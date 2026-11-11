@@ -27,7 +27,7 @@ meaning and are never used as decoration.
 | Gilt | `#d9a441` | Linework, primary actions, and advertising, measurement and telemetry marks |
 | Parchment | `#ece3cf` | Body text and data values |
 | Sightless cyan | `#6fd6d2` | Only "No DNS via Pi-hole": something the monitor cannot see |
-| Cinnabar | `#ff8a75` | Only errors and work that needs attention |
+| Cinnabar | `#ff8a75` | Only errors, work that needs attention, and the frame of a control that discards something |
 
 Derived tones, not new colours: Tallow `#a89a7d` (secondary text, parchment
 dimmed), Umber `#4a3a1c` (hairlines), Brass `#8a6b2b` (form-control borders,
@@ -42,7 +42,7 @@ Only system fonts; the Content-Security-Policy forbids anything else.
 
 | Role | Stack | Used for |
 | --- | --- | --- |
-| Display | `Didot, "Bodoni 72", "Bodoni MT", Georgia, serif` | The page title, the connect title and the wordmark, never below 26px. This is the Renaissance voice. |
+| Display | `Didot, "Bodoni 72", "Bodoni MT", Georgia, serif` | The page title, the connect title, the pane title and document titles, never below 26px; the wordmark lockup is the one smaller use. This is the Renaissance voice. |
 | Structure | `"Avenir Next Condensed", "DIN Alternate", "Arial Narrow", sans-serif` | Panel headings, tabs, buttons, table headers, tags. This is the instrument voice. |
 | Body | `"Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif` | Sentences, caveats, forms |
 | Data | `ui-monospace, "SF Mono", Menlo, Consolas, monospace` with tabular figures | Addresses, MACs, byte counts, query counts, domains, revision ids. Numbers are right-aligned in columns. Nothing else is monospace. |
@@ -77,23 +77,24 @@ device opens the pane; the page never scrolls to a distant form. Candidates are
 a separate mode of the same list and render as a compact address grid.
 
 ```
- Find a device [________] Show [Observed ▾] Order [▾] │ Living room TV      [Close]
- [All 16] [Ad, measurement, telemetry 4] [No DNS 3]   │ What it is
- Device           Address     Signals   Lookups  …    │ What it talks to (behavioural first)
- Gateway          192.0.2.1   None      No profile    │ How much it sends
-▌Living room TV   192.0.2.10  1 reset   ▓▓▒ 566       │ Open ports and exposures
- Driveway camera  192.0.2.20  ◇ No DNS via Pi-hole    │ Your notes and expectations
-                                                      │   saved profile · Edit profile · issues
-                                                      │ Agent assessment (honest empty state)
+ Find a device [________] Show [Observed ▾] Order [▾] │ Living room TV        Close
+ [All 16] [Ad, measurement, telemetry 4] [No DNS 3]   │ What it is · Assessment · Talks to · …
+ Device           Address     Signals   Lookups  …    │ What it is
+ Gateway          192.0.2.1   None      No profile    │ Agent assessment (state, decisions, report)
+▌Living room TV   192.0.2.10  ◇ …       ▓▓▒ 566       │ What it talks to (behavioural first)
+ Driveway camera  192.0.2.20  ◇ No DNS via Pi-hole    │ How much it sends
+                                                      │ Open ports and exposures
+                                                      │ What we know about this device
+                                                      │ Your notes and expectations
                                                       │ Product and advisories
-                                                      │ (editors open here, in place)
                                                       │ Evidence history
 ```
 
 The pane is fixed to the right edge and the page content narrows beside it, so
 it is always next to what was clicked. It also hosts the profile editor, the
 issue editor and reader, the agent draft review and the product lookup: one
-element each, shown in place. The open view and selected device are kept in the
+element each. An editor or reader replaces the device view in place, at the
+top of the pane, with "Back to device" in the pane head. The open view and selected device are kept in the
 URL fragment (`#tab=devices&device=<address>`), so reload and Back restore them;
 Back from a collection opened from a device returns to that device. Escape and Close
 return focus to the row.
@@ -193,3 +194,63 @@ because they were defaults rather than decisions.
   520px the signal tag takes its own line.
 - **Phone filters.** At 600px and below, Show, Order and the signal chips fold
   behind "Filter and order", which reads "in use" when anything is narrowed.
+
+## Round 3: one pattern
+
+The console had grown several ways to do each thing. From here every view and
+every pane section is built from the components below and nothing else. A new
+need is met by one of them, or by adding a component here first. The values
+they share (sizes, spaces, lines, shapes, fill patterns) are tokens on `:root`
+in `style.css`; a one-off value is a defect.
+
+### Pattern catalogue
+
+| Component | Markup | Rule |
+| --- | --- | --- |
+| Section block | Page: `.panel` > `.panel-heading` (`h2`, optional note or tag) + `.panel-body`. Pane: `section.pane-section` > gilt `h3`, built by `paneSection(title, nav)`. | The only containers. A collapsible panel is `details.panel`. Inside a pane section the order is fixed: facts or headline figure, its source line (`.hint.source`), its limits, detail, then the action row. |
+| Fact list | `dl.facts` with `fact(list, term, value)` | Read-only term and value. Used for identity, ports, device-reported facts and system health. Values that are addresses, MACs or versions take `.data`. |
+| Form | `form.form-grid` (one column), `.inline-form` (one field and its button), `label` wrapping its control, `.check` for a checkbox, `.hint` under the field it explains | Editable values only; never used to display facts. The action row is the last child. |
+| Action row | `.actions` | Primary first, quiet last. One size of button, four variants: primary (no class) sends a change or starts work; `.secondary` opens, reads or checks; `.quiet` leaves or withdraws without consequence (Close, Cancel, Disconnect, Dismiss a message); `.danger` discards something. Labels are verb-first, sentence case. The working button carries `aria-busy` (shown as a trailing ellipsis) through `setBusy` or `markBusy`. |
+| Confirmation | `confirmedAction(label, variant, confirmLabel, cost, action)` | Every action that spends model calls. The first press replaces the button with the cost sentence, then Confirm and Cancel beneath it. Nothing is sent before Confirm. |
+| Notice | `#condition.notice` and `#notice-bar.notice.message` | Two channels. `condition()` is the collector's standing state and is rewritten by each refresh. `notice()` reports the outcome of something the operator did: it stays until replaced or dismissed and is fixed to the viewport, above the pane. An error is cinnabar and begins "Needs attention:". Inside a section an error is a `p.notice.error`. There is no separate success or warning colour: a confirmation says so in words, and a caution about evidence is a limit. |
+| Empty state | `p.empty` | Nothing is here yet, and what would put something here. |
+| Unmeasured | `p.hint.unmeasured` (dashed frame) | A figure or section is absent for a stated reason. Never rendered as zero or as an empty state. |
+| Limit | `p.limit` (filled triangle) | What the adjacent figure cannot show. |
+| Disclosure | `details` > `summary` reading "Details · what is inside" | Identifiers, raw state words, JSON and long documents. `foldDetails` applies it to the Evidence, Record metadata and issue-decision sections of rendered documents. A disclosure with nothing in it is not rendered. |
+| Table | `table.data-table`, `th`/`td.num` for figures | Text columns left; figures right-aligned in the data face with tabular numerals and grouped thousands. Domains are built by `domainName` and wrap only after a dot. Report tables keep `.markdown-table`. |
+| Entry list | `.entries` > `button.entry` or `a.entry`, inner `.entry-line` | One record that opens what it names; a brass chevron says so. The open one is `.selected` with `aria-current`. |
+| Record | `.record` | A ruled record that does not open and carries its own action row (a finding, a shared issue, a run). |
+| Card | `.card` | One boxed record inside a section: a linked issue, an advisory, a vendor note, a citation. |
+| Tag, badge, chip | `.tag`, `.badge` / `.status-line`, `button.chip` | A tag is a framed fact (mode, schedule state, the cyan signal). A badge or status line is a state word in gilt, always sentence case through `statusLabel`. A chip is a filter toggle with `aria-pressed`. |
+
+### Copy
+
+- One word per thing: **lookup** (never query) for what a device asked DNS;
+  **device** (never client); **scan** for the act and **collection** for its
+  retained result (never sweep); **device list** for the ledger. Direction is
+  always "to device" and "from device".
+- "and", not an ampersand or a slash.
+- Counts go through `plural()` and `formatCount()`; bytes through
+  `formatBytes()`; date-times through `formatWhen()` ("12 Nov 2026, 08:38" in
+  the browser's locale, month spelled out, no seconds); calendar days through
+  `formatDay()`; ranges through `formatRange()`.
+- State words from the collector or Plowshare are mapped to a label or passed
+  through `statusLabel()`; an underscore never reaches the screen outside a
+  Details disclosure.
+- The second agent's check reads "Checked by a second agent: passed" so it is
+  not mistaken for the operator's own Accept.
+
+### Decisions
+
+- **Assessment moved up.** The agent assessment follows "What it is", so its
+  state and decisions are within the first screen. Its report is a Details
+  disclosure, open while it awaits a decision and closed once final. This
+  supersedes the Round 2 order; notes are still not analysis and keep their own
+  section.
+- **A section menu** sits under the pane title and jumps to each section.
+- **Editors replace the device view** rather than opening below it. Back and
+  Escape return to the device at its previous scroll position and focus the
+  control that opened the editor; a second Escape closes the pane.
+- **Cinnabar gained one use**, the frame of a control that discards, because a
+  fourth button variant needed a mark and a new colour would have cost more.
+- **System health is a fact list**, not a second grid of label and value.

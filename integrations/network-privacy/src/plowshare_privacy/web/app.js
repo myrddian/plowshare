@@ -4,6 +4,7 @@
 let bearer = '';
 let authenticated = false;
 let selected = null;
+let selectedReport = null;
 let refreshPending = false;
 let settingsLoaded = false;
 let settingsPending = false;
@@ -34,7 +35,7 @@ const byId = (name) => document.getElementById(name);
 const views = {
   overview: ['Network overview', 'What is on the network, who it talks to, how much it sends and what cannot be seen.'],
   devices: ['Your devices', 'Device observations, profiles and linked privacy issues.'],
-  findings: ['Findings & investigations', 'Review observed changes and read investigation reports.'],
+  findings: ['Findings and investigations', 'Review observed changes and read investigation reports.'],
   evidence: ['Collection evidence', 'Retained observations, comparisons and coverage gaps.'],
   settings: ['Monitoring settings', 'Devices, connections and investigation preferences.'],
 };
@@ -88,15 +89,91 @@ byId('close-report').addEventListener('click', () => byId('report-panel').classL
 byId('close-evidence').addEventListener('click', () => byId('evidence-panel').classList.toggle('reading', false));
 const phases = {queued:'Queued',collected:'Collected',uploading:'Upload outcome pending',uploaded:'Evidence retained',publishing:'Publication outcome pending',done:'Evidence published'};
 
+// Two message channels. condition() is the collector's standing state: every
+// refresh rewrites it. notice() reports the outcome of something the operator
+// did; it stays until it is replaced or dismissed, and its bar is fixed to the
+// viewport so it is readable while scrolled or with the device pane open.
 function notice(message, error = false) {
+  byId('notice-bar').hidden = !message;
+  byId('notice-bar').classList.toggle('error', error);
   byId('notice').textContent = message;
-  byId('notice').classList.toggle('error', error);
 }
+function condition(message, error = false) {
+  byId('condition').textContent = message;
+  byId('condition').classList.toggle('error', error);
+}
+byId('notice-dismiss').addEventListener('click', () => notice(''));
 function element(tag, content, className) {
   const node = document.createElement(tag);
   if (content !== undefined) node.textContent = content;
   if (className) node.className = className;
   return node;
+}
+// One way to write counts, dates and states, so the same fact reads the same
+// in every view. Dates follow the browser's locale with the month spelled
+// out; a date-only value is a calendar day and is never shifted by time zone.
+const countFormat = new Intl.NumberFormat();
+const whenFormat = new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeStyle:'short'});
+const dayFormat = new Intl.DateTimeFormat(undefined, {dateStyle:'medium'});
+const calendarDayFormat = new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeZone:'UTC'});
+function formatCount(value) {return countFormat.format(value);}
+function plural(count, one, many) {return `${formatCount(count)} ${count === 1 ? one : many}`;}
+function formatWhen(stamp) {
+  if (!stamp) return '';
+  const date = new Date(stamp);
+  return Number.isNaN(date.getTime()) ? String(stamp) : whenFormat.format(date);
+}
+function formatDay(stamp) {
+  if (!stamp) return '';
+  const date = new Date(stamp);
+  if (Number.isNaN(date.getTime())) return String(stamp);
+  return (/^\d{4}-\d{2}-\d{2}$/.test(String(stamp)) ? calendarDayFormat : dayFormat).format(date);
+}
+function formatRange(from, until) {return `${formatWhen(from)} to ${formatWhen(until)}`;}
+// A state word from the collector or Plowshare, shown in sentence case.
+function statusLabel(value) {
+  const text = String(value ?? '').replaceAll('_', ' ').trim();
+  return text ? text[0].toUpperCase() + text.slice(1) : 'Unknown';
+}
+// The control that is working says so; markBusy is for a control whose
+// disabled state is decided elsewhere.
+function markBusy(button, busy) {button.setAttribute?.('aria-busy', String(busy));}
+function setBusy(button, busy) {button.disabled = busy; markBusy(button, busy);}
+// A domain may wrap only after a dot, so a label is never split mid-word and
+// copied text is still the exact name.
+function domainName(domain) {
+  const name = element('span', undefined, 'domain');
+  const labels = String(domain).split('.');
+  labels.forEach((label, index) => {
+    if (index) name.append(element('wbr'));
+    name.append(element('span', index < labels.length - 1 ? label + '.' : label));
+  });
+  return name;
+}
+// Work that spends model calls is confirmed in place: the first press says
+// what it costs, above the button that then sends it. Cancel restores the
+// first button and nothing is sent.
+function confirmedAction(label, className, confirmLabel, cost, action, disabled = false) {
+  const group = element('div', undefined, 'actions confirm');
+  const start = element('button', label, className);
+  start.type = 'button';
+  start.disabled = disabled;
+  start.addEventListener('click', () => {
+    const go = element('button', confirmLabel);
+    const cancel = element('button', 'Cancel', 'quiet');
+    go.type = 'button'; cancel.type = 'button';
+    const restore = () => {group.replaceChildren(start); start.focus();};
+    cancel.addEventListener('click', restore);
+    go.addEventListener('click', async () => {
+      setBusy(go, true); cancel.disabled = true;
+      try {await action();} catch (error) {notice(error.message, true);}
+      finally {if (group.isConnected) restore();}
+    });
+    group.replaceChildren(element('p', cost, 'hint'), go, cancel);
+    go.focus();
+  });
+  group.append(start);
+  return group;
 }
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: {...(bearer ? {Authorization: `Bearer ${bearer}`} : {}), 'Content-Type': 'application/json'}, cache:'no-store'});
@@ -111,7 +188,7 @@ async function api(path, options = {}) {
 }
 function listItems(parent, title, values) {
   parent.append(element('h3', title));
-  if (!values.length) {parent.append(element('p', 'None recorded.')); return;}
+  if (!values.length) {parent.append(element('p', 'None recorded.', 'hint')); return;}
   const list = element('ul');
   values.forEach(value => list.append(element('li', value)));
   parent.append(list);
@@ -125,64 +202,70 @@ async function showEvidence(scanId) {
   const panel = byId('evidence');
   panel.replaceChildren();
   byId('selection').textContent = evidence.mode === 'fixture' ? 'Synthetic fixture' : 'Collected observations';
-  panel.append(element('p', `Observed ${new Date(evidence.snapshot.observed_at).toLocaleString()}`));
+  panel.append(element('p', `Observed ${formatWhen(evidence.snapshot.observed_at)}`));
   const devices = evidence.snapshot.devices || [];
   if (devices.length) {
     panel.append(element('h3', 'Observed devices'));
-    const table = element('table', undefined, 'identity-table');
+    const table = element('table', undefined, 'data-table');
     const header = element('tr');
-    ['Device', 'Address', 'MAC / identity', 'Observed association'].forEach(title => header.append(element('th', title)));
+    ['Device', 'Address', 'MAC or identity', 'Observed association'].forEach(title => header.append(element('th', title)));
     table.append(header);
     devices.forEach(device => {
       const row = element('tr');
-      [device.label || device.hostname || 'Unnamed device', device.address, device.mac || device.device_id, device.last_seen ? `${device.source} · ${new Date(device.last_seen).toLocaleString()}` : 'Configured address; MAC not observed'].forEach(value => row.append(element('td', value)));
+      row.append(element('td', device.label || device.hostname || 'Unnamed device'), element('td', device.address, 'data'),
+        element('td', device.mac || device.device_id, 'data'),
+        element('td', device.last_seen ? `${device.source} · ${formatWhen(device.last_seen)}` : 'Configured address; MAC not observed'));
       table.append(row);
     });
     panel.append(table);
   }
   if (evidence.snapshot.dns_window) {
     const window = evidence.snapshot.dns_window;
-    panel.append(element('p', `Pi-hole DNS window: ${new Date(window.from_at).toLocaleString()} – ${new Date(window.until_at).toLocaleString()}. Read ${window.queries_read} of ${window.queries_available} matching recorded queries${window.complete ? '.' : '; coverage is incomplete. See gaps below.'}`));
+    panel.append(element('p', `Pi-hole DNS window: ${formatRange(window.from_at, window.until_at)}. Read ${formatCount(window.queries_read)} of ${formatCount(window.queries_available)} matching recorded lookups${window.complete ? '.' : '; coverage is incomplete. See gaps below.'}`, 'hint source'));
   }
   listItems(panel, 'Changes against the previous collection', evidence.changes);
-  listItems(panel, 'Coverage & gaps', evidence.issues);
-  panel.append(element('h3', 'Evidence revision'));
-  panel.append(element('p', result.revision || 'Not yet retained in Plowshare.'));
-  panel.append(element('h3', 'Observations'));
-  panel.append(element('pre', JSON.stringify(evidence.snapshot, null, 2)));
+  listItems(panel, 'Coverage and gaps', evidence.issues);
+  const raw = element('details');
+  raw.append(element('summary', 'Details · evidence revision and raw observations'),
+    element('p', result.revision ? `Evidence revision ${result.revision}` : 'Not yet retained in Plowshare.', 'hint'),
+    element('pre', JSON.stringify(evidence.snapshot, null, 2)));
   if (overview) {
     const scan = (await api('/api/scans')).find(value => value.scan_id === scanId);
     if (scan?.investigation) panel.append(element('p', `Investigation: ${scan.investigation.reason}`));
     const manual = overview.investigations.find(value => value.scan_id === scanId && value.phase !== 'refused');
-    if (manual) panel.append(element('p', `Explicit investigation: ${manual.phase}${manual.run_id ? ` · ${manual.run_id}` : ' · inspect its retained receipt'}`));
+    if (manual) panel.append(element('p', `Explicit investigation: ${statusLabel(manual.phase)}${manual.run_id ? '' : ' · inspect its retained receipt'}`));
     else if (scan?.phase === 'done' && scan.investigation?.requested === false) {
-      const investigate = element('button', 'Investigate this evidence');
-      investigate.addEventListener('click', async () => {
-        if (investigate.dataset.reviewed !== 'yes') {
-          investigate.dataset.reviewed = 'yes'; investigate.textContent = 'Confirm one explicit investigation';
-          panel.append(element('p', 'This starts one investigation of the retained evidence and may incur model costs beyond the automatic limit. Confirm above to submit it.'));
-          return;
-        }
-        investigate.disabled = true;
-        try {await api('/api/investigations', {method:'POST', body:JSON.stringify({scan_id:scanId, request_id:crypto.randomUUID()})}); await refresh(); await showEvidence(scanId);} catch (error) {notice(error.message, true);}
-      });
-      panel.append(investigate);
+      panel.append(confirmedAction('Investigate this evidence', undefined, 'Confirm investigation',
+        'This starts one investigation of the retained evidence and may incur model costs beyond the automatic limit.',
+        async () => {
+          await api('/api/investigations', {method:'POST', body:JSON.stringify({scan_id:scanId, request_id:crypto.randomUUID()})});
+          await refresh(); await showEvidence(scanId);
+        }));
     }
+    if (manual?.run_id) raw.append(element('p', `Investigation run ${manual.run_id}`, 'hint'));
   }
   const reports = await api('/api/reports');
   const associated = reports.filter(value => (value.inputs || []).includes(result.revision));
   panel.append(element('h3', 'Reports citing this evidence'));
-  if (!associated.length) panel.append(element('p', 'No retained report cites this revision yet.'));
+  if (!associated.length) panel.append(element('p', 'No retained report cites this revision yet.', 'empty'));
   for (const report of associated) {
     const button = element('button', report.title, 'entry');
+    button.type = 'button';
     button.addEventListener('click', () => showReport(report.revision).catch(error => notice(error.message, true)));
     panel.append(button);
   }
+  panel.append(raw);
 }
 async function showReport(revision) {
   const result = await api(`/api/reports/${encodeURIComponent(revision)}`);
-  const document = PrivacyMarkdown.render(result.text);
+  const document = foldDetails(PrivacyMarkdown.render(result.text));
   showView('findings', true);
+  selectedReport = revision;
+  for (const entry of byId('reports').querySelectorAll('.entry')) {
+    const current = entry.dataset.revision === revision;
+    entry.classList.toggle('selected', current);
+    entry.setAttribute('aria-current', String(current));
+  }
   const report = byId('reports').querySelector(`[data-revision="${CSS.escape(revision)}"]`);
   byId('report-selection').textContent = report ? report.dataset.title : 'Retained report';
   byId('report-content').replaceChildren(document);
@@ -196,9 +279,10 @@ function renderCollections(scans) {
   scans.forEach(scan => {
     const button = element('button', undefined, `entry${selected === scan.scan_id ? ' selected' : ''}`);
     button.type = 'button';
-    const row = element('span', undefined, 'row');
-    row.append(element('span', new Date(scan.occurred_at).toLocaleString()), element('span', phases[scan.phase] || scan.phase, 'badge'));
-    button.append(row, element('small', `${scan.change_count ?? scan.changes.length} comparison entries · ${scan.issue_count ?? scan.issues.length} coverage notes${scan.mode === 'fixture' ? ' · fixture' : ''}`));
+    button.setAttribute('aria-current', String(selected === scan.scan_id));
+    const row = element('span', undefined, 'entry-line');
+    row.append(element('span', formatWhen(scan.occurred_at)), element('span', phases[scan.phase] || statusLabel(scan.phase), 'badge'));
+    button.append(row, element('small', `${plural(scan.change_count ?? scan.changes.length, 'comparison entry', 'comparison entries')} · ${plural(scan.issue_count ?? scan.issues.length, 'coverage note', 'coverage notes')}${scan.mode === 'fixture' ? ' · fixture' : ''}`));
     button.disabled = scan.phase === 'queued';
     button.addEventListener('click', () => {showEvidence(scan.scan_id).then(() => renderCollections(scans)).catch(error => notice(error.message, true));});
     container.append(button);
@@ -209,10 +293,12 @@ function renderReports(reports) {
   container.replaceChildren();
   if (!reports.length) {container.append(element('p', 'No retained investigations yet. Collection and agent completion are separate stages.', 'empty')); return;}
   reports.forEach(report => {
-    const button = element('button', undefined, 'entry');
+    const button = element('button', undefined, `entry${selectedReport === report.revision ? ' selected' : ''}`);
+    button.type = 'button';
+    button.setAttribute('aria-current', String(selectedReport === report.revision));
     button.dataset.revision = report.revision; button.dataset.title = report.title;
-    const row = element('span', undefined, 'row');
-    row.append(element('span', report.title), element('span', report.status, 'badge'));
+    const row = element('span', undefined, 'entry-line');
+    row.append(element('span', report.title), element('span', statusLabel(report.status), 'badge'));
     button.append(row);
     button.addEventListener('click', () => {showReport(report.revision).catch(error => notice(error.message, true));});
     container.append(button);
@@ -221,7 +307,7 @@ function renderReports(reports) {
 async function refresh() {
   if ((!bearer && !authenticated) || refreshPending) return;
   refreshPending = true;
-  byId('refresh').disabled = true;
+  setBusy(byId('refresh'), true);
   try {
     const [status, scans, reportResult] = await Promise.all([api('/api/status'), api('/api/scans'), api('/api/reports').then(value => ({value}), error => ({error}))]);
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
@@ -233,7 +319,7 @@ async function refresh() {
     byId('background-research').hidden = !status.profile_research_available;
     if (!researchBusy) byId('background-research-enabled').checked = !!status.profile_research_enabled;
     const waitingDrafts = status.profile_drafts_waiting || 0;
-    byId('background-research-count').textContent = waitingDrafts ? String(waitingDrafts) + ' awaiting review' : '';
+    byId('background-research-count').textContent = waitingDrafts ? formatCount(waitingDrafts) + ' awaiting review' : '';
     advisoriesAvailable = !!status.advisories_available;
     byId('research-search-status').textContent = advisoriesAvailable
       ? 'Advisory search sends only this public model name to NVD. Review it before searching.'
@@ -246,10 +332,10 @@ async function refresh() {
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
     byId('collector').textContent = status.collector;
-    byId('state').textContent = status.state === 'attention_required' ? 'Needs attention' : status.collection_enabled === false ? 'Disabled' : status.state.replaceAll('_', ' ');
+    byId('state').textContent = status.state === 'attention_required' ? 'Needs attention' : status.collection_enabled === false ? 'Disabled' : statusLabel(status.state);
     byId('detail').textContent = status.state !== 'attention_required' && status.collection_enabled === false ? 'Enable collection in Settings when you are ready.' : status.detail;
-    byId('change-count').textContent = scans.length ? scans[0].change_count ?? scans[0].changes.filter(change => !change.startsWith('Baseline')).length : '—';
-    byId('report-count').textContent = reportResult.error ? 'Unavailable' : reportResult.value.length;
+    byId('change-count').textContent = scans.length ? formatCount(scans[0].change_count ?? scans[0].changes.filter(change => !change.startsWith('Baseline')).length) : '—';
+    byId('report-count').textContent = reportResult.error ? 'Unavailable' : formatCount(reportResult.value.length);
     byId('scan').disabled = status.state === 'attention_required' || status.collection_enabled === false;
     renderCollections(scans);
     if (reportResult.error) byId('reports').replaceChildren(element('p', 'Retained agent reports are temporarily unavailable. Local evidence remains readable.', 'empty'));
@@ -260,24 +346,25 @@ async function refresh() {
       const settings = await api('/api/monitoring');
       renderMonitorSettings(settings);
     }
-    try {overview = await api('/api/overview'); renderOverview(overview);} catch (error) {byId('health').replaceChildren(element('p', error.message)); byId('health-summary').textContent = 'Status unavailable';}
+    try {overview = await api('/api/overview'); renderOverview(overview);} catch (error) {byId('health').replaceChildren(); byId('health-detail').textContent = error.message; byId('health-summary').textContent = 'Status unavailable';}
     byId('dashboard').hidden = false;
     byId('connect').hidden = true;
     const unknown = status.requests.find(request => request.state === 'pending');
-    if (unknown) notice(`Request ${unknown.request_id} needs reconciliation. It has not been resent.`, true);
-    else if (reportResult.error) notice(reportResult.error.message, true);
-    else notice(status.state === 'attention_required' ? status.detail : '', status.state === 'attention_required');
+    // The standing condition only: a refresh never clears what an action reported.
+    if (unknown) condition(`Request ${unknown.request_id} needs reconciliation. It has not been resent.`, true);
+    else if (reportResult.error) condition(reportResult.error.message, true);
+    else condition(status.state === 'attention_required' ? status.detail : '', status.state === 'attention_required');
     await pollAssessment().catch(error => notice(error.message, true));
-  } finally {refreshPending = false; byId('refresh').disabled = false;}
+  } finally {refreshPending = false; setBusy(byId('refresh'), false);}
 }
 byId('connect').addEventListener('submit', event => {
   event.preventDefault();
   bearer = byId('token').value;
   byId('token').value = '';
-  notice('Reading collector status and retained evidence…');
-  refresh().catch(error => {bearer = ''; notice(error.message, true);});
+  condition('Reading collector status and retained evidence…');
+  refresh().catch(error => {bearer = ''; condition(error.message, true);});
 });
-byId('refresh').addEventListener('click', () => {refresh().catch(error => notice(error.message, true));});
+byId('refresh').addEventListener('click', () => {refresh().catch(error => condition(error.message, true));});
 byId('disconnect').addEventListener('click', async () => {
   try {await api('/api/session/logout', {method:'POST', body:'{}'});} catch (error) {notice(error.message, true); return;}
   clearIssueEditor();
@@ -287,13 +374,13 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
   monitoringDraft = false;
-  bearer = ''; authenticated = false; selected = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
+  bearer = ''; authenticated = false; selected = null; selectedReport = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings','q-third','q-silent','q-volume']) byId(id).replaceChildren();
-  for (const id of ['q-network','q-third-coverage','device-shown']) byId(id).textContent = '';
+  for (const id of ['q-network','q-third-coverage','device-shown','health-detail']) byId(id).textContent = '';
   byId('device-search').value = ''; byId('device-presence').value = 'observed'; byId('device-sort').value = 'inventory';
   setSignalFilter('all');
-  selectedDevice = null; byId('device-view').hidden = true;
-  for (const id of ['device-facts','device-analysis','device-history']) byId(id).replaceChildren();
+  selectedDevice = null;
+  for (const id of deviceParts) byId(id).replaceChildren();
   syncPane();
   byId('fixture-banner').hidden = true; byId('mode').classList.toggle('synthetic', false);
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
@@ -304,19 +391,18 @@ byId('disconnect').addEventListener('click', async () => {
   showView('overview');
   byId('dashboard').hidden = true; byId('connect').hidden = false;
   byId('collections').replaceChildren(); byId('reports').replaceChildren(); byId('evidence').replaceChildren(); byId('report-content').replaceChildren(); byId('report-selection').textContent = 'Select a report';
-  byId('mode').textContent = 'Not connected'; notice('Disconnected. Private evidence has been cleared from view.');
+  byId('mode').textContent = 'Not connected'; condition('Connect to view this collector’s private evidence.'); notice('Disconnected. Private evidence has been cleared from view.');
 });
 byId('scan').addEventListener('click', async () => {
-  byId('scan').disabled = true;
+  setBusy(byId('scan'), true);
   try {
     if (!globalThis.crypto?.randomUUID) throw new Error('Scan requests need a secure browser context: use HTTPS or a loopback development listener.');
     const requestId = crypto.randomUUID();
-    notice('Requesting a collection…');
     await api('/api/scans', {method:'POST', body:JSON.stringify({request_id:requestId})});
-    notice('Scan requested. Evidence will appear here when collection finishes.');
+    notice('Scan requested. Its evidence appears under Evidence when the scan finishes.');
     await refresh();
   } catch (error) {notice(error.message, true);}
-  finally {byId('scan').disabled = false;}
+  finally {setBusy(byId('scan'), false);}
 });
 
 
@@ -333,7 +419,7 @@ function renderDevices(report) {
   const container = byId('devices');
   container.replaceChildren();
   report.devices.forEach(device => {
-    const label = element('label', undefined, 'device');
+    const label = element('label', undefined, 'check');
     const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.value = device.address; checkbox.checked = targets.has(device.address);
     checkbox.addEventListener('change', () => {
       const draft = byId('targets').value;
@@ -343,11 +429,11 @@ function renderDevices(report) {
       byId('targets').value = [...selectedTargets].join(', ');
       if (selectedTargets.size) byId('enabled').checked = true;
     });
-    const description = element('span', device.address);
+    const description = element('span', device.address, 'data');
     description.append(element('small', device.open_ports.length ? `Open ports: ${device.open_ports.join(', ')}` : 'Responded; selected ports closed'));
     label.append(checkbox, description); container.append(label);
   });
-  byId('discovery-detail').textContent = `${report.devices.length} responding addresses. Select up to 256 devices, or monitor the whole /24 subnet. ${report.coverage}`;
+  byId('discovery-detail').textContent = `${plural(report.devices.length, 'responding address', 'responding addresses')}. Select up to 256 devices, or monitor the whole /24 subnet. ${report.coverage}`;
 }
 async function loadSettings() {
   const settings = await api('/api/monitoring');
@@ -359,7 +445,7 @@ async function loadSettings() {
   byId('targets').value = settings.targets.join(', ');
   byId('ports').value = settings.ports.join(',');
   byId('device-labels').value = (settings.labels || []).map(label => `${label.address}=${label.label}`).join('\n');
-  const sources = [settings.pihole_configured && 'Pi-hole v6 for identity and DNS', settings.unifi_configured && 'UniFi for connected-client identity'].filter(Boolean);
+  const sources = [settings.pihole_configured && 'Pi-hole v6 for identity and DNS', settings.unifi_configured && 'UniFi for connected-device identity'].filter(Boolean);
   byId('identity-source').textContent = sources.length
     ? 'Configured sources: ' + sources.join(', ') + '. Names below are your own labels.'
     : 'Add your own labels or connect Pi-hole or UniFi for observed device identity.';
@@ -387,10 +473,10 @@ for (const id of ['targets','ports','device-labels','enabled','quick-scan','dns-
 });
 // Destination groups arrive in privacy-first order from the collector.
 const destinationLabels = {
-  advertising:'Advertising', measurement:'Audience measurement & content recognition',
-  telemetry:'Vendor telemetry & logging', streaming:'Streaming services',
-  unclassified:'Unclassified', connectivity:'Connectivity checks & time',
-  local:'Local names & reverse lookups',
+  advertising:'Advertising', measurement:'Audience measurement and content recognition',
+  telemetry:'Vendor telemetry and logging', streaming:'Streaming services',
+  unclassified:'Unclassified', connectivity:'Connectivity checks and time',
+  local:'Local names and reverse lookups',
 };
 const behaviouralKinds = new Set(['advertising', 'measurement', 'telemetry']);
 function behaviouralQueries(activity) {
@@ -413,47 +499,45 @@ function shareBar(fraction, className) {
 function renderTraffic(traffic) {
   const section = element('section', undefined, 'readout traffic');
   section.append(element('h4', `Traffic · ${formatBytes(traffic.to_device_bytes)} to device · ${formatBytes(traffic.from_device_bytes)} from device`));
-  const bounds = [traffic.from_at, traffic.until_at].map(value => new Date(value).toLocaleString()).join(' to ');
-  section.append(element('p', `UniFi client byte counters · ${bounds} · ${traffic.samples} quick checks`, 'hint source'));
-  if (traffic.resets) section.append(element('p', `${traffic.resets} intervals skipped after a counter reset (reconnect or controller restart). Totals are a lower bound.`, 'limit'));
-  section.append(element('p', 'Direction follows UniFi: "to device" is what the network sent the client. Counters show volume, not which hosts received it.', 'limit'));
+  section.append(element('p', `UniFi byte counters · ${formatRange(traffic.from_at, traffic.until_at)} · ${plural(traffic.samples, 'quick check', 'quick checks')}`, 'hint source'));
+  if (traffic.resets) section.append(element('p', `${plural(traffic.resets, 'interval', 'intervals')} skipped after a counter reset (reconnect or controller restart). Totals are a lower bound.`, 'limit'));
+  section.append(element('p', 'Direction follows UniFi: “to device” is what the network sent the device. Counters show volume, not which hosts received it.', 'limit'));
   section.append(element('p', 'Totals include local traffic, such as a camera recording to a local video recorder or a backup to a NAS, not only internet traffic.', 'limit'));
   return section;
 }
 function renderDnsActivity(activity) {
   const labels = destinationLabels;
   const section = element('section', undefined, 'readout dns');
-  section.append(element('h4', `DNS activity · ${activity.queries_read} sampled queries in the last 24 hours`));
+  section.append(element('h4', `DNS activity · ${plural(activity.queries_read, 'sampled lookup', 'sampled lookups')} in the last 24 hours`));
   if (activity.pihole_silent) {
     const hours = Math.floor((new Date(activity.until_at) - new Date(activity.from_at)) / 3600000);
-    section.append(element('p', `No DNS queries reached Pi-hole in ${activity.windows} confirmed checks over ${hours} hours while this device was on the network. It may be idle, or it may use its own DNS servers or DNS over HTTPS, which Pi-hole cannot see.`, 'gap-note'));
+    section.append(element('p', `No DNS lookups reached Pi-hole in ${plural(activity.windows, 'confirmed check', 'confirmed checks')} over ${hours} hours while this device was on the network. It may be idle, or it may use its own DNS servers or DNS over HTTPS, which Pi-hole cannot see.`, 'gap-note'));
   }
-  const bounds = [activity.from_at, activity.until_at].map(value => new Date(value).toLocaleString()).join(' to ');
-  section.append(element('p', `Pi-hole · ${bounds} · ${activity.windows} observed windows`, 'hint source'));
-  if (activity.partial_windows) section.append(element('p', `Partial coverage in ${activity.partial_windows} windows. Pi-hole reported ${activity.queries_available} matching queries in the sampled windows.`, 'limit'));
+  section.append(element('p', `Pi-hole · ${formatRange(activity.from_at, activity.until_at)} · ${plural(activity.windows, 'observed window', 'observed windows')}`, 'hint source'));
+  if (activity.partial_windows) section.append(element('p', `Partial coverage in ${plural(activity.partial_windows, 'window', 'windows')}. Pi-hole reported ${formatCount(activity.queries_available)} matching lookups in the sampled windows.`, 'limit'));
   section.append(element('p', 'Counts are sampled DNS lookups, not connections or bytes. Traffic volume is under How much it sends; which host received those bytes is not observed.', 'limit'));
   const most = Math.max(1, ...activity.groups.flatMap(group => group.destinations.map(entry => entry.queries)));
   for (const group of activity.groups) {
     const behavioural = behaviouralKinds.has(group.kind);
-    section.append(element('h5', `${labels[group.kind] || group.kind} · ${group.queries} queries`, behavioural ? `kind kind-${group.kind}` : 'kind'));
+    section.append(element('h5', `${labels[group.kind] || statusLabel(group.kind)} · ${plural(group.queries, 'lookup', 'lookups')}`, behavioural ? `kind kind-${group.kind}` : 'kind'));
     if (group.destinations.length) {
-      const table = element('table', undefined, 'destinations');
+      const table = element('table', undefined, 'data-table');
       const head = element('tr');
-      head.append(element('th', 'Destination'), element('th', 'Queries', 'num'), element('th', 'Reported blocked', 'num'));
+      head.append(element('th', 'Destination'), element('th', 'Lookups', 'num'), element('th', 'Reported blocked', 'num'));
       table.append(head);
       for (const entry of group.destinations) {
         const row = element('tr');
         const name = element('td', undefined, 'destination');
-        name.append(element('span', entry.domain, 'domain'));
+        name.append(domainName(entry.domain));
         if (entry.provider) name.append(element('span', entry.provider, 'provider'));
         name.append(shareBar(entry.queries / most, behavioural ? `share seg-${group.kind}` : 'share'));
-        row.append(name, element('td', String(entry.queries), 'num'), element('td', String(entry.blocked || 0), entry.blocked ? 'num' : 'num zero'));
+        row.append(name, element('td', formatCount(entry.queries), 'num'), element('td', formatCount(entry.blocked || 0), entry.blocked ? 'num' : 'num zero'));
         table.append(row);
       }
       section.append(table);
     }
     if (group.distinct > group.destinations.length) {
-      section.append(element('p', `Showing ${group.destinations.length} of ${group.distinct} destinations`, 'hint'));
+      section.append(element('p', `Showing ${formatCount(group.destinations.length)} of ${formatCount(group.distinct)} destinations`, 'hint'));
     }
   }
   return section;
@@ -461,7 +545,7 @@ function renderDnsActivity(activity) {
 // Device rows carry their own search text and signals so filtering never
 // re-reads evidence. Candidates stay a separate mode of the same list.
 let signalFilter = 'all';
-const signalNames = {all:'All observed', third:'Ad, measurement or telemetry lookups', silent:'No DNS via Pi-hole'};
+const signalNames = {all:'All observed', third:'Ad, measurement and telemetry lookups', silent:'No DNS via Pi-hole'};
 function setSignalFilter(name) {
   signalFilter = name;
   for (const signal of Object.keys(signalNames)) byId(`signal-${signal}`).setAttribute('aria-pressed', String(signal === name));
@@ -486,13 +570,13 @@ function filterDevices() {
   const narrowed = bySignal || presence === 'candidate' || byId('device-sort').value !== 'inventory';
   byId('filters-toggle').textContent = narrowed ? 'Filter and order · in use' : 'Filter and order';
   byId('device-shown').textContent = cards.length
-    ? `${shown} of ${group} ${presence === 'candidate' ? 'candidate addresses' : 'observed devices'}` : '';
+    ? `${formatCount(shown)} of ${formatCount(group)} ${presence === 'candidate' ? 'candidate addresses' : 'observed devices'}` : '';
   const empty = byId('device-filter-empty');
   empty.hidden = !cards.length || cards.some(card => !card.hidden);
   empty.textContent = query ? 'No addresses match this search.'
     : bySignal ? `No observed device shows “${signalNames[signalFilter]}”.`
     : presence === 'candidate' ? 'No candidate addresses remain in this scope.'
-    : 'No devices observed yet. Candidate addresses are checked on each sweep.';
+    : 'No devices observed yet. Candidate addresses are checked on each scan.';
 }
 byId('filters-toggle').addEventListener('click', () => {
   const open = byId('filters-toggle').getAttribute('aria-expanded') !== 'true';
@@ -505,18 +589,18 @@ byId('device-search').addEventListener('input', filterDevices);
 byId('device-presence').addEventListener('change', filterDevices);
 byId('discover-form').addEventListener('submit', async event => {
   event.preventDefault();
-  byId('discover').disabled = true;
+  setBusy(byId('discover'), true);
   byId('discovery-detail').textContent = 'Looking for responding devices…';
   try {
     const report = await api('/api/discovery', {method:'POST', body:JSON.stringify({network:byId('network').value.trim(), ports:portSelection()})});
     renderDevices(report);
     notice('Discovery finished. Choose the devices you want to monitor.');
   } catch (error) {byId('discovery-detail').textContent = error.message; notice(error.message, true);}
-  finally {byId('discover').disabled = false;}
+  finally {setBusy(byId('discover'), false);}
 });
 byId('monitor-form').addEventListener('submit', async event => {
   event.preventDefault(); settingsPending = true;
-  byId('save-monitoring').disabled = true;
+  setBusy(byId('save-monitoring'), true);
   try {
     const targets = byId('targets').value.split(',').map(value => value.trim()).filter(Boolean);
     const labels = {};
@@ -533,7 +617,7 @@ byId('monitor-form').addEventListener('submit', async event => {
     notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
     await refresh().catch(error => notice('Monitoring settings were saved, but dashboard refresh failed. ' + error.message, true));
   } catch (error) {notice(error.message, true);}
-  finally {settingsPending = false; byId('save-monitoring').disabled = false;}
+  finally {settingsPending = false; setBusy(byId('save-monitoring'), false);}
 });
 
 // A local launcher opens a fresh, process-scoped dashboard bearer. Fragments are
@@ -570,7 +654,7 @@ connectLocal().catch(error => {
   if (handoff) notice(error.message, true);
 });
 setInterval(() => {
-  if ((bearer || authenticated) && (!document.hidden || overview?.preferences.browser_notifications) && !settingsPending) refresh().catch(error => notice(error.message, true));
+  if ((bearer || authenticated) && (!document.hidden || overview?.preferences.browser_notifications) && !settingsPending) refresh().catch(error => condition(error.message, true));
 }, 5000);
 
 function renderDeviceDetection(detection) {
@@ -589,8 +673,8 @@ function renderDeviceDetection(detection) {
 }
 function renderExposures(detection) {
   const nodes = detection.exposures.map(exposure => element('p',
-    'TCP ' + exposure.ports.join(', ') + ' · Possible ' + exposure.possible_service + '. ' + exposure.risk_check, 'exposure'));
-  nodes.push(element('p', 'Open ports suggest services. Verify the protocol, model, and firmware before assessing vulnerabilities.', 'limit'));
+    'TCP ' + exposure.ports.join(', ') + ' · Possible ' + exposure.possible_service + '. ' + exposure.risk_check));
+  nodes.push(element('p', 'Open ports suggest services. Verify the protocol, model and firmware before assessing vulnerabilities.', 'limit'));
   return nodes;
 }
 
@@ -603,7 +687,7 @@ function behaviouralGroups(activity) {
 }
 const shortKinds = {advertising:'Advertising', measurement:'Measurement', telemetry:'Telemetry'};
 function behaviouralBreakdown(activity) {
-  return behaviouralGroups(activity).map(group => `${shortKinds[group.kind]} ${group.queries}`).join(' · ');
+  return behaviouralGroups(activity).map(group => `${shortKinds[group.kind]} ${formatCount(group.queries)}`).join(' · ');
 }
 // One gilt bar, split by pattern so the three kinds never rely on hue. The
 // bar is decorative; callers always print the same breakdown as text.
@@ -620,7 +704,7 @@ function segmentBar(activity, scale) {
   track.append(fill);
   return track;
 }
-function resetCount(resets) {return resets === 1 ? '1 counter reset' : `${resets} counter resets`;}
+function resetCount(resets) {return plural(resets, 'counter reset', 'counter resets');}
 function silentHours(activity) {
   return Math.floor((new Date(activity.until_at) - new Date(activity.from_at)) / 3600000);
 }
@@ -632,7 +716,7 @@ function deviceLink(device) {
 }
 function leafMore(parent, hidden, noun, apply) {
   if (hidden < 1) return;
-  const more = element('button', `${hidden} more ${noun} in the device list`, 'text-link');
+  const more = element('button', `${formatCount(hidden)} more ${noun} in the device list`, 'text-link');
   more.type = 'button';
   more.addEventListener('click', () => {apply(); showView('devices', true);});
   parent.append(more);
@@ -662,7 +746,7 @@ function renderTriptych(value) {
   for (const device of talkers.slice(0, limit)) {
     const row = element('div', undefined, 'leaf-row talker');
     const head = element('div', undefined, 'leaf-line');
-    head.append(deviceLink(device), element('span', undefined, 'leader'), element('span', `${behaviouralQueries(device.dns_activity)} lookups`, 'figure'));
+    head.append(deviceLink(device), element('span', undefined, 'leader'), element('span', plural(behaviouralQueries(device.dns_activity), 'lookup', 'lookups'), 'figure'));
     const providers = behaviouralGroups(device.dns_activity).flatMap(group => group.destinations)
       .sort((a, b) => b.queries - a.queries).slice(0, 3).map(entry => entry.provider || entry.domain);
     const who = element('p', behaviouralBreakdown(device.dns_activity), 'leaf-note');
@@ -671,14 +755,14 @@ function renderTriptych(value) {
     third.append(row);
   }
   if (!talkers.length) third.append(element('p', profiled.length
-    ? `None of the ${profiled.length} devices with a DNS profile looked up a destination in these groups.`
+    ? `No device with a DNS profile looked up a destination in these groups (${formatCount(profiled.length)} profiled).`
     : 'No per-device DNS profiles yet. They need Pi-hole and quick presence checks; see Settings.', 'empty'));
   leafMore(third, talkers.length - limit, 'devices', () => showInventory('third', 'third'));
   const unprofiled = value.devices.length - profiled.length;
   const partial = profiled.filter(device => device.dns_activity.partial_windows).length;
   byId('q-third-coverage').textContent = [
-    unprofiled && profiled.length ? `${unprofiled} of ${value.devices.length} observed devices have no DNS profile and cannot appear here.` : '',
-    partial ? `${partial} devices had partial coverage in some windows; open a device for detail.` : '',
+    unprofiled && profiled.length ? `${formatCount(unprofiled)} of ${plural(value.devices.length, 'observed device', 'observed devices')} ${unprofiled === 1 ? 'has' : 'have'} no DNS profile and cannot appear here.` : '',
+    partial ? `${plural(partial, 'device', 'devices')} had partial coverage in some windows; open a device for detail.` : '',
   ].filter(Boolean).join(' ');
 
   const silent = byId('q-silent'); silent.replaceChildren();
@@ -687,7 +771,7 @@ function renderTriptych(value) {
     const row = element('div', undefined, 'leaf-row gap');
     const head = element('div', undefined, 'leaf-line');
     head.append(deviceLink(device), element('span', undefined, 'leader'), element('span', `quiet ${silentHours(device.dns_activity)} h`, 'figure'));
-    row.append(head, element('p', `No DNS via Pi-hole in ${device.dns_activity.windows} confirmed checks`, 'leaf-note'));
+    row.append(head, element('p', `No DNS via Pi-hole in ${plural(device.dns_activity.windows, 'confirmed check', 'confirmed checks')}`, 'leaf-note'));
     silent.append(row);
   }
   if (!quiet.length) silent.append(element('p', profiled.length
@@ -720,10 +804,10 @@ function renderTriptych(value) {
     if (!device.detection || device.detection.confidence === 'unknown') unknown += 1;
     else types.set(device.detection.device_type, (types.get(device.detection.device_type) || 0) + 1);
   }
-  const tally = [...types].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => `${name} ${count}`);
+  const tally = [...types].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => `${name} ${formatCount(count)}`);
   if (unknown) tally.push(`type unknown ${unknown}`);
   byId('q-network').textContent = value.devices.length
-    ? `${identified} with an identity observed by UniFi or Pi-hole, ${value.devices.length - identified} by address only. Possible types from names and open ports: ${tally.join(' · ')}.`
+    ? `${formatCount(identified)} with an identity observed by UniFi or Pi-hole, ${formatCount(value.devices.length - identified)} by address only. Possible types from names and open ports: ${tally.join(' · ')}.`
     : 'Choose addresses in Settings to begin monitoring.';
   if (!triptychOpened) {
     // The single page-load moment: the wings open once, never on later refreshes.
@@ -742,10 +826,26 @@ function cell(label, className) {
 function fact(list, term, value, className) {
   list.append(element('dt', term), element('dd', value, className));
 }
-function paneSection(title) {
+// Every block in the side pane is one of these: a titled section that the
+// pane's section menu can jump to. `nav` is its short name in that menu.
+function paneSection(title, nav) {
   const section = element('section', undefined, 'pane-section');
-  section.append(element('h3', title));
+  const heading = element('h3', title);
+  heading.tabIndex = -1;
+  section.dataset.nav = nav;
+  section.append(heading);
   return section;
+}
+function renderPaneNav() {
+  byId('pane-nav').replaceChildren(...[...byId('device-view').querySelectorAll('.pane-section')].map(section => {
+    const link = element('button', section.dataset.nav, 'text-link');
+    link.type = 'button';
+    link.addEventListener('click', () => {
+      section.scrollIntoView({block:'start'});
+      section.querySelector('h3').focus({preventScroll:true});
+    });
+    return link;
+  }));
 }
 function actionButton(label, className, action) {
   const button = element('button', label, className);
@@ -755,22 +855,43 @@ function actionButton(label, className, action) {
 }
 
 // The side pane is the one place detail opens: a device, its profile editor,
-// an issue or an agent draft. Nothing scrolls the page to a distant form.
+// an issue or an agent draft. Nothing scrolls the page to a distant form. An
+// editor or reader replaces the device view in place: it opens at the top of
+// the pane, Back returns to the device where it was scrolled, and focus goes
+// back to the control that opened it.
 let selectedDevice = null;
-const paneParts = ['device-view','profile-form','profile-markdown','device-research','background-draft','issue-form','issue-markdown'];
+const deviceParts = ['device-identity','device-assessment','device-facts','device-analysis','device-history'];
+const editorParts = ['profile-form','profile-markdown','device-research','background-draft','issue-form','issue-markdown'];
+let paneReturn = null;
+function paneEditing() {return editorParts.some(id => byId(id).hidden === false);}
 function syncPane() {
   const visible = id => byId(id).hidden === false;
+  const editing = paneEditing();
   const device = selectedDevice && overview ? overview.devices.find(item => item.address === selectedDevice) : null;
+  const body = byId('pane-body');
+  const opened = editing && !paneReturn;
+  if (opened) paneReturn = {scroll: body.scrollTop, opener: document.activeElement};
+  byId('device-view').hidden = !device || editing;
+  byId('pane-nav').hidden = !device || editing;
+  byId('pane-back').hidden = !device || !editing;
   byId('pane-title').textContent = device ? device.name
     : visible('issue-form') || visible('issue-markdown') ? 'Privacy issue'
     : visible('background-draft') ? 'Agent research draft' : 'Device profile';
-  byId('side-pane').hidden = !paneParts.some(visible);
+  byId('side-pane').hidden = !device && !editing;
+  if (opened) body.scrollTop = 0;
+  if (!editing && paneReturn) {
+    const back = paneReturn; paneReturn = null;
+    if (device) body.scrollTop = back.scroll;
+    if (back.opener?.isConnected) back.opener.focus({preventScroll:true});
+    else if (device) byId('pane-title').focus({preventScroll:true});
+  }
 }
 function closeEditors() {
   profileEdit = null; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true; byId('profile-history').replaceChildren();
   issueEdit = null; byId('issue-form').hidden = true; byId('issue-markdown').hidden = true; byId('issue-history').replaceChildren();
   clearBackgroundDraft();
   clearDeviceResearch();
+  syncPane();
 }
 function markSelectedRow() {
   for (const card of byId('device-cards').querySelectorAll('.device-card')) {
@@ -787,7 +908,6 @@ function openDevice(address, record = true) {
   if (changed) closeEditors();
   selectedDevice = address;
   renderDeviceView(device);
-  byId('device-view').hidden = false;
   markSelectedRow(); syncPane();
   if (changed) {
     if (record) recordLocation();
@@ -799,8 +919,7 @@ function openDevice(address, record = true) {
 function closePane(record = true) {
   const address = selectedDevice;
   selectedDevice = null;
-  byId('device-view').hidden = true;
-  for (const id of ['device-facts','device-analysis','device-history']) byId(id).replaceChildren();
+  for (const id of deviceParts) byId(id).replaceChildren();
   closeEditors();
   markSelectedRow(); syncPane();
   if (record) recordLocation();
@@ -810,7 +929,12 @@ function closePane(record = true) {
   }
 }
 byId('pane-close').addEventListener('click', () => closePane());
-byId('side-pane').addEventListener('keydown', event => {if (event.key === 'Escape') closePane();});
+byId('pane-back').addEventListener('click', closeEditors);
+// Escape steps back once: out of an editor to its device, then out of the pane.
+byId('side-pane').addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  if (selectedDevice && paneEditing()) closeEditors(); else closePane();
+});
 globalThis.addEventListener?.('popstate', () => {
   const params = new URLSearchParams(location.hash.slice(1));
   const tab = params.get('tab'), address = params.get('device');
@@ -825,10 +949,12 @@ globalThis.addEventListener?.('popstate', () => {
 
 // What was observed, in the order the operator asks about it: what the device
 // is, what it talks to, how much it sends, then its open ports. Each block
-// keeps the source and the limits of its own numbers.
+// keeps the source and the limits of its own numbers. The agent assessment
+// sits between identity and the observations, so its state and decisions are
+// near the top of a long pane.
 function renderDeviceView(device) {
   const {current, known} = knownIdentity(device);
-  const identity = paneSection('What it is');
+  const identity = paneSection('What it is', 'What it is');
   const facts = element('dl', undefined, 'facts');
   fact(facts, 'Address', device.address, 'data');
   if (known) {
@@ -836,7 +962,7 @@ function renderDeviceView(device) {
     if (known.hostname) fact(facts, 'Hostname', known.hostname, 'data');
     if (known.vendor) fact(facts, 'Vendor', known.vendor);
     const association = [known.hostname, known.mac, known.vendor].filter(Boolean).join(' · ') || 'Address observed';
-    const observedAt = new Date(known.observed_at).toLocaleString();
+    const observedAt = formatWhen(known.observed_at);
     const source = known.source === 'unifi' ? 'UniFi' : 'Pi-hole';
     fact(facts, 'Identity source', (current ? '' : 'Last known ') + source + ' association · ' + association + ' · ' + observedAt);
   } else {
@@ -846,63 +972,90 @@ function renderDeviceView(device) {
   if (presence?.checked > 0) {
     const percent = Math.round(100 * presence.seen / presence.checked);
     const subject = presence.address_only ? 'Address seen' : 'Device seen';
-    const last = presence.last_seen ? ' · Last seen ' + new Date(presence.last_seen).toLocaleString() : '';
-    fact(facts, 'Presence', `${subject} in ${presence.seen} of ${presence.checked} quick checks (${percent}%) over 24 hours${last}`);
+    const last = presence.last_seen ? ' · Last seen ' + formatWhen(presence.last_seen) : '';
+    fact(facts, 'Presence', `${subject} in ${formatCount(presence.seen)} of ${plural(presence.checked, 'quick check', 'quick checks')} (${percent}%) over 24 hours${last}`);
   } else if (presence?.last_seen) {
-    fact(facts, 'Presence', 'Last quick sighting ' + new Date(presence.last_seen).toLocaleString());
+    fact(facts, 'Presence', 'Last quick sighting ' + formatWhen(presence.last_seen));
   }
   identity.append(facts);
   if (device.detection) identity.append(renderDeviceDetection(device.detection));
 
-  const talks = paneSection('What it talks to');
+  const talks = paneSection('What it talks to', 'Talks to');
   if (device.dns_activity) talks.append(renderDnsActivity(device.dns_activity));
   else talks.append(element('p', 'No Pi-hole DNS profile for this device. Its destinations are unknown, not absent.', 'hint unmeasured'));
-  const destinations = element('details'); destinations.append(element('summary', `Last full sweep · ${device.dns.length} sampled DNS destinations`));
-  for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint'));
-  talks.append(destinations);
+  // A disclosure with nothing in it is not shown.
+  if (device.dns.length) {
+    const destinations = element('details');
+    destinations.append(element('summary', `Details · ${plural(device.dns.length, 'DNS destination', 'DNS destinations')} sampled in the last full scan`));
+    for (const query of device.dns) {
+      const line = element('p', undefined, 'hint');
+      line.append(domainName(query.domain), element('span', plural(query.queries, 'sampled lookup', 'sampled lookups')));
+      destinations.append(line);
+    }
+    talks.append(destinations);
+  }
 
-  const sends = paneSection('How much it sends');
+  const sends = paneSection('How much it sends', 'Sends');
   if (device.traffic) sends.append(renderTraffic(device.traffic));
   else sends.append(element('p', 'No UniFi byte counters for this device. Volume is unknown, not zero.', 'hint unmeasured'));
 
-  const ports = paneSection('Open ports and exposures');
+  const ports = paneSection('Open ports and exposures', 'Ports');
   const sweep = element('dl', undefined, 'facts');
   fact(sweep, 'Checked ports', device.services.length ? device.services.map(item => `${item.port}: ${item.status}`).join(' · ') : 'No checked ports recorded.', device.services.length ? 'data' : undefined);
   const responded = device.services.some(item => item.status === 'open' || item.status === 'closed');
-  fact(sweep, 'Full sweep', device.last_seen ? `Last checked ${new Date(device.last_seen).toLocaleString()} · ${responded ? 'TCP response' : 'No TCP response'}` : 'Awaiting first full sweep');
+  fact(sweep, 'Full scan', device.last_seen ? `Last checked ${formatWhen(device.last_seen)} · ${responded ? 'TCP response' : 'No TCP response'}` : 'Awaiting first full scan');
   if (device.last_response_at) {
-    fact(sweep, 'TCP responses', `First TCP response ${new Date(device.first_response_at).toLocaleString()} · Last ${new Date(device.last_response_at).toLocaleString()}`);
+    fact(sweep, 'TCP responses', `First ${formatWhen(device.first_response_at)} · Last ${formatWhen(device.last_response_at)}`);
   }
   ports.append(sweep);
   if (device.detection) ports.append(...renderExposures(device.detection));
-  byId('device-facts').replaceChildren(identity, talks, sends, ports);
+  byId('device-identity').replaceChildren(identity);
+  byId('device-facts').replaceChildren(talks, sends, ports);
 
-  const history = paneSection('Evidence history');
-  history.append(element('p', `${device.history.length} ${device.history.length === 1 ? 'collection' : 'collections'} at this address. Reading one opens it in the Evidence view.`, 'hint'));
+  const history = paneSection('Evidence history', 'Evidence');
+  history.append(element('p', `${plural(device.history.length, 'collection', 'collections')} at this address. Reading one opens it in the Evidence view.`, 'hint'));
+  const entries = element('div', undefined, 'entries');
   for (const id of [...device.history].reverse()) {
-    history.append(actionButton(`Read collection ${id.slice(0,8)}`, 'entry', () => showEvidence(id)));
+    entries.append(actionButton(`Read collection ${id.slice(0,8)}`, 'entry', () => showEvidence(id)));
   }
+  history.append(entries);
   byId('device-history').replaceChildren(history);
+  renderPaneNav();
 }
 
 const applicabilityLabels = [['potentially_affected','Potentially affected'],['confirmed_affected','Confirmed affected'],['not_affected','Not affected'],['mitigated','Mitigated'],['unresolved','Unresolved']];
 const mitigationLabels = [['proposed','Proposed'],['accepted','Accepted'],['applied','Applied by operator'],['verified','Verified by operator'],['reverted','Reverted by operator']];
-// Profile documents end with a machine-readable record. Fold it away after
-// rendering so the operator's notes are not buried under JSON and identifiers.
-function collapseRecordMetadata(article) {
-  const heading = [...article.children].find(node => /^H[1-6]$/.test(node.tagName) && node.textContent.trim() === 'Record metadata');
-  if (!heading) return article;
-  const fold = element('details', undefined, 'record-metadata');
-  fold.append(element('summary', 'Record metadata'));
-  let next = heading.nextElementSibling;
-  while (next && next.tagName !== 'PRE') next = next.nextElementSibling;
-  if (!next) return article;
-  heading.replaceWith(fold);
-  fold.append(next);
+// Rendered documents carry sections written for the record rather than the
+// reader: identifiers, raw state words and JSON. Each is folded into the same
+// closed "Details" disclosure after rendering, so the prose is not buried and
+// nothing is removed. A record's JSON block folds alone; the other sections
+// fold up to the next heading of the same or a higher level.
+const foldedSections = new Set(['Record metadata', 'Evidence', 'Privacy issues and mitigation decisions']);
+function foldDetails(article) {
+  if (!article?.children) return article;
+  const headings = [...article.children].filter(node => /^H[1-6]$/.test(node.tagName) && foldedSections.has(node.textContent.trim()));
+  for (const heading of headings) {
+    const title = heading.textContent.trim();
+    const members = [];
+    let next = heading.nextElementSibling;
+    if (title === 'Record metadata') {
+      while (next && next.tagName !== 'PRE') next = next.nextElementSibling;
+      if (next) members.push(next);
+    } else {
+      while (next && !(/^H[1-6]$/.test(next.tagName) && next.tagName <= heading.tagName)) {
+        members.push(next); next = next.nextElementSibling;
+      }
+    }
+    if (!members.length) continue;
+    const fold = element('details', undefined, 'record-details');
+    fold.append(element('summary', `Details · ${title[0].toLowerCase()}${title.slice(1)}`));
+    heading.replaceWith(fold);
+    fold.append(...members);
+  }
   return article;
 }
 function renderProfileDocument(text) {
-  return collapseRecordMetadata(PrivacyMarkdown.render(text));
+  return foldDetails(PrivacyMarkdown.render(text));
 }
 // The operator's profile, linked issues and any agent draft are read once when
 // a device is opened and again after a save; the five-second refresh leaves
@@ -911,19 +1064,23 @@ function renderProfileDocument(text) {
 async function loadDeviceAnalysis(device) {
   const panel = byId('device-analysis');
   const stale = () => selectedDevice !== device.address;
-  const notes = paneSection('Your notes and expectations');
-  const known = paneSection('What we know about this device');
-  const assessment = paneSection('Agent assessment');
-  const product = paneSection('Product and advisories');
+  const notes = paneSection('Your notes and expectations', 'Notes');
+  const known = paneSection('What we know about this device', 'Known');
+  const assessment = paneSection('Agent assessment', 'Assessment');
+  const product = paneSection('Product and advisories', 'Advisories');
   product.append(element('p', 'Confirm the product with UniFi, then search the public NVD advisory database by model name. No agent is involved.', 'hint'),
     actionButton('Look up product and advisories', 'secondary', () => openDeviceResearch(device)));
-  const waiting = paneSection('Your notes and expectations');
+  const waitingAssessment = paneSection('Agent assessment', 'Assessment');
+  waitingAssessment.append(element('p', 'Reading the assessment…', 'hint'));
+  const waiting = paneSection('Your notes and expectations', 'Notes');
   waiting.append(element('p', 'Reading the saved profile…', 'hint'));
+  byId('device-assessment').replaceChildren(waitingAssessment);
   panel.replaceChildren(waiting);
+  renderPaneNav();
   const mac = device.identity?.mac || null;
   try {
     if (byId('device-profiles').hidden) {
-      notes.append(element('p', 'Device profiles are unavailable on this collector.', 'hint'));
+      notes.append(element('p', 'Device profiles are unavailable on this collector.', 'hint unmeasured'));
     } else {
       const {profiles} = await api('/api/profiles');
       const confirmed = mac ? profiles.filter(view => view.profile.fields.device_mac === mac) : [];
@@ -939,14 +1096,14 @@ async function loadDeviceAnalysis(device) {
           : 'Your saved profile, associated by address only. A matching address alone does not establish device identity. It records what you expect of the device; it is not an observation or an assessment.', 'hint'));
         const reader = element('div', undefined, 'document-reader');
         reader.append(renderProfileDocument(source.text));
-        notes.append(actionButton('Edit profile', undefined, () => editProfile(view, device.address, null)), reader);
+        notes.append(reader, actionButton('Edit profile', 'secondary', () => editProfile(view, device.address, null)));
         const links = view.profile.fields.issues || [];
         notes.append(element('h4', 'Linked privacy issues'));
         if (links.length) {
           const titles = issuesAvailable
             ? new Map((await api('/api/issues')).issues.map(item => [item.issue.issue_id, item.issue.fields.title])) : new Map();
           for (const link of links) {
-            const issue = element('article', undefined, 'linked-issue');
+            const issue = element('article', undefined, 'card');
             const label = (choices, value) => (choices.find(choice => choice[0] === value) || [value, value])[1];
             issue.append(element('h5', titles.get(link.issue_id) || `Retained issue ${link.issue_id}`),
               element('p', `${label(applicabilityLabels, link.applicability)} · Mitigation: ${label(mitigationLabels, link.mitigation_status)}`, 'status-line'));
@@ -959,7 +1116,7 @@ async function loadDeviceAnalysis(device) {
         }
       } else {
         notes.append(element('p', 'You have not written a profile for this device. A profile records what the device is and what you expect it to do.', 'hint'),
-          actionButton('Write a profile for this device', undefined, () => openDeviceProfile(device.address, mac)));
+          actionButton('Create profile for this device', 'secondary', () => openDeviceProfile(device.address, mac)));
       }
     }
   } catch (error) {
@@ -969,7 +1126,7 @@ async function loadDeviceAnalysis(device) {
     if (mac && device.identity?.device_id) {
       known.append(...renderSupplemental(await api(`/api/devices/${encodeURIComponent(device.identity.device_id)}/supplemental`)));
     } else {
-      known.append(element('p', 'Not available: this device is known by its address only. Device descriptions need a confirmed MAC address.', 'hint'));
+      known.append(element('p', 'Not available: this device is known by its address only. Device descriptions need a confirmed MAC address.', 'hint unmeasured'));
     }
   } catch (error) {
     known.append(element('p', error.message, 'notice error'));
@@ -994,7 +1151,10 @@ async function loadDeviceAnalysis(device) {
   } catch (error) {
     assessment.append(element('p', error.message, 'notice error'));
   }
-  if (!stale()) panel.replaceChildren(notes, known, assessment, product);
+  if (stale()) return;
+  byId('device-assessment').replaceChildren(assessment);
+  panel.replaceChildren(known, notes, product);
+  renderPaneNav();
 }
 
 // What the device said about itself, public advisories for its model and
@@ -1002,9 +1162,6 @@ async function loadDeviceAnalysis(device) {
 // value is shown with textContent: device-reported strings are untrusted.
 const describedBy = {upnp:'UPnP', mdns:'mDNS'};
 const modelFrom = {profile:'your profile', unifi:'the UniFi controller', device:'the device’s own description'};
-function shortDate(stamp) {
-  return stamp ? new Date(stamp).toLocaleDateString() : '';
-}
 function renderSupplemental(body) {
   const section = body.supplemental;
   const nodes = [];
@@ -1013,7 +1170,7 @@ function renderSupplemental(body) {
       ? 'Not described yet. The collector asks each monitored device to describe itself at most once a day, after quick checks.'
       : 'Device descriptions are off — turn them on in Settings.', 'hint'));
   } else if (!section.descriptions.length) {
-    nodes.push(element('p', `The device did not describe itself when last asked (${shortDate(section.described_at)}). Many devices do not; that is not a finding.`, 'hint'));
+    nodes.push(element('p', `The device did not describe itself when last asked (${formatDay(section.described_at)}). Many devices do not; that is not a finding.`, 'hint'));
   }
   if (section.descriptions.length) {
     nodes.push(element('h4', 'Reported by the device'));
@@ -1024,7 +1181,7 @@ function renderSupplemental(body) {
       if (item.model_number) fact(list, 'Model number', item.model_number, 'data');
       if (item.firmware) fact(list, 'Firmware', item.firmware, 'data');
       if (item.services.length) fact(list, 'Advertises', item.services.join(' · '));
-      fact(list, 'Source', `${describedBy[item.source] || item.source} on the local network · ${shortDate(item.observed_at)}`);
+      fact(list, 'Source', `${describedBy[item.source] || item.source} on the local network · ${formatDay(item.observed_at)}`);
       nodes.push(list);
     }
     nodes.push(element('p', 'These are the device’s own claims, not confirmed identity.', 'limit'));
@@ -1035,28 +1192,28 @@ function renderSupplemental(body) {
   if (!lookup) {
     nodes.push(element('p', 'Not looked up yet.', 'hint'));
   } else if (lookup.status === 'model_unknown') {
-    nodes.push(element('p', `Not looked up: no public model name was available (${shortDate(lookup.checked_at)}).`, 'hint'));
+    nodes.push(element('p', `Not looked up: no public model name was available (${formatDay(lookup.checked_at)}).`, 'hint'));
   } else if (lookup.status === 'not_configured') {
     nodes.push(element('p', 'Not looked up: no advisory source is configured on this collector.', 'hint'));
   } else if (lookup.status === 'unavailable') {
-    nodes.push(element('p', `The NVD lookup did not complete (${shortDate(lookup.checked_at)}${from}). ${lookup.unavailable || ''} Advisories are unknown, not none.`, 'hint unmeasured'));
+    nodes.push(element('p', `The NVD lookup did not complete (${formatDay(lookup.checked_at)}${from}). ${lookup.unavailable || ''} Advisories are unknown, not none.`, 'hint unmeasured'));
   } else {
-    nodes.push(element('p', `NVD · checked ${shortDate(lookup.checked_at)}${from} · ${lookup.total ? lookup.total + ' found' : 'none found'}`, 'hint'));
+    nodes.push(element('p', `NVD · checked ${formatDay(lookup.checked_at)}${from} · ${lookup.total ? formatCount(lookup.total) + ' found' : 'none found'}`, 'hint source'));
     for (const item of lookup.advisories) {
-      const entry = element('article', undefined, 'known-item');
-      const facts = [item.severity ? item.severity[0] + item.severity.slice(1).toLowerCase() : 'Severity not rated', 'published ' + item.published_on];
+      const entry = element('article', undefined, 'card');
+      const facts = [item.severity ? item.severity[0] + item.severity.slice(1).toLowerCase() : 'Severity not rated', 'published ' + formatDay(item.published_on)];
       if (item.known_exploited) facts.push('known exploited');
       entry.append(element('p', item.cve, 'data'), element('p', facts.join(' · '), 'status-line'), element('p', item.description, 'hint'));
       nodes.push(entry);
     }
     const unlisted = (lookup.total || 0) - lookup.advisories.length;
-    if (unlisted > 0) nodes.push(element('p', `${unlisted} more not listed here.`, 'hint'));
+    if (unlisted > 0) nodes.push(element('p', `${formatCount(unlisted)} more not listed here.`, 'hint'));
     if (lookup.total) nodes.push(element('p', 'An advisory is about the model, not proof that this device is affected. Check whether the firmware it names matches.', 'limit'));
   }
   if (section.vendor_notes.length) {
     nodes.push(element('h4', 'Worth checking'));
     for (const note of section.vendor_notes) {
-      const entry = element('article', undefined, 'known-item');
+      const entry = element('article', undefined, 'card');
       entry.append(element('h5', `${note.feature} (${note.applies_to})`), element('p', note.collects),
         element('p', `To turn it off: ${note.turn_off.replace(/\.$/, '')}. Menus may vary by model year.`, 'hint'));
       const sources = element('p', 'Source: ', 'hint');
@@ -1084,23 +1241,25 @@ function renderSupplemental(body) {
 // the state. Nothing here resends a request whose outcome is unknown: Check
 // status only reads.
 let deviceAssessment = null;
-let assessmentBusy = false;
+let assessmentBusy = null;
 function assessmentPath(deviceId, suffix = '') {
   return `/api/devices/${encodeURIComponent(deviceId)}/assessment${suffix}`;
-}
-function when(stamp) {
-  return stamp ? new Date(stamp).toLocaleString() : '';
 }
 function renderAssessment(view, report) {
   const nodes = [];
   const button = (label, action, className) => {
     const control = actionButton(label, className, () => assessmentAction(action));
-    control.disabled = assessmentBusy;
+    control.disabled = Boolean(assessmentBusy);
+    if (assessmentBusy === action) markBusy(control, true);
     return control;
   };
-  const verdict = view.review === 'needs_corrections' ? 'accepted after one correction round' : 'accepted';
-  const run = view.run_id ? element('p', 'Run ', 'hint') : null;
-  if (run) run.append(element('span', view.run_id, 'data'));
+  // The second agent's check, in words that cannot be mistaken for the
+  // operator's own Accept below it.
+  const checked = view.review === 'needs_corrections'
+    ? 'Checked by a second agent: passed after one round of corrections'
+    : 'Checked by a second agent: passed';
+  const run = view.run_id ? element('details') : null;
+  if (run) run.append(element('summary', 'Details · run identifier'), element('p', view.run_id, 'hint data'));
   if (view.state === 'idle') {
     nodes.push(element('p', 'Not assessed', 'status-line'),
       element('p', 'An agent reads this device’s observations (what it is, who it talks to and how much it sends) and explains them in plain language. A second agent checks each concern against the same data. The report stays a draft until you accept it.', 'hint'));
@@ -1108,18 +1267,18 @@ function renderAssessment(view, report) {
     nodes.push(element('p', view.pending === 'admission' ? 'Starting' : 'Assessment running', 'status-line'),
       element('p', view.pending === 'admission'
         ? 'Plowshare has not confirmed the start. It is not sent again; its admission receipt settles it.'
-        : `Requested ${when(view.requested_at)}. This view updates while the run continues.`, 'hint'));
+        : `Requested ${formatWhen(view.requested_at)}. This view updates while the run continues.`, 'hint'));
     if (run) nodes.push(run);
   } else if (view.state === 'review') {
     nodes.push(element('p', view.pending === 'accept' ? 'Accept sent, not yet confirmed' : 'Awaiting your review', 'status-line'),
       element('p', view.pending === 'accept'
         ? 'Plowshare has not confirmed the report is final. Accept is not sent again; Check status reads it.'
-        : `Assessed ${when(view.requested_at)}. Reviewer verdict: ${verdict}. Accept makes this report final in Plowshare. Dismiss hides it here and leaves it in Plowshare as a draft.`, 'hint'));
+        : `Assessed ${formatWhen(view.requested_at)}. ${checked}. Accept makes this report final in Plowshare. Dismiss hides it here and leaves it in Plowshare as a draft.`, 'hint'));
   } else if (view.state === 'accepted') {
-    nodes.push(element('p', 'Accepted ' + when(view.decided_at), 'status-line'),
-      element('p', `This report is final in Plowshare. Assessed ${when(view.requested_at)}; reviewer verdict: ${verdict}.`, 'hint'));
+    nodes.push(element('p', 'Accepted ' + formatWhen(view.decided_at), 'status-line'),
+      element('p', `This report is final in Plowshare. Assessed ${formatWhen(view.requested_at)}. ${checked}.`, 'hint'));
   } else if (view.state === 'dismissed') {
-    nodes.push(element('p', 'Dismissed ' + when(view.decided_at), 'status-line'),
+    nodes.push(element('p', 'Dismissed ' + formatWhen(view.decided_at), 'status-line'),
       element('p', 'You dismissed this draft. It stays in Plowshare as history and is not shown here.', 'hint'));
   } else if (view.state === 'failed') {
     nodes.push(element('p', 'Last assessment failed', 'status-line'));
@@ -1127,21 +1286,28 @@ function renderAssessment(view, report) {
   }
   if (view.detail) nodes.push(element('p', view.detail, view.state === 'failed' || (view.state === 'review' && !view.pending) ? 'notice error' : 'hint'));
   // Decisions sit with the state line, above a report that can be long.
-  const actions = element('div', undefined, 'row');
+  const actions = element('div', undefined, 'actions');
   if (view.can_accept) actions.append(button('Accept and make final', 'accept'));
-  if (view.can_dismiss) actions.append(button('Dismiss without finalising', 'dismiss', 'secondary'));
+  if (view.can_dismiss) actions.append(button('Dismiss without finalising', 'dismiss', 'danger'));
   if (view.pending || (view.state === 'review' && view.detail)) actions.append(button('Check status', 'check', 'secondary'));
   if (view.can_assess) {
-    actions.append(view.state === 'idle' ? button('Assess this device', 'assess')
-      : view.state === 'failed' ? button('Retry', 'assess')
-      : button('Assess again', 'assess', 'secondary'));
+    const [label, className] = view.state === 'idle' ? ['Assess this device']
+      : view.state === 'failed' ? ['Retry assessment'] : ['Assess again', 'secondary'];
+    actions.append(confirmedAction(label, className, 'Confirm assessment',
+      'This starts one agent assessment of this device. It uses model calls and counts toward today’s assessment limit.',
+      () => assessmentAction('assess'), Boolean(assessmentBusy)));
   }
-  nodes.push(actions);
+  if (actions.children.length) nodes.push(actions);
   if (!view.can_assess && view.assess_note) nodes.push(element('p', view.assess_note, 'hint'));
+  // The report can be long. It is open while it awaits a decision and folded
+  // once it is final, so the sections below stay within reach.
   if (report && (view.state === 'review' || view.state === 'accepted')) {
     const reader = element('div', undefined, 'document-reader');
-    reader.append(PrivacyMarkdown.render(report));
-    nodes.push(reader);
+    reader.append(foldDetails(PrivacyMarkdown.render(report)));
+    const fold = element('details');
+    fold.open = view.state === 'review';
+    fold.append(element('summary', 'Details · the assessment report'), reader);
+    nodes.push(fold);
   }
   return nodes;
 }
@@ -1164,12 +1330,12 @@ async function reloadAssessment() {
 async function openAssessment(device, block) {
   deviceAssessment = null;
   if (!assessmentsAvailable) {
-    block.append(element('p', 'Device assessments are not enabled on this collector.', 'hint'));
+    block.append(element('p', 'Device assessments are not enabled on this collector.', 'hint unmeasured'));
     return;
   }
   const deviceId = device.identity?.mac ? device.identity.device_id : null;
   if (!deviceId) {
-    block.append(element('p', 'Not assessed. An assessment needs a confirmed MAC address; this device is known by its address only.', 'hint'));
+    block.append(element('p', 'Not assessed. An assessment needs a confirmed MAC address; this device is known by its address only.', 'hint unmeasured'));
     return;
   }
   deviceAssessment = {address: device.address, deviceId, block, view: null, report: null};
@@ -1178,13 +1344,13 @@ async function openAssessment(device, block) {
 async function assessmentAction(action) {
   const current = deviceAssessment;
   if (!current || assessmentBusy) return;
-  assessmentBusy = true; showAssessment();
+  assessmentBusy = action; showAssessment();
   try {
     await api(assessmentPath(current.deviceId, '/' + action), {method:'POST', body:'{}'});
   } catch (error) {
     notice(error.message, true);
   } finally {
-    assessmentBusy = false;
+    assessmentBusy = null;
   }
   await reloadAssessment();
 }
@@ -1196,7 +1362,7 @@ async function pollAssessment() {
 async function loadAssessmentSettings() {
   const settings = await api('/api/device-assessments');
   byId('assessment-limit').value = String(settings.background_limit);
-  byId('assessment-settings-detail').textContent = settings.detail || (settings.background_limit ? `Up to ${settings.background_limit} background assessments a day.` : 'Background assessment is off.');
+  byId('assessment-settings-detail').textContent = settings.detail || (settings.background_limit ? `Up to ${plural(settings.background_limit, 'background assessment', 'background assessments')} a day.` : 'Background assessment is off.');
   assessmentSettingsLoaded = true;
 }
 byId('assessment-settings').addEventListener('submit', async event => {
@@ -1223,7 +1389,7 @@ function renderInventory(value) {
   if (value.devices.length) {
     const head = element('div', undefined, 'ledger-head');
     head.setAttribute('aria-hidden', 'true');
-    for (const [title, className] of [['Device', 'c-name'], ['Address', 'c-address'], ['Signals', 'c-signals'], ['Ad, measurement, telemetry lookups', 'c-third'], ['To device', 'c-to'], ['From device', 'c-from']]) head.append(element('span', title, className));
+    for (const [title, className] of [['Device', 'c-name'], ['Address', 'c-address'], ['Signals', 'c-signals'], ['Ad, measurement and telemetry lookups', 'c-third'], ['To device', 'c-to'], ['From device', 'c-from']]) head.append(element('span', title, className));
     cards.append(head);
   }
   const order = inventoryOrders[byId('device-sort').value];
@@ -1236,7 +1402,7 @@ function renderInventory(value) {
     const tracking = behaviouralQueries(device.dns_activity);
     const flags = [];
     if (device.dns_activity?.pihole_silent) flags.push('No DNS via Pi-hole');
-    if (tracking) flags.push(`${tracking} ad, measurement or telemetry lookups`);
+    if (tracking) flags.push(`${tracking} ad, measurement and telemetry lookups`);
     const signals = [];
     if (device.dns_activity?.pihole_silent) {signals.push('silent'); silentCount += 1;}
     if (tracking) {signals.push('third'); thirdCount += 1;}
@@ -1256,11 +1422,11 @@ function renderInventory(value) {
     const signalCell = cell('Signals', 'c-signals');
     if (device.dns_activity?.pihole_silent) signalCell.append(element('span', 'No DNS via Pi-hole', 'tag tag-silent'));
     if (signalCell.children.length === 1) signalCell.append(element('span', 'None', 'nil'));
-    const third = cell('Ad, measurement, telemetry lookups', 'c-third');
+    const third = cell('Ad, measurement and telemetry lookups', 'c-third');
     if (!device.dns_activity) third.append(element('span', 'No DNS profile', 'nil'));
     else {
       if (tracking) third.append(segmentBar(device.dns_activity, most));
-      third.append(element('span', String(tracking), tracking ? 'data' : 'data zero'), element('span', 'lookups', 'unit'));
+      third.append(element('span', formatCount(tracking), tracking ? 'data' : 'data zero'), element('span', tracking === 1 ? 'lookup' : 'lookups', 'unit'));
       if (tracking) third.append(element('span', behaviouralBreakdown(device.dns_activity), 'breakdown'));
     }
     const to = cell('To device', 'c-to'), from = cell('From device', 'c-from');
@@ -1280,17 +1446,17 @@ function renderInventory(value) {
     card.append(summary);
     cards.append(card);
   }
-  byId('signal-all').textContent = `${signalNames.all} · ${value.devices.length}`;
-  byId('signal-third').textContent = `${signalNames.third} · ${thirdCount}`;
-  byId('signal-silent').textContent = `${signalNames.silent} · ${silentCount}`;
+  byId('signal-all').textContent = `${signalNames.all} · ${formatCount(value.devices.length)}`;
+  byId('signal-third').textContent = `${signalNames.third} · ${formatCount(thirdCount)}`;
+  byId('signal-silent').textContent = `${signalNames.silent} · ${formatCount(silentCount)}`;
   for (const candidate of value.candidates) {
     const card = element('article', undefined, 'device-card candidate');
     card.dataset.presence = 'candidate';
     card.dataset.search = [candidate.address, candidate.label].filter(Boolean).join(' ').toLowerCase();
     card.append(element('h3', candidate.address, 'data'), element('p', candidate.label || 'Candidate address'));
     card.append(element('p', candidate.last_checked_at
-      ? 'Last checked ' + new Date(candidate.last_checked_at).toLocaleString()
-      : 'Awaiting first sweep', 'hint'));
+      ? 'Last checked ' + formatWhen(candidate.last_checked_at)
+      : 'Awaiting first scan', 'hint'));
     cards.append(card);
   }
   // Keep an open device view on fresh observations; drop it if the device left.
@@ -1302,34 +1468,32 @@ function renderInventory(value) {
 
 function renderOverview(value) {
   const health = value.health;
-  byId('device-count').textContent = value.devices.length;
-  byId('candidate-count').textContent = value.candidates.length;
+  byId('device-count').textContent = formatCount(value.devices.length);
+  byId('candidate-count').textContent = formatCount(value.candidates.length);
   byId('health-summary').textContent = !health.connected ? 'Connection needs attention' : health.recovery.length ? 'Retained work needs attention' : 'Connected to Plowshare';
   byId('setup-checklist').hidden = health.checklist.length === 0;
   renderScheduleControl(health.schedule, value.schedule_control, value.pending_deployment);
   byId('deployment-state').textContent = value.pending_deployment ? `Deployment ${value.pending_deployment} needs reconciliation. Enter the administrator password and choose Check retained deployment.` : 'No unsettled schedule deployment.';
   const grid = byId('health'); grid.replaceChildren();
-  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? new Date(health.last_contact).toLocaleString() : 'Awaiting contact'], ['Last completed scan', health.last_scan ? new Date(health.last_scan).toLocaleString() : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at || 'Awaiting next fire') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length}/3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length}/6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at || 'Not supplied']];
-  for (const [name, detail] of checks) {const card = element('article'); card.append(element('strong', name), element('p', detail)); grid.append(card);}
-  if (health.unifi) {
-    const card = element('article');
-    card.append(element('strong', 'UniFi'), element('p', health.unifi));
-    grid.append(card);
-  }
-  grid.append(element('p', `Checked ${new Date(health.checked_at).toLocaleString()}. ${health.detail}`, 'hint'));
+  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? formatWhen(health.last_contact) : 'Awaiting contact'], ['Last completed scan', health.last_scan ? formatWhen(health.last_scan) : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at ? 'Next scan ' + formatWhen(health.schedule.next_at) : 'Awaiting next scan') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length} of 3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length} of 6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at ? formatWhen(health.credential_expires_at) : 'Not supplied']];
+  for (const [name, detail] of checks) fact(grid, name, detail);
+  if (health.unifi) fact(grid, 'UniFi', health.unifi);
+  byId('health-detail').textContent = `Checked ${formatWhen(health.checked_at)}. ${health.detail}`;
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
   const runs = byId('recent-runs'); runs.replaceChildren();
   if (!health.runs.length) runs.append(element('p', 'No project investigations yet.', 'empty'));
   for (const run of health.runs) {
-    const row = element('div', undefined, 'activity-row');
-    row.append(element('span', run.state, 'badge'), element('code', run.id));
+    const row = element('div', undefined, 'record');
+    const line = element('div', undefined, 'entry-line');
+    line.append(element('span', statusLabel(run.state), 'badge'), element('code', run.id));
+    row.append(line);
     runs.append(row);
   }
   const presenceStatus = value.quick_presence;
   const quickStatus = byId('quick-presence-status');
   quickStatus.textContent = presenceStatus?.enabled
-    ? (presenceStatus.last_checked ? 'Last quick check ' + new Date(presenceStatus.last_checked).toLocaleString() + '.' : 'Waiting for the first quick check.')
+    ? (presenceStatus.last_checked ? 'Last quick check ' + formatWhen(presenceStatus.last_checked) + '.' : 'Waiting for the first quick check.')
       + (presenceStatus.issues.length ? ' ' + presenceStatus.issues.join(' ') : '')
     : 'Quick presence checks are off.';
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates]);
@@ -1354,10 +1518,11 @@ function renderOverview(value) {
   const findings = byId('findings'); findings.replaceChildren();
   if (!value.findings.length) findings.append(element('p', 'No comparison findings yet. A baseline establishes the first observations.', 'empty'));
   for (const finding of value.findings) {
-    const card = element('article', undefined, 'finding'); card.append(element('h3', finding.title), PrivacyMarkdown.render(finding.explanation));
-    const open = element('button', 'Read evidence', 'secondary'); open.addEventListener('click', () => showEvidence(finding.scan_id).catch(error => notice(error.message, true)));
-    const acknowledge = element('button', finding.expected ? 'Expected · undo' : 'Mark expected', 'secondary');
-    acknowledge.addEventListener('click', async () => {acknowledge.disabled = true; try {await api('/api/expected', {method:'POST', body:JSON.stringify({id:finding.id,expected:!finding.expected})}); await refresh();} catch (error) {notice(error.message,true); acknowledge.disabled = false;}});
+    const card = element('article', undefined, 'record'); card.append(element('h3', finding.title), PrivacyMarkdown.render(finding.explanation));
+    if (finding.expected) card.append(element('p', 'Marked expected', 'status-line'));
+    const open = element('button', 'Read evidence', 'secondary'); open.type = 'button'; open.addEventListener('click', () => showEvidence(finding.scan_id).catch(error => notice(error.message, true)));
+    const acknowledge = element('button', finding.expected ? 'Undo expected' : 'Mark expected', 'secondary'); acknowledge.type = 'button';
+    acknowledge.addEventListener('click', async () => {setBusy(acknowledge, true); try {await api('/api/expected', {method:'POST', body:JSON.stringify({id:finding.id,expected:!finding.expected})}); await refresh();} catch (error) {notice(error.message,true); setBusy(acknowledge, false);}});
     const actions = element('div', undefined, 'actions'); actions.append(open, acknowledge); card.append(actions); findings.append(card);
   }
   }
@@ -1402,6 +1567,7 @@ async function piholeConnection(save) {
   if (piholePending) return;
   piholePending = true;
   byId('pihole-test').disabled = true; byId('pihole-save').disabled = true;
+  markBusy(byId(save ? 'pihole-save' : 'pihole-test'), true);
   const password = byId('pihole-password').value; byId('pihole-password').value = '';
   byId('pihole-detail').textContent = save ? 'Saving connection and password…' : 'Testing connection; your password will not be saved…';
   try {
@@ -1414,24 +1580,24 @@ async function piholeConnection(save) {
       await refresh().catch(error => notice('Pi-hole was saved, but dashboard refresh failed. ' + error.message, true));
     }
   } catch (error) {byId('pihole-detail').textContent = `${save ? 'Save was not confirmed. ' : 'Connection test failed. '}${error.message} The password field was cleared; enter it again to retry.`;}
-  finally {piholePending = false; byId('pihole-test').disabled = false; byId('pihole-save').disabled = !monitorEditable;}
+  finally {piholePending = false; setBusy(byId('pihole-test'), false); markBusy(byId('pihole-save'), false); byId('pihole-save').disabled = !monitorEditable;}
 }
 byId('pihole-test').addEventListener('click', () => piholeConnection(false));
 byId('pihole-form').addEventListener('submit', event => {event.preventDefault(); piholeConnection(true);});
 byId('recover').addEventListener('click', async () => {
-  byId('recover').disabled = true;
-  try {await api('/api/recovery', {method:'POST', body:'{}'}); await refresh(); notice('Retained receipts checked. Collection can resume; no uncertain effect was resent.');} catch (error) {notice(error.message,true);} finally {byId('recover').disabled = false;}
+  setBusy(byId('recover'), true);
+  try {await api('/api/recovery', {method:'POST', body:'{}'}); await refresh(); notice('Retained receipts checked. Collection can resume; no uncertain effect was resent.');} catch (error) {notice(error.message,true);} finally {setBusy(byId('recover'), false);}
 });
 byId('check-moves').addEventListener('click', async () => {
-  byId('check-moves').disabled = true;
+  setBusy(byId('check-moves'), true);
   try {
     const moves = await api('/api/device-moves', {method:'POST', body:'{}'}); byId('moves').replaceChildren();
-    if (!moves.length) byId('moves').append(element('p', 'No fresh reassociation found in the latest discovery. Run Find devices before checking again.', 'hint'));
+    if (!moves.length) byId('moves').append(element('p', 'No fresh reassociation found in the latest discovery. Run Find devices before checking again.', 'empty'));
     for (const move of moves) {
-      const button = element('button', `Confirm ${move.device_id}: ${move.old} → ${move.new}`, 'entry');
-      button.addEventListener('click', async () => {button.disabled = true; try {await api('/api/device-moves/accept', {method:'POST', body:JSON.stringify(move)}); settingsLoaded = false; await refresh(); byId('moves').replaceChildren();} catch (error) {notice(error.message,true); button.disabled = false;}}); byId('moves').append(button);
+      const button = element('button', `Confirm ${move.device_id}: ${move.old} → ${move.new}`, 'entry'); button.type = 'button';
+      button.addEventListener('click', async () => {setBusy(button, true); try {await api('/api/device-moves/accept', {method:'POST', body:JSON.stringify(move)}); settingsLoaded = false; await refresh(); byId('moves').replaceChildren();} catch (error) {notice(error.message,true); setBusy(button, false);}}); byId('moves').append(button);
     }
-  } catch (error) {notice(error.message,true);} finally {byId('check-moves').disabled = false;}
+  } catch (error) {notice(error.message,true);} finally {setBusy(byId('check-moves'), false);}
 });
 function renderScheduleControl(schedule, control, pendingDeployment) {
   byId('schedule-runtime').textContent = schedule ? (schedule.paused ? 'Paused' : 'Running') : 'Unavailable';
@@ -1447,6 +1613,8 @@ function renderScheduleControl(schedule, control, pendingDeployment) {
 async function controlSchedule(paused) {
   if (scheduleControlBusy || (paused === null ? byId('check-schedule').disabled : byId(paused ? 'pause-schedule' : 'resume-schedule').disabled)) return;
   scheduleControlBusy = true;
+  const acting = byId(paused === null ? 'check-schedule' : paused ? 'pause-schedule' : 'resume-schedule');
+  markBusy(acting, true);
   renderScheduleControl(overview && overview.health.schedule, overview && overview.schedule_control, overview && overview.pending_deployment);
   try {
     const result = await api(paused === null ? '/api/schedule/check' : '/api/schedule/control', {method:'POST',body:JSON.stringify(paused === null ? {} : {paused})});
@@ -1463,6 +1631,7 @@ async function controlSchedule(paused) {
     notice(byId('schedule-control-detail').textContent, true);
   } finally {
     scheduleControlBusy = false;
+    markBusy(acting, false);
     renderScheduleControl(overview && overview.health.schedule, overview && overview.schedule_control, overview && overview.pending_deployment);
   }
 }
@@ -1477,7 +1646,7 @@ byId('schedule-form').addEventListener('submit', async event => {
     scheduleDraft = await api('/api/schedule/review', {method:'POST', body:JSON.stringify({preset:byId('frequency').value,zone:byId('zone').value.trim(),paused:byId('schedule-paused').checked,password})});
     byId('schedule-review').textContent = `${scheduleDraft.paused ? 'Paused' : 'Enabled'} · ${scheduleDraft.cron} · ${scheduleDraft.zone}. Based on revision ${scheduleDraft.expected_revision}. Source digest ${scheduleDraft.source_digest}. Enter the administrator password again to deploy.`;
     byId('schedule-store').replaceChildren(...scheduleDraft.stores.map(store => {const option = element('option', store); option.value = store; return option;}));
-    const sources = element('details'); sources.append(element('summary', 'Review full Application source'));
+    const sources = element('details'); sources.append(element('summary', 'Details · full Application source'));
     for (const file of scheduleDraft.sources) {sources.append(element('h3', file.path), element('pre', file.text));}
     byId('schedule-review').append(sources);
     byId('schedule-draft').hidden = false;
@@ -1485,15 +1654,15 @@ byId('schedule-form').addEventListener('submit', async event => {
 });
 byId('deploy-schedule').addEventListener('click', async () => {
   if (!scheduleDraft || !byId('administrator-password').value) {notice('Review a revision and enter the administrator password to deploy.',true); return;}
-  const password = byId('administrator-password').value; byId('administrator-password').value = ''; byId('deploy-schedule').disabled = true;
-  try {const result = await api('/api/schedule/deploy', {method:'POST',body:JSON.stringify({review_id:scheduleDraft.id,store:byId('schedule-store').value,password})}); scheduleDraft = null; byId('schedule-draft').hidden = true; await refresh(); notice(`Application revision ${result.revision} retained. Schedule activation may take a moment.`);} catch (error) {notice(error.message,true);} finally {byId('deploy-schedule').disabled = false;}
+  const password = byId('administrator-password').value; byId('administrator-password').value = ''; setBusy(byId('deploy-schedule'), true);
+  try {const result = await api('/api/schedule/deploy', {method:'POST',body:JSON.stringify({review_id:scheduleDraft.id,store:byId('schedule-store').value,password})}); scheduleDraft = null; byId('schedule-draft').hidden = true; await refresh(); notice(`Application revision ${result.revision} retained. Schedule activation may take a moment.`);} catch (error) {notice(error.message,true);} finally {setBusy(byId('deploy-schedule'), false);}
 });
 
 byId('check-deployment').addEventListener('click', async () => {
   const password = byId('administrator-password').value; byId('administrator-password').value = '';
   if (!password) {notice('Enter the configured deployment administrator password to inspect its retained receipt.', true); return;}
-  byId('check-deployment').disabled = true;
-  try {const result = await api('/api/schedule/reconcile', {method:'POST', body:JSON.stringify({password})}); await refresh(); notice(result.revision ? `Confirmed active revision ${result.revision}. No deployment was resent.` : 'No unsettled schedule deployment.');} catch (error) {notice(error.message, true);} finally {byId('check-deployment').disabled = false;}
+  setBusy(byId('check-deployment'), true);
+  try {const result = await api('/api/schedule/reconcile', {method:'POST', body:JSON.stringify({password})}); await refresh(); notice(result.revision ? `Confirmed active revision ${result.revision}. No deployment was resent.` : 'No unsettled schedule deployment.');} catch (error) {notice(error.message, true);} finally {setBusy(byId('check-deployment'), false);}
 });
 
 
@@ -1512,10 +1681,10 @@ async function loadProfiles() {
   const records = byId('profile-records'); records.replaceChildren();
   if (!result.profiles.length) records.append(element('p', 'No device profiles in this project yet.', 'empty'));
   for (const view of result.profiles) {
-    const button = element('button', `${view.profile.fields.name} · ${view.profile.fields.addresses.join(', ')}`, 'entry');
+    const button = element('button', `${view.profile.fields.name} · ${view.profile.fields.addresses.join(', ')}`, 'entry'); button.type = 'button';
     button.addEventListener('click', () => editProfile(view).catch(error => notice(error.message, true))); records.append(button);
   }
-  if (!profileBlocked) byId('profile-detail').textContent = `${result.profiles.length} device profiles loaded from Plowshare. Older revisions remain available below each profile.`;
+  if (!profileBlocked) byId('profile-detail').textContent = `${plural(result.profiles.length, 'device profile', 'device profiles')} loaded from Plowshare. Older revisions remain available below each profile.`;
   return result.profiles;
 }
 function clearBackgroundDraft() {
@@ -1540,10 +1709,10 @@ async function loadBackgroundResearch() {
   if (!researchBusy) byId('background-research-enabled').checked = queue.enabled;
   byId('background-research-detail').textContent = queue.detail || (queue.enabled ? 'Background research enabled.' : 'Background research paused.');
   list.replaceChildren();
-  if (!queue.entries.length) list.append(element('p', 'No drafts or research activity to review.', 'hint'));
+  if (!queue.entries.length) list.append(element('p', 'No drafts or research activity to review.', 'empty'));
   for (const entry of queue.entries) {
     const name = entry.label || entry.model || entry.address;
-    const button = element('button', name + ' · ' + researchPhases[entry.phase], 'entry');
+    const button = element('button', name + ' · ' + (researchPhases[entry.phase] || statusLabel(entry.phase)), 'entry');
     button.type = 'button';
     button.addEventListener('click', () => openBackgroundDraft(entry.request_id).catch(error => notice(error.message, true)));
     list.append(button);
@@ -1558,7 +1727,7 @@ async function openBackgroundDraft(id) {
   byId('background-draft-model').value = entry.model || '';
   byId('background-draft-feedback').value = '';
   const output = byId('background-draft-content');
-  output.replaceChildren(element('p', [entry.identity.address, entry.identity.mac, researchPhases[entry.phase], entry.run_id].filter(Boolean).join(' · '), 'hint'));
+  output.replaceChildren(element('p', [entry.identity.address, entry.identity.mac, researchPhases[entry.phase] || statusLabel(entry.phase)].filter(Boolean).join(' · '), 'hint source'));
   if (draft) {
     const nvdCoverage = {
       searched: 'NVD searched for the confirmed model. Keyword results require an applicability check.',
@@ -1638,7 +1807,7 @@ function clearDeviceResearch() {
   researchDevice = null;
   byId('device-research').hidden = true; syncPane();
   byId('research-model').value = '';
-  byId('research-title').textContent = 'Research a device';
+  byId('research-title').textContent = 'Product and advisories';
   byId('research-observation').textContent = '';
   byId('research-unifi-result').textContent = '';
   byId('research-results').replaceChildren();
@@ -1646,7 +1815,7 @@ function clearDeviceResearch() {
 function openDeviceResearch(device) {
   clearDeviceResearch();
   researchDevice = device;
-  byId('research-title').textContent = 'Research ' + device.name;
+  byId('research-title').textContent = 'Product and advisories';
   const identity = device.identity?.source === 'configured' ? null : device.identity;
   const known = identity || device.last_known_identity;
   const clues = [known?.hostname, known?.vendor, ...((device.detection?.clues) || [])].filter(Boolean);
@@ -1667,7 +1836,7 @@ byId('research-unifi').addEventListener('click', async () => {
   const device = researchDevice;
   if (!device?.identity?.mac) return;
   const result = byId('research-unifi-result');
-  byId('research-unifi').disabled = true;
+  setBusy(byId('research-unifi'), true);
   result.textContent = 'Checking the controller…';
   try {
     const {available, product} = await api(researchPath(device, 'product'), {
@@ -1688,7 +1857,7 @@ byId('research-unifi').addEventListener('click', async () => {
   } catch (error) {
     if (device === researchDevice) result.textContent = error.message;
   } finally {
-    if (device === researchDevice) byId('research-unifi').disabled = false;
+    if (device === researchDevice) setBusy(byId('research-unifi'), false); else markBusy(byId('research-unifi'), false);
   }
 });
 byId('research-form').addEventListener('submit', async event => {
@@ -1697,14 +1866,15 @@ byId('research-form').addEventListener('submit', async event => {
   const model = byId('research-model').value.trim();
   if (!device || !model || !advisoriesAvailable) return;
   const results = byId('research-results');
-  byId('research-search').disabled = true;
-  results.replaceChildren(element('p', 'Checking NVD…'));
+  setBusy(byId('research-search'), true);
+  results.replaceChildren(element('p', 'Checking NVD…', 'hint'));
   try {
     const page = await api(researchPath(device, 'advisories'), {method:'POST', body:JSON.stringify({model})});
     if (device === researchDevice) renderAdvisoryPage(results, page);
   } catch (error) {
     if (device === researchDevice) results.replaceChildren(element('p', error.message, 'notice error'));
   } finally {
+    markBusy(byId('research-search'), false);
     if (device === researchDevice) byId('research-search').disabled = !advisoriesAvailable;
   }
 });
@@ -1719,18 +1889,19 @@ byId('research-profile').addEventListener('click', async () => {
 });
 function renderAdvisoryPage(results, page) {
   const detail = page.total
-    ? 'Showing ' + page.advisories.length + ' of ' + page.total + ' keyword matches.'
+    ? 'Showing ' + formatCount(page.advisories.length) + ' of ' + formatCount(page.total) + ' keyword matches.'
     : 'No keyword matches found.';
-  results.replaceChildren(element('p', detail + ' Checked '
-    + new Date(page.checked_at).toLocaleString() + '. Check the affected model, firmware and configuration in each advisory.', 'hint'));
+  results.replaceChildren(element('p', 'NVD · checked ' + formatWhen(page.checked_at) + ' · ' + detail, 'hint source'),
+    element('p', 'A keyword match is about the model name, not proof that this device is affected. Check the affected model, firmware and configuration in each advisory.', 'limit'));
   for (const item of page.advisories) {
     const link = element('a', item.cve);
     link.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(item.cve);
     link.target = '_blank'; link.rel = 'noopener noreferrer';
-    const entry = element('article');
-    const metadata = [item.published_on, item.severity ? 'CVSS ' + item.severity.toLowerCase() : null,
-      item.known_exploited ? 'CISA lists known exploitation' : null].filter(Boolean);
-    entry.append(link, element('p', metadata.join(' · '), 'hint'), element('p', item.description));
+    const entry = element('article', undefined, 'card');
+    const metadata = [item.severity ? item.severity[0] + item.severity.slice(1).toLowerCase() : 'Severity not rated',
+      'published ' + formatDay(item.published_on), item.known_exploited ? 'known exploited' : null].filter(Boolean);
+    const name = element('p', undefined, 'data'); name.append(link);
+    entry.append(name, element('p', metadata.join(' · '), 'status-line'), element('p', item.description, 'hint'));
     results.append(entry);
   }
 }
@@ -1750,8 +1921,8 @@ function advisoryLookup(view) {
   const button = element('button', 'Look up advisories for saved model', 'secondary');
   button.type = 'button';
   button.addEventListener('click', async () => {
-    button.disabled = true;
-    results.replaceChildren(element('p', 'Checking NVD…'));
+    setBusy(button, true);
+    results.replaceChildren(element('p', 'Checking NVD…', 'hint'));
     try {
       const path = '/api/profiles/' + encodeURIComponent(view.profile.profile_id)
         + '/' + encodeURIComponent(view.revision) + '/advisories';
@@ -1760,7 +1931,7 @@ function advisoryLookup(view) {
     } catch (error) {
       results.replaceChildren(element('p', error.message, 'notice error'));
     } finally {
-      button.disabled = false;
+      setBusy(button, false);
     }
   });
   panel.append(button, results);
@@ -1792,14 +1963,14 @@ async function editProfile(view, address = null, deviceMac = null) {
     history.append(advisoryLookup(view));
     history.append(element('h3', 'Retained profile revisions'));
     for (const version of [...view.versions].sort((a,b) => b.ordinal - a.ordinal)) {
-      const read = element('button', `Revision ${version.ordinal} · ${new Date(version.created_at).toLocaleString()}`, 'entry');
+      const read = element('button', `Revision ${version.ordinal} · ${formatWhen(version.created_at)}`, 'entry'); read.type = 'button';
       read.title = version.revision;
       read.addEventListener('click', async () => {try {const source = await api(`/api/profiles/${view.profile.profile_id}/${version.revision}`); byId('profile-markdown').replaceChildren(renderProfileDocument(source.text)); byId('profile-markdown').hidden = false; syncPane(); byId('profile-markdown').scrollIntoView({block:'nearest'});} catch(error) {notice(error.message,true);}}); history.append(read);
     }
     history.append(element('h3', 'Recent retained evidence at associated addresses'));
-    if (!view.evidence.length) history.append(element('p', 'No matching evidence among the latest 50 local collections.'));
+    if (!view.evidence.length) history.append(element('p', 'No matching evidence among the latest 50 local collections.', 'empty'));
     for (const revision of view.evidence) {
-      const read = element('button', revision, 'entry');
+      const read = element('button', `Read collection ${revision.slice(0,8)}`, 'entry'); read.type = 'button'; read.title = revision;
       read.addEventListener('click', async () => {try {const scans = await api('/api/scans'); const scan = scans.find(value => value.revision === revision); if (!scan) throw new Error('Evidence is outside the current local history window.'); await showEvidence(scan.scan_id);} catch(error) {notice(error.message,true);}}); history.append(read);
     }
   }
@@ -1828,13 +1999,13 @@ byId('new-profile').addEventListener('click', () => editProfile(null).catch(erro
 byId('cancel-profile').addEventListener('click', () => {profileEdit = null; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true; byId('profile-history').replaceChildren(); syncPane();});
 byId('profile-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!profileEdit || profileBlocked) return;
-  byId('save-profile').disabled = true;
+  setBusy(byId('save-profile'), true);
   const fields = {name:byId('profile-name').value,owner:byId('profile-owner').value,model:byId('profile-model').value,purpose:byId('profile-purpose').value,expected_services:byId('profile-expected').value,notes:byId('profile-notes').value,addresses:[...byId('profile-addresses').selectedOptions].map(value => value.value),issues:readIssueLinks(),device_mac:profileEdit.deviceMac || null};
   try {
     const receipt = await api('/api/profiles', {method:'POST',body:JSON.stringify({profile_id:profileEdit.id,request_id:crypto.randomUUID(),expected_revision:profileEdit.revision,fields})});
     if (receipt.phase === 'confirmed') {profileEdit = null; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true; byId('profile-history').replaceChildren(); syncPane(); const shown = selectedDevice && overview?.devices.find(item => item.address === selectedDevice); if (shown) loadDeviceAnalysis(shown); notice('Device profile saved in Plowshare. Processing may still be pending; load profiles again when ready.');}
     else notice(`Profile write ${receipt.request_id} needs reconciliation. It has not been resent.`, true);
-  } catch(error) {notice(error.message,true);} finally {await profileReceipts().catch(() => {byId('save-profile').disabled = true;});}
+  } catch(error) {notice(error.message,true);} finally {markBusy(byId('save-profile'), false); await profileReceipts().catch(() => {byId('save-profile').disabled = true;});}
 });
 byId('reconcile-profiles').addEventListener('click', async () => {try {await api('/api/profiles/reconcile',{method:'POST',body:'{}'}); await loadProfiles(); notice('Retained profile writes checked; no mutation was resent.');} catch(error) {notice(error.message,true);}});
 
@@ -1853,11 +2024,11 @@ function labelled(parent, title, control) {
 }
 function sourceRow(source = {url:'',published_on:null}) {
   if (byId('issue-sources').children.length >= 4) return;
-  const row = element('div', undefined, 'citation-row');
+  const row = element('div', undefined, 'card');
   const url = element('input'); url.type = 'url'; url.required = true; url.maxLength = 1024; url.value = source.url; url.dataset.field = 'url';
   labelled(row, 'HTTPS source URL', url);
   const date = element('input'); date.type = 'date'; date.value = source.published_on || ''; date.dataset.field = 'published_on'; labelled(row, 'Published on (optional)', date);
-  const remove = element('button', 'Remove source', 'secondary'); remove.type = 'button'; remove.addEventListener('click', () => row.remove()); row.append(remove); byId('issue-sources').append(row);
+  const remove = element('button', 'Remove source', 'quiet'); remove.type = 'button'; remove.addEventListener('click', () => row.remove()); row.append(remove); byId('issue-sources').append(row);
 }
 function ruleHelp(normalize = false) {
   const mechanism = byId('issue-mechanism').value;
@@ -1880,6 +2051,7 @@ function ruleHelp(normalize = false) {
   if (byId('issue-ports').disabled) byId('issue-ports').value = '';
   byId('issue-rule-help').textContent = mechanism === 'firewall' ? 'Specify direction, an exact IP/CIDR or internet, protocol and destination ports. Broad blocks may break essential services. Choose This device as the source for outbound rules or destination for inbound rules. Lateral rules require an explicit private peer. Ports are destination ports in the chosen direction.' : mechanism === 'pihole' ? 'Blocks one exact DNS domain for the linked device. Pi-hole does not enforce port rules; direct-IP and alternative-DNS traffic need separate controls.' : 'Describe the network zone/access boundary or exact privacy setting. Apply through the owning router or device interface.';
 }
+const mechanismLabels = {firewall:'Router or firewall rule', pihole:'Pi-hole domain block', segmentation:'Network segmentation', device_setting:'Device privacy setting'};
 async function issueReceipts() {
   const intents = await api('/api/issue-intents'); issueBlocked = intents.some(v => v.phase === 'pending');
   byId('save-issue').disabled = issueBlocked; byId('new-issue').disabled = issueBlocked;
@@ -1892,11 +2064,12 @@ async function loadIssues() {
   const records = byId('issue-records'); records.replaceChildren();
   if (!result.issues.length) records.append(element('p', 'No shared privacy issues yet. Add an issue with source citations and a proposed mitigation.', 'empty'));
   for (const view of result.issues) {
-    const card = element('article', undefined, 'finding');
-    card.append(element('h3', view.issue.fields.title), element('p', `Sources checked ${view.issue.fields.checked_on} · ${view.issue.fields.mitigation.mechanism}`, 'hint'));
-    const edit = element('button', 'Review issue & mitigation'); edit.addEventListener('click', () => editIssue(view).catch(error => notice(error.message,true))); card.append(edit); records.append(card);
+    const card = element('article', undefined, 'record');
+    const mechanism = view.issue.fields.mitigation.mechanism;
+    card.append(element('h3', view.issue.fields.title), element('p', `Sources checked ${formatDay(view.issue.fields.checked_on)} · ${mechanismLabels[mechanism] || statusLabel(mechanism)}`, 'hint source'));
+    const edit = element('button', 'Edit issue and mitigation', 'secondary'); edit.type = 'button'; edit.addEventListener('click', () => editIssue(view).catch(error => notice(error.message,true))); card.append(edit); records.append(card);
   }
-  if (!issueBlocked) byId('issue-detail').textContent = `${result.issues.length} shared issues loaded. Link reviewed plans from a device profile.`;
+  if (!issueBlocked) byId('issue-detail').textContent = `${plural(result.issues.length, 'shared issue', 'shared issues')} loaded. Link reviewed plans from a device profile.`;
   return result.issues;
 }
 async function editIssue(view = null) {
@@ -1915,7 +2088,7 @@ async function editIssue(view = null) {
   if (view) {
     byId('issue-history').append(element('h3', 'Retained issue revisions'));
     for (const version of [...view.versions].sort((a,b) => b.ordinal - a.ordinal)) {
-      const read = element('button', `Revision ${version.ordinal} · ${new Date(version.created_at).toLocaleString()}`, 'entry');
+      const read = element('button', `Revision ${version.ordinal} · ${formatWhen(version.created_at)}`, 'entry'); read.type = 'button';
       read.addEventListener('click', () => readIssue(view.issue.issue_id, version.revision).catch(error => notice(error.message,true))); byId('issue-history').append(read);
     }
   }
@@ -1926,23 +2099,23 @@ async function editIssue(view = null) {
 }
 async function readIssue(identity, revision) {
   const source = await api(`/api/issues/${identity}/${revision}`);
-  byId('issue-markdown').replaceChildren(PrivacyMarkdown.render(source.text)); byId('issue-markdown').hidden = false; syncPane();
+  byId('issue-markdown').replaceChildren(foldDetails(PrivacyMarkdown.render(source.text))); byId('issue-markdown').hidden = false; syncPane();
   byId('issue-markdown').scrollIntoView({block:'nearest'});
 }
 async function renderIssueLinks(links, evidence) {
   if (!issuesAvailable) {
     if (links.length) throw new Error('The linked privacy issue catalogue is unavailable. Your retained links are preserved.');
-    byId('profile-issue-links').replaceChildren(element('p', 'Privacy issue management is unavailable on this collector.'));
+    byId('profile-issue-links').replaceChildren(element('p', 'Privacy issue management is unavailable on this collector.', 'hint unmeasured'));
     return;
   }
   const result = await api('/api/issues');
   const heads = new Map(result.issues.map(v => [v.issue.issue_id,v]));
   const identities = [...new Set([...links.map(v => v.issue_id), ...heads.keys()])];
   const parent = byId('profile-issue-links'); parent.replaceChildren();
-  if (!identities.length) parent.append(element('p', 'Create a shared privacy issue below, then reload this profile to link it.'));
+  if (!identities.length) parent.append(element('p', 'No shared privacy issue yet. Create one under Privacy issues and mitigations, then reopen this profile to link it.', 'empty'));
   for (const identity of identities) {
     const old = links.find(v => v.issue_id === identity); const head = heads.get(identity);
-    const card = element('details', undefined, 'issue-link'); card.open = !!old;
+    const card = element('details', undefined, 'card issue-link'); card.open = !!old;
     card.dataset.issue = identity; card.dataset.revision = old?.revision || head.revision;
     card.append(element('summary', head ? head.issue.fields.title : `Retained issue ${identity}`));
     const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = !!old; enabled.dataset.field = 'linked'; labelled(card, 'Link this issue to this device', enabled);
@@ -1950,10 +2123,10 @@ async function renderIssueLinks(links, evidence) {
     const status = element('select'); status.dataset.field = 'status'; status.replaceChildren(...optionList(mitigationLabels,old?.mitigation_status || 'proposed')); labelled(card, 'Mitigation progress', status);
     const notes = element('textarea'); notes.rows = 3; notes.maxLength = 512; notes.value = old?.notes || ''; notes.dataset.field = 'notes'; labelled(card, 'Assessment, action taken and verification result', notes);
     const revisions = element('select'); revisions.multiple = true; revisions.dataset.field = 'evidence'; revisions.replaceChildren(...[...new Set([...evidence,...(old?.evidence || [])])].map(value => {const option = element('option', value); option.value = value; option.selected = old?.evidence.includes(value); return option;})); labelled(card, 'Supporting evidence revisions (up to four)', revisions);
-    const read = element('button', 'Read reviewed issue & plan'); read.type = 'button'; read.addEventListener('click', () => readIssue(identity,card.dataset.revision).catch(error => notice(error.message,true))); card.append(read);
+    const read = element('button', 'Read issue and mitigation plan', 'secondary'); read.type = 'button'; read.addEventListener('click', () => readIssue(identity,card.dataset.revision).catch(error => notice(error.message,true))); card.append(read);
     if (head && old && head.revision !== old.revision) {
       const updated = element('p', 'A newer issue revision is available. This device still references the reviewed plan.', 'hint');
-      const adopt = element('button', 'Review and use latest plan'); adopt.type = 'button'; adopt.addEventListener('click', async () => {
+      const adopt = element('button', 'Review and use latest plan', 'secondary'); adopt.type = 'button'; adopt.addEventListener('click', async () => {
         try {await readIssue(identity,head.revision); card.dataset.revision = head.revision; status.value = 'proposed'; applicability.value = 'unresolved'; notes.value = ''; revisions.selectedIndex = -1; updated.textContent = 'Latest plan selected. Review applicability and progress, then save the device profile.'; adopt.disabled = true;} catch(error) {notice(error.message,true);}
       }); card.append(updated,adopt);
     }
@@ -1975,7 +2148,7 @@ byId('issue-direction').addEventListener('change', () => {
 });
 byId('reconcile-issues').addEventListener('click', async () => {try {await api('/api/issues/reconcile',{method:'POST',body:'{}'}); await loadIssues(); notice('Retained issue writes checked; no change was resent.');} catch(error) {notice(error.message,true);}});
 byId('issue-form').addEventListener('submit', async event => {
-  event.preventDefault(); if (!issueEdit || issueBlocked) return; byId('save-issue').disabled = true;
+  event.preventDefault(); if (!issueEdit || issueBlocked) return; setBusy(byId('save-issue'), true);
   const fields = {};
   for (const [id,key] of [['issue-title','title'],['issue-description','description'],['issue-models','affected_models'],['issue-firmware','firmware'],['issue-conditions','conditions'],['issue-checked','checked_on']]) fields[key] = byId(id).value;
   fields.sources = [...byId('issue-sources').children].map(row => ({url:row.querySelector('[data-field="url"]').value,published_on:row.querySelector('[data-field="published_on"]').value || null}));
@@ -1988,5 +2161,5 @@ byId('issue-form').addEventListener('submit', async event => {
     const receipt = await api('/api/issues',{method:'POST',body:JSON.stringify({issue_id:issueEdit.id,request_id:crypto.randomUUID(),expected_revision:issueEdit.revision,fields})});
     if (receipt.phase === 'confirmed') {issueEdit = null; byId('issue-form').hidden = true; syncPane(); notice('Privacy issue saved in Plowshare. Load it again when processing completes, then link it from device profiles.');}
     else notice(`Issue write ${receipt.request_id} needs reconciliation. It has not been resent.`,true);
-  } catch(error) {notice(error.message,true);} finally {await issueReceipts().catch(() => {byId('save-issue').disabled = true;});}
+  } catch(error) {notice(error.message,true);} finally {markBusy(byId('save-issue'), false); await issueReceipts().catch(() => {byId('save-issue').disabled = true;});}
 });

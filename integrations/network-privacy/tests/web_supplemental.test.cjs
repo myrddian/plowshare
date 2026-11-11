@@ -55,7 +55,7 @@ test('the device block shows reported facts, advisories and vendor notes with so
   assert.match(all, /own claims, not confirmed identity/);
   assert.match(all, /NVD · checked .* · model BRAVIA KD-55X85K from the device’s own description · 3 found/);
   assert.match(all, /CVE-2026-0001/);
-  assert.match(all, /High · published 2026-02-03 · known exploited/);
+  assert.match(all, /High · published [^·]*2026 · known exploited/);
   assert.match(all, /2 more not listed here/);
   assert.match(all, /not proof that this device is affected/);
   assert.match(all, /Samba Interactive TV \(some BRAVIA TV models\)/);
