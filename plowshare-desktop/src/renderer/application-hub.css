@@ -29,12 +29,6 @@
 /* Every view section fills the frame below the tabs. */
 #application-panel > section { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 #application-panel > section[hidden] { display: none; }
-#application-panel [data-overview] { overflow: auto; gap: 22px; }
-#application-panel [data-overview-tiles] { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
-#application-panel [data-overview-tiles] button { display: block; width: 100%; text-align: left; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-#application-panel [data-overview-tiles] button:hover { border-color: var(--accent); }
-#application-panel [data-overview-tiles] button strong { display: block; font-size: 13px; font-weight: 500; }
-#application-panel [data-overview-tiles] button small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
 /* Access */
 #application-panel [data-access] { overflow: auto; }
@@ -46,6 +40,11 @@
 #application-panel .application-conversation-toolbar strong { font: 10px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; font-weight: 400; color: var(--muted); }
 #application-panel .application-activity-actions { display: flex; gap: 4px; }
 #application-panel [data-activity-note] { flex-shrink: 0; }
+/* List preferences sit under the toolbar: one quiet row, same height controls. */
+#application-panel .application-activity-filters { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+#application-panel .application-activity-filters label { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; cursor: pointer; }
+#application-panel .application-activity-filters input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
+#application-panel .application-activity-filters select { flex-shrink: 0; padding: 3px 6px; font-size: 11px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
 #application-panel [data-activity-tree] { overflow: auto; min-height: 0; flex: 1; padding: 4px; }
 #application-panel [data-activity-tree] .activity-row { width: 100%; align-items: center; gap: 8px; padding: 6px 8px; margin: 0; border-radius: 6px; border-left: 2px solid transparent; }
 #application-panel .activity-row > .icon,

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   applicationActivityRows,
   activityVisibility,
+  isDocumentProcessing,
   isLiveProcState,
 } from './application-activity.ts';
 import type { ProcConversation } from 'plowshare-client-ts/operations/proc';
@@ -112,4 +113,41 @@ await test('applicationActivityRows nests person chats without treating service 
   );
   assert.equal(rows.find((row) => row.id === 'cnv_mine')?.nestChat, true);
   assert.equal(rows.find((row) => row.id === 'cnv_service')?.nestChat, false);
+});
+
+await test('hideDocuments drops document-ingestion work and keeps the rest', () => {
+  const items = [
+    row('pipeline', { origin: 'submission', agent: 'document_pipeline' }),
+    row('paragraph', { origin: 'delegation', agent: 'paragraph_summariser' }),
+    row('tagger', { origin: 'delegation', agent: 'information_tagger' }),
+    row('analyst', { origin: 'delegation', agent: 'privacy_analyst' }),
+    row('chat', { agent: null }),
+  ];
+  assert.deepEqual(
+    applicationActivityRows(items, { hideDocuments: true }).map((r) => r.id),
+    ['analyst', 'chat'],
+  );
+  const all = applicationActivityRows(items);
+  assert.equal(all.length, 5);
+  assert.equal(all.find((r) => r.id === 'pipeline')?.document, true);
+  assert.equal(all.find((r) => r.id === 'analyst')?.document, false);
+  assert.equal(isDocumentProcessing({ agent: null }), false);
+  assert.equal(isDocumentProcessing({ agent: 'span_summariser' }), true);
+});
+
+await test('order sorts newest first with live work on top, or oldest first', () => {
+  const items = [
+    row('middle', { lastTurnAt: '2026-11-10T08:00:00Z' }),
+    row('old', { lastTurnAt: '2026-11-09T08:00:00Z' }),
+    row('live-old', { lastTurnAt: '2026-11-08T08:00:00Z', state: 'RUNNING' }),
+    row('new', { lastTurnAt: '2026-11-11T08:00:00Z' }),
+  ];
+  assert.deepEqual(
+    applicationActivityRows(items, { order: 'newest' }).map((r) => r.id),
+    ['live-old', 'new', 'middle', 'old'],
+  );
+  assert.deepEqual(
+    applicationActivityRows(items, { order: 'oldest' }).map((r) => r.id),
+    ['live-old', 'old', 'middle', 'new'],
+  );
 });

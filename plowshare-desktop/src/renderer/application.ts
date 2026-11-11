@@ -11,7 +11,11 @@ import {
   mountChat,
   restoreChat,
 } from './chat-nest.ts';
-import { applicationActivityRows } from './application-activity.ts';
+import {
+  applicationActivityRows,
+  isDocumentProcessing,
+  type ActivityOrder,
+} from './application-activity.ts';
 import {
   installFileBrowser,
   type FileBrowserHandle,
@@ -32,38 +36,32 @@ import { mountProjectAccess } from './project-access.ts';
 type PageView = 'schedules' | 'relay' | 'runtime' | 'memory' | 'boards';
 const pageViews: Record<
   PageView,
-  { kinds: WorkspaceRoute['kind'][]; label: string; purpose: string }
+  { kinds: WorkspaceRoute['kind'][]; label: string }
 > = {
   schedules: {
     kinds: ['activity'],
     label: 'Schedules',
-    purpose: 'Schedules and triggers that run this Application',
   },
   relay: {
     kinds: ['relay'],
     label: 'Relay',
-    purpose: 'Messages relayed to and from this Application',
   },
   runtime: {
     kinds: ['activity'],
     label: 'Runtime',
-    purpose: 'Agent, orchestration and schedule definitions in use',
   },
   memory: {
     kinds: ['memories', 'library'],
     label: 'Memory',
-    purpose: 'Memories this Application keeps',
   },
   boards: {
     kinds: ['board'],
     label: 'Boards',
-    purpose: 'Boards for this Application',
   },
 };
 const isPageView = (value: string): value is PageView => value in pageViews;
 
 const hubViews = [
-  'overview',
   'activity',
   'schedules',
   'relay',
@@ -98,7 +96,7 @@ export type ApplicationEmbedding = {
 
 /**
  * Application workflow hub and server source editor.
- * `open` lands on Overview. Activity lists every LLM-bearing conversation for
+ * `open` lands on Activity and opens its newest row. Activity lists every LLM-bearing conversation for
  * this Application via proc.list (server visibility for admins). Own person
  * chats nest the existing chat; other inventory rows open their trajectory
  * inside the Activity detail pane. Schedules and Relay likewise host their
@@ -118,11 +116,8 @@ export function installApplication(
 ) {
   const tab = (name: PageView) =>
     `<button type="button" data-hub="${name}">${pageViews[name].label}</button>`;
-  const tile = (name: PageView) =>
-    `<button type="button" data-hub="${name}"><strong>${pageViews[name].label}</strong><small>${pageViews[name].purpose}</small></button>`;
   host.innerHTML = `<header class="hub-header"><div class="hub-heading"><div class="eyebrow">APPLICATION</div><h2 data-title></h2><div class="hub-meta" data-summary></div></div><button type="button" class="hub-close" data-close aria-label="Close Application">${icon('close')}<span>Close</span></button></header>
-    <nav aria-label="Application views" data-hub-nav><button type="button" data-hub="overview">Overview</button><button type="button" data-hub="activity">Activity</button>${tab('schedules')}${tab('relay')}<button type="button" data-hub="files" data-files>Files</button>${tab('runtime')}${tab('memory')}${tab('boards')}<button type="button" data-hub="access" data-settings>Access</button></nav>
-    <section data-overview><div data-overview-tiles><button type="button" data-hub="activity"><strong>Activity</strong><small>Conversations and LLM logs, with full trajectories</small></button>${tile('schedules')}${tile('relay')}<button type="button" data-hub="files"><strong>Files</strong><small>Browse and edit the Application source</small></button>${tile('runtime')}${tile('memory')}${tile('boards')}<button type="button" data-hub="access"><strong>Access</strong><small>Who can use and manage this Application</small></button></div></section>
+    <nav aria-label="Application views" data-hub-nav><button type="button" data-hub="activity">Activity</button>${tab('schedules')}${tab('relay')}<button type="button" data-hub="files" data-files>Files</button>${tab('runtime')}${tab('memory')}${tab('boards')}<button type="button" data-hub="access" data-settings>Access</button></nav>
     <section data-activity hidden>
       <div class="application-activity-split">
         <div class="application-activity-list">
@@ -132,6 +127,10 @@ export function installApplication(
               <button type="button" class="icon-button" data-activity-refresh aria-label="Refresh activity">${icon('refresh')}</button>
               <button type="button" class="icon-button" data-conversation-new aria-label="New conversation">${icon('plus')}</button>
             </div>
+          </div>
+          <div class="application-activity-filters">
+            <label><input type="checkbox" data-activity-hide-documents> Hide document processing</label>
+            <select data-activity-order aria-label="Activity order"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
           </div>
           <nav data-activity-tree aria-label="Application activity"></nav>
           <p class="application-activity-note" data-activity-note hidden></p>
@@ -153,7 +152,31 @@ export function installApplication(
     identity = '',
     shown = false,
     files = false;
-  let view: HubView = 'overview';
+  let view: HubView = 'activity';
+  // Per-viewer list preferences; storage may be unavailable.
+  const preferenceKey = 'plowshare.desktop.application-activity.v1';
+  let order: ActivityOrder = 'newest';
+  let hideDocuments = false;
+  try {
+    const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? '{}') as {
+      order?: unknown;
+      hideDocuments?: unknown;
+    };
+    if (saved.order === 'oldest') order = 'oldest';
+    hideDocuments = saved.hideDocuments === true;
+  } catch {
+    /* Defaults apply when stored preferences are missing or unreadable. */
+  }
+  const savePreferences = () => {
+    try {
+      localStorage.setItem(
+        preferenceKey,
+        JSON.stringify({ order, hideDocuments }),
+      );
+    } catch {
+      /* Preferences are a convenience; the list still works without them. */
+    }
+  };
   let selected = '';
   // Failure to open the current view's embedded page; cleared on view change.
   let embedError = '';
@@ -296,6 +319,8 @@ export function installApplication(
       titles,
       selected,
       handle: state().handle,
+      order,
+      hideDocuments,
     });
   };
   const showActivityPanes = (nestable: boolean) => {
@@ -326,8 +351,11 @@ export function installApplication(
       note.hidden = true;
       note.textContent = '';
     }
+    const hidden = hideDocuments
+      ? (listed?.items ?? []).filter(isDocumentProcessing).length
+      : 0;
     if (!rows.length) {
-      tree.innerHTML = `<p class="application-activity-note">${listed?.loading ? 'Loading activity…' : listed?.loaded ? 'No LLM activity for this Application yet.' : 'Activity unavailable. Try Refresh.'}</p>`;
+      tree.innerHTML = `<p class="application-activity-note">${listed?.loading ? 'Loading activity…' : hidden ? `Only document processing so far (${hidden} hidden).` : listed?.loaded ? 'No LLM activity for this Application yet.' : 'Activity unavailable. Try Refresh.'}</p>`;
     } else {
       tree.innerHTML = rows
         .map((row) => {
@@ -494,12 +522,31 @@ export function installApplication(
       run(openFileBrowser)();
       return;
     }
-    if (isPageView(hub)) {
-      run(() => openPage(hub))();
-      return;
-    }
-    show('overview');
+    if (isPageView(hub)) run(() => openPage(hub))();
   });
+  const hideDocumentsBox = get<HTMLInputElement>(
+    '[data-activity-hide-documents]',
+  );
+  const orderSelect = get<HTMLSelectElement>('[data-activity-order]');
+  hideDocumentsBox.checked = hideDocuments;
+  orderSelect.value = order;
+  // A filter change that hides the selected row moves to the first row left.
+  const applyListPreferences = run(async () => {
+    hideDocuments = hideDocumentsBox.checked;
+    order = orderSelect.value === 'oldest' ? 'oldest' : 'newest';
+    savePreferences();
+    const rows = activityRows();
+    if (selected && !rows.some((row) => row.id === selected)) {
+      if (rows[0]) await chooseRow(rows[0].id);
+      else {
+        selected = '';
+        renderActivity();
+        await embedding?.release();
+      }
+    } else renderActivity();
+  });
+  hideDocumentsBox.addEventListener('change', applyListPreferences);
+  orderSelect.addEventListener('change', applyListPreferences);
   function render() {
     const current = state(),
       key = `${current.base}\0${current.handle}`;
@@ -549,7 +596,6 @@ export function installApplication(
       browser.session.setScope(scopeKey());
     }
     get('[data-area-label]').hidden = areaSelect.options.length < 2;
-    get('[data-overview]').hidden = view !== 'overview';
     get('[data-activity]').hidden = view !== 'activity';
     for (const page of host.querySelectorAll<HTMLElement>('[data-page]'))
       page.hidden = page.dataset.page !== view;
@@ -617,12 +663,11 @@ export function installApplication(
     get visible() {
       return shown;
     },
+    /** Land on Activity and open its first row (usually a trajectory). */
     open(name: string) {
       useProject(name);
-      view = 'overview';
       files = false;
-      releaseChat();
-      render();
+      run(openActivity)();
     },
     openAccess(name: string) {
       useProject(name);
