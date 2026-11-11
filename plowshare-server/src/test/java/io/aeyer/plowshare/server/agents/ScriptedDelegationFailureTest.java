@@ -47,6 +47,7 @@ class ScriptedDelegationFailureTest {
           }
         };
     var store = mock(ScriptStore.class);
+    when(store.head(anyString())).thenCallRealMethod();
     var latest = new AtomicReference<ScriptStore.Step>();
     when(store.latest(anyString())).thenAnswer(call -> Optional.ofNullable(latest.get()));
     when(store.prepareNext(anyString(), any(), anyBoolean()))

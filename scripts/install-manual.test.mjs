@@ -75,9 +75,9 @@ function installation(server, extra = {}) {
 test('actual chapters are bounded and deterministic; dry run is offline', async () => {
   const first = await loadManual();
   assert.ok(first.chapters.every(chapter => chapter.name === `Plowshare manual / ${chapter.id}.md`));
-  assert.equal(first.chapters.length, 37); assert.deepEqual(first, await loadManual());
+  assert.equal(first.chapters.length, 39); assert.deepEqual(first, await loadManual());
   const dry = await execute(['--dry-run'], { PLOWSHARE_URL: 'http://unreachable.invalid' });
-  assert.equal(dry.code, 0, dry.stderr); assert.match(dry.stdout, /37 chapters validated; no requests/);
+  assert.equal(dry.code, 0, dry.stderr); assert.match(dry.stdout, /39 chapters validated; no requests/);
 });
 
 test('manifest refuses escaping symlinks/duplicates, and Library links preserve fenced examples', async () => {
@@ -85,10 +85,15 @@ test('manifest refuses escaping symlinks/duplicates, and Library links preserve 
   const outside = await mkdtemp(join(tmpdir(), 'manual-outside-'));
   try {
     await mkdir(join(root, 'docs/manual'), { recursive: true });
+    const manifestPath = join(root, 'docs/manual/manifest.json');
+    await writeFile(join(outside, 'manifest.json'), '{}');
+    await symlink(join(outside, 'manifest.json'), manifestPath);
+    await assert.rejects(loadManual(root), /manifest must be inside the checkout/);
+    await rm(manifestPath);
     await writeFile(join(outside, 'private.md'), '# Not a chapter\n');
     await symlink(join(outside, 'private.md'), join(root, 'docs/manual/linked.md'));
     const manifest = { formatVersion: 1, edition: '1', chapters: [{ id: 'one', title: 'One', path: 'docs/manual/linked.md' }] };
-    const save = () => writeFile(join(root, 'docs/manual/manifest.json'), JSON.stringify(manifest));
+    const save = () => writeFile(manifestPath, JSON.stringify(manifest));
     await save(); await assert.rejects(loadManual(root), /inside the checkout/);
     await writeFile(join(root, 'docs/manual/one.md'), '# One\n[Two](two.md)\n```md\n[Example](two.md)\n```\n');
     await writeFile(join(root, 'docs/manual/two.md'), '# Two\n');
@@ -240,8 +245,8 @@ test('real Node SDK publishes all chapters over WS and resumes a dropped admissi
     const failed = await execute(args, env); assert.equal(failed.code, 1); assert.equal(server.rows.size, 1);
     const denied = await execute(args, env); assert.equal(denied.code, 1); assert.match(denied.stderr, /uncertain delivery/);
     const done = await execute([...args, '--resume'], env);
-    assert.equal(done.code, 0, done.stderr); assert.match(done.stdout, /Installed 37 generally available chapters/);
-    assert.equal(server.rows.size, 37);
+    assert.equal(done.code, 0, done.stderr); assert.match(done.stdout, /Installed 39 generally available chapters/);
+    assert.equal(server.rows.size, 39);
     assert.ok([...server.rows.values()].every(row => row.shared && row.tags.includes('plowshare-manual') && row.tags.includes(`manual-chapter-${row.name.split('/ ')[1].slice(0, -3)}`)));
     assert.ok(frames.some(frame => frame.type === 'information.read' && frame.payload.scope.kind === 'global_read'));
     assert.ok(paths.every(path => ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket'].includes(path)));

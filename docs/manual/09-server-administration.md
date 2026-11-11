@@ -135,8 +135,9 @@ space. Their tokens have an expiry and fixed per-project role ceilings; effectiv
 access is the lower of that ceiling and the account's current grant. Token
 rotation keeps its execution principal and ownership while changing its secret.
 These limits follow background work and internal routing. Service credentials
-cannot read the shared information catalogue, so the current shared manual
-installation does not supply documentation to those readers.
+can read explicitly published `GLOBAL_READ` resources subject to current access
+policy. Older `LEGACY_SHARED` roots do not grant that access. Service credentials
+cannot install the manual into Personal or perform Global administration.
 
 ## Upgrade and rollback
 
@@ -160,8 +161,12 @@ shipped scripts when upgrading or restoring a database.
 
 ## Install and update the manual
 
-Run the Library installer from a checkout matching the server's intended edition.
-Use one stable publishing account and `--share` for access by other accounts.
+The [public manual directory](https://plowshare.cc/manual) does not require
+Library installation. To serve Desktop Help, run the
+[Library installer](installation.md) from a checkout matching the server's intended
+edition. Keep the original publishing account and journal for updates. Use
+`--share` for publication from Personal or `--global` for a human administrator
+installing into Global custody.
 The installed chapters are ordinary information sources with retained revisions,
 tags and explicit sharing. Updates create new revisions and exclude previous
 installer-owned versions from discovery after the new version is usable; old

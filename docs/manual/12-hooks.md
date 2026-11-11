@@ -341,7 +341,10 @@ are delivered only after the fold commits, and callbacks share the fold deadline
 
 Inspect the relevant conversation/trajectory, orchestration record, information
 events/status and owner inbox. Hook records identify tier, file/name, callback,
-decision or failure and timing. After an edit, distinguish server directory reload
+decision or failure and timing. When the engine locates a thrown exception, the
+failure names the original source file, line and column, including for TypeScript
+hooks. The server warning includes the callback's conversation, project and
+account when available. After an edit, distinguish server directory reload
 from a local snapshot that needs a new log. Check filters and the actual origin
 before concluding a callback is missing. A recorded denial is a real outcome;
 another allow, prompt instruction or human approval cannot override the owning

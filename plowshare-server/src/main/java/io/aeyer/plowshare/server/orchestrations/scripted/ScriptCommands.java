@@ -1,7 +1,10 @@
 package io.aeyer.plowshare.server.orchestrations.scripted;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /** Sandbox/persistence codec; rejects ambiguous commands before they reach the runtime. */
 final class ScriptCommands {
@@ -11,6 +14,39 @@ final class ScriptCommands {
           .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
   private ScriptCommands() {}
+
+  static Optional<UUID> reportRequest(ScriptStore.Command command) {
+    if (!(command instanceof ScriptStore.Tool tool) || !tool.name().equals("information_write"))
+      return Optional.empty();
+    try {
+      JsonNode args = JSON.readTree(tool.arguments());
+      if (!"report".equals(args.path("operation").textValue())) return Optional.empty();
+      String request = args.path("requestId").textValue();
+      if (request == null) return Optional.empty();
+      UUID id = UUID.fromString(request);
+      return id.toString().equalsIgnoreCase(request) ? Optional.of(id) : Optional.empty();
+    } catch (java.io.IOException | IllegalArgumentException invalid) {
+      return Optional.empty();
+    }
+  }
+
+  /** Only the host may add the retry provenance field to an already validated report command. */
+  static String retainedReportRetry(ScriptStore.Tool tool, UUID original, UUID request) {
+    if (reportRequest(tool).filter(original::equals).isEmpty())
+      throw new IllegalArgumentException("invalid retained report retry");
+    try {
+      var arguments = (ObjectNode) JSON.readTree(tool.arguments());
+      arguments.put("requestId", request.toString());
+      var stored =
+          JSON.createObjectNode()
+              .put("tool", tool.name())
+              .put("retryOfReport", original.toString());
+      stored.set("arguments", arguments);
+      return stored.toString();
+    } catch (java.io.IOException invalid) {
+      throw new IllegalStateException("invalid retained report arguments", invalid);
+    }
+  }
 
   /** Direct DTO construction has the same structural invariant as sandbox/stored conversion. */
   static void arguments(String name, String arguments, boolean readinessObserver) {

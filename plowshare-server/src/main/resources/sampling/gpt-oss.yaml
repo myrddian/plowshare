@@ -40,6 +40,9 @@
 # one -- a tight per-task bound is a per-agent fact and does not belong in a file
 # about a model.
 
+version: 2
+response-guard: harmony
+
 modes:
 
   default:

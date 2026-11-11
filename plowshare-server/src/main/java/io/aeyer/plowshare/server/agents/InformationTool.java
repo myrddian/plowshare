@@ -387,6 +387,15 @@ public final class InformationTool implements AgentTool {
 
   @Override
   public String run(String arguments, Home home) {
+    return runInformation(arguments, home, null);
+  }
+
+  /** Save-only recovery rechecks live access and admits exactly the original dependency set. */
+  String retryReport(String arguments, Home home, Set<UUID> expectedInputs) {
+    return runInformation(arguments, home, Set.copyOf(expectedInputs));
+  }
+
+  private String runInformation(String arguments, Home home, Set<UUID> expectedReportInputs) {
     try {
       if (access == null || inputs == null || log == null || actor == null)
         throw new CallerFault("information capability needs an authenticated durable run");
@@ -403,6 +412,8 @@ public final class InformationTool implements AgentTool {
                       args.get("corpus")));
       args.put("view", io.aeyer.plowshare.protocol.InformationContent.VIEW);
       String operation = required(args, "operation");
+      if (expectedReportInputs != null && (!writing || !operation.equals("report")))
+        throw new CallerFault("Only the retained report can be retried");
       if (List.of("list", "facets", "search", "rank").contains(operation))
         context =
             context.withFacets(
@@ -500,6 +511,9 @@ public final class InformationTool implements AgentTool {
           case "report" -> {
             var dependencies = new LinkedHashSet<>(ids(args, "inputs"));
             dependencies.addAll(inputs.inputsOf(log, actor.attribution()));
+            if (expectedReportInputs != null && !dependencies.equals(expectedReportInputs))
+              throw new CallerFault(
+                  "Report inputs changed since review; inspect the retained inputs");
             var admission =
                 service.reportDetailsForSession(
                     context,

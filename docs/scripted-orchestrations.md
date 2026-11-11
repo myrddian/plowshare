@@ -379,9 +379,41 @@ Observers receive `orchestration.resumed` (run ID and resume request UUID), the
 existing `orchestration.changed` account push and a
 `run_resumed` milestone through `orchestration.recorded`.
 
-Do not delete/edit journal rows to force progress or silently alter pinned source.
-Deleting a consumed document clears associated script journal material under the
-existing policy. Retained states and raw outputs carry the root's input restrictions.
+### Continue a retained report under a fixed script
+
+Use `orchestration.repair` when a failed root stopped while interpreting a
+completed delegate response and has yet to prepare an information write.
+Supply the last completed command sequence, the pinned source hash, and the
+reviewed replacement source hash. Hashes use `sha256:` followed by the
+lowercase digest of the full UTF-8 source. The original owner must still have
+work authority and access to the retained inputs. The replacement must be the
+installed script at the same definition origin and tier, with an unchanged
+manifest. Session-local scripts and stages that run acceptance work are
+ineligible.
+
+The server previews the next command using the exact retained state and
+response in the script sandbox. It then claims the failed root and records
+the source change and original script in one transaction. Completed journal
+rows and their hashes remain intact. The first new step crosses the recorded
+boundary and later steps use the new hash. Subsequent turns and restarts keep
+the same restriction on effects.
+
+A repaired continuation can advance existing locked stages, save one draft
+using the revisions from its completed evidence reads, and finish after the
+draft receipt. Model calls, delegation, additional reads, scans, and other
+effects are refused. The draft uses the next journal sequence's stable
+request ID. A prepared write with uncertain execution remains fenced, and
+a refused draft must be inspected through its retained receipt.
+
+Use a new request UUID for the repair and retain the exact payload after
+uncertain delivery. An identical submission returns the existing run.
+Changing the sequence or either hash with that UUID is refused. Older
+servers reject the distinct operation. Ordinary Resume continues to use the
+run's pinned source.
+
+Do not edit journal rows to force progress. Deleting a consumed document
+clears associated script journal material under the existing policy.
+Retained states and raw outputs carry the root's input restrictions.
 
 ## Inspection and troubleshooting
 
@@ -395,6 +427,7 @@ operation names and **payloads**, not standalone REST requests or complete frame
 | `orchestration.record` | `{"root":"orc_…","tail":true,"limit":50}` | Recent run-tree record, including questions and failures. |
 | `orchestration.answer` | `{"id":"orc_…","answer":"The gate cause has been resolved; recheck."}` | Continue an outstanding question after resolving its cause. |
 | `orchestration.resume` | `{"id":"orc_…","requestId":"22222222-2222-4222-8222-222222222222"}` | Explicitly resume a failed root; retain the UUID after uncertainty. |
+| `orchestration.repair` | `{"id":"orc_…","requestId":"33333333-3333-4333-8333-333333333333","checkpoint":{"sequence":30,"sourceHash":"sha256:…","replacementHash":"sha256:…"}}` | Continue a retained report under the reviewed installed script. |
 | `orchestration.cancel` | `{"id":"orc_…"}` | Stop the selected run. |
 
 Caller agents instead use their offered `orchestration_status`,

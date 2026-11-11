@@ -12,7 +12,7 @@ from plowshare import Delivery, Refusal, TransportError
 from plowshare.contracts import RelayPublishRequest
 from plowshare.tools import ToolAttention
 
-from .collection import Collector
+from .collection import Collector, scope_fingerprint
 from .contracts import (
     Configuration,
     ScanRequest,
@@ -26,6 +26,7 @@ from .journal import Publication, Receipt, Receipts, ScanOrigin
 from .limits import MAX_EVIDENCE_BYTES
 from .operator_state import OperatorStore
 from .ports import PrivacyPort, evidence_name
+from .presence import PresenceCollector, PresenceStatus, PresenceView, PresenceWatch
 
 
 class ReconciliationRequired(RuntimeError):
@@ -58,8 +59,10 @@ class Worker:
         receipts: Receipts,
         collector: Collector,
         operator: OperatorStore | None = None,
+        presence: PresenceWatch | None = None,
     ):
         self.operator = operator
+        self.presence = presence
         self.recovery_requested = asyncio.Event()
         self.last_contact: str | None = None
         self.failure_kind: str | None = None
@@ -408,6 +411,33 @@ class Worker:
                         )
                     self.receipts.save(replace(receipt, phase="done"))
 
+    def presence_view(self) -> PresenceView:
+        if self.presence is None:
+            return PresenceView()
+        plan = self.config.collection
+        return self.presence.view(
+            scope_fingerprint(plan), include_dns=plan.enabled and plan.dns_profiles
+        )
+
+    def presence_status(self) -> PresenceStatus:
+        plan = self.config.collection
+        enabled = self.presence is not None and plan.enabled and plan.quick_scan
+        view = self.presence_view()
+        issues = self.presence.issues if enabled and self.presence is not None else ()
+        return PresenceStatus(enabled, view.checked_at, issues)
+
+    async def poll_presence(self) -> None:
+        if self.presence is None:
+            return
+        # The same fence serializes settings activation and ordinary collections.
+        async with self.lock:
+            plan = self.config.collection
+            if not plan.enabled or not plan.quick_scan:
+                self.presence.reset()
+                return
+            if isinstance(self.collector, PresenceCollector):
+                await self.presence.poll(plan, scope_fingerprint(plan), self.collector)
+
     async def run(
         self,
         stop: asyncio.Event,
@@ -436,6 +466,8 @@ class Worker:
                 OSError,
             ) as error:
                 # Keep the dashboard available; reconnection and mutation replay are explicit.
+                if self.presence is not None:
+                    self.presence.reset()
                 self.failure_kind = type(error).__name__
                 self.state = "attention_required"
                 self.detail = (
@@ -466,7 +498,12 @@ class Worker:
                     else "configuration_required"
                 )
                 continue
+            if not stop.is_set():
+                await self.poll_presence()
             try:
-                await asyncio.wait_for(stop.wait(), 2)
+                wait = (
+                    self.presence.wait_seconds() if self.presence is not None else 2.0
+                )
+                await asyncio.wait_for(stop.wait(), wait)
             except TimeoutError:
                 continue

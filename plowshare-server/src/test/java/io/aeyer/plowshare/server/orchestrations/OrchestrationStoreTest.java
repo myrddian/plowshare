@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.orchestrations;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Orchestration.CheckpointRepair;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier;
@@ -17,8 +19,12 @@ import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage.Kind;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration;
+import io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
 import io.aeyer.plowshare.server.todos.StageRules;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -26,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
@@ -145,6 +152,234 @@ class OrchestrationStoreTest {
         () ->
             recovery.claim(
                 other.id(), "enzo", key, store.find(other.id()).orElseThrow().endedAt()));
+  }
+
+  @Test
+  void failed_report_append_rolls_back_the_resume_claim_and_receipt() {
+    var run = store.insert(newOrchestration(conductorConversation(), 2));
+    store.stop(run.id(), OrchestrationState.FAILED, "report blocked");
+    var recovery = new JdbcOrchestrationRecovery(jdbc, unitOfWork);
+    var scripts = new JdbcScriptStore(jdbc);
+    UUID resume = UUID.randomUUID();
+    UUID report = UUID.randomUUID();
+    String args = "{\"operation\":\"report\",\"requestId\":\"" + report + "\"}";
+    // A stale checkpoint cannot be appended. Its failure must roll back the enclosing claim.
+    var previous =
+        new ScriptStore.Step(
+            3,
+            "hash",
+            new ScriptStore.Tool("information_write", args, false),
+            "refused",
+            "refused",
+            true,
+            args);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            unitOfWork.inTransaction(
+                () -> {
+                  assertTrue(recovery.claim(run.id(), "enzo", resume, T0));
+                  scripts.prepareReportRetry(
+                      run.conductorConversation(),
+                      previous,
+                      new ScriptStore.ReportBlock(3, report, "refused"));
+                  return null;
+                }));
+    assertEquals(OrchestrationState.FAILED, store.find(run.id()).orElseThrow().state());
+    assertFalse(recovery.received(run.id(), "enzo", resume));
+  }
+
+  @Test
+  void checkpoint_repair_pins_the_fixed_source_and_preserves_the_completed_journal() {
+    String original =
+        """
+        // plowshare-script v1
+        export const manifest={};
+        export function step(input) { throw new Error('Invalid review notes'); }
+        """;
+    UUID source = UUID.randomUUID();
+    String replacement =
+        """
+        // plowshare-script v1
+        export const manifest={};
+        export function step(input) {
+          if (input.sequence === 2 && input.result === '["retained note"]') {
+            return {state: input.state, command: {tool: 'information_write', arguments: {
+              operation: 'report', requestId: input.requestId, name: 'Draft',
+              text: input.state.assessment, inputs: ['%s']
+            }}};
+          }
+          return {state: input.state, command: {tool: 'orchestration_finish', arguments: {result: 'Saved draft'}}};
+        }
+        """
+            .formatted(source);
+    var checkpoint =
+        new CheckpointRepair(
+            1, ScriptProgram.sourceHash(original), ScriptProgram.sourceHash(replacement));
+    var run = store.insert(newOrchestration(conductorConversation(), 2));
+    String conversation = run.conductorConversation();
+    jdbc.update(
+        "UPDATE orchestrations SET definition_source=?, definition_hash=? WHERE id=?",
+        original,
+        checkpoint.sourceHash(),
+        run.id());
+    store.stop(run.id(), OrchestrationState.FAILED, "Invalid review notes");
+    String readArgs =
+        """
+        {"operation":"read","revision":"%s"}
+        """
+            .formatted(source);
+    String retained =
+        """
+        ["retained note"]
+        """
+            .strip();
+    jdbc.update(
+        """
+        INSERT INTO orchestration_script_steps(conversation_id,sequence,source_hash,state,command,
+          effective_arguments,raw_result,result,started_at,executed_at,completed_at)
+        VALUES (?,0,?,'{}',jsonb_build_object('tool','information_read','arguments',?::jsonb),
+          ?,?,?,now(),now(),now()),
+          (?,1,?,'{"assessment":"retained analyst"}','{"tool":"agent_run","arguments":{}}',
+          '{}',?,?,now(),now(),now())
+        """,
+        conversation,
+        checkpoint.sourceHash(),
+        readArgs,
+        readArgs,
+        "{}",
+        "{}",
+        conversation,
+        checkpoint.sourceHash(),
+        retained,
+        retained);
+
+    var scripts = new JdbcScriptStore(jdbc);
+    var recovery = new JdbcOrchestrationRecovery(jdbc, unitOfWork);
+    var key = UUID.randomUUID();
+    var repair = new ScriptStore.Repair(checkpoint, scripts.repairEvidence(conversation, 1));
+    assertEquals(Set.of(source), repair.evidence());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            scripts.previewRepair(
+                replacement,
+                new ScriptStore.Input(
+                    conversation,
+                    "retained input",
+                    2,
+                    UUID.randomUUID(),
+                    1,
+                    retained,
+                    List.of(),
+                    checkpoint.replacementHash()),
+                repair));
+    var nextRequest =
+        UUID.nameUUIDFromBytes(
+            (conversation + ":2").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var input =
+        new ScriptStore.Input(
+            conversation,
+            "retained input",
+            2,
+            nextRequest,
+            1,
+            retained,
+            List.of(),
+            checkpoint.replacementHash());
+    scripts.previewRepair(replacement, input, repair);
+    assertEquals(1, scripts.latest(conversation).orElseThrow().sequence());
+
+    assertThrows(
+        CallerFault.class,
+        () -> recovery.claimRepair(run.id(), "other", key, T0, checkpoint, original, replacement));
+    var stale = new CheckpointRepair(0, checkpoint.sourceHash(), checkpoint.replacementHash());
+    assertThrows(
+        CallerFault.class,
+        () -> recovery.claimRepair(run.id(), "enzo", key, T0, stale, original, replacement));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            unitOfWork.inTransaction(
+                () -> {
+                  assertTrue(
+                      recovery.claimRepair(
+                          run.id(), "enzo", key, T0, checkpoint, original, replacement));
+                  throw new IllegalStateException("abort after claim");
+                }));
+    assertFalse(recovery.received(run.id(), "enzo", key, checkpoint));
+    assertEquals(original, store.find(run.id()).orElseThrow().definitionSource());
+
+    assertTrue(recovery.claimRepair(run.id(), "enzo", key, T0, checkpoint, original, replacement));
+    assertFalse(recovery.claimRepair(run.id(), "enzo", key, T0, checkpoint, original, replacement));
+    assertThrows(CallerFault.class, () -> recovery.received(run.id(), "enzo", key));
+    assertThrows(CallerFault.class, () -> recovery.received(run.id(), "enzo", key, stale));
+    var resumed = store.find(run.id()).orElseThrow();
+    assertEquals(OrchestrationState.RUNNING, resumed.state());
+    assertEquals(conversation, resumed.conductorConversation());
+    assertEquals(replacement, resumed.definitionSource());
+    assertEquals(checkpoint.replacementHash(), resumed.definitionHash());
+    assertEquals(
+        original,
+        jdbc.queryForObject(
+            "SELECT previous_script_source FROM orchestration_resume_receipts WHERE request_id=?",
+            String.class,
+            key));
+
+    var head = scripts.head(conversation);
+    assertEquals(repair, head.repair().orElseThrow());
+    assertTrue(repair.crosses(head.step().orElseThrow(), resumed.definitionHash()));
+    var draft =
+        assertInstanceOf(
+                ScriptStore.Prepared.class, scripts.prepareNext(replacement, input, repair))
+            .step();
+    assertEquals(checkpoint.replacementHash(), draft.hash());
+    var tool = assertInstanceOf(ScriptStore.Tool.class, draft.command());
+    assertEquals("information_write", tool.name());
+    assertEquals(
+        retained,
+        jdbc.queryForObject(
+            "SELECT result FROM orchestration_script_steps WHERE conversation_id=? AND sequence=1 AND source_hash=?",
+            String.class,
+            conversation,
+            checkpoint.sourceHash()));
+    scripts.started(conversation, 2, tool.arguments());
+    var repeatedRequest =
+        UUID.nameUUIDFromBytes(
+            (conversation + ":3").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var repeated =
+        new ScriptStore.Tool(
+            tool.name(),
+            tool.arguments().replace(nextRequest.toString(), repeatedRequest.toString()),
+            false);
+    assertThrows(
+        IllegalStateException.class,
+        () -> scripts.requireRepairEffect(conversation, 3, repeated, List.of(), repair));
+    String receipt =
+        """
+        {"resource":"%s","revision":"%s"}
+        """
+            .formatted(UUID.randomUUID(), UUID.randomUUID());
+    scripts.executed(conversation, 2, receipt);
+    scripts.completed(conversation, 2, receipt);
+    var done =
+        assertInstanceOf(
+            ScriptStore.Prepared.class,
+            scripts.prepareNext(
+                replacement,
+                new ScriptStore.Input(
+                    conversation,
+                    "retained input",
+                    3,
+                    repeatedRequest,
+                    2,
+                    receipt,
+                    List.of(),
+                    checkpoint.replacementHash()),
+                repair));
+    assertEquals(
+        "orchestration_finish",
+        assertInstanceOf(ScriptStore.Tool.class, done.step().command()).name());
   }
 
   @Test

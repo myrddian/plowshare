@@ -14,7 +14,7 @@ async function dashboard() {
     return nodes.get(id);
   }
   const context = vm.createContext({
-    document:{getElementById:node}, location:{hash:''}, URLSearchParams,
+    document:{getElementById:node, createElement:tag=>({tag, append(){}})}, location:{hash:''}, URLSearchParams,
     CSS:{escape:value=>value}, PrivacyMarkdown:{render:source=>({source})},
     setInterval() {}, fetch:async () => ({ok:false, status:401}),
   });
@@ -31,6 +31,34 @@ test('saved settings remain editable while activation is pending', async () => {
   assert.match(node('pihole-saved').textContent, /password are stored/);
   assert.match(node('pihole-blocker').textContent, /Settings saved/);
   assert.equal(node('scan').disabled, true);
+});
+
+test('DNS profiling is a separate setting and shows blocked lookups as DNS evidence', async () => {
+  const {context, node} = await dashboard();
+  vm.runInContext("renderMonitorSettings({editable:true,pihole_configured:false,detail:''})", context);
+  assert.equal(node('dns-profiles').disabled, true);
+  vm.runInContext("renderMonitorSettings({editable:true,pihole_configured:true,detail:''})", context);
+  assert.equal(node('dns-profiles').disabled, false);
+  node('dns-profiles').checked = true;
+  node('dns-profiles').listeners.input();
+  assert.equal(node('quick-scan').checked, true);
+  node('quick-scan').checked = false;
+  node('quick-scan').listeners.input();
+  assert.equal(node('dns-profiles').checked, false);
+
+  context.document.createElement = tag => ({
+    tag, children: [], append(...children) { this.children.push(...children); },
+  });
+  context.activity = {
+    from_at:'2026-01-01T00:00:00Z', until_at:'2026-01-01T00:05:00Z',
+    windows:2, partial_windows:1, queries_read:8, queries_available:12,
+    groups:[{kind:'advertising', queries:3, distinct:1,
+      destinations:[{domain:'ads.example', provider:'Fixture Ads', queries:3, blocked:2}]}],
+  };
+  const rendered = JSON.stringify(vm.runInContext('renderDnsActivity(activity)', context));
+  assert.match(rendered, /Partial coverage in 1 windows/);
+  assert.match(rendered, /Connections and data transfers require gateway flow records/);
+  assert.match(rendered, /ads.example · Fixture Ads · 3 queries · 2 reported blocked/);
 });
 
 test('save uses one request and retains confirmation after a failed refresh', async () => {
@@ -191,6 +219,25 @@ test('reports open in Findings as Markdown without replacing selected collection
 });
 
 
+test('device inventory keeps candidates separate and searches the selected group', async () => {
+  const {node} = await dashboard();
+  const known = {dataset:{presence:'observed', search:'10.1.2.10 tv'}};
+  const silent = {dataset:{presence:'candidate', search:'10.1.2.22'}};
+  node('device-cards').querySelectorAll = () => [known, silent];
+  node('device-presence').value = 'observed';
+  node('device-presence').listeners.change();
+  assert.equal(known.hidden, false);
+  assert.equal(silent.hidden, true);
+  node('device-search').value = '10.1.2.22';
+  node('device-search').listeners.input();
+  assert.equal(node('device-filter-empty').hidden, false);
+  node('device-presence').value = 'candidate';
+  node('device-presence').listeners.change();
+  assert.equal(known.hidden, true);
+  assert.equal(silent.hidden, false);
+  assert.equal(node('device-filter-empty').hidden, true);
+});
+
 test('whole-subnet selection prepares scope without saving, enabling or starting work', async () => {
   const {context, node} = await dashboard();
   let requests = 0;
@@ -205,4 +252,67 @@ test('whole-subnet selection prepares scope without saving, enabling or starting
   vm.runInContext("renderMonitorSettings({editable:true,pending:false,pihole_configured:true,detail:'Saved settings are active.'})",context);
   assert.match(node('settings-detail').textContent,/not saved/);
   assert.equal(node('targets').value,'192.168.0.0/24');
+});
+
+test('research sends the observed identity only to the local controller route and the reviewed model only to search', async () => {
+  const {context, node} = await dashboard();
+  const calls = [];
+  context.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push({url,body});
+    if (url.endsWith('/product')) return {ok:true,json:async()=>({available:true,product:{
+      manufacturer:'Ubiquiti',model:'USW-Pro',firmware:'1.2.3',firmware_updatable:true,
+    }})};
+    return {ok:true,json:async()=>({total:0,advisories:[],checked_at:'2026-01-01T00:00:00Z'})};
+  };
+  vm.runInContext("advisoriesAvailable = true; openDeviceResearch({address:'192.168.1.10',name:'Private',identity:{source:'unifi',mac:'02:00:00:00:00:01',device_id:'mac:02:00:00:00:00:01',hostname:'private-device.lan'}});", context);
+  assert.equal(node('research-model').value, '');
+  assert.equal(calls.length, 0);
+  await node('research-unifi').listeners.click();
+  assert.match(node('research-unifi-result').textContent, /Firmware 1.2.3/);
+  assert.equal(node('research-model').value, 'Ubiquiti USW-Pro');
+  await node('research-form').listeners.submit({preventDefault(){}});
+  assert.deepEqual(calls, [
+    {url:'/api/devices/192.168.1.10/product',body:{device_id:'mac:02:00:00:00:00:01'}},
+    {url:'/api/devices/192.168.1.10/advisories',body:{model:'Ubiquiti USW-Pro'}},
+  ]);
+  vm.runInContext("openDeviceProfile = async () => {};", context);
+  await node('research-profile').listeners.click();
+  assert.equal(node('profile-model').value, 'Ubiquiti USW-Pro');
+  assert.equal(calls.length, 2);
+});
+
+test('a reviewed background draft fills only empty profile fields without saving or using a guessed model', async () => {
+  const {context, node} = await dashboard();
+  const requests = [];
+  const entry = {
+    request_id:'11111111-1111-4111-8111-111111111111', phase:'review',
+    identity:{address:'192.168.1.2'}, model:null,
+    draft:{name:'Fixture switch',model_hypothesis:'Unconfirmed X1',purpose:'Switching',expected_services:'HTTPS',notes:'Check firmware'},
+  };
+  context.fetch = async (url, options) => {
+    requests.push({url, method:options.method});
+    return {ok:true,json:async()=>entry};
+  };
+  context.entry = entry;
+  node('profile-purpose').value = 'Operator-provided purpose';
+  vm.runInContext("selectedResearch = entry; openDeviceProfile = async () => {};", context);
+  await node('background-draft-editor').listeners.click();
+  assert.equal(node('profile-name').value, 'Fixture switch');
+  assert.equal(node('profile-model').value, '');
+  assert.equal(node('profile-purpose').value, 'Operator-provided purpose');
+  assert.equal(node('profile-notes').value, 'Check firmware');
+  assert.deepEqual(requests, [{url:'/api/profile-research/' + entry.request_id + '/editor',method:undefined}]);
+});
+
+test('device profile selection follows a confirmed MAC when its former IP is reused', async () => {
+  const {context} = await dashboard();
+  const profiles = [
+    {profile:{profile_id:'first',fields:{device_mac:'02:00:00:00:00:01',addresses:['192.168.1.10']}}},
+    {profile:{profile_id:'second',fields:{device_mac:'02:00:00:00:00:02',addresses:['192.168.1.20']}}},
+  ];
+  context.profiles = profiles;
+  vm.runInContext("loadProfiles = async () => profiles; editProfile = async (view) => { selectedProfile = view.profile.profile_id; };", context);
+  await vm.runInContext("openDeviceProfile('192.168.1.20','02:00:00:00:00:01')", context);
+  assert.equal(vm.runInContext('selectedProfile', context), 'first');
 });

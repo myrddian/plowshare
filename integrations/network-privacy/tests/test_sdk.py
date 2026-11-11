@@ -130,7 +130,11 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
             async with serve(handle, "127.0.0.1", 0) as server:
                 origin = "http://127.0.0.1:" + str(server.sockets[0].getsockname()[1])
                 async with await Client.connect(
-                    origin, "fixture-token", timeout=2, legacy_transport=True
+                    origin,
+                    "fixture-token",
+                    timeout=2,
+                    legacy_transport=True,
+                    dispatch_mode="ordered",
                 ) as client:
                     reports = await SdkPrivacyPort(client, config).reports()
                     self.assertEqual(len(reports), 1)
@@ -233,7 +237,11 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                 config = replace(config, origin=f"http://127.0.0.1:{port}")
                 # This local fixture implements the legacy JSON envelope explicitly.
                 async with await Client.connect(
-                    config.origin, "fixture-token", timeout=2, legacy_transport=True
+                    config.origin,
+                    "fixture-token",
+                    timeout=2,
+                    legacy_transport=True,
+                    dispatch_mode="ordered",
                 ) as client:
                     outgoing = SdkOutgoingPort(client, config)
                     await outgoing.advertise()
@@ -413,6 +421,7 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                     "fixture-plowshare-token",
                     timeout=2,
                     legacy_transport=True,
+                    dispatch_mode="ordered",
                 ) as client:
                     receipts = MemoryReceipts()
                     worker = Worker(

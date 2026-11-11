@@ -20,10 +20,9 @@ from plowshare import Delivery, Refusal, TransportError
 from .collection import scope_fingerprint
 from .console_port import Admission, AgentHealth, ConsolePort, RunSummary, ScheduleView
 from .contracts import (
+    CollectionPlan,
     DeviceIdentity,
-    DnsObservation,
     PiHolePlan,
-    TcpObservation,
     identifier,
     items,
     load_json,
@@ -32,24 +31,15 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .device_inventory import DeviceInventory, device_inventory
 from .discovery import DeviceDiscovery
+from .journal import Receipt
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Finding, OperatorStore, findings
 from .pihole import PiHoleV6
+from .presence import PresenceView
 from .private_files import replace_private
 from .worker import Worker
-
-
-@dataclass(frozen=True)
-class DeviceCard:
-    address: str
-    name: str
-    identity: DeviceIdentity | None
-    last_seen: str | None
-    services: tuple[TcpObservation, ...]
-    dns: tuple[DnsObservation, ...]
-    history: tuple[str, ...]
-    revision: str | None
 
 
 @dataclass(frozen=True)
@@ -87,6 +77,7 @@ class Health:
     recovery: tuple[str, ...]
     checklist: tuple[str, ...]
     credential_expires_at: str | None
+    unifi: str = "Optional: not configured"
 
 
 @dataclass(frozen=True)
@@ -201,6 +192,10 @@ class OperatorConsole:
         self.health_lock = asyncio.Lock()
         self.cached: Health | None = None
         self.cache_until = 0.0
+        self._device_plan: CollectionPlan | None = None
+        self._device_receipts: tuple[Receipt, ...] = ()
+        self._device_inventory = DeviceInventory()
+        self._device_presence: PresenceView | None = None
         self.journal = journal
 
     @property
@@ -224,63 +219,30 @@ class OperatorConsole:
             raise ValueError("Choose an observed finding")
         self.store.acknowledge(identity, expected)
 
-    def devices(self) -> tuple[DeviceCard, ...]:
-        result: list[DeviceCard] = []
+    def inventory(self) -> DeviceInventory:
+        plan = self.worker.config.collection
         receipts = tuple(
-            item for item in self.worker.receipts.all()[-50:] if item.evidence
+            item for item in self.worker.receipts.all() if item.phase == "done"
         )
-        labels = {
-            item.address: item.label for item in self.worker.config.collection.labels
-        }
-        for address in self.worker.config.collection.targets:
-            latest = next(
-                (
-                    item
-                    for item in reversed(receipts)
-                    if item.evidence
-                    and address in {v.address for v in item.evidence.snapshot.tcp}
-                ),
-                None,
+        presence = self.worker.presence_view()
+        # The active plan fences visibility. Immutable receipts let the dashboard
+        # reuse one projection across refreshes without rescanning the evidence.
+        if (
+            plan != self._device_plan
+            or presence is not self._device_presence
+            or len(receipts) != len(self._device_receipts)
+            or any(
+                current is not cached
+                for current, cached in zip(receipts, self._device_receipts)
             )
-            evidence = latest.evidence if latest else None
-            identity = (
-                next(
-                    (v for v in evidence.snapshot.devices if v.address == address), None
-                )
-                if evidence
-                else None
+        ):
+            self._device_inventory = device_inventory(
+                plan.targets, plan.labels, receipts, presence
             )
-            history = [
-                item.scan_id
-                for item in receipts
-                if item.evidence
-                and any(v.address == address for v in item.evidence.snapshot.tcp)
-            ]
-            result.append(
-                DeviceCard(
-                    address,
-                    labels.get(address)
-                    or (identity.hostname if identity else None)
-                    or "Unnamed device",
-                    identity,
-                    evidence.finished_at if evidence else None,
-                    tuple(
-                        item
-                        for item in evidence.snapshot.tcp
-                        if item.address == address
-                    )
-                    if evidence
-                    else (),
-                    tuple(
-                        item for item in evidence.snapshot.dns if item.device == address
-                    )
-                    if evidence
-                    else (),
-                    tuple(history),
-                    latest.revision if latest else None,
-                )
-            )
-        return tuple(result)
+            self._device_presence = presence
+            self._device_plan = plan
+            self._device_receipts = receipts
+        return self._device_inventory
 
     async def health(self) -> Health:
         async with self.health_lock:
@@ -314,16 +276,34 @@ class OperatorConsole:
                 if item.phase == "done" and item.evidence
             ]
             latest = completed[-1].evidence if completed else None
+            plan = self.worker.config.collection
+            current_scope = latest is not None and latest.scope == scope_fingerprint(
+                plan
+            )
             pihole = "Optional: not configured"
-            if self.worker.config.collection.pihole:
+            if plan.pihole:
                 pihole = "Configured; awaiting a collection"
-                if latest and latest.scope == scope_fingerprint(
-                    self.worker.config.collection
-                ):
+                if latest and current_scope:
                     pihole = (
                         "Coverage gaps: " + "; ".join(latest.issues)
                         if latest.issues
                         else "Latest collection retained; inspect its observation time and DNS window"
+                    )
+            unifi = "Optional: not configured"
+            if plan.unifi:
+                unifi = "Configured; awaiting a collection"
+                if latest and current_scope:
+                    issues = tuple(
+                        issue
+                        for issue in latest.issues
+                        if issue.startswith(("unifi_", "identity_conflict:"))
+                    )
+                    associated = sum(
+                        item.source == "unifi" for item in latest.snapshot.devices
+                    )
+                    unifi = (
+                        f"{associated} selected addresses associated in the latest sweep"
+                        + (". " + "; ".join(issues) if issues else "")
                     )
             recovery = []
             if self.worker.state == "attention_required":
@@ -375,6 +355,7 @@ class OperatorConsole:
                 tuple(recovery),
                 tuple(checklist),
                 self.credential_expires_at,
+                unifi,
             )
             self.cache_until = time.monotonic() + 20
             return self.cached
@@ -500,7 +481,7 @@ class OperatorConsole:
             if len(values) == 1
         }
         result = []
-        for card in self.devices():
+        for card in self.inventory().devices:
             identity = card.identity
             if identity is None:
                 continue

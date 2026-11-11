@@ -22,6 +22,7 @@ public final class OrchestrationRequests {
       Set.of(
           Orchestration.Start.class,
           Orchestration.Resume.class,
+          Orchestration.Repair.class,
           Orchestration.Receipt.class,
           Orchestration.Reference.class,
           Orchestration.Answer.class,
@@ -49,6 +50,13 @@ public final class OrchestrationRequests {
     if (!SHAPES.contains(shape))
       throw new IllegalArgumentException("unsupported orchestration request shape");
     try {
+      if (shape == Orchestration.Repair.class
+          && (payload == null
+              || !payload.keySet().equals(Set.of("id", "requestId", "checkpoint"))
+              || !(payload.get("checkpoint") instanceof Map<?, ?> checkpoint)
+              || !checkpoint.keySet().equals(Set.of("sequence", "sourceHash", "replacementHash"))))
+        throw new IllegalArgumentException(
+            "repair requires the exact checkpoint sequence and both script hashes");
       return JSON.convertValue(payload == null ? Map.of() : payload, shape);
     } catch (IllegalArgumentException invalid) {
       throw new CallerFault("Invalid " + operation + " request: " + invalid.getMessage(), invalid);

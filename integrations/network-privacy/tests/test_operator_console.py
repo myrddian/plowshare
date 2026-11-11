@@ -16,6 +16,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from plowshare import Delivery, TransportError
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
 
+from plowshare_privacy.advisories import AdvisoryLookup, AdvisoryPage
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
 from plowshare_privacy.console_port import (
     Admission,
@@ -23,12 +24,19 @@ from plowshare_privacy.console_port import (
     RunSummary,
     ScheduleView,
 )
-from plowshare_privacy.contracts import DeviceIdentity, PiHolePlan
+from plowshare_privacy.contracts import (
+    DeviceIdentity,
+    DeviceLabel,
+    PiHolePlan,
+    TcpObservation,
+)
+from plowshare_privacy.device_inventory import DeviceInventory, device_inventory
 from plowshare_privacy.discovery import (
     DiscoveredDevice,
     DiscoveryReport,
     LocalDeviceDiscovery,
 )
+from plowshare_privacy.identity_source import ManagedProduct, ManagedProductLookup
 from plowshare_privacy.journal import FileReceipts, Receipt
 from plowshare_privacy.monitor import MonitorChoice, MonitorView
 from plowshare_privacy.operator_state import (
@@ -38,6 +46,7 @@ from plowshare_privacy.operator_state import (
     findings,
 )
 from plowshare_privacy.pihole import DeviceData
+from plowshare_privacy.presence import PresenceView, Sighting
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
 
@@ -357,6 +366,258 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.store.set_preferences(Preferences(True, 50, 0, False))
         self.assertEqual(self.worker.completion_request(receipt).text, expected)
         self.assertEqual(findings(receipt, frozenset()), ())
+
+    def test_device_inventory_remembers_responses_without_reasserting_old_identity(
+        self,
+    ) -> None:
+        address, silent, unscanned = "10.1.2.10", "10.1.2.22", "10.1.2.33"
+        first, latest = "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"
+        identity = DeviceIdentity(
+            address,
+            "mac:02:00:00:00:00:01",
+            None,
+            "TV",
+            "02:00:00:00:00:01",
+            None,
+            "pihole-v6",
+            first,
+            first,
+        )
+        self.worker.config = replace(
+            self.config,
+            collection=replace(
+                self.config.collection, targets=(address, silent, unscanned)
+            ),
+        )
+        evidence = self.scan.evidence
+        assert evidence is not None
+        baseline = replace(
+            evidence,
+            finished_at=first,
+            snapshot=replace(
+                evidence.snapshot,
+                tcp=(TcpObservation(address, 443, "closed"),),
+                devices=(identity,),
+            ),
+        )
+        self.receipts.save(replace(self.scan, evidence=baseline))
+        self.assertEqual(self.console.inventory().devices[0].identity, identity)
+
+        # An initial observation stays in inventory after its card link ages out.
+        for _ in range(51):
+            scan_id = str(uuid4())
+            unanswered = replace(
+                baseline,
+                scan_id=scan_id,
+                finished_at=latest,
+                snapshot=replace(
+                    baseline.snapshot,
+                    tcp=(
+                        TcpObservation(address, 443, "timeout"),
+                        TcpObservation(silent, 443, "unreachable"),
+                    ),
+                    devices=(),
+                ),
+            )
+            self.receipts.save(replace(self.scan, scan_id=scan_id, evidence=unanswered))
+        inventory = self.console.inventory()
+        (observed,) = inventory.devices
+        never_responded, never_checked = inventory.candidates
+        self.assertEqual(observed.last_seen, latest)
+        self.assertEqual(
+            (observed.first_response_at, observed.last_response_at), (first, first)
+        )
+        self.assertIsNone(observed.identity)
+        self.assertEqual(observed.last_known_identity, identity)
+        self.assertEqual(observed.name, "Unnamed device")
+        self.assertEqual(len(observed.history), 50)
+        self.assertNotIn(self.scan.scan_id, observed.history)
+        self.assertEqual(never_responded.address, silent)
+        self.assertEqual(never_responded.last_checked_at, latest)
+        self.assertEqual(never_checked.address, unscanned)
+        self.assertIsNone(never_checked.last_checked_at)
+
+    async def test_device_research_checks_identity_and_searches_only_reviewed_model(
+        self,
+    ) -> None:
+        address = "192.168.90.2"
+        candidate = "192.168.90.3"
+        stamp = "2026-01-01T00:00:00Z"
+        mac = "02:00:00:00:00:01"
+        identity = DeviceIdentity(
+            address,
+            "mac:" + mac,
+            None,
+            "private-name",
+            mac,
+            None,
+            "unifi",
+            stamp,
+            stamp,
+        )
+        sightings = PresenceView(sightings={address: Sighting(address, identity)})
+        inventory: DeviceInventory = device_inventory(
+            (address, candidate), (), (), sightings
+        )
+        products = AsyncMock(spec=ManagedProductLookup)
+        products.managed_product.return_value = ManagedProduct(
+            "Example", "Switch 10G", "1.2.3", True
+        )
+        advisories = AsyncMock(spec=AdvisoryLookup)
+        model = "Example Switch 10G"
+        advisories.search.return_value = AdvisoryPage(model, stamp, 0, ())
+        headers = {"Authorization": "Bearer " + TOKEN}
+        product_path = f"/api/devices/{address}/product"
+        search_path = f"/api/devices/{address}/advisories"
+        with patch.object(self.console, "inventory", return_value=inventory):
+            async with TestClient(
+                TestServer(
+                    application(
+                        self.worker,
+                        TOKEN,
+                        console=self.console,
+                        advisories=advisories,
+                        managed_products=lambda: products,
+                    )
+                )
+            ) as client:
+                self.assertEqual(
+                    (
+                        await client.post(
+                            product_path, json={"device_id": identity.device_id}
+                        )
+                    ).status,
+                    401,
+                )
+                self.assertEqual(
+                    (
+                        await client.post(
+                            product_path,
+                            headers=headers,
+                            json={"device_id": "mac:02:00:00:00:00:02"},
+                        )
+                    ).status,
+                    409,
+                )
+                products.managed_product.assert_not_awaited()
+                product = await client.post(
+                    product_path,
+                    headers=headers,
+                    json={"device_id": identity.device_id},
+                )
+                self.assertEqual((await product.json())["product"]["firmware"], "1.2.3")
+                products.managed_product.assert_awaited_once_with(identity)
+                for body in (
+                    {"model": model, "mac": mac},
+                    {"model": address},
+                    {"model": "private-name"},
+                    {"model": "private-name.lan"},
+                ):
+                    self.assertEqual(
+                        (
+                            await client.post(search_path, headers=headers, json=body)
+                        ).status,
+                        400,
+                    )
+                self.assertEqual(
+                    (
+                        await client.post(
+                            f"/api/devices/{candidate}/advisories",
+                            headers=headers,
+                            json={"model": model},
+                        )
+                    ).status,
+                    404,
+                )
+                advisories.search.assert_not_awaited()
+                response = await client.post(
+                    search_path, headers=headers, json={"model": model}
+                )
+                self.assertEqual((await response.json())["model"], model)
+                advisories.search.assert_awaited_once_with(model)
+        self.assertEqual(self.remote.starts, 0)
+        self.assertEqual(self.receipts.all(), (self.scan,))
+
+    async def test_subnet_addresses_only_become_devices_with_observed_evidence(
+        self,
+    ) -> None:
+        open_address, identified, refused, silent = (
+            "192.168.90.1",
+            "192.168.90.2",
+            "192.168.90.3",
+            "192.168.90.4",
+        )
+        targets = (open_address, identified, refused, silent)
+        self.worker.config = replace(
+            self.config,
+            collection=replace(
+                self.config.collection,
+                targets=targets,
+                labels=(DeviceLabel(refused, "Configured name"),),
+            ),
+        )
+        async with TestClient(
+            TestServer(application(self.worker, TOKEN, console=self.console))
+        ) as client:
+            headers = {"Authorization": "Bearer " + TOKEN}
+            response = await client.get("/api/overview", headers=headers)
+            self.assertEqual(response.status, 200)
+            overview = await response.json()
+            self.assertEqual(overview["devices"], [])
+            self.assertEqual(
+                [row["address"] for row in overview["candidates"]], list(targets)
+            )
+
+            evidence = self.scan.evidence
+            assert evidence is not None
+            stamp = evidence.finished_at
+            pihole = DeviceIdentity(
+                identified,
+                "mac:02:00:00:00:00:01",
+                None,
+                "TV",
+                "02:00:00:00:00:01",
+                None,
+                "pihole-v6",
+                stamp,
+                stamp,
+            )
+            configured = DeviceIdentity(
+                refused,
+                "ip:" + refused,
+                "Configured name",
+                None,
+                None,
+                None,
+                "configured",
+                stamp,
+                None,
+            )
+            snapshot = replace(
+                evidence.snapshot,
+                tcp=(
+                    TcpObservation(open_address, 443, "open"),
+                    TcpObservation(identified, 443, "timeout"),
+                    TcpObservation(refused, 443, "closed"),
+                    TcpObservation(silent, 443, "timeout"),
+                ),
+                devices=(pihole, configured),
+            )
+            self.receipts.save(
+                replace(self.scan, evidence=replace(evidence, snapshot=snapshot))
+            )
+            response = await client.get("/api/overview", headers=headers)
+            self.assertEqual(response.status, 200)
+            overview = await response.json()
+            self.assertEqual(
+                [row["address"] for row in overview["devices"]],
+                [open_address, identified],
+            )
+            self.assertEqual(
+                [row["address"] for row in overview["candidates"]], [refused, silent]
+            )
+            self.assertEqual(overview["candidates"][0]["label"], "Configured name")
+            self.assertEqual(overview["candidates"][0]["last_checked_at"], stamp)
 
     async def test_move_requires_one_fresh_address_and_rechecks_before_accept(
         self,

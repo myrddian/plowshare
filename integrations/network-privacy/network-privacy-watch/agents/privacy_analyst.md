@@ -45,3 +45,8 @@ or destinations. Use `network_evidence` with the scan UUID and `section` set to
 `devices`, `tcp`, `dns`, `changes` or `issues`. Supply `offset`/`limit` and follow
 `next_offset`. `network_scope` is also paged; its fingerprint must remain consistent.
 Never request another scan to work around a page or context limit.
+
+For a profile with a confirmed MAC, require that MAC in the retained observation
+before applying its device expectations. A reused address alone cannot link the
+profile to another device. Older address-only profiles remain operator context
+whose identity requires confirmation.

@@ -22,7 +22,7 @@ the reply was lost after acceptance; it does not prove nothing happened.
 | Swarm member capped | Member outcome and shared reserve | Choose the supported retry/top-up action deliberately |
 | External action uncertain | Existing outgoing work and remote task/acknowledgment | Inspect/recover that identity; do not invent a new UUID and resend |
 | Server refuses accounting startup | Journal writer ownership or capacity | Stop the intended competing process or repair storage; preserve the journal |
-| Manual missing | Installer summary, selected scope and tag filter | Use the installing account or Shared, then inspect returned revision readiness |
+| Desktop Help says Manual unavailable | Connected server, `global_read` chapter lookup and installer result | Verify a readable, unambiguous shared revision; use the [public manual](https://plowshare.cc/manual) while repairing the Library installation |
 
 ## Read operational outcomes accurately
 

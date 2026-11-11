@@ -241,7 +241,9 @@ class WorkRelayReceiverTest {
     verify(jobs)
         .submitEvent(
             captured.capture(), any(), any(), any(), any(), any(), any(), any(), any(), any());
-    assertEquals(agent.withPrompt(source), captured.getValue());
+    assertEquals(
+        agent.withPrompt(source, request.delivery().branch().handler().path()),
+        captured.getValue());
     assertEquals(source, request.delivery().branch().handler().source());
   }
 

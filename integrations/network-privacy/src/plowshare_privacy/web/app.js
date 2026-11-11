@@ -20,6 +20,10 @@ let deviceSignature = null;
 let findingSignature = null;
 let profileEdit = null;
 let profileBlocked = false;
+let advisoriesAvailable = false;
+let researchDevice = null;
+let selectedResearch = null;
+let researchBusy = false;
 let issueEdit = null;
 let issueBlocked = false;
 let issuesAvailable = false;
@@ -202,6 +206,15 @@ async function refresh() {
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
     byId('mode').textContent = status.collection_enabled === false ? 'Collection disabled' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     byId('device-profiles').hidden = !status.profiles_available;
+    byId('background-research').hidden = !status.profile_research_available;
+    if (!researchBusy) byId('background-research-enabled').checked = !!status.profile_research_enabled;
+    const waitingDrafts = status.profile_drafts_waiting || 0;
+    byId('background-research-count').textContent = waitingDrafts ? String(waitingDrafts) + ' awaiting review' : '';
+    advisoriesAvailable = !!status.advisories_available;
+    byId('research-search-status').textContent = advisoriesAvailable
+      ? 'Advisory search sends only this public model name to NVD. Review it before searching.'
+      : 'Enable the collector’s NVD lookup to search here. You can still review product clues and edit a profile.';
+    if (!researchDevice) byId('research-search').disabled = !advisoriesAvailable;
     issuesAvailable = !!status.issues_available;
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
@@ -240,12 +253,15 @@ byId('refresh').addEventListener('click', () => {refresh().catch(error => notice
 byId('disconnect').addEventListener('click', async () => {
   try {await api('/api/session/logout', {method:'POST', body:'{}'});} catch (error) {notice(error.message, true); return;}
   clearIssueEditor();
+  clearDeviceResearch();
+  clearBackgroundResearch();
   profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
   monitoringDraft = false;
   bearer = ''; authenticated = false; selected = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings']) byId(id).replaceChildren();
+  byId('device-search').value = ''; byId('device-presence').value = 'observed';
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
   byId('schedule-draft').hidden = true;
   renderScheduleControl(null, null, null);
@@ -303,10 +319,15 @@ async function loadSettings() {
   const settings = await api('/api/monitoring');
   const report = await api('/api/discovery');
   byId('enabled').checked = settings.enabled;
+  byId('quick-scan').checked = settings.quick_scan === true;
+  byId('dns-profiles').checked = settings.dns_profiles === true;
   byId('targets').value = settings.targets.join(', ');
   byId('ports').value = settings.ports.join(',');
   byId('device-labels').value = (settings.labels || []).map(label => `${label.address}=${label.label}`).join('\n');
-  byId('identity-source').textContent = settings.pihole_configured ? 'Pi-hole v6 is configured. A scan records fresh device associations and DNS activity; names below remain your own labels.' : 'Add your own device names, or connect Pi-hole v6 using the setup guide for observed hostnames, MAC addresses and DNS activity.';
+  const sources = [settings.pihole_configured && 'Pi-hole v6 for identity and DNS', settings.unifi_configured && 'UniFi for connected-client identity'].filter(Boolean);
+  byId('identity-source').textContent = sources.length
+    ? 'Configured sources: ' + sources.join(', ') + '. Names below are your own labels.'
+    : 'Add your own labels or connect Pi-hole or UniFi for observed device identity.';
   renderDevices(report);
   if (settings.ports.length) byId('ports').value = settings.ports.join(',');
   byId('monitoring').hidden = false;
@@ -321,15 +342,50 @@ byId('use-subnet').addEventListener('click', () => {
   for (const checkbox of byId('devices').querySelectorAll('input')) checkbox.checked = false;
   byId('settings-detail').textContent = 'Subnet scope prepared. Save monitoring to validate and retain it; no scan has started.';
 });
-for (const id of ['targets','ports','device-labels','enabled']) byId(id).addEventListener('input', () => {
+for (const id of ['targets','ports','device-labels','enabled','quick-scan','dns-profiles']) byId(id).addEventListener('input', () => {
+  if (id === 'quick-scan' && !byId('quick-scan').checked) byId('dns-profiles').checked = false;
+  if (id === 'dns-profiles' && byId('dns-profiles').checked) byId('quick-scan').checked = true;
   monitoringDraft = true;
   byId('settings-detail').textContent = 'Monitoring changes are not saved. Choose Save monitoring to retain them.';
 });
+function renderDnsActivity(activity) {
+  const labels = {streaming:'Streaming services', advertising:'Advertising', measurement:'Audience measurement', unclassified:'Unclassified'};
+  const details = element('details');
+  details.append(element('summary', `DNS activity · ${activity.queries_read} sampled queries in the last 24 hours`));
+  const bounds = [activity.from_at, activity.until_at].map(value => new Date(value).toLocaleString()).join(' to ');
+  details.append(element('p', `Pi-hole · ${bounds} · ${activity.windows} observed windows`, 'hint'));
+  if (activity.partial_windows) details.append(element('p', `Partial coverage in ${activity.partial_windows} windows. Pi-hole reported ${activity.queries_available} matching queries in the sampled windows.`, 'hint'));
+  details.append(element('p', 'Counts show DNS lookups. Connections and data transfers require gateway flow records.', 'hint'));
+  for (const group of activity.groups) {
+    details.append(element('h4', `${labels[group.kind]} · ${group.queries} queries`));
+    const items = element('ul');
+    for (const entry of group.destinations) {
+      const provider = entry.provider ? ` · ${entry.provider}` : '';
+      const blocked = entry.blocked ? ` · ${entry.blocked} reported blocked` : '';
+      items.append(element('li', `${entry.domain}${provider} · ${entry.queries} queries${blocked}`));
+    }
+    details.append(items);
+    if (group.distinct > group.destinations.length) {
+      details.append(element('p', `Showing ${group.destinations.length} of ${group.distinct} destinations`, 'hint'));
+    }
+  }
+  return details;
+}
 function filterDevices() {
   const query = byId('device-search').value.trim().toLowerCase();
-  for (const card of byId('device-cards').querySelectorAll('.device-card')) card.hidden = !card.dataset.search.includes(query);
+  const presence = byId('device-presence').value;
+  const cards = [...byId('device-cards').querySelectorAll('.device-card')];
+  for (const card of cards) {
+    card.hidden = card.dataset.presence !== presence || !card.dataset.search.includes(query);
+  }
+  const empty = byId('device-filter-empty');
+  empty.hidden = !cards.length || cards.some(card => !card.hidden);
+  empty.textContent = query ? 'No addresses match this search.'
+    : presence === 'candidate' ? 'No candidate addresses remain in this scope.'
+    : 'No devices observed yet. Candidate addresses are checked on each sweep.';
 }
 byId('device-search').addEventListener('input', filterDevices);
+byId('device-presence').addEventListener('change', filterDevices);
 byId('discover-form').addEventListener('submit', async event => {
   event.preventDefault();
   byId('discover').disabled = true;
@@ -354,7 +410,7 @@ byId('monitor-form').addEventListener('submit', async event => {
       if (separator < 1 || !name  || Object.hasOwn(labels, address)) throw new Error('Use one selected address=name per line, without duplicate addresses.');
       labels[address] = name;
     }
-    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels})});
+    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels, quickScan:byId('quick-scan').checked,dnsProfiles:byId('dns-profiles').checked})});
     monitoringDraft = false;
     renderMonitorSettings(result);
     notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
@@ -381,6 +437,8 @@ async function connectLocal() {
 }
 connectLocal().catch(error => {
   clearIssueEditor();
+  clearDeviceResearch();
+  clearBackgroundResearch();
   profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
@@ -391,9 +449,30 @@ setInterval(() => {
   if ((bearer || authenticated) && (!document.hidden || overview?.preferences.browser_notifications) && !settingsPending) refresh().catch(error => notice(error.message, true));
 }, 5000);
 
+function renderDeviceDetection(detection) {
+  const panel = element('details');
+  const title = detection.confidence === 'unknown' ? 'Device type unknown'
+    : 'Possible device type: ' + detection.device_type;
+  panel.append(element('summary', title));
+  if (detection.clues.length) {
+    const clues = element('ul');
+    clues.append(...detection.clues.map(clue => element('li', clue)));
+    panel.append(clues);
+  }
+  if (detection.confidence === 'corroborated') {
+    panel.append(element('p', 'The observed name and port agree.', 'hint'));
+  }
+  panel.append(element('p', 'Open ports suggest services. Verify the protocol, model, and firmware before assessing vulnerabilities.', 'hint'));
+  for (const exposure of detection.exposures) {
+    panel.append(element('p', 'TCP ' + exposure.ports.join(', ') + ' · Possible ' + exposure.possible_service + '. ' + exposure.risk_check, 'hint'));
+  }
+  return panel;
+}
+
 function renderOverview(value) {
   const health = value.health;
   byId('device-count').textContent = value.devices.length;
+  byId('candidate-count').textContent = value.candidates.length;
   byId('health-summary').textContent = !health.connected ? 'Connection needs attention' : health.recovery.length ? 'Retained work needs attention' : 'Connected to Plowshare';
   byId('setup-checklist').hidden = health.checklist.length === 0;
   renderScheduleControl(health.schedule, value.schedule_control, value.pending_deployment);
@@ -401,6 +480,11 @@ function renderOverview(value) {
   const grid = byId('health'); grid.replaceChildren();
   const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? new Date(health.last_contact).toLocaleString() : 'Awaiting contact'], ['Last completed scan', health.last_scan ? new Date(health.last_scan).toLocaleString() : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at || 'Awaiting next fire') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length}/3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length}/6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at || 'Not supplied']];
   for (const [name, detail] of checks) {const card = element('article'); card.append(element('strong', name), element('p', detail)); grid.append(card);}
+  if (health.unifi) {
+    const card = element('article');
+    card.append(element('strong', 'UniFi'), element('p', health.unifi));
+    grid.append(card);
+  }
   grid.append(element('p', `Checked ${new Date(health.checked_at).toLocaleString()}. ${health.detail}`, 'hint'));
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
@@ -411,24 +495,67 @@ function renderOverview(value) {
     row.append(element('span', run.state, 'badge'), element('code', run.id));
     runs.append(row);
   }
-  const nextDeviceSignature = JSON.stringify(value.devices);
+  const presenceStatus = value.quick_presence;
+  const quickStatus = byId('quick-presence-status');
+  quickStatus.textContent = presenceStatus?.enabled
+    ? (presenceStatus.last_checked ? 'Last quick check ' + new Date(presenceStatus.last_checked).toLocaleString() + '.' : 'Waiting for the first quick check.')
+      + (presenceStatus.issues.length ? ' ' + presenceStatus.issues.join(' ') : '')
+    : 'Quick presence checks are off.';
+  const nextDeviceSignature = JSON.stringify([value.devices, value.candidates]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
   const cards = byId('device-cards'); cards.replaceChildren();
-  if (!value.devices.length) cards.append(element('p', 'Choose devices in Settings to begin monitoring.'));
+  if (!value.devices.length && !value.candidates.length) cards.append(element('p', 'Choose addresses in Settings to begin monitoring.'));
   for (const device of value.devices) {
     const card = element('article', undefined, 'device-card');
-    card.dataset.search = [device.name, device.address, device.identity?.mac, device.identity?.hostname, device.identity?.vendor].filter(Boolean).join(' ').toLowerCase();
+    const current = device.identity?.source === 'configured' ? null : device.identity;
+    const known = current || device.last_known_identity;
+    card.dataset.presence = 'observed';
+    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor, device.detection?.device_type].filter(Boolean).join(' ').toLowerCase();
     card.append(element('h3', device.name), element('p', device.address));
-    card.append(element('p', device.identity ? `${device.identity.mac || device.identity.device_id}${device.identity.vendor ? ' · ' + device.identity.vendor : ''}` : 'Address only; physical identity not observed', 'hint'));
-    card.append(element('p', device.last_seen ? `Last evidence ${new Date(device.last_seen).toLocaleString()}` : 'Awaiting first evidence', 'hint'));
+    if (known) {
+      const association = [known.hostname, known.mac, known.vendor].filter(Boolean).join(' · ') || 'Address observed';
+      const observedAt = new Date(known.observed_at).toLocaleString();
+      const source = known.source === 'unifi' ? 'UniFi' : 'Pi-hole';
+      card.append(element('p', (current ? '' : 'Last known ') + source + ' association · ' + association + ' · ' + observedAt, 'hint'));
+    } else {
+      card.append(element('p', 'Address only; no observed identity', 'hint'));
+    }
+    const responded = device.services.some(item => item.status === 'open' || item.status === 'closed');
+    card.append(element('p', device.last_seen ? `Last checked ${new Date(device.last_seen).toLocaleString()} · ${responded ? 'TCP response' : 'No TCP response'}` : 'Awaiting first full sweep', 'hint'));
+    const presence = device.presence;
+    if (presence?.checked > 0) {
+      const percent = Math.round(100 * presence.seen / presence.checked);
+      const subject = presence.address_only ? 'Address seen' : 'Device seen';
+      const last = presence.last_seen ? ' · Last seen ' + new Date(presence.last_seen).toLocaleString() : '';
+      card.append(element('p', `${subject} in ${presence.seen} of ${presence.checked} quick checks (${percent}%) over 24 hours${last}`, 'hint'));
+    } else if (presence?.last_seen) {
+      card.append(element('p', 'Last quick sighting ' + new Date(presence.last_seen).toLocaleString(), 'hint'));
+    }
+    if (device.last_response_at) {
+      card.append(element('p', `First TCP response ${new Date(device.first_response_at).toLocaleString()} · Last ${new Date(device.last_response_at).toLocaleString()}`, 'hint'));
+    }
     card.append(element('p', device.services.map(item => `${item.port}: ${item.status}`).join(' · '), 'hint'));
-    const destinations = element('details'); destinations.append(element('summary', `${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
+    if (device.detection) card.append(renderDeviceDetection(device.detection));
+    if (device.dns_activity) card.append(renderDnsActivity(device.dns_activity));
+    const destinations = element('details'); destinations.append(element('summary', `Last full sweep · ${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
     const history = element('details'); history.append(element('summary', `${device.history.length} collections at this address`));
     for (const id of [...device.history].reverse()) {const button = element('button', `Read ${id.slice(0,8)}`, 'entry'); button.addEventListener('click', () => showEvidence(id).catch(error => notice(error.message, true))); history.append(button);}
     const profile = element('button', 'Device profile');
-    profile.addEventListener('click', () => openDeviceProfile(device.address).catch(error => notice(error.message, true)));
-    card.append(history, profile); cards.append(card);
+    profile.addEventListener('click', () => openDeviceProfile(device.address, device.identity?.mac || null).catch(error => notice(error.message, true)));
+    const research = element('button', 'Research device', 'secondary');
+    research.addEventListener('click', () => openDeviceResearch(device));
+    card.append(history, research, profile); cards.append(card);
+  }
+  for (const candidate of value.candidates) {
+    const card = element('article', undefined, 'device-card');
+    card.dataset.presence = 'candidate';
+    card.dataset.search = [candidate.address, candidate.label].filter(Boolean).join(' ').toLowerCase();
+    card.append(element('h3', candidate.address), element('p', candidate.label || 'Candidate address'));
+    card.append(element('p', candidate.last_checked_at
+      ? 'Last checked ' + new Date(candidate.last_checked_at).toLocaleString()
+      : 'Awaiting first sweep', 'hint'));
+    cards.append(card);
   }
   }
   filterDevices();
@@ -473,6 +600,8 @@ function renderPiHoleSaved(configured, pending = false) {
 function renderMonitorSettings(settings) {
   monitorEditable = settings.editable;
   byId('save-monitoring').disabled = !monitorEditable;
+  byId('quick-scan').disabled = !monitorEditable;
+  byId('dns-profiles').disabled = !monitorEditable || !settings.pihole_configured;
   byId('settings-detail').textContent = monitoringDraft ? 'Monitoring changes are not saved. Choose Save monitoring to retain them. ' + settings.detail : settings.detail;
   renderPiHoleSaved(settings.pihole_configured, settings.pending);
   byId('pihole-save').disabled = !monitorEditable || piholePending;
@@ -599,12 +728,267 @@ async function loadProfiles() {
   if (!profileBlocked) byId('profile-detail').textContent = `${result.profiles.length} device profiles loaded from Plowshare. Older revisions remain available below each profile.`;
   return result.profiles;
 }
-async function editProfile(view, address = null) {
+function clearBackgroundDraft() {
+  selectedResearch = null;
+  byId('background-draft').hidden = true;
+  byId('background-draft-title').textContent = '';
+  byId('background-draft-content').replaceChildren();
+  byId('background-draft-model').value = '';
+  byId('background-draft-feedback').value = '';
+}
+function clearBackgroundResearch() {
+  clearBackgroundDraft();
+  byId('background-research-list').replaceChildren();
+  byId('background-research-detail').textContent = '';
+  byId('background-research-count').textContent = '';
+  byId('background-research-enabled').checked = false;
+}
+const researchPhases = {queued:'Queued for research',pending:'Awaiting admission receipt',running:'Research running',review:'Ready for review',failed:'Needs attention'};
+async function loadBackgroundResearch() {
+  const queue = await api('/api/profile-research');
+  const list = byId('background-research-list');
+  if (!researchBusy) byId('background-research-enabled').checked = queue.enabled;
+  byId('background-research-detail').textContent = queue.detail || (queue.enabled ? 'Background research enabled.' : 'Background research paused.');
+  list.replaceChildren();
+  if (!queue.entries.length) list.append(element('p', 'No drafts or research activity to review.', 'hint'));
+  for (const entry of queue.entries) {
+    const name = entry.label || entry.model || entry.address;
+    const button = element('button', name + ' · ' + researchPhases[entry.phase], 'entry');
+    button.type = 'button';
+    button.addEventListener('click', () => openBackgroundDraft(entry.request_id).catch(error => notice(error.message, true)));
+    list.append(button);
+  }
+}
+function backgroundDraftPath(id) {return '/api/profile-research/' + encodeURIComponent(id);}
+async function openBackgroundDraft(id) {
+  const entry = await api(backgroundDraftPath(id));
+  selectedResearch = entry;
+  const draft = entry.draft;
+  byId('background-draft-title').textContent = entry.identity.hostname || entry.model || entry.identity.address;
+  byId('background-draft-model').value = entry.model || '';
+  byId('background-draft-feedback').value = '';
+  const output = byId('background-draft-content');
+  output.replaceChildren(element('p', [entry.identity.address, entry.identity.mac, researchPhases[entry.phase], entry.run_id].filter(Boolean).join(' · '), 'hint'));
+  if (draft) {
+    const nvdCoverage = {
+      searched: 'NVD searched for the confirmed model. Keyword results require an applicability check.',
+      model_unconfirmed: 'NVD lookup awaits a confirmed public model.',
+      not_configured: 'NVD lookup is disabled on this collector.',
+      unavailable: 'NVD lookup was unavailable during this run.',
+    };
+    output.append(element('p', nvdCoverage[entry.nvd_status] || 'NVD coverage unavailable.', 'hint'));
+    for (const [heading, value] of [
+      ['Name', draft.name], ['Model hypothesis', draft.model_hypothesis],
+      ['Purpose', draft.purpose], ['Expected services', draft.expected_services],
+      ['Research notes', draft.notes], ['Questions for you', draft.questions],
+    ]) if (value) output.append(element('h4', heading), element('p', value));
+    for (const cve of entry.advisory_ids) {
+      const link = element('a', cve, 'entry');
+      link.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(cve);
+      link.target = '_blank'; link.rel = 'noopener noreferrer';
+      output.append(link);
+    }
+  }
+  byId('background-draft-research').hidden = !['review','failed'].includes(entry.phase);
+  byId('background-draft-editor').hidden = entry.phase !== 'review' || byId('device-profiles').hidden;
+  byId('background-draft-reviewed').hidden = entry.phase !== 'review';
+  byId('background-draft-dismiss').hidden = !['review','failed','queued'].includes(entry.phase);
+  byId('background-draft').hidden = false;
+}
+byId('background-research-load').addEventListener('click', () => loadBackgroundResearch().catch(error => notice(error.message, true)));
+byId('background-research-enabled').addEventListener('change', async () => {
+  const toggle = byId('background-research-enabled');
+  if (researchBusy) return;
+  researchBusy = true; toggle.disabled = true;
+  try {
+    const saved = await api('/api/profile-research', {method:'POST',body:JSON.stringify({enabled:toggle.checked})});
+    toggle.checked = saved.enabled;
+    await loadBackgroundResearch();
+  } catch (error) {notice(error.message, true);}
+  finally {researchBusy = false; toggle.disabled = false;}
+});
+async function reviewBackgroundDraft(action) {
+  if (!selectedResearch || researchBusy) return;
+  const id = selectedResearch.request_id;
+  const model = action === 'research' ? byId('background-draft-model').value.trim() || null : null;
+  const feedback = action === 'research' ? byId('background-draft-feedback').value.trim() : '';
+  researchBusy = true;
+  try {
+    await api(backgroundDraftPath(id), {method:'POST',body:JSON.stringify({action,model,feedback})});
+    if (selectedResearch?.request_id === id) clearBackgroundDraft();
+    await loadBackgroundResearch();
+  } catch (error) {notice(error.message, true);}
+  finally {researchBusy = false;}
+}
+byId('background-draft').addEventListener('submit', event => {
+  event.preventDefault(); reviewBackgroundDraft('research');
+});
+byId('background-draft-reviewed').addEventListener('click', () => reviewBackgroundDraft('reviewed'));
+byId('background-draft-dismiss').addEventListener('click', () => reviewBackgroundDraft('dismissed'));
+byId('background-draft-editor').addEventListener('click', async () => {
+  if (!selectedResearch || researchBusy) return;
+  const id = selectedResearch.request_id;
+  researchBusy = true;
+  try {
+    const entry = await api(backgroundDraftPath(id) + '/editor');
+    await openDeviceProfile(entry.identity.address, entry.identity.mac, true);
+    const draft = entry.draft;
+    for (const [field, value] of [['name',draft.name],['model',entry.model],['purpose',draft.purpose],
+      ['expected',draft.expected_services],['notes',draft.notes]]) {
+      const input = byId('profile-' + field);
+      if (value && !input.value.trim()) input.value = value;
+    }
+    notice('Draft copied into empty profile fields. Confirm the identity and review before saving.');
+  } catch (error) {notice(error.message, true);}
+  finally {researchBusy = false;}
+});
+
+function clearDeviceResearch() {
+  researchDevice = null;
+  byId('device-research').hidden = true;
+  byId('research-model').value = '';
+  byId('research-title').textContent = 'Research a device';
+  byId('research-observation').textContent = '';
+  byId('research-unifi-result').textContent = '';
+  byId('research-results').replaceChildren();
+}
+function openDeviceResearch(device) {
+  clearDeviceResearch();
+  researchDevice = device;
+  byId('research-title').textContent = 'Research ' + device.name;
+  const identity = device.identity?.source === 'configured' ? null : device.identity;
+  const known = identity || device.last_known_identity;
+  const clues = [known?.hostname, known?.vendor, ...((device.detection?.clues) || [])].filter(Boolean);
+  byId('research-observation').textContent = clues.length
+    ? 'Observed clues. Confirm the product before searching. ' + clues.join(' · ')
+    : 'No model evidence yet. Enter the public model from the device label or its management page.';
+  byId('research-unifi').disabled = !identity?.mac;
+  byId('research-search').disabled = !advisoriesAvailable;
+  byId('research-profile').disabled = byId('device-profiles').hidden;
+  byId('device-research').hidden = false;
+  byId('device-research').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function researchPath(device, operation) {
+  return '/api/devices/' + encodeURIComponent(device.address) + '/' + operation;
+}
+byId('close-research').addEventListener('click', clearDeviceResearch);
+byId('research-unifi').addEventListener('click', async () => {
+  const device = researchDevice;
+  if (!device?.identity?.mac) return;
+  const result = byId('research-unifi-result');
+  byId('research-unifi').disabled = true;
+  result.textContent = 'Checking the controller…';
+  try {
+    const {available, product} = await api(researchPath(device, 'product'), {
+      method:'POST', body:JSON.stringify({device_id:device.identity.device_id})
+    });
+    if (device !== researchDevice) return;
+    if (!product) {
+      result.textContent = available
+        ? 'No unique online adopted UniFi device matched the observed MAC.'
+        : 'UniFi is unavailable on this collector.';
+      return;
+    }
+    const model = product.manufacturer + ' ' + product.model;
+    const firmware = product.firmware ? ' · Firmware ' + product.firmware : '';
+    const update = product.firmware_updatable ? ' · UniFi reports an update is available' : '';
+    result.textContent = 'Confirmed by UniFi · ' + model + firmware + update;
+    if (!byId('research-model').value.trim()) byId('research-model').value = model;
+  } catch (error) {
+    if (device === researchDevice) result.textContent = error.message;
+  } finally {
+    if (device === researchDevice) byId('research-unifi').disabled = false;
+  }
+});
+byId('research-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const device = researchDevice;
+  const model = byId('research-model').value.trim();
+  if (!device || !model || !advisoriesAvailable) return;
+  const results = byId('research-results');
+  byId('research-search').disabled = true;
+  results.replaceChildren(element('p', 'Checking NVD…'));
+  try {
+    const page = await api(researchPath(device, 'advisories'), {method:'POST', body:JSON.stringify({model})});
+    if (device === researchDevice) renderAdvisoryPage(results, page);
+  } catch (error) {
+    if (device === researchDevice) results.replaceChildren(element('p', error.message, 'notice error'));
+  } finally {
+    if (device === researchDevice) byId('research-search').disabled = !advisoriesAvailable;
+  }
+});
+byId('research-profile').addEventListener('click', async () => {
+  const device = researchDevice;
+  const model = byId('research-model').value.trim();
+  if (!device || !model) return;
+  try {
+    await openDeviceProfile(device.address, device.identity?.mac || null);
+    if (device === researchDevice) byId('profile-model').value = model;
+  } catch (error) {notice(error.message, true);}
+});
+function renderAdvisoryPage(results, page) {
+  const detail = page.total
+    ? 'Showing ' + page.advisories.length + ' of ' + page.total + ' keyword matches.'
+    : 'No keyword matches found.';
+  results.replaceChildren(element('p', detail + ' Checked '
+    + new Date(page.checked_at).toLocaleString() + '. Check the affected model, firmware and configuration in each advisory.', 'hint'));
+  for (const item of page.advisories) {
+    const link = element('a', item.cve);
+    link.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(item.cve);
+    link.target = '_blank'; link.rel = 'noopener noreferrer';
+    const entry = element('article');
+    const metadata = [item.published_on, item.severity ? 'CVSS ' + item.severity.toLowerCase() : null,
+      item.known_exploited ? 'CISA lists known exploitation' : null].filter(Boolean);
+    entry.append(link, element('p', metadata.join(' · '), 'hint'), element('p', item.description));
+    results.append(entry);
+  }
+}
+
+function advisoryLookup(view) {
+  const panel = element('section');
+  panel.append(element('h3', 'Product advisories'));
+  const model = view.profile.fields.model.trim();
+  if (!model || !advisoriesAvailable) {
+    panel.append(element('p', model ? 'Advisory lookup is unavailable on this collector.'
+      : 'Save the public manufacturer and exact model to look up advisories.', 'hint'));
+    return panel;
+  }
+  panel.append(element('p', 'This lookup sends the saved public model name to NVD: ' + model + '.', 'hint'));
+  const results = element('div');
+  results.setAttribute('aria-live', 'polite');
+  const button = element('button', 'Look up advisories for saved model', 'secondary');
+  button.type = 'button';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    results.replaceChildren(element('p', 'Checking NVD…'));
+    try {
+      const path = '/api/profiles/' + encodeURIComponent(view.profile.profile_id)
+        + '/' + encodeURIComponent(view.revision) + '/advisories';
+      const page = await api(path, {method:'POST', body:JSON.stringify({model})});
+      renderAdvisoryPage(results, page);
+    } catch (error) {
+      results.replaceChildren(element('p', error.message, 'notice error'));
+    } finally {
+      button.disabled = false;
+    }
+  });
+  panel.append(button, results);
+  return panel;
+}
+
+async function editProfile(view, address = null, deviceMac = null) {
   await profileReceipts();
   const settings = await api('/api/monitoring');
   const fields = view ? view.profile.fields : {name:'',owner:'',model:'',purpose:'',expected_services:'',notes:'',addresses:address ? [address] : []};
-  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null};
+  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null, deviceMac:view?.profile.fields.device_mac || deviceMac};
+  byId('profile-mac').textContent = profileEdit.deviceMac
+    ? 'Confirmed device MAC · ' + profileEdit.deviceMac
+    : 'Address-only profile. A matching address alone does not establish device identity.';
   for (const [id, key] of [['profile-name','name'],['profile-owner','owner'],['profile-model','model'],['profile-purpose','purpose'],['profile-expected','expected_services'],['profile-notes','notes']]) byId(id).value = fields[key];
+  const macs = [...new Set((overview?.devices || []).filter(device => fields.addresses.includes(device.address))
+    .map(device => device.identity?.mac).filter(Boolean))];
+  byId('profile-bind-mac').hidden = !!profileEdit.deviceMac || macs.length !== 1;
+  profileEdit.observedMac = macs.length === 1 ? macs[0] : null;
   const choices = [...new Set([...settings.targets, ...fields.addresses])];
   byId('profile-addresses').replaceChildren(...choices.map(value => {const option = element('option', value); option.value = value; option.selected = fields.addresses.includes(value); return option;}));
   await renderIssueLinks(fields.issues || [], view?.evidence || []);
@@ -613,6 +997,7 @@ async function editProfile(view, address = null) {
   byId('profile-form').hidden = false; byId('device-profiles').open = true;
   const history = byId('profile-history'); history.replaceChildren(); byId('profile-markdown').hidden = true;
   if (view) {
+    history.append(advisoryLookup(view));
     history.append(element('h3', 'Retained profile revisions'));
     for (const version of [...view.versions].sort((a,b) => b.ordinal - a.ordinal)) {
       const read = element('button', `Revision ${version.ordinal} · ${new Date(version.created_at).toLocaleString()}`, 'entry');
@@ -628,19 +1013,30 @@ async function editProfile(view, address = null) {
   }
   byId('device-profiles').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
-async function openDeviceProfile(address) {
+async function openDeviceProfile(address, mac = null, bind = false) {
   const profiles = await loadProfiles();
-  const matches = profiles.filter(value => value.profile.fields.addresses.includes(address));
-  if (matches.length > 1) throw new Error('Several profiles claim this address. Review their retained documents before editing.');
-  await editProfile(matches[0] || null, address);
+  const matches = profiles.filter(value => mac
+    ? value.profile.fields.device_mac === mac
+    : !value.profile.fields.device_mac && value.profile.fields.addresses.includes(address));
+  const legacy = profiles.some(value => !value.profile.fields.device_mac && value.profile.fields.addresses.includes(address));
+  if (matches.length > 1) throw new Error('Several profiles claim this device. Review their retained documents before editing.');
+  if (mac && !matches.length && legacy) throw new Error('This address has a legacy profile. Review it in the knowledge base before confirming a MAC association.');
+  await editProfile(matches[0] || null, address, bind ? mac : null);
 }
+
+byId('profile-bind-mac').addEventListener('click', () => {
+  if (!profileEdit || profileEdit.deviceMac || !profileEdit.observedMac) return;
+  profileEdit.deviceMac = profileEdit.observedMac;
+  byId('profile-mac').textContent = 'Confirming MAC on save · ' + profileEdit.deviceMac;
+  byId('profile-bind-mac').hidden = true;
+});
 byId('load-profiles').addEventListener('click', () => loadProfiles().catch(error => notice(error.message,true)));
 byId('new-profile').addEventListener('click', () => editProfile(null).catch(error => notice(error.message,true)));
 byId('cancel-profile').addEventListener('click', () => {profileEdit = null; byId('profile-form').hidden = true;});
 byId('profile-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!profileEdit || profileBlocked) return;
   byId('save-profile').disabled = true;
-  const fields = {name:byId('profile-name').value,owner:byId('profile-owner').value,model:byId('profile-model').value,purpose:byId('profile-purpose').value,expected_services:byId('profile-expected').value,notes:byId('profile-notes').value,addresses:[...byId('profile-addresses').selectedOptions].map(value => value.value),issues:readIssueLinks()};
+  const fields = {name:byId('profile-name').value,owner:byId('profile-owner').value,model:byId('profile-model').value,purpose:byId('profile-purpose').value,expected_services:byId('profile-expected').value,notes:byId('profile-notes').value,addresses:[...byId('profile-addresses').selectedOptions].map(value => value.value),issues:readIssueLinks(),device_mac:profileEdit.deviceMac || null};
   try {
     const receipt = await api('/api/profiles', {method:'POST',body:JSON.stringify({profile_id:profileEdit.id,request_id:crypto.randomUUID(),expected_revision:profileEdit.revision,fields})});
     if (receipt.phase === 'confirmed') {profileEdit = null; byId('profile-form').hidden = true; notice('Device profile saved in Plowshare. Processing may still be pending; load profiles again when ready.');}

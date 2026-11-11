@@ -97,16 +97,148 @@ failures are reported separately from connection or activation problems.
 ## Read health, devices and findings
 
 **System health** shows collector state, last successful contact, last completed
-scan, Pi-hole coverage, project agents, projected dynamic tools,
+scan, Pi-hole and UniFi coverage, project agents, projected dynamic tools,
 recent project investigations and service credential expiry. Remote checks and
 report projections are cached for 20 seconds. Visibility is an inspection result;
 permissions and availability are still enforced by Plowshare on each tool call.
 A checklist highlights missing setup. The expiry notice warns within seven days.
 
-The **Devices** search filters names, addresses, MACs, hostnames and vendors locally.
-Device cards show configured names, observed MAC/vendor associations, TCP service
-responses, sampled DNS destinations and collection history. History is explicitly
-at an address; a DHCP change or randomized MAC does not prove physical identity.
+Saving a subnet adds its addresses as candidates. Each sweep checks the saved
+addresses. A completed sweep promotes an address into the device inventory when
+it finds an open TCP service or a Pi-hole or UniFi association. A refusal alone leaves an
+address as a candidate. In **Devices**, switch between observed devices and
+candidate addresses, or search by name, address, MAC, hostname or vendor.
+The inventory reconstructs first and last TCP responses from retained scan receipts
+after a restart. A timed-out check updates the last check time, while the last
+response stays at the last successful or refused connection. The latest 50
+completed sweeps provide links to individual collections. An older device
+association appears separately with its observation time when the latest sweep
+has no association. This history belongs to the address; DHCP reuse and randomized
+MACs can change which device holds it.
+
+Enable **Quick presence checks every 2–5 minutes** in **Settings → Choose what
+to monitor** alongside ordinary collection. File-managed collectors can set
+`collection.quickScan` to `true`. The option defaults to off. The collector chooses a new random
+delay after each quick check and waits for the normal collection lock. A restart
+starts a fresh delay. The quick check covers only saved private IPv4 addresses
+and never publishes evidence, fires the scan schedule, or starts an investigation.
+
+Quick checks use connected UniFi clients first, then a Pi-hole v6 network-table
+sighting whose address timestamp falls within the current sampling interval.
+Remaining addresses get up to two short probes on the first configured TCP
+ports. Only an open connection counts as a TCP sighting. DNS profiling is a
+separate option and defaults to off. Malformed network-table rows and unavailable sources are
+reported separately while the other sources continue.
+
+Device cards show sightings out of completed quick checks over the last
+24 hours. A known MAC follows the device across watched addresses. When a MAC
+is first confirmed at an address, an uninterrupted run of preceding IP-only
+sightings can count toward that device. Once an address has an identified
+owner, a later IP-only run needs confirmation from the same MAC on both sides.
+A missed check, conflicting association, or gap over seven minutes breaks
+continuity. This infers presence from the available observations. An IP change
+of owner between two samples can go undetected. Retained journals from older
+collectors can credit only leading streaks in an intact history with a retained
+address-to-MAC observation at the transition.
+
+A missed response means the check did not see the device. A failed or skipped
+check contributes no sample. The local private journal keeps the last positive
+association and the latest MAC confirmation or conflict for each address in
+the active scope even after the rolling count expires. New scopes start their
+own history. Full-scan evidence and scheduled investigations keep their
+existing path.
+
+### DNS activity profiles
+
+With Pi-hole configured, select **Profile device DNS activity with Pi-hole** in
+Settings and save monitoring. File-managed collectors can set
+`collection.dnsProfiles` to `true` alongside `collection.quickScan`. Profiles begin
+after two successful quick checks confirm the same MAC at the same watched IP.
+UniFi supplies the current association when available. Fresh Pi-hole network
+sightings can supply it otherwise. Unknown MACs, conflicting addresses, reused
+IPs and interrupted observation windows get no retrospective DNS attribution.
+Two matching observations still leave gaps in visibility between checks.
+
+Device cards show the last 24 hours of sampled DNS activity, grouped by
+streaming services, advertising, audience measurement and unclassified
+destinations. Counts distinguish DNS responses reported blocked and show partial
+coverage if samples are truncated or unavailable. Category totals use the
+retained destinations, with a maximum of 32 per window and eight shown per
+category. Profiles remain in the collector's private presence journal and use
+its rolling retention. They do not submit DNS history to Plowshare, external
+lookups or a model. Turning the option off stops new sampling and hides the
+profile while older windows age out.
+
+The category list uses published service domains, including
+[YouTube embeds](https://support.google.com/youtube/answer/171780),
+[Google video delivery](https://knowledge.workspace.google.com/admin/getting-started/set-up-a-google-workspace-host-name-allowlist),
+[Google Ads](https://developers.google.com/publisher-tag/guides/general-best-practices),
+[Microsoft Advertising](https://learn.microsoft.com/en-us/xandr/monetize/export-placement-tags),
+[The Trade Desk](https://partner.thetradedesk.com/v3/portal/resources/doc/TrackingTagsUniversalPixel),
+and [Google Analytics](https://developers.google.com/analytics/devguides/collection/protocol/ga4/reference).
+Classification describes the destination's known association. A query count
+does not show time spent in an app, whether a connection succeeded, or whether
+data was sent. Pi-hole visibility depends on the client using Pi-hole directly
+and the query log retaining client and domain details. For sessions and bytes,
+UniFi provides a separate [Traffic Flows export](https://help.ui.com/hc/en-us/articles/32201256219799-Traffic-Flows-and-Traffic-Logging-in-UniFi-Network)
+outside the client inventory API used here.
+
+### UniFi identity
+
+UniFi reads connected wired and wireless clients through the controller's local
+API. It keeps names and MACs for saved addresses only. The sweep withholds the
+association for an address if sources disagree on its MAC. A failed UniFi read
+appears under coverage gaps while TCP and other configured sources continue.
+An address missing from the connected-client list has unknown UniFi coverage for
+that sweep.
+
+Quick presence also reads the bounded adopted-device inventory. Online adopted
+switches and access points can supply watched identities even when they are
+absent from the connected-client list. A unique matching MAC joins the adopted
+name and product details to the connected client's current address, even when
+the adopted record reports a different address. Conflicting MACs at one
+address stay unresolved. Managed devices with current product evidence take
+priority in the background research queue.
+
+A UniFi gateway can advertise its WAN IP in the adopted inventory. If the
+configured API host is the watched LAN gateway, stop the collector and use the
+bootstrap `bind-unifi-gateway --device-id <adopted UUID> --lan-mac <confirmed LAN MAC>`
+command. Obtain both values from the operator's controller and LAN records.
+The collector checks that the bound device is online and that the same site's
+enabled default gateway network advertises the configured private API host.
+It does not infer an alias from a device name or the final bytes of a MAC.
+The binding does not change the scan scope.
+
+Open a device's type panel to see the observed name and conventional TCP port clues
+from its latest completed sweep. Conflicting or insufficient clues leave the
+type unknown. Possible services have exposure checks you can verify locally.
+Port assignments are clues to check, and the collector sends no protocol probes
+to verify them. See the [IANA service registry](https://www.iana.org/assignments/service-names-port-numbers).
+
+Choose **Research device** on an observed card to review the local identity and
+device-type clues. **Read UniFi product details** looks up the observed MAC in the
+adopted-device inventory and checks for a unique online match.
+Supported adopted switches, access points and gateways can supply model and
+firmware, and UniFi may report an available firmware update. Connected-client
+names and Pi-hole hostnames, MAC vendors and timestamps are identification clues.
+For other devices, confirm the public model from a label or management page.
+
+Review the public manufacturer and exact model before choosing **Look up
+advisories**. This sends only the model to NVD and works before a profile is
+saved. **Use model in profile editor** fills the existing profile form for review.
+These actions leave the full-scan schedule and investigation activity untouched.
+
+To enable advisory lookup, set the collector's
+`PLOWSHARE_PRIVACY_NVD_ORIGIN` to the HTTPS origin of the NVD API
+(`https://services.nvd.nist.gov`) before starting the dashboard. Choose
+**Look up advisories for saved model** in the profile to send only that model
+name. The dashboard shows up to ten keyword matches, any primary CVSS rating
+reported by NVD, and any CISA known-exploitation flag reported there. Check the
+vendor advisory for the affected model, firmware and configuration before
+linking an issue to the device. A search without matches leaves applicability
+unknown. The lookup runs only on request and leaves scan evidence and profiles
+as saved.
+
 **Check moved devices** compares fresh Pi-hole associations with the last local
 LAN discovery, bounded to 256 addresses and read in 32-device batches. Confirm each suggested move
 explicitly. Confirmation rechecks the association and uses the normal idle/scope
@@ -244,6 +376,21 @@ Do not delete an uncertain intent to make a retry button work. History is bounde
 512 acknowledgements, 128 manual intents and the existing 1,000-scan journal fence.
 Archive settled history deliberately; preserve identities for reconciliation.
 
+An investigation that stops with **Invalid analyst assessment** or **Invalid
+reviewed assessment** and reports raw model protocol markup has kept the
+original model response in its trajectory. It has stopped before saving a
+draft from that response. Inspect the retained delegate response before starting
+another investigation from the same evidence.
+
+If an investigation reports **Report save blocked**, its review is retained in
+the run trajectory. After the write refusal is resolved, use Plowshare's
+orchestration **Resume** as the original run owner. For an automatically
+launched service-owned run, submit `orchestration.resume` through the public SDK
+with that service identity and a new resume request ID. The server retries the
+draft save using the retained review and source revisions. The original scan
+and model calls stay in the run history. A save with an uncertain outcome
+requires receipt reconciliation before another submission.
+
 ## Upgrade an existing collector
 
 Stop the foreground process or user service, preserve the private directory, then
@@ -272,6 +419,35 @@ Tool visibility comes from a current unmeasured
 context projection of an existing project conversation, not declared agent grants.
 Before a project conversation exists, visibility remains unknown.
 
+## Background device profiles
+
+Under **Devices → Background device profiles**, enable research after enabling
+quick presence checks and deploying the matching Application source and collector.
+It starts off. The collector admits one profile research run at a time, with up
+to four admissions per UTC day. A candidate needs a fresh MAC association and
+at least three associated quick sightings. Model work is separate from network
+investigations. It uses retained evidence and starts no new network scan.
+
+The collector matches the observed MAC to the configured UniFi adopted inventory
+when available. Full-sweep port clues are used only when a retained sweep
+observed the same MAC at that address. If the controller confirms a public model,
+or you enter one during review, the configured NVD lookup checks that model
+automatically. Configure `PLOWSHARE_PRIVACY_NVD_ORIGIN` as described above.
+Unknown models still get a draft and may ask you for identifying details.
+The Plowshare profiler receives local name, vendor and port clues, the public
+advisory results and your feedback. Its project Information tool is read-only.
+NVD receives only the confirmed public model.
+
+Use **Load drafts and activity** to review results and see retained Plowshare run
+IDs. **Research with feedback** queues another bounded run for the same MAC.
+**Use draft in profile editor** requires a fresh association and fills empty
+fields. Review the device and choose **Save profile** explicitly to publish a
+profile. **Mark reviewed** and **Dismiss** keep the decision and prevent automatic
+repeat research for that MAC. Suspending research stops new starts and continues
+receipt reads for admitted work. An uncertain start is reconciled by the original
+request UUID, with later admissions held until it settles. The private journal
+holds up to 256 device records.
+
 ## Device knowledge base
 
 Open **Device knowledge base** or choose **Device profile** on a device card.
@@ -280,6 +456,15 @@ Give it a name, responsible person, model, purpose, expected services/behaviour 
 operator notes. These are operator-confirmed expectations, separate from observed
 TCP/DNS evidence. A profile association records its confirmation time; a reused
 address or randomized MAC does not prove that two observations concern one device.
+
+When saving a reviewed device draft, its current MAC can be retained with the
+profile. The profile editor offers **Confirm observed MAC for this profile**
+for an existing address-only record. Saving a new binding requires a fresh
+matching sighting. A bound profile follows that MAC when opened from a device
+card. Address changes remain an operator edit, and an IP reused by a different
+MAC does not select the old profile. Retained evidence links require the same
+MAC in the recorded sweep. Older address-only profiles and their exact
+Markdown remain readable.
 
 Each profile has a stable Application-assigned UUID and a named Markdown resource
 `network-privacy-device/<UUID>.md` in the Application's Plowshare project. The
@@ -335,8 +520,9 @@ core API or SDK changes. Whole-document authorization covers every section.
    issue, affected models, firmware versions (or explicitly unknown), relevant
    settings, one to four HTTPS source citations, their publication dates when
    known, and the date you checked them. These are operator-supplied sources: the
-   collector does not fetch arbitrary URLs, discover advisories or certify their
-   claims. Prefer original vendor notices or primary research and recheck stale
+   collector does not fetch arbitrary URLs or certify their claims. Use the
+   separate product lookup for NVD references. Prefer original vendor notices
+   or primary research and recheck stale
    claims before applying a change. No real vendor allegations ship as seed data.
 2. Include one proposed mitigation: a firewall rule, exact Pi-hole domain block,
    network segmentation or a device setting. Record why it addresses the issue,

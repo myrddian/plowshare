@@ -26,6 +26,8 @@ from plowshare.contracts import (
 from plowshare.tool_journal import SqliteToolJournal
 from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
+from .advisories import NvdAdvisories
+from .collection import NetworkCollector
 from .collector_factory import configured_collector
 from .console import FileManualInvestigations, OperatorConsole
 from .console_port import SdkConsolePort
@@ -33,6 +35,7 @@ from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
 from .device_profiles import DeviceProfiles, FileProfileIntents
 from .discovery import LocalDeviceDiscovery
+from .identity_source import ManagedProductLookup
 from .issue_port import SdkIssuePort
 from .issue_records import FileIssueIntents, PrivacyIssues
 from .journal import FileReceipts
@@ -42,7 +45,10 @@ from .operator_state import FileOperatorStore
 from .peer import IntegrationPeer, SdkOutgoingPort
 from .peer_journal import FilePeerReceipts
 from .ports import SdkPrivacyPort
+from .presence import PresenceHistory, PresenceView, PresenceWatch
 from .profile_port import SdkProfilePort
+from .profile_research import ProfileResearch, ResearchJournal
+from .profile_research_port import SdkResearchPort
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
 from .tool_journal_upgrade import open_tool_journal
@@ -60,6 +66,12 @@ def credential(name: str) -> str:
 
 async def execute(args: argparse.Namespace) -> None:
     config = Configuration.read(Path(args.config))
+    advisory_origin = os.environ.get("PLOWSHARE_PRIVACY_NVD_ORIGIN")
+    advisories = (
+        NvdAdvisories(advisory_origin)
+        if args.command == "serve" and advisory_origin is not None
+        else None
+    )
     if args.command == "check":
         if config.collection.observations_file:
             Snapshot.decode(load_json(config.collection.observations_file))
@@ -158,6 +170,7 @@ async def execute(args: argparse.Namespace) -> None:
                 receipts,
                 configured_collector(config.collector, config.collection),
                 operator_store,
+                PresenceWatch(PresenceHistory(config.state_directory)),
             )
             peer = (
                 IntegrationPeer(
@@ -251,6 +264,7 @@ async def execute(args: argparse.Namespace) -> None:
                     receipts,
                     lambda: worker.config.collection.targets,
                     issues,
+                    worker.presence_view,
                 )
                 if operator_store
                 else None
@@ -370,6 +384,36 @@ async def execute(args: argparse.Namespace) -> None:
                 # Capture the connection cell: recovery replaces client without retaining a stale socket.
                 return SdkScheduleRuntime(client, current)
 
+            def managed_products() -> ManagedProductLookup | None:
+                # Settings can replace the active collector and its configured controller.
+                collector = worker.collector
+                if isinstance(collector, NetworkCollector) and isinstance(
+                    collector.identity_source, ManagedProductLookup
+                ):
+                    return collector.identity_source
+                return None
+
+            def research_presence() -> PresenceView:
+                plan = worker.config.collection
+                return (
+                    worker.presence_view()
+                    if (plan.enabled and plan.quick_scan and worker.state == "ready")
+                    else PresenceView()
+                )
+
+            research = (
+                ProfileResearch(
+                    ResearchJournal(config.state_directory),
+                    SdkResearchPort(lambda: client, config.project),
+                    research_presence,
+                    receipts,
+                    managed_products,
+                    advisories,
+                )
+                if operator_store is not None and config.collection.mode == "tcp"
+                else None
+            )
+
             runner = web.AppRunner(
                 application(
                     worker,
@@ -380,6 +424,9 @@ async def execute(args: argparse.Namespace) -> None:
                     console=console,
                     profiles=profiles,
                     issues=issues,
+                    advisories=advisories,
+                    managed_products=managed_products,
+                    profile_research=research,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
                     )
@@ -390,6 +437,7 @@ async def execute(args: argparse.Namespace) -> None:
             )
             await runner.setup()
             task: asyncio.Task[None] | None = None
+            research_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
                 await site.start()
@@ -432,15 +480,20 @@ async def execute(args: argparse.Namespace) -> None:
                         settings.apply_pending if settings else None,
                     )
                 )
+                if research is not None:
+                    research_task = asyncio.create_task(research.run(stop))
                 await stop.wait()
             finally:
                 stop.set()
-                if task:
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+                for running in (research_task, task):
+                    if running is not None:
+                        running.cancel()
+                for running in (research_task, task):
+                    if running is not None:
+                        try:
+                            await running
+                        except asyncio.CancelledError:
+                            pass
                 await runner.cleanup()
                 if owns_handoff:
                     handoff.unlink(missing_ok=True)

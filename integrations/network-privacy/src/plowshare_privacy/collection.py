@@ -6,9 +6,10 @@ import asyncio
 import errno
 import hashlib
 import json
+from collections import Counter
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Awaitable, Callable, Protocol
 
 from .contracts import (
     CollectionPlan,
@@ -19,10 +20,14 @@ from .contracts import (
     Snapshot,
     TcpObservation,
     load_json,
+    private_ipv4,
     utc_now,
 )
+from .dns_activity import DnsActivityWindow, QuerySample
+from .identity_source import DeviceIdentitySource, IdentitySample, ManagedInventory
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .pihole import DeviceDataSource
+from .presence import MAX_ATTRIBUTION_GAP, PresenceSample, Sighting, epoch
 
 
 class Collector(Protocol):
@@ -39,6 +44,9 @@ class Collector(Protocol):
 
 def scope_fingerprint(plan: CollectionPlan) -> str:
     values = asdict(plan)
+    # Local presence sampling does not change full collection evidence or receipts.
+    values.pop("quick_scan")
+    values.pop("dns_profiles")
     # Default-enabled plans retain their historical fingerprints and journal identity.
     if plan.enabled:
         values.pop("enabled")
@@ -50,6 +58,16 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
         values["pihole"]["password_file"] = (
             str(plan.pihole.password_file) if plan.pihole.password_file else None
         )
+    if plan.unifi is None:
+        values.pop("unifi")
+    else:
+        values["unifi"]["ca_file"] = (
+            str(plan.unifi.ca_file) if plan.unifi.ca_file else None
+        )
+        if plan.unifi.certificate_sha256 is None:
+            values["unifi"].pop("certificate_sha256")
+        # A controller alias enriches identity evidence without changing probe scope.
+        values["unifi"].pop("gateway")
     values["observations_file"] = (
         str(plan.observations_file) if plan.observations_file else None
     )
@@ -103,12 +121,198 @@ class NetworkCollector:
         collector: str,
         plan: CollectionPlan,
         device_source: DeviceDataSource | None = None,
+        identity_source: DeviceIdentitySource | None = None,
+        pihole_presence: Callable[[tuple[str, ...], str], Awaitable[IdentitySample]]
+        | None = None,
+        pihole_activity: Callable[
+            [tuple[str, ...], str, str],
+            Awaitable[tuple[tuple[QuerySample, ...], tuple[str, ...]]],
+        ]
+        | None = None,
     ):
         if plan.pihole is not None and device_source is None:
             raise ValueError("Configured Pi-hole requires a device-data source")
+        if plan.unifi is not None and identity_source is None:
+            raise ValueError("Configured UniFi requires a device identity source")
         self.collector = collector
         self.plan = plan
         self.device_source = device_source
+        self.identity_source = identity_source
+        self.pihole_presence = pihole_presence
+        self.pihole_activity = pihole_activity
+
+    async def _identity_sample(self, observed: str) -> IdentitySample:
+        if self.identity_source is None:
+            return IdentitySample()
+        samples = [await self.identity_source.identify(self.plan.targets, observed)]
+        if isinstance(self.identity_source, ManagedInventory):
+            samples.append(
+                await self.identity_source.managed_sightings(
+                    self.plan.targets, observed, samples[0].devices
+                )
+            )
+        devices: dict[str, DeviceIdentity] = {}
+        ambiguous: set[str] = set()
+        issues: list[str] = []
+        scope = frozenset(self.plan.targets)
+        for sample in samples:
+            addresses = {identity.address for identity in sample.devices}
+            if (
+                len(addresses) != len(sample.devices)
+                or addresses & sample.ambiguous_addresses
+                or not (addresses | sample.ambiguous_addresses) <= scope
+            ):
+                raise ValueError(
+                    "Identity source returned invalid or out-of-scope addresses"
+                )
+            issues.extend(sample.issues)
+            ambiguous.update(sample.ambiguous_addresses)
+            for identity in sample.devices:
+                prior = devices.get(identity.address)
+                if prior is not None and prior.mac != identity.mac:
+                    ambiguous.add(identity.address)
+                    issues.append(
+                        "unifi_ambiguous: connected and adopted inventory disagree on a watched address"
+                    )
+                devices[identity.address] = identity
+        return IdentitySample(
+            tuple(
+                identity
+                for address, identity in devices.items()
+                if address not in ambiguous
+            ),
+            frozenset(ambiguous),
+            tuple(dict.fromkeys(issues)),
+        )
+
+    async def collect_presence(self, since: str) -> PresenceSample:
+        """Sample positive evidence only, without building or publishing a full scan."""
+        plan = self.plan
+        if not (
+            plan.mode == "tcp"
+            and plan.enabled
+            and plan.quick_scan
+            and plan.targets
+            and plan.ports
+            and all(private_ipv4(address) for address in plan.targets)
+        ):
+            raise ValueError("Quick presence scans require enabled private monitoring")
+        observed = utc_now()
+        start, end = epoch(since), epoch(observed)
+        connected = await self._identity_sample(observed)
+        sightings = {
+            identity.address: Sighting(identity.address, identity)
+            for identity in connected.devices
+        }
+        issues = list(connected.issues)
+        ambiguous = connected.ambiguous_addresses
+        remaining = tuple(
+            address
+            for address in plan.targets
+            if address not in sightings and address not in ambiguous
+        )
+        if self.pihole_presence is not None and remaining:
+            cached = await self.pihole_presence(remaining, observed)
+            # Ordinary absence/staleness is expected when watching every address on a subnet.
+            issues.extend(
+                issue
+                for issue in cached.issues
+                if not issue.startswith(
+                    ("identity_stale:", "identity_unavailable: some selected")
+                )
+            )
+            eligible = frozenset(remaining)
+            ambiguous |= cached.ambiguous_addresses & eligible
+            for identity in cached.devices:
+                if (
+                    identity.address in eligible
+                    and identity.address not in ambiguous
+                    and identity.last_seen is not None
+                    and start < epoch(identity.last_seen) <= end
+                ):
+                    sightings[identity.address] = Sighting(identity.address, identity)
+
+        pending = tuple(address for address in plan.targets if address not in sightings)
+        semaphore = asyncio.Semaphore(plan.concurrency)
+        # Low-concurrency subnet plans use one probe to bound the time they hold
+        # the ordinary collector's lock even if every address is silent.
+        ports = plan.ports[: 1 if len(pending) > 64 * plan.concurrency else 2]
+
+        async def responding(address: str) -> bool:
+            async with semaphore:
+                for port in ports:
+                    if await _quick_connect(address, port, min(plan.timeout, 0.25)):
+                        return True
+                return False
+
+        for start_at in range(0, len(pending), BATCH_SIZE):
+            batch = pending[start_at : start_at + BATCH_SIZE]
+            tasks = [asyncio.create_task(responding(address)) for address in batch]
+            try:
+                for address, seen in zip(
+                    batch, await asyncio.gather(*tasks), strict=True
+                ):
+                    if seen:
+                        sightings[address] = Sighting(address)
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+        return PresenceSample(
+            observed, tuple(sightings.values()), tuple(dict.fromkeys(issues)), ambiguous
+        )
+
+    async def collect_dns_activity(
+        self, previous: PresenceSample, current: PresenceSample
+    ) -> tuple[tuple[DnsActivityWindow, ...], tuple[str, ...]]:
+        gap = epoch(current.checked_at) - epoch(previous.checked_at)
+        read = self.pihole_activity
+        if (
+            not self.plan.dns_profiles
+            or read is None
+            or not 0 < gap <= MAX_ATTRIBUTION_GAP
+        ):
+            return (), ()
+        watched = frozenset(self.plan.targets)
+        old = {
+            item.address: item.key
+            for item in previous.sightings
+            if item.identity
+            and item.identity.mac
+            and item.address not in previous.ambiguous_addresses
+        }
+        prior_counts = Counter(old.values())
+        current_counts = Counter(
+            item.key
+            for item in current.sightings
+            if item.identity and item.identity.mac
+        )
+        # Require fresh matching endpoints. IP-only sightings and conflicting
+        # associations never backfill DNS, even if they count for presence.
+        confirmed = {
+            item.address: item.key
+            for item in current.sightings
+            if item.address in watched
+            and item.address not in current.ambiguous_addresses
+            and item.identity
+            and item.identity.mac
+            and old.get(item.address) == item.key
+            and prior_counts[item.key] == current_counts[item.key] == 1
+        }
+        if not confirmed:
+            return (), ()
+        samples, issues = await read(
+            tuple(confirmed), previous.checked_at, current.checked_at
+        )
+        return (
+            tuple(
+                DnsActivityWindow(device, previous.checked_at, sample)
+                for device, sample in zip(confirmed.values(), samples, strict=True)
+            )
+            if samples
+            else (),
+            issues,
+        )
 
     async def collect(
         self,
@@ -191,7 +395,7 @@ class NetworkCollector:
                 )
             observed = utc_now()
             labels = {label.address: label.label for label in self.plan.labels}
-            devices = {
+            configured = {
                 address: DeviceIdentity(
                     address,
                     "ip:" + address,
@@ -205,6 +409,7 @@ class NetworkCollector:
                 )
                 for address in self.plan.targets
             }
+            devices = configured.copy()
             dns = imported.dns if imported else ()
             window = None
             if self.device_source is not None:
@@ -253,6 +458,25 @@ class NetworkCollector:
                         and not any(issue.startswith("dns_") for issue in issues),
                     )
                 issues = list(dict.fromkeys(issues))
+            if self.identity_source is not None:
+                sample = await self._identity_sample(observed)
+                issues.extend(sample.issues)
+                for address in sample.ambiguous_addresses:
+                    devices[address] = configured[address]
+                conflict = False
+                for item in sample.devices:
+                    previous_identity = devices[item.address]
+                    if previous_identity.mac and item.mac != previous_identity.mac:
+                        devices[item.address] = configured[item.address]
+                        conflict = True
+                    else:
+                        devices[item.address] = replace(
+                            item, label=labels.get(item.address)
+                        )
+                if conflict:
+                    issues.append(
+                        "identity_conflict: UniFi and Pi-hole disagreed on a selected IP's MAC address"
+                    )
             snapshot = Snapshot(
                 imported.observed_at if imported else observed,
                 tuple(observations),
@@ -319,3 +543,24 @@ class NetworkCollector:
                 "Evidence exceeds the retained artifact size limit; reduce optional metadata or scope"
             )
         return evidence
+
+
+async def _quick_connect(address: str, port: int, timeout: float) -> bool:
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(address, port), timeout
+        )
+    except TimeoutError:
+        return False
+    except OSError as error:
+        if error.errno in {errno.ECONNREFUSED, errno.EHOSTUNREACH, errno.ETIMEDOUT}:
+            return False
+        # A missing route, permission failure or socket exhaustion is a failed sweep,
+        # not evidence that all of its devices were absent.
+        raise
+    writer.close()
+    try:
+        await asyncio.wait_for(writer.wait_closed(), timeout)
+    except (TimeoutError, ConnectionError):
+        pass
+    return True

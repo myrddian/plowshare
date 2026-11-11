@@ -26,6 +26,7 @@ import io.aeyer.plowshare.server.hooks.StepPost;
 import io.aeyer.plowshare.server.hooks.Tier;
 import io.aeyer.plowshare.server.hooks.ToolPost;
 import io.aeyer.plowshare.server.hooks.ToolPre;
+import io.aeyer.plowshare.server.hooks.script.ScriptLocation;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.information.InformationActor;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
@@ -39,8 +40,10 @@ import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
+import io.aeyer.plowshare.server.llm.dispatch.ModelResponseRejected;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import io.aeyer.plowshare.server.todos.TodoLists;
 import java.time.Duration;
 import java.time.Instant;
@@ -2189,21 +2192,10 @@ public final class JobRuntime {
                     ? search.scripted()
                     : tool instanceof TodoTools.Write write ? write.scripted() : tool);
     HookContext context = declared.holding(offered.keySet());
-    String hash;
-    try {
-      hash =
-          "sha256:"
-              + java.util.HexFormat.of()
-                  .formatHex(
-                      java.security.MessageDigest.getInstance("SHA-256")
-                          .digest(
-                              definition
-                                  .prompt()
-                                  .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-    } catch (java.security.NoSuchAlgorithmException impossible) {
-      throw new IllegalStateException(impossible);
-    }
-    var previous = scripts.latest(conversation).orElse(null);
+    String hash = ScriptProgram.sourceHash(definition.prompt());
+    var head = scripts.head(conversation);
+    var repair = head.repair().orElse(null);
+    var previous = head.step().orElse(null);
     int callsBefore = budget.spent();
     int taken = 0;
     while (!cancelled.getAsBoolean()) {
@@ -2216,7 +2208,9 @@ public final class JobRuntime {
             budget.spent() - callsBefore,
             "");
       if (informationInputs != null) informationInputs.requireLog(conversation, owner);
-      if (previous != null && !previous.hash().equals(hash))
+      if (previous != null
+          && !previous.hash().equals(hash)
+          && (repair == null || !repair.crosses(previous, hash)))
         throw new IllegalStateException("script source differs from the pinned journal");
       boolean resuming = previous != null && previous.result() == null;
       if (resuming
@@ -2262,13 +2256,71 @@ public final class JobRuntime {
         io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Preparation next;
         try {
           next =
-              scripts.prepareNext(
-                  definition.prompt(), input, definition.nativeOnly() || !budget.exhausted());
+              repair == null
+                  ? scripts.prepareNext(
+                      definition.prompt(), input, definition.nativeOnly() || !budget.exhausted())
+                  : scripts.prepareNext(definition.prompt(), input, repair);
         } catch (IllegalStateException failed) {
+          String file = ScriptProgram.fileName(definition.name(), definition.origin());
+          var location =
+              failed instanceof ScriptProgram.Failure script
+                  ? script.location()
+                  : Optional.<ScriptLocation>empty();
+          String site = location.map(at -> at.at(file)).orElse(file);
+          String identity =
+              "conversation=%s project=%s account=%s script=%s"
+                  .formatted(
+                      conversation, home.isGlobal() ? "(global)" : home.project(), owner, site);
+          if (repair == null
+              && transcript.origin() == io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION) {
+            var block = scripts.blockedReport(owner, previous);
+            if (block.isPresent()) {
+              var refusal = block.get();
+              String reason = refusal.operatorMessage() + " [" + identity + "]";
+              log.warn(
+                  "Report save blocked before command {} [{}] requestId={}",
+                  sequence,
+                  identity,
+                  refusal.requestId());
+              var diagnostic =
+                  new com.fasterxml.jackson.databind.ObjectMapper()
+                      .createObjectNode()
+                      .put("code", "REPORT_SAVE_BLOCKED")
+                      .put("command", refusal.sequence())
+                      .put("requestId", refusal.requestId().toString())
+                      .put("draftCommitted", false)
+                      .put("conversationId", conversation)
+                      .put("project", home.project())
+                      .put("account", owner)
+                      .put("script", file)
+                      .put("message", reason);
+              location.ifPresent(
+                  at -> diagnostic.put("line", at.line()).put("column", at.column()));
+              transcript.record(LoggedEntry.notice(diagnostic.toString()));
+              return new Outcome(
+                  Ending.UNAVAILABLE, reason, taken, budget.spent() - callsBefore, reason);
+            }
+          }
           // Script evaluation includes output validation. Keep its reason and the
           // completed work counts instead of falling through JobStore's last resort.
-          String reason = "Script stopped before command " + sequence + ": " + failed.getMessage();
-          log.warn("{} in {}", reason, conversation, failed);
+          String reason =
+              "Script stopped before command "
+                  + sequence
+                  + " ["
+                  + identity
+                  + "]: "
+                  + failed.getMessage();
+          if (failed instanceof ScriptProgram.Failure) {
+            log.warn(
+                "Script stopped before command {} [{}]: {}",
+                sequence,
+                identity,
+                failed.getMessage().replaceAll("\\p{Cntrl}", " "));
+            log.debug("Script failure cause [{}]", identity, failed);
+          } else {
+            log.warn(reason, failed);
+          }
+          transcript.record(LoggedEntry.notice(reason));
           return new Outcome(
               Ending.UNAVAILABLE,
               reason + ". Completed command results remain retained in the journal.",
@@ -2357,6 +2409,34 @@ public final class JobRuntime {
         throw new IllegalStateException(
             "a hook changed a cached command's arguments; its paid result cannot be reused for a different request");
       if (raw == null) {
+        // Preparation checked the original command. Recheck a recovered prepared command or
+        // a hook rewrite against the current snapshot before any effect.
+        if (repair != null
+            && (resuming
+                || !io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.sameArguments(
+                    arguments, pre.arguments())))
+          scripts.requireRepairEffect(
+              conversation,
+              pending.sequence(),
+              new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool(
+                  name, pre.arguments(), command.readinessObserver()),
+              input.todos(),
+              repair);
+        var retainedInputs =
+            pending.retryOfReport() == null
+                ? Optional.<Set<java.util.UUID>>empty()
+                : scripts.reportRetryInputs(owner, pending.retryOfReport());
+        if (pending.retryOfReport() != null
+            && (retainedInputs.isEmpty()
+                || !(tool instanceof InformationTool)
+                || !io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.sameArguments(
+                    arguments, pre.arguments()))) {
+          String reason =
+              "Report save retry blocked: the original receipt or exact reviewed command is unavailable.";
+          transcript.record(LoggedEntry.notice(reason));
+          return new Outcome(
+              Ending.UNAVAILABLE, reason, taken, budget.spent() - callsBefore, reason);
+        }
         scripts.started(conversation, pending.sequence(), pre.arguments());
         watch.scriptCommand(
             definition.name(), tool.schema().name(), taken, budget.spent() - callsBefore);
@@ -2369,12 +2449,17 @@ public final class JobRuntime {
         // The offered set enforces the admitted definition's internal grants. Each tool owns
         // resource/lifecycle checks; external proxies also recheck their provider authority.
         try {
-          raw =
-              usable(
-                  transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                      ? tool.run(pre.arguments(), home)
-                      : tool.run(pre.arguments(), home, usageFor(transcript, definition, taken)),
-                  name);
+          if (retainedInputs.isPresent() && tool instanceof InformationTool information) {
+            raw =
+                usable(information.retryReport(pre.arguments(), home, retainedInputs.get()), name);
+          } else {
+            raw =
+                usable(
+                    transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                        ? tool.run(pre.arguments(), home)
+                        : tool.run(pre.arguments(), home, usageFor(transcript, definition, taken)),
+                    name);
+          }
           if (operation != null) operations.require(operation);
         } catch (AgentRunTool.SubAgentFailed child) {
           // A dependency failure is an ordinary terminal child outcome, not a runtime bug.
@@ -2952,6 +3037,8 @@ public final class JobRuntime {
     int steps = 0;
     int modelCalls = 0;
     boolean answerReviewed = false;
+    boolean regenerateResponse = false;
+    boolean responseRetryUsed = false;
     // CALL FAILURES, per turn (spec 2026-09-28-call-failures §3-§4): a reply that writes a
     // call as text is held and warned about, each one in a row takes a warning from this
     // allowance, and a real tool call restores it. `mustCallNext` is one request's worth and
@@ -3073,6 +3160,8 @@ public final class JobRuntime {
       // calls are judged against it below.
       boolean forced = mustCallNext;
       mustCallNext = false;
+      boolean regenerating = regenerateResponse;
+      regenerateResponse = false;
       try {
         // Streamed, and the reason is a wall clock rather than a wish to
         // show tokens. Measured 2026-09-02 against qwen3.5-9b: a
@@ -3119,7 +3208,7 @@ public final class JobRuntime {
                 systemRequest(
                     requiring(
                         route
-                            .requestFor(history)
+                            .requestFor(regenerating ? regenerationHistory(history) : history)
                             .withAttribution(usageFor(transcript, definition, steps + 1))
                             .withAuthorization(
                                 operation == null
@@ -3128,16 +3217,51 @@ public final class JobRuntime {
                                     : inferenceCalls == null
                                         ? () -> operations.require(operation)
                                         : inferenceCalls.claimed(operation, claimed.orElseThrow()))
-                            .withTools(forced ? withTheWayOut(schemas) : schemas),
+                            .withTools(
+                                regenerating
+                                    ? List.of()
+                                    : forced ? withTheWayOut(schemas) : schemas),
                         extras,
                         schemas,
                         forced),
                     claimed.orElseThrow()),
                 timed.timing(
                     informationStream(
-                        watch.streaming() ? watching(watch) : DISCARDS,
+                        !regenerating && watch.streaming() ? watching(watch) : DISCARDS,
                         transcript.conversationId())),
                 cancelled);
+      } catch (ModelResponseRejected rejected) {
+        if (informationInputs != null
+            && !informationInputs.logAllowed(transcript.conversationId(), owner))
+          return stopped(
+              Ending.UNAVAILABLE,
+              "An information input became unavailable; no answer was delivered.",
+              trail,
+              steps,
+              modelCalls,
+              "");
+        steps++;
+        recordRejectedResponse(transcript, home, owner, rejected);
+        // A turn with a required tool cannot be repaired by accepting a prose answer.
+        // Re-enter the normal admission loop so the extra call spends its own allowance.
+        if (responseRetryUsed
+            || extras.requiresAToolCall()
+            || forced
+            || rejected.reason() == ModelResponseRejected.Reason.GUARD_UNAVAILABLE
+            || cap.stops(steps)
+            || budget.exhausted()
+            || cancelled.getAsBoolean()) {
+          return stopped(
+              Ending.UNAVAILABLE,
+              "The model returned an invalid response.",
+              trail,
+              steps,
+              modelCalls,
+              rejected.getMessage());
+        }
+        responseRetryUsed = true;
+        regenerateResponse = true;
+        continue;
       } catch (CallerAbandonedException cancelledMidStream) {
         // The run was cancelled while the model was still generating.
         //
@@ -3254,6 +3378,24 @@ public final class JobRuntime {
         transcript.answerMeasured(completionTokens);
       }
 
+      if (regenerating
+          && (!completion.toolCalls().isEmpty()
+              || completion.content().isBlank()
+              || "length".equals(completion.finishReason())
+              || WrittenCalls.writtenIn(completion.content(), offered).isPresent()
+              || WrittenCalls.writesToolEnvelope(completion.content()))) {
+        transcript.record(
+            LoggedEntry.diagnostic(
+                "Model response regeneration did not return a complete answer without tools."));
+        return stopped(
+            Ending.UNAVAILABLE,
+            "The model could not regenerate a complete answer without tools.",
+            trail,
+            steps,
+            modelCalls,
+            "");
+      }
+
       // The forced request answered with nothing but the way out: the call the held draft
       // wrote was an example, and the draft is the answer, delivered down the ordinary
       // answer path below -- prompt.post, the mandatory reviewer if any, the ANSWER entry.
@@ -3336,6 +3478,15 @@ public final class JobRuntime {
                 firstTokenMillis);
         route.called(call, modelCallTook);
         if (refusal.isPresent()) {
+          if (regenerating) {
+            return stopped(
+                Ending.UNAVAILABLE,
+                "The model declined to regenerate an answer.",
+                trail,
+                steps,
+                modelCalls,
+                "");
+          }
           Rerouting.Decision decision =
               route.refused(call, refusal.get(), completion.content(), modelCallTook);
           if (decision == Rerouting.Decision.REROUTED) {
@@ -5235,6 +5386,40 @@ public final class JobRuntime {
 
   private long tookMs(long began) {
     return Math.max(0, (ticker.getAsLong() - began) / 1_000_000);
+  }
+
+  private static List<ChatMessage> regenerationHistory(List<ChatMessage> history) {
+    List<ChatMessage> retry = new ArrayList<>(history);
+    retry.add(
+        ChatMessage.user(
+            "The previous response could not be parsed. Give a complete answer using the existing conversation "
+                + "and tool results. If the evidence is insufficient, say what is missing. "
+                + "Do not call tools, emit protocol markup, or claim a new action was performed."));
+    return retry;
+  }
+
+  private static void recordRejectedResponse(
+      Transcript transcript, Home home, String owner, ModelResponseRejected rejected) {
+    var completion = rejected.completion();
+    var served = completion.servedBy();
+    var receipt = completion.capture() == null ? null : completion.capture().callId();
+    String metadata =
+        "conversation=%s project=%s account=%s pool=%s model=%s receipt=%s"
+            .formatted(
+                transcript.conversationId(),
+                home.project(),
+                owner,
+                served == null ? null : served.pool(),
+                served == null ? null : served.wireModel(),
+                receipt);
+    log.warn("{} [{}]", rejected.getMessage(), metadata);
+    String content = completion.content();
+    // The filtered text stays in the authorized trajectory, never in the next prompt or server
+    // logs.
+    String excerpt =
+        content.length() <= 8192 ? content : content.substring(0, 8192) + "\n[truncated]";
+    transcript.record(
+        LoggedEntry.diagnostic(rejected.getMessage() + " [" + metadata + "]\n" + excerpt));
   }
 
   /**

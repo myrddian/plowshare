@@ -165,6 +165,16 @@ class DnsObservation:
         )
 
 
+def mac_address(value: object) -> str:
+    mac = text(value, 17).lower()
+    if not re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", mac) or mac in {
+        "00:00:00:00:00:00",
+        "ff:ff:ff:ff:ff:ff",
+    }:
+        raise ValueError("Invalid device MAC address")
+    return mac
+
+
 @dataclass(frozen=True)
 class DeviceIdentity:
     """A time-specific address association, not proof of a physical device's identity."""
@@ -175,7 +185,7 @@ class DeviceIdentity:
     hostname: str | None
     mac: str | None
     vendor: str | None
-    source: Literal["configured", "pihole-v6"]
+    source: Literal["configured", "pihole-v6", "unifi"]
     observed_at: str
     last_seen: str | None
 
@@ -196,18 +206,17 @@ class DeviceIdentity:
             },
         )
         address = str(ipaddress.ip_address(text(row["address"])))
-        mac = text(row["mac"], 17).lower() if row["mac"] is not None else None
-        if mac is not None and (
-            not re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", mac)
-            or mac in {"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"}
-        ):
-            raise ValueError("Invalid device MAC address")
+        mac = mac_address(row["mac"]) if row["mac"] is not None else None
         expected = "mac:" + mac if mac else "ip:" + address
-        if row["device_id"] != expected or row["source"] not in {
+        source = row["source"]
+        if row["device_id"] != expected or source not in (
             "configured",
             "pihole-v6",
-        }:
+            "unifi",
+        ):
             raise ValueError("Invalid device identity provenance")
+        if source == "unifi" and mac is None:
+            raise ValueError("UniFi association requires a client MAC address")
         if row["source"] == "configured" and (
             mac is not None
             or row["hostname"] is not None
@@ -222,7 +231,11 @@ class DeviceIdentity:
             text(row["hostname"], 128) if row["hostname"] is not None else None,
             mac,
             text(row["vendor"], 96) if row["vendor"] is not None else None,
-            "pihole-v6" if row["source"] == "pihole-v6" else "configured",
+            "unifi"
+            if source == "unifi"
+            else "pihole-v6"
+            if source == "pihole-v6"
+            else "configured",
             timestamp(row["observed_at"]),
             timestamp(row["last_seen"]) if row["last_seen"] is not None else None,
         )
@@ -307,6 +320,16 @@ class Snapshot:
         return cls(timestamp(row["observed_at"]), tcp, dns, devices, window)
 
 
+_PRIVATE_IPV4 = tuple(
+    ipaddress.IPv4Network(block)
+    for block in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+
+
+def private_ipv4(address: str) -> bool:
+    return any(ipaddress.ip_address(address) in block for block in _PRIVATE_IPV4)
+
+
 def expand_targets(value: object) -> tuple[str, ...]:
     """Expand an explicit private IPv4 CIDR, preserving a bounded, frozen scope.
 
@@ -315,16 +338,12 @@ def expand_targets(value: object) -> tuple[str, ...]:
     caller intent. Explicit historical address configurations remain supported.
     """
     result: list[str] = []
-    private = tuple(
-        ipaddress.IPv4Network(block)
-        for block in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-    )
     for entry in items(value, MAX_TARGETS):
         address = text(entry, 64)
         if "/" in address:
             network = ipaddress.IPv4Network(address, strict=True)
             if network.num_addresses > MAX_TARGETS or not any(
-                network.subnet_of(block) for block in private
+                network.subnet_of(block) for block in _PRIVATE_IPV4
             ):
                 raise ValueError(
                     "Choose a private IPv4 subnet of at most 256 addresses (/24 or smaller)"
@@ -447,6 +466,74 @@ class PiHolePlan:
 
 
 @dataclass(frozen=True)
+class UniFiGateway:
+    device_id: str
+    lan_mac: str
+
+    @classmethod
+    def decode(cls, value: object) -> UniFiGateway:
+        row = object_fields(value, {"deviceId", "lanMac"})
+        return cls(uuid(row["deviceId"]), mac_address(row["lanMac"]))
+
+
+@dataclass(frozen=True)
+class UniFiPlan:
+    api_base: str
+    site_id: str
+    api_key_environment: str
+    ca_file: Path | None
+    certificate_sha256: str | None = None
+    gateway: UniFiGateway | None = None
+
+    @classmethod
+    def decode(cls, value: object) -> UniFiPlan:
+        row = object_fields(
+            value,
+            {"apiBase", "siteId", "apiKeyEnvironment"},
+            {"caFile", "certificateSha256", "gateway"},
+        )
+        base = text(row["apiBase"], 2048).rstrip("/")
+        url = urlsplit(base)
+        if (
+            url.scheme != "https"
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.query
+            or url.fragment
+            or url.path not in ("/proxy/network/integration/v1", "/integration/v1")
+            or any(c.isspace() for c in base)
+        ):
+            raise ValueError(
+                "Configure the local UniFi HTTPS Network Integration API base"
+            )
+        url.port
+        environment = text(row["apiKeyEnvironment"], 128)
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", environment):
+            raise ValueError("Invalid UniFi API key environment name")
+        ca_file = Path(text(row["caFile"], 4096)) if "caFile" in row else None
+        if ca_file is not None and (
+            not ca_file.is_absolute() or ca_file.resolve() != ca_file
+        ):
+            raise ValueError("UniFi CA file must be an absolute, unlinked path")
+        fingerprint = (
+            text(row["certificateSha256"], 64).lower()
+            if "certificateSha256" in row
+            else None
+        )
+        if fingerprint is not None and not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise ValueError("UniFi certificate pin must be a SHA-256 hex digest")
+        if ca_file is not None and fingerprint is not None:
+            raise ValueError("Choose either a UniFi CA file or a certificate pin")
+        gateway = UniFiGateway.decode(row["gateway"]) if "gateway" in row else None
+        if gateway is not None and not private_ipv4(url.hostname):
+            raise ValueError("A UniFi gateway binding requires a private IPv4 API host")
+        return cls(
+            base, uuid(row["siteId"]), environment, ca_file, fingerprint, gateway
+        )
+
+
+@dataclass(frozen=True)
 class CollectionPlan:
     mode: Literal["tcp", "fixture"]
     targets: tuple[str, ...]
@@ -458,6 +545,9 @@ class CollectionPlan:
     enabled: bool = True
     labels: tuple[DeviceLabel, ...] = ()
     pihole: PiHolePlan | None = None
+    unifi: UniFiPlan | None = None
+    quick_scan: bool = False
+    dns_profiles: bool = False
 
 
 @dataclass(frozen=True)
@@ -532,6 +622,9 @@ class Configuration:
                 "enabled",
                 "deviceLabels",
                 "pihole",
+                "unifi",
+                "quickScan",
+                "dnsProfiles",
             },
         )
         mode = plan["mode"]
@@ -552,6 +645,9 @@ class Configuration:
             collection = CollectionPlan("fixture", (), (), 1.0, 1, observations, 0)
         else:
             enabled = plan.get("enabled", True)
+            quick_scan = plan.get("quickScan", False)
+            if type(quick_scan) is not bool:
+                raise ValueError("Quick presence scan must be a boolean")
             if type(enabled) is not bool:
                 raise ValueError("TCP collection enabled must be a boolean")
             if not {"targets", "ports", "timeoutSeconds", "concurrency"} <= set(plan):
@@ -559,6 +655,8 @@ class Configuration:
                     "TCP collection requires explicit targets, ports and limits"
                 )
             targets = expand_targets(plan["targets"])
+            if quick_scan and not all(private_ipv4(address) for address in targets):
+                raise ValueError("Quick presence scans require private IPv4 addresses")
             ports = tuple(
                 integer(item, 1, 65535) for item in items(plan["ports"], MAX_PORTS)
             )
@@ -588,6 +686,13 @@ class Configuration:
                 else 0
             )
             pihole = PiHolePlan.decode(plan["pihole"]) if "pihole" in plan else None
+            dns_profiles = plan.get("dnsProfiles", False)
+            if type(dns_profiles) is not bool:
+                raise ValueError("DNS activity profiles must be a boolean")
+            if dns_profiles and (not quick_scan or pihole is None):
+                raise ValueError(
+                    "DNS activity profiles require quick presence checks and Pi-hole"
+                )
             if pihole is not None and observations is not None:
                 raise ValueError("Choose either Pi-hole or a DNS observation file")
             collection = CollectionPlan(
@@ -601,6 +706,9 @@ class Configuration:
                 enabled,
                 device_labels(plan.get("deviceLabels", {}), targets),
                 pihole,
+                UniFiPlan.decode(plan["unifi"]) if "unifi" in plan else None,
+                quick_scan,
+                dns_profiles,
             )
         tokens = (
             identifier(row["tokenEnvironment"]),
@@ -608,6 +716,11 @@ class Configuration:
         )
         if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in tokens):
             raise ValueError("Invalid credential environment name")
+        if collection.unifi and collection.unifi.api_key_environment in (
+            *tokens,
+            collection.pihole.password_environment if collection.pihole else None,
+        ):
+            raise ValueError("Use a separate credential environment variable for UniFi")
         request_topic, result_topic = (
             identifier(row["requestTopic"]),
             identifier(row["resultTopic"]),

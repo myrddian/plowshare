@@ -190,6 +190,7 @@ var operationNames = []string{
 	"orchestration.list",
 	"orchestration.receipt",
 	"orchestration.record",
+	"orchestration.repair",
 	"orchestration.resume",
 	"orchestration.start",
 	"orchestration.status",

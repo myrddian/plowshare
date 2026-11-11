@@ -89,6 +89,63 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         with FileReceipts(self.worker.config) as reopened:
             self.assertEqual(reopened.all(), ())
 
+    async def test_quick_scan_setting_defaults_off_and_survives_older_settings_clients(
+        self,
+    ) -> None:
+        self.assertFalse(self.settings.view().quick_scan)
+        saved = await self.settings.save(replace(CHOICE, quick_scan=True))
+        self.assertTrue(saved.quick_scan)
+        self.assertFalse(self.worker.config.collection.quick_scan)
+        await self.settings.apply_pending()
+        await self.settings.save(CHOICE)
+        await self.settings.apply_pending()
+        self.assertTrue(Configuration.read(self.path).collection.quick_scan)
+        with self.assertRaisesRegex(ValueError, "must be a boolean"):
+            MonitorChoice.decode(
+                {
+                    "enabled": True,
+                    "targets": ["192.168.0.12"],
+                    "ports": [443],
+                    "quickScan": None,
+                }
+            )
+
+    async def test_dns_profiles_require_pihole_and_follow_quick_check_settings(
+        self,
+    ) -> None:
+        self.assertFalse(self.settings.view().dns_profiles)
+        with self.assertRaisesRegex(
+            ValueError, "require quick presence checks and Pi-hole"
+        ):
+            await self.settings.save(
+                replace(CHOICE, quick_scan=True, dns_profiles=True)
+            )
+        with self.assertRaisesRegex(ValueError, "must be a boolean"):
+            MonitorChoice.decode(
+                {
+                    "enabled": True,
+                    "targets": ["192.168.0.12"],
+                    "ports": [443],
+                    "dnsProfiles": None,
+                }
+            )
+        secret = self.root / "fixture-pihole-password"
+        secret.write_text("fixture-secret")
+        secret.chmod(0o600)
+        await self.settings.save_pihole(
+            PiHolePlan.decode(
+                {"origin": "https://pihole.example", "passwordFile": str(secret)}
+            )
+        )
+        await self.settings.save(replace(CHOICE, quick_scan=True, dns_profiles=True))
+        await self.settings.apply_pending()
+        self.assertTrue(self.worker.config.collection.dns_profiles)
+        await self.settings.save(CHOICE)
+        self.assertTrue(self.settings.view().dns_profiles)
+        await self.settings.save(replace(CHOICE, quick_scan=False))
+        await self.settings.apply_pending()
+        self.assertFalse(self.worker.config.collection.dns_profiles)
+
     async def test_completed_evidence_survives_scope_change_and_restart(self) -> None:
         await self.settings.save(CHOICE)
         await self.settings.apply_pending()

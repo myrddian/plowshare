@@ -26,7 +26,41 @@ class NetworkPrivacyInvestigationTest {
       "## Facts\nActual analyst response: \"timeout\", not closed.\n\nGap: DNS unavailable.";
   private static final String CORRECTION =
       "## Facts\nTCP timeout; no claim of a closed port or exfiltration.\n\nGap: DNS unavailable.";
+  private static final String RAW_TOOL_CALL =
+      "<|start|>assistant<|channel|>commentary to=functions.network_scan_list"
+          + " {\"offset\":0,\"limit\":10}<|call|>";
   private static final ObjectMapper JSON = new ObjectMapper();
+
+  @Test
+  void relay_completion_enters_the_evidence_stage_without_an_sdk_kind_field() throws Exception {
+    var host = new Host();
+    host.setRequest(
+        Map.of(
+            "subscription", "event",
+            "topic", "privacy.scan.completed",
+            "schemaVersion", 1,
+            "position", "1",
+            "payload", Map.of("text", host.completion)));
+    host.next();
+    host.ackTodo();
+    assertEquals("information_read", host.command.path("tool").asText());
+    assertEquals(
+        CURRENT, host.command.path("arguments").path("sources").get(0).path("revision").asText());
+  }
+
+  @Test
+  void untyped_payloads_require_the_completion_topic_and_schema() throws Exception {
+    var host = new Host();
+    var payload = Map.of("text", host.completion);
+    for (var invalid :
+        java.util.List.<Map<String, ?>>of(
+            Map.of("payload", payload),
+            Map.of("topic", "privacy.scan.requests", "schemaVersion", 1, "payload", payload),
+            Map.of("topic", "privacy.scan.completed", "schemaVersion", 2, "payload", payload))) {
+      host.setRequest(invalid);
+      assertThrows(IllegalStateException.class, host::next);
+    }
+  }
 
   @Test
   void actual_assessment_and_complete_sources_cross_the_review_boundary_and_form_one_draft()
@@ -79,10 +113,56 @@ class NetworkPrivacyInvestigationTest {
   }
 
   @Test
+  void review_note_lists_are_retained_in_order() throws Exception {
+    var host = new Host();
+    host.advanceTo("privacy_reviewer");
+    host.accept(
+        """
+        {"verdict":"needs_corrections","assessment":"Corrected assessment",
+         "notes":["First correction","Remaining gap"]}
+        """);
+    host.finish();
+    assertEquals(1, host.writes);
+    assertTrue(host.report.path("text").asText().contains("First correction\n\nRemaining gap"));
+  }
+
+  @Test
   void absent_assessment_stops_before_review_or_report() throws Exception {
     var host = new Host();
     host.advanceTo("privacy_analyst");
     assertThrows(IllegalStateException.class, () -> host.accept(" \n "));
+    assertEquals(0, host.writes);
+  }
+
+  @Test
+  void raw_tool_call_text_stops_before_review_or_report() throws Exception {
+    for (String response :
+        new String[] {
+          RAW_TOOL_CALL, " \n" + RAW_TOOL_CALL.substring("<|start|>assistant".length())
+        }) {
+      var host = new Host();
+      host.advanceTo("privacy_analyst");
+      var failure = assertThrows(IllegalStateException.class, () -> host.accept(response));
+      assertTrue(
+          failure.getMessage().contains("Invalid analyst assessment: raw model protocol markup"));
+      assertFalse(failure.getMessage().contains("network_scan_list"));
+      assertTrue(host.input.path("state").path("assessment").isNull());
+      assertEquals("privacy_analyst", host.command.path("arguments").path("agent").asText());
+      assertEquals(0, host.writes);
+    }
+  }
+
+  @Test
+  void raw_tool_call_text_in_a_review_cannot_become_a_draft() throws Exception {
+    var host = new Host();
+    host.advanceTo("privacy_reviewer");
+    String review =
+        JSON.writeValueAsString(
+            Map.of(
+                "verdict", "needs_corrections", "assessment", RAW_TOOL_CALL, "notes", "Reviewed"));
+    var failure = assertThrows(IllegalStateException.class, () -> host.accept(review));
+    assertTrue(
+        failure.getMessage().contains("Invalid reviewed assessment: raw model protocol markup"));
     assertEquals(0, host.writes);
   }
 
@@ -97,6 +177,8 @@ class NetworkPrivacyInvestigationTest {
           "Information request refused: no access",
           "not JSON",
           "{\"verdict\":\"accepted\",\"notes\":\"ok\",\"assessment\":\"\"}",
+          "{\"verdict\":\"accepted\",\"notes\":[],\"assessment\":\"text\"}",
+          "{\"verdict\":\"accepted\",\"notes\":[\"ok\",{}],\"assessment\":\"text\"}",
           "{\"verdict\":\"guessed\",\"notes\":\"ok\",\"assessment\":\"text\"}"
         }) {
       var host = new Host();
@@ -175,6 +257,7 @@ class NetworkPrivacyInvestigationTest {
                 .resolve("orchestrations/investigate_network.js"));
     final ObjectNode input = JSON.createObjectNode();
     final Map<String, String> sources = new LinkedHashMap<>();
+    final String completion;
     JsonNode command;
     JsonNode report;
     String writeRequest;
@@ -208,7 +291,7 @@ class NetworkPrivacyInvestigationTest {
                   "tcp",
                   "padding",
                   "baseline evidence ".repeat(600))));
-      String completion =
+      completion =
           JSON.writeValueAsString(
               Map.of(
                   "version",
@@ -225,14 +308,17 @@ class NetworkPrivacyInvestigationTest {
                   java.util.List.of(),
                   "issues",
                   java.util.List.of("DNS unavailable")));
-      String request =
-          JSON.writeValueAsString(Map.of("payload", Map.of("kind", "TEXT", "text", completion)));
-      input.put("message", JSON.writeValueAsString(Map.of("request", request)));
+      setRequest(Map.of("payload", Map.of("kind", "TEXT", "text", completion)));
       input.putNull("state");
       input.putNull("result");
       var todos = input.putArray("todos");
       for (String stage : new String[] {"inspect", "assess", "retain"})
         todos.addObject().put("id", stage).put("stageId", stage).put("status", "pending");
+    }
+
+    void setRequest(Map<String, ?> request) throws Exception {
+      input.put(
+          "message", JSON.writeValueAsString(Map.of("request", JSON.writeValueAsString(request))));
     }
 
     void next() throws Exception {

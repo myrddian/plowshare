@@ -271,6 +271,7 @@ export const WAIT_OPERATIONS: readonly Operation[] = [
   'orchestration.status',
   'orchestration.receipt',
   'orchestration.resume',
+  'orchestration.repair',
 ];
 
 export interface Transport {
@@ -831,6 +832,7 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
     (asked.type === 'orchestration.answer' ||
       asked.type === 'orchestration.cancel' ||
       asked.type === 'orchestration.resume' ||
+      asked.type === 'orchestration.repair' ||
       asked.type === 'approval.revoke') &&
     body?.['id'] !== asked.payload.id
   )
@@ -844,7 +846,10 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
     // its conductor continued it without returning a job handle.
     return { kind: 'completed', outcome };
   }
-  if (asked.type === 'orchestration.resume') {
+  if (
+    asked.type === 'orchestration.resume' ||
+    asked.type === 'orchestration.repair'
+  ) {
     return { kind: 'completed', outcome, orchestration: asked.payload.id };
   }
   if (asked.type === 'memory.navigate') {

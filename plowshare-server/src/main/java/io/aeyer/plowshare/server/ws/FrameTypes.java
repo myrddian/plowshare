@@ -813,6 +813,8 @@ public final class FrameTypes {
   /** Explicit recovery of a failed orchestration root. */
   public static final String ORCHESTRATION_RESUME = "orchestration.resume";
 
+  public static final String ORCHESTRATION_REPAIR = "orchestration.repair";
+
   /**
    * A project's caps, read and applied to its live runs — spec 2026-09-29 §2. {@link CapsFrames}.
    */

@@ -88,6 +88,58 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.query_clients, [])
         self.assertEqual(self.calls[-1], ("DELETE", "/api/auth"))
 
+    async def test_presence_reads_one_table_and_keeps_valid_rows_in_partial_response(
+        self,
+    ) -> None:
+        self.mode = "partial_identity"
+        targets = (ADDRESS, *(f"192.0.2.{n}" for n in range(30, 90)))
+        result = await PiHoleV6(self.plan).presence(targets, utc_now())
+        self.assertEqual(
+            [(device.address, device.mac) for device in result.devices],
+            [(ADDRESS, MAC)],
+        )
+        self.assertTrue(
+            any(issue.startswith("identity_partial:") for issue in result.issues)
+        )
+        self.assertEqual(
+            self.calls,
+            [
+                ("POST", "/api/auth"),
+                ("GET", "/api/network/devices"),
+                ("DELETE", "/api/auth"),
+            ],
+        )
+        self.assertEqual(self.query_clients, [])
+
+    async def test_presence_exposes_conflicting_addresses_without_guessing_mac(
+        self,
+    ) -> None:
+        self.mode = "ambiguous"
+        result = await PiHoleV6(self.plan).presence((ADDRESS,), utc_now())
+        self.assertEqual(result.devices, ())
+        self.assertEqual(result.ambiguous_addresses, frozenset({ADDRESS}))
+        self.assertEqual(self.query_clients, [])
+
+    async def test_activity_uses_half_open_query_window_and_records_blocked_status(
+        self,
+    ) -> None:
+        self.mode = "activity"
+        since = datetime.fromtimestamp(self.now - 120, timezone.utc).isoformat()
+        samples, issues = await PiHoleV6(self.plan).activity(
+            (ADDRESS,), since, utc_now()
+        )
+        self.assertEqual(issues, ())
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(
+            [(item.domain, item.queries) for item in samples[0].dns],
+            [("ad.doubleclick.net", 1), ("www.youtube.com", 1)],
+        )
+        self.assertEqual(samples[0].blocked, {"ad.doubleclick.net": 1})
+        self.assertEqual(
+            self.calls,
+            [("POST", "/api/auth"), ("GET", "/api/queries"), ("DELETE", "/api/auth")],
+        )
+
     async def stolen_request(self, request: web.Request) -> web.Response:
         self.stolen = True
         return web.json_response({})
@@ -155,6 +207,14 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         if self.mode == "no_mac":
             devices[0]["hwaddr"] = "ip-" + ADDRESS
             devices[0]["macVendor"] = ""
+        if self.mode == "partial_identity":
+            return web.json_response(
+                {
+                    "devices": [{"ips": None}, *devices],
+                    "took": 0.01,
+                    "newField": "ignored",
+                }
+            )
         return web.json_response({"devices": devices, "took": 0.01})
 
     async def queries(self, request: web.Request) -> web.Response:
@@ -191,6 +251,13 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         if self.mode == "invalid_domain":
             query["domain"] = "_service._tcp.example"
         queries = [query, dict(query, id=101)]
+        if self.mode == "activity":
+            query.update(
+                time=float(request.query["from"]),
+                domain="Ad.DoubleClick.NET.",
+                status="GRAVITY",
+            )
+            queries[1]["domain"] = "www.youtube.com"
         if self.mode == "duplicate":
             queries[1]["id"] = 100
         available = len(queries) + (10 if self.mode == "truncated" else 0)
@@ -498,9 +565,12 @@ class PiHoleConfigurationTest(unittest.TestCase):
             config = configuration(Path(folder))
             plan = config.collection
             old = asdict(plan)
+            old.pop("quick_scan")
+            old.pop("dns_profiles")
             old.pop("enabled")
             old.pop("labels")
             old.pop("pihole")
+            old.pop("unifi")
             old["observations_file"] = str(plan.observations_file)
             self.assertEqual(
                 scope_fingerprint(plan),

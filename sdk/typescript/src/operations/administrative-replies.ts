@@ -337,6 +337,7 @@ export interface AdministrativeReplies {
   'orchestration.answer': OrchestrationAnswered;
   'orchestration.cancel': OrchestrationCancelled;
   'orchestration.resume': OrchestrationAnswered;
+  'orchestration.repair': OrchestrationAnswered;
   'orchestration.caps': CapsView;
   'schedule.save': ScheduleFile;
   'schedule.sync': readonly ScheduleFile[];
@@ -632,6 +633,7 @@ const readers = {
   'orchestration.answer': record({ id: named, state: named }),
   'orchestration.cancel': record({ id: named, state: named }),
   'orchestration.resume': record({ id: named, state: named }),
+  'orchestration.repair': record({ id: named, state: named }),
   'orchestration.caps': record({
     project: named,
     steps: setting,

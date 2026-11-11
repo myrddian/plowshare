@@ -752,7 +752,7 @@ def connect_pihole(setup: Setup, origin: str, application_password: str) -> None
     plan = object_fields(
         row["collection"],
         {"mode", "targets", "ports", "timeoutSeconds", "concurrency"},
-        {"enabled", "deviceLabels"},
+        {"enabled", "deviceLabels", "unifi", "quickScan", "dnsProfiles"},
     )
     path = setup.collector.parent / ("pihole-password-" + str(uuid4()))
     plan["pihole"] = {
@@ -778,6 +778,78 @@ def connect_pihole(setup: Setup, origin: str, application_password: str) -> None
         receipts.complete_scope_change(configured.collection)
     print(
         "Pi-hole v6 configured. Run start, then request a scan to check device and DNS evidence."
+    )
+
+
+def connect_unifi(
+    setup: Setup,
+    api_base: str,
+    site_id: str,
+    key_environment: str,
+    ca_file: Path | None,
+    certificate_sha256: str | None = None,
+) -> None:
+    """Enroll a stopped collector using the same journal fence as a scope change."""
+    config = Configuration.read(setup.collector)
+    if config.collection.mode != "tcp":
+        raise SetupProblem("UniFi needs TCP collection.")
+    if config.collection.unifi is not None:
+        raise SetupProblem(
+            "UniFi is already configured. Rotate its existing environment secret."
+        )
+    row = load_json(setup.collector)
+    if not isinstance(row, dict) or not isinstance(plan := row.get("collection"), dict):
+        raise SetupProblem("Invalid collector configuration.")
+    source = {
+        "apiBase": api_base,
+        "siteId": site_id,
+        "apiKeyEnvironment": key_environment,
+    }
+    if ca_file is not None:
+        source["caFile"] = str(ca_file)
+    if certificate_sha256 is not None:
+        source["certificateSha256"] = certificate_sha256
+    plan["unifi"] = source
+    configured = Configuration.decode(row, setup.collector)
+    with FileReceipts(config) as receipts:
+        if Configuration.read(setup.collector) != config:
+            raise SetupProblem(
+                "Collector configuration changed; review it before connecting UniFi."
+            )
+        receipts.prepare_scope_change(configured.collection)
+        replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
+        receipts.complete_scope_change(configured.collection)
+    print("UniFi configured. Start the collector with the API key in its environment.")
+
+
+def bind_unifi_gateway(setup: Setup, device_id: str, lan_mac: str) -> None:
+    """Bind an operator-confirmed gateway on a stopped collector without changing scope."""
+    config = Configuration.read(setup.collector)
+    if config.collection.unifi is None:
+        raise SetupProblem("Configure UniFi before binding its gateway.")
+    pending = setup.collector.with_name(
+        setup.collector.stem + ".pending" + setup.collector.suffix
+    )
+    if pending.exists():
+        raise SetupProblem(
+            "Apply or review pending collector settings before binding a gateway."
+        )
+    row = load_json(setup.collector)
+    if not isinstance(row, dict) or not isinstance(plan := row.get("collection"), dict):
+        raise SetupProblem("Invalid collector configuration")
+    unifi = plan.get("unifi")
+    if not isinstance(unifi, dict):
+        raise SetupProblem("Missing UniFi configuration")
+    unifi["gateway"] = {"deviceId": device_id, "lanMac": lan_mac}
+    Configuration.decode(row, setup.collector)
+    with FileReceipts(config):
+        if Configuration.read(setup.collector) != config:
+            raise SetupProblem(
+                "Collector configuration changed before the gateway binding was saved."
+            )
+        replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
+    print(
+        "Gateway binding saved. Start the collector to verify the default LAN and adopted-device record."
     )
 
 
@@ -816,6 +888,33 @@ def main() -> None:
     pihole.add_argument(
         "--origin", required=True, help="Explicit Pi-hole HTTP(S) origin"
     )
+    unifi = commands.add_parser(
+        "connect-unifi",
+        help="Configure a stopped collector's local UniFi source offline",
+    )
+    unifi.add_argument(
+        "--api-base", required=True, help="UniFi HTTPS Network Integration API base"
+    )
+    unifi.add_argument("--site-id", required=True, help="UniFi Network site UUID")
+    unifi.add_argument(
+        "--api-key-environment",
+        required=True,
+        help="Environment variable name, not the API key",
+    )
+    unifi_tls = unifi.add_mutually_exclusive_group()
+    unifi_tls.add_argument(
+        "--ca-file", type=Path, help="Absolute path to a private CA PEM file"
+    )
+    unifi_tls.add_argument(
+        "--certificate-sha256",
+        help="Independently verified SHA-256 digest of the controller leaf certificate",
+    )
+    gateway = commands.add_parser(
+        "bind-unifi-gateway",
+        help="Bind a confirmed adopted gateway UUID and LAN MAC on a stopped collector",
+    )
+    gateway.add_argument("--device-id", required=True)
+    gateway.add_argument("--lan-mac", required=True)
     commands.add_parser(
         "install",
         help="Deploy paused once, then issue its reserved service credential",
@@ -894,7 +993,7 @@ def main() -> None:
             return
         if args.directory is None:
             raise SetupProblem(
-                "Set --directory for configure, install, status, start, connect-pihole or serve."
+                "Set --directory to the private collector setup directory."
             )
         root = private_root(args.directory)
         if args.command == "configure":
@@ -958,6 +1057,19 @@ def main() -> None:
             connect_pihole(
                 setup, args.origin, getpass("Pi-hole application password: ")
             )
+            return
+        if args.command == "connect-unifi":
+            connect_unifi(
+                setup,
+                args.api_base,
+                args.site_id,
+                args.api_key_environment,
+                args.ca_file,
+                args.certificate_sha256,
+            )
+            return
+        if args.command == "bind-unifi-gateway":
+            bind_unifi_gateway(setup, args.device_id, args.lan_mac)
             return
         if args.command == "start":
             saved = (

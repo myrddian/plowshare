@@ -14,7 +14,7 @@ operation contract is needed.
 
 ## Prepare the toolchain
 
-Source builds require Java 21, Node.js 22.12 or newer, pnpm 10.34.5 and Python 3
+Source builds require Java 21, Node.js 22.13 or newer, pnpm 10.34.5 and Python 3
 on `PATH`. Use the committed Gradle wrapper. Initial builds download dependencies;
 TypeScript module tasks install with their frozen lockfiles. Docker is needed for
 database integration tests and container image builds, rather than for every

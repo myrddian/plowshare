@@ -1061,6 +1061,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   /** Creation has no revision to lock yet; validate the exact destination and live role. */
   private void requireDestination(InformationContext context) {
+    requireDestination(context, context.selection().includeGlobal());
+  }
+
+  private void requireDestination(InformationContext context, boolean includeGlobal) {
     if (!Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT information_lock_destination(?,?,?,?)",
@@ -1068,7 +1072,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             context.account(),
             context.selection().scope().name().toLowerCase(Locale.ROOT),
             context.selection().project(),
-            context.selection().includeGlobal()))) throw absent();
+            includeGlobal))) throw absent();
   }
 
   public Admission admit(InformationContext context, UUID request, AdmissionWrite write) {
@@ -1091,7 +1095,9 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new CallerFault("shared namespace cannot admit source bytes");
 
-    requireDestination(context);
+    // A report's shared-read selection authorizes its dependencies. The destination lock
+    // authorizes creation in one home; shared reading is not part of that write selection.
+    requireDestination(context, !kind.equals("report") && context.selection().includeGlobal());
 
     // Serialises this idempotency key and this namespace/name across processes, without model
     // calls.
