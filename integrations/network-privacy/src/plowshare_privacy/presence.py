@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
 
 from .contracts import CollectionPlan, DeviceIdentity, timestamp, utc_now
-from .dns_activity import DnsActivity, DnsActivityWindow, classify, group_destinations
+from .dns_activity import (
+    DnsActivity,
+    DnsActivityWindow,
+    group_destinations,
+    pihole_silent,
+    retention_rank,
+)
+from .traffic import TrafficCounter, TrafficVolume, accumulate
 
 WINDOW_SECONDS = 24 * 60 * 60
 MAX_DELAY_SECONDS = 300
@@ -50,6 +57,7 @@ class PresenceSample:
     sightings: tuple[Sighting, ...]
     issues: tuple[str, ...] = ()
     ambiguous_addresses: frozenset[str] = frozenset()
+    traffic: tuple[TrafficCounter, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -68,6 +76,7 @@ class PresenceView:
     sightings: dict[str, Sighting] = field(default_factory=dict)
     counts: dict[str, PresenceCount] = field(default_factory=dict)
     dns: dict[str, DnsActivity] = field(default_factory=dict)
+    traffic: dict[str, TrafficVolume] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -183,6 +192,12 @@ class PresenceHistory:
                     device TEXT NOT NULL, start REAL NOT NULL, read INTEGER NOT NULL,
                     available INTEGER NOT NULL, partial INTEGER NOT NULL,
                     destinations TEXT NOT NULL,
+                    PRIMARY KEY (sweep_id, device)
+                );
+                CREATE TABLE IF NOT EXISTS traffic (
+                    sweep_id INTEGER REFERENCES sweep(id) ON DELETE CASCADE,
+                    device TEXT NOT NULL, to_device INTEGER NOT NULL,
+                    from_device INTEGER NOT NULL,
                     PRIMARY KEY (sweep_id, device)
                 );
                 CREATE TABLE IF NOT EXISTS address_anchor (
@@ -391,6 +406,24 @@ class PresenceHistory:
                 """,
                 (self._dns_row(sweep, item) for item in dns),
             )
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO traffic (sweep_id, device, to_device, from_device)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    # SQLite integers are signed 64-bit; clamp the rare counter
+                    # above that so the row stays valid. accumulate() then sees
+                    # a flat interval, never a fabricated one.
+                    (
+                        sweep,
+                        item.device,
+                        min(item.to_device, 2**63 - 1),
+                        min(item.from_device, 2**63 - 1),
+                    )
+                    for item in sample.traffic
+                ),
+            )
             self._record_associations(
                 connection, scope, checked, sample, sweep, previous_id
             )
@@ -411,7 +444,7 @@ class PresenceHistory:
         ordered = sorted(
             sample.dns,
             key=lambda query: (
-                classify(query.domain)[0] == "unclassified",
+                retention_rank(query.domain),
                 -query.queries,
                 query.domain,
             ),
@@ -469,6 +502,7 @@ class PresenceHistory:
                 read,
                 available,
                 group_destinations(destinations[device]),
+                pihole_silent(windows=windows, partial=partial, available=available),
             )
             for device, start, end, windows, partial, read, available in connection.execute(
                 f"""
@@ -549,7 +583,48 @@ class PresenceHistory:
                         ),
                     )
             dns = self._dns_view(connection, scope, cutoff, now) if include_dns else {}
-            return PresenceView(checked_at, checks, sightings, counts, dns)
+            traffic = (
+                self._traffic_view(connection, scope, cutoff, now)
+                if include_dns
+                else {}
+            )
+            return PresenceView(checked_at, checks, sightings, counts, dns, traffic)
+
+    @staticmethod
+    def _traffic_view(
+        connection: sqlite3.Connection, scope: str, cutoff: float, now: float
+    ) -> dict[str, TrafficVolume]:
+        if (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='traffic'"
+            ).fetchone()
+            is None
+        ):
+            return {}  # Read-only startup can encounter a pre-traffic journal.
+        rows = connection.execute(
+            """
+            SELECT traffic.device, sweep.checked, traffic.to_device, traffic.from_device
+            FROM sweep JOIN traffic ON traffic.sweep_id=sweep.id
+            WHERE sweep.scope=? AND sweep.checked BETWEEN ? AND ?
+            ORDER BY traffic.device, sweep.checked, sweep.id
+            """,
+            (scope, cutoff, now),
+        )
+        result = {}
+        for device, group in groupby(rows, key=lambda row: row[0]):
+            series = [(row[1], row[2], row[3]) for row in group]
+            samples, to_bytes, from_bytes, resets = accumulate(series)
+            if samples < 2:
+                continue  # One sample has no interval and therefore no volume.
+            result[device] = TrafficVolume(
+                _instant(series[0][0]),
+                _instant(series[-1][0]),
+                samples,
+                to_bytes,
+                from_bytes,
+                resets,
+            )
+        return result
 
 
 class PresenceWatch:

@@ -83,6 +83,20 @@ def page(
     return request
 
 
+def raw(body: object, status: int = 200) -> MagicMock:
+    """A single non-paginated JSON response, as stat/sta returns."""
+    encoded = json.dumps(body).encode()
+
+    async def chunks(_: int) -> AsyncIterator[bytes]:
+        yield encoded
+
+    request = MagicMock()
+    response = request.__aenter__.return_value
+    response.status = status
+    response.content.iter_chunked = chunks
+    return request
+
+
 class UniFiTest(unittest.IsolatedAsyncioTestCase):
     def test_validate_source_configuration(self) -> None:
         for invalid in (
@@ -353,8 +367,16 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         original.pop("pihole")
         original["unifi"].pop("certificate_sha256")
         original["unifi"].pop("gateway")
+        original["unifi"].pop("traffic_site")
         expected = sha256(json.dumps(original, sort_keys=True).encode()).hexdigest()
         self.assertEqual(scope_fingerprint(plan), expected)
+        # Enabling byte counters is local presence data and keeps the journal.
+        self.assertEqual(
+            scope_fingerprint(
+                replace(plan, unifi=replace(unifi, traffic_site="default"))
+            ),
+            expected,
+        )
         self.assertNotEqual(
             scope_fingerprint(
                 replace(plan, unifi=replace(unifi, certificate_sha256="aa" * 32))
@@ -471,6 +493,125 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         for call in calls:
             self.assertFalse(call.kwargs["allow_redirects"])
             self.assertTrue(call.kwargs["ssl"].check_hostname)
+
+    def test_traffic_site_is_optional_and_validated(self) -> None:
+        self.assertIsNone(UniFiPlan.decode(configuration()).traffic_site)
+        plan = UniFiPlan.decode({**configuration(), "trafficSite": "default"})
+        self.assertEqual(plan.traffic_site, "default")
+        for invalid in ("", "../default", "a b", "x" * 65):
+            with self.subTest(site=invalid), self.assertRaises(ValueError):
+                UniFiPlan.decode({**configuration(), "trafficSite": invalid})
+
+    async def test_traffic_reads_scoped_counters_from_legacy_statistics(self) -> None:
+        body = {
+            "meta": {"rc": "ok"},
+            "data": [
+                # Wireless: unprefixed counters.
+                {"mac": MAC, "ip": FIRST, "tx_bytes": 5000, "rx_bytes": 700},
+                # Wired: switch-port counters live under wired-*.
+                {
+                    "mac": OTHER_MAC,
+                    "ip": SECOND,
+                    "is_wired": True,
+                    "tx_bytes": 0,
+                    "rx_bytes": 0,
+                    "wired-tx_bytes": 9000,
+                    "wired-rx_bytes": 300,
+                },
+                # Outside the watched scope.
+                {
+                    "mac": "00:11:22:33:44:77",
+                    "ip": "192.0.2.99",
+                    "tx_bytes": 1,
+                    "rx_bytes": 1,
+                },
+                # No address yet, or no counters: skipped rather than guessed.
+                {"mac": "00:11:22:33:44:88", "tx_bytes": 1, "rx_bytes": 1},
+                {"mac": "00:11:22:33:44:99", "ip": THIRD},
+            ],
+        }
+        with (
+            patch.dict(os.environ, {KEY: "fixture-key"}),
+            patch("plowshare_privacy.unifi.ClientSession") as factory,
+        ):
+            session = factory.return_value.__aenter__.return_value
+            session.get = MagicMock(return_value=raw(body))
+            source = UniFiNetwork(
+                UniFiPlan.decode({**configuration(), "trafficSite": "default"})
+            )
+            counters, issues = await source.traffic((FIRST, SECOND, THIRD))
+        self.assertEqual(issues, ())
+        self.assertEqual(
+            [(c.device, c.address, c.to_device, c.from_device) for c in counters],
+            [("mac:" + MAC, FIRST, 5000, 700), ("mac:" + OTHER_MAC, SECOND, 9000, 300)],
+        )
+        call = session.get.call_args
+        self.assertEqual(
+            call.args[0],
+            "https://unifi.example.invalid/proxy/network/api/s/default/stat/sta",
+        )
+        self.assertFalse(call.kwargs["allow_redirects"])
+        self.assertEqual(
+            factory.call_args.kwargs["headers"]["X-API-Key"], "fixture-key"
+        )
+
+    async def test_traffic_failures_are_coverage_gaps(self) -> None:
+        cases = (
+            raw({"meta": {"rc": "error"}, "data": []}),
+            raw(
+                {
+                    "meta": {"rc": "ok"},
+                    "data": [{"mac": MAC, "ip": FIRST, "tx_bytes": -1, "rx_bytes": 0}],
+                }
+            ),
+            raw({"meta": {"rc": "ok"}, "data": []}, status=401),
+        )
+        for response in cases:
+            with (
+                self.subTest(),
+                patch.dict(os.environ, {KEY: "fixture-key"}),
+                patch("plowshare_privacy.unifi.ClientSession") as factory,
+            ):
+                factory.return_value.__aenter__.return_value.get = MagicMock(
+                    return_value=response
+                )
+                source = UniFiNetwork(
+                    UniFiPlan.decode({**configuration(), "trafficSite": "default"})
+                )
+                counters, issues = await source.traffic((FIRST,))
+            self.assertEqual(counters, ())
+            self.assertIn("unifi_traffic_unavailable", issues[0])
+
+    async def test_traffic_withholds_an_address_claimed_by_two_macs(self) -> None:
+        body = {
+            "meta": {"rc": "ok"},
+            "data": [
+                {"mac": MAC, "ip": FIRST, "tx_bytes": 1, "rx_bytes": 1},
+                {"mac": OTHER_MAC, "ip": FIRST, "tx_bytes": 2, "rx_bytes": 2},
+            ],
+        }
+        with (
+            patch.dict(os.environ, {KEY: "fixture-key"}),
+            patch("plowshare_privacy.unifi.ClientSession") as factory,
+        ):
+            factory.return_value.__aenter__.return_value.get = MagicMock(
+                return_value=raw(body)
+            )
+            source = UniFiNetwork(
+                UniFiPlan.decode({**configuration(), "trafficSite": "default"})
+            )
+            counters, _ = await source.traffic((FIRST,))
+        self.assertEqual(counters, ())
+
+    async def test_without_traffic_site_no_request_is_made(self) -> None:
+        with (
+            patch.dict(os.environ, {KEY: "fixture-key"}),
+            patch("plowshare_privacy.unifi.ClientSession") as factory,
+        ):
+            source = UniFiNetwork(UniFiPlan.decode(configuration()))
+            self.assertFalse(source.reads_traffic)
+            self.assertEqual(await source.traffic((FIRST,)), ((), ()))
+        factory.assert_not_called()
 
     async def test_refused_or_inconsistent_pages_withhold_partial_associations(
         self,

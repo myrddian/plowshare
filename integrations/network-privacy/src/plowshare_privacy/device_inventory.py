@@ -8,6 +8,7 @@ from .device_detection import DeviceDetection, detect_device
 from .dns_activity import DnsActivity
 from .journal import Receipt
 from .presence import PresenceCount, PresenceView, epoch
+from .traffic import TrafficVolume
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class DeviceCard:
     detection: DeviceDetection
     presence: PresenceCount | None = None
     dns_activity: DnsActivity | None = None
+    traffic: TrafficVolume | None = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,10 @@ def device_inventory(
                 detection=detect_device(history.identity, history.services),
                 presence=count,
                 dns_activity=presence.dns.get(quick.key)
+                if quick and quick.identity and history.identity == quick.identity
+                else None,
+                # Same attribution rule as DNS: only the confirmed current MAC.
+                traffic=presence.traffic.get(quick.key)
                 if quick and quick.identity and history.identity == quick.identity
                 else None,
             )

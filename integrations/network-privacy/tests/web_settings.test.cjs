@@ -59,6 +59,26 @@ test('DNS profiling is a separate setting and shows blocked lookups as DNS evide
   assert.match(rendered, /Partial coverage in 1 windows/);
   assert.match(rendered, /Connections and data transfers require gateway flow records/);
   assert.match(rendered, /ads.example · Fixture Ads · 3 queries · 2 reported blocked/);
+
+  context.silent = {...context.activity, windows:7, partial_windows:0, queries_read:0,
+    queries_available:0, groups:[], pihole_silent:true};
+  assert.match(JSON.stringify(vm.runInContext('renderDnsActivity(silent)', context)),
+    /No DNS queries reached Pi-hole in 7 confirmed windows/);
+  context.grouped = {...context.activity, groups:[
+    {kind:'measurement', queries:4, distinct:1, destinations:[]},
+    {kind:'telemetry', queries:2, distinct:1, destinations:[]},
+    {kind:'local', queries:9, distinct:1, destinations:[]}]};
+  assert.equal(vm.runInContext('behaviouralQueries(grouped)', context), 6);
+  assert.match(JSON.stringify(vm.runInContext('renderDnsActivity(grouped)', context)),
+    /Audience measurement & content recognition · 4 queries/);
+
+  context.traffic = {from_at:'2026-01-01T00:00:00Z', until_at:'2026-01-02T00:00:00Z',
+    samples:300, to_device_bytes:1234567890, from_device_bytes:2048, resets:2};
+  const traffic = JSON.stringify(vm.runInContext('renderTraffic(traffic)', context));
+  assert.match(traffic, /1.2 GB to device · 2.0 KB from device/);
+  assert.match(traffic, /2 intervals skipped after a counter reset/);
+  assert.match(traffic, /counters show volume, not which hosts/i);
+  assert.equal(vm.runInContext('formatBytes(999)', context), '999 B');
 });
 
 test('save uses one request and retains confirmation after a failed refresh', async () => {
