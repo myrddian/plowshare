@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal, cast
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from plowshare.contracts import (
     InformationListRequest,
     InformationRevisionDto,
     InformationStatusRequest,
+    InformationStepDto,
     OrchestrationStartRequest,
 )
 from support import configuration
@@ -24,6 +26,7 @@ from test_device_dossier import activity, card, facts, identity
 
 from plowshare_privacy.assessment_port import (
     AssessmentRun,
+    ReportState,
     ReportStatus,
     SdkAssessmentPort,
 )
@@ -49,6 +52,12 @@ from plowshare_privacy.dossier_port import RetainedDossier
 TV = "mac:02:00:00:00:00:01"
 LAMP = "mac:02:00:00:00:00:02"
 NOW = "2026-11-11T09:00:00Z"
+Stage = Literal[
+    "extract", "derive", "embed", "summarise", "summary_embed", "autoTag", "tagGroups"
+]
+StepState = Literal[
+    "running", "failed", "blocked", "pending", "ready", "skipped", "cancelled"
+]
 
 
 def lamp(*, queries: int = 0) -> DeviceCard:
@@ -97,6 +106,8 @@ class Runs:
         self.states: dict[str, AssessmentRun] = {}
         self.newest: dict[str, str] = {}
         self.status: dict[str, ReportStatus] = {}
+        # Report revisions Plowshare has not finished processing.
+        self.processing: set[str] = set()
         self.texts: dict[str, str] = {}
         self.finalised: list[tuple[str, str]] = []
         self.start_error: Exception | None = None
@@ -148,9 +159,9 @@ class Runs:
         if self.finalise_error is not None:
             raise self.finalise_error
 
-    async def report_status(self, device_id: str, revision: str) -> ReportStatus:
-        self.calls.append("report_status")
-        return self.status[revision]
+    async def report_state(self, device_id: str, revision: str) -> ReportState:
+        self.calls.append("report_state")
+        return ReportState(self.status[revision], revision not in self.processing)
 
     async def read_report(self, device_id: str, revision: str) -> str:
         self.calls.append("read_report")
@@ -396,6 +407,72 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         settled = await self.restart().check(TV)
         self.assertEqual(settled.state, "accepted")
         self.assertEqual(self.runs.calls.count("finalise"), 1)
+
+    async def test_accept_waits_until_plowshare_has_processed_the_report(
+        self,
+    ) -> None:
+        await self.service.assess(TV)
+        revision = self.runs.finish(self.runs.starts[-1][1])
+        self.runs.processing.add(revision)
+        await self.service.poll()
+        view = self.service.view(TV)
+        self.assertEqual(view.state, "review")
+        self.assertTrue(view.processing)
+        self.assertFalse(view.can_accept)
+        # Dismiss stays available while the report is processed.
+        self.assertTrue(view.can_dismiss)
+        with self.assertRaisesRegex(AssessmentConflict, "being processed"):
+            await self.service.accept(TV)
+        self.assertEqual(self.runs.finalised, [])
+        # Each poll reads the state again until processing is done.
+        await self.service.poll()
+        self.assertEqual(self.runs.calls.count("report_state"), 2)
+        self.runs.processing.clear()
+        await self.service.poll()
+        ready = self.service.view(TV)
+        self.assertFalse(ready.processing)
+        self.assertTrue(ready.can_accept)
+        # Once processed, polling stops reading this report.
+        await self.service.poll()
+        self.assertEqual(self.runs.calls.count("report_state"), 3)
+        self.assertEqual((await self.service.accept(TV)).state, "accepted")
+        self.assertEqual([item[1] for item in self.runs.finalised], [revision])
+
+    async def test_a_report_read_after_restart_is_processing_until_read(
+        self,
+    ) -> None:
+        await self.finished()
+        self.assertTrue(self.service.view(TV).can_accept)
+        restarted = self.restart()
+        # Unknown after a restart: Accept waits for one state read.
+        self.assertTrue(restarted.view(TV).processing)
+        self.assertFalse(restarted.view(TV).can_accept)
+        await restarted.check(TV)
+        self.assertTrue(restarted.view(TV).can_accept)
+
+    async def test_finalise_refused_while_processing_says_to_try_again_shortly(
+        self,
+    ) -> None:
+        revision = await self.finished()
+        self.runs.finalise_error = Refusal(
+            "BAD_REQUEST", "a final report must complete processing first"
+        )
+        view = await self.service.accept(TV)
+        self.assertEqual((view.state, view.pending), ("review", None))
+        detail = view.detail or ""
+        self.assertIn("still processing", detail)
+        self.assertIn("try again shortly", detail)
+        self.assertNotIn("service account", detail)
+        self.assertTrue(view.processing)
+        self.assertFalse(view.can_accept)
+        self.assertTrue(view.can_dismiss)
+        self.runs.finalise_error = None
+        await self.service.poll()
+        ready = self.service.view(TV)
+        self.assertTrue(ready.can_accept)
+        self.assertEqual((await self.service.accept(TV)).state, "accepted")
+        self.assertEqual(len(self.runs.finalised), 2)
+        self.assertEqual(self.runs.status[revision], "final")
 
     async def test_dismiss_is_local_and_never_calls_the_server(self) -> None:
         await self.finished()
@@ -692,7 +769,10 @@ class SdkAssessmentPortTest(unittest.IsolatedAsyncioTestCase):
                 source_name=report_name(TV),
             )
         )
-        self.assertEqual(await self.port.report_status(TV, revision), "final")
+        # Without processing steps the server is left to decide on finalise.
+        self.assertEqual(
+            await self.port.report_state(TV, revision), ReportState("final", True)
+        )
         self.assertIsInstance(
             self.client.request.await_args.args[0], InformationStatusRequest
         )
@@ -711,7 +791,57 @@ class SdkAssessmentPortTest(unittest.IsolatedAsyncioTestCase):
         ):
             self.client.request.return_value = reply(foreign)
             with self.assertRaises(ValueError):
-                await self.port.report_status(TV, revision)
+                await self.port.report_state(TV, revision)
+
+    async def test_report_state_is_processed_when_its_generation_is_ready(
+        self,
+    ) -> None:
+        revision = str(uuid4())
+        content = ("extract", "derive", "embed", "summarise", "summary_embed")
+
+        def status(
+            steps: tuple[tuple[str, str, int], ...], generation: int | None = 2
+        ) -> InformationRevisionDto:
+            # A status that omits its generation, as an older server may.
+            row = InformationRevisionDto(
+                id=revision,
+                kind="report",
+                report_status="draft",
+                source_name=report_name(TV),
+                steps=tuple(
+                    InformationStepDto(
+                        attempt=1,
+                        generation=g,
+                        stage=cast(Stage, stage),
+                        state=cast(StepState, state),
+                    )
+                    for stage, state, g in steps
+                ),
+            )
+            return row if generation is None else replace(row, generation=generation)
+
+        ready = tuple((stage, "ready", 2) for stage in content)
+        for steps, generation, processed in (
+            (ready, 2, True),
+            # Tagging is not part of what finalise requires.
+            ((*ready, ("autoTag", "running", 2)), 2, True),
+            (ready[:-1] + (("summary_embed", "running", 2),), 2, False),
+            (ready[:-1], 2, False),
+            # Ready stages of an earlier generation do not count.
+            (tuple((stage, "ready", 1) for stage in content), 2, False),
+            (ready, None, True),
+            (
+                (*tuple((s, "ready", 1) for s in content), ("extract", "pending", 2)),
+                None,
+                False,
+            ),
+        ):
+            self.client.request.return_value = reply(status(steps, generation))
+            self.assertEqual(
+                await self.port.report_state(TV, revision),
+                ReportState("draft", processed),
+                (steps, generation),
+            )
 
     async def test_outcome_refuses_a_foreign_run(self) -> None:
         view = Mock(

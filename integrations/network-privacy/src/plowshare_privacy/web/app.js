@@ -1240,8 +1240,8 @@ function renderSupplemental(body) {
 
 // The agent assessment of one device. The collector's ledger holds its state;
 // the report text is read once per revision. While a run is starting or
-// running, or an Accept is unconfirmed, the five-second refresh rereads only
-// the state. Nothing here resends a request whose outcome is unknown: Check
+// running, its report is still being processed, or an Accept is unconfirmed,
+// the five-second refresh rereads only the state. Nothing here resends a request whose outcome is unknown: Check
 // status only reads.
 let deviceAssessment = null;
 let assessmentBusy = null;
@@ -1277,6 +1277,8 @@ function renderAssessment(view, report) {
       element('p', view.pending === 'accept'
         ? 'Plowshare has not confirmed the report is final. Accept is not sent again; Check status reads it.'
         : `Assessed ${formatWhen(view.requested_at)}. ${checked}. Accept makes this report final in Plowshare. Dismiss hides it here and leaves it in Plowshare as a draft.`, 'hint'));
+    // Plowshare refuses to finalise a report it is still processing.
+    if (view.processing && !view.pending && !view.detail) nodes.push(element('p', 'Report is being processed… Accept becomes available when Plowshare finishes.', 'hint'));
   } else if (view.state === 'accepted') {
     nodes.push(element('p', 'Accepted ' + formatWhen(view.decided_at), 'status-line'),
       element('p', `This report is final in Plowshare. Assessed ${formatWhen(view.requested_at)}. ${checked}.`, 'hint'));
@@ -1287,10 +1289,16 @@ function renderAssessment(view, report) {
     nodes.push(element('p', 'Last assessment failed', 'status-line'));
     if (run) nodes.push(run);
   }
-  if (view.detail) nodes.push(element('p', view.detail, view.state === 'failed' || (view.state === 'review' && !view.pending) ? 'notice error' : 'hint'));
+  // A refusal while the report is processing is a wait, not an error.
+  if (view.detail) nodes.push(element('p', view.detail, view.state === 'failed' || (view.state === 'review' && !view.pending && !view.processing) ? 'notice error' : 'hint'));
   // Decisions sit with the state line, above a report that can be long.
   const actions = element('div', undefined, 'actions');
   if (view.can_accept) actions.append(button('Accept and make final', 'accept'));
+  else if (view.state === 'review' && view.processing && !view.pending) {
+    const waiting = button('Accept and make final', 'accept');
+    waiting.disabled = true;
+    actions.append(waiting);
+  }
   if (view.can_dismiss) actions.append(button('Dismiss without finalising', 'dismiss', 'danger'));
   if (view.pending || (view.state === 'review' && view.detail)) actions.append(button('Check status', 'check', 'secondary'));
   if (view.can_assess) {
@@ -1360,7 +1368,7 @@ async function assessmentAction(action) {
 async function pollAssessment() {
   const view = deviceAssessment?.view;
   if (!view || deviceAssessment.address !== selectedDevice || assessmentBusy) return;
-  if (view.state === 'running' || view.pending) await reloadAssessment();
+  if (view.state === 'running' || view.pending || view.processing) await reloadAssessment();
 }
 async function loadAssessmentSettings() {
   const settings = await api('/api/device-assessments');
