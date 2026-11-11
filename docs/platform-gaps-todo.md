@@ -332,6 +332,23 @@ returned as typed outcomes, not thrown as transport errors, and cancelling the
 local future never cancels server work unless the caller asks for `job.cancel`.
 Benefits from B3 so the job id still resolves after a server restart.
 
+### B7: a small core API over the catalog (M)
+
+- [ ] Offer a thread/run/stream layer for newcomers on top of the full catalog.
+
+**Evidence (verified):** the catalog has about 300 fine-grained operations, and a
+first program has to learn projects, conversations, agent definitions, jobs and
+push decoding before it gets an answer. There is no small set of calls for the
+common case.
+
+**Scope and acceptance:** a documented core in each SDK, for example
+`threads.create`, `threads.send` (returning a B6 run future), `runs.stream`
+(typed events, using A6 sequence numbers once they exist) and `runs.cancel`,
+built from existing operations with no new server contract. The B2 proxy exposes
+the same core as its first documented routes. A "hello world" in the manual uses
+only the core. Gaps that need server changes are reported, not hidden in the
+helper.
+
 ---
 
 ## Track C: integrations
@@ -383,6 +400,27 @@ delivery mechanisms. Blocked on an audience for account-private content
 
 - [ ] Render `orchestration record` as a timeline in desktop/console.
 
+### D6: Relay consumers: lease renewal and poison records (M)
+
+- [ ] Let SDK consumers renew a batch lease, and stop one failing record from
+  blocking its group forever.
+
+**Evidence (verified):** internal deliveries can renew their claims
+(`relay/DurableRelayDeliveries.java:51`), but SDK `relay.consume` batches carry a
+fixed lease, and `docs/relay.md:574-575` states there is no lease renewal for
+external consumers ("Bound handler work to the lease"). The operation catalog
+has `relay.consume`/`relay.ack` and no renew. **Reported:** there is no
+dead-letter path; because consumption is ordered and reading never advances the
+cursor, a record a consumer cannot handle is redelivered until an operator uses
+`relay.operate` (for example `ABANDON`).
+
+**Scope and acceptance:** a `relay.renew` (or a heartbeat on the batch token)
+bound to the existing fence; a delivery-attempt count per record; an optional
+per-subscription policy that parks a record after N attempts on a derived
+parked topic with an audited receipt, leaving the default as today's strict
+behaviour. Tests cover renewal by the live owner only, renewal refused after
+expiry, and parking preserving order for the remaining records.
+
 ---
 
 ## Track E: knowledge
@@ -396,6 +434,8 @@ delivery mechanisms. Blocked on an audience for account-private content
 
 - [ ] Extract DOCX, PPTX and HTML files; add OCR for scanned PDFs; consider image
   captioning for indexing. Today only UTF-8 text and PDF are ingested.
+- [ ] Extract tables and figures as structured content rather than flattened
+  text, so retrieval and evidence offsets can address a table cell or caption.
 
 ### E3: source connectors (M–L)
 
@@ -405,6 +445,36 @@ delivery mechanisms. Blocked on an audience for account-private content
 
 - [ ] Evaluate a reranker model and non-English lexical search (today
   `websearch_to_tsquery('english')` without IDF).
+
+### E5: group the digest tree by topic (M)
+
+- [ ] Build digest parents from related nodes rather than consecutive ones.
+
+**Evidence (verified):** `agents/digests/Digester.java` groups roots `FANOUT = 8`
+at a time in list order (`:43`, `:127-129`), so a parent summarises whatever
+eight nodes happen to be adjacent. The navigator's descent then chooses between
+summaries that mix unrelated conversations.
+
+**Scope and acceptance:** cluster candidates by embedding similarity (or by
+conversation and project) before grouping, keep provenance to exact spans, and
+keep the repair-stale-ancestors pass bounded. Measure navigation success on a
+fixed question set before and after.
+
+### E6: memory recall without table locks (M)
+
+- [ ] Remove the table-level locks taken on every recall.
+
+**Evidence (verified):** `archive/MemoryStore.java` executes
+`LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE` and `SHARE` locks on provenance
+and information tables in both its read and write admission paths (`:181-183`,
+`:321-325`). `SHARE ROW EXCLUSIVE` conflicts with itself, so concurrent recalls
+serialise, and they also block memory writes.
+
+**Scope and acceptance:** keep the guarantee the locks provide (admission and
+disclosure decided against one consistent state) with row-level locks, an
+advisory lock per home scope, or a snapshot/version check. A concurrency test
+shows parallel recalls overlapping and writes not blocked by reads, without
+losing the "outside live read authority" refusal.
 
 ---
 
@@ -424,6 +494,15 @@ delivery mechanisms. Blocked on an audience for account-private content
 ### F3: retrieval benchmark (M)
 
 - [ ] Publish a document retrieval and citation-accuracy benchmark.
+
+---
+
+## Project risk (not a task)
+
+The codebase is large for its maintainer count. The approachable core API (B7),
+the proxy (B2), published SDKs (B5) and reduced documentation drift (Track G) also
+lower the cost for a new contributor to make a first change, which is the main
+mitigation available.
 
 ---
 
