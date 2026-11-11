@@ -1,0 +1,32 @@
+/* Reusable file browser (Application Files, Personal files). It fills its host; the tree and the editor scroll independently. */
+#personal-file-browser { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+.file-browser { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+.file-browser-toolbar { display: flex; flex-direction: column; gap: 6px; }
+.file-browser-jump { color: var(--muted); font-size: 0.9em; }
+.file-browser-jump summary { cursor: pointer; user-select: none; }
+.file-browser-jump form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.file-browser-jump input { flex: 1 1 200px; min-width: 0; }
+.file-browser-split { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 12px; min-height: 0; flex: 1; }
+.file-browser-tree,
+.file-browser-editor { border: 1px solid var(--line); border-radius: 12px; background: var(--panel, #1c1c19); min-height: 280px; }
+.file-browser-tree { overflow: auto; padding: 6px; }
+.file-browser-row { display: flex; align-items: center; gap: 2px; padding-left: calc(var(--depth, 0) * 16px); }
+.file-browser-toggle { flex: 0 0 auto; width: 28px; height: 36px; padding: 0; color: var(--muted); background: transparent; border: 0; display: inline-flex; align-items: center; justify-content: center; }
+.file-browser-toggle .icon { width: 14px; height: 14px; transform: rotate(-90deg); transition: transform .12s; }
+.file-browser-toggle.is-open .icon { transform: rotate(0deg); }
+.file-browser-name { flex: 1 1 auto; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; overflow-wrap: anywhere; background: transparent; border: 0; color: inherit; padding: 12px; border-radius: 8px; }
+.file-browser-name .icon { width: 18px; height: 18px; flex: 0 0 auto; color: #dfc389; opacity: .85; }
+.file-browser-name[aria-current="true"] { background: #30291e; color: #dfc389; }
+.file-browser-name:hover { background: #24241f; }
+.file-browser-empty, .file-browser-more { color: var(--muted); margin: 8px; font-size: 0.9em; }
+.file-browser-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 16px; }
+.file-browser-empty-editor { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); text-align: center; padding: 24px; }
+.file-browser-empty-editor .icon { width: 28px; height: 28px; color: #dfc389; opacity: .7; }
+.file-browser-empty-editor p { margin: 0; }
+.file-browser-editor [data-text] { width: 100%; min-height: 280px; resize: vertical; font-family: monospace; tab-size: 2; line-height: 1.6; }
+.file-browser-editor label { display: block; }
+.file-browser-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.file-browser [data-status], .file-browser [data-permission], .file-browser [data-error] { overflow-wrap: anywhere; margin: 0; }
+@media (max-width: 720px) {
+  .file-browser-split { grid-template-columns: 1fr; }
+}

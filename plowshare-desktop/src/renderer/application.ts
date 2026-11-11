@@ -1,5 +1,10 @@
 import type { FileStoreReference } from 'plowshare-client-ts/binding/filestores';
-import type { DesktopState, Reply, Request } from '../shared.ts';
+import type {
+  DesktopState,
+  Reply,
+  Request,
+  WorkspaceRoute,
+} from '../shared.ts';
 import { ownedEvent } from './events.ts';
 import {
   conversationsForProject,
@@ -13,6 +18,11 @@ import {
   type FileBrowserPort,
 } from './file-browser.ts';
 import { icon } from './icons.ts';
+import {
+  renderWorkspaceSlotError,
+  workspaceSlotMarkup,
+  type WorkspaceSlots,
+} from './workspace-slots.ts';
 
 const hubViews = [
   'overview',
@@ -36,10 +46,22 @@ export type ApplicationChatNest = {
 };
 
 /**
+ * Host hooks for workspace pages shown inside the hub. The hub registers its
+ * slots with the shared registry; `release` returns the workspace to chat
+ * when the hub leaves a view that hosts a page.
+ */
+export type ApplicationEmbedding = {
+  slots: WorkspaceSlots;
+  release: () => Promise<unknown>;
+};
+
+/**
  * Application workflow hub and server source editor.
  * `open` lands on Overview. Activity lists every LLM-bearing conversation for
  * this Application via proc.list (server visibility for admins). Own person
- * chats nest the existing chat; other inventory rows show metadata in-hub.
+ * chats nest the existing chat; other inventory rows open their trajectory
+ * inside the Activity detail pane. Schedules and Relay likewise host their
+ * workspace pages inside the hub, so the header and view tabs stay in place.
  * Trajectory reads use the server's current scoped permissions for each log.
  * Files mounts the reusable file-browser over application.files / read / save.
  */
@@ -51,6 +73,7 @@ export function installApplication(
   openSchedules?: (project: string) => void,
   openRelay?: (project: string) => void,
   nest?: ApplicationChatNest,
+  embedding?: ApplicationEmbedding,
 ) {
   host.innerHTML = `<header><div><div class="eyebrow">APPLICATION</div><h2 data-title></h2></div><button type="button" data-close>Close</button></header>
     <p data-summary></p><nav aria-label="Application views" data-hub-nav><button type="button" data-hub="overview">Overview</button><button type="button" data-hub="activity">Activity</button><button type="button" data-hub="schedules">Schedules</button><button type="button" data-hub="relay">Relay</button><button type="button" data-hub="files" data-files>Files</button><button type="button" data-hub="access" data-settings>Access</button></nav>
@@ -71,20 +94,14 @@ export function installApplication(
         </div>
         <div class="application-activity-embed">
           <div class="application-conversation-embed" data-conversation-embed hidden></div>
-          <div class="application-activity-log" data-activity-log hidden>
-            <div class="eyebrow">LOG</div>
-            <h3 data-activity-log-title></h3>
-            <p data-activity-log-meta></p>
-            <p data-activity-log-evidence class="file-browser-empty"></p>
-            <button type="button" class="primary-button" data-activity-trajectory>Open trajectory</button>
-          </div>
+          ${workspaceSlotMarkup('activity', 'Opening trajectory…')}
           <div class="activity-empty" data-activity-empty hidden><p>Select a conversation or log.</p></div>
         </div>
       </div>
     </section>
-    <section data-schedules hidden><p>Scheduled work opens for this Application. Rows that name it stay in that list; a page with none says so.</p></section>
-    <section data-relay hidden><p>Relay opens with this Application selected as its scope.</p></section>
-    <section data-access hidden><p>Membership for this Application opens in Access.</p></section>
+    <section data-schedules hidden>${workspaceSlotMarkup('schedules', 'Opening scheduled work for this Application…')}</section>
+    <section data-relay hidden>${workspaceSlotMarkup('relay', 'Opening the Relay log for this Application…')}</section>
+    <section data-access hidden><p>Membership for this Application opens in the Access dialog.</p><div><button type="button" data-access-open>Open Access</button></div></section>
     <section data-source hidden><label data-area-label hidden>File location<select data-area aria-label="Application file location"></select></label>
     <div data-file-browser></div></section>`;
   const get = <T extends HTMLElement = HTMLElement>(selector: string) =>
@@ -95,6 +112,8 @@ export function installApplication(
     files = false;
   let view: HubView = 'overview';
   let selected = '';
+  // Failure to open the current view's embedded page; cleared on view change.
+  let embedError = '';
   let location: FileStoreReference | undefined;
   const selectedLocation = () => (location ? { location } : {});
   const escape = (value: string) =>
@@ -174,16 +193,24 @@ export function installApplication(
     port,
   );
 
+  // Failures belong to the view that raised them: Files reports in the
+  // browser; every other view reports in its embed placeholder.
   const run = (work: () => Promise<unknown> | void) =>
     ownedEvent(async () => {
       try {
         await work();
       } catch (reason) {
-        browser.session.error =
+        const message =
           reason instanceof Error
             ? reason.message
             : 'The Application view could not be opened.';
-        browser.render();
+        if (files) {
+          browser.session.error = message;
+          browser.render();
+        } else {
+          embedError = message;
+          render();
+        }
       }
     });
   const scopeKey = () => `${project}\0${JSON.stringify(location ?? null)}`;
@@ -215,12 +242,12 @@ export function installApplication(
   };
   const showActivityPanes = (nestable: boolean) => {
     const chatEmbed = get('[data-conversation-embed]');
-    const log = get('[data-activity-log]');
+    const slot = get('[data-workspace-slot="activity"]');
     const empty = get('[data-activity-empty]');
     const showingChat = !!selected && nestable;
     const showingLog = !!selected && !nestable;
     chatEmbed.hidden = !showingChat;
-    log.hidden = !showingLog;
+    slot.hidden = !showingLog;
     empty.hidden = showingChat || showingLog;
     if (showingChat) nestChat();
     else releaseChat();
@@ -258,24 +285,23 @@ export function installApplication(
     }
     const current = rows.find((row) => row.id === selected);
     showActivityPanes(!!current?.nestChat);
-    if (current && !current.nestChat) {
-      get('[data-activity-log-title]').textContent = current.title;
-      get('[data-activity-log-meta]').textContent =
-        `${current.subtitle} · ${date(current.at)} · ${current.id}`;
-      const evidence =
-        listed?.items.find((row) => row.id === current.id)?.evidence ?? '';
-      get('[data-activity-log-evidence]').textContent = evidence;
-    }
   };
   const openTrajectory = (id: string) =>
     request({ action: 'application-activity-open', conversation: id });
+  // A chat row nests the live chat; a log row opens its trajectory page,
+  // which the host places over the Activity embed slot.
   const chooseRow = async (id: string) => {
     selected = id;
     show('activity');
     const row = activityRows().find((item) => item.id === id);
     if (row?.nestChat && nest) await nest.choose(id);
-    else releaseChat();
+    else {
+      releaseChat();
+      renderActivity();
+      if (row) await openTrajectory(id);
+    }
     renderActivity();
+    embedding?.slots.changed();
   };
   const openActivity = async () => {
     show('activity');
@@ -311,12 +337,21 @@ export function installApplication(
     releaseChat();
     shown = false;
     host.hidden = true;
+    embedding?.slots.changed();
   };
+  // Views without an embed slot hand the workspace back to chat so a page
+  // left open by Activity, Schedules or Relay never lingers in the
+  // breadcrumb or over the hub.
+  const embeds = (value: HubView) =>
+    value === 'activity' || value === 'schedules' || value === 'relay';
   const show = (next: HubView) => {
+    if (next !== view) embedError = '';
     view = next;
     files = next === 'files';
     if (next !== 'activity') releaseChat();
     render();
+    if (!embeds(next) && embedding) run(embedding.release)();
+    embedding?.slots.changed();
   };
   const returnToStage = () => {
     close();
@@ -364,14 +399,24 @@ export function installApplication(
     if (!id) return;
     run(() => chooseRow(id))();
   });
-  get('[data-activity-trajectory]').addEventListener(
-    'click',
-    run(async () => {
-      const row = activityRows().find((item) => item.id === selected);
-      if (!row) return;
-      await openTrajectory(selected);
-    }),
-  );
+  host.addEventListener('click', (event) => {
+    const retry = (event.target as HTMLElement | null)?.closest(
+      '[data-slot-retry]',
+    );
+    if (!retry) return;
+    embedError = '';
+    if (view === 'activity' && selected) run(() => chooseRow(selected))();
+    else if (view === 'schedules')
+      run(() => openSchedules?.(project))();
+    else if (view === 'relay') run(() => openRelay?.(project))();
+  });
+  const openAccess = () =>
+    document
+      .querySelector<HTMLButtonElement>(
+        `[data-project-access="${CSS.escape(project)}"]`,
+      )
+      ?.click();
+  get('[data-access-open]').addEventListener('click', openAccess);
   host.addEventListener('click', (event) => {
     const hub = (event.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-hub]',
@@ -383,11 +428,7 @@ export function installApplication(
     }
     if (hub === 'access') {
       show('access');
-      document
-        .querySelector<HTMLButtonElement>(
-          `[data-project-access="${CSS.escape(project)}"]`,
-        )
-        ?.click();
+      openAccess();
       return;
     }
     if (hub === 'files') {
@@ -485,9 +526,40 @@ export function installApplication(
     ))
       button.disabled = loading;
     get<HTMLButtonElement>('[data-activity-refresh]').disabled = loading;
+    for (const slot of host.querySelectorAll<HTMLElement>(
+      '[data-workspace-slot]',
+    ))
+      renderWorkspaceSlotError(
+        slot,
+        slot.dataset.workspaceSlot === view ? embedError : '',
+      );
     if (files) browser.render();
     if (view === 'activity') renderActivity();
     else releaseChat();
+  }
+  /**
+   * The slot a workspace page of this route should cover, or undefined when
+   * the hub does not want it shown. Activity claims trajectories only while
+   * a log row is selected, including ones opened from inside that trajectory.
+   */
+  const embedSlot = (route: WorkspaceRoute): HTMLElement | undefined => {
+    if (!shown || host.hidden || embedError) return undefined;
+    if (view === 'activity' && route.kind === 'trajectory') {
+      const row = activityRows().find((item) => item.id === selected);
+      return row && !row.nestChat
+        ? get('[data-workspace-slot="activity"]')
+        : undefined;
+    }
+    if (view === 'schedules' && route.kind === 'activity')
+      return get('[data-workspace-slot="schedules"]');
+    if (view === 'relay' && route.kind === 'relay')
+      return get('[data-workspace-slot="relay"]');
+    return undefined;
+  };
+  if (embedding) {
+    embedding.slots.register(embedSlot);
+    for (const slot of host.querySelectorAll('[data-workspace-slot]'))
+      embedding.slots.observe(slot);
   }
   return {
     render,

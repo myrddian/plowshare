@@ -9,6 +9,7 @@ import { displayText } from 'plowshare-client-ts/binding/values';
 import { botDisplayName, botDetails } from './bot-details.ts';
 import { installPaneResize } from './pane-resize.ts';
 import { installApplication } from './application.ts';
+import { createWorkspaceSlots } from './workspace-slots.ts';
 import {
   installFileBrowser,
   type FileBrowserHandle,
@@ -120,6 +121,8 @@ const commandControls = installCommands(
     localStorage.removeItem(key);
   },
 );
+// Panels claim workspace pages by registering slots; see workspace-slots.ts.
+const workspaceSlots = createWorkspaceSlots(() => syncWorkspaceHost());
 const application = installApplication(
   $('#application-panel'),
   () => state,
@@ -134,6 +137,13 @@ const application = installApplication(
     title: (id) => title(id),
     choose: (id) => choose(id, { keepApplication: true }),
     create: () => newConversation({ keepApplication: true }),
+  },
+  {
+    slots: workspaceSlots,
+    release: async () => {
+      if (workspaceRoute.kind !== 'chat')
+        await request({ action: 'workspace-chat' });
+    },
   },
 );
 function openApplicationSchedules(project: string) {
@@ -184,6 +194,8 @@ let personalConversationsCollapsed = false;
 let personalBotsCollapsed = true;
 let personalVisible = false;
 let workspaceRoute: WorkspaceRoute = { kind: 'chat', label: 'Conversation' };
+let layoutFrame = 0,
+  layoutStamp = '';
 const historyBusy = new Set<string>();
 const measurements = new Map<string, { at: number; pending: boolean }>();
 try {
@@ -1282,8 +1294,14 @@ function renderPersonal() {
   if ($('#personal-panel').hidden === showPersonal)
     $('#personal-panel').hidden = !showPersonal;
   // Background state updates must not reveal chat underneath an embedded page.
-  if (workspaceRoute.kind !== 'chat') application.close();
+  // The Application hub keeps pages it hosts in its own embed slots.
+  if (
+    workspaceRoute.kind !== 'chat' &&
+    !workspaceSlots.resolve(workspaceRoute)
+  )
+    application.close();
   application.render();
+  syncWorkspaceHost();
   const hideStage =
     workspaceRoute.kind !== 'chat' || showPersonal || application.visible;
   if (stage.hidden !== hideStage) stage.hidden = hideStage;
@@ -2851,13 +2869,15 @@ function renderBreadcrumb() {
     else button.removeAttribute('aria-current');
   }
 }
-let layoutFrame = 0,
-  layoutStamp = '';
 function reportWorkspaceLayout() {
   if (layoutFrame) return;
   layoutFrame = requestAnimationFrame(() => {
     layoutFrame = 0;
-    const bounds = $('#workspace-view-host').getBoundingClientRect();
+    // A page hosted by the Application hub covers the hub's slot; any other
+    // page covers the full workspace host.
+    const slot = workspaceSlots.resolve(workspaceRoute);
+    const host = $('#workspace-view-host');
+    const bounds = (slot ?? host).getBoundingClientRect();
     const layout = {
       action: 'workspace-layout' as const,
       x: bounds.x,
@@ -2866,6 +2886,7 @@ function reportWorkspaceLayout() {
       height: bounds.height,
       visible:
         !['chat', 'manage', 'administration'].includes(workspaceRoute.kind) &&
+        (!!slot || !host.hidden) &&
         !document.querySelector('dialog:modal'),
     };
     const stamp = JSON.stringify(layout);
@@ -2876,13 +2897,20 @@ function reportWorkspaceLayout() {
       .catch((reason: unknown) => error(errorMessage(reason)));
   });
 }
+/** Hide the full-size host while a slot hosts the page, then re-place it. */
+function syncWorkspaceHost() {
+  const hidden =
+    workspaceRoute.kind === 'chat' || !!workspaceSlots.resolve(workspaceRoute);
+  const host = $('#workspace-view-host');
+  if (host.hidden !== hidden) host.hidden = hidden;
+  reportWorkspaceLayout();
+}
 function showWorkspace(route: WorkspaceRoute) {
   const changed = JSON.stringify(route) !== JSON.stringify(workspaceRoute);
   if (!changed) return;
   workspaceRoute = route;
   if (route.kind !== 'chat') personalVisible = false;
   renderPersonal();
-  $('#workspace-view-host').hidden = route.kind === 'chat';
   $('#workspace-manage').hidden = route.kind !== 'manage';
   $('#workspace-administration').hidden = route.kind !== 'administration';
   $('#inspector-toggle').hidden = route.kind !== 'chat';
@@ -2922,7 +2950,7 @@ window.plowshare.subscribeWorkspace?.((message) => {
       }),
     );
 });
-new ResizeObserver(reportWorkspaceLayout).observe($('#workspace-view-host'));
+workspaceSlots.observe($('#workspace-view-host'));
 const modalLayout = new MutationObserver(reportWorkspaceLayout);
 modalLayout.observe(document.body, {
   subtree: true,
