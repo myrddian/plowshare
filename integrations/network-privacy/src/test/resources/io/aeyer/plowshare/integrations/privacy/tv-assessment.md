@@ -23,7 +23,9 @@ Confidence: medium. This rests on:
 
 ## What it sends
 
-About 310 MB left the TV and 4.2 GB reached it over eight hours.
+Between 2026-01-01 00:00 and 2026-01-01 08:00 UTC, the network counted 310 MB sent by this device and 4.2 GB sent to it.
+
+Most of the volume went to the TV, which is consistent with streaming video.
 
 Where the outgoing bytes went, and what they contained, cannot be told from this data.
 

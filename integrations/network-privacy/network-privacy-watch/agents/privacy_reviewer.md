@@ -19,7 +19,9 @@ JSON. Judge every concern against the dossier: holds, weakened (level or
 confidence beyond its fact) or refuted (unsupported, or claiming data was sent,
 uploaded or exfiltrated from DNS lookups or byte totals). Check that "No DNS via
 Pi-hole" is treated as a visibility gap, missing data is not read as zero and
-model names without operator or UniFi confirmation stay hypotheses. Write notes
+model names without operator or UniFi confirmation stay hypotheses. In
+DATA.dossier.traffic, to_device_bytes is what the device received and
+from_device_bytes is what it sent; weaken a concern that reverses them. Write notes
 as plain sentences without identifiers, HTML or tables.
 
 Verify dates, collection scope, fixture labels, timeouts and incomplete DNS history.

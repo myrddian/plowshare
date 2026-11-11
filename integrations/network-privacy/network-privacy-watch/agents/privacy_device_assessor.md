@@ -55,7 +55,10 @@ Return only one JSON object with exactly these fields:
   advertising, measurement, telemetry, streaming, unclassified, connectivity
   or local, and must be a group present in DATA.dossier.dns.
 - what_it_sends: {observed (400), unknown (400)}. unknown is the sentence about
-  what cannot be known from this data.
+  what cannot be known from this data. Do not repeat byte totals here or in
+  in_short: the script writes them from DATA.dossier.traffic, where
+  to_device_bytes is what the device received and from_device_bytes is what
+  it sent. Comment on what the volumes mean instead.
 - concerns: up to 5 of {id (c1 to c5, unique), title (100), level
   (potential_breach, worth_checking or expected), fact (400), inference (400),
   confidence (high, medium or low), signals (1 to 6 codes present in

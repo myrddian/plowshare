@@ -374,6 +374,35 @@ class NetworkDeviceAssessmentTest {
   }
 
   @Test
+  void traffic_volumes_and_direction_are_written_by_code() throws Exception {
+    // PROD's third TV run said the TV "transmitted" 35 MB that it had received.
+    var value = assessment();
+    ((ObjectNode) value.path("what_it_sends"))
+        .put("observed", "The TV transmitted 4.2 GB and received 310 MB. Most of it is streaming.");
+    value.put("in_short", "The TV uploaded 4.2 GB. It also looked up OzTAM.");
+    var host = new Host(PREVIOUS);
+    host.assessor.add(value.toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    assertEquals(1, host.writes);
+    assertEquals(1, host.assessorTasks.size(), "Removing byte totals needs no repair run");
+    var text = host.report.path("text").asText();
+    assertTrue(
+        text.contains("the network counted 310 MB sent by this device and 4.2 GB sent to it."),
+        text);
+    assertFalse(text.contains("transmitted 4.2 GB"), text);
+    assertFalse(text.contains("uploaded 4.2 GB"), text);
+    assertTrue(text.contains("Most of it is streaming."), text);
+    assertTrue(text.contains("It also looked up OzTAM."), text);
+    assertTrue(text.contains("Removed a byte total from what it sends"), text);
+    assertTrue(text.contains("Removed a byte total from in short"), text);
+    String task = host.assessorTasks.getFirst().split("\\nDATA:\\n", 2)[0];
+    assertTrue(task.contains("to_device_bytes is what the device received"), task);
+    assertTrue(
+        host.reviewerTasks.getFirst().contains("to_device_bytes is what the device received"));
+  }
+
+  @Test
   void host_refusals_are_not_repaired() throws Exception {
     var host = new Host(PREVIOUS);
     host.assessor.add("E_NO_EXEC: delegate unavailable");
@@ -468,7 +497,7 @@ class NetworkDeviceAssessmentTest {
              "who_it_talks_to":[
                {"party":"OzTAM","purpose":"measurement","observation":"Looked up 14 times; none were blocked.","meaning":"OzTAM measures Australian TV audiences for broadcasters."},
                {"party":"Netflix","purpose":"streaming","observation":"Looked up 120 times.","meaning":"Ordinary streaming use."}],
-             "what_it_sends":{"observed":"About 310 MB left the TV and 4.2 GB reached it over eight hours.","unknown":"Where the outgoing bytes went, and what they contained, cannot be told from this data."},
+             "what_it_sends":{"observed":"Most of the volume went to the TV, which is consistent with streaming video.","unknown":"Where the outgoing bytes went, and what they contained, cannot be told from this data."},
              "concerns":[
                {"id":"c1","title":"Viewing measurement by OzTAM","level":"worth_checking",
                 "fact":"The TV looked up an OzTAM measurement name 14 times.",

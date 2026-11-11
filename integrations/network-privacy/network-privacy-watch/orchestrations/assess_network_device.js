@@ -218,7 +218,8 @@ function assessmentResult(raw, dossier, options) {
   };
   const value = fields(agentJson(raw, 'Assessor'), 'assessment',
     ['in_short', 'what_it_is', 'who_it_talks_to', 'what_it_sends', 'concerns', 'questions']);
-  let inShort = fit(value.in_short, 'in_short', 480);
+  let inShort = withoutVolumes(fit(value.in_short, 'in_short', 480), 'in short', fix)
+    || 'The sections below set out what was observed.';
   if (inShort.split(/\s+/).length > 60) {
     fix('Shortened in short to 60 words.');
     inShort = words(inShort, 60);
@@ -279,7 +280,8 @@ function assessmentResult(raw, dossier, options) {
         basis: upTo(what.basis, 'what_it_is.basis', 1, 6).map((item, i) => fit(item, 'what_it_is.basis[' + i + ']', 200))
       },
       who_it_talks_to: talks,
-      what_it_sends: {observed: fit(sends.observed, 'what_it_sends.observed', 400), unknown: fit(sends.unknown, 'what_it_sends.unknown', 400)},
+      what_it_sends: {observed: withoutVolumes(fit(sends.observed, 'what_it_sends.observed', 400), 'what it sends', fix),
+        unknown: withoutVolumes(fit(sends.unknown, 'what_it_sends.unknown', 400), 'what it sends', fix)},
       concerns,
       questions
     },
@@ -287,6 +289,18 @@ function assessmentResult(raw, dossier, options) {
   };
 }
 
+// Byte totals and their direction are written by code from the dossier: an
+// agent once reported 35 MB "transmitted" by a TV that had received it. A
+// sentence in the summary or "what it sends" that states a byte quantity is
+// removed, and the removal is listed with the other automatic fixes.
+const VOLUME = /\b\d[\d,.]*\s*(?:bytes?|[kKMGT]i?B|kilobytes?|megabytes?|gigabytes?|terabytes?)\b/;
+function withoutVolumes(value, field, fix) {
+  if (!VOLUME.test(value)) return value;
+  const sentences = value.match(/[^.!?]+(?:[.!?]+|$)/g) || [value];
+  const kept = sentences.filter(sentence => !VOLUME.test(sentence)).join('').trim();
+  fix('Removed a byte total from ' + field + '; the report states traffic volumes from the counters.');
+  return kept;
+}
 // Shortens to whole sentences within the limit when possible, else whole
 // words with an ellipsis. It only removes text, so it cannot add a claim.
 function shorten(value, limit) {
@@ -349,7 +363,7 @@ function handoff(state, role) {
     task = 'Assess this one device from DATA.dossier for its owner. Return only the JSON object your role defines, with plain-language fields and no identifiers, HTML or tables.';
   } else if (role === 'review') {
     data.assessment = state.draft;
-    task = 'Review the device assessment in DATA.assessment against DATA.dossier, per concern. For each concern return holds, weakened or refuted: refute any claim that data was sent, uploaded or exfiltrated, since DNS lookups and byte totals cannot show it; weaken a concern whose level or confidence goes beyond its dossier fact. Check identity claims carry their basis and that coverage gaps are stated. Return only JSON with verdict (accepted, needs_corrections or not_checked), concerns (one {id, verdict, note} for every concern in DATA.assessment, in any order) and notes (a nonempty string or list of strings). Notes are plain paragraphs without identifiers, HTML or tables. If DATA.assessment is missing, return not_checked immediately.';
+    task = 'Review the device assessment in DATA.assessment against DATA.dossier, per concern. For each concern return holds, weakened or refuted: refute any claim that data was sent, uploaded or exfiltrated, since DNS lookups and byte totals cannot show it; weaken a concern whose level or confidence goes beyond its dossier fact. Check identity claims carry their basis and that coverage gaps are stated. In DATA.dossier.traffic, to_device_bytes is what the device received and from_device_bytes is what it sent; weaken any concern that states the direction the wrong way round. Return only JSON with verdict (accepted, needs_corrections or not_checked), concerns (one {id, verdict, note} for every concern in DATA.assessment, in any order) and notes (a nonempty string or list of strings). Notes are plain paragraphs without identifiers, HTML or tables. If DATA.assessment is missing, return not_checked immediately.';
   } else {
     data.assessment = state.draft;
     data.review = {verdict: state.review.verdict, notes: state.review.notes, concerns: state.review.concerns};
@@ -360,6 +374,7 @@ function handoff(state, role) {
   const signals = state.dossier.signals.map(signal => signal.code);
   const purposes = (state.dossier.dns?.groups || []).map(group => group.kind);
   if (role !== 'review') {
+    task += '\nDo not state byte totals in in_short or what_it_sends; the script writes them from DATA.dossier.traffic, where to_device_bytes is what the device received and from_device_bytes is what it sent.';
     task += '\nAllowed concern signals for this device, copied exactly: ' + (signals.length ? signals.join(', ') : 'none, so return no concerns') + '.'
       + ' Allowed who_it_talks_to purposes: ' + (purposes.length ? purposes.join(', ') : 'none, so return an empty list') + '.';
     if (state.repair !== null) {
@@ -374,6 +389,15 @@ function handoff(state, role) {
   return text(request, 'delegation payload', 131072);
 }
 
+// The direction is spelled out because UniFi's own terms (tx/rx) are from the
+// access point's side: to_device is what the device received.
+function trafficSentence(traffic) {
+  if (!traffic) return 'No UniFi byte counters were available for this device.';
+  return 'Between ' + plain(traffic.from_at, 40).slice(0, 16).replace('T', ' ') + ' and '
+    + plain(traffic.until_at, 40).slice(0, 16).replace('T', ' ') + ' UTC, the network counted '
+    + bytes(Number(traffic.from_device_bytes)) + ' sent by this device and '
+    + bytes(Number(traffic.to_device_bytes)) + ' sent to it.';
+}
 function bytes(value) {
   if (value >= 1e9) return (value / 1e9).toFixed(1) + ' GB';
   if (value >= 1e6) return Math.round(value / 1e6) + ' MB';
@@ -403,8 +427,10 @@ function render(state) {
   } else {
     out.push('No destinations are described. The Evidence section says what DNS data was available.');
   }
-  out.push('', '## What it sends', '', final.what_it_sends.observed, '',
-    final.what_it_sends.unknown, '',
+  out.push('', '## What it sends', '', trafficSentence(dossier.traffic), '');
+  if (final.what_it_sends.observed) out.push(final.what_it_sends.observed, '');
+  if (final.what_it_sends.unknown) out.push(final.what_it_sends.unknown, '');
+  out.push(
     'DNS lookups show that a name was looked up, not that data was sent. Byte totals show volume only; they include local traffic and do not name a destination.', '',
     '## What is concerning', '');
   if (final.concerns.length) {
