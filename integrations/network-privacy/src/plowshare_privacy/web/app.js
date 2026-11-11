@@ -857,7 +857,7 @@ byId('research-unifi').addEventListener('click', async () => {
     if (device !== researchDevice) return;
     if (!product) {
       result.textContent = available
-        ? 'No online adopted UniFi device matched both the observed IP and MAC.'
+        ? 'No unique online adopted UniFi device matched the observed MAC.'
         : 'UniFi is unavailable on this collector.';
       return;
     }

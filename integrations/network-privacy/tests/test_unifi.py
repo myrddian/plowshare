@@ -111,7 +111,7 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         ):
             UniFiNetwork(UniFiPlan.decode(configuration()))
 
-    async def test_managed_product_requires_a_unique_online_mac_and_address_match(
+    async def test_managed_product_requires_a_unique_online_mac_match(
         self,
     ) -> None:
         stamp = utc_now()
@@ -129,7 +129,6 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {KEY: "fixture-key"}):
             unifi = UniFiNetwork(UniFiPlan.decode(configuration()))
         for total, rows in (
-            (1, [adopted | {"ipAddress": SECOND}]),
             (1, [adopted | {"macAddress": OTHER_MAC}]),
             (1, [adopted | {"state": "OFFLINE"}]),
             (2, [adopted, adopted]),
@@ -151,7 +150,7 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
                 "limit": 2,
                 "count": 1,
                 "totalCount": 1,
-                "data": [adopted],
+                "data": [adopted | {"ipAddress": SECOND}],
             }
         )
         with patch.object(unifi, "_read_page", read):
@@ -189,8 +188,8 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         rows = [
             device(1, FIRST, MAC),
             device(2, SECOND, OTHER_MAC),
-            device(3, SECOND, MAC),
-            device(4, "192.0.2.99", MAC),
+            device(3, SECOND, "00:11:22:33:44:77"),
+            device(4, "192.0.2.99", "00:11:22:33:44:88"),
         ]
         response = {
             "offset": 0,
@@ -209,9 +208,64 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.ambiguous_addresses, frozenset({SECOND}))
         self.assertTrue(unifi.recently_managed(result.devices[0]))
-        self.assertFalse(
+        self.assertTrue(
             unifi.recently_managed(replace(result.devices[0], address=SECOND))
         )
+
+    async def test_client_mac_joins_adopted_name_at_current_watched_address(
+        self,
+    ) -> None:
+        stamp = utc_now()
+        observed = DeviceIdentity(
+            FIRST, "mac:" + MAC, None, "client label", MAC, None, "unifi", stamp, stamp
+        )
+        adopted = {
+            "id": str(UUID(int=1)),
+            "ipAddress": "192.0.2.99",
+            "macAddress": MAC.upper(),
+            "state": "ONLINE",
+            "name": "Managed switch",
+            "model": "USW-Pro",
+        }
+        response = {
+            "offset": 0,
+            "limit": 100,
+            "count": 1,
+            "totalCount": 1,
+            "data": [adopted],
+        }
+        with patch.dict(os.environ, {KEY: "fixture-key"}):
+            unifi = UniFiNetwork(UniFiPlan.decode(configuration()))
+        plan = CollectionPlan("tcp", (FIRST, SECOND), (443,), 0.1, 1, None, 3600)
+        collector = NetworkCollector("fixture", plan, identity_source=unifi)
+        with (
+            patch.object(
+                unifi, "identify", AsyncMock(return_value=IdentitySample((observed,)))
+            ),
+            patch.object(unifi, "_read_page", AsyncMock(return_value=response)),
+        ):
+            result = await collector._identity_sample(stamp)
+        self.assertEqual(
+            result.devices,
+            (replace(observed, hostname="Managed switch", vendor="Ubiquiti"),),
+        )
+        self.assertTrue(unifi.recently_managed(observed))
+
+        response["data"] = [
+            adopted,
+            adopted | {"id": str(UUID(int=2)), "model": "Other model"},
+        ]
+        response["count"] = response["totalCount"] = 2
+        with (
+            patch.object(
+                unifi, "identify", AsyncMock(return_value=IdentitySample((observed,)))
+            ),
+            patch.object(unifi, "_read_page", AsyncMock(return_value=response)),
+        ):
+            duplicate = await collector._identity_sample(stamp)
+        self.assertEqual(duplicate.devices, (observed,))
+        self.assertFalse(unifi.recently_managed(observed))
+        self.assertIn("multiple adopted records", duplicate.issues[0])
 
     async def test_gateway_lan_alias_requires_explicit_binding_and_network_confirmation(
         self,
