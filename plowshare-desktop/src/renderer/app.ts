@@ -127,6 +127,14 @@ const application = installApplication(
   chooseScope,
   openApplicationSchedules,
   openApplicationRelay,
+  {
+    chat,
+    home: stage,
+    selected: () => selected,
+    title: (id) => title(id),
+    choose: (id) => choose(id, { keepApplication: true }),
+    create: () => newConversation({ keepApplication: true }),
+  },
 );
 function openApplicationSchedules(project: string) {
   // Account-wide Scheduled work has no project field on schedule rows.
@@ -359,9 +367,14 @@ async function loadHistory(id = selected, before?: number) {
     historyBusy.delete(id);
   }
 }
-async function choose(id: string) {
-  application.close();
-  personalVisible = false;
+async function choose(
+  id: string,
+  options: { keepApplication?: boolean } = {},
+) {
+  if (!options.keepApplication) {
+    application.close();
+    personalVisible = false;
+  }
   const row = state.conversations.find((row) => row.id === id);
   if (!row) return;
   await request({ action: 'workspace-chat' });
@@ -408,7 +421,9 @@ async function chooseScope(nextScope: string) {
     error(reason instanceof Error ? reason.message : errorMessage(reason));
   }
 }
-async function newConversation() {
+async function newConversation(
+  options: { keepApplication?: boolean } = {},
+) {
   if (
     busy ||
     (state.mode === 'live' && !state.connected) ||
@@ -421,7 +436,11 @@ async function newConversation() {
       action: 'create',
       ...(scope ? { project: scope } : {}),
     });
-    if (reply.conversation) await choose(reply.conversation);
+    if (reply.conversation)
+      await choose(
+        reply.conversation,
+        options.keepApplication ? { keepApplication: true } : {},
+      );
     draft.focus();
   } catch (reason) {
     error(reason instanceof Error ? reason.message : errorMessage(reason));
@@ -1372,7 +1391,9 @@ $('#personal-bots').addEventListener('click', (event) => {
 });
 $('#personal-conversation-new').addEventListener('click', () => {
   if (state.personal)
-    background(chooseScope(state.personal.project).then(newConversation));
+    background(
+      chooseScope(state.personal.project).then(() => newConversation()),
+    );
 });
 $('#personal-bots-files').addEventListener('click', () => {
   personalVisible = true;
@@ -1779,7 +1800,9 @@ $('#refresh').addEventListener(
 );
 function move() {
   chat.style.transform =
-    docked || expanded ? 'none' : `translate(${offset.x}px, ${offset.y}px)`;
+    docked || expanded || chat.classList.contains('application-nested')
+      ? 'none'
+      : `translate(${offset.x}px, ${offset.y}px)`;
 }
 $('#dock').addEventListener('click', () => {
   docked = !docked;

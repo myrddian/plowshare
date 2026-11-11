@@ -86,6 +86,7 @@ export class RunClient {
       id.length > 512 ||
       !(
         this.state().activity.runs.items.some((run) => run.id === id) ||
+        this.state().applicationRuns?.items.some((run) => run.id === id) ||
         Object.values(this.state().activity.details).some(
           (detail) =>
             detail.value?.run.id === id ||

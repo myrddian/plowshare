@@ -299,6 +299,20 @@ export function listingRuns(): Ask<typeof ORCHESTRATION_LIST> {
 }
 
 /**
+ * One project's runs, newest first.
+ *
+ * <p><b>Scoped on the server, unlike {@link listingRuns}.</b> The account-wide
+ * listing hides nothing so a person can find a run they lost; an Application
+ * hub needs the opposite filter so live and recent work for that project is
+ * not buried under every other project's history.
+ */
+export function listingProjectRuns(
+  project: string,
+): Ask<typeof ORCHESTRATION_LIST> {
+  return { type: ORCHESTRATION_LIST, payload: { project, limit: 20 } };
+}
+
+/**
  * This account's runs that are waiting on a person, for the background check
  * that keeps the count on the status line.
  *

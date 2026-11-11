@@ -779,7 +779,27 @@
 #application-panel .application-secondary button { color: var(--muted); }
 #application-panel [data-schedules], #application-panel [data-relay], #application-panel [data-access] { max-width: 62ch; color: var(--muted); }
 #application-panel [data-summary] { overflow-wrap: anywhere; }
-#application-panel [data-source] { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
+#application-panel [data-source],
+#application-panel [data-activity] { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
+#application-panel [data-activity] .application-activity-split { min-height: min(70vh, 640px); }
+#application-panel .application-conversation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 4px; }
+#application-panel .application-conversation-toolbar strong { font-size: 12px; font-weight: 500; color: var(--muted); }
+#application-panel .application-activity-actions { display: flex; gap: 4px; }
+#application-panel .application-activity-list,
+#application-panel .application-activity-embed { border: 1px solid var(--line); border-radius: 12px; background: var(--panel, #1c1c19); min-height: 280px; }
+#application-panel .application-activity-list { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+#application-panel [data-activity-tree] { overflow: auto; min-height: 0; flex: 1; padding: 4px 6px 8px; }
+#application-panel [data-activity-tree] .conversation-row,
+#application-panel [data-activity-tree] .activity-row { width: 100%; }
+#application-panel .application-activity-embed { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 0; overflow: hidden; }
+#application-panel .application-conversation-embed,
+#application-panel .application-activity-log { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+#application-panel .application-activity-log { padding: 16px; gap: 10px; }
+#application-panel .application-activity-log h3 { margin: 0; }
+#application-panel .application-activity-log [data-activity-log-meta] { color: var(--muted); overflow-wrap: anywhere; }
+#application-panel [data-activity-empty] { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+#chat.application-nested { position: relative; inset: auto; width: 100%; height: 100%; min-height: 420px; transform: none !important; box-shadow: none; border-radius: 12px; }
+#chat.application-nested .chat-grip { cursor: default; opacity: .3; }
 #application-panel [data-file-browser],
 #personal-file-browser { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .file-browser { display: flex; flex-direction: column; gap: 12px; min-height: min(70vh, 640px); }

@@ -91,6 +91,7 @@ import type {
   Run,
   RunStatus,
 } from 'plowshare-client-ts/operations/client-views';
+import type { ProcConversation } from 'plowshare-client-ts/operations/proc';
 export type { Agent, Approval, Conversation, Entry, Project };
 
 export type ProjectAccessOperation =
@@ -188,6 +189,25 @@ export interface DesktopState {
     document?: ApplicationFileDocument;
     error?: string;
     uncertain?: boolean;
+  };
+  applicationRuns?: {
+    project: string;
+    items: Run[];
+    loaded: boolean;
+    loading?: boolean;
+    error?: string;
+    limited?: boolean;
+    selected?: string;
+  };
+  applicationActivity?: {
+    project: string;
+    items: ProcConversation[];
+    loaded: boolean;
+    loading?: boolean;
+    error?: string;
+    visibility: 'mine' | 'server';
+    selected?: string;
+    cursor?: string;
   };
   backgroundError?: string;
   /** Pending decisions remain visible while a read fails; the user can retry discovery. */
@@ -425,6 +445,10 @@ export type Request =
   | { action: 'filestore-choose' }
   | { action: 'filestore-setup'; alias: string; root: string }
   | { action: 'application-runtime'; project: string }
+  | { action: 'application-activity'; project: string }
+  | { action: 'application-activity-open'; conversation: string }
+  | { action: 'application-runs'; project: string }
+  | { action: 'application-run-detail'; id: string }
   | {
       action: 'application-files';
       project: string;
@@ -863,6 +887,8 @@ export function inspectionConversation(
       detail.wire?.orchestration.callerConversation,
     ])
       if (conversation) known.add(conversation);
+  // proc.list / Application Activity inventory is metadata only (ADR 0031):
+  // fleet visibility does not admit log inputs or trajectory follows.
   // Only traverse histories reachable from an account-owned inspection surface.
   for (const parent of known)
     for (const entry of state.history[parent]?.entries ?? [])

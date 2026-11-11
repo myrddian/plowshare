@@ -1102,12 +1102,96 @@ background(
       }
       if (main && request?.action === 'question-refresh')
         return client.dispatch(request);
+      const hubRun = (id: string) => {
+        const listed = client.state.applicationRuns;
+        return (
+          !!listed &&
+          (listed.selected === id ||
+            listed.items.some((run) => run.id === id) ||
+            !!client.state.activity.details[id]?.value)
+        );
+      };
+      if (main && request?.action === 'application-activity')
+        return client.dispatch(request);
+      if (main && request?.action === 'application-activity-open') {
+        return client.dispatch(request).then((reply) => {
+          if (inspectionConversation(client.state, request.conversation))
+            openTrajectory(request.conversation);
+          else
+            throw new Error(
+              'Trajectory stays on account-owned logs from this Activity inventory.',
+            );
+          return { ...reply, state: client.state };
+        });
+      }
+      if (main && request?.action === 'application-runs')
+        return client.dispatch(request);
+      if (main && request?.action === 'application-run-detail') {
+        return client.dispatch(request).then(async (reply) => {
+          await client.runs.navigation(request.id);
+          const conversation =
+            client.state.activity.details[request.id]?.wire?.orchestration
+              .conductorConversation;
+          await client.followView(
+            'application-run',
+            conversation ?? undefined,
+          );
+          return { ...reply, state: client.state };
+        });
+      }
+      if (main && request?.action === 'run-record' && hubRun(request.id))
+        return client.dispatch(request).then(async (reply) => {
+          await client.runs.navigation(request.id);
+          return { ...reply, state: client.state };
+        });
+      if (main && request?.action === 'run-trajectory' && hubRun(request.id)) {
+        openTrajectory(client.runs.conversation(request.id, request.actor));
+        return { state: client.state };
+      }
+      if (
+        main &&
+        request?.action === 'run-stage-trajectory' &&
+        hubRun(request.id)
+      ) {
+        const conversation = client.runs.conversation(
+          request.id,
+          'conductor',
+        );
+        if (
+          !client.state.activity.details[request.id]?.value?.stages.some(
+            (stage) => stage.stage === request.stage,
+          )
+        )
+          throw new Error('Choose a stage of this run.');
+        return client.runs.navigation(request.id).then(() => {
+          if (
+            !stageSpans(client.state, request.id).get(request.stage)?.length
+          )
+            throw new Error('This stage has no recorded work yet.');
+          openTrajectory(conversation, {
+            run: request.id,
+            stage: request.stage,
+          });
+          return { state: client.state };
+        });
+      }
+      if (
+        main &&
+        (request?.action === 'run-cancel' || request?.action === 'run-resume') &&
+        hubRun(request.id)
+      )
+        return client.dispatch(request);
       if (main && request?.action === 'run-answer') {
         const shown = client.state.activity.details[request.id]?.wire;
-        if (
-          !client.state.activity.runs.items.some(
+        const asking =
+          client.state.activity.runs.items.some(
             (run) => run.id === request.id && run.state === 'asking',
           ) ||
+          client.state.applicationRuns?.items.some(
+            (run) => run.id === request.id && run.state === 'asking',
+          );
+        if (
+          !asking ||
           !shown ||
           shown.orchestration.state !== 'asking' ||
           runQuestion(shown) !== request.question

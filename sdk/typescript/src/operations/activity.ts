@@ -68,6 +68,19 @@ export function listingLive(): Ask[] {
 }
 
 /**
+ * Live runs for one project, same states and limit as {@link listingLive}.
+ *
+ * <p>Used by the Application hub so a long-running root in that project is not
+ * dropped behind finished phases from other projects.
+ */
+export function listingProjectLive(project: string): Ask[] {
+  return LIVE_STATES.map((state) => ({
+    type: ORCHESTRATION_LIST,
+    payload: { project, state, limit: LIVE_LISTING },
+  }));
+}
+
+/**
  * The runs {@link listingLive}'s answers found, newest first and each once — or nothing when any
  * was refused, since a state missing from the read would read as its runs having ended.
  */

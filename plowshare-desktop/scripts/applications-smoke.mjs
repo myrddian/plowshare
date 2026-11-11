@@ -46,8 +46,16 @@ try {
   await expect(page.locator('#application-panel')).toBeVisible();
   const hubNav = page.locator('#application-panel nav[aria-label="Application views"]');
   await expect(hubNav.locator('[data-hub="overview"]')).toHaveAttribute('aria-current', 'page');
-  for (const name of ['Overview', 'Conversations', 'Schedules', 'Relay', 'Files', 'Access'])
+  for (const name of ['Overview', 'Activity', 'Schedules', 'Relay', 'Files', 'Access'])
     await expect(hubNav.getByRole('button', { name, exact: true })).toBeVisible();
+  await expect(hubNav.getByRole('button', { name: 'Conversations', exact: true })).toHaveCount(0);
+  await expect(hubNav.getByRole('button', { name: 'Runs', exact: true })).toHaveCount(0);
+  await page.locator('#application-panel nav [data-hub="activity"]').click();
+  await expect(page.locator('#application-panel [data-activity]')).toBeVisible();
+  await expect(page.locator('#application-panel [data-activity-tree]')).toBeVisible();
+  await expect(page.locator('#application-panel [data-activity-tree]')).toContainText('No LLM activity for this Application yet.');
+  await page.locator('#application-panel nav [data-hub="overview"]').click();
+  await expect(page.locator('#application-panel [data-overview]')).toBeVisible();
   for (const name of ['Runtime definitions', 'Memory', 'Boards'])
     await expect(hubNav.getByRole('button', { name, exact: true })).toHaveCount(0);
   await expect(page.locator('#application-panel [data-overview] [data-runtime]')).toBeVisible();
@@ -163,9 +171,15 @@ try {
     await expect(page.locator('#application-panel')).toBeVisible();
     await page.locator('#application-panel nav [data-hub="files"]').click();
     await expect(hubFiles).toBeDisabled();
-    await page.locator('#application-panel nav [data-hub="conversations"]').click();
+    await page.locator('#application-panel nav [data-hub="activity"]').click();
+    await expect(page.locator('#application-panel')).toBeVisible();
+    await expect(page.locator('#application-panel [data-activity]')).toBeVisible();
+    await expect(page.locator('#application-panel [data-activity-tree]')).toBeVisible();
+    await expect(page.locator('#application-panel [data-activity-tree]')).toContainText('No LLM activity for this Application yet.');
+    await page.locator('#application-panel [data-close]').click();
     await expect(page.locator('#application-panel')).toBeHidden();
-    await expect(page.locator('#stage')).toBeVisible();
+    await expect(page.locator('#stage #chat')).toBeVisible();
+    await expect(page.locator('#chat')).not.toHaveClass(/application-nested/);
     await expect(page.locator('#scope-caption')).toHaveText('Chatbot');
     await expect(page.locator('#application-conversations [data-project="Chatbot"]')).toHaveAttribute('aria-current', 'true');
     // Opening an Application does not switch Info onto App files.

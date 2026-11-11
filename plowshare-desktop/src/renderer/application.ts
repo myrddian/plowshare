@@ -2,14 +2,21 @@ import type { FileStoreReference } from 'plowshare-client-ts/binding/filestores'
 import type { DesktopState, Reply, Request } from '../shared.ts';
 import { ownedEvent } from './events.ts';
 import {
+  conversationsForProject,
+  mountChat,
+  restoreChat,
+} from './chat-nest.ts';
+import { applicationActivityRows } from './application-activity.ts';
+import {
   installFileBrowser,
   type FileBrowserHandle,
   type FileBrowserPort,
 } from './file-browser.ts';
+import { icon } from './icons.ts';
 
 const hubViews = [
   'overview',
-  'conversations',
+  'activity',
   'schedules',
   'relay',
   'files',
@@ -19,12 +26,22 @@ type HubView = (typeof hubViews)[number];
 const isHubView = (value: string): value is HubView =>
   (hubViews as readonly string[]).includes(value);
 
+export type ApplicationChatNest = {
+  chat: HTMLElement;
+  home: HTMLElement;
+  selected: () => string;
+  title: (id: string) => string;
+  choose: (id: string) => Promise<void>;
+  create: () => Promise<void>;
+};
+
 /**
  * Application workflow hub and server source editor.
- * `open` lands on Overview with the file browser closed. Drafts stay in this
- * account and window only. Runtime, Memory and Boards stay on Overview;
- * Conversations returns to the chat stage. Files mounts the reusable
- * file-browser over application.files / read / save.
+ * `open` lands on Overview. Activity lists every LLM-bearing conversation for
+ * this Application via proc.list (server visibility for admins). Own person
+ * chats nest the existing chat; other inventory rows show metadata in-hub.
+ * Trajectory opens only for account-owned logs (same custody as Processes).
+ * Files mounts the reusable file-browser over application.files / read / save.
  */
 export function installApplication(
   host: HTMLElement,
@@ -33,11 +50,39 @@ export function installApplication(
   conversations: (project: string) => Promise<void>,
   openSchedules?: (project: string) => void,
   openRelay?: (project: string) => void,
+  nest?: ApplicationChatNest,
 ) {
-  host.innerHTML = `<header><div><div class="eyebrow">APPLICATION</div><h2 data-title></h2></div><button type="button" data-close>Conversations</button></header>
-    <p data-summary></p><nav aria-label="Application views" data-hub-nav><button type="button" data-hub="overview">Overview</button><button type="button" data-hub="conversations">Conversations</button><button type="button" data-hub="schedules">Schedules</button><button type="button" data-hub="relay">Relay</button><button type="button" data-hub="files" data-files>Files</button><button type="button" data-hub="access" data-settings>Access</button></nav>
-    <section data-overview><div data-overview-tiles><button type="button" data-hub="conversations"><strong>Conversations</strong><small>Chat scoped to this Application</small></button><button type="button" data-hub="schedules"><strong>Schedules</strong><small>Scheduled work that names this Application</small></button><button type="button" data-hub="relay"><strong>Relay</strong><small>Relay log scoped to this Application</small></button><button type="button" data-hub="files"><strong>Files</strong><small>Server source for this Application</small></button><button type="button" data-hub="access"><strong>Access</strong><small>Membership for this Application</small></button></div>
+  host.innerHTML = `<header><div><div class="eyebrow">APPLICATION</div><h2 data-title></h2></div><button type="button" data-close>Close</button></header>
+    <p data-summary></p><nav aria-label="Application views" data-hub-nav><button type="button" data-hub="overview">Overview</button><button type="button" data-hub="activity">Activity</button><button type="button" data-hub="schedules">Schedules</button><button type="button" data-hub="relay">Relay</button><button type="button" data-hub="files" data-files>Files</button><button type="button" data-hub="access" data-settings>Access</button></nav>
+    <section data-overview><div data-overview-tiles><button type="button" data-hub="activity"><strong>Activity</strong><small>Every LLM log for this Application</small></button><button type="button" data-hub="schedules"><strong>Schedules</strong><small>Scheduled work that names this Application</small></button><button type="button" data-hub="relay"><strong>Relay</strong><small>Relay log scoped to this Application</small></button><button type="button" data-hub="files"><strong>Files</strong><small>Server source for this Application</small></button><button type="button" data-hub="access"><strong>Access</strong><small>Membership for this Application</small></button></div>
     <div class="application-secondary" aria-label="More Application surfaces"><button type="button" data-runtime>Runtime definitions</button><button type="button" data-memory>Memory</button><button type="button" data-board>Boards</button></div></section>
+    <section data-activity hidden>
+      <div class="file-browser-split application-activity-split">
+        <div class="application-activity-list">
+          <div class="application-conversation-toolbar">
+            <strong>Activity</strong>
+            <div class="application-activity-actions">
+              <button type="button" class="icon-button" data-activity-refresh aria-label="Refresh activity">${icon('refresh')}</button>
+              <button type="button" class="icon-button" data-conversation-new aria-label="New conversation">${icon('plus')}</button>
+            </div>
+          </div>
+          <nav data-activity-tree aria-label="Application activity"></nav>
+          <p class="file-browser-empty" data-activity-note hidden></p>
+        </div>
+        <div class="application-activity-embed">
+          <div class="application-conversation-embed" data-conversation-embed hidden></div>
+          <div class="application-activity-log" data-activity-log hidden>
+            <div class="eyebrow">LOG</div>
+            <h3 data-activity-log-title></h3>
+            <p data-activity-log-meta></p>
+            <p data-activity-log-evidence class="file-browser-empty"></p>
+            <p class="file-browser-empty" data-activity-log-custody hidden></p>
+            <button type="button" class="primary-button" data-activity-trajectory>Open trajectory</button>
+          </div>
+          <div class="activity-empty" data-activity-empty hidden><p>Select a conversation or log.</p></div>
+        </div>
+      </div>
+    </section>
     <section data-schedules hidden><p>Scheduled work opens for this Application. Rows that name it stay in that list; a page with none says so.</p></section>
     <section data-relay hidden><p>Relay opens with this Application selected as its scope.</p></section>
     <section data-access hidden><p>Membership for this Application opens in Access.</p></section>
@@ -50,8 +95,21 @@ export function installApplication(
     shown = false,
     files = false;
   let view: HubView = 'overview';
+  let selected = '';
   let location: FileStoreReference | undefined;
   const selectedLocation = () => (location ? { location } : {});
+  const escape = (value: string) =>
+    value.replace(
+      /[&<>"']/g,
+      (character) =>
+        ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        })[character]!,
+    );
 
   const port: FileBrowserPort = {
     async list(path) {
@@ -131,6 +189,120 @@ export function installApplication(
     });
   const scopeKey = () =>
     `${project}\0${JSON.stringify(location ?? null)}`;
+  const releaseChat = () => {
+    if (nest) restoreChat(nest.chat, nest.home);
+  };
+  const nestChat = () => {
+    if (nest) mountChat(nest.chat, get('[data-conversation-embed]'));
+  };
+  const date = (value: string) => {
+    const time = Date.parse(value);
+    return Number.isFinite(time) ? new Date(time).toLocaleString() : value;
+  };
+  const activityRows = () => {
+    const listed = state().applicationActivity;
+    const titles: Record<string, string> = {};
+    if (nest)
+      for (const row of conversationsForProject(
+        state().conversations,
+        project,
+        nest.title,
+      ))
+        titles[row.id] = row.title;
+    return applicationActivityRows(listed?.items ?? [], {
+      titles,
+      selected,
+      handle: state().handle,
+    });
+  };
+  const showActivityPanes = (nestable: boolean) => {
+    const chatEmbed = get('[data-conversation-embed]');
+    const log = get('[data-activity-log]');
+    const empty = get('[data-activity-empty]');
+    const showingChat = !!selected && nestable;
+    const showingLog = !!selected && !nestable;
+    chatEmbed.hidden = !showingChat;
+    log.hidden = !showingLog;
+    empty.hidden = showingChat || showingLog;
+    if (showingChat) nestChat();
+    else releaseChat();
+  };
+  const renderActivity = () => {
+    const listed = state().applicationActivity;
+    const tree = get('[data-activity-tree]');
+    const note = get('[data-activity-note]');
+    const rows = activityRows();
+    if (listed?.error) {
+      note.hidden = false;
+      note.textContent = listed.error;
+    } else if (listed?.visibility === 'mine') {
+      note.hidden = false;
+      note.textContent =
+        'Showing work owned by this account. Server admin visibility is required to list service-owned Application logs.';
+    } else {
+      note.hidden = true;
+      note.textContent = '';
+    }
+    if (!rows.length) {
+      tree.innerHTML = `<p class="file-browser-empty">${listed?.loading ? 'Loading activity…' : listed?.loaded ? 'No LLM activity for this Application yet.' : 'Activity unavailable. Try Refresh.'}</p>`;
+    } else {
+      tree.innerHTML = rows
+        .map((row) => {
+          const glyph =
+            row.origin === 'turn'
+              ? 'message'
+              : row.origin === 'delegation' || row.origin === 'orchestration'
+                ? 'route'
+                : 'activity';
+          return `<button type="button" class="activity-row" data-activity-id="${escape(row.id)}" aria-current="${row.current}"><span class="conversation-icon">${icon(glyph)}</span><span><strong>${escape(row.title)}</strong><small>${escape(row.subtitle)}${row.live ? ' · live' : ''}</small><time>${escape(date(row.at))}</time></span></button>`;
+        })
+        .join('');
+    }
+    const current = rows.find((row) => row.id === selected);
+    showActivityPanes(!!current?.nestChat);
+    if (current && !current.nestChat) {
+      get('[data-activity-log-title]').textContent = current.title;
+      get('[data-activity-log-meta]').textContent =
+        `${current.subtitle} · ${date(current.at)} · ${current.id}`;
+      const evidence =
+        listed?.items.find((row) => row.id === current.id)?.evidence ?? '';
+      get('[data-activity-log-evidence]').textContent = evidence;
+      const open = get<HTMLButtonElement>('[data-activity-trajectory]');
+      open.hidden = !current.canOpenTrajectory;
+      open.disabled = !current.canOpenTrajectory;
+      const note = get('[data-activity-log-custody]');
+      if (current.canOpenTrajectory) {
+        note.hidden = true;
+        note.textContent = '';
+      } else {
+        note.hidden = false;
+        note.textContent =
+          'Trajectory stays on account-owned logs. This row is inventory metadata only.';
+      }
+    }
+  };
+  const openTrajectory = (id: string) =>
+    request({ action: 'application-activity-open', conversation: id });
+  const chooseRow = async (id: string) => {
+    selected = id;
+    show('activity');
+    const row = activityRows().find((item) => item.id === id);
+    if (row?.nestChat && nest) await nest.choose(id);
+    else releaseChat();
+    renderActivity();
+  };
+  const openActivity = async () => {
+    show('activity');
+    await request({ action: 'application-activity', project });
+    const rows = activityRows();
+    if (selected && rows.some((row) => row.id === selected))
+      await chooseRow(selected);
+    else if (rows[0]) await chooseRow(rows[0].id);
+    else {
+      selected = '';
+      renderActivity();
+    }
+  };
   get<HTMLSelectElement>('[data-area]').addEventListener(
     'change',
     run(async () => {
@@ -150,15 +322,17 @@ export function installApplication(
     }),
   );
   const close = () => {
+    releaseChat();
     shown = false;
     host.hidden = true;
   };
   const show = (next: HubView) => {
     view = next;
     files = next === 'files';
+    if (next !== 'activity') releaseChat();
     render();
   };
-  const returnToConversations = () => {
+  const returnToStage = () => {
     close();
     return conversations(project);
   };
@@ -167,26 +341,58 @@ export function installApplication(
       location = undefined;
       get<HTMLSelectElement>('[data-area]').selectedIndex = 0;
       browser.reset();
+      releaseChat();
+      selected = '';
     }
     project = name;
     shown = true;
     browser.session.setScope(scopeKey());
   };
-  // Same path as the Files control. Do not click that button: render disables
-  // it while this Application's file load or save is in flight.
   const openFileBrowser = async () => {
     show('files');
     browser.session.setScope(scopeKey());
     await browser.openRoot();
   };
-  get('[data-close]').addEventListener('click', run(returnToConversations));
+  get('[data-close]').addEventListener('click', run(returnToStage));
+  get('[data-conversation-new]').addEventListener(
+    'click',
+    run(async () => {
+      if (!nest) return;
+      show('activity');
+      await nest.create();
+      selected = nest.selected();
+      await request({ action: 'application-activity', project });
+      renderActivity();
+    }),
+  );
+  get('[data-activity-refresh]').addEventListener(
+    'click',
+    run(async () => {
+      await openActivity();
+    }),
+  );
+  get('[data-activity-tree]').addEventListener('click', (event) => {
+    const id = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-activity-id]',
+    )?.dataset.activityId;
+    if (!id) return;
+    run(() => chooseRow(id))();
+  });
+  get('[data-activity-trajectory]').addEventListener(
+    'click',
+    run(async () => {
+      const row = activityRows().find((item) => item.id === selected);
+      if (!row?.canOpenTrajectory) return;
+      await openTrajectory(selected);
+    }),
+  );
   host.addEventListener('click', (event) => {
     const hub = (event.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-hub]',
     )?.dataset.hub;
     if (!hub || !isHubView(hub)) return;
-    if (hub === 'conversations') {
-      run(returnToConversations)();
+    if (hub === 'activity') {
+      run(openActivity)();
       return;
     }
     if (hub === 'access') {
@@ -270,6 +476,7 @@ export function installApplication(
     }
     get('[data-area-label]').hidden = areaSelect.options.length < 2;
     get('[data-overview]').hidden = view !== 'overview';
+    get('[data-activity]').hidden = view !== 'activity';
     get('[data-schedules]').hidden = view !== 'schedules';
     get('[data-relay]').hidden = view !== 'relay';
     get('[data-access]').hidden = view !== 'access';
@@ -283,14 +490,18 @@ export function installApplication(
     const loading =
       browser.session.busy ||
       !!current.applicationFiles?.loading ||
-      !!current.applicationFiles?.saving;
+      !!current.applicationFiles?.saving ||
+      !!current.applicationActivity?.loading;
     areaSelect.disabled = loading;
     get('[data-source]').hidden = !files;
     for (const button of host.querySelectorAll<HTMLButtonElement>(
       '[data-files]',
     ))
       button.disabled = loading;
+    get<HTMLButtonElement>('[data-activity-refresh]').disabled = loading;
     if (files) browser.render();
+    if (view === 'activity') renderActivity();
+    else releaseChat();
   }
   return {
     render,
@@ -302,6 +513,7 @@ export function installApplication(
       useProject(name);
       view = 'overview';
       files = false;
+      releaseChat();
       render();
     },
     openFiles(name: string) {
