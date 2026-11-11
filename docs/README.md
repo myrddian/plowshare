@@ -32,6 +32,7 @@
 - [Global knowledge read contract](global-knowledge-read-contract.md) (implemented read boundaries and selector cutover)
 - [Standalone allowances and execution recovery](standalone-allowance-and-recovery-plan.md) (standalone Budget storage, policy preservation, swarm/operator recovery and cutover verification)
 - [Post–slice 18 follow-up TODOs](post-slice-18-follow-up-todos.md) (deferred account-delegated runtime capabilities and Desktop Global administration)
+- [Platform gaps TODO](platform-gaps-todo.md) (November 2026 review: WebSocket transport, REST retirement, REST/SSE proxy, A2A rewrite, orchestration, knowledge and benchmarks)
 - [Global scope migration map](global-scope-migration-map.md) (source mapping and proposed migration)
 - [Role and scope permissions](role-scope-permissions-proposal.md) (RBAC helpers, default role profiles and proposed action matrices)
 - [Authority substrate impact report](authority-substrate-impact-report.md) (settled policy, migration requirements, reuse and deferred gaps; source evidence)
