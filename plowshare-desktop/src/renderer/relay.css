@@ -247,7 +247,18 @@
 }
 @media (max-width: 850px) {
   .relay-screen {
-    padding: 20px;
+    padding: 18px 20px;
+  }
+  .relay-header {
+    margin-bottom: 16px;
+  }
+  .relay-header h1 {
+    font-size: 22px;
+    letter-spacing: -0.4px;
+  }
+  .relay-page-controls {
+    flex-wrap: wrap;
+    gap: 8px 16px;
   }
   .relay-columns {
     grid-template-columns: 1fr;

@@ -14,8 +14,8 @@ import type { WorkspaceRoute } from '../shared.ts';
  * provider must only claim while its element is laid out and visible, since
  * the main process trusts the reported bounds. Call `changed` whenever a
  * provider's answer or its element's position may have changed.
- * Registration notifies asynchronously, so panels may register while the
- * host module is still initialising.
+ * Notifications are always asynchronous, so panels may register or report
+ * changes while the host module is still initialising.
  */
 export type WorkspaceSlotProvider = (
   route: WorkspaceRoute,
@@ -55,7 +55,7 @@ export function createWorkspaceSlots(onChange: () => void): WorkspaceSlots {
       }
       return undefined;
     },
-    changed: onChange,
+    changed: () => queueMicrotask(onChange),
   };
 }
 

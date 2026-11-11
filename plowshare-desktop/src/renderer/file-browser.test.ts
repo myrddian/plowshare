@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   FileBrowserSession,
+  cursorPosition,
+  isSaveShortcut,
+  lineCount,
+  lineNumbers,
   type FileBrowserDocument,
   type FileBrowserListing,
   type FileBrowserPort,
@@ -195,4 +199,85 @@ await test('scoped drafts survive a root switch and restore when the scope retur
   session.setScope('source');
   await session.open('notes.md');
   assert.equal(session.draftText, 'source draft');
+});
+
+await test('savable follows the Save gate: writable, dirty, current revision, idle', async () => {
+  const files = new Map<string, { text: string; writable?: boolean } | 'dir'>([
+    ['notes.md', { text: 'before' }],
+    ['locked.md', { text: 'fixed', writable: false }],
+  ]);
+  const port = memoryPort(files);
+  const session = new FileBrowserSession(port);
+  assert.equal(session.savable, false, 'nothing is open');
+  await session.open('notes.md');
+  assert.equal(session.savable, false, 'a clean file has nothing to save');
+  session.setDraft('after');
+  assert.equal(session.savable, true);
+  session.busy = true;
+  assert.equal(session.savable, false, 'another operation is in flight');
+  session.busy = false;
+  files.set('notes.md', { text: 'changed elsewhere' });
+  await session.open('notes.md');
+  assert.equal(session.revisionConflict, true);
+  assert.equal(session.draftText, 'after', 'the draft is retained');
+  assert.equal(session.savable, false, 'a stale draft is never offered');
+  await assert.rejects(session.save(), /server file changed/);
+  assert.deepEqual(port.saves, [], 'a refused save does not reach the port');
+  await session.open('locked.md');
+  session.setDraft('edited');
+  assert.equal(session.savable, false, 'read-only files are never savable');
+
+  const writer = memoryPort(new Map([['notes.md', { text: 'before' }]]));
+  const readOnlyPort: FileBrowserPort = {
+    list: (path) => writer.list(path),
+    read: (path) => writer.read(path),
+  };
+  const readOnly = new FileBrowserSession(readOnlyPort);
+  await readOnly.open('notes.md');
+  readOnly.setDraft('after');
+  assert.equal(readOnly.savable, false, 'a port without save cannot write');
+  await assert.rejects(readOnly.save(), /cannot save files/);
+});
+
+await test('gutter numbers every editor line including a trailing empty one', () => {
+  assert.equal(lineCount(''), 1);
+  assert.equal(lineCount('one'), 1);
+  assert.equal(lineCount('one\ntwo'), 2);
+  assert.equal(lineCount('one\ntwo\n'), 3);
+  assert.equal(lineCount('\n\n'), 3);
+  assert.equal(lineNumbers(1), '1');
+  assert.equal(lineNumbers(3), '1\n2\n3');
+  assert.equal(lineNumbers(lineCount('a\nb\n')).split('\n').length, 3);
+});
+
+await test('cursor position is one-based and clamped to the text', () => {
+  const text = 'ab\ncde\n';
+  assert.deepEqual(cursorPosition(text, 0), { line: 1, column: 1 });
+  assert.deepEqual(cursorPosition(text, 2), { line: 1, column: 3 });
+  assert.deepEqual(cursorPosition(text, 3), { line: 2, column: 1 });
+  assert.deepEqual(cursorPosition(text, 6), { line: 2, column: 4 });
+  assert.deepEqual(cursorPosition(text, 7), { line: 3, column: 1 });
+  assert.deepEqual(cursorPosition(text, 99), { line: 3, column: 1 });
+  assert.deepEqual(cursorPosition(text, -5), { line: 1, column: 1 });
+});
+
+await test('save shortcut is exactly Cmd+S or Ctrl+S', () => {
+  const key = (
+    name: string,
+    held: Partial<Record<'meta' | 'ctrl' | 'alt' | 'shift', boolean>> = {},
+  ) => ({
+    key: name,
+    metaKey: held.meta === true,
+    ctrlKey: held.ctrl === true,
+    altKey: held.alt === true,
+    shiftKey: held.shift === true,
+  });
+  assert.equal(isSaveShortcut(key('s', { meta: true })), true);
+  assert.equal(isSaveShortcut(key('s', { ctrl: true })), true);
+  assert.equal(isSaveShortcut(key('S', { ctrl: true })), true);
+  assert.equal(isSaveShortcut(key('s')), false);
+  assert.equal(isSaveShortcut(key('s', { meta: true, ctrl: true })), false);
+  assert.equal(isSaveShortcut(key('s', { meta: true, shift: true })), false);
+  assert.equal(isSaveShortcut(key('s', { ctrl: true, alt: true })), false);
+  assert.equal(isSaveShortcut(key('a', { meta: true })), false);
 });

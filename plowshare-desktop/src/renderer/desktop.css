@@ -106,6 +106,31 @@
 .activity-options ul { padding-left:20px; line-height:1.9; }
 .activity-options pre { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.8 var(--mono); color:#bdb29c; }
 @media(max-width:1000px) { .activity-workspace { padding:20px; } .activity-columns { grid-template-columns:var(--activity-width,260px) minmax(0,1fr); } #activity-detail { padding:24px; } }
+/* Activity may be placed in a narrow slot (Application hub Schedules); size to the page. */
+.activity-workspace { container:activity / inline-size; }
+.activity-toolbar>div { min-width:0; }
+.activity-toolbar>button { flex-shrink:0; white-space:nowrap; }
+#activity-list nav.run-actions { gap:4px 10px; margin:8px 6px; font-size:11px; color:var(--muted); }
+#activity-list nav.run-actions [role=status] { color:var(--ink); }
+.activity-tabs { flex-wrap:wrap; }
+@container activity (max-width:860px) {
+  .activity-toolbar { padding-bottom:12px; }
+  .activity-toolbar h1 { font-size:17px; }
+  .activity-tabs { gap:4px; margin-bottom:10px; }
+  .activity-tabs button { padding:6px 10px; }
+  .activity-columns { grid-template-columns:var(--activity-width,240px) minmax(0,1fr); }
+  #activity-detail { padding:18px 20px; }
+  #activity-detail h2 { font-size:17px; }
+}
+/* Too narrow for a list beside its detail: the list sits above. */
+@container activity (max-width:640px) {
+  .activity-columns { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(140px,2fr) minmax(0,3fr); }
+  .activity-columns>.pane-resizer { display:none; }
+  .activity-list-column { border-right:0; border-bottom:1px solid #33312a; }
+  .activity-list-column>footer { padding:8px 14px; }
+  .activity-list-column>.search-field { margin:10px; }
+  #activity-detail { padding:16px; }
+}
 .main-area { background:radial-gradient(ellipse at 50% 30%,#26231c33,transparent 75%),var(--bg); }
 .stage { gap:24px; grid-template-columns:minmax(0,1fr) var(--context-width,280px); }
 .chat { border-color:#454036; border-radius:13px; box-shadow:0 16px 45px #0004; background:#1c1c1b; }
@@ -669,8 +694,52 @@
 .embedded-view>.titlebar { display:none; }
 .embedded-view .trajectory-workspace,.embedded-view .activity-workspace,.embedded-view .board-workspace { height:100vh; }
 .embedded-view .activity-workspace,.embedded-view .board-workspace { padding:16px 0 0; }
-.embedded-view .trajectory-toolbar { padding:16px 0; }
-.embedded-view .trajectory-strip { margin-left:0; margin-right:0; }
+.embedded-view .trajectory-toolbar { padding:16px 18px 14px; }
+.embedded-view .trajectory-strip { margin:0 18px 14px; }
+/*
+ * Workspace pages are their own documents, so they size to whatever region
+ * the main window gives them: the full workspace or a narrower slot such as
+ * the Application hub's Activity pane. Layout follows the page's own width.
+ */
+.trajectory-workspace { container:trajectory / inline-size; }
+.trajectory-toolbar>div { min-width:0; }
+.trajectory-toolbar p { overflow-wrap:anywhere; }
+.trajectory-actions button { white-space:nowrap; }
+@container trajectory (max-width:900px) {
+  .trajectory-toolbar { gap:12px; }
+  .trajectory-toolbar h1 { font-size:17px; letter-spacing:-.2px; }
+  .trajectory-toolbar h1>.icon { width:17px; height:17px; }
+  .trajectory-actions { gap:4px; }
+  .trajectory-columns { grid-template-columns:var(--trajectory-width,minmax(280px,1fr)) minmax(0,1fr); }
+  .trajectory-filter { padding:10px 14px; }
+  .trajectory-row { gap:7px; padding:7px 12px; }
+  .step-kind { max-width:40%; flex-shrink:1; min-width:0; }
+  .step-outcome { display:none; }
+  .trajectory-log-footer { padding:9px 14px; }
+  .trajectory-detail>header { padding:14px 18px; }
+  .trajectory-detail h2 { font-size:14px; }
+  #trajectory-detail-content { padding:4px 18px 24px; }
+  .trajectory-text-section { padding:13px 0; }
+  .trajectory-detail pre { font-size:11px; line-height:1.75; }
+}
+/* Too narrow for two readable columns: the log sits above its detail. */
+@container trajectory (max-width:680px) {
+  .trajectory-columns { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(150px,2fr) minmax(0,3fr); }
+  .trajectory-columns>.pane-resizer { display:none; }
+  .trajectory-log { border-right:0; border-bottom:1px solid var(--line); }
+  .trajectory-log-footer>span:last-child { display:none; }
+  .trajectory-log-footer>span:first-child { flex:1; }
+  .step-outcome { display:block; max-width:30%; overflow:hidden; text-overflow:ellipsis; }
+  .trajectory-row.answer .step-outcome { white-space:nowrap; max-width:30%; }
+}
+@container trajectory (max-width:480px) {
+  .embedded-view .trajectory-toolbar { padding:12px 14px 10px; }
+  .embedded-view .trajectory-strip { margin:0 14px 10px; }
+  .trajectory-toolbar { align-items:flex-start; }
+  .trajectory-actions button { padding:6px 8px; }
+  .step-outcome { display:none; }
+  .step-turn { display:none; }
+}
 .workspace-manage .operator-dialog { position:static; width:100%; height:100%; max-height:none; max-width:none; margin:0; border:0; border-radius:0; box-shadow:none; padding:20px 0; }
 @media(max-width:1200px) { .workspace-view-host { margin:0 20px 25px; } }
 

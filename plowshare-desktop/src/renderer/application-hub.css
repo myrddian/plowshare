@@ -5,48 +5,81 @@
  * native views that the main process places over an embed slot inside the
  * active view (workspace-slot.css).
  */
-#application-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; padding: 20px clamp(16px, 2.4vw, 32px) 16px; }
+#application-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; padding: 18px clamp(16px, 2.4vw, 32px) 16px; }
 #application-panel[hidden] { display: none; }
 #application-panel > header,
-#application-panel > [data-summary],
 #application-panel > [data-hub-nav] { flex-shrink: 0; }
-#application-panel > header { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
-#application-panel [data-summary] { margin: 4px 0 0; overflow-wrap: anywhere; color: var(--muted); }
-#application-panel [data-hub-nav] { display: flex; flex-wrap: wrap; gap: 4px; margin: 16px 0 14px; }
-#application-panel [data-hub-nav] button[aria-current="page"] { background: #30291e; color: #dfc389; }
+#application-panel .hub-header { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; padding-bottom: 12px; }
+#application-panel .hub-heading { min-width: 0; }
+#application-panel .hub-heading .eyebrow { font: 10px/1.2 var(--mono); letter-spacing: .12em; color: var(--muted); }
+#application-panel .hub-heading h2 { margin: 4px 0 0; font-size: 18px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+#application-panel .hub-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+#application-panel .hub-meta span { max-width: 100%; padding: 1px 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 11px; line-height: 18px; color: var(--muted); overflow-wrap: anywhere; }
+#application-panel .hub-meta span:first-child { font-family: var(--mono); font-size: 10.5px; }
+#application-panel .hub-close { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 4px 8px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+#application-panel .hub-close:hover { background: #ffffff08; color: var(--ink); }
+#application-panel .hub-close .icon { width: 14px; height: 14px; }
+
+/* Underline tab bar, same idiom as the inspector tabs. */
+#application-panel [data-hub-nav] { display: flex; gap: 22px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; margin: 0 0 14px; border-bottom: 1px solid var(--line); }
+#application-panel [data-hub-nav] button { flex-shrink: 0; padding: 9px 0; font-size: 12px; line-height: 18px; color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; margin-bottom: -1px; }
+#application-panel [data-hub-nav] button:hover { color: var(--ink); background: none; }
+#application-panel [data-hub-nav] button[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent); background: none; }
 
 /* Every view section fills the frame below the tabs. */
 #application-panel > section { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 #application-panel > section[hidden] { display: none; }
-#application-panel [data-overview] { overflow: auto; }
-#application-panel [data-overview-tiles] { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-#application-panel [data-overview-tiles] button { display: block; width: 100%; text-align: left; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #1c1c19; }
-#application-panel [data-overview-tiles] button strong { display: block; }
-#application-panel [data-overview-tiles] button small { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; }
-#application-panel .application-secondary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-#application-panel .application-secondary button { color: var(--muted); }
+#application-panel [data-overview] { overflow: auto; gap: 22px; }
+#application-panel .hub-group h3 { margin: 0 0 8px; font: 10px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+#application-panel [data-overview-tiles] { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+#application-panel [data-overview-tiles] button { display: block; width: 100%; text-align: left; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+#application-panel [data-overview-tiles] button:hover { border-color: var(--accent); }
+#application-panel [data-overview-tiles] button strong { display: block; font-size: 13px; font-weight: 500; }
+#application-panel [data-overview-tiles] button small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+#application-panel .hub-links { display: flex; flex-wrap: wrap; gap: 8px; }
+#application-panel .hub-links button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; color: var(--ink); }
+#application-panel .hub-links button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Access */
+#application-panel [data-access] { overflow: auto; }
+#application-panel .hub-panel { max-width: 420px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+#application-panel .hub-panel h3 { margin: 0 0 4px; font-size: 13px; font-weight: 500; }
+#application-panel .hub-panel p { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+#application-panel .hub-panel button { padding: 6px 14px; border: 1px solid var(--accent); border-radius: 6px; color: var(--accent); font-size: 12px; }
+#application-panel .hub-panel button:hover { background: var(--tint); }
 
 /* Activity: list and detail scroll independently of the hub frame. */
 #application-panel .application-activity-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 12px; }
-#application-panel .application-activity-list { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-#application-panel .application-conversation-toolbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 4px; }
-#application-panel .application-conversation-toolbar strong { font-size: 12px; font-weight: 500; color: var(--muted); }
+#application-panel .application-activity-list { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+#application-panel .application-conversation-toolbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--line); }
+#application-panel .application-conversation-toolbar strong { font: 10px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; font-weight: 400; color: var(--muted); }
 #application-panel .application-activity-actions { display: flex; gap: 4px; }
 #application-panel [data-activity-note] { flex-shrink: 0; }
-#application-panel [data-activity-tree] { overflow: auto; min-height: 0; flex: 1; padding: 4px 6px 8px; }
-#application-panel [data-activity-tree] .activity-row { width: 100%; }
+#application-panel [data-activity-tree] { overflow: auto; min-height: 0; flex: 1; padding: 4px; }
+#application-panel [data-activity-tree] .activity-row { width: 100%; align-items: center; gap: 8px; padding: 6px 8px; margin: 0; border-radius: 6px; border-left: 2px solid transparent; }
+#application-panel .activity-row > .icon,
+#application-panel .activity-row > .conversation-icon { margin-top: 0; flex-shrink: 0; }
+#application-panel .activity-row .activity-text { flex: 1; min-width: 0; }
+#application-panel .activity-row strong { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+#application-panel .activity-row small { display: block; margin: 0; line-height: 1.4; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
+#application-panel .activity-row time { flex-shrink: 0; align-self: flex-start; margin-top: 2px; font: 10px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
+#application-panel .activity-row[aria-current="true"] { background: var(--tint); border-left-color: var(--accent); }
 #application-panel .application-activity-embed { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 #application-panel .application-conversation-embed { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #application-panel .application-conversation-embed[hidden],
 #application-panel [data-activity-empty][hidden] { display: none; }
-#application-panel [data-activity-empty] { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); border: 1px solid var(--line); border-radius: 12px; }
+#application-panel [data-activity-empty] { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; }
 #chat.application-nested { position: relative; inset: auto; width: 100%; height: 100%; min-height: 0; transform: none !important; box-shadow: none; border-radius: 12px; }
 #chat.application-nested .chat-grip { cursor: default; opacity: .3; }
 
 /* Files: the browser fills the frame; the tree and editor scroll inside. */
-#application-panel [data-source] > label { flex-shrink: 0; }
+#application-panel [data-source] > label { flex-shrink: 0; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+#application-panel [data-source] > label select { padding: 5px 8px; font-size: 12px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+#application-panel .application-activity-note { margin: 8px 10px; font-size: 11px; line-height: 1.6; color: var(--muted); }
 #application-panel [data-file-browser] { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 
 @media (max-width: 760px) {
   #application-panel .application-activity-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(160px, 35%) minmax(0, 1fr); }
+  #application-panel .activity-row time { display: none; }
+  #application-panel .hub-close span { display: none; }
 }

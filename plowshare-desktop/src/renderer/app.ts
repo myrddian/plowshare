@@ -140,8 +140,13 @@ const application = installApplication(
   },
   {
     slots: workspaceSlots,
+    // Release only pages no slot claims, so moving between hub views that
+    // host pages never drops the page the new view is about to show.
     release: async () => {
-      if (workspaceRoute.kind !== 'chat')
+      if (
+        workspaceRoute.kind !== 'chat' &&
+        !workspaceSlots.resolve(workspaceRoute)
+      )
         await request({ action: 'workspace-chat' });
     },
   },
@@ -1293,13 +1298,8 @@ function renderPersonal() {
     personalVisible && !!personal && workspaceRoute.kind === 'chat';
   if ($('#personal-panel').hidden === showPersonal)
     $('#personal-panel').hidden = !showPersonal;
-  // Background state updates must not reveal chat underneath an embedded page.
-  // The Application hub keeps pages it hosts in its own embed slots.
-  if (
-    workspaceRoute.kind !== 'chat' &&
-    !workspaceSlots.resolve(workspaceRoute)
-  )
-    application.close();
+  // The hub closes for unclaimed pages only when the route changes (see
+  // showWorkspace); state pushes during a hub view transition must not.
   application.render();
   syncWorkspaceHost();
   const hideStage =
@@ -2869,6 +2869,33 @@ function renderBreadcrumb() {
     else button.removeAttribute('aria-current');
   }
 }
+/**
+ * A slot's padding box (inside its border, so the frame stays visible),
+ * clipped to the Application panel and the viewport: native views ignore
+ * CSS overflow clipping, and main rejects negative coordinates.
+ */
+function slotBounds(slot: HTMLElement) {
+  const outer = slot.getBoundingClientRect();
+  const panel = $('#application-panel').getBoundingClientRect();
+  const left = Math.max(outer.left + slot.clientLeft, panel.left, 0),
+    top = Math.max(outer.top + slot.clientTop, panel.top, 0),
+    right = Math.min(
+      outer.left + slot.clientLeft + slot.clientWidth,
+      panel.right,
+      window.innerWidth,
+    ),
+    bottom = Math.min(
+      outer.top + slot.clientTop + slot.clientHeight,
+      panel.bottom,
+      window.innerHeight,
+    );
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
+}
 function reportWorkspaceLayout() {
   if (layoutFrame) return;
   layoutFrame = requestAnimationFrame(() => {
@@ -2877,7 +2904,7 @@ function reportWorkspaceLayout() {
     // page covers the full workspace host.
     const slot = workspaceSlots.resolve(workspaceRoute);
     const host = $('#workspace-view-host');
-    const bounds = (slot ?? host).getBoundingClientRect();
+    const bounds = slot ? slotBounds(slot) : host.getBoundingClientRect();
     const layout = {
       action: 'workspace-layout' as const,
       x: bounds.x,
@@ -2892,15 +2919,20 @@ function reportWorkspaceLayout() {
     const stamp = JSON.stringify(layout);
     if (stamp === layoutStamp) return;
     layoutStamp = stamp;
-    void window.plowshare
-      .request(layout)
-      .catch((reason: unknown) => error(errorMessage(reason)));
+    // A rejected layout must be retried on the next report.
+    void window.plowshare.request(layout).catch((reason: unknown) => {
+      if (layoutStamp === stamp) layoutStamp = '';
+      error(errorMessage(reason));
+    });
   });
 }
-/** Hide the full-size host while a slot hosts the page, then re-place it. */
+/**
+ * The full-size host is shown only for pages outside the hub: while the hub
+ * is visible it owns the main area, and a page it does not (yet) claim stays
+ * hidden rather than sharing the area beside it.
+ */
 function syncWorkspaceHost() {
-  const hidden =
-    workspaceRoute.kind === 'chat' || !!workspaceSlots.resolve(workspaceRoute);
+  const hidden = workspaceRoute.kind === 'chat' || application.visible;
   const host = $('#workspace-view-host');
   if (host.hidden !== hidden) host.hidden = hidden;
   reportWorkspaceLayout();
@@ -2910,6 +2942,10 @@ function showWorkspace(route: WorkspaceRoute) {
   if (!changed) return;
   workspaceRoute = route;
   if (route.kind !== 'chat') personalVisible = false;
+  // A page no hub slot claims replaces the hub (e.g. Library from the
+  // sidebar); background state updates never close it.
+  if (route.kind !== 'chat' && !workspaceSlots.resolve(route))
+    application.close();
   renderPersonal();
   $('#workspace-manage').hidden = route.kind !== 'manage';
   $('#workspace-administration').hidden = route.kind !== 'administration';

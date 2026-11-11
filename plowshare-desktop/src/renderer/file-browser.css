@@ -1,32 +1,97 @@
-/* Reusable file browser (Application Files, Personal files). It fills its host; the tree and the editor scroll independently. */
-#personal-file-browser { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-.file-browser { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
-.file-browser-toolbar { display: flex; flex-direction: column; gap: 6px; }
-.file-browser-jump { color: var(--muted); font-size: 0.9em; }
-.file-browser-jump summary { cursor: pointer; user-select: none; }
-.file-browser-jump form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
-.file-browser-jump input { flex: 1 1 200px; min-width: 0; }
-.file-browser-split { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 12px; min-height: 0; flex: 1; }
-.file-browser-tree,
-.file-browser-editor { border: 1px solid var(--line); border-radius: 12px; background: var(--panel, #1c1c19); min-height: 280px; }
-.file-browser-tree { overflow: auto; padding: 6px; }
-.file-browser-row { display: flex; align-items: center; gap: 2px; padding-left: calc(var(--depth, 0) * 16px); }
-.file-browser-toggle { flex: 0 0 auto; width: 28px; height: 36px; padding: 0; color: var(--muted); background: transparent; border: 0; display: inline-flex; align-items: center; justify-content: center; }
-.file-browser-toggle .icon { width: 14px; height: 14px; transform: rotate(-90deg); transition: transform .12s; }
+/*
+ * Reusable file browser (Application Files, Personal files).
+ *
+ * The browser is one framed surface that fills its host: a tree pane, an
+ * editor pane and a slim status footer. Nothing in it has a fixed height; the
+ * tree and the code area are the only scroll containers, so the page behind
+ * the browser never scrolls. Rows and editor lines sit on fixed pixel line
+ * heights so the gutter numbers stay aligned with the text.
+ */
+#personal-file-browser { flex: 1; min-height: 240px; }
+.file-browser {
+  --fb-row: 26px;
+  --fb-line: 20px;
+  --fb-code: 12.5px;
+  --fb-danger: #f2a69a;
+  --fb-hover: #ffffff0a;
+  display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden;
+  container: file-browser / inline-size;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+}
+.file-browser-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 272px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+
+/* Tree pane */
+.file-browser-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.file-browser-jump { flex-shrink: 0; display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 6px 0 10px; border-bottom: 1px solid var(--line); }
+.file-browser-jump input { flex: 1; min-width: 0; height: 24px; padding: 0; border: 0; background: transparent; font-size: 12px; color: var(--ink); outline: none; }
+.file-browser-jump input::placeholder { color: var(--muted); opacity: .7; }
+.file-browser-jump button { flex-shrink: 0; height: 22px; padding: 0 8px; border-radius: 5px; font-size: 11px; color: var(--muted); }
+.file-browser-jump button:hover { background: var(--fb-hover); color: var(--ink); }
+.file-browser-jump:focus-within { box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+.file-browser-tree { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+.file-browser-row { display: flex; align-items: center; height: var(--fb-row); padding-left: calc(var(--depth, 0) * 14px); }
+/* Files have no chevron; reserve its width so names line up with folders. */
+.file-browser-row.is-file { padding-left: calc(var(--depth, 0) * 14px + 18px); }
+.file-browser-toggle { flex: 0 0 18px; height: var(--fb-row); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); border-radius: 4px; }
+.file-browser-toggle .icon { width: 12px; height: 12px; transform: rotate(-90deg); transition: transform .12s; }
 .file-browser-toggle.is-open .icon { transform: rotate(0deg); }
-.file-browser-name { flex: 1 1 auto; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; overflow-wrap: anywhere; background: transparent; border: 0; color: inherit; padding: 12px; border-radius: 8px; }
-.file-browser-name .icon { width: 18px; height: 18px; flex: 0 0 auto; color: #dfc389; opacity: .85; }
-.file-browser-name[aria-current="true"] { background: #30291e; color: #dfc389; }
-.file-browser-name:hover { background: #24241f; }
-.file-browser-empty, .file-browser-more { color: var(--muted); margin: 8px; font-size: 0.9em; }
-.file-browser-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 16px; }
-.file-browser-empty-editor { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); text-align: center; padding: 24px; }
-.file-browser-empty-editor .icon { width: 28px; height: 28px; color: #dfc389; opacity: .7; }
-.file-browser-empty-editor p { margin: 0; }
-.file-browser-editor [data-text] { width: 100%; min-height: 280px; resize: vertical; font-family: monospace; tab-size: 2; line-height: 1.6; }
-.file-browser-editor label { display: block; }
-.file-browser-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.file-browser [data-status], .file-browser [data-permission], .file-browser [data-error] { overflow-wrap: anywhere; margin: 0; }
-@media (max-width: 720px) {
-  .file-browser-split { grid-template-columns: 1fr; }
+.file-browser-name { flex: 1 1 auto; min-width: 0; height: var(--fb-row); display: flex; align-items: center; gap: 7px; padding: 0 8px 0 4px; border-radius: 5px; font-size: 12.5px; line-height: var(--fb-row); color: var(--ink); }
+.file-browser-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-browser-name .icon { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
+.file-browser-name:hover { background: var(--fb-hover); color: var(--ink); }
+.file-browser-name[aria-current="true"] { background: var(--tint); color: var(--accent); }
+.file-browser-name[aria-current="true"] .icon { color: var(--accent); }
+.file-browser-tree button:focus-visible { outline-width: 1px; outline-offset: -1px; }
+.file-browser-empty, .file-browser-more { margin: 6px 8px; color: var(--muted); font-size: 12px; }
+.file-browser-more { margin: 0; height: var(--fb-row); line-height: var(--fb-row); padding-left: calc(var(--depth, 0) * 14px + 22px); font-style: italic; }
+
+/* Editor pane */
+.file-browser-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.file-browser-empty-editor { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--muted); font-size: 12px; text-align: center; }
+.file-browser-empty-editor .icon { width: 22px; height: 22px; opacity: .6; }
+.file-browser-document { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.file-browser-bar { flex-shrink: 0; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.file-browser-title { flex: 0 1 auto; min-width: 0; display: flex; font: 500 12px var(--mono); white-space: nowrap; }
+.file-browser-title-directory { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.file-browser-title-name { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.file-browser-dirty { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.file-browser-badge { flex: 0 0 auto; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 10.5px; line-height: 18px; color: var(--muted); white-space: nowrap; }
+.file-browser-badge[data-state="conflict"] { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
+.file-browser-actions { flex: 0 0 auto; display: flex; gap: 6px; margin-left: auto; }
+.file-browser-actions button,
+.file-browser-conflict button { height: 24px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; line-height: 22px; white-space: nowrap; color: var(--ink); }
+.file-browser-actions button:hover:not(:disabled),
+.file-browser-conflict button:hover { background: var(--fb-hover); color: var(--ink); }
+.file-browser-actions button.is-primary:not(:disabled) { border-color: var(--accent); background: var(--accent); color: var(--bg); font-weight: 600; }
+.file-browser-actions button.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, white); color: var(--bg); }
+.file-browser-bar button:focus-visible,
+.file-browser-conflict button:focus-visible { outline-width: 1px; outline-offset: 2px; }
+.file-browser-conflict { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--line); background: var(--tint); font-size: 12px; }
+.file-browser-conflict p { flex: 1 1 240px; min-width: 0; }
+
+/* Code area: the gutter is clipped and follows the textarea's vertical scroll. */
+.file-browser-code { flex: 1; min-height: 0; display: flex; position: relative; }
+.file-browser-gutter,
+.file-browser-code textarea { font: var(--fb-code)/var(--fb-line) var(--mono); font-variant-ligatures: none; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; padding-top: 10px; }
+.file-browser-gutter { flex: 0 0 auto; box-sizing: content-box; width: calc(var(--digits, 2) * 1ch); padding-left: 14px; padding-right: 12px; padding-bottom: 64px; overflow: hidden; white-space: pre; text-align: right; color: var(--muted); opacity: .55; user-select: none; border-right: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.file-browser-code textarea { flex: 1; min-width: 0; min-height: 0; display: block; margin: 0; padding-left: 12px; padding-right: 16px; padding-bottom: 10px; border: 0; border-radius: 0; background: transparent; color: var(--ink); resize: none; overflow: auto; white-space: pre; overflow-wrap: normal; tab-size: 2; caret-color: var(--accent); outline: none; }
+.file-browser-code textarea:focus-visible { outline: none; }
+.file-browser-code textarea::-webkit-scrollbar-corner { background: transparent; }
+.file-browser-code textarea { scrollbar-color: #4a4639 var(--panel); }
+.file-browser-code textarea[readonly] { color: color-mix(in srgb, var(--ink) 86%, var(--muted)); }
+.file-browser-code textarea::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+/* Focus is a hairline on the code area, not a ring around the whole field. */
+.file-browser-code:focus-within::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent); }
+.file-browser-code:focus-within .file-browser-gutter { opacity: .8; }
+
+/* Footer: listing status or error on the left, caret position on the right. */
+.file-browser-foot { flex-shrink: 0; display: flex; align-items: baseline; gap: 12px; min-height: 26px; padding: 3px 12px; border-top: 1px solid var(--line); font-size: 11px; line-height: 18px; color: var(--muted); }
+.file-browser-foot p { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-browser-foot [data-error] { white-space: normal; overflow-wrap: anywhere; max-height: 54px; overflow: auto; color: var(--fb-danger); }
+.file-browser-position { flex: 0 0 auto; margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Narrow hosts stack the tree above the editor. */
+@container file-browser (max-width: 620px) {
+  .file-browser-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(96px, 34%) minmax(0, 1fr); }
+  .file-browser-side { border-right: 0; border-bottom: 1px solid var(--line); }
 }

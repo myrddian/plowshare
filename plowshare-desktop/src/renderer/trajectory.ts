@@ -118,6 +118,15 @@ function title() {
     'New conversation'
   );
 }
+/**
+ * One-line row preview. Rows truncate visually with an ellipsis; bounding the
+ * text as well keeps large tool arguments (often whole JSON documents) out of
+ * every row's DOM. The selected entry's detail shows the full value.
+ */
+function previewText(value: string) {
+  const line = value.replace(/\s+/g, ' ').trim();
+  return line.length > 240 ? `${line.slice(0, 239)}…` : line;
+}
 function fromStep(step: Step): Item {
   if (step.kind === 'call')
     return {
@@ -276,7 +285,7 @@ function render() {
       .map((row) => {
         const call = row.step?.kind === 'call' ? row.step : undefined,
           linked = call && navigableCall(call);
-        return `<div class="trajectory-step" role="listitem"><button class="trajectory-row ${row.step?.kind ?? 'event'} ${row.standing}" data-step="${esc(row.key)}" ${row.key === selected ? 'aria-current="true"' : ''}><span class="step-turn">${row.turn ?? '·'}</span><span class="step-kind">${linked ? '<span class="delegation-direction" title="Agent called">&gt;</span>' : icon(itemIcon(row))}<span>${esc(row.label)}</span></span><span class="step-preview">${esc(row.preview.replace(/\s+/g, ' '))}</span><span class="step-outcome">${linked && call.result ? '<span class="delegation-direction" title="Agent result received">&lt;</span> ' : ''}${row.millis === undefined ? esc(row.standing) : `${esc(row.standing)} · ${millis(row.millis)}`}${row.step?.kind !== 'call' && row.step?.entry.dispatch ? ` · ${esc(inferenceTokens(row.step.entry))}` : ''}</span></button>${linked ? delegationLink(call, 'row') : ''}</div>`;
+        return `<div class="trajectory-step" role="listitem"><button class="trajectory-row ${row.step?.kind ?? 'event'} ${row.standing}" data-step="${esc(row.key)}" ${row.key === selected ? 'aria-current="true"' : ''}><span class="step-turn">${row.turn ?? '·'}</span><span class="step-kind">${linked ? '<span class="delegation-direction" title="Agent called">&gt;</span>' : icon(itemIcon(row))}<span>${esc(row.label)}</span></span><span class="step-preview">${esc(previewText(row.preview))}</span><span class="step-outcome">${linked && call.result ? '<span class="delegation-direction" title="Agent result received">&lt;</span> ' : ''}${row.millis === undefined ? esc(row.standing) : `${esc(row.standing)} · ${millis(row.millis)}`}${row.step?.kind !== 'call' && row.step?.entry.dispatch ? ` · ${esc(inferenceTokens(row.step.entry))}` : ''}</span></button>${linked ? delegationLink(call, 'row') : ''}</div>`;
       })
       .join('') ||
     '<div class="trajectory-empty">No matching steps. Load earlier entries or refresh the conversation.</div>';
@@ -308,7 +317,7 @@ function renderRun(job: Job | undefined) {
   $('#trajectory-run-items').innerHTML = runItems
     .map(
       (row) =>
-        `<button class="trajectory-run-item" data-step="${esc(row.key)}" ${row.key === selected ? 'aria-current="true"' : ''}>${icon(itemIcon(row))}<span>${esc(row.label)}</span><span class="step-preview">${esc(row.preview.replace(/\s+/g, ' ').slice(0, 160))}</span></button>`,
+        `<button class="trajectory-run-item" data-step="${esc(row.key)}" ${row.key === selected ? 'aria-current="true"' : ''}>${icon(itemIcon(row))}<span>${esc(row.label)}</span><span class="step-preview">${esc(previewText(row.preview))}</span></button>`,
     )
     .join('');
 }
