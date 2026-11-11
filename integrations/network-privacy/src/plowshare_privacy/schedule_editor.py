@@ -36,6 +36,10 @@ from .schedule_control import ScheduleController, ScheduleControlStatus, Schedul
 from .setup import Setup, administrator_login, private_write
 
 PRESETS = {"15m": "0 */15 * * * *", "hourly": "0 0 * * * *", "daily": "0 0 9 * * *"}
+# Keeps the cron already in the prepared schedule. Review refuses source whose
+# revision is not the active one, so this is the live schedule; it lets an
+# operator change only the zone or pause state of a custom (non-preset) cron.
+CURRENT = "current"
 
 
 @dataclass(frozen=True)
@@ -100,7 +104,10 @@ class ScheduleManagement(Protocol):
     async def reconcile(self, password: str) -> str | None: ...
     async def review(
         self, preset: str, zone: str, paused: bool, password: str
-    ) -> ScheduleReview: ...
+    ) -> ScheduleReview:
+        """Prepare a revision; ``preset`` is a ``PRESETS`` key or ``CURRENT``."""
+        ...
+
     async def deploy(self, review_id: str, store: str, password: str) -> str: ...
 
 
@@ -128,7 +135,7 @@ class ScheduleEditor:
     ) -> ScheduleReview:
         from .bootstrap import application_files
 
-        if preset not in PRESETS or type(paused) is not bool:
+        if (preset not in PRESETS and preset != CURRENT) or type(paused) is not bool:
             raise ValueError("Choose a listed schedule frequency")
         try:
             ZoneInfo(text(zone, 128))
@@ -188,7 +195,8 @@ class ScheduleEditor:
                 json.loads(selected.text),
                 {"version", "cron", "zone", "paused", "action", "target", "limits"},
             )
-            row.update(cron=PRESETS[preset], zone=zone, paused=paused)
+            cron = text(row["cron"], 128) if preset == CURRENT else PRESETS[preset]
+            row.update(cron=cron, zone=zone, paused=paused)
             prepared = tuple(
                 ApplicationSourceFileDto(
                     path=item.path, text=json.dumps(row, indent=2) + "\n"
@@ -203,7 +211,7 @@ class ScheduleEditor:
             result = ScheduleReview(
                 str(uuid4()),
                 uuid(status.active_revision),
-                PRESETS[preset],
+                cron,
                 zone,
                 paused,
                 tuple(

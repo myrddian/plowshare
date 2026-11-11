@@ -374,7 +374,7 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
   monitoringDraft = false;
-  bearer = ''; authenticated = false; selected = null; selectedReport = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
+  bearer = ''; authenticated = false; selected = null; selectedReport = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; liveCron = null; deviceSignature = null; findingSignature = null; notified = null;
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings','q-third','q-silent','q-volume']) byId(id).replaceChildren();
   for (const id of ['q-network','q-third-coverage','device-shown','health-detail']) byId(id).textContent = '';
   byId('device-search').value = ''; byId('device-presence').value = 'observed'; byId('device-sort').value = 'inventory';
@@ -1466,6 +1466,32 @@ function renderInventory(value) {
   }
 }
 
+// The schedule presets the collector offers, by the cron each deploys
+// (schedule_editor.PRESETS). Any other live cron is shown as itself.
+const schedulePresets = [['15m', '0 */15 * * * *', 'Every 15 minutes'], ['hourly', '0 0 * * * *', 'Hourly'], ['daily', '0 0 9 * * *', 'Daily at 09:00']];
+function scheduleLabel(cron) {
+  const preset = schedulePresets.find(([, value]) => value === cron);
+  return preset ? preset[2] : 'Custom: ' + cron;
+}
+// The frequency choice starts at the live schedule, and follows it only when
+// the live schedule changes, so a refresh does not undo an unsaved choice. A
+// cron that is not a preset is kept by the "current" choice, so a review
+// without changes cannot replace it with a preset.
+let liveCron = null;
+function renderSchedule(schedule) {
+  const facts = byId('schedule-facts'); facts.replaceChildren();
+  if (!schedule) {fact(facts, 'Frequency', 'Unavailable'); return;}
+  fact(facts, 'Frequency', scheduleLabel(schedule.cron));
+  fact(facts, 'Time zone', schedule.zone);
+  if (schedule.cron === liveCron) return;
+  liveCron = schedule.cron;
+  const preset = schedulePresets.find(([, value]) => value === schedule.cron);
+  const current = byId('frequency-current');
+  current.hidden = current.disabled = Boolean(preset);
+  current.textContent = preset ? 'Custom (current)' : 'Custom (current): ' + schedule.cron;
+  byId('frequency').value = preset ? preset[0] : 'current';
+}
+
 function renderOverview(value) {
   const health = value.health;
   byId('device-count').textContent = formatCount(value.devices.length);
@@ -1473,9 +1499,10 @@ function renderOverview(value) {
   byId('health-summary').textContent = !health.connected ? 'Connection needs attention' : health.recovery.length ? 'Retained work needs attention' : 'Connected to Plowshare';
   byId('setup-checklist').hidden = health.checklist.length === 0;
   renderScheduleControl(health.schedule, value.schedule_control, value.pending_deployment);
+  renderSchedule(health.schedule);
   byId('deployment-state').textContent = value.pending_deployment ? `Deployment ${value.pending_deployment} needs reconciliation. Enter the administrator password and choose Check retained deployment.` : 'No unsettled schedule deployment.';
   const grid = byId('health'); grid.replaceChildren();
-  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? formatWhen(health.last_contact) : 'Awaiting contact'], ['Last completed scan', health.last_scan ? formatWhen(health.last_scan) : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at ? 'Next scan ' + formatWhen(health.schedule.next_at) : 'Awaiting next scan') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length} of 3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length} of 6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at ? formatWhen(health.credential_expires_at) : 'Not supplied']];
+  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? formatWhen(health.last_contact) : 'Awaiting contact'], ['Last completed scan', health.last_scan ? formatWhen(health.last_scan) : 'None yet'], ['Schedule', health.schedule ? scheduleLabel(health.schedule.cron) + ' · ' + health.schedule.zone : 'Not found or unavailable'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at ? 'Next scan ' + formatWhen(health.schedule.next_at) : 'Awaiting next scan') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length} of 3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length} of 6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at ? formatWhen(health.credential_expires_at) : 'Not supplied']];
   for (const [name, detail] of checks) fact(grid, name, detail);
   if (health.unifi) fact(grid, 'UniFi', health.unifi);
   byId('health-detail').textContent = `Checked ${formatWhen(health.checked_at)}. ${health.detail}`;
@@ -1668,7 +1695,7 @@ byId('schedule-form').addEventListener('submit', async event => {
   const password = byId('administrator-password').value; byId('administrator-password').value = '';
   try {
     scheduleDraft = await api('/api/schedule/review', {method:'POST', body:JSON.stringify({preset:byId('frequency').value,zone:byId('zone').value.trim(),paused:byId('schedule-paused').checked,password})});
-    byId('schedule-review').textContent = `${scheduleDraft.paused ? 'Paused' : 'Enabled'} · ${scheduleDraft.cron} · ${scheduleDraft.zone}. Based on revision ${scheduleDraft.expected_revision}. Source digest ${scheduleDraft.source_digest}. Enter the administrator password again to deploy.`;
+    byId('schedule-review').textContent = `${scheduleDraft.paused ? 'Paused' : 'Enabled'} · ${scheduleLabel(scheduleDraft.cron)} · ${scheduleDraft.zone}. Based on revision ${scheduleDraft.expected_revision}. Source digest ${scheduleDraft.source_digest}. Enter the administrator password again to deploy.`;
     byId('schedule-store').replaceChildren(...scheduleDraft.stores.map(store => {const option = element('option', store); option.value = store; return option;}));
     const sources = element('details'); sources.append(element('summary', 'Details · full Application source'));
     for (const file of scheduleDraft.sources) {sources.append(element('h3', file.path), element('pre', file.text));}
