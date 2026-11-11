@@ -348,16 +348,46 @@ for (const id of ['targets','ports','device-labels','enabled','quick-scan','dns-
   monitoringDraft = true;
   byId('settings-detail').textContent = 'Monitoring changes are not saved. Choose Save monitoring to retain them.';
 });
+// Destination groups arrive in privacy-first order from the collector.
+const destinationLabels = {
+  advertising:'Advertising', measurement:'Audience measurement & content recognition',
+  telemetry:'Vendor telemetry & logging', streaming:'Streaming services',
+  unclassified:'Unclassified', connectivity:'Connectivity checks & time',
+  local:'Local names & reverse lookups',
+};
+const behaviouralKinds = new Set(['advertising', 'measurement', 'telemetry']);
+function behaviouralQueries(activity) {
+  return (activity?.groups || []).filter(group => behaviouralKinds.has(group.kind))
+    .reduce((total, group) => total + group.queries, 0);
+}
+function formatBytes(value) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let amount = value, unit = 0;
+  while (amount >= 1000 && unit < units.length - 1) {amount /= 1000; unit += 1;}
+  return `${unit ? amount.toFixed(amount < 10 ? 1 : 0) : amount} ${units[unit]}`;
+}
+function renderTraffic(traffic) {
+  const details = element('details');
+  details.append(element('summary', `Traffic · ${formatBytes(traffic.to_device_bytes)} to device · ${formatBytes(traffic.from_device_bytes)} from device`));
+  const bounds = [traffic.from_at, traffic.until_at].map(value => new Date(value).toLocaleString()).join(' to ');
+  details.append(element('p', `UniFi client byte counters · ${bounds} · ${traffic.samples} quick checks`, 'hint'));
+  if (traffic.resets) details.append(element('p', `${traffic.resets} intervals skipped after a counter reset (reconnect or controller restart). Totals are a lower bound.`, 'hint'));
+  details.append(element('p', 'Direction follows UniFi: "to device" is what the network sent the client. Counters show volume, not which hosts received it.', 'hint'));
+  return details;
+}
 function renderDnsActivity(activity) {
-  const labels = {streaming:'Streaming services', advertising:'Advertising', measurement:'Audience measurement', unclassified:'Unclassified'};
+  const labels = destinationLabels;
   const details = element('details');
   details.append(element('summary', `DNS activity · ${activity.queries_read} sampled queries in the last 24 hours`));
+  if (activity.pihole_silent) {
+    details.append(element('p', `No DNS queries reached Pi-hole in ${activity.windows} confirmed windows while this device was on the network. It may be idle, or it may use its own DNS servers or DNS over HTTPS, which Pi-hole cannot see.`, 'notice'));
+  }
   const bounds = [activity.from_at, activity.until_at].map(value => new Date(value).toLocaleString()).join(' to ');
   details.append(element('p', `Pi-hole · ${bounds} · ${activity.windows} observed windows`, 'hint'));
   if (activity.partial_windows) details.append(element('p', `Partial coverage in ${activity.partial_windows} windows. Pi-hole reported ${activity.queries_available} matching queries in the sampled windows.`, 'hint'));
   details.append(element('p', 'Counts show DNS lookups. Connections and data transfers require gateway flow records.', 'hint'));
   for (const group of activity.groups) {
-    details.append(element('h4', `${labels[group.kind]} · ${group.queries} queries`));
+    details.append(element('h4', `${labels[group.kind] || group.kind} · ${group.queries} queries`));
     const items = element('ul');
     for (const entry of group.destinations) {
       const provider = entry.provider ? ` · ${entry.provider}` : '';
@@ -537,6 +567,17 @@ function renderOverview(value) {
     }
     card.append(element('p', device.services.map(item => `${item.port}: ${item.status}`).join(' · '), 'hint'));
     if (device.detection) card.append(renderDeviceDetection(device.detection));
+    const flags = [];
+    if (device.dns_activity?.pihole_silent) flags.push('Bypasses Pi-hole?');
+    const tracking = behaviouralQueries(device.dns_activity);
+    if (tracking) flags.push(`${tracking} ad, measurement or telemetry lookups`);
+    if (flags.length) {
+      const row = element('p', undefined, 'flags');
+      for (const flag of flags) row.append(element('span', flag, 'badge'));
+      card.append(row);
+      card.dataset.search += ' ' + flags.join(' ').toLowerCase();
+    }
+    if (device.traffic) card.append(renderTraffic(device.traffic));
     if (device.dns_activity) card.append(renderDnsActivity(device.dns_activity));
     const destinations = element('details'); destinations.append(element('summary', `Last full sweep · ${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
     const history = element('details'); history.append(element('summary', `${device.history.length} collections at this address`));

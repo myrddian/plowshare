@@ -484,13 +484,17 @@ class UniFiPlan:
     ca_file: Path | None
     certificate_sha256: str | None = None
     gateway: UniFiGateway | None = None
+    # Short legacy site name (often "default") for per-client byte counters.
+    # The Integration API used for identity has no traffic fields, so traffic
+    # reads the controller's stat/sta endpoint with the same API key.
+    traffic_site: str | None = None
 
     @classmethod
     def decode(cls, value: object) -> UniFiPlan:
         row = object_fields(
             value,
             {"apiBase", "siteId", "apiKeyEnvironment"},
-            {"caFile", "certificateSha256", "gateway"},
+            {"caFile", "certificateSha256", "gateway", "trafficSite"},
         )
         base = text(row["apiBase"], 2048).rstrip("/")
         url = urlsplit(base)
@@ -528,8 +532,19 @@ class UniFiPlan:
         gateway = UniFiGateway.decode(row["gateway"]) if "gateway" in row else None
         if gateway is not None and not private_ipv4(url.hostname):
             raise ValueError("A UniFi gateway binding requires a private IPv4 API host")
+        traffic_site = text(row["trafficSite"], 64) if "trafficSite" in row else None
+        if traffic_site is not None and not re.fullmatch(
+            r"[A-Za-z0-9_-]{1,64}", traffic_site
+        ):
+            raise ValueError("UniFi traffic site must be a short site name")
         return cls(
-            base, uuid(row["siteId"]), environment, ca_file, fingerprint, gateway
+            base,
+            uuid(row["siteId"]),
+            environment,
+            ca_file,
+            fingerprint,
+            gateway,
+            traffic_site,
         )
 
 

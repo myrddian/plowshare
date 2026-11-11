@@ -853,6 +853,45 @@ def bind_unifi_gateway(setup: Setup, device_id: str, lan_mac: str) -> None:
     )
 
 
+def enable_unifi_traffic(setup: Setup, site: str) -> None:
+    """Turn on UniFi byte counters for a stopped collector without changing scope.
+
+    Counters are read from the controller's legacy stat/sta endpoint for the
+    named site (usually "default") with the existing API key. They feed local
+    presence data only, so the receipt journal and evidence scope stay as they are.
+    """
+    config = Configuration.read(setup.collector)
+    if config.collection.unifi is None:
+        raise SetupProblem("Configure UniFi before enabling traffic counters.")
+    pending = setup.collector.with_name(
+        setup.collector.stem + ".pending" + setup.collector.suffix
+    )
+    if pending.exists():
+        raise SetupProblem(
+            "Apply or review pending collector settings before enabling traffic."
+        )
+    row = load_json(setup.collector)
+    if not isinstance(row, dict) or not isinstance(plan := row.get("collection"), dict):
+        raise SetupProblem("Invalid collector configuration")
+    unifi = plan.get("unifi")
+    if not isinstance(unifi, dict):
+        raise SetupProblem("Missing UniFi configuration")
+    unifi["trafficSite"] = site
+    try:
+        Configuration.decode(row, setup.collector)
+    except ValueError as error:
+        raise SetupProblem(str(error)) from None
+    with FileReceipts(config):
+        if Configuration.read(setup.collector) != config:
+            raise SetupProblem(
+                "Collector configuration changed before traffic counters were saved."
+            )
+        replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
+    print(
+        "UniFi traffic counters enabled. Start the collector; volumes appear after two quick checks."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -915,6 +954,15 @@ def main() -> None:
     )
     gateway.add_argument("--device-id", required=True)
     gateway.add_argument("--lan-mac", required=True)
+    traffic = commands.add_parser(
+        "enable-unifi-traffic",
+        help="Read per-client UniFi byte counters on a stopped collector",
+    )
+    traffic.add_argument(
+        "--site",
+        required=True,
+        help="UniFi legacy site name, usually 'default'",
+    )
     commands.add_parser(
         "install",
         help="Deploy paused once, then issue its reserved service credential",
@@ -1070,6 +1118,9 @@ def main() -> None:
             return
         if args.command == "bind-unifi-gateway":
             bind_unifi_gateway(setup, args.device_id, args.lan_mac)
+            return
+        if args.command == "enable-unifi-traffic":
+            enable_unifi_traffic(setup, args.site)
             return
         if args.command == "start":
             saved = (

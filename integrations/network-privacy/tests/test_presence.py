@@ -16,7 +16,11 @@ from support import FixturePort, MemoryReceipts, configuration
 from plowshare_privacy.collection import NetworkCollector, scope_fingerprint
 from plowshare_privacy.contracts import CollectionPlan, DeviceIdentity, DnsObservation
 from plowshare_privacy.device_inventory import device_inventory
-from plowshare_privacy.dns_activity import QuerySample
+from plowshare_privacy.dns_activity import (
+    MIN_SILENT_WINDOWS,
+    DnsActivityWindow,
+    QuerySample,
+)
 from plowshare_privacy.identity_source import IdentitySample
 from plowshare_privacy.presence import (
     PresenceHistory,
@@ -25,6 +29,7 @@ from plowshare_privacy.presence import (
     Sighting,
     epoch,
 )
+from plowshare_privacy.traffic import TrafficCounter
 from plowshare_privacy.worker import Worker
 
 A, B, C, D = ("192.168.10.1", "192.168.10.2", "192.168.10.3", "192.168.10.4")
@@ -257,6 +262,97 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 history.view(scope, epoch(at(86400 + 480)), include_dns=True).dns, {}
             )
+
+    async def test_confirmed_device_without_pihole_queries_is_reported_silent(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            history = PresenceHistory(Path(folder).resolve())
+            scope = scope_fingerprint(PLAN)
+            empty = QuerySample((), 0, 0, ())
+            for step in range(1, MIN_SILENT_WINDOWS + 2):
+                seconds = step * 120
+                window = (
+                    (DnsActivityWindow(MAC, at(seconds - 120), empty),)
+                    if step > 1
+                    else ()
+                )
+                history.record(
+                    scope,
+                    PresenceSample(
+                        at(seconds), (Sighting(A, identity(A, "unifi", seconds)),)
+                    ),
+                    window,
+                )
+            now = epoch(at((MIN_SILENT_WINDOWS + 1) * 120))
+            profile = history.view(scope, now, include_dns=True).dns[MAC]
+            self.assertEqual(profile.windows, MIN_SILENT_WINDOWS)
+            self.assertEqual(profile.queries_read, 0)
+            self.assertTrue(profile.pihole_silent)
+            self.assertEqual(profile.groups, ())
+
+    async def test_traffic_volume_sums_counter_deltas_and_skips_resets(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            history = PresenceHistory(Path(folder).resolve())
+            scope = scope_fingerprint(PLAN)
+            device = "mac:" + MAC
+            # to_device / from_device counters; the third sample is a reconnect.
+            for seconds, to_bytes, from_bytes in (
+                (120, 1_000, 100),
+                (240, 5_000, 400),
+                (360, 200, 50),
+                (480, 1_200, 90),
+            ):
+                history.record(
+                    scope,
+                    PresenceSample(
+                        at(seconds),
+                        (Sighting(A, identity(A, "unifi", seconds)),),
+                        traffic=(TrafficCounter(device, A, to_bytes, from_bytes),),
+                    ),
+                )
+            view = history.view(scope, epoch(at(480)), include_dns=True)
+            volume = view.traffic[device]
+            self.assertEqual(volume.samples, 4)
+            self.assertEqual(volume.to_device_bytes, 4_000 + 1_000)
+            self.assertEqual(volume.from_device_bytes, 300 + 40)
+            self.assertEqual(volume.resets, 1)
+            self.assertEqual(
+                (epoch(volume.from_at), epoch(volume.until_at)),
+                (epoch(at(120)), epoch(at(480))),
+            )
+            cards = device_inventory((A,), (), (), view).devices
+            self.assertEqual(cards[0].traffic, volume)
+            # Outside the 24-hour window the samples no longer count.
+            later = history.view(scope, epoch(at(86400 + 600)), include_dns=True)
+            self.assertNotIn(device, later.traffic)
+
+    async def test_presence_attributes_traffic_only_to_the_confirmed_mac(self) -> None:
+        plan = replace(PLAN, quick_scan=True)
+        counters = (
+            TrafficCounter("mac:" + MAC, A, 10, 1),
+            # UniFi statistics name a different MAC at B than the identity read.
+            TrafficCounter("mac:" + OTHER_MAC, B, 20, 2),
+            # C answers only to a TCP probe, so it has no MAC to attribute.
+            TrafficCounter("mac:" + MAC, C, 30, 3),
+        )
+        traffic = AsyncMock(return_value=(counters, ("unifi_traffic_partial: x",)))
+        identities = AsyncMock()
+        identities.identify = AsyncMock(
+            return_value=IdentitySample(
+                (identity(A, "unifi", 0), identity(B, "unifi", 0))
+            )
+        )
+        collector = NetworkCollector(
+            "fixture", plan, identity_source=identities, traffic_source=traffic
+        )
+        with patch(
+            "plowshare_privacy.collection._quick_connect",
+            AsyncMock(return_value=True),
+        ):
+            sample = await collector.collect_presence(at(0))
+        self.assertEqual(sample.traffic, (counters[0],))
+        self.assertIn("unifi_traffic_partial: x", sample.issues)
 
     async def test_dns_activity_refuses_conflicts_and_reused_addresses(self) -> None:
         plan = replace(PLAN, dns_profiles=True)

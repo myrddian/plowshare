@@ -159,12 +159,17 @@ sightings can supply it otherwise. Unknown MACs, conflicting addresses, reused
 IPs and interrupted observation windows get no retrospective DNS attribution.
 Two matching observations still leave gaps in visibility between checks.
 
-Device cards show the last 24 hours of sampled DNS activity, grouped by
-streaming services, advertising, audience measurement and unclassified
-destinations. Counts distinguish DNS responses reported blocked and show partial
+Device cards show the last 24 hours of sampled DNS activity, grouped in this
+order: advertising; audience measurement and automatic content recognition
+(ACR); vendor telemetry and logging; streaming services; unclassified;
+connectivity checks and time sync; and local names and reverse lookups. A badge
+on the card counts lookups in the first three groups, which are the
+destinations that can carry behavioural data about the household. Counts distinguish DNS responses reported blocked and show partial
 coverage if samples are truncated or unavailable. Category totals use the
 retained destinations, with a maximum of 32 per window and eight shown per
-category. Profiles remain in the collector's private presence journal and use
+category. When a window holds more than 32 destinations, advertising,
+measurement and telemetry are retained first and connectivity probes and
+reverse lookups last. Profiles remain in the collector's private presence journal and use
 its rolling retention. They do not submit DNS history to Plowshare, external
 lookups or a model. Turning the option off stops new sampling and hides the
 profile while older windows age out.
@@ -176,12 +181,58 @@ The category list uses published service domains, including
 [Microsoft Advertising](https://learn.microsoft.com/en-us/xandr/monetize/export-placement-tags),
 [The Trade Desk](https://partner.thetradedesk.com/v3/portal/resources/doc/TrackingTagsUniversalPixel),
 and [Google Analytics](https://developers.google.com/analytics/devguides/collection/protocol/ga4/reference).
+Later additions follow the same rule: a provider-operated domain with a
+published or self-describing purpose, such as OzTAM, Nielsen, Comscore, Samba TV
+and Alphonso (TV audience measurement and ACR), Microsoft diagnostic data
+(`events.data.microsoft.com`) and Netflix device logs (`logs.netflix.com`).
+Suffixes match on label boundaries and the longest match wins, so
+`logs.netflix.com` is telemetry while other `netflix.com` names are streaming.
+Unknown vendor clouds stay unclassified rather than guessed.
+
+**Devices that bypass Pi-hole.** A card warns when a device was confirmed on the
+network for at least six consecutive windows (about a quarter of an hour) and
+Pi-hole recorded no queries from its address, with no partial or failed read in
+any window. This is a visibility finding, not an accusation: the device may be
+idle, or it may use hard-coded DNS servers or DNS over HTTPS, which Pi-hole
+cannot see. Cameras and media devices often do the latter. Router rules that
+redirect port 53 to Pi-hole, or blocking known DoH endpoints, restore visibility.
+
 Classification describes the destination's known association. A query count
 does not show time spent in an app, whether a connection succeeded, or whether
 data was sent. Pi-hole visibility depends on the client using Pi-hole directly
-and the query log retaining client and domain details. For sessions and bytes,
-UniFi provides a separate [Traffic Flows export](https://help.ui.com/hc/en-us/articles/32201256219799-Traffic-Flows-and-Traffic-Logging-in-UniFi-Network)
-outside the client inventory API used here.
+and the query log retaining client and domain details. Per-device byte volume
+is available from UniFi client counters (see below). For per-connection
+sessions, UniFi provides a separate [Traffic Flows export](https://help.ui.com/hc/en-us/articles/32201256219799-Traffic-Flows-and-Traffic-Logging-in-UniFi-Network)
+that this collector does not read.
+
+### UniFi traffic volume
+
+The Network Integration API used for identity has no per-client traffic. With
+UniFi configured, run this on a stopped collector to read the controller's
+client statistics (`stat/sta`) with the same API key:
+
+```sh
+plowshare-privacy-bootstrap --directory "$PRIVACY_SETUP" enable-unifi-traffic --site default
+```
+
+`--site` is the controller's short legacy site name, usually `default`, not the
+site UUID. This endpoint is not part of UniFi's official integration API; it
+is long-standing and accepts API keys on current UniFi Network releases. If a
+release refuses it, the card shows no traffic and quick checks report
+`unifi_traffic_unavailable` while identity and presence continue.
+
+Each quick check stores each watched client's cumulative counters in the
+private presence journal. The card shows the last 24 hours as "to device" and
+"from device", following UniFi's own direction: `tx` is what the network sent
+to the client, `rx` what it received from it. Wired clients use UniFi's
+switch-port (`wired-*`) counters. Counters reset when a client reconnects or
+the controller restarts; an interval that goes backwards is skipped and counted,
+so totals are a lower bound. Bytes are attributed only when the same quick check
+confirmed the same MAC at the same address; two MACs at one address get none.
+Volumes are local presence data: they never change evidence scope, receipts or
+the full-collection fingerprint, and they say nothing about which remote hosts
+received the bytes. Pair them with the DNS profile to see where a device is
+likely sending them.
 
 ### UniFi identity
 

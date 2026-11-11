@@ -28,6 +28,7 @@ from .identity_source import DeviceIdentitySource, IdentitySample, ManagedInvent
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .pihole import DeviceDataSource
 from .presence import MAX_ATTRIBUTION_GAP, PresenceSample, Sighting, epoch
+from .traffic import TrafficCounter
 
 
 class Collector(Protocol):
@@ -68,6 +69,9 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
             values["unifi"].pop("certificate_sha256")
         # A controller alias enriches identity evidence without changing probe scope.
         values["unifi"].pop("gateway")
+        # Byte counters are local presence data, like quick checks; they never
+        # change full collection evidence or the receipt journal identity.
+        values["unifi"].pop("traffic_site")
     values["observations_file"] = (
         str(plan.observations_file) if plan.observations_file else None
     )
@@ -129,6 +133,11 @@ class NetworkCollector:
             Awaitable[tuple[tuple[QuerySample, ...], tuple[str, ...]]],
         ]
         | None = None,
+        traffic_source: Callable[
+            [tuple[str, ...]],
+            Awaitable[tuple[tuple[TrafficCounter, ...], tuple[str, ...]]],
+        ]
+        | None = None,
     ):
         if plan.pihole is not None and device_source is None:
             raise ValueError("Configured Pi-hole requires a device-data source")
@@ -140,6 +149,7 @@ class NetworkCollector:
         self.identity_source = identity_source
         self.pihole_presence = pihole_presence
         self.pihole_activity = pihole_activity
+        self.traffic_source = traffic_source
 
     async def _identity_sample(self, observed: str) -> IdentitySample:
         if self.identity_source is None:
@@ -258,8 +268,25 @@ class NetworkCollector:
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
+        traffic: tuple[TrafficCounter, ...] = ()
+        if self.traffic_source is not None:
+            counters, traffic_issues = await self.traffic_source(plan.targets)
+            issues.extend(traffic_issues)
+            # Attribute bytes only where this check confirmed the same MAC at the
+            # same address; IP-only or conflicting sightings get no traffic.
+            traffic = tuple(
+                counter
+                for counter in counters
+                if counter.address not in ambiguous
+                and (sighting := sightings.get(counter.address)) is not None
+                and sighting.key == counter.device
+            )
         return PresenceSample(
-            observed, tuple(sightings.values()), tuple(dict.fromkeys(issues)), ambiguous
+            observed,
+            tuple(sightings.values()),
+            tuple(dict.fromkeys(issues)),
+            ambiguous,
+            traffic,
         )
 
     async def collect_dns_activity(

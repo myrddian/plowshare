@@ -33,6 +33,7 @@ from plowshare_privacy.bootstrap import (
     connect_pihole,
     connect_unifi,
     deploy,
+    enable_unifi_traffic,
     inspect,
     install,
     private_root,
@@ -41,6 +42,7 @@ from plowshare_privacy.bootstrap import (
     start,
     wait_for_schedule,
 )
+from plowshare_privacy.collection import scope_fingerprint
 from plowshare_privacy.contracts import Configuration, utc_now
 from plowshare_privacy.journal import FileReceipts, Publication, Receipt
 from plowshare_privacy.setup import Setup, bind_provider, prepare, private_write
@@ -731,3 +733,23 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         with FileReceipts(both_sources) as receipts:
             self.assertEqual(receipts.all()[0].evidence, evidence)
             self.assertEqual(receipts.publications()[0].state, "published")
+
+    def test_enable_unifi_traffic_requires_unifi_and_keeps_scope(self) -> None:
+        config = self.tcp_configuration()
+        with self.assertRaises(SetupProblem):
+            enable_unifi_traffic(self.setup, "default")
+        site = "00000000-0000-4000-8000-000000000001"
+        base = "https://unifi.example.invalid/proxy/network/integration/v1"
+        connect_unifi(self.setup, base, site, "UNIFI_TEST_KEY", None)
+        before = Configuration.read(self.config)
+        with self.assertRaises(SetupProblem):
+            enable_unifi_traffic(self.setup, "../default")
+        self.assertEqual(Configuration.read(self.config), before)
+        enable_unifi_traffic(self.setup, "default")
+        after = Configuration.read(self.config)
+        assert after.collection.unifi is not None
+        self.assertEqual(after.collection.unifi.traffic_site, "default")
+        self.assertEqual(
+            scope_fingerprint(after.collection), scope_fingerprint(before.collection)
+        )
+        self.assertNotEqual(config, after)

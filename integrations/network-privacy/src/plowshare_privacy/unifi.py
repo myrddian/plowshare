@@ -29,10 +29,14 @@ from .contracts import (
     uuid,
 )
 from .identity_source import IdentitySample, ManagedProduct, ManagedProductUnavailable
+from .traffic import MAX_COUNTER, TrafficCounter
 
 _PAGE_SIZE = 100
 _MAX_PAGES = 8
 _MAX_BYTES = 524288
+# stat/sta returns every connected client in one response with many fields.
+_MAX_TRAFFIC_BYTES = 4 * 1024 * 1024
+_MAX_TRAFFIC_CLIENTS = 2048
 
 
 @dataclass(frozen=True)
@@ -93,6 +97,7 @@ class UniFiNetwork:
         self._clients = site + "/clients"
         self._devices = site + "/devices"
         self._networks = site + "/networks"
+        self._traffic = _traffic_url(plan.api_base, plan.traffic_site)
         self._gateway = plan.gateway
         self._controller_host = urlsplit(plan.api_base).hostname
         self._managed_keys: frozenset[str] = frozenset()
@@ -183,6 +188,50 @@ class UniFiNetwork:
                 "unifi_incomplete: UniFi client inventory exceeded the pagination limit",
             )
         )
+
+    @property
+    def reads_traffic(self) -> bool:
+        return self._traffic is not None
+
+    async def traffic(
+        self, scope: tuple[str, ...]
+    ) -> tuple[tuple[TrafficCounter, ...], tuple[str, ...]]:
+        """Read cumulative byte counters for connected clients at scope addresses.
+
+        Uses the controller's legacy stat/sta endpoint with the same read-only
+        API key; the Integration API has no per-client traffic. Failures are a
+        coverage gap for this check only and never affect identity or presence.
+        """
+        if self._traffic is None:
+            return (), ()
+        try:
+            async with asyncio.timeout(15):
+                async with ClientSession(
+                    headers={"X-API-Key": self._api_key, "Accept": "application/json"},
+                    timeout=ClientTimeout(total=10),
+                ) as session:
+                    async with session.get(
+                        self._traffic, ssl=self._tls, allow_redirects=False
+                    ) as response:
+                        if response.status != 200:
+                            raise ValueError("UniFi traffic request failed")
+                        body = bytearray()
+                        async for chunk in response.content.iter_chunked(65536):
+                            body.extend(chunk)
+                            if len(body) > _MAX_TRAFFIC_BYTES:
+                                raise ValueError("UniFi traffic exceeded the limit")
+            return _decode_traffic(
+                parse_json(bytes(body), maximum_bytes=_MAX_TRAFFIC_BYTES),
+                frozenset(scope),
+            ), ()
+        except ServerFingerprintMismatch:
+            return (), (
+                "unifi_traffic_unavailable: UniFi controller certificate pin mismatch",
+            )
+        except (ClientError, TimeoutError, ValueError):
+            return (), (
+                "unifi_traffic_unavailable: UniFi client counters could not be read or validated",
+            )
 
     def recently_managed(self, identity: DeviceIdentity) -> bool:
         return (
@@ -515,3 +564,52 @@ def _decode_page(
     if len(set(ids)) != len(ids):
         raise ValueError("UniFi returned a duplicate client ID")
     return _ClientPage(total, tuple(ids), tuple(devices))
+
+
+def _traffic_url(api_base: str, site: str | None) -> str | None:
+    """Derive the legacy client-statistics URL on the same controller origin."""
+    if site is None:
+        return None
+    url = urlsplit(api_base)
+    prefix = "/proxy/network" if url.path.startswith("/proxy/network/") else ""
+    return f"{url.scheme}://{url.netloc}{prefix}/api/s/{site}/stat/sta"
+
+
+def _decode_traffic(value: object, scope: frozenset[str]) -> tuple[TrafficCounter, ...]:
+    if not isinstance(value, dict):
+        raise ValueError("Expected a UniFi statistics response")
+    meta = value.get("meta")
+    if not isinstance(meta, dict) or meta.get("rc") != "ok":
+        raise ValueError("UniFi statistics response was not successful")
+    clients = items(value.get("data"), _MAX_TRAFFIC_CLIENTS)
+    counters: dict[str, TrafficCounter] = {}
+    conflicted: set[str] = set()
+    for raw in clients:
+        if not isinstance(raw, dict):
+            raise ValueError("Expected UniFi client statistics")
+        address = raw.get("ip")
+        if address is None:
+            continue
+        address = str(ipaddress.ip_address(text(address, 64)))
+        if address not in scope:
+            continue
+        mac = mac_address(text(raw.get("mac"), 17))
+        # Wired clients report switch-port counters under wired-* names; the
+        # unprefixed fields can be zero or wireless-only on some firmware.
+        prefix = "wired-" if raw.get("is_wired") is True else ""
+        to_name, from_name = prefix + "tx_bytes", prefix + "rx_bytes"
+        if to_name not in raw or from_name not in raw:
+            continue
+        counter = TrafficCounter(
+            "mac:" + mac,
+            address,
+            integer(raw[to_name], 0, MAX_COUNTER),
+            integer(raw[from_name], 0, MAX_COUNTER),
+        )
+        if address in counters and counters[address].device != counter.device:
+            conflicted.add(address)
+        counters[address] = counter
+    # Two MACs claiming one address cannot be attributed; drop both.
+    return tuple(
+        counter for address, counter in counters.items() if address not in conflicted
+    )
