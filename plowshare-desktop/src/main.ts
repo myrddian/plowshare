@@ -524,6 +524,7 @@ background(
           'administration.css',
           'file-browser.css',
           'application-hub.css',
+          'project-access.css',
           'workspace-slot.css',
           'app.js',
           'app-icon.png',

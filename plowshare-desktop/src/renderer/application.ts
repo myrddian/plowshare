@@ -23,6 +23,44 @@ import {
   workspaceSlotMarkup,
   type WorkspaceSlots,
 } from './workspace-slots.ts';
+import { mountProjectAccess } from './project-access.ts';
+
+/**
+ * Hub views that host one workspace page each. `kinds` are the route kinds
+ * the view's slot claims; `label` is the tab and tile name.
+ */
+type PageView = 'schedules' | 'relay' | 'runtime' | 'memory' | 'boards';
+const pageViews: Record<
+  PageView,
+  { kinds: WorkspaceRoute['kind'][]; label: string; purpose: string }
+> = {
+  schedules: {
+    kinds: ['activity'],
+    label: 'Schedules',
+    purpose: 'Schedules and triggers that run this Application',
+  },
+  relay: {
+    kinds: ['relay'],
+    label: 'Relay',
+    purpose: 'Messages relayed to and from this Application',
+  },
+  runtime: {
+    kinds: ['activity'],
+    label: 'Runtime',
+    purpose: 'Agent, orchestration and schedule definitions in use',
+  },
+  memory: {
+    kinds: ['memories', 'library'],
+    label: 'Memory',
+    purpose: 'Memories this Application keeps',
+  },
+  boards: {
+    kinds: ['board'],
+    label: 'Boards',
+    purpose: 'Boards for this Application',
+  },
+};
+const isPageView = (value: string): value is PageView => value in pageViews;
 
 const hubViews = [
   'overview',
@@ -30,6 +68,9 @@ const hubViews = [
   'schedules',
   'relay',
   'files',
+  'runtime',
+  'memory',
+  'boards',
   'access',
 ] as const;
 type HubView = (typeof hubViews)[number];
@@ -75,10 +116,13 @@ export function installApplication(
   nest?: ApplicationChatNest,
   embedding?: ApplicationEmbedding,
 ) {
+  const tab = (name: PageView) =>
+    `<button type="button" data-hub="${name}">${pageViews[name].label}</button>`;
+  const tile = (name: PageView) =>
+    `<button type="button" data-hub="${name}"><strong>${pageViews[name].label}</strong><small>${pageViews[name].purpose}</small></button>`;
   host.innerHTML = `<header class="hub-header"><div class="hub-heading"><div class="eyebrow">APPLICATION</div><h2 data-title></h2><div class="hub-meta" data-summary></div></div><button type="button" class="hub-close" data-close aria-label="Close Application">${icon('close')}<span>Close</span></button></header>
-    <nav aria-label="Application views" data-hub-nav><button type="button" data-hub="overview">Overview</button><button type="button" data-hub="activity">Activity</button><button type="button" data-hub="schedules">Schedules</button><button type="button" data-hub="relay">Relay</button><button type="button" data-hub="files" data-files>Files</button><button type="button" data-hub="access" data-settings>Access</button></nav>
-    <section data-overview><div class="hub-group"><h3>Workspace</h3><div data-overview-tiles><button type="button" data-hub="activity"><strong>Activity</strong><small>Conversations and LLM logs, with full trajectories</small></button><button type="button" data-hub="schedules"><strong>Schedules</strong><small>Schedules and triggers that run this Application</small></button><button type="button" data-hub="relay"><strong>Relay</strong><small>Messages relayed to and from this Application</small></button><button type="button" data-hub="files"><strong>Files</strong><small>Browse and edit the Application source</small></button><button type="button" data-hub="access"><strong>Access</strong><small>Who can use and manage this Application</small></button></div></div>
-    <div class="hub-group application-secondary" role="group" aria-label="More Application surfaces"><h3>Related</h3><div class="hub-links"><button type="button" data-runtime>Runtime definitions</button><button type="button" data-memory>Memory</button><button type="button" data-board>Boards</button></div></div></section>
+    <nav aria-label="Application views" data-hub-nav><button type="button" data-hub="overview">Overview</button><button type="button" data-hub="activity">Activity</button>${tab('schedules')}${tab('relay')}<button type="button" data-hub="files" data-files>Files</button>${tab('runtime')}${tab('memory')}${tab('boards')}<button type="button" data-hub="access" data-settings>Access</button></nav>
+    <section data-overview><div data-overview-tiles><button type="button" data-hub="activity"><strong>Activity</strong><small>Conversations and LLM logs, with full trajectories</small></button>${tile('schedules')}${tile('relay')}<button type="button" data-hub="files"><strong>Files</strong><small>Browse and edit the Application source</small></button>${tile('runtime')}${tile('memory')}${tile('boards')}<button type="button" data-hub="access"><strong>Access</strong><small>Who can use and manage this Application</small></button></div></section>
     <section data-activity hidden>
       <div class="application-activity-split">
         <div class="application-activity-list">
@@ -99,9 +143,8 @@ export function installApplication(
         </div>
       </div>
     </section>
-    <section data-schedules hidden>${workspaceSlotMarkup('schedules', 'Opening scheduled work for this Application…')}</section>
-    <section data-relay hidden>${workspaceSlotMarkup('relay', 'Opening the Relay log for this Application…')}</section>
-    <section data-access hidden><div class="hub-panel"><h3>Access</h3><p>Membership for this Application is managed in the Access dialog.</p><button type="button" data-access-open>Open Access</button></div></section>
+    ${(Object.keys(pageViews) as PageView[]).map((name) => `<section data-page="${name}" hidden>${workspaceSlotMarkup(name, `Opening ${pageViews[name].label.toLowerCase()}…`)}</section>`).join('')}
+    <section data-access hidden></section>
     <section data-source hidden><label data-area-label hidden>File location<select data-area aria-label="Application file location"></select></label>
     <div data-file-browser></div></section>`;
   const get = <T extends HTMLElement = HTMLElement>(selector: string) =>
@@ -193,6 +236,9 @@ export function installApplication(
     port,
   );
 
+  // Access is ordinary DOM, not a workspace page: the shared membership
+  // component mounts straight into the Access view.
+  const access = mountProjectAccess(get('[data-access]'), request);
   // Failures belong to the view that raised them: Files reports in the
   // browser; every other view reports in its embed placeholder.
   const run = (work: () => Promise<unknown> | void) =>
@@ -346,6 +392,7 @@ export function installApplication(
     }),
   );
   const close = () => {
+    access.close();
     releaseChat();
     shown = false;
     host.hidden = true;
@@ -356,6 +403,7 @@ export function installApplication(
   // or Relay never lingers in the breadcrumb or over another view.
   const show = (next: HubView) => {
     if (next !== view) embedError = '';
+    if (view === 'access' && next !== 'access') access.close();
     view = next;
     files = next === 'files';
     if (next !== 'activity') releaseChat();
@@ -416,16 +464,18 @@ export function installApplication(
     if (!retry) return;
     embedError = '';
     if (view === 'activity' && selected) run(() => chooseRow(selected))();
-    else if (view === 'schedules') run(() => openSchedules?.(project))();
-    else if (view === 'relay') run(() => openRelay?.(project))();
+    else if (isPageView(view)) run(() => openPage(view as PageView))();
   });
-  const openAccess = () =>
-    document
-      .querySelector<HTMLButtonElement>(
-        `[data-project-access="${CSS.escape(project)}"]`,
-      )
-      ?.click();
-  get('[data-access-open]').addEventListener('click', openAccess);
+  const openPage = (name: PageView) => {
+    show(name);
+    if (name === 'schedules') return openSchedules?.(project);
+    if (name === 'relay') return openRelay?.(project);
+    if (name === 'runtime')
+      return request({ action: 'application-runtime', project });
+    if (name === 'memory')
+      return request({ action: 'library', view: 'memories', project });
+    return request({ action: 'board-inspection', view: 'board', project });
+  };
   host.addEventListener('click', (event) => {
     const hub = (event.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-hub]',
@@ -437,41 +487,19 @@ export function installApplication(
     }
     if (hub === 'access') {
       show('access');
-      openAccess();
+      access.open(project);
       return;
     }
     if (hub === 'files') {
       run(openFileBrowser)();
       return;
     }
-    if (hub === 'schedules') {
-      run(() => {
-        show('schedules');
-        openSchedules?.(project);
-      })();
-      return;
-    }
-    if (hub === 'relay') {
-      run(() => {
-        show('relay');
-        openRelay?.(project);
-      })();
+    if (isPageView(hub)) {
+      run(() => openPage(hub))();
       return;
     }
     show('overview');
   });
-  get('[data-runtime]').addEventListener(
-    'click',
-    run(() => request({ action: 'application-runtime', project })),
-  );
-  get('[data-memory]').addEventListener(
-    'click',
-    run(() => request({ action: 'library', view: 'memories', project })),
-  );
-  get('[data-board]').addEventListener(
-    'click',
-    run(() => request({ action: 'board-inspection', view: 'board', project })),
-  );
   function render() {
     const current = state(),
       key = `${current.base}\0${current.handle}`;
@@ -523,9 +551,10 @@ export function installApplication(
     get('[data-area-label]').hidden = areaSelect.options.length < 2;
     get('[data-overview]').hidden = view !== 'overview';
     get('[data-activity]').hidden = view !== 'activity';
-    get('[data-schedules]').hidden = view !== 'schedules';
-    get('[data-relay]').hidden = view !== 'relay';
+    for (const page of host.querySelectorAll<HTMLElement>('[data-page]'))
+      page.hidden = page.dataset.page !== view;
     get('[data-access]').hidden = view !== 'access';
+    access.update(current);
     for (const button of host.querySelectorAll<HTMLButtonElement>(
       '[data-hub]',
     )) {
@@ -573,10 +602,8 @@ export function installApplication(
         ? get('[data-workspace-slot="activity"]')
         : undefined;
     }
-    if (view === 'schedules' && route.kind === 'activity')
-      return get('[data-workspace-slot="schedules"]');
-    if (view === 'relay' && route.kind === 'relay')
-      return get('[data-workspace-slot="relay"]');
+    if (isPageView(view) && pageViews[view].kinds.includes(route.kind))
+      return get(`[data-workspace-slot="${view}"]`);
     return undefined;
   };
   if (embedding) {
@@ -596,6 +623,11 @@ export function installApplication(
       files = false;
       releaseChat();
       render();
+    },
+    openAccess(name: string) {
+      useProject(name);
+      show('access');
+      access.open(name);
     },
     openFiles(name: string) {
       useProject(name);

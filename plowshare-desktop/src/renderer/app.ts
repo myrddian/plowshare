@@ -417,6 +417,19 @@ async function choose(id: string, options: { keepApplication?: boolean } = {}) {
   }
   await loadHistory(id);
 }
+/**
+ * Open a scope the way the sidebar does: an Application lands on its hub,
+ * any other project on its chat. Breadcrumbs use the same entry point.
+ */
+async function openScope(project: string) {
+  await chooseScope(project);
+  if (
+    state.projects.find((row) => row.name === project)?.kind === 'application'
+  ) {
+    application.open(project);
+    renderPersonal();
+  }
+}
 async function chooseScope(nextScope: string) {
   application.close();
   personalVisible = false;
@@ -1678,18 +1691,7 @@ for (const navigation of ['#conversations', '#application-conversations'])
       '[data-project]',
     )?.dataset.project;
     if (project !== undefined) {
-      background(
-        (async () => {
-          await chooseScope(project);
-          if (
-            state.projects.find((row) => row.name === project)?.kind ===
-            'application'
-          ) {
-            application.open(project);
-            renderPersonal();
-          }
-        })(),
-      );
+      background(openScope(project));
       return;
     }
     const id = (event.target as HTMLElement).closest<HTMLElement>(
@@ -2969,7 +2971,7 @@ function showWorkspace(route: WorkspaceRoute) {
   reportWorkspaceLayout();
 }
 $('#scope-caption').addEventListener('click', () =>
-  background(chooseScope(workspaceRoute.project ?? scope)),
+  background(openScope(workspaceRoute.project ?? scope)),
 );
 $('#title-caption').addEventListener('click', () => {
   if (workspaceRoute.kind === 'trajectory' && workspaceRoute.conversation)
@@ -3155,6 +3157,19 @@ for (const navigation of ['#conversations', '#application-conversations'])
     const button = (event.target as Element).closest<HTMLElement>(
       '[data-project-access]',
     );
-    if (button?.dataset.projectAccess)
-      projectAccess.open(button.dataset.projectAccess);
+    const project = button?.dataset.projectAccess;
+    if (!project) return;
+    // An Application's membership lives in its hub; other projects keep the
+    // Access dialog (both render the same project-access component).
+    if (
+      state.projects.find((row) => row.name === project)?.kind === 'application'
+    )
+      background(
+        (async () => {
+          await chooseScope(project);
+          application.openAccess(project);
+          renderPersonal();
+        })(),
+      );
+    else projectAccess.open(project);
   });

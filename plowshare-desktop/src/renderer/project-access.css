@@ -1,0 +1,60 @@
+/*
+ * Project access. A self-contained component: it fills whatever host it is
+ * mounted in (Application hub view or dialog) and scrolls internally.
+ */
+.project-access { display: flex; flex-direction: column; gap: 14px; min-height: 0; min-width: 0; overflow: auto; font-size: 12px; }
+.project-access h3 { margin: 0 0 8px; font: 10px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; font-weight: 400; color: var(--muted); }
+.project-access .pa-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.project-access .pa-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.project-access .pa-title strong { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.project-access .pa-chip { flex-shrink: 0; padding: 1px 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 11px; line-height: 18px; color: var(--muted); }
+.project-access .pa-chip:empty { display: none; }
+.project-access .pa-error { margin: 0; padding: 7px 10px; border: 1px solid #7a3b34; border-radius: 6px; background: #2a1613; color: #e8a79d; overflow-wrap: anywhere; }
+.project-access .pa-error[hidden] { display: none; }
+
+.project-access .pa-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 0; }
+.project-access .pa-legend > div { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.project-access .pa-legend dt { font-weight: 500; }
+.project-access .pa-legend dd { margin: 2px 0 0; color: var(--muted); line-height: 1.4; }
+.project-access .pa-note { margin: -6px 0 0; color: var(--muted); font-size: 11px; }
+
+.project-access .pa-members { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.project-access .pa-members:empty { display: none; }
+.project-access .pa-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; align-items: center; gap: 10px; min-height: 40px; padding: 5px 10px; border-top: 1px solid var(--line); }
+.project-access .pa-row:first-child { border-top: 0; }
+.project-access .pa-handle { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.project-access .pa-role { color: var(--muted); grid-column: 2 / 4; }
+.project-access .pa-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.project-access select,
+.project-access input { height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font-size: 12px; min-width: 0; }
+.project-access input:focus-visible,
+.project-access select:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.project-access .pa-row button,
+.project-access .pa-add button { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; color: var(--ink); text-align: center; white-space: nowrap; }
+.project-access .pa-row button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.project-access .pa-row button.pa-danger { color: var(--muted); }
+.project-access .pa-row button.pa-danger:hover:not(:disabled) { border-color: #a5483f; color: #e8a79d; }
+.project-access .pa-add button.pa-primary { border-color: var(--accent); color: var(--accent); }
+.project-access .pa-add button.pa-primary:hover:not(:disabled) { background: var(--tint); }
+
+.project-access .pa-add[hidden],
+.project-access [data-history][hidden] { display: none; }
+.project-access .pa-add-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; gap: 8px; }
+
+.project-access .pa-changes { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.project-access .pa-changes:empty { display: none; }
+.project-access .pa-changes li { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 6px 10px; border-top: 1px solid var(--line); }
+.project-access .pa-changes li:first-child { border-top: 0; }
+.project-access .pa-changes time { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.project-access .pa-what { overflow-wrap: anywhere; }
+
+.project-access-dialog { width: min(560px, calc(100vw - 40px)); }
+.project-access-dialog [data-access-host] { display: flex; flex-direction: column; max-height: 70vh; min-height: 0; }
+
+@media (max-width: 520px) {
+  .project-access .pa-row,
+  .project-access .pa-add-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .project-access .pa-changes li { grid-template-columns: minmax(0, 1fr) auto; }
+  .project-access .pa-changes time { grid-column: 1 / -1; }
+}
