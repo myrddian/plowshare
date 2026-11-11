@@ -62,7 +62,7 @@ class Settings:
     async def save(self, choice: MonitorChoice) -> MonitorView:
         return self.view()
 
-    async def save_pihole(self, plan: PiHolePlan) -> MonitorView:
+    async def save_pihole(self, origin: str, password_file: Path) -> MonitorView:
         return self.view()
 
 
@@ -708,7 +708,7 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
             async with self.console.lock:
                 saved = await asyncio.wait_for(
                     self.console.connect_pihole(
-                        "http://pihole.invalid", "fixture-secret", True
+                        "http://pihole.invalid/", "fixture-secret", True
                     ),
                     1,
                 )
@@ -719,7 +719,10 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(credential.read_text(), "fixture-secret\n")
         self.assertEqual(credential.stat().st_mode & 0o777, 0o600)
         self.assertNotIn("fixture-secret", json.dumps(asdict(saved)))
-        settings.save_pihole.assert_awaited_once()
+        # Only the connection is handed over; settings keep the saved tuning.
+        settings.save_pihole.assert_awaited_once_with(
+            "http://pihole.invalid", credential
+        )
 
     async def test_failed_pihole_test_does_not_remove_saved_password(self) -> None:
         await self.console.connect_pihole(

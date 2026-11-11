@@ -132,11 +132,7 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         secret = self.root / "fixture-pihole-password"
         secret.write_text("fixture-secret")
         secret.chmod(0o600)
-        await self.settings.save_pihole(
-            PiHolePlan.decode(
-                {"origin": "https://pihole.example", "passwordFile": str(secret)}
-            )
-        )
+        await self.settings.save_pihole("https://pihole.example", secret)
         await self.settings.save(replace(CHOICE, quick_scan=True, dns_profiles=True))
         await self.settings.apply_pending()
         self.assertTrue(self.worker.config.collection.dns_profiles)
@@ -313,7 +309,7 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
             {"origin": "https://pihole.example", "passwordFile": str(secret)}
         )
         await self.settings.save(CHOICE)
-        await self.settings.save_pihole(pihole)
+        await self.settings.save_pihole(pihole.origin, secret)
         self.assertEqual(self.settings.view().targets, CHOICE.targets)
         self.assertTrue(self.settings.view().pihole_configured)
         await self.settings.save(replace(CHOICE, targets=("192.168.0.13",)))
@@ -324,6 +320,85 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         await self.settings.apply_pending()
         self.assertEqual(self.worker.config.collection.targets, ("192.168.0.13",))
         self.assertEqual(self.worker.config.collection.pihole, pihole)
+
+    def configure_pihole(self, pihole: dict[str, object]) -> None:
+        """Make ``pihole`` the active configuration, as an installer would."""
+        row = json.loads(self.path.read_text())
+        row["collection"]["pihole"] = pihole
+        configured = Configuration.decode(row, self.path)
+        self.receipts.prepare_scope_change(configured.collection)
+        self.path.write_text(json.dumps(row))
+        self.receipts.complete_scope_change(configured.collection)
+        self.worker.config = configured
+
+    async def test_resaving_pihole_connection_keeps_saved_tuning(self) -> None:
+        self.configure_pihole(
+            {
+                "origin": "https://pihole.example",
+                "passwordEnvironment": "FIXTURE_PIHOLE_PASSWORD",
+                "lookbackSeconds": 7200,
+                "queryLimit": 128,
+                "maxIdentityAgeSeconds": 3600,
+                "timeoutSeconds": 2.5,
+            }
+        )
+        view = self.settings.view().pihole
+        assert view is not None
+        self.assertEqual(view.password_source, "environment")
+        self.assertEqual(view.password_environment, "FIXTURE_PIHOLE_PASSWORD")
+        self.assertEqual(
+            (
+                view.lookback_seconds,
+                view.query_limit,
+                view.max_identity_age_seconds,
+                view.timeout_seconds,
+            ),
+            (7200, 128, 3600, 2.5),
+        )
+        secret = self.root / "fixture-pihole-password"
+        secret.write_text("fixture-secret")
+        secret.chmod(0o600)
+        saved = await self.settings.save_pihole("https://other.example", secret)
+        pending = Configuration.read(self.settings.pending_path).collection.pihole
+        assert pending is not None
+        # Only the connection changed: the origin and where the password lives.
+        self.assertEqual(pending.origin, "https://other.example")
+        self.assertEqual(pending.password_file, secret)
+        self.assertIsNone(pending.password_environment)
+        self.assertEqual(
+            (
+                pending.lookback_seconds,
+                pending.query_limit,
+                pending.max_identity_age,
+                pending.timeout,
+            ),
+            (7200, 128, 3600, 2.5),
+        )
+        assert saved.pihole is not None
+        self.assertEqual(saved.pihole.password_source, "file")
+        self.assertIsNone(saved.pihole.password_environment)
+        self.assertEqual(saved.pihole.query_limit, 128)
+        self.assertNotIn(str(secret), str(saved))
+        # A second save keeps the tuning saved in the pending file.
+        await self.settings.save_pihole("https://third.example", secret)
+        again = Configuration.read(self.settings.pending_path).collection.pihole
+        assert again is not None
+        self.assertEqual((again.lookback_seconds, again.timeout), (7200, 2.5))
+
+    async def test_first_pihole_connection_uses_default_tuning(self) -> None:
+        self.assertIsNone(self.settings.view().pihole)
+        secret = self.root / "fixture-pihole-password"
+        secret.write_text("fixture-secret")
+        secret.chmod(0o600)
+        await self.settings.save_pihole("https://pihole.example", secret)
+        self.assertEqual(
+            Configuration.read(self.settings.pending_path).collection.pihole,
+            PiHolePlan.decode(
+                {"origin": "https://pihole.example", "passwordFile": str(secret)}
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "origin"):
+            await self.settings.save_pihole("ftp://pihole.example", secret)
 
     async def test_worker_applies_saved_settings_before_new_intake(self) -> None:
         await self.settings.save(CHOICE)

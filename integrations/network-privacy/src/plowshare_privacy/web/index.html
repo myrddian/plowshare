@@ -364,14 +364,18 @@
         </section>
         <details class="panel">
           <summary class="panel-heading"><h2>Connect Pi-hole v6</h2><span>Optional device identity and DNS evidence</span></summary>
-          <form id="pihole-form" class="panel-body form-grid">
-            <label>Pi-hole origin<input id="pihole-origin" type="url" placeholder="Your Pi-hole HTTP(S) origin" required></label>
-            <label>Application password<input id="pihole-password" type="password" autocomplete="off" required></label>
-            <div class="actions"><button id="pihole-save" type="submit" disabled>Save connection</button><button id="pihole-test" type="button" class="secondary">Test connection</button></div>
-            <p id="pihole-saved" class="hint" role="status">Checking saved connection…</p>
-            <p id="pihole-blocker" class="hint"></p>
-            <p id="pihole-detail" class="hint" role="status" aria-live="polite">Save stores your connection and password in a private file, even when disconnected. Test connection is optional.</p>
-          </form>
+          <div class="panel-body">
+            <dl id="pihole-tuning" class="facts" hidden></dl>
+            <p id="pihole-saved" class="hint source" role="status">Checking saved connection…</p>
+            <p class="hint">The lookup window, lookups per device, identity age and timeout are set in the collector configuration. Saving the connection here keeps them.</p>
+            <form id="pihole-form" class="form-grid">
+              <label>Pi-hole origin<input id="pihole-origin" type="url" placeholder="Your Pi-hole HTTP(S) origin" required></label>
+              <label>Application password<input id="pihole-password" type="password" autocomplete="off" required></label>
+              <p id="pihole-blocker" class="hint"></p>
+              <p id="pihole-detail" class="hint" role="status" aria-live="polite">Save stores your connection and password in a private file, even when disconnected. Test connection is optional.</p>
+              <div class="actions"><button id="pihole-save" type="submit" disabled>Save connection</button><button id="pihole-test" type="button" class="secondary">Test connection</button></div>
+            </form>
+          </div>
         </details>
         <details class="panel">
           <summary class="panel-heading"><h2>Investigation and alert preferences</h2></summary>

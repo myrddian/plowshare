@@ -1548,9 +1548,32 @@ byId('preferences-form').addEventListener('submit', async event => {
     await refresh(); notice('Preferences saved. Existing evidence and publication decisions are unchanged.' + notificationHint);
   } catch (error) {notice(error.message,true);}
 });
-function renderPiHoleSaved(configured, pending = false) {
-  byId('pihole-saved').textContent = configured ? 'Saved connection: Pi-hole connection and password are stored on this collector.' + (pending ? ' Waiting to apply saved settings.' : '') : 'Saved connection: no Pi-hole connection is configured yet.';
+// A whole number of the largest unit that divides it: 7200 is "2 hours".
+function formatDuration(seconds) {
+  for (const [size, one, many] of [[86400, 'day', 'days'], [3600, 'hour', 'hours'], [60, 'minute', 'minutes']]) {
+    if (seconds >= size && seconds % size === 0) return plural(seconds / size, one, many);
+  }
+  return plural(seconds, 'second', 'seconds');
 }
+// `pihole` is the saved Pi-hole view: where its password comes from and its
+// tuning, which is collector configuration that a dashboard save keeps. The
+// password itself never reaches the browser; an environment variable is named.
+function renderPiHoleSaved(pihole, pending = false) {
+  const source = !pihole ? null
+    : pihole.password_source === 'environment' ? `Saved connection: Pi-hole is configured. Its password is read from the environment variable ${pihole.password_environment} on this collector.`
+    : pihole.password_source === 'file' ? 'Saved connection: Pi-hole is configured. Its password is stored in a private file on this collector.'
+    : 'Saved connection: Pi-hole is configured.';
+  byId('pihole-saved').textContent = source ? source + (pending ? ' Waiting to apply saved settings.' : '') : 'Saved connection: no Pi-hole connection is configured yet.';
+  const facts = byId('pihole-tuning'); facts.replaceChildren();
+  const tuned = Boolean(pihole && Number.isFinite(pihole.lookback_seconds));
+  facts.hidden = !tuned;
+  if (!tuned) return;
+  fact(facts, 'DNS lookup window', formatDuration(pihole.lookback_seconds));
+  fact(facts, 'Lookups read per device', plural(pihole.query_limit, 'lookup', 'lookups'));
+  fact(facts, 'Maximum identity age', formatDuration(pihole.max_identity_age_seconds));
+  fact(facts, 'Request timeout', plural(pihole.timeout_seconds, 'second', 'seconds'));
+}
+let piholeSaved = null;
 function renderMonitorSettings(settings) {
   monitorEditable = settings.editable;
   byId('save-monitoring').disabled = !monitorEditable;
@@ -1558,7 +1581,8 @@ function renderMonitorSettings(settings) {
   byId('dns-profiles').disabled = !monitorEditable || !settings.pihole_configured;
   byId('device-descriptions').disabled = !monitorEditable;
   byId('settings-detail').textContent = monitoringDraft ? 'Monitoring changes are not saved. Choose Save monitoring to retain them. ' + settings.detail : settings.detail;
-  renderPiHoleSaved(settings.pihole_configured, settings.pending);
+  piholeSaved = settings.pihole || (settings.pihole_configured ? {} : null);
+  renderPiHoleSaved(piholeSaved, settings.pending);
   byId('pihole-save').disabled = !monitorEditable || piholePending;
   byId('pihole-blocker').textContent = settings.pending || !monitorEditable ? settings.detail : '';
   if (settings.pending) byId('scan').disabled = true;
@@ -1575,7 +1599,7 @@ async function piholeConnection(save) {
     const message = result.saved ? 'Pi-hole connection and password saved on this collector. Connection was not tested.' + (result.pending ? ' Saved settings are waiting to apply; existing work keeps its original configuration.' : '') : result.connected ? 'Connection test passed. Your password was not saved; enter it again and choose Save connection to save it.' : 'Connection test failed. Your saved settings are unchanged.';
     byId('pihole-detail').textContent = `${message} ${result.issues.join(' ')} The password field was cleared for privacy.`;
     if (result.saved) {
-      renderPiHoleSaved(true, result.pending); settingsLoaded = false;
+      renderPiHoleSaved({...piholeSaved, password_source:'file', password_environment:null}, result.pending); settingsLoaded = false;
       // A later health/read failure cannot undo the confirmed save response.
       await refresh().catch(error => notice('Pi-hole was saved, but dashboard refresh failed. ' + error.message, true));
     }

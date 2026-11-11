@@ -10,7 +10,7 @@ const vm = require('node:vm');
 async function dashboard() {
   const nodes = new Map();
   function node(id) {
-    if (!nodes.has(id)) nodes.set(id, {value:'', textContent:'', disabled:false, classList:{toggle() {}}, listeners:{}, attributes:{}, setAttribute(name,value) {this.attributes[name] = value;}, focus() {this.focused = true;}, scrollIntoView() {}, addEventListener(name,handler) {this.listeners[name] = handler;}, children:[], replaceChildren(...children) {this.children = children;}, querySelector() {return null;}, querySelectorAll() {return [];}, reset() {}});
+    if (!nodes.has(id)) nodes.set(id, {value:'', textContent:'', disabled:false, classList:{toggle() {}}, listeners:{}, attributes:{}, setAttribute(name,value) {this.attributes[name] = value;}, focus() {this.focused = true;}, scrollIntoView() {}, addEventListener(name,handler) {this.listeners[name] = handler;}, children:[], append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.children = children;}, querySelector() {return null;}, querySelectorAll() {return [];}, reset() {}});
     return nodes.get(id);
   }
   const context = vm.createContext({
@@ -28,7 +28,7 @@ test('saved settings remain editable while activation is pending', async () => {
   vm.runInContext("renderMonitorSettings({editable:true,pending:true,pihole_configured:true,detail:'Settings saved. Collector is disconnected.'})", context);
   assert.equal(node('pihole-save').disabled, false);
   assert.equal(node('save-monitoring').disabled, false);
-  assert.match(node('pihole-saved').textContent, /password are stored/);
+  assert.match(node('pihole-saved').textContent, /Waiting to apply/);
   assert.match(node('pihole-blocker').textContent, /Settings saved/);
   assert.equal(node('scan').disabled, true);
 });
@@ -94,6 +94,33 @@ test('DNS profiling is a separate setting and shows blocked lookups as DNS evide
   assert.equal(vm.runInContext('formatBytes(999)', context), '999 B');
 });
 
+test('saved Pi-hole tuning is shown read-only and the password source is named, never its value', async () => {
+  const {context, node} = await dashboard();
+  context.document.createElement = tag => ({tag, children:[], append(...children) {this.children.push(...children);}});
+  const tuning = {lookback_seconds:7200, query_limit:128, max_identity_age_seconds:86400, timeout_seconds:2.5};
+  context.settings = {editable:true, pending:false, pihole_configured:true, detail:'',
+    pihole:{password_source:'environment', password_environment:'FIXTURE_PIHOLE_PASSWORD', ...tuning}};
+  vm.runInContext('renderMonitorSettings(settings)', context);
+  const saved = node('pihole-saved').textContent;
+  assert.match(saved, /environment variable FIXTURE_PIHOLE_PASSWORD/);
+  assert.doesNotMatch(saved, /stored/);
+  const facts = node('pihole-tuning');
+  assert.equal(facts.hidden, false);
+  assert.deepEqual(facts.children.map(item => [item.tag, item.textContent]), [
+    ['dt', 'DNS lookup window'], ['dd', '2 hours'],
+    ['dt', 'Lookups read per device'], ['dd', '128 lookups'],
+    ['dt', 'Maximum identity age'], ['dd', '1 day'],
+    ['dt', 'Request timeout'], ['dd', `${new Intl.NumberFormat().format(2.5)} seconds`],
+  ]);
+  context.settings.pihole = {password_source:'file', password_environment:null, ...tuning};
+  vm.runInContext('renderMonitorSettings(settings)', context);
+  assert.match(node('pihole-saved').textContent, /password is stored in a private file on this collector/);
+  vm.runInContext("renderMonitorSettings({editable:true,pending:false,pihole_configured:false,pihole:null,detail:''})", context);
+  assert.match(node('pihole-saved').textContent, /no Pi-hole connection is configured yet/);
+  assert.equal(node('pihole-tuning').hidden, true);
+  assert.deepEqual(node('pihole-tuning').children, []);
+});
+
 test('save uses one request and retains confirmation after a failed refresh', async () => {
   const {context, node} = await dashboard();
   const requests = [];
@@ -117,11 +144,11 @@ test('save uses one request and retains confirmation after a failed refresh', as
 
 test('failed optional test leaves the saved indicator intact', async () => {
   const {context, node} = await dashboard();
-  vm.runInContext('renderPiHoleSaved(true)', context);
+  vm.runInContext("renderPiHoleSaved({password_source:'file', password_environment:null})", context);
   node('pihole-password').value = 'fixture-invalid';
   context.fetch = async () => ({ok:true, json:async () => ({saved:false, connected:false, issues:['Authentication failed']})});
   await vm.runInContext('piholeConnection(false)', context);
-  assert.match(node('pihole-saved').textContent, /password are stored/);
+  assert.match(node('pihole-saved').textContent, /password is stored in a private file/);
   assert.match(node('pihole-detail').textContent, /Connection test failed/);
 });
 
@@ -132,7 +159,7 @@ test('unknown save outcome does not claim the password was saved', async () => {
   await vm.runInContext('piholeConnection(true)', context);
   assert.match(node('pihole-detail').textContent, /Save was not confirmed/);
   assert.equal(node('pihole-password').value, '');
-  assert.doesNotMatch(node('pihole-saved').textContent, /password are stored/);
+  assert.doesNotMatch(node('pihole-saved').textContent, /password is stored/);
 });
 
 function scheduleFixture(context) {
