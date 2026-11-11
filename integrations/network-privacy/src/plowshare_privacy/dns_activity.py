@@ -138,20 +138,32 @@ def classify(domain: str) -> tuple[DestinationKind, str | None]:
     return "unclassified", None
 
 
-# Quick checks run every 2-5 minutes, so six confirmed windows is at least a
-# quarter of an hour of continuous association at one address.
-MIN_SILENT_WINDOWS = 6
+# Devices that resolve rarely can cache answers for hours, so a short quiet
+# spell is ordinary. Silence is only reported after this much confirmed
+# association: at least six hours between the first and last window, with
+# enough windows (quick checks run every 2-5 minutes) to show it was continuous
+# rather than two isolated sightings.
+MIN_SILENT_SECONDS = 6 * 3600
+MIN_SILENT_WINDOWS = 24
 
 
-def pihole_silent(*, windows: int, partial: int, available: int) -> bool:
-    """True when a confirmed device sent Pi-hole no queries for long enough.
+def pihole_silent(
+    *, windows: int, partial: int, available: int, span_seconds: float
+) -> bool:
+    """True when a confirmed client sent Pi-hole no queries for hours.
 
     This is a visibility finding, not proof of misbehaviour: the device may be
     idle, use hard-coded resolvers or DNS over HTTPS, or resolve over IPv6
     through another server. Any partial window could hide queries, so a single
-    failed or truncated read withholds the claim.
+    failed or truncated read withholds the claim. Adopted UniFi infrastructure
+    never reaches this check because it is not profiled as a DNS client.
     """
-    return windows >= MIN_SILENT_WINDOWS and partial == 0 and available == 0
+    return (
+        windows >= MIN_SILENT_WINDOWS
+        and span_seconds >= MIN_SILENT_SECONDS
+        and partial == 0
+        and available == 0
+    )
 
 
 def retention_rank(domain: str) -> int:

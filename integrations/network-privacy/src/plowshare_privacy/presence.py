@@ -502,7 +502,12 @@ class PresenceHistory:
                 read,
                 available,
                 group_destinations(destinations[device]),
-                pihole_silent(windows=windows, partial=partial, available=available),
+                pihole_silent(
+                    windows=windows,
+                    partial=partial,
+                    available=available,
+                    span_seconds=end - start,
+                ),
             )
             for device, start, end, windows, partial, read, available in connection.execute(
                 f"""

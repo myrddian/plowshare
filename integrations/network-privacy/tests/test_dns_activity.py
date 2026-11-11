@@ -4,6 +4,7 @@ import unittest
 
 from plowshare_privacy.dns_activity import (
     GROUP_ORDER,
+    MIN_SILENT_SECONDS,
     MIN_SILENT_WINDOWS,
     classify,
     group_destinations,
@@ -104,22 +105,38 @@ class RetentionTest(unittest.TestCase):
 
 
 class SilenceTest(unittest.TestCase):
-    def test_long_association_without_queries_is_silent(self) -> None:
+    def test_hours_of_association_without_queries_is_silent(self) -> None:
         self.assertTrue(
-            pihole_silent(windows=MIN_SILENT_WINDOWS, partial=0, available=0)
+            pihole_silent(
+                windows=MIN_SILENT_WINDOWS,
+                partial=0,
+                available=0,
+                span_seconds=MIN_SILENT_SECONDS,
+            )
         )
 
-    def test_short_or_partial_or_active_windows_are_not_silent(self) -> None:
+    def test_short_partial_or_active_profiles_are_not_silent(self) -> None:
+        enough = {"windows": MIN_SILENT_WINDOWS, "span_seconds": MIN_SILENT_SECONDS}
+        # Quiet devices cache DNS answers for minutes to hours; a short quiet
+        # spell is ordinary and must not be reported.
         self.assertFalse(
-            pihole_silent(windows=MIN_SILENT_WINDOWS - 1, partial=0, available=0)
+            pihole_silent(
+                **{**enough, "span_seconds": MIN_SILENT_SECONDS - 1},
+                partial=0,
+                available=0,
+            )
+        )
+        self.assertFalse(
+            pihole_silent(
+                **{**enough, "windows": MIN_SILENT_WINDOWS - 1}, partial=0, available=0
+            )
         )
         # A failed or truncated read could hide queries; never claim silence.
-        self.assertFalse(
-            pihole_silent(windows=MIN_SILENT_WINDOWS, partial=1, available=0)
-        )
-        self.assertFalse(
-            pihole_silent(windows=MIN_SILENT_WINDOWS, partial=0, available=1)
-        )
+        self.assertFalse(pihole_silent(**enough, partial=1, available=0))
+        self.assertFalse(pihole_silent(**enough, partial=0, available=1))
+
+    def test_threshold_is_hours_not_minutes(self) -> None:
+        self.assertGreaterEqual(MIN_SILENT_SECONDS, 6 * 3600)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from plowshare_privacy.collection import NetworkCollector, scope_fingerprint
 from plowshare_privacy.contracts import CollectionPlan, DeviceIdentity, DnsObservation
 from plowshare_privacy.device_inventory import device_inventory
 from plowshare_privacy.dns_activity import (
+    MIN_SILENT_SECONDS,
     MIN_SILENT_WINDOWS,
     DnsActivityWindow,
     QuerySample,
@@ -39,6 +40,29 @@ START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 PLAN = CollectionPlan(
     "tcp", (A, B, C, D), (443, 80, 22), 1, 4, None, 0, quick_scan=True
 )
+
+
+class ManagedFixture:
+    """A UniFi-like source that knows which MACs are adopted infrastructure."""
+
+    def __init__(self, managed: set[str]):
+        self.managed = managed
+
+    async def identify(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        return IdentitySample()
+
+    async def managed_sightings(
+        self,
+        targets: tuple[str, ...],
+        observed_at: str,
+        clients: tuple[DeviceIdentity, ...] = (),
+    ) -> IdentitySample:
+        return IdentitySample()
+
+    def recently_managed(self, identity: DeviceIdentity) -> bool:
+        return identity.device_id in self.managed
 
 
 def at(seconds: int) -> str:
@@ -270,13 +294,11 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
             history = PresenceHistory(Path(folder).resolve())
             scope = scope_fingerprint(PLAN)
             empty = QuerySample((), 0, 0, ())
-            for step in range(1, MIN_SILENT_WINDOWS + 2):
-                seconds = step * 120
-                window = (
-                    (DnsActivityWindow(MAC, at(seconds - 120), empty),)
-                    if step > 1
-                    else ()
-                )
+            step_seconds = MIN_SILENT_SECONDS // MIN_SILENT_WINDOWS + 1
+            last = 0
+            for step in range(MIN_SILENT_WINDOWS + 1):
+                seconds = step * step_seconds
+                window = (DnsActivityWindow(MAC, at(last), empty),) if step else ()
                 history.record(
                     scope,
                     PresenceSample(
@@ -284,12 +306,41 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
                     ),
                     window,
                 )
-            now = epoch(at((MIN_SILENT_WINDOWS + 1) * 120))
-            profile = history.view(scope, now, include_dns=True).dns[MAC]
+                last = seconds
+            profile = history.view(scope, epoch(at(last)), include_dns=True).dns[MAC]
             self.assertEqual(profile.windows, MIN_SILENT_WINDOWS)
             self.assertEqual(profile.queries_read, 0)
             self.assertTrue(profile.pihole_silent)
             self.assertEqual(profile.groups, ())
+            # Half the span is a quiet spell, not a visibility gap.
+            early = history.view(scope, epoch(at(last // 2)), include_dns=True).dns[MAC]
+            self.assertFalse(early.pihole_silent)
+
+    async def test_dns_profiles_skip_adopted_unifi_infrastructure(self) -> None:
+        plan = replace(PLAN, dns_profiles=True)
+        read = AsyncMock(return_value=((QuerySample((), 0, 0, ()),), ()))
+        inventory = ManagedFixture(managed={"mac:" + OTHER_MAC})
+        collector = NetworkCollector(
+            "fixture", plan, identity_source=inventory, pihole_activity=read
+        )
+        previous = PresenceSample(
+            at(120),
+            (
+                Sighting(A, identity(A, "unifi", 120)),
+                Sighting(B, identity(B, "unifi", 120, OTHER_MAC)),
+            ),
+        )
+        current = PresenceSample(
+            at(240),
+            (
+                Sighting(A, identity(A, "unifi", 240)),
+                Sighting(B, identity(B, "unifi", 240, OTHER_MAC)),
+            ),
+        )
+        windows, _ = await collector.collect_dns_activity(previous, current)
+        assert read.await_args is not None
+        self.assertEqual(read.await_args.args[0], (A,))
+        self.assertEqual([window.device for window in windows], ["mac:" + MAC])
 
     async def test_traffic_volume_sums_counter_deltas_and_skips_resets(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

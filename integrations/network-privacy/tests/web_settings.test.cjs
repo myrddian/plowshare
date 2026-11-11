@@ -60,10 +60,11 @@ test('DNS profiling is a separate setting and shows blocked lookups as DNS evide
   assert.match(rendered, /Connections and data transfers require gateway flow records/);
   assert.match(rendered, /ads.example · Fixture Ads · 3 queries · 2 reported blocked/);
 
-  context.silent = {...context.activity, windows:7, partial_windows:0, queries_read:0,
+  context.silent = {...context.activity, from_at:'2026-01-01T00:00:00Z',
+    until_at:'2026-01-01T07:30:00Z', windows:90, partial_windows:0, queries_read:0,
     queries_available:0, groups:[], pihole_silent:true};
   assert.match(JSON.stringify(vm.runInContext('renderDnsActivity(silent)', context)),
-    /No DNS queries reached Pi-hole in 7 confirmed windows/);
+    /No DNS queries reached Pi-hole in 90 confirmed checks over 7 hours/);
   context.grouped = {...context.activity, groups:[
     {kind:'measurement', queries:4, distinct:1, destinations:[]},
     {kind:'telemetry', queries:2, distinct:1, destinations:[]},
@@ -78,6 +79,7 @@ test('DNS profiling is a separate setting and shows blocked lookups as DNS evide
   assert.match(traffic, /1.2 GB to device · 2.0 KB from device/);
   assert.match(traffic, /2 intervals skipped after a counter reset/);
   assert.match(traffic, /counters show volume, not which hosts/i);
+  assert.match(traffic, /Totals include local traffic/);
   assert.equal(vm.runInContext('formatBytes(999)', context), '999 B');
 });
 
