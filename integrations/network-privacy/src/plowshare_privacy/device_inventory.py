@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from .contracts import DeviceIdentity, DeviceLabel, DnsObservation, TcpObservation
 from .device_detection import DeviceDetection, detect_device
+from .dns_activity import DnsActivity
 from .journal import Receipt
 from .presence import PresenceCount, PresenceView, epoch
 
@@ -25,6 +26,7 @@ class DeviceCard:
     last_known_identity: DeviceIdentity | None
     detection: DeviceDetection
     presence: PresenceCount | None = None
+    dns_activity: DnsActivity | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,7 @@ def device_inventory(
     devices = []
     candidates = []
     for address, history in addresses.items():
+        full_identity = history.identity
         quick = presence.sightings.get(address)
         quick_identity = quick.identity if quick else None
         if quick_identity is not None:
@@ -153,7 +156,15 @@ def device_inventory(
                 identity=history.identity,
                 last_seen=history.last_checked_at,
                 services=history.services,
-                dns=history.dns,
+                dns=history.dns
+                if history.identity == full_identity
+                or (
+                    full_identity
+                    and full_identity.mac
+                    and known
+                    and full_identity.mac == known.mac
+                )
+                else (),
                 history=tuple(history.scans),
                 revision=history.revision,
                 first_response_at=history.first_response_at,
@@ -161,6 +172,9 @@ def device_inventory(
                 last_known_identity=history.last_known_identity,
                 detection=detect_device(history.identity, history.services),
                 presence=count,
+                dns_activity=presence.dns.get(quick.key)
+                if quick and quick.identity and history.identity == quick.identity
+                else None,
             )
         )
     return DeviceInventory(tuple(devices), tuple(candidates))

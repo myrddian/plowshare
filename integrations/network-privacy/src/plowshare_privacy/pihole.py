@@ -30,7 +30,9 @@ from .contracts import (
     object_fields,
     parse_json,
     text,
+    timestamp,
 )
+from .dns_activity import QuerySample
 from .identity_source import IdentitySample
 from .limits import BATCH_SIZE, MAX_TARGETS
 
@@ -97,12 +99,23 @@ def password(plan: PiHolePlan) -> str:
     return text(value, 4096)
 
 
-@dataclass(frozen=True)
-class QuerySample:
-    dns: tuple[DnsObservation, ...]
-    read: int
-    available: int
-    issues: tuple[str, ...]
+# Pi-hole reports upstream blocking separately. Count only statuses that
+# explicitly indicate blocking in this sample, including local CNAME rules.
+_BLOCKED_STATUSES = frozenset(
+    {
+        "GRAVITY",
+        "REGEX",
+        "DENYLIST",
+        "GRAVITY_CNAME",
+        "REGEX_CNAME",
+        "DENYLIST_CNAME",
+        "SPECIAL_DOMAIN",
+        "EXTERNAL_BLOCKED_IP",
+        "EXTERNAL_BLOCKED_NULL",
+        "EXTERNAL_BLOCKED_NXRA",
+        "EXTERNAL_BLOCKED_EDE15",
+    }
+)
 
 
 class PiHoleV6:
@@ -241,7 +254,13 @@ class PiHoleV6:
         )
 
     def _queries(
-        self, raw: object, address: str, start: float, end: float
+        self,
+        raw: object,
+        address: str,
+        start: float,
+        end: float,
+        *,
+        half_open: bool = False,
     ) -> QuerySample:
         row = object_fields(
             raw,
@@ -258,7 +277,9 @@ class PiHoleV6:
         values = items(row["queries"], self.plan.query_limit)
         available = integer(row["recordsFiltered"], len(values), 2**48 - 1)
         counts: Counter[str] = Counter()
+        blocked: Counter[str] = Counter()
         ids: set[int] = set()
+        truncated = available > len(values)
         issues: set[str] = set()
         for value in values:
             query = object_fields(
@@ -276,9 +297,11 @@ class PiHoleV6:
                 },
             )
             client = object_fields(query["client"], {"ip"}, {"name"})
+            at = epoch(query["time"])
             if (
                 str(ipaddress.ip_address(text(client["ip"], 64))) != address
-                or not start <= epoch(query["time"]) <= end
+                or not start <= at <= end
+                or (half_open and at == end)
             ):
                 raise ValueError(
                     "Pi-hole returned queries outside the selected scope/window"
@@ -287,8 +310,8 @@ class PiHoleV6:
             if identity in ids:
                 raise ValueError("Duplicate Pi-hole query")
             ids.add(identity)
-            domain = text(query["domain"], 254).lower().removesuffix(".")
             try:
+                domain = text(query["domain"], 254).lower().removesuffix(".")
                 observation = DnsObservation.decode(
                     {"device": address, "domain": domain, "queries": 1}
                 )
@@ -298,12 +321,15 @@ class PiHoleV6:
                 )
                 continue
             counts[observation.domain] += 1
+            status = query.get("status")
+            if half_open and isinstance(status, str) and status in _BLOCKED_STATUSES:
+                blocked[observation.domain] += 1
         earliest = row.get("earliest_timestamp")
         if earliest is None or epoch(earliest) == 0 or epoch(earliest) > start:
             issues.add(
                 "dns_partial: Pi-hole retained history does not establish the full requested window"
             )
-        if available > len(values):
+        if truncated:
             issues.add(
                 "dns_truncated: Pi-hole query sample reached the configured per-device limit"
             )
@@ -315,37 +341,59 @@ class PiHoleV6:
             len(values),
             available,
             tuple(sorted(issues)),
+            dict(blocked),
         )
 
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
-        sample, _ = await self._read(targets, observed_at, queries=True)
+        sample, _, _ = await self._read(targets, observed_at, queries=True)
         return sample
 
     async def identify(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
         """Operator-only identity checks; no DNS history is fetched or retained."""
         if len(targets) > BATCH_SIZE:
             raise ValueError("Pi-hole requires at most 32 unique selected addresses")
-        sample, _ = await self._read(targets, observed_at, queries=False)
+        sample, _, _ = await self._read(targets, observed_at, queries=False)
         return sample
 
     async def presence(
         self, targets: tuple[str, ...], observed_at: str
     ) -> IdentitySample:
         """Read the network table once for the watched scope, without querying DNS logs."""
-        sample, ambiguous = await self._read(targets, observed_at, queries=False)
+        sample, ambiguous, _ = await self._read(targets, observed_at, queries=False)
         return IdentitySample(sample.devices, ambiguous, sample.issues)
 
+    async def activity(
+        self, targets: tuple[str, ...], since: str, observed_at: str
+    ) -> tuple[tuple[QuerySample, ...], tuple[str, ...]]:
+        """Read query logs for confirmed clients only, without re-reading the device table."""
+        data, _, samples = await self._read(
+            targets, observed_at, queries=True, since=since
+        )
+        return samples, data.issues
+
     async def _read(
-        self, targets: tuple[str, ...], observed_at: str, *, queries: bool
-    ) -> tuple[DeviceData, frozenset[str]]:
-        limit = BATCH_SIZE if queries else MAX_TARGETS
+        self,
+        targets: tuple[str, ...],
+        observed_at: str,
+        *,
+        queries: bool,
+        since: str | None = None,
+    ) -> tuple[DeviceData, frozenset[str], tuple[QuerySample, ...]]:
+        limit = BATCH_SIZE if queries and since is None else MAX_TARGETS
         if len(targets) > limit or len(set(targets)) != len(targets):
             raise ValueError(
                 f"Pi-hole requires at most {limit} unique selected addresses"
             )
         targets = tuple(str(ipaddress.ip_address(address)) for address in targets)
-        end = datetime.fromisoformat(observed_at.replace("Z", "+00:00")).timestamp()
-        start = end - self.plan.lookback_seconds
+        end = datetime.fromisoformat(timestamp(observed_at)).timestamp()
+        start = (
+            datetime.fromisoformat(timestamp(since)).timestamp()
+            if since is not None
+            else end - self.plan.lookback_seconds
+        )
+        if start >= end:
+            raise ValueError("Pi-hole query window must advance")
+        samples: tuple[QuerySample, ...] = ()
         identity = IdentitySample()
         dns: tuple[DnsObservation, ...] = ()
         window: DnsWindow | None = None
@@ -370,28 +418,32 @@ class PiHoleV6:
                         "authentication refused; use a Pi-hole application password"
                     )
                 sid = text(accepted["sid"], 256)
-                try:
-                    identity = self._devices(
-                        await self._request(
-                            session,
-                            "GET",
-                            "network/devices",
-                            sid=sid,
-                            parameters={"max_devices": "256", "max_addresses": "16"},
-                        ),
-                        targets,
-                        end,
-                    )
-                    issues.update(identity.issues)
-                except (
-                    PiHoleUnavailable,
-                    ValueError,
-                    aiohttp.ClientError,
-                    TimeoutError,
-                ):
-                    issues.add(
-                        "identity_unavailable: Pi-hole device records could not be read or validated"
-                    )
+                if since is None:
+                    try:
+                        identity = self._devices(
+                            await self._request(
+                                session,
+                                "GET",
+                                "network/devices",
+                                sid=sid,
+                                parameters={
+                                    "max_devices": "256",
+                                    "max_addresses": "16",
+                                },
+                            ),
+                            targets,
+                            end,
+                        )
+                        issues.update(identity.issues)
+                    except (
+                        PiHoleUnavailable,
+                        ValueError,
+                        aiohttp.ClientError,
+                        TimeoutError,
+                    ):
+                        issues.add(
+                            "identity_unavailable: Pi-hole device records could not be read or validated"
+                        )
                 if queries:
                     semaphore = asyncio.Semaphore(4)
 
@@ -411,7 +463,13 @@ class PiHoleV6:
                                         "disk": "false",
                                     },
                                 )
-                                return self._queries(raw, address, start, end)
+                                return self._queries(
+                                    raw,
+                                    address,
+                                    start,
+                                    end,
+                                    half_open=since is not None,
+                                )
                             except (
                                 PiHoleUnavailable,
                                 ValueError,
@@ -427,29 +485,30 @@ class PiHoleV6:
                                     ),
                                 )
 
-                    samples = await asyncio.gather(
-                        *(sample(address) for address in targets)
+                    samples = tuple(
+                        await asyncio.gather(*(sample(address) for address in targets))
                     )
                     for sample_result in samples:
                         issues.update(sample_result.issues)
-                    dns = tuple(
-                        observation
-                        for sample_result in samples
-                        for observation in sample_result.dns
-                    )
-                    if len(dns) > 256:
-                        dns = dns[:256]
-                        issues.add(
-                            "dns_truncated: normalized Pi-hole destination limit reached"
+                    if since is None:
+                        dns = tuple(
+                            observation
+                            for sample_result in samples
+                            for observation in sample_result.dns
                         )
-                    window = DnsWindow(
-                        "pihole-v6",
-                        instant(start),
-                        instant(end),
-                        sum(sample.read for sample in samples),
-                        sum(sample.available for sample in samples),
-                        not any(issue.startswith("dns_") for issue in issues),
-                    )
+                        if len(dns) > 256:
+                            dns = dns[:256]
+                            issues.add(
+                                "dns_truncated: normalized Pi-hole destination limit reached"
+                            )
+                        window = DnsWindow(
+                            "pihole-v6",
+                            instant(start),
+                            instant(end),
+                            sum(sample.read for sample in samples),
+                            sum(sample.available for sample in samples),
+                            not any(issue.startswith("dns_") for issue in issues),
+                        )
             except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
                 issues.add(
                     "identity_unavailable: Pi-hole authentication or connection failed"
@@ -474,4 +533,5 @@ class PiHoleV6:
         return (
             DeviceData(identity.devices, dns, window, tuple(sorted(issues))),
             identity.ambiguous_addresses,
+            samples,
         )

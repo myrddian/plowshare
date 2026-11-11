@@ -120,6 +120,26 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ambiguous_addresses, frozenset({ADDRESS}))
         self.assertEqual(self.query_clients, [])
 
+    async def test_activity_uses_half_open_query_window_and_records_blocked_status(
+        self,
+    ) -> None:
+        self.mode = "activity"
+        since = datetime.fromtimestamp(self.now - 120, timezone.utc).isoformat()
+        samples, issues = await PiHoleV6(self.plan).activity(
+            (ADDRESS,), since, utc_now()
+        )
+        self.assertEqual(issues, ())
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(
+            [(item.domain, item.queries) for item in samples[0].dns],
+            [("ad.doubleclick.net", 1), ("www.youtube.com", 1)],
+        )
+        self.assertEqual(samples[0].blocked, {"ad.doubleclick.net": 1})
+        self.assertEqual(
+            self.calls,
+            [("POST", "/api/auth"), ("GET", "/api/queries"), ("DELETE", "/api/auth")],
+        )
+
     async def stolen_request(self, request: web.Request) -> web.Response:
         self.stolen = True
         return web.json_response({})
@@ -231,6 +251,13 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         if self.mode == "invalid_domain":
             query["domain"] = "_service._tcp.example"
         queries = [query, dict(query, id=101)]
+        if self.mode == "activity":
+            query.update(
+                time=float(request.query["from"]),
+                domain="Ad.DoubleClick.NET.",
+                status="GRAVITY",
+            )
+            queries[1]["domain"] = "www.youtube.com"
         if self.mode == "duplicate":
             queries[1]["id"] = 100
         available = len(queries) + (10 if self.mode == "truncated" else 0)
@@ -539,6 +566,7 @@ class PiHoleConfigurationTest(unittest.TestCase):
             plan = config.collection
             old = asdict(plan)
             old.pop("quick_scan")
+            old.pop("dns_profiles")
             old.pop("enabled")
             old.pop("labels")
             old.pop("pihole")

@@ -6,6 +6,7 @@ import asyncio
 import errno
 import hashlib
 import json
+from collections import Counter
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Protocol
@@ -22,10 +23,11 @@ from .contracts import (
     private_ipv4,
     utc_now,
 )
+from .dns_activity import DnsActivityWindow, QuerySample
 from .identity_source import DeviceIdentitySource, IdentitySample, ManagedInventory
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .pihole import DeviceDataSource
-from .presence import PresenceSample, Sighting, epoch
+from .presence import MAX_ATTRIBUTION_GAP, PresenceSample, Sighting, epoch
 
 
 class Collector(Protocol):
@@ -44,6 +46,7 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
     values = asdict(plan)
     # Local presence sampling does not change full collection evidence or receipts.
     values.pop("quick_scan")
+    values.pop("dns_profiles")
     # Default-enabled plans retain their historical fingerprints and journal identity.
     if plan.enabled:
         values.pop("enabled")
@@ -121,6 +124,11 @@ class NetworkCollector:
         identity_source: DeviceIdentitySource | None = None,
         pihole_presence: Callable[[tuple[str, ...], str], Awaitable[IdentitySample]]
         | None = None,
+        pihole_activity: Callable[
+            [tuple[str, ...], str, str],
+            Awaitable[tuple[tuple[QuerySample, ...], tuple[str, ...]]],
+        ]
+        | None = None,
     ):
         if plan.pihole is not None and device_source is None:
             raise ValueError("Configured Pi-hole requires a device-data source")
@@ -131,6 +139,7 @@ class NetworkCollector:
         self.device_source = device_source
         self.identity_source = identity_source
         self.pihole_presence = pihole_presence
+        self.pihole_activity = pihole_activity
 
     async def _identity_sample(self, observed: str) -> IdentitySample:
         if self.identity_source is None:
@@ -251,6 +260,58 @@ class NetworkCollector:
                 await asyncio.gather(*tasks, return_exceptions=True)
         return PresenceSample(
             observed, tuple(sightings.values()), tuple(dict.fromkeys(issues)), ambiguous
+        )
+
+    async def collect_dns_activity(
+        self, previous: PresenceSample, current: PresenceSample
+    ) -> tuple[tuple[DnsActivityWindow, ...], tuple[str, ...]]:
+        gap = epoch(current.checked_at) - epoch(previous.checked_at)
+        read = self.pihole_activity
+        if (
+            not self.plan.dns_profiles
+            or read is None
+            or not 0 < gap <= MAX_ATTRIBUTION_GAP
+        ):
+            return (), ()
+        watched = frozenset(self.plan.targets)
+        old = {
+            item.address: item.key
+            for item in previous.sightings
+            if item.identity
+            and item.identity.mac
+            and item.address not in previous.ambiguous_addresses
+        }
+        prior_counts = Counter(old.values())
+        current_counts = Counter(
+            item.key
+            for item in current.sightings
+            if item.identity and item.identity.mac
+        )
+        # Require fresh matching endpoints. IP-only sightings and conflicting
+        # associations never backfill DNS, even if they count for presence.
+        confirmed = {
+            item.address: item.key
+            for item in current.sightings
+            if item.address in watched
+            and item.address not in current.ambiguous_addresses
+            and item.identity
+            and item.identity.mac
+            and old.get(item.address) == item.key
+            and prior_counts[item.key] == current_counts[item.key] == 1
+        }
+        if not confirmed:
+            return (), ()
+        samples, issues = await read(
+            tuple(confirmed), previous.checked_at, current.checked_at
+        )
+        return (
+            tuple(
+                DnsActivityWindow(device, previous.checked_at, sample)
+                for device, sample in zip(confirmed.values(), samples, strict=True)
+            )
+            if samples
+            else (),
+            issues,
         )
 
     async def collect(

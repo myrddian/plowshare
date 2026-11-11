@@ -8,6 +8,7 @@ import os
 import random
 import sqlite3
 import time
+from collections import defaultdict
 from contextlib import closing
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
 
 from .contracts import CollectionPlan, DeviceIdentity, timestamp, utc_now
+from .dns_activity import DnsActivity, DnsActivityWindow, classify, group_destinations
 
 WINDOW_SECONDS = 24 * 60 * 60
 MAX_DELAY_SECONDS = 300
@@ -24,6 +26,8 @@ SAMPLE_TIMEOUT_SECONDS = 120
 MAX_SAMPLES = WINDOW_SECONDS // 120 + 1
 # One maximum timer delay plus the deadline of the preceding quick check.
 MAX_ATTRIBUTION_GAP = MAX_DELAY_SECONDS + SAMPLE_TIMEOUT_SECONDS
+DNS_TIMEOUT_SECONDS = 30
+MAX_WINDOW_DESTINATIONS = 32
 
 
 def epoch(when: str) -> float:
@@ -63,6 +67,7 @@ class PresenceView:
     checks: int = 0
     sightings: dict[str, Sighting] = field(default_factory=dict)
     counts: dict[str, PresenceCount] = field(default_factory=dict)
+    dns: dict[str, DnsActivity] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,13 @@ class PresenceStatus:
 @runtime_checkable
 class PresenceCollector(Protocol):
     async def collect_presence(self, since: str) -> PresenceSample: ...
+
+
+@runtime_checkable
+class DnsActivityCollector(Protocol):
+    async def collect_dns_activity(
+        self, previous: PresenceSample, current: PresenceSample
+    ) -> tuple[tuple[DnsActivityWindow, ...], tuple[str, ...]]: ...
 
 
 def _instant(value: float) -> str:
@@ -165,6 +177,13 @@ class PresenceHistory:
                     scope TEXT NOT NULL, address TEXT NOT NULL, identity TEXT,
                     checked REAL NOT NULL,
                     PRIMARY KEY (scope, address)
+                );
+                CREATE TABLE IF NOT EXISTS dns_activity (
+                    sweep_id INTEGER REFERENCES sweep(id) ON DELETE CASCADE,
+                    device TEXT NOT NULL, start REAL NOT NULL, read INTEGER NOT NULL,
+                    available INTEGER NOT NULL, partial INTEGER NOT NULL,
+                    destinations TEXT NOT NULL,
+                    PRIMARY KEY (sweep_id, device)
                 );
                 CREATE TABLE IF NOT EXISTS address_anchor (
                     scope TEXT NOT NULL, address TEXT NOT NULL, device TEXT,
@@ -323,7 +342,12 @@ class PresenceHistory:
             ),
         )
 
-    def record(self, scope: str, sample: PresenceSample) -> None:
+    def record(
+        self,
+        scope: str,
+        sample: PresenceSample,
+        dns: tuple[DnsActivityWindow, ...] = (),
+    ) -> None:
         checked = epoch(timestamp(sample.checked_at))
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -359,6 +383,14 @@ class PresenceHistory:
                     for item in sample.sightings
                 ),
             )
+            connection.executemany(
+                """
+                INSERT INTO dns_activity
+                    (sweep_id, device, start, read, available, partial, destinations)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (self._dns_row(sweep, item) for item in dns),
+            )
             self._record_associations(
                 connection, scope, checked, sample, sweep, previous_id
             )
@@ -371,7 +403,89 @@ class PresenceHistory:
             connection.execute("DELETE FROM latest WHERE scope <> ?", (scope,))
             connection.execute("DELETE FROM address_anchor WHERE scope <> ?", (scope,))
 
-    def view(self, scope: str, now: float) -> PresenceView:
+    @staticmethod
+    def _dns_row(
+        sweep: int, item: DnsActivityWindow
+    ) -> tuple[int, str, float, int, int, bool, str]:
+        sample = item.sample
+        ordered = sorted(
+            sample.dns,
+            key=lambda query: (
+                classify(query.domain)[0] == "unclassified",
+                -query.queries,
+                query.domain,
+            ),
+        )
+        return (
+            sweep,
+            item.device,
+            epoch(item.from_at),
+            sample.read,
+            sample.available,
+            bool(sample.issues) or len(ordered) > MAX_WINDOW_DESTINATIONS,
+            json.dumps(
+                [
+                    (query.domain, query.queries, sample.blocked.get(query.domain, 0))
+                    for query in ordered[:MAX_WINDOW_DESTINATIONS]
+                ]
+            ),
+        )
+
+    @staticmethod
+    def _dns_view(
+        connection: sqlite3.Connection, scope: str, cutoff: float, now: float
+    ) -> dict[str, DnsActivity]:
+        if (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='dns_activity'"
+            ).fetchone()
+            is None
+        ):
+            return {}  # Read-only startup can encounter a pre-profile journal.
+        predicate = (
+            "sweep.scope=? AND sweep.checked BETWEEN ? AND ? AND dns_activity.start>=?"
+        )
+        parameters = (scope, cutoff, now, cutoff)
+        destinations: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
+        for device, domain, count, blocked in connection.execute(
+            f"""
+            SELECT dns_activity.device, json_extract(destination.value, '$[0]'),
+                   sum(json_extract(destination.value, '$[1]')),
+                   sum(json_extract(destination.value, '$[2]'))
+            FROM sweep JOIN dns_activity ON dns_activity.sweep_id=sweep.id
+            JOIN json_each(dns_activity.destinations) AS destination
+            WHERE {predicate}
+            GROUP BY 1, 2
+            """,
+            parameters,
+        ):
+            destinations[device].append((domain, count, blocked))
+        return {
+            device: DnsActivity(
+                _instant(start),
+                _instant(end),
+                windows,
+                partial,
+                read,
+                available,
+                group_destinations(destinations[device]),
+            )
+            for device, start, end, windows, partial, read, available in connection.execute(
+                f"""
+                SELECT dns_activity.device, min(dns_activity.start), max(sweep.checked),
+                       count(*), sum(dns_activity.partial), sum(dns_activity.read),
+                       sum(dns_activity.available)
+                FROM sweep JOIN dns_activity ON dns_activity.sweep_id=sweep.id
+                WHERE {predicate}
+                GROUP BY 1
+                """,
+                parameters,
+            )
+        }
+
+    def view(
+        self, scope: str, now: float, *, include_dns: bool = False
+    ) -> PresenceView:
         self._require_unlinked()
         if not self.path.exists():
             return PresenceView()
@@ -434,7 +548,8 @@ class PresenceHistory:
                             checked_at,
                         ),
                     )
-            return PresenceView(checked_at, checks, sightings, counts)
+            dns = self._dns_view(connection, scope, cutoff, now) if include_dns else {}
+            return PresenceView(checked_at, checks, sightings, counts, dns)
 
 
 class PresenceWatch:
@@ -459,11 +574,14 @@ class PresenceWatch:
         self._cached_scope: str | None = None
         self._cached_until = 0.0
         self._cached = PresenceView()
+        self._cached_dns = False
+        self._previous: PresenceSample | None = None
 
     def reset(self) -> None:
         self.due = None
         self.since = None
         self.issues = ()
+        self._previous = None
 
     def wait_seconds(self) -> float:
         return (
@@ -480,6 +598,7 @@ class PresenceWatch:
             return
         if self.scope != scope or self.due is None or self.since is None:
             self.scope = scope
+            self._previous = None
             self.since = self.clock()
             self.due = self.monotonic() + self.delay()
             self.issues = ()
@@ -492,25 +611,50 @@ class PresenceWatch:
             # One failed, cancelled or incomplete sweep never enters the denominator.
             async with asyncio.timeout(SAMPLE_TIMEOUT_SECONDS):
                 sample = await collect.collect_presence(since)
-            self.history.record(scope, sample)
+            dns: tuple[DnsActivityWindow, ...] = ()
+            dns_issues: tuple[str, ...] = ()
+            if (
+                plan.dns_profiles
+                and self._previous is not None
+                and isinstance(collect, DnsActivityCollector)
+            ):
+                try:
+                    async with asyncio.timeout(DNS_TIMEOUT_SECONDS):
+                        dns, dns_issues = await collect.collect_dns_activity(
+                            self._previous, sample
+                        )
+                except (OSError, ValueError, TimeoutError):
+                    dns_issues = (
+                        "DNS activity could not be sampled in this quick check.",
+                    )
+            self.history.record(scope, sample, dns)
+            self._previous = sample if plan.dns_profiles else None
             self._cached_until = 0.0
-            self.issues = sample.issues
+            self.issues = (*sample.issues, *dns_issues)
             self.since = sample.checked_at
         except (OSError, ValueError, TimeoutError, sqlite3.Error):
+            self._previous = None
             self.issues = (
                 "Quick presence check failed; it was excluded from the history.",
             )
         finally:
             self.due = self.monotonic() + self.delay()
 
-    def view(self, scope: str) -> PresenceView:
+    def view(self, scope: str, *, include_dns: bool = False) -> PresenceView:
         now = self.monotonic()
-        if self._cached_scope != scope or now >= self._cached_until:
+        if (
+            self._cached_scope != scope
+            or self._cached_dns != include_dns
+            or now >= self._cached_until
+        ):
             try:
-                self._cached = self.history.view(scope, epoch(self.clock()))
+                self._cached = self.history.view(
+                    scope, epoch(self.clock()), include_dns=include_dns
+                )
             except (OSError, ValueError, sqlite3.Error):
                 self._cached = PresenceView()
                 self.issues = ("Quick presence history is unavailable.",)
             self._cached_scope = scope
+            self._cached_dns = include_dns
             self._cached_until = now + 20
         return self._cached

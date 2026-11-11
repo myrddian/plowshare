@@ -14,4 +14,5 @@ def configured_collector(collector: str, plan: CollectionPlan) -> NetworkCollect
         pihole,
         UniFiNetwork(plan.unifi) if plan.unifi else None,
         pihole.presence if pihole else None,
+        pihole.activity if pihole else None,
     )

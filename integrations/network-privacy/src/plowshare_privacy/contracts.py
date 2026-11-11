@@ -547,6 +547,7 @@ class CollectionPlan:
     pihole: PiHolePlan | None = None
     unifi: UniFiPlan | None = None
     quick_scan: bool = False
+    dns_profiles: bool = False
 
 
 @dataclass(frozen=True)
@@ -623,6 +624,7 @@ class Configuration:
                 "pihole",
                 "unifi",
                 "quickScan",
+                "dnsProfiles",
             },
         )
         mode = plan["mode"]
@@ -684,6 +686,13 @@ class Configuration:
                 else 0
             )
             pihole = PiHolePlan.decode(plan["pihole"]) if "pihole" in plan else None
+            dns_profiles = plan.get("dnsProfiles", False)
+            if type(dns_profiles) is not bool:
+                raise ValueError("DNS activity profiles must be a boolean")
+            if dns_profiles and (not quick_scan or pihole is None):
+                raise ValueError(
+                    "DNS activity profiles require quick presence checks and Pi-hole"
+                )
             if pihole is not None and observations is not None:
                 raise ValueError("Choose either Pi-hole or a DNS observation file")
             collection = CollectionPlan(
@@ -699,6 +708,7 @@ class Configuration:
                 pihole,
                 UniFiPlan.decode(plan["unifi"]) if "unifi" in plan else None,
                 quick_scan,
+                dns_profiles,
             )
         tokens = (
             identifier(row["tokenEnvironment"]),

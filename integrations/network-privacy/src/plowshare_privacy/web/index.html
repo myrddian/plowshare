@@ -158,7 +158,7 @@
             <label for="targets">Addresses to watch</label><input id="targets" aria-describedby="targets-help" placeholder="Private IPv4 addresses or a subnet such as 192.168.0.0/24">
             <p class="hint" id="targets-help">Subnet addresses start as candidates. An open TCP service or an observed identity adds the address to the device inventory.</p>
             <label for="device-labels">Device names</label><textarea id="device-labels" rows="3" placeholder="One selected address=name per line, e.g. 192.168.0.12=Living room TV"></textarea><p class="hint" id="identity-source">Names help identify devices. Pi-hole v6 and UniFi can add observed device identities.</p>
-            <div class="monitor-actions"><label class="check"><input id="enabled" type="checkbox">Enable collection</label><label class="check"><input id="quick-scan" type="checkbox">Quick presence checks every 2–5 minutes</label><button id="save-monitoring" type="submit">Save monitoring</button><span id="settings-detail" class="hint"></span></div>
+            <div class="monitor-actions"><label class="check"><input id="enabled" type="checkbox">Enable collection</label><label class="check"><input id="quick-scan" type="checkbox">Quick presence checks every 2–5 minutes</label><label class="check"><input id="dns-profiles" type="checkbox">Profile device DNS activity with Pi-hole</label><button id="save-monitoring" type="submit">Save monitoring</button><span id="settings-detail" class="hint"></span></div>
           </form>
         </div>
       </section>

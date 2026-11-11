@@ -33,6 +33,34 @@ test('saved settings remain editable while activation is pending', async () => {
   assert.equal(node('scan').disabled, true);
 });
 
+test('DNS profiling is a separate setting and shows blocked lookups as DNS evidence', async () => {
+  const {context, node} = await dashboard();
+  vm.runInContext("renderMonitorSettings({editable:true,pihole_configured:false,detail:''})", context);
+  assert.equal(node('dns-profiles').disabled, true);
+  vm.runInContext("renderMonitorSettings({editable:true,pihole_configured:true,detail:''})", context);
+  assert.equal(node('dns-profiles').disabled, false);
+  node('dns-profiles').checked = true;
+  node('dns-profiles').listeners.input();
+  assert.equal(node('quick-scan').checked, true);
+  node('quick-scan').checked = false;
+  node('quick-scan').listeners.input();
+  assert.equal(node('dns-profiles').checked, false);
+
+  context.document.createElement = tag => ({
+    tag, children: [], append(...children) { this.children.push(...children); },
+  });
+  context.activity = {
+    from_at:'2026-01-01T00:00:00Z', until_at:'2026-01-01T00:05:00Z',
+    windows:2, partial_windows:1, queries_read:8, queries_available:12,
+    groups:[{kind:'advertising', queries:3, distinct:1,
+      destinations:[{domain:'ads.example', provider:'Fixture Ads', queries:3, blocked:2}]}],
+  };
+  const rendered = JSON.stringify(vm.runInContext('renderDnsActivity(activity)', context));
+  assert.match(rendered, /Partial coverage in 1 windows/);
+  assert.match(rendered, /Connections and data transfers require gateway flow records/);
+  assert.match(rendered, /ads.example · Fixture Ads · 3 queries · 2 reported blocked/);
+});
+
 test('save uses one request and retains confirmation after a failed refresh', async () => {
   const {context, node} = await dashboard();
   const requests = [];

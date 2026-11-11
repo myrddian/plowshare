@@ -37,11 +37,14 @@ class MonitorChoice:
     ports: tuple[int, ...]
     labels: tuple[DeviceLabel, ...] | None = None
     quick_scan: bool | None = None
+    dns_profiles: bool | None = None
 
     @classmethod
     def decode(cls, value: object) -> MonitorChoice:
         row = object_fields(
-            value, {"enabled", "targets", "ports"}, {"labels", "quickScan"}
+            value,
+            {"enabled", "targets", "ports"},
+            {"labels", "quickScan", "dnsProfiles"},
         )
         if type(row["enabled"]) is not bool:
             raise ValueError("Monitoring enabled must be a boolean")
@@ -51,6 +54,12 @@ class MonitorChoice:
                 raise ValueError("Quick presence scan must be a boolean")
         else:
             quick_scan = None
+        if "dnsProfiles" in row:
+            dns_profiles = row["dnsProfiles"]
+            if type(dns_profiles) is not bool:
+                raise ValueError("DNS activity profiles must be a boolean")
+        else:
+            dns_profiles = None
         targets = expand_targets(row["targets"])
         ports = tuple(integer(item, 1, 65535) for item in items(row["ports"], 8))
         if (
@@ -67,6 +76,7 @@ class MonitorChoice:
             ports,
             device_labels(row["labels"], targets) if "labels" in row else None,
             quick_scan,
+            dns_profiles,
         )
 
 
@@ -82,6 +92,7 @@ class MonitorView:
     pending: bool = False
     unifi_configured: bool = False
     quick_scan: bool = False
+    dns_profiles: bool = False
 
 
 class MonitorSettings(Protocol):
@@ -146,6 +157,7 @@ class FileMonitorSettings:
             pending,
             plan.unifi is not None,
             plan.quick_scan,
+            plan.dns_profiles,
         )
 
     def _blocked_detail(self, *, include_locks: bool = True) -> str | None:
@@ -225,6 +237,7 @@ class FileMonitorSettings:
                     "pihole",
                     "unifi",
                     "quickScan",
+                    "dnsProfiles",
                 },
             )
             plan.update(
@@ -234,6 +247,10 @@ class FileMonitorSettings:
             )
             if choice.quick_scan is not None:
                 plan["quickScan"] = choice.quick_scan
+                if not choice.quick_scan:
+                    plan["dnsProfiles"] = False
+            if choice.dns_profiles is not None:
+                plan["dnsProfiles"] = choice.dns_profiles
             labels = (
                 choice.labels
                 if choice.labels is not None
@@ -301,6 +318,12 @@ class FileMonitorSettings:
             collector = configured_collector(config.collector, config.collection)
             self.receipts.prepare_scope_change(config.collection)
             replace_private(self.path, self.pending_path.read_text())
+            if (
+                config.collection.dns_profiles
+                != self.worker.config.collection.dns_profiles
+                and self.worker.presence is not None
+            ):
+                self.worker.presence.reset()
             self.worker.config = config
             self.worker.collector = collector
             self.receipts.complete_scope_change(config.collection)

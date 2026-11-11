@@ -126,8 +126,8 @@ and never publishes evidence, fires the scan schedule, or starts an investigatio
 Quick checks use connected UniFi clients first, then a Pi-hole v6 network-table
 sighting whose address timestamp falls within the current sampling interval.
 Remaining addresses get up to two short probes on the first configured TCP
-ports. Only an open connection counts as a TCP sighting. The Pi-hole path reads
-no DNS query history. Malformed network-table rows and unavailable sources are
+ports. Only an open connection counts as a TCP sighting. DNS profiling is a
+separate option and defaults to off. Malformed network-table rows and unavailable sources are
 reported separately while the other sources continue.
 
 Device cards show sightings out of completed quick checks over the last
@@ -147,6 +147,43 @@ association and the latest MAC confirmation or conflict for each address in
 the active scope even after the rolling count expires. New scopes start their
 own history. Full-scan evidence and scheduled investigations keep their
 existing path.
+
+### DNS activity profiles
+
+With Pi-hole configured, select **Profile device DNS activity with Pi-hole** in
+Settings and save monitoring. File-managed collectors can set
+`collection.dnsProfiles` to `true` alongside `collection.quickScan`. Profiles begin
+after two successful quick checks confirm the same MAC at the same watched IP.
+UniFi supplies the current association when available. Fresh Pi-hole network
+sightings can supply it otherwise. Unknown MACs, conflicting addresses, reused
+IPs and interrupted observation windows get no retrospective DNS attribution.
+Two matching observations still leave gaps in visibility between checks.
+
+Device cards show the last 24 hours of sampled DNS activity, grouped by
+streaming services, advertising, audience measurement and unclassified
+destinations. Counts distinguish DNS responses reported blocked and show partial
+coverage if samples are truncated or unavailable. Category totals use the
+retained destinations, with a maximum of 32 per window and eight shown per
+category. Profiles remain in the collector's private presence journal and use
+its rolling retention. They do not submit DNS history to Plowshare, external
+lookups or a model. Turning the option off stops new sampling and hides the
+profile while older windows age out.
+
+The category list uses published service domains, including
+[YouTube embeds](https://support.google.com/youtube/answer/171780),
+[Google video delivery](https://knowledge.workspace.google.com/admin/getting-started/set-up-a-google-workspace-host-name-allowlist),
+[Google Ads](https://developers.google.com/publisher-tag/guides/general-best-practices),
+[Microsoft Advertising](https://learn.microsoft.com/en-us/xandr/monetize/export-placement-tags),
+[The Trade Desk](https://partner.thetradedesk.com/v3/portal/resources/doc/TrackingTagsUniversalPixel),
+and [Google Analytics](https://developers.google.com/analytics/devguides/collection/protocol/ga4/reference).
+Classification describes the destination's known association. A query count
+does not show time spent in an app, whether a connection succeeded, or whether
+data was sent. Pi-hole visibility depends on the client using Pi-hole directly
+and the query log retaining client and domain details. For sessions and bytes,
+UniFi provides a separate [Traffic Flows export](https://help.ui.com/hc/en-us/articles/32201256219799-Traffic-Flows-and-Traffic-Logging-in-UniFi-Network)
+outside the client inventory API used here.
+
+### UniFi identity
 
 UniFi reads connected wired and wireless clients through the controller's local
 API. It keeps names and MACs for saved addresses only. The sweep withholds the

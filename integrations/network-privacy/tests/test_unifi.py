@@ -347,6 +347,7 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         plan = CollectionPlan("tcp", (FIRST,), (443,), 0.1, 1, None, 3600, unifi=unifi)
         original = asdict(plan)
         original.pop("quick_scan")
+        original.pop("dns_profiles")
         original.pop("enabled")
         original.pop("labels")
         original.pop("pihole")
