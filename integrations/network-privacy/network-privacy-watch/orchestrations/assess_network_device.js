@@ -265,7 +265,7 @@ function agentJson(raw, field) {
 // report may only raise concerns that something in the dossier supports.
 function assessmentResult(raw, dossier, options) {
   const fixes = [];
-  const fix = message => { if (fixes.length < 16) fixes.push(message); };
+  const fix = message => { if (fixes.length < 16 && !fixes.includes(message)) fixes.push(message); };
   // Readable field names for the Evidence list: concerns[0].fact -> concerns 1 fact.
   const label = field => field.replace(/\[(\d+)\]/g, (_, n) => ' ' + (Number(n) + 1)).replace(/[._]/g, ' ');
   const fields = (value, field, keys) => {
@@ -366,10 +366,18 @@ function assessmentResult(raw, dossier, options) {
 const VOLUME = /\b\d[\d,.]*\s*(?:bytes?|[kKMGT]i?B|kilobytes?|megabytes?|gigabytes?|terabytes?)\b/;
 function withoutVolumes(value, field, fix) {
   if (!VOLUME.test(value)) return value;
-  const sentences = value.match(/[^.!?]+(?:[.!?]+|$)/g) || [value];
-  const kept = sentences.filter(sentence => !VOLUME.test(sentence)).join('').trim();
+  const kept = sentencesOf(value).filter(sentence => !VOLUME.test(sentence)).join(' ').trim();
   fix('Removed a byte total from ' + field + '; the report states traffic volumes from the counters.');
   return kept;
+}
+// Sentence boundaries are terminal punctuation followed by whitespace, so a
+// decimal point ("18.4 GB") never splits a sentence.
+function sentencesOf(value) {
+  return String(value).replace(/([.!?])\s+/g, '$1\u0000').split('\u0000').filter(part => part.trim());
+}
+// Agent fragments joined by code each end with terminal punctuation.
+function sentence(value) {
+  return /[.!?]$/.test(value) ? value : value + '.';
 }
 // Shortens to whole sentences within the limit when possible, else whole
 // words with an ellipsis. It only removes text, so it cannot add a claim.
@@ -383,11 +391,11 @@ function shorten(value, limit) {
   return (space > 0 ? head.slice(0, space) : head.slice(0, limit - 1)).replace(/[\s,;:]+$/, '') + '…';
 }
 function words(value, count) {
-  const sentences = value.match(/[^.!?]+[.!?]+(\s|$)/g) || [value];
   let out = '';
-  for (const sentence of sentences) {
-    if ((out + sentence).trim().split(/\s+/).length > count) break;
-    out += sentence;
+  for (const part of sentencesOf(value)) {
+    const next = out ? out + ' ' + part : part;
+    if (next.trim().split(/\s+/).length > count) break;
+    out = next;
   }
   return out.trim() || value.split(/\s+/).slice(0, count).join(' ') + '…';
 }
@@ -560,7 +568,7 @@ function render(state) {
   const verdictLine = review.verdict === 'accepted' ? 'accepted' : 'corrections requested and applied in one round';
   const out = [];
   out.push('# ' + (plain(dossier.identity.name, 128) || 'Unnamed device') + ': privacy assessment', '',
-    'Assessed ' + request.requested_at.slice(0, 10) + '. Reviewer verdict: ' + verdictLine + '.', '',
+    'Assessed ' + request.requested_at.slice(0, 16).replace('T', ' ') + ' UTC. Reviewer verdict: ' + verdictLine + '.', '',
     '## In short', '', final.in_short, '',
     '## What it is', '', final.what_it_is.text, '',
     'Confidence: ' + final.what_it_is.confidence + '. This rests on:', '',
@@ -568,7 +576,7 @@ function render(state) {
     '## Who it talks to', '');
   if (final.who_it_talks_to.length) {
     out.push(...final.who_it_talks_to.map(party => '- ' + party.party + ' (' + PURPOSE_LABEL[party.purpose] + '): '
-      + party.observation + ' ' + party.meaning));
+      + sentence(party.observation) + ' ' + sentence(party.meaning)));
   } else {
     out.push('No destinations are described. The Evidence section says what DNS data was available.');
   }
@@ -695,7 +703,7 @@ function consume(state, input, todo) {
         if (!reviewed.includes(concern.id)) fail('Corrected assessment added concern ' + concern.id + ', which was never reviewed');
       }
       state.correction = corrected;
-      state.fixes = state.fixes.concat(parsed.fixes).slice(0, 16);
+      state.fixes = [...new Set(state.fixes.concat(parsed.fixes))].slice(0, 16);
     });  } else if (pending === 'report') {
     const receipt = json(toolResult(input.result), 'report admission');
     uuid(receipt.revision, 'report revision');

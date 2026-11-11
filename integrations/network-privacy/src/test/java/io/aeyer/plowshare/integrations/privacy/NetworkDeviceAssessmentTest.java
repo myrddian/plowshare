@@ -403,6 +403,30 @@ class NetworkDeviceAssessmentTest {
   }
 
   @Test
+  void decimal_byte_totals_are_removed_whole_and_joins_are_punctuated() throws Exception {
+    var value = assessment();
+    ((ObjectNode) value.path("what_it_sends"))
+        .put("observed", "The TV received 18.4 GB over the day. Most of it is streaming.")
+        .put("unknown", "It sent 1.2 GB, mostly at night. Destinations are unknown.");
+    ((ObjectNode) value.path("who_it_talks_to").get(0))
+        .put("observation", "Looked up 14 times")
+        .put("meaning", "OzTAM measures Australian TV audiences");
+    var host = new Host(PREVIOUS);
+    host.assessor.add(value.toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    var text = host.report.path("text").asText();
+    assertFalse(text.contains("received 18."), text);
+    assertFalse(text.contains("It sent 1."), text);
+    assertTrue(text.contains("Most of it is streaming."), text);
+    assertTrue(text.contains("Destinations are unknown."), text);
+    assertTrue(text.contains("Looked up 14 times. OzTAM measures Australian TV audiences."), text);
+    var evidence = text.substring(text.indexOf("Automatic fixes to the assessor answer:"));
+    assertEquals(
+        1, evidence.split("Removed a byte total from what it sends", -1).length - 1, evidence);
+  }
+
+  @Test
   void host_refusals_are_not_repaired() throws Exception {
     var host = new Host(PREVIOUS);
     host.assessor.add("E_NO_EXEC: delegate unavailable");
