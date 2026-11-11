@@ -14,8 +14,9 @@ from unittest.mock import AsyncMock, patch
 from support import FixturePort, MemoryReceipts, configuration
 
 from plowshare_privacy.collection import NetworkCollector, scope_fingerprint
-from plowshare_privacy.contracts import CollectionPlan, DeviceIdentity
+from plowshare_privacy.contracts import CollectionPlan, DeviceIdentity, DnsObservation
 from plowshare_privacy.device_inventory import device_inventory
+from plowshare_privacy.dns_activity import QuerySample
 from plowshare_privacy.identity_source import IdentitySample
 from plowshare_privacy.presence import (
     PresenceHistory,
@@ -148,6 +149,140 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 scope_fingerprint(PLAN), scope_fingerprint(worker.config.collection)
             )
+
+    async def test_dns_profiles_follow_the_mac_across_watched_addresses_and_never_publish(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            plan = replace(PLAN, dns_profiles=True)
+            config = replace(configuration(root), collection=plan)
+            port = FixturePort(config)
+            receipts = MemoryReceipts()
+            read = AsyncMock(
+                side_effect=[
+                    (
+                        (
+                            QuerySample(
+                                (
+                                    DnsObservation(A, "www.youtube.com", 5),
+                                    DnsObservation(A, "ads.doubleclick.net", 2),
+                                ),
+                                7,
+                                7,
+                                (),
+                                {"ads.doubleclick.net": 2},
+                            ),
+                        ),
+                        (),
+                    ),
+                    (
+                        (
+                            QuerySample(
+                                (
+                                    DnsObservation(B, "ads.doubleclick.net", 3),
+                                    DnsObservation(B, "doubleclick.net.example", 1),
+                                ),
+                                4,
+                                9,
+                                ("dns_truncated: fixture",),
+                                {"ads.doubleclick.net": 1},
+                            ),
+                        ),
+                        ("dns_truncated: fixture",),
+                    ),
+                ]
+            )
+            collector = NetworkCollector("fixture", plan, pihole_activity=read)
+            clock = 0
+            history = PresenceHistory(root)
+            watch = PresenceWatch(
+                history,
+                monotonic=lambda: float(clock),
+                clock=lambda: at(clock),
+                delay=lambda: 120.0,
+            )
+            worker = Worker(config, port, receipts, collector, presence=watch)
+            with patch.object(
+                collector, "collect_presence", new_callable=AsyncMock
+            ) as sample:
+                sample.side_effect = [
+                    PresenceSample(
+                        at(120), (Sighting(A, identity(A, "unifi", 120)), Sighting(C))
+                    ),
+                    PresenceSample(
+                        at(240), (Sighting(A, identity(A, "unifi", 240)), Sighting(C))
+                    ),
+                    PresenceSample(
+                        at(360),
+                        (
+                            Sighting(A, identity(A, "unifi", 360, OTHER_MAC)),
+                            Sighting(B, identity(B, "unifi", 360)),
+                        ),
+                    ),
+                    PresenceSample(
+                        at(480), (Sighting(B, identity(B, "pihole-v6", 480)),)
+                    ),
+                ]
+                await worker.poll_presence()
+                for clock in (120, 240, 360, 480):
+                    await worker.poll_presence()
+            self.assertEqual(
+                [call.args for call in read.await_args_list],
+                [((A,), at(120), at(240)), ((B,), at(360), at(480))],
+            )
+            self.assertEqual(port.published, [])
+            self.assertEqual(port.uploads, 0)
+            self.assertEqual(receipts.all(), ())
+            scope = scope_fingerprint(plan)
+            self.assertEqual(scope, scope_fingerprint(PLAN))
+            self.assertEqual(history.view(scope, epoch(at(480))).dns, {})
+            view = PresenceHistory(root).view(scope, epoch(at(480)), include_dns=True)
+            cards = {
+                card.address: card
+                for card in device_inventory(plan.targets, (), (), view).devices
+            }
+            self.assertIsNone(cards[A].dns_activity)
+            profile = cards[B].dns_activity
+            assert profile is not None
+            self.assertEqual((profile.windows, profile.partial_windows), (2, 1))
+            self.assertEqual(
+                (profile.queries_read, profile.queries_available), (11, 16)
+            )
+            groups = {group.kind: group for group in profile.groups}
+            self.assertEqual(groups["streaming"].queries, 5)
+            self.assertEqual(groups["advertising"].queries, 5)
+            self.assertEqual(groups["advertising"].destinations[0].blocked, 3)
+            self.assertEqual(groups["unclassified"].queries, 1)
+            self.assertEqual(
+                history.view(scope, epoch(at(86400 + 480)), include_dns=True).dns, {}
+            )
+
+    async def test_dns_activity_refuses_conflicts_and_reused_addresses(self) -> None:
+        plan = replace(PLAN, dns_profiles=True)
+        read = AsyncMock()
+        collector = NetworkCollector("fixture", plan, pihole_activity=read)
+        previous = PresenceSample(
+            at(120),
+            (
+                Sighting(A, identity(A, "unifi", 120)),
+                Sighting(B, identity(B, "unifi", 120, OTHER_MAC)),
+                Sighting(C),
+            ),
+        )
+        current = PresenceSample(
+            at(240),
+            (
+                Sighting(A, identity(A, "unifi", 240)),
+                Sighting(B, identity(B, "unifi", 240)),
+                Sighting(C, identity(C, "unifi", 240, OTHER_MAC)),
+            ),
+            ambiguous_addresses=frozenset({A}),
+        )
+        self.assertEqual(
+            await collector.collect_dns_activity(previous, current), ((), ())
+        )
+        read.assert_not_awaited()
 
     async def test_history_survives_restart_groups_mac_moves_and_expires_old_checks(
         self,

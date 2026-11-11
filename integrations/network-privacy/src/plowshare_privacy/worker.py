@@ -414,7 +414,10 @@ class Worker:
     def presence_view(self) -> PresenceView:
         if self.presence is None:
             return PresenceView()
-        return self.presence.view(scope_fingerprint(self.config.collection))
+        plan = self.config.collection
+        return self.presence.view(
+            scope_fingerprint(plan), include_dns=plan.enabled and plan.dns_profiles
+        )
 
     def presence_status(self) -> PresenceStatus:
         plan = self.config.collection

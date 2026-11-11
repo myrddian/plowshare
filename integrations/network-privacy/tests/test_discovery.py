@@ -211,6 +211,7 @@ class DeferredCollectionTest(unittest.IsolatedAsyncioTestCase):
             plan = configuration(Path(directory)).collection
             legacy = asdict(plan)
             legacy.pop("quick_scan")
+            legacy.pop("dns_profiles")
             legacy.pop("enabled")
             legacy.pop("labels")
             legacy.pop("pihole")

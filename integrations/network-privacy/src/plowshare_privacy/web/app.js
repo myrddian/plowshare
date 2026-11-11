@@ -320,6 +320,7 @@ async function loadSettings() {
   const report = await api('/api/discovery');
   byId('enabled').checked = settings.enabled;
   byId('quick-scan').checked = settings.quick_scan === true;
+  byId('dns-profiles').checked = settings.dns_profiles === true;
   byId('targets').value = settings.targets.join(', ');
   byId('ports').value = settings.ports.join(',');
   byId('device-labels').value = (settings.labels || []).map(label => `${label.address}=${label.label}`).join('\n');
@@ -341,10 +342,35 @@ byId('use-subnet').addEventListener('click', () => {
   for (const checkbox of byId('devices').querySelectorAll('input')) checkbox.checked = false;
   byId('settings-detail').textContent = 'Subnet scope prepared. Save monitoring to validate and retain it; no scan has started.';
 });
-for (const id of ['targets','ports','device-labels','enabled','quick-scan']) byId(id).addEventListener('input', () => {
+for (const id of ['targets','ports','device-labels','enabled','quick-scan','dns-profiles']) byId(id).addEventListener('input', () => {
+  if (id === 'quick-scan' && !byId('quick-scan').checked) byId('dns-profiles').checked = false;
+  if (id === 'dns-profiles' && byId('dns-profiles').checked) byId('quick-scan').checked = true;
   monitoringDraft = true;
   byId('settings-detail').textContent = 'Monitoring changes are not saved. Choose Save monitoring to retain them.';
 });
+function renderDnsActivity(activity) {
+  const labels = {streaming:'Streaming services', advertising:'Advertising', measurement:'Audience measurement', unclassified:'Unclassified'};
+  const details = element('details');
+  details.append(element('summary', `DNS activity · ${activity.queries_read} sampled queries in the last 24 hours`));
+  const bounds = [activity.from_at, activity.until_at].map(value => new Date(value).toLocaleString()).join(' to ');
+  details.append(element('p', `Pi-hole · ${bounds} · ${activity.windows} observed windows`, 'hint'));
+  if (activity.partial_windows) details.append(element('p', `Partial coverage in ${activity.partial_windows} windows. Pi-hole reported ${activity.queries_available} matching queries in the sampled windows.`, 'hint'));
+  details.append(element('p', 'Counts show DNS lookups. Connections and data transfers require gateway flow records.', 'hint'));
+  for (const group of activity.groups) {
+    details.append(element('h4', `${labels[group.kind]} · ${group.queries} queries`));
+    const items = element('ul');
+    for (const entry of group.destinations) {
+      const provider = entry.provider ? ` · ${entry.provider}` : '';
+      const blocked = entry.blocked ? ` · ${entry.blocked} reported blocked` : '';
+      items.append(element('li', `${entry.domain}${provider} · ${entry.queries} queries${blocked}`));
+    }
+    details.append(items);
+    if (group.distinct > group.destinations.length) {
+      details.append(element('p', `Showing ${group.destinations.length} of ${group.distinct} destinations`, 'hint'));
+    }
+  }
+  return details;
+}
 function filterDevices() {
   const query = byId('device-search').value.trim().toLowerCase();
   const presence = byId('device-presence').value;
@@ -384,7 +410,7 @@ byId('monitor-form').addEventListener('submit', async event => {
       if (separator < 1 || !name  || Object.hasOwn(labels, address)) throw new Error('Use one selected address=name per line, without duplicate addresses.');
       labels[address] = name;
     }
-    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels, quickScan:byId('quick-scan').checked})});
+    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels, quickScan:byId('quick-scan').checked,dnsProfiles:byId('dns-profiles').checked})});
     monitoringDraft = false;
     renderMonitorSettings(result);
     notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
@@ -511,7 +537,8 @@ function renderOverview(value) {
     }
     card.append(element('p', device.services.map(item => `${item.port}: ${item.status}`).join(' · '), 'hint'));
     if (device.detection) card.append(renderDeviceDetection(device.detection));
-    const destinations = element('details'); destinations.append(element('summary', `${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
+    if (device.dns_activity) card.append(renderDnsActivity(device.dns_activity));
+    const destinations = element('details'); destinations.append(element('summary', `Last full sweep · ${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
     const history = element('details'); history.append(element('summary', `${device.history.length} collections at this address`));
     for (const id of [...device.history].reverse()) {const button = element('button', `Read ${id.slice(0,8)}`, 'entry'); button.addEventListener('click', () => showEvidence(id).catch(error => notice(error.message, true))); history.append(button);}
     const profile = element('button', 'Device profile');
@@ -574,6 +601,7 @@ function renderMonitorSettings(settings) {
   monitorEditable = settings.editable;
   byId('save-monitoring').disabled = !monitorEditable;
   byId('quick-scan').disabled = !monitorEditable;
+  byId('dns-profiles').disabled = !monitorEditable || !settings.pihole_configured;
   byId('settings-detail').textContent = monitoringDraft ? 'Monitoring changes are not saved. Choose Save monitoring to retain them. ' + settings.detail : settings.detail;
   renderPiHoleSaved(settings.pihole_configured, settings.pending);
   byId('pihole-save').disabled = !monitorEditable || piholePending;
