@@ -137,9 +137,12 @@ class NetworkDeviceAssessmentTest {
     var host = new Host(PREVIOUS);
     host.assessor.add(assessment().toString());
     host.reviewer.add(review("needs_corrections", "c1", "weakened").toString());
+    // The repair run repeats the added concern, so the run fails.
+    host.assessor.add(twoConcerns().toString());
     host.assessor.add(twoConcerns().toString());
     var failure = assertThrows(IllegalStateException.class, host::finish);
     assertTrue(failure.getMessage().contains("c2"), failure.getMessage());
+    assertTrue(host.assessorTasks.get(2).contains("c2"), host.assessorTasks.get(2));
     assertEquals(0, host.writes);
   }
 
@@ -165,8 +168,11 @@ class NetworkDeviceAssessmentTest {
     }
     for (String assessor : new String[] {"not JSON", "<|channel|>final " + assessment(), "[]"}) {
       var host = new Host(PREVIOUS);
+      // The first invalid answer gets one repair run; the second fails the run.
+      host.assessor.add(assessor);
       host.assessor.add(assessor);
       assertThrows(IllegalStateException.class, host::finish, assessor);
+      assertEquals(2, host.assessorTasks.size());
       assertEquals(0, host.writes);
       assertEquals(0, host.reviewerTasks.size());
     }
@@ -191,6 +197,7 @@ class NetworkDeviceAssessmentTest {
       var value = assessment();
       edit.accept(value);
       var host = new Host(PREVIOUS);
+      host.assessor.add(value.toString());
       host.assessor.add(value.toString());
       assertThrows(IllegalStateException.class, host::finish, value.toString());
       assertEquals(0, host.reviewerTasks.size(), value.toString());
@@ -220,9 +227,54 @@ class NetworkDeviceAssessmentTest {
       edit.accept(value);
       var host = new Host(PREVIOUS);
       host.assessor.add(value.toString());
+      host.assessor.add(value.toString());
       assertThrows(IllegalStateException.class, host::finish, value.toString());
       assertEquals(0, host.writes, value.toString());
     }
+  }
+
+  @Test
+  void an_absent_signal_gets_one_repair_run_with_the_validator_message() throws Exception {
+    // PROD's first TV run cited the DNS purpose "telemetry" as a signal code.
+    var invalid = assessment();
+    ((ArrayNode) invalid.path("concerns").get(0).path("signals")).removeAll().add("telemetry");
+    var host = new Host(PREVIOUS);
+    host.assessor.add(invalid.toString());
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    assertEquals(1, host.writes);
+    assertEquals(2, host.assessorTasks.size());
+    String first = host.assessorTasks.get(0).split("\\nDATA:\\n", 2)[0];
+    assertTrue(
+        first.contains("Allowed concern signals for this device, copied exactly: measurement_dns."),
+        first);
+    assertFalse(first.contains("rejected"), first);
+    String repair = host.assessorTasks.get(1).split("\\nDATA:\\n", 2)[0];
+    assertTrue(repair.contains("rejected by the validator"), repair);
+    assertTrue(repair.contains("telemetry"), repair);
+    assertEquals(assessment(), payload(host.reviewerTasks.getFirst()).path("assessment"));
+  }
+
+  @Test
+  void host_refusals_are_not_repaired() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add("E_NO_EXEC: delegate unavailable");
+    assertThrows(IllegalStateException.class, host::finish);
+    assertEquals(1, host.assessorTasks.size());
+    assertEquals(0, host.writes);
+  }
+
+  @Test
+  void the_draft_and_correction_share_one_repair() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add("not JSON");
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(review("needs_corrections", "c1", "weakened").toString());
+    host.assessor.add("not JSON");
+    assertThrows(IllegalStateException.class, host::finish);
+    assertEquals(3, host.assessorTasks.size());
+    assertEquals(0, host.writes);
   }
 
   @Test
