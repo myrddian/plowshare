@@ -1449,6 +1449,46 @@ await test('growth during paged reads cannot advance the cursor past a newer uno
   );
 });
 
+await test('inspection metadata permits a server READ request and preserves its refusal', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.shutdown());
+  await connect(f.client);
+  f.client.retainInspection({
+    id: 'service-log',
+    project: 'Research',
+    title: 'Analyst',
+  });
+  f.trajectory(() => ({
+    code: 'NOT_FOUND',
+    said: 'log inputs are unavailable to this account',
+  }));
+  await f.client.followView('trajectory:service-log', 'service-log');
+  assert.ok(
+    f.calls.some(
+      (call) =>
+        call.type === 'conversation.trajectory' &&
+        call.payload.conversation === 'service-log',
+    ),
+  );
+  assert.match(
+    f.client.state.history['service-log']?.error ?? '',
+    /log inputs are unavailable/,
+  );
+  assert.equal(f.client.state.history['service-log']?.entries.length, 0);
+  assert.equal(
+    f.client.state.conversations.some((row) => row.id === 'service-log'),
+    false,
+  );
+  f.closed();
+  await connect(f.client);
+  assert.equal(f.client.state.inspectedConversations?.[0]?.id, 'service-log');
+  await f.client.followView('trajectory:service-log', 'service-log');
+  assert.match(
+    f.client.state.history['service-log']?.error ?? '',
+    /log inputs are unavailable/,
+  );
+});
+
 await test('history refusal preserves data and cursor and a manual refresh retries without agent mutations', async (t) => {
   const f = fixture();
   t.after(() => f.client.dispose());

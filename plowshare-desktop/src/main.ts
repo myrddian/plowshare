@@ -198,7 +198,10 @@ function trajectoryRoute(
   conversation: string,
   stageScope?: StageScope,
 ): WorkspaceRoute {
-  const row = client.state.conversations.find((row) => row.id === conversation);
+  const row = [
+    ...client.state.conversations,
+    ...(client.state.inspectedConversations ?? []),
+  ].find((row) => row.id === conversation);
   const run = Object.values(client.state.activity.details).find((detail) =>
     [
       detail.wire?.orchestration.conductorConversation,
@@ -1119,7 +1122,7 @@ background(
             openTrajectory(request.conversation);
           else
             throw new Error(
-              'Trajectory stays on account-owned logs from this Activity inventory.',
+              'Choose a log from the current Application activity inventory.',
             );
           return { ...reply, state: client.state };
         });
@@ -1132,10 +1135,7 @@ background(
           const conversation =
             client.state.activity.details[request.id]?.wire?.orchestration
               .conductorConversation;
-          await client.followView(
-            'application-run',
-            conversation ?? undefined,
-          );
+          await client.followView('application-run', conversation ?? undefined);
           return { ...reply, state: client.state };
         });
       }
@@ -1153,10 +1153,7 @@ background(
         request?.action === 'run-stage-trajectory' &&
         hubRun(request.id)
       ) {
-        const conversation = client.runs.conversation(
-          request.id,
-          'conductor',
-        );
+        const conversation = client.runs.conversation(request.id, 'conductor');
         if (
           !client.state.activity.details[request.id]?.value?.stages.some(
             (stage) => stage.stage === request.stage,
@@ -1164,9 +1161,7 @@ background(
         )
           throw new Error('Choose a stage of this run.');
         return client.runs.navigation(request.id).then(() => {
-          if (
-            !stageSpans(client.state, request.id).get(request.stage)?.length
-          )
+          if (!stageSpans(client.state, request.id).get(request.stage)?.length)
             throw new Error('This stage has no recorded work yet.');
           openTrajectory(conversation, {
             run: request.id,
@@ -1177,7 +1172,8 @@ background(
       }
       if (
         main &&
-        (request?.action === 'run-cancel' || request?.action === 'run-resume') &&
+        (request?.action === 'run-cancel' ||
+          request?.action === 'run-resume') &&
         hubRun(request.id)
       )
         return client.dispatch(request);

@@ -40,7 +40,6 @@ function update(state: DesktopState) {
   if (!panel) {
     panel = mountProcPanel(root, reader, {
       serverAdmin: state.serverAdmin === true,
-      canOpenConversation: (row) => row.owner === state.handle,
       openConversation: (conversation) =>
         background(
           window.plowshare.request({ action: 'proc-trajectory', conversation }),

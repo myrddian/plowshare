@@ -16,23 +16,24 @@ const listed = (
   state: string,
   createdAt: string,
   project = 'Managed app',
-): Run =>
-  ({
-    id,
-    definition: 'research',
-    tier: 'project',
-    project,
-    state,
-    depth: 0,
-    createdAt,
-  }) as Run;
+): Run => ({
+  id,
+  definition: 'research',
+  tier: 'project',
+  project,
+  state,
+  depth: 0,
+  createdAt,
+});
 
 function fixture() {
   const state: DesktopState = {
     ...demoState(),
     mode: 'live',
     connected: true,
-    projects: [{ name: 'Managed app', kind: 'application', role: 'CONTRIBUTOR' }],
+    projects: [
+      { name: 'Managed app', kind: 'application', role: 'CONTRIBUTOR' },
+    ],
     activity: emptyActivity(),
   };
   const calls: Ask[] = [];
@@ -145,7 +146,13 @@ await test('ApplicationRunsClient inspect loads detail without an Activity windo
 
 await test('ApplicationRunsClient refuses a project that is not an available Application', async () => {
   const f = fixture();
-  await assert.rejects(f.client.list('Research'), /available server Application/);
+  await assert.rejects(
+    f.client.list('Research'),
+    /available server Application/,
+  );
   f.state.connected = false;
-  await assert.rejects(f.client.list('Managed app'), /available server Application/);
+  await assert.rejects(
+    f.client.list('Managed app'),
+    /available server Application/,
+  );
 });

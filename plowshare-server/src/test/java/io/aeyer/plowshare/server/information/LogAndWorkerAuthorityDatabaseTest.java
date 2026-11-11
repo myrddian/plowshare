@@ -48,8 +48,9 @@ class LogAndWorkerAuthorityDatabaseTest {
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     Flyway.configure().dataSource(source).load().migrate();
-    // Freeze the shipped V186 implementation as an independent oracle. It still calls the
-    // unchanged scalar information_readable, not any of the new batched machinery.
+    // Use V186's scalar ACL check as an independent oracle, with the obsolete
+    // attribution equality removed. The batched implementation must agree with
+    // information_readable for every retained selection and dependency.
     try (var input =
         LogAndWorkerAuthorityDatabaseTest.class.getResourceAsStream(
             "/db/migration/V186__log_readability_walks_the_ancestry.sql")) {
@@ -57,8 +58,8 @@ class LogAndWorkerAuthorityDatabaseTest {
       new JdbcTemplate(source)
           .execute(
               new String(input.readAllBytes(), StandardCharsets.UTF_8)
-                  .replace(
-                      "FUNCTION information_log_readable(", "FUNCTION log_readable_unbatched("));
+                  .replace("FUNCTION information_log_readable(", "FUNCTION log_readable_unbatched(")
+                  .replace("$2 <> i.owner_handle", "false"));
     }
   }
 
@@ -330,7 +331,7 @@ class LogAndWorkerAuthorityDatabaseTest {
   }
 
   @Test
-  void retainedSelectionsPrivacyOwnershipAndRevocationMatchTheScalarOracle() {
+  void retainedSelectionsPrivacyAndRevocationMatchTheScalarOracle() {
     log("empty", null);
     log("project", null);
     log("child", "project");
@@ -369,6 +370,43 @@ class LogAndWorkerAuthorityDatabaseTest {
     jdbc.update("UPDATE admins SET enabled=false WHERE handle='reader'");
     parity();
     assertFalse(readable("personal", "reader"));
+  }
+
+  @Test
+  void applicationReadersUseLiveReadGrantsAndResourceAclInsteadOfInputAttribution() {
+    log("application", null);
+    log("delegate", "application");
+    var value = retained("other", "one");
+    input("application", "other", value, "project", "one", false);
+    assertTrue(readable("delegate", "reader"), "MANAGER can read another actor's inputs");
+    assertFalse(readable("delegate", "other"), "Attribution does not grant READ");
+    parity();
+
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'other','VIEWER' FROM projects WHERE name='one'");
+    assertTrue(readable("delegate", "other"));
+    jdbc.update(
+        "DELETE FROM project_members WHERE handle='reader' AND project_id=(SELECT id FROM projects WHERE name='one')");
+    assertFalse(readable("delegate", "reader"), "Revoking READ closes the retained log");
+    parity();
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'reader','VIEWER' FROM projects WHERE name='one'");
+    assertTrue(readable("delegate", "reader"), "READER is sufficient for disclosure");
+
+    audience(value, "HOME", true);
+    assertFalse(readable("delegate", "reader"), "The resource's private ACL is still enforced");
+    assertTrue(readable("delegate", "other"));
+    parity();
+    audience(value, "HOME", false);
+    jdbc.update(
+        "INSERT INTO information_quarantined_payloads(payload_id,reason) VALUES('application','fixture')");
+    assertFalse(readable("delegate", "reader"));
+    parity();
+    jdbc.update("DELETE FROM information_quarantined_payloads WHERE payload_id='application'");
+    jdbc.update(
+        "UPDATE information_revisions SET availability='deleted' WHERE id=?", value.revision());
+    assertFalse(readable("delegate", "reader"));
+    parity();
   }
 
   @Test

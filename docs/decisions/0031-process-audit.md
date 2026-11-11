@@ -32,3 +32,9 @@ states, response-generation fences and cleanup on navigation. Dedicated push
 subscriptions can be introduced later without changing ownership or read semantics.
 
 See [Processes and conversation audit](../proc-audit.md) for usage and coverage.
+
+Trajectory navigation uses the server's current READ authority and retained-input
+ACLs. Input attribution and the identity shown on an inventory row do not impose
+an additional creator-only client rule. Inspected targets are held as bounded
+navigation metadata separately from the account's chats. Follows use the server's
+current scope checks and trajectory pages also evaluate retained-input ACLs.

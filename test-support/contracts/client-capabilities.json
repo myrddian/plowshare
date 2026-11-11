@@ -5921,6 +5921,10 @@
         },
         {
           "source": "sdk/typescript/src/operations/session.ts",
+          "function": "listingProjectRuns"
+        },
+        {
+          "source": "sdk/typescript/src/operations/session.ts",
           "function": "listingAsking"
         },
         {
@@ -5941,6 +5945,7 @@
       "desktopConsumer": true,
       "desktopSourceReferences": [
         "plowshare-desktop/src/activity.ts",
+        "plowshare-desktop/src/application-runs.ts",
         "plowshare-desktop/src/client.ts"
       ],
       "headlessCliConsumer": true,
@@ -6076,6 +6081,7 @@
       "desktopConsumer": true,
       "desktopSourceReferences": [
         "plowshare-desktop/src/activity.ts",
+        "plowshare-desktop/src/application-runs.ts",
         "plowshare-desktop/src/client.ts",
         "plowshare-desktop/src/runs.ts"
       ],
@@ -6254,6 +6260,7 @@
       "typescriptConstants": [],
       "desktopConsumer": true,
       "desktopSourceReferences": [
+        "plowshare-desktop/src/application-activity.ts",
         "plowshare-desktop/src/request-schemas.ts"
       ],
       "headlessCliConsumer": true,
