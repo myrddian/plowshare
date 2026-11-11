@@ -31,9 +31,10 @@ try {
   await expect(chatbotLocation).toContainText('Active on server');
   await expect(chatbotLocation).not.toContainText('DISJOINT · no sync');
   await page.locator('#application-conversations [data-project-access="Chatbot"]').click();
-  await expect(page.locator('#project-access-dialog')).toBeVisible();
-  await expect(page.locator('#project-access-dialog [data-project]')).toHaveText('Chatbot');
-  await page.locator('#project-access-dialog [data-close]').click();
+  // An Application's membership opens in its hub, not a dialog.
+  await expect(page.locator('#project-access-dialog')).toBeHidden();
+  await expect(page.locator('#application-panel nav [data-hub="access"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#application-panel [data-access] [data-project]')).toHaveText('Chatbot');
   await expect(page.locator('#conversations [data-project="Remote files"]')).toBeVisible();
   await expect(page.locator('#conversations [data-project="Chatbot"]')).toHaveCount(0);
   await expect(page.locator('#application-conversations [data-project="Managed app"]')).toBeVisible();
@@ -46,7 +47,7 @@ try {
   await expect(page.locator('#application-panel')).toBeVisible();
   const hubNav = page.locator('#application-panel nav[aria-label="Application views"]');
   await expect(hubNav.locator('[data-hub="overview"]')).toHaveAttribute('aria-current', 'page');
-  for (const name of ['Overview', 'Activity', 'Schedules', 'Relay', 'Files', 'Access'])
+  for (const name of ['Overview', 'Activity', 'Schedules', 'Relay', 'Files', 'Runtime', 'Memory', 'Boards', 'Access'])
     await expect(hubNav.getByRole('button', { name, exact: true })).toBeVisible();
   await expect(hubNav.getByRole('button', { name: 'Conversations', exact: true })).toHaveCount(0);
   await expect(hubNav.getByRole('button', { name: 'Runs', exact: true })).toHaveCount(0);
@@ -56,11 +57,16 @@ try {
   await expect(page.locator('#application-panel [data-activity-tree]')).toContainText('No LLM activity for this Application yet.');
   await page.locator('#application-panel nav [data-hub="overview"]').click();
   await expect(page.locator('#application-panel [data-overview]')).toBeVisible();
-  for (const name of ['Runtime definitions', 'Memory', 'Boards'])
-    await expect(hubNav.getByRole('button', { name, exact: true })).toHaveCount(0);
-  await expect(page.locator('#application-panel [data-overview] [data-runtime]')).toBeVisible();
-  await expect(page.locator('#application-panel [data-overview] [data-memory]')).toBeVisible();
-  await expect(page.locator('#application-panel [data-overview] [data-board]')).toBeVisible();
+  for (const name of ['runtime', 'memory', 'boards'])
+    await expect(page.locator(`#application-panel [data-overview] [data-hub="${name}"]`)).toBeVisible();
+  // Runtime, Memory and Boards are hub views hosting their pages in a slot.
+  for (const name of ['runtime', 'memory', 'boards']) {
+    await page.locator(`#application-panel nav [data-hub="${name}"]`).click();
+    await expect(page.locator('#application-panel')).toBeVisible();
+    await expect(page.locator(`#application-panel [data-workspace-slot="${name}"]`)).toBeVisible();
+    await expect(page.locator('#workspace-view-host')).toBeHidden();
+  }
+  await page.locator('#application-panel nav [data-hub="overview"]').click();
   await expect(page.locator('#application-panel [data-source]')).toBeHidden();
   await page.locator('#application-panel [data-files]').click();
   await expect(page.locator('#application-panel [data-file-browser] .file-browser-tree')).toBeVisible();
@@ -135,9 +141,10 @@ try {
   fixture.setRefuseProjects(false);
   await page.locator('#refresh').click();
   await expect(page.locator('#application-conversations [data-project="Chatbot"]')).toBeVisible();
-  for (const [selector, operation] of [['data-runtime', 'orchestration.definitions'], ['data-memory', 'memory.index'], ['data-board', 'board.topics']]) {
+  for (const [view, operation] of [['runtime', 'orchestration.definitions'], ['memory', 'memory.index'], ['boards', 'board.topics']]) {
     await page.locator('[data-project="Managed app"]').click();
-    await page.locator(`#application-panel [${selector}]`).click();
+    await page.locator(`#application-panel [data-overview] [data-hub="${view}"]`).click();
+    await expect(page.locator(`#application-panel [data-workspace-slot="${view}"]`)).toBeVisible();
     await expect.poll(() => fixture.frames.some(frame => frame.type === operation && frame.payload.project === 'Managed app')).toBe(true);
   }
   await page.locator('[data-project="Managed app"]').click();
