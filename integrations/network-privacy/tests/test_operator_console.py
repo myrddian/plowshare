@@ -919,6 +919,56 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
             status = await (await client.get("/api/status", headers=headers)).json()
             self.assertFalse(status["device_assessments_available"])
 
+    async def test_device_supplemental_route_reads_retained_facts_only(
+        self,
+    ) -> None:
+        from test_device_dossier import facts
+
+        address, mac = "192.168.90.2", "02:00:00:00:00:01"
+        stamp = "2026-01-01T00:00:00Z"
+        device = "mac:" + mac
+        identity = DeviceIdentity(
+            address, device, None, "lounge-smarttv", mac, None, "unifi", stamp, stamp
+        )
+        inventory = device_inventory(
+            (address,),
+            (),
+            (),
+            PresenceView(sightings={address: Sighting(address, identity)}),
+        )
+        retained: dict[str, object] = {}
+        self.worker.device_inventory = lambda: inventory  # type: ignore[method-assign]
+        self.worker.device_facts = retained.get  # type: ignore[assignment]
+        headers = {"Authorization": "Bearer " + TOKEN}
+        path = f"/api/devices/{device}/supplemental"
+        async with TestClient(
+            TestServer(application(self.worker, TOKEN, console=self.console))
+        ) as client:
+            self.assertEqual((await client.get(path)).status, 401)
+            empty = await (await client.get(path, headers=headers)).json()
+            self.assertFalse(empty["enabled"])
+            self.assertIsNone(empty["supplemental"]["described_at"])
+            self.assertEqual(empty["supplemental"]["descriptions"], [])
+            retained[device] = replace(facts(), device_id=device)
+            body = await (await client.get(path, headers=headers)).json()
+            section = body["supplemental"]
+            self.assertEqual(
+                section["descriptions"][0]["model_name"], "BRAVIA KD-55X85K"
+            )
+            self.assertEqual(section["advisories"]["status"], "searched")
+            self.assertEqual(
+                [note["feature"] for note in section["vendor_notes"]],
+                ["Samba Interactive TV"],
+            )
+            missing = await client.get(
+                "/api/devices/mac:02:00:00:00:00:09/supplemental", headers=headers
+            )
+            self.assertEqual(missing.status, 404)
+            invalid = await client.get(
+                f"/api/devices/{address}/supplemental", headers=headers
+            )
+            self.assertEqual(invalid.status, 400)
+
     async def test_device_assessment_dismiss_is_local(self) -> None:
         address, mac = "192.168.90.2", "02:00:00:00:00:01"
         stamp = "2026-01-01T00:00:00Z"

@@ -1,11 +1,11 @@
 """A bounded, typed per-device dossier built from data the collector already holds.
 
 Everything here is a pure function of a ``DeviceCard`` (and, optionally, an
-operator profile summary). There is no IO, no model and no clock: the same card
-always yields the same dossier and the same JSON bytes, so a reply or retained
-revision can be compared and cited.
+operator profile summary and the device's retained ``DeviceFacts``). There is
+no IO, no model and no clock: the same inputs always yield the same dossier and
+the same JSON bytes, so a reply or retained revision can be compared and cited.
 
-Three rules shape the record:
+Four rules shape the record:
 
 * A dossier exists only for a device whose current identity carries a confirmed
   MAC address. Address-only devices may be different machines over time, and
@@ -15,6 +15,10 @@ Three rules shape the record:
   "No UniFi counters" and "sent 0 bytes" are different facts.
 * ``signals`` are deterministic attention flags with thresholds defined below.
   They tell a reader where to look; none of them is a finding.
+* ``supplemental`` is context, not observation: what the device says about
+  itself, public advisories for a model name and vendor features worth
+  checking. A device that did not describe itself is a coverage line. Serials,
+  UUIDs and friendly names never reach it (``device_facts`` drops them).
 """
 
 from __future__ import annotations
@@ -24,8 +28,10 @@ import re
 from dataclasses import asdict, dataclass, replace
 from typing import Literal
 
+from .advisories import Advisory
 from .contracts import mac_address, uuid
 from .device_detection import ServiceExposure
+from .device_facts import AdvisoryStatus, DeviceDescription, DeviceFacts, ModelSource
 from .device_inventory import DeviceCard
 from .dns_activity import (
     GROUP_ORDER,
@@ -38,6 +44,7 @@ from .dns_activity import (
 from .limits import TOOL_REPLY_BYTES
 from .presence import PresenceCount, epoch
 from .traffic import TrafficVolume
+from .vendor_notes import VendorNote, vendor_notes
 
 SignalCode = Literal[
     "measurement_dns",
@@ -89,6 +96,13 @@ UPLOAD_HEAVY_BYTES = 1_000_000_000
 # mark most of the network and direct attention nowhere. The names must match
 # device_detection's service rules; a test enforces that.
 ADMIN_SERVICES: frozenset[str] = frozenset({"SSH", "Telnet", "HTTP", "Remote desktop"})
+
+# Advisories listed per dossier, most severe first. NVD pages hold at most ten;
+# the rest are counted in ``omitted``. Descriptions are shortened because the
+# CVE ID is the reference and the report needs only a hint of the subject.
+MAX_SUPPLEMENTAL_ADVISORIES = 5
+MAX_ADVISORY_TEXT = 240
+_SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "NONE": 4}
 
 _DEVICE_ID = re.compile(r"mac:[0-9a-f]{2}(?::[0-9a-f]{2}){5}")
 
@@ -223,6 +237,51 @@ class OperatorProfile:
 
 
 @dataclass(frozen=True)
+class SupplementalAdvisory:
+    cve: str
+    severity: str | None
+    published_on: str
+    known_exploited: bool
+    description: str
+
+
+@dataclass(frozen=True)
+class SupplementalAdvisories:
+    """The advisory lookup for this device's model, as ``device_facts`` retained it.
+
+    ``total`` is NVD's match count for a search (it can exceed the page);
+    ``omitted`` counts page entries not listed here, whether by the listing
+    limit or the reply budget. Other statuses carry no advisories.
+    """
+
+    status: AdvisoryStatus
+    checked_at: str
+    model: str | None
+    model_source: ModelSource | None
+    total: int | None
+    advisories: tuple[SupplementalAdvisory, ...]
+    omitted: int
+    unavailable: str | None
+
+
+@dataclass(frozen=True)
+class DossierSupplemental:
+    """Context about the device that the network traffic does not show.
+
+    ``described_at`` is the last time the device was asked to describe itself
+    (None when it never was); ``updated_at`` the last time these facts changed.
+    Descriptions are the device's own claims. Vendor notes come from the
+    curated table in ``vendor_notes`` and are things to check, not findings.
+    """
+
+    described_at: str | None
+    updated_at: str | None
+    descriptions: tuple[DeviceDescription, ...]
+    advisories: SupplementalAdvisories | None
+    vendor_notes: tuple[VendorNote, ...]
+
+
+@dataclass(frozen=True)
 class DeviceDossier:
     identity: DossierIdentity
     detection: DossierDetection
@@ -232,6 +291,7 @@ class DeviceDossier:
     pihole_silent: DnsSilence | None
     traffic: TrafficVolume | None
     profile: OperatorProfile | None
+    supplemental: DossierSupplemental
     coverage: tuple[str, ...]
     signals: tuple[Signal, ...]
     # Destinations dropped from this record to fit the byte budget.
@@ -362,8 +422,148 @@ def _silence(dns: DnsActivity) -> DnsSilence:
     return DnsSilence(hours, dns.windows)
 
 
+def _ranked(advisories: tuple[Advisory, ...]) -> list[Advisory]:
+    """Known exploited first, then by severity, then newest, then CVE ID.
+
+    Stable sorts from the last key to the first; unrated advisories sort after
+    every rated one.
+    """
+    ranked = sorted(advisories, key=lambda item: item.cve)
+    ranked.sort(key=lambda item: item.published_on, reverse=True)
+    ranked.sort(
+        key=lambda item: (
+            not item.known_exploited,
+            _SEVERITY_RANK.get(item.severity or "", len(_SEVERITY_RANK)),
+        )
+    )
+    return ranked
+
+
+def _brief(value: str, limit: int) -> str:
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    head = text[: limit - 1]
+    space = head.rfind(" ")
+    return (head[:space] if space > limit // 2 else head).rstrip(" ,;:") + "…"
+
+
+def supplemental_section(
+    facts: DeviceFacts | None,
+    *,
+    vendors: tuple[str | None, ...],
+    device_type: str,
+    limit: int = MAX_SUPPLEMENTAL_ADVISORIES,
+) -> DossierSupplemental:
+    """Project retained facts and matching vendor notes into the dossier section.
+
+    ``vendors`` are the device's network-identity vendor names (MAC vendor or
+    UniFi); with the device-reported manufacturers they select vendor notes.
+    """
+    descriptions = facts.descriptions if facts is not None else ()
+    services = tuple(s for item in descriptions for s in item.services)
+    names = (*vendors, *(item.manufacturer for item in descriptions))
+    lookup = facts.advisories if facts is not None else None
+    advisories = None
+    if lookup is not None:
+        page = lookup.page
+        ranked = _ranked(page.advisories) if page else []
+        advisories = SupplementalAdvisories(
+            lookup.status,
+            lookup.checked_at,
+            lookup.model,
+            lookup.model_source,
+            page.total if page else None,
+            tuple(
+                SupplementalAdvisory(
+                    item.cve,
+                    item.severity,
+                    item.published_on,
+                    item.known_exploited,
+                    _brief(item.description, MAX_ADVISORY_TEXT),
+                )
+                for item in ranked[:limit]
+            ),
+            max(0, len(ranked) - limit),
+            lookup.unavailable,
+        )
+    return DossierSupplemental(
+        facts.described_at if facts is not None else None,
+        facts.updated_at if facts is not None else None,
+        descriptions,
+        advisories,
+        vendor_notes(names, device_type, services),
+    )
+
+
+def card_supplemental(
+    card: DeviceCard, facts: DeviceFacts | None
+) -> DossierSupplemental:
+    """``supplemental_section`` for a monitored device's card."""
+    current = card.identity
+    return supplemental_section(
+        facts,
+        vendors=(current.vendor if current is not None else None,),
+        device_type=card.detection.device_type,
+    )
+
+
+def _supplemental_coverage(section: DossierSupplemental, trimmed: int) -> list[str]:
+    lines: list[str] = []
+    if section.described_at is None:
+        lines.append(
+            "The device has not been asked to describe itself; device "
+            "descriptions may be off or not yet run."
+        )
+    elif not section.descriptions:
+        lines.append(
+            "The device did not describe itself when asked; many devices do not, "
+            "and that is not a finding."
+        )
+    else:
+        lines.append(
+            "The manufacturer, model and firmware under supplemental are the "
+            "device's own claims over the local network, not confirmed identity."
+        )
+    advisories = section.advisories
+    if advisories is None:
+        lines.append("Public advisories have not been looked up for this device.")
+    elif advisories.status == "model_unknown":
+        lines.append(
+            "No public model name was available, so advisories were not looked up."
+        )
+    elif advisories.status == "not_configured":
+        lines.append(
+            "No advisory source is configured, so advisories were not looked up."
+        )
+    elif advisories.status == "unavailable":
+        lines.append(
+            "The advisory lookup did not complete; advisories are unknown, not none."
+        )
+    else:
+        lines.append(
+            "Advisories match the model name, not this device's firmware or "
+            "settings; a listed advisory may not apply to it."
+        )
+    if trimmed:
+        lines.append(
+            f"{trimmed} lower-ranked advisories omitted to fit the reply budget; "
+            "the advisory total is complete."
+        )
+    if section.vendor_notes:
+        lines.append(
+            "Vendor notes are features worth checking for this manufacturer, "
+            "not observations of this device."
+        )
+    return lines
+
+
 def _coverage(
-    card: DeviceCard, profile: OperatorProfile | None, trimmed: int
+    card: DeviceCard,
+    profile: OperatorProfile | None,
+    trimmed: int,
+    section: DossierSupplemental,
+    trimmed_advisories: int = 0,
 ) -> tuple[str, ...]:
     lines: list[str] = []
     if card.revision is None:
@@ -417,6 +617,7 @@ def _coverage(
             )
     if profile is None:
         lines.append("No operator profile supplied; expected behaviour is unknown.")
+    lines.extend(_supplemental_coverage(section, trimmed_advisories))
     if trimmed:
         lines.append(
             f"{trimmed} lower-ranked DNS destinations omitted to fit the reply "
@@ -475,18 +676,25 @@ def build_dossier(
     card: DeviceCard,
     profile: OperatorProfile | None = None,
     *,
+    facts: DeviceFacts | None = None,
     budget: int = TOOL_REPLY_BYTES,
 ) -> DeviceDossier:
-    """Build the dossier, trimming lowest-ranked destinations to fit ``budget`` bytes.
+    """Build the dossier and fit it to ``budget`` bytes.
 
-    Signals are computed before trimming from complete group totals, so the
-    budget never changes them. Raises ValueError without a confirmed MAC or when
-    even the record without any destinations exceeds the budget.
+    Listed advisories are trimmed first, least severe first, then the
+    lowest-ranked DNS destinations; counts record what was left out. Signals
+    are computed before trimming from complete group totals, so the budget
+    never changes them. Raises ValueError without a confirmed MAC, for facts
+    about another device, or when even the record without any advisories or
+    destinations exceeds the budget.
     """
     device_id = confirmed_device_id(card)
     current = card.identity
     if device_id is None or current is None or current.mac is None:
         raise ValueError("A device dossier needs a confirmed MAC identity")
+    if facts is not None and facts.device_id != device_id:
+        raise ValueError("Device facts belong to another device")
+    section = card_supplemental(card, facts)
     dns = card.dns_activity
     groups = _groups(dns) if dns is not None else ()
     dossier = DeviceDossier(
@@ -530,28 +738,46 @@ def build_dossier(
         _silence(dns) if dns is not None and dns.pihole_silent else None,
         card.traffic,
         profile,
-        _coverage(card, profile, 0),
+        section,
+        _coverage(card, profile, 0, section),
         device_signals(card),
     )
-    section = dossier.dns
+    # Advisories go first: each is about the model rather than this device's
+    # behaviour, and the total and CVE count stay in the record.
+    trimmed_advisories = 0
+    while (
+        _size(dossier) > budget and section.advisories and section.advisories.advisories
+    ):
+        listed = section.advisories
+        listed = replace(
+            listed, advisories=listed.advisories[:-1], omitted=listed.omitted + 1
+        )
+        section = replace(section, advisories=listed)
+        trimmed_advisories += 1
+        dossier = replace(
+            dossier,
+            supplemental=section,
+            coverage=_coverage(card, profile, 0, section, trimmed_advisories),
+        )
+    dns_section = dossier.dns
     drop = _drop_order(groups)
     trimmed = 0
-    # The drop list is empty without DNS, so section is set whenever it is used.
-    while section is not None and _size(dossier) > budget and trimmed < len(drop):
+    # The drop list is empty without DNS, so dns_section is set whenever used.
+    while dns_section is not None and _size(dossier) > budget and trimmed < len(drop):
         index, item = drop[trimmed]
         trimmed += 1
-        kept = list(section.groups)
+        kept = list(dns_section.groups)
         group = kept[index]
         kept[index] = replace(
             group,
             omitted=group.omitted + 1,
             destinations=tuple(d for d in group.destinations if d is not item),
         )
-        section = replace(section, groups=tuple(kept))
+        dns_section = replace(dns_section, groups=tuple(kept))
         dossier = replace(
             dossier,
-            dns=section,
-            coverage=_coverage(card, profile, trimmed),
+            dns=dns_section,
+            coverage=_coverage(card, profile, trimmed, section, trimmed_advisories),
             trimmed_destinations=trimmed,
         )
     if _size(dossier) > budget:

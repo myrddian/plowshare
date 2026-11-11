@@ -239,8 +239,11 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
         document = DossierDocument(str(uuid4()), DEVICE, payload)
         self.assertEqual(DossierDocument.read(document.text()), document)
         self.assertEqual(json.loads(document.text())["dossier"], json.loads(payload))
+        self.assertTrue(document.text().startswith('{"version":2,'))
         for invalid in (
-            document.text().replace('"version":1', '"version":2'),
+            # Version 1 has no supplemental section; version 3 is unknown.
+            document.text().replace('"version":2', '"version":1'),
+            document.text().replace('"version":2', '"version":3'),
             document.text()[:-1] + ',"extra":true}',
             document.text().replace(',"', ', "', 1),
             json.dumps({**json.loads(document.text()), "device_id": "ip:10.0.0.1"}),
@@ -249,6 +252,25 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
                 DossierDocument.read(invalid)
         with self.assertRaises(ValueError):
             DossierDocument(str(uuid4()), OTHER, payload)
+
+    async def test_a_version_1_revision_is_read_and_revised_to_version_2(
+        self,
+    ) -> None:
+        current = json.loads(encode_dossier(dossier()))
+        del current["supplemental"]
+        legacy = DossierDocument(
+            str(uuid4()), DEVICE, json.dumps(current, separators=(",", ":")), 1
+        )
+        self.assertTrue(legacy.text().startswith('{"version":1,'))
+        self.assertEqual(DossierDocument.read(legacy.text()), legacy)
+        revision, resource = str(uuid4()), str(uuid4())
+        self.remote.rows.append(DossierVersion(DEVICE, revision, resource, 1, STAMP))
+        self.remote.texts[revision] = legacy.text()
+        retained = await self.dossiers.retain(dossier())
+        self.assertTrue(retained.changed)
+        self.assertEqual(self.remote.writes[-1][2], revision)
+        written = DossierDocument.read(self.remote.texts[retained.revision])
+        self.assertEqual(written.version, 2)
 
     def test_journal_is_bound_to_project_collector_and_settled_receipts(self) -> None:
         document = DossierDocument(str(uuid4()), DEVICE, encode_dossier(dossier()))

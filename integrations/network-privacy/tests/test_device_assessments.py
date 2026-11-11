@@ -20,7 +20,7 @@ from plowshare.contracts import (
     OrchestrationStartRequest,
 )
 from support import configuration
-from test_device_dossier import activity, card, identity
+from test_device_dossier import activity, card, facts, identity
 
 from plowshare_privacy.assessment_port import (
     AssessmentRun,
@@ -42,6 +42,7 @@ from plowshare_privacy.device_assessments import (
     UnknownDevice,
 )
 from plowshare_privacy.device_dossier import DeviceDossier
+from plowshare_privacy.device_facts import DeviceFacts
 from plowshare_privacy.device_inventory import DeviceCard, DeviceInventory
 from plowshare_privacy.dossier_port import RetainedDossier
 
@@ -197,6 +198,7 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         self.runs = Runs()
         self.dossiers = Dossiers()
         self.cards: tuple[DeviceCard, ...] = (tv(), lamp())
+        self.facts: dict[str, DeviceFacts] = {}
         self.now = NOW
         self.service = self.restart()
 
@@ -206,8 +208,19 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
             self.runs,
             self.dossiers,
             lambda: DeviceInventory(self.cards),
+            facts=self.facts.get,
             clock=lambda: self.now,
         )
+
+    def learn(self, device: str, updated_at: str, *, described: bool = True) -> None:
+        """Give ``device`` retained facts whose content last changed at ``updated_at``."""
+        value = replace(
+            facts(described=described, status="searched" if described else "x"),
+            device_id=device,
+            described_at=updated_at,
+            updated_at=updated_at,
+        )
+        self.facts[device] = value
 
     async def finished(self, device: str = TV, **kwargs: str) -> str:
         """Start and complete one assessment; returns its report revision."""
@@ -471,6 +484,65 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runs.starts[2][1].device_id, TV)
         with self.assertRaises(ValueError):
             self.service.set_background_limit(DAILY_CEILING + 1)
+
+    async def test_the_dossier_carries_the_devices_retained_facts(self) -> None:
+        self.learn(TV, "2026-11-11T08:00:00Z")
+        await self.service.assess(TV)
+        [dossier] = self.dossiers.retained
+        self.assertEqual(dossier.supplemental.described_at, "2026-11-11T08:00:00Z")
+        self.assertEqual(dossier.supplemental.descriptions[0].manufacturer, "Sony")
+
+    async def test_background_assesses_a_never_assessed_device_with_facts(
+        self,
+    ) -> None:
+        self.service.set_background_limit(3)
+        # The lamp has no signal but described itself; the signalled TV goes first.
+        self.learn(LAMP, "2026-11-11T08:00:00Z")
+        await self.service.poll()
+        self.assertEqual(self.runs.starts[0][1].device_id, TV)
+        self.runs.finish(self.runs.starts[0][1])
+        await self.service.poll()
+        await self.service.poll()
+        self.assertEqual(len(self.runs.starts), 2)
+        self.assertEqual(self.runs.starts[1][1].device_id, LAMP)
+
+    async def test_facts_without_anything_learned_do_not_queue_a_device(
+        self,
+    ) -> None:
+        self.cards = (lamp(),)
+        self.service.set_background_limit(3)
+        self.learn(LAMP, "2026-11-11T08:00:00Z", described=False)
+        await self.service.poll()
+        self.assertEqual(self.runs.starts, [])
+
+    async def test_changed_facts_requeue_a_settled_device_once(self) -> None:
+        self.cards = (lamp(),)
+        self.learn(LAMP, "2026-11-11T08:00:00Z")
+        self.service.set_background_limit(4)
+        await self.service.poll()
+        [(_, first)] = self.runs.starts
+        self.runs.finish(first)
+        await self.service.poll()
+        # In review: changed facts do not start another run.
+        self.learn(LAMP, "2026-11-11T09:30:00Z")
+        await self.service.poll()
+        self.assertEqual(len(self.runs.starts), 1)
+        self.service.dismiss(LAMP)
+        # Facts older than the last admission are not a change.
+        self.learn(LAMP, "2026-11-11T08:59:00Z")
+        await self.service.poll()
+        self.assertEqual(len(self.runs.starts), 1)
+        self.learn(LAMP, "2026-11-11T09:30:00Z")
+        self.now = "2026-11-11T10:00:00Z"
+        await self.service.poll()
+        self.assertEqual(len(self.runs.starts), 2)
+        self.assertEqual(self.service.ledger.entries[0].trigger, "background")
+        self.runs.finish(self.runs.starts[1][1])
+        await self.service.poll()
+        self.service.dismiss(LAMP)
+        await self.service.poll()
+        # The same facts after the new admission do not requeue it again.
+        self.assertEqual(len(self.runs.starts), 2)
 
     async def test_an_unreadable_journal_disables_assessments_and_is_preserved(
         self,

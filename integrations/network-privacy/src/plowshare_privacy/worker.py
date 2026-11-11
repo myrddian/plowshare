@@ -21,6 +21,7 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .device_facts import DeviceFacts, DeviceFactsStep
 from .device_inventory import DeviceInventory, InventoryProjection
 from .diagnostics import refusal_detail
 from .journal import Publication, Receipt, Receipts, ScanOrigin
@@ -64,9 +65,13 @@ class Worker:
         collector: Collector,
         operator: OperatorStore | None = None,
         presence: PresenceWatch | None = None,
+        facts: DeviceFactsStep | None = None,
     ):
         self.operator = operator
         self.presence = presence
+        self.facts = facts
+        self._facts_task: asyncio.Task[None] | None = None
+        self._facts_checked: str | None = None
         self.recovery_requested = asyncio.Event()
         self.last_contact: str | None = None
         self.failure_kind: str | None = None
@@ -450,12 +455,61 @@ class Worker:
                 return
             if isinstance(self.collector, PresenceCollector):
                 await self.presence.poll(plan, scope_fingerprint(plan), self.collector)
+        self._start_facts()
+
+    def _start_facts(self) -> None:
+        """Start the device facts step for a newly recorded quick check.
+
+        It runs as one background task outside the collector lock, so device
+        queries never delay presence recording, intake or scans. A check that
+        arrives while the step is still running is skipped; the next one picks
+        up whatever is still due. The step handles its own expected failures,
+        so a finished task's result only re-raises programming errors.
+        """
+        presence, facts = self.presence, self.facts
+        if presence is None or facts is None:
+            return
+        sample = presence.latest
+        if (
+            sample is None
+            or sample.checked_at == self._facts_checked
+            or not self.config.collection.device_descriptions
+        ):
+            return
+        if self._facts_task is not None:
+            if not self._facts_task.done():
+                return
+            self._facts_task.result()
+        self._facts_checked = sample.checked_at
+        self._facts_task = asyncio.create_task(facts.refresh(sample))
+
+    async def stop_facts(self) -> None:
+        """Cancel a running facts step; it keeps every fact already saved."""
+        task, self._facts_task = self._facts_task, None
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    def device_facts(self, device_id: str) -> DeviceFacts | None:
+        """Retained supplemental facts for a confirmed MAC (``mac:…``), if any."""
+        return self.facts.facts(device_id) if self.facts is not None else None
 
     async def run(
         self,
         stop: asyncio.Event,
         external: ExternalRequests | None = None,
         apply_settings: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        try:
+            await self._run(stop, external, apply_settings)
+        finally:
+            await self.stop_facts()
+
+    async def _run(
+        self,
+        stop: asyncio.Event,
+        external: ExternalRequests | None,
+        apply_settings: Callable[[], Awaitable[None]] | None,
     ) -> None:
         while not stop.is_set():
             try:

@@ -201,6 +201,22 @@ class ResearchLedger:
         return cls(row["enabled"], entries, admissions)
 
 
+def reviewed_model(ledger: ResearchLedger, device_id: str) -> str | None:
+    """The public model the operator confirmed for a device in review, if any.
+
+    Only a model the operator entered (``model_reviewed``) counts; a model the
+    collector inferred from the controller is not an operator confirmation.
+    """
+    return next(
+        (
+            entry.model
+            for entry in ledger.entries
+            if entry.identity.device_id == device_id and entry.model_reviewed
+        ),
+        None,
+    )
+
+
 class ResearchJournal:
     def __init__(self, root: Path):
         self.path = root / "profile-research.json"

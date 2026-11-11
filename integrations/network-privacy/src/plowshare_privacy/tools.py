@@ -578,7 +578,11 @@ class WorkerTools:
             )
             if chosen is None:
                 raise ValueError("Unknown monitored device")
-            return build_dossier(chosen, budget=TOOL_REPLY_BYTES)
+            return build_dossier(
+                chosen,
+                facts=self.worker.device_facts(call.device_id),
+                budget=TOOL_REPLY_BYTES,
+            )
         result = self.evidence(call.scan_id)
         evidence = result.evidence
         if isinstance(call, EvidenceCall):

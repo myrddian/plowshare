@@ -212,6 +212,7 @@ class DeferredCollectionTest(unittest.IsolatedAsyncioTestCase):
             legacy = asdict(plan)
             legacy.pop("quick_scan")
             legacy.pop("dns_profiles")
+            legacy.pop("device_descriptions")
             legacy.pop("enabled")
             legacy.pop("labels")
             legacy.pop("pihole")

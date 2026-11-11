@@ -9,8 +9,13 @@ counts are invented. Nothing here describes a real household.
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from plowshare_privacy.advisories import Advisory, AdvisoryPage
+from plowshare_privacy.device_dossier import supplemental_section
+from plowshare_privacy.device_facts import AdvisoryFacts, DeviceDescription, DeviceFacts
 
 # Rows mirror the dashboard JSON exactly; they never enter application code.
 Row = dict[str, Any]
@@ -449,6 +454,25 @@ Expected. Confidence: high.
 - Was viewing information turned on during the TV's first setup?
 - Which catch-up apps are used on the TV?
 
+## Supplemental information
+
+The device describes itself as Sony BRAVIA KD-55X85K, firmware 6.6.0 (reported over the local network via UPnP, 2026-11-11).
+
+It advertises over UPnP: screen casting (DIAL), media rendering (DLNA), remote control (Sony IRCC).
+
+These are the device's own claims, not confirmed identity.
+
+Public advisories for this model (NVD, checked 2026-11-11, model BRAVIA KD-55X85K from the device's own description): 2 found.
+
+- CVE-2099-0002 (high, published 2099-01-02, known exploited): Synthetic preview advisory; not a real vulnerability.
+- CVE-2099-0001 (medium, published 2099-01-01): Synthetic preview advisory; not a real vulnerability.
+
+An advisory is about the model, not proof that this device is affected; check whether the firmware it names matches.
+
+Worth checking: Samba Interactive TV (some BRAVIA TV models) — Sony describes it as third-party content recognition that uses viewing history for recommendations and adverts; Sony says it does not recognise content inside installed apps such as Netflix. To turn it off: System Preferences → Samba Interactive TV → Disable (older Android TV: Home → Settings → Preferences → Setup → Network → Samba Interactive TV). Menus may vary by model year. Source: Sony support article (https://www.sony.com.au/electronics/support/articles/00182856); Sony BRAVIA Help Guide (https://helpguide.sony.net/tv/gmxl4/v1/en/060nhm-06-01-06.html).
+
+Vendor notes are features this manufacturer ships, not observations of this device.
+
 ## Evidence
 
 - Device: `mac:02:00:00:00:00:0a` at 192.0.2.10
@@ -524,3 +548,80 @@ def sample_assessments() -> dict[str, tuple[Row, str | None]]:
             None,
         ),
     }
+
+
+# Supplemental facts for the sample network, built by the dossier's own
+# projection. The model is a public product name; the advisories are
+# synthetic (CVE-2099-…) and describe no real vulnerability.
+SAMPLE_MODEL = "BRAVIA KD-55X85K"
+
+
+def _sample_facts(device_id: str, described: bool) -> DeviceFacts:
+    stamp = _at(30).replace("+00:00", "Z")
+    advisories = tuple(
+        Advisory(
+            f"CVE-2099-000{n}",
+            "Synthetic preview advisory; not a real vulnerability.",
+            f"2099-01-0{n}",
+            severity,
+            n == 2,
+        )
+        for n, severity in ((1, "MEDIUM"), (2, "HIGH"))
+    )
+    # DeviceFacts accepts only private addresses; this one is never shown.
+    return DeviceFacts(
+        device_id,
+        "10.0.2." + str(int(device_id[-2:], 16)),
+        stamp,
+        stamp,
+        (
+            DeviceDescription(
+                "upnp",
+                stamp,
+                "Sony",
+                SAMPLE_MODEL,
+                None,
+                "6.6.0",
+                (
+                    "screen casting (DIAL)",
+                    "media rendering (DLNA)",
+                    "remote control (Sony IRCC)",
+                ),
+            ),
+        )
+        if described
+        else (),
+        AdvisoryFacts(
+            "searched",
+            stamp,
+            SAMPLE_MODEL,
+            "device",
+            AdvisoryPage(SAMPLE_MODEL, stamp, len(advisories), advisories),
+        )
+        if described
+        else AdvisoryFacts("model_unknown", stamp),
+    )
+
+
+def sample_supplemental(device_id: str) -> Row:
+    """The ``/api/devices/<id>/supplemental`` body for one sample device.
+
+    The Living room TV described itself; the Kitchen display was asked and did
+    not answer; the Gateway shows the "descriptions are off" state (the real
+    setting is collector-wide, so this is a preview-only mix); every other
+    device has not been described yet.
+    """
+    devices = {row["identity"]["device_id"]: row for row in sample_devices()}
+    row = devices.get(device_id)
+    if row is None:
+        raise KeyError(device_id)
+    name = row["name"]
+    facts = (
+        _sample_facts(device_id, name == "Living room TV")
+        if name in ("Living room TV", "Kitchen display")
+        else None
+    )
+    section = supplemental_section(
+        facts, vendors=(), device_type=row["detection"]["device_type"]
+    )
+    return {"enabled": name != "Gateway", "supplemental": asdict(section)}

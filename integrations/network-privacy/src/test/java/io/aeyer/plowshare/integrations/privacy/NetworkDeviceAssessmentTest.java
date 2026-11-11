@@ -443,6 +443,163 @@ class NetworkDeviceAssessmentTest {
   }
 
   @Test
+  void supplemental_information_lists_ranked_advisories_and_sanitises_device_text()
+      throws Exception {
+    var host =
+        Host.of(
+            PREVIOUS,
+            dossier(
+                section -> {
+                  var upnp = (ObjectNode) section.path("descriptions").get(0);
+                  upnp.put("model_name", "<b>X|Y</b> `rm` [link](x) " + "Z".repeat(100))
+                      .put("firmware", "6.6.0 " + PROFILE);
+                  var lookup = (ObjectNode) section.path("advisories");
+                  lookup.put("total", 7).put("omitted", 0);
+                  var list = lookup.putArray("advisories");
+                  list.addObject()
+                      .put("cve", "CVE-2026-0001")
+                      .put("severity", "HIGH")
+                      .put("published_on", "2026-02-03")
+                      .put("known_exploited", true)
+                      .put(
+                          "description",
+                          "Remote code execution | via <script> in the cast service.");
+                  list.addObject()
+                      .put("cve", "CVE-2025-1234")
+                      .putNull("severity")
+                      .put("published_on", "2025-06-01")
+                      .put("known_exploited", false)
+                      .put("description", "Information disclosure.");
+                }));
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    String text = host.report.path("text").asText();
+    String section =
+        text.substring(
+            text.indexOf("\n## Supplemental information\n"), text.indexOf("\n## Evidence\n"));
+    assertTrue(
+        section.contains(
+            "- CVE-2026-0001 (high, published 2026-02-03, known exploited): Remote code"
+                + " execution via script in the cast service."),
+        section);
+    assertTrue(
+        section.contains("- CVE-2025-1234 (severity not rated, published 2025-06-01)"), section);
+    assertTrue(section.contains("): 7 found."), section);
+    assertTrue(section.contains("5 more are not listed here."), section);
+    assertTrue(section.contains("not proof that this device is affected"), section);
+    assertTrue(section.contains("firmware 6.6.0 (identifier removed)"), section);
+    assertFalse(section.contains("<"), section);
+    assertFalse(section.contains("|"), section);
+    assertFalse(section.contains("`"), section);
+    assertFalse(section.contains("]("), section);
+    assertTrue(section.contains("b X Y /b rm link (x) ZZZ"), section);
+    assertFalse(section.contains("Z".repeat(80)), "Device text is bounded");
+    assertFalse(UUID_TEXT.matcher(section).find(), section);
+    assertTrue(text.indexOf("## Open questions") < text.indexOf("## Supplemental information"));
+  }
+
+  @Test
+  void supplemental_information_states_plainly_when_nothing_is_known() throws Exception {
+    var empty =
+        Host.of(
+            PREVIOUS,
+            dossier(
+                section -> {
+                  section.putNull("described_at").putNull("updated_at").putNull("advisories");
+                  section.putArray("descriptions");
+                  section.putArray("vendor_notes");
+                }));
+    empty.assessor.add(assessment().toString());
+    empty.reviewer.add(review("accepted", "c1", "holds").toString());
+    empty.finish();
+    assertTrue(
+        empty
+            .report
+            .path("text")
+            .asText()
+            .contains(
+                "## Supplemental information\n\nNothing is known about this device beyond its"
+                    + " network traffic: it has not been asked to describe itself and no advisories"
+                    + " were looked up.\n\n## Evidence"));
+    var silent =
+        Host.of(
+            PREVIOUS,
+            dossier(
+                section -> {
+                  section.putArray("descriptions");
+                  ((ObjectNode) section.path("advisories"))
+                      .put("status", "model_unknown")
+                      .putNull("model")
+                      .putNull("model_source")
+                      .putNull("total");
+                }));
+    silent.assessor.add(assessment().toString());
+    silent.reviewer.add(review("accepted", "c1", "holds").toString());
+    silent.finish();
+    String text = silent.report.path("text").asText();
+    assertTrue(text.contains("did not describe itself when last asked (2026-01-01)"), text);
+    assertTrue(text.contains("that is not a finding"), text);
+    assertTrue(text.contains("no public model name was available"), text);
+    // A version 1 document, retained before the section existed, still renders.
+    var legacy = (ObjectNode) JSON.readTree(resource("tv-dossier.json"));
+    legacy.put("version", 1);
+    ((ObjectNode) legacy.path("dossier")).remove("supplemental");
+    var old = Host.of(PREVIOUS, legacy.toString());
+    old.assessor.add(assessment().toString());
+    old.reviewer.add(review("accepted", "c1", "holds").toString());
+    old.finish();
+    assertTrue(
+        old.report
+            .path("text")
+            .asText()
+            .contains("No supplemental information was collected for this device."));
+  }
+
+  @Test
+  void agents_are_told_supplemental_facts_are_context_and_bad_sections_stop_the_run()
+      throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    for (String task : List.of(host.assessorTasks.getFirst(), host.reviewerTasks.getFirst())) {
+      String instructions = task.split("\\nDATA:\\n", 2)[0];
+      assertTrue(instructions.contains("DATA.dossier.supplemental is context"), instructions);
+    }
+    assertEquals(
+        "BRAVIA KD-55X85K",
+        payload(host.assessorTasks.getFirst())
+            .path("dossier")
+            .path("supplemental")
+            .path("descriptions")
+            .get(0)
+            .path("model_name")
+            .asText());
+    List<Consumer<ObjectNode>> edits =
+        List.of(
+            s -> s.put("extra", true),
+            s -> s.remove("vendor_notes"),
+            s -> ((ObjectNode) s.path("descriptions").get(0)).put("source", "ssdp"),
+            s -> ((ObjectNode) s.path("advisories")).put("status", "guessed"),
+            s ->
+                ((ObjectNode) s.path("vendor_notes").get(0).path("sources").get(0))
+                    .put("url", "javascript:alert(1)"),
+            s -> ((ObjectNode) s.path("descriptions").get(0)).put("firmware", "x".repeat(129)));
+    for (var edit : edits) {
+      var invalid = Host.of(PREVIOUS, dossier(edit));
+      assertThrows(IllegalStateException.class, invalid::finish);
+      assertEquals(0, invalid.assessorTasks.size());
+      assertEquals(0, invalid.writes);
+    }
+    var version1 = (ObjectNode) JSON.readTree(resource("tv-dossier.json"));
+    version1.put("version", 1);
+    var invalid = Host.of(PREVIOUS, version1.toString());
+    assertThrows(IllegalStateException.class, invalid::finish);
+    assertEquals(0, invalid.assessorTasks.size());
+  }
+
+  @Test
   void a_dossier_for_another_device_or_unready_extraction_stops_before_any_model_call()
       throws Exception {
     var foreign = new Host(PREVIOUS, DEVICE.replace("01", "02"));
@@ -485,6 +642,13 @@ class NetworkDeviceAssessmentTest {
     reused.reviewer.add(review("accepted", "c1", "holds").toString());
     reused.receipt = Map.of("revision", PREVIOUS, "resource", RESOURCE);
     assertThrows(IllegalStateException.class, reused::finish);
+  }
+
+  /** The TV dossier document with its supplemental section edited. */
+  private static String dossier(Consumer<ObjectNode> edit) throws Exception {
+    var document = (ObjectNode) JSON.readTree(resource("tv-dossier.json"));
+    edit.accept((ObjectNode) document.path("dossier").path("supplemental"));
+    return document.toString();
   }
 
   private static ObjectNode assessment() throws Exception {
@@ -589,7 +753,16 @@ class NetworkDeviceAssessmentTest {
     }
 
     Host(String previous, String retainedDevice) throws Exception {
-      dossier = resource("tv-dossier.json").replace(DEVICE, retainedDevice);
+      this(previous, resource("tv-dossier.json").replace(DEVICE, retainedDevice), true);
+    }
+
+    /** A host whose retained dossier is exactly {@code retained}. */
+    static Host of(String previous, String retained) throws Exception {
+      return new Host(previous, retained, true);
+    }
+
+    private Host(String previous, String retained, boolean unused) throws Exception {
+      dossier = retained;
       var start = request(Map.of());
       start.put("previous", previous);
       setRequest(start);

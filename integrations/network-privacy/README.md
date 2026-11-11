@@ -497,7 +497,7 @@ properties and identifies read versus Relay submission effects. Invoke it with
 | `network.evidence` | `scan_id`; optional `section`, `offset`, `limit` | Small complete evidence or a large-scan summary; explicit sections return pages |
 | `network.destinations` | `scan_id`; optional `offset`, `limit` | Small legacy observations or paged DNS destinations |
 | `network.devices` | Optional `offset`, `limit` | Page of monitored devices with a confirmed MAC: `device_id`, name, address and signal codes; `unavailable` counts devices without one |
-| `network.device` | `{"device_id":"mac:<canonical MAC>"}` from `network.devices` | One device dossier: identity, detection, presence, open ports, DNS purpose groups, Pi-hole silence, traffic volume, coverage and signals |
+| `network.device` | `{"device_id":"mac:<canonical MAC>"}` from `network.devices` | One device dossier: identity, detection, presence, open ports, DNS purpose groups, Pi-hole silence, traffic volume, supplemental context, coverage and signals |
 
 Read pages default to 32 records (scan lists: 50); serialized size may produce
 smaller pages. Follow `next_offset` until null, using the same retained scan UUID
@@ -517,6 +517,11 @@ them in `omitted` and `trimmed_destinations`. `signals` are deterministic
 attention flags (`measurement_dns`, `advertising_dns`, `telemetry_dominant`,
 `dns_bypass`, `upload_heavy`, `open_admin_service`) whose thresholds are
 documented in `src/plowshare_privacy/device_dossier.py`; they are not findings.
+`supplemental` holds what the device reported about itself, the advisory lookup
+for its model (at most five advisories; the rest are counted in `omitted`) and
+curated vendor features worth checking. It is context, not observation; a
+device that never described itself is a coverage line. Advisories are dropped
+before destinations when the reply budget is tight.
 
 All calls require the configured web bearer. Scan calls retain the caller's
 request identity before SDK publication and use the same Relay pipeline as the

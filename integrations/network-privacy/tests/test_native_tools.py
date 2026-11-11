@@ -18,6 +18,7 @@ from support import CountingCollector, FixturePort, MemoryReceipts, configuratio
 from test_device_dossier import activity, card, identity, volume
 
 from plowshare_privacy.device_dossier import build_dossier, encode_dossier
+from plowshare_privacy.device_facts import DeviceFacts
 from plowshare_privacy.device_inventory import DeviceCard, DeviceInventory
 from plowshare_privacy.journal import FileReceipts, Publication, ScanOrigin
 from plowshare_privacy.limits import TOOL_REPLY_BYTES
@@ -270,6 +271,30 @@ class DeviceToolsTest(unittest.IsolatedAsyncioTestCase):
         # One inventory projection per call; the dossier reuses it.
         self.assertEqual(self.reads, 2)
 
+    async def test_device_dossier_carries_the_workers_retained_facts(self) -> None:
+        from test_device_dossier import facts
+
+        listed = mac_card(1)
+        self.inventory = DeviceInventory((listed,))
+        retained = replace(facts(), device_id="mac:02:00:00:00:01:01")
+        asked: list[str] = []
+
+        def lookup(device_id: str) -> DeviceFacts | None:
+            asked.append(device_id)
+            return retained
+
+        self.worker.device_facts = lookup  # type: ignore[method-assign]
+        state, text = await self.invoke(
+            "network_device", {"device_id": "mac:02:00:00:00:01:01"}
+        )
+        self.assertEqual(state, "COMPLETED")
+        self.assertEqual(asked, ["mac:02:00:00:00:01:01"])
+        self.assertEqual(text, encode_dossier(build_dossier(listed, facts=retained)))
+        self.assertEqual(
+            json.loads(text)["supplemental"]["descriptions"][0]["model_name"],
+            "BRAVIA KD-55X85K",
+        )
+
     async def test_unknown_or_unmonitored_device_ids_are_rejected(self) -> None:
         self.inventory = DeviceInventory((mac_card(1), address_only(2)))
         state, text = await self.invoke(
@@ -365,12 +390,12 @@ class DeviceToolsTest(unittest.IsolatedAsyncioTestCase):
             unclassified["distinct"],
             len(unclassified["destinations"]) + unclassified["omitted"],
         )
-        with patch("plowshare_privacy.tools.TOOL_REPLY_BYTES", 2500):
+        with patch("plowshare_privacy.tools.TOOL_REPLY_BYTES", 3000):
             state, text = await self.invoke(
                 "network_device", {"device_id": "mac:02:00:00:00:01:01"}
             )
         self.assertEqual(state, "COMPLETED")
-        self.assertLessEqual(len(text.encode()), 2500)
+        self.assertLessEqual(len(text.encode()), 3000)
         trimmed = json.loads(text)
         self.assertGreater(trimmed["trimmed_destinations"], 0)
         self.assertEqual(

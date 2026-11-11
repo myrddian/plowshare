@@ -56,7 +56,28 @@ from .profile_port import RetainedSourceReader
 from .worker import ReconciliationRequired
 
 PREFIX = "network-privacy-dossier/"
-DOCUMENT_VERSION = 1
+# Version 2 added the dossier's ``supplemental`` section. Version 1 revisions
+# retained before it are still read (for comparison and receipts) but never
+# written; a v1 payload never equals a v2 one, so the next retention revises it.
+DOCUMENT_VERSION = 2
+_DOSSIER_FIELDS = {
+    1: frozenset(
+        {
+            "identity",
+            "detection",
+            "presence",
+            "services",
+            "dns",
+            "pihole_silent",
+            "traffic",
+            "profile",
+            "coverage",
+            "signals",
+            "trimmed_destinations",
+        }
+    ),
+}
+_DOSSIER_FIELDS[2] = _DOSSIER_FIELDS[1] | {"supplemental"}
 # A dossier is built to the 16,000-byte tool reply budget; the envelope adds
 # well under 200 bytes. The bound leaves room without admitting unbounded text.
 MAX_DOCUMENT_BYTES = 32768
@@ -89,25 +110,16 @@ class DossierDocument:
     write_id: str
     device_id: str
     payload: str
+    version: int = DOCUMENT_VERSION
 
     def __post_init__(self) -> None:
         uuid(self.write_id)
         parse_device_id(self.device_id)
+        if type(self.version) is not int or self.version not in _DOSSIER_FIELDS:
+            raise ValueError("Unsupported dossier document version")
         dossier = object_fields(
             parse_json(self.payload, maximum_bytes=MAX_DOCUMENT_BYTES),
-            {
-                "identity",
-                "detection",
-                "presence",
-                "services",
-                "dns",
-                "pihole_silent",
-                "traffic",
-                "profile",
-                "coverage",
-                "signals",
-                "trimmed_destinations",
-            },
+            set(_DOSSIER_FIELDS[self.version]),
         )
         identity = object_fields(
             dossier["identity"],
@@ -136,7 +148,7 @@ class DossierDocument:
     def text(self) -> str:
         return (
             '{"version":'
-            + str(DOCUMENT_VERSION)
+            + str(self.version)
             + ',"write_id":'
             + json.dumps(self.write_id)
             + ',"device_id":'
@@ -152,13 +164,16 @@ class DossierDocument:
             parse_json(text, maximum_bytes=MAX_DOCUMENT_BYTES),
             {"version", "write_id", "device_id", "dossier"},
         )
-        if type(row["version"]) is not int or row["version"] != DOCUMENT_VERSION:
+        version = row["version"]
+        if type(version) is not int or version not in _DOSSIER_FIELDS:
             raise ValueError("Unsupported dossier document version")
         if not isinstance(row["write_id"], str) or not isinstance(
             row["device_id"], str
         ):
             raise ValueError("Invalid dossier document identity")
-        document = cls(row["write_id"], row["device_id"], _compact(row["dossier"]))
+        document = cls(
+            row["write_id"], row["device_id"], _compact(row["dossier"]), version
+        )
         if document.text() != text:
             raise ValueError("Dossier text differs from its validated record")
         return document

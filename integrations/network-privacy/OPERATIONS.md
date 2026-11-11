@@ -210,6 +210,77 @@ is available from UniFi client counters (see below). For per-connection
 sessions, UniFi provides a separate [Traffic Flows export](https://help.ui.com/hc/en-us/articles/32201256219799-Traffic-Flows-and-Traffic-Logging-in-UniFi-Network)
 that this collector does not read.
 
+### Device descriptions
+
+Many TVs, speakers, streamers and printers describe themselves on the local
+network. With this option on, the collector asks watched devices directly.
+Turn it on in Settings with **Ask monitored devices to describe themselves**,
+next to the DNS profile option, then **Save monitoring**. File-managed
+collectors set `collection.deviceDescriptions` to `true` alongside
+`collection.quickScan`. The settings API accepts `deviceDescriptions`. The
+option is off by default, and turning quick checks off turns it off too.
+
+What is sent, and to whom:
+
+- Only devices that a successful quick check confirmed by MAC at a watched
+  private address are asked. Adopted UniFi infrastructure, IP-only sightings
+  and addresses with conflicting MACs are skipped.
+- One SSDP search (`M-SEARCH`, `ssdp:all`) goes to the device's own address on
+  UDP 1900. If the reply gives a description location on plain HTTP at that
+  same address (any port), the collector fetches it once. Redirects are
+  refused, the fetch has a 2-second total timeout and a 64 KiB limit, and XML
+  that declares a document type or entities is refused.
+- Up to three unicast mDNS queries go to the device's address on UDP 5353:
+  the services it advertises, then their instances and TXT records, for at
+  most eight services and eight instances.
+- Nothing is broadcast or multicast. Replies from any other address are
+  ignored. Each reply wait is at most 2 seconds.
+
+How often: each device is asked at most once a day, or sooner if its MAC is
+seen at a different watched address. Each quick check asks at most four
+devices, oldest first, at least 250 ms apart. The step runs in the background
+after the check is recorded, so it never delays presence history, scans or
+intake.
+
+What is kept: manufacturer, model name, model number, an explicit firmware or
+software version field, and the advertised service types as short labels such
+as "screen casting (DIAL)". Serial numbers, UUIDs, friendly names, mDNS
+instance names, URLs, MAC and IP addresses are discarded before anything is
+stored. A device that does not answer is normal and is not a finding; it keeps
+its earlier description, with its original collection time, until it is seen
+at another address.
+
+Public advisories: when `PLOWSHARE_PRIVACY_NVD_ORIGIN` is configured (see
+**UniFi identity** below), the collector looks up one public model string per
+device. It uses the model you confirmed in background device profile review
+first, then a model the UniFi controller confirms, then the model the device
+reported. Only that model string is sent to NVD, and each model is looked up at
+most once a week. Without an NVD origin nothing leaves the network.
+
+Facts stay in the collector's private `device-facts.json` in the state
+directory. The file holds at most 256 devices, and the least recently asked
+device is dropped first. A damaged file is preserved and stops new facts until
+it is inspected. Facts are not published to Plowshare by this step; they reach
+Plowshare only inside a device's dossier when it is assessed.
+
+Where you see them: the device pane's **What we know about this device**
+block, between your notes and the agent assessment, shows what the device
+reported (with the protocol and date), the advisory lookup (NVD, the date, the
+model and where it came from, and up to five advisories, known-exploited and
+most severe first) and any vendor notes. Before the first answer it says "Not
+described yet", or "Device descriptions are off" when the option is off. The
+block reads `GET /api/devices/<device_id>/supplemental`, which only reads the
+retained facts; it never asks the device or NVD.
+
+Vendor notes are a short curated table in `vendor_notes.py`: viewing-tracking
+features that a manufacturer ships (for example Sony's Samba Interactive TV or
+Vizio's Viewing Data), what each collects, where to turn it off and the source.
+A note is shown for a TV or streaming player whose reported manufacturer, MAC
+vendor or UniFi vendor matches the manufacturer name. It is something to check,
+never an observation that the feature is on. Entries come from the vendor's own
+pages, except LG Live Plus, which is marked as reported by The Markup and
+Malwarebytes. Settings menus differ by model year.
+
 ### UniFi traffic volume
 
 The Network Integration API used for identity has no per-client traffic. With
@@ -248,9 +319,12 @@ device, then choose **Assess this device** under **Agent assessment**.
 
 1. The collector builds the device's dossier from what it already holds:
    identity, open services, DNS grouped by purpose, Pi-hole silence, UniFi
-   traffic, explicit coverage gaps and code-computed attention signals. It
-   retains the dossier as `network-privacy-dossier/<device_id>.json` so the
-   report can cite the exact revision.
+   traffic, supplemental facts (see **Device descriptions**), explicit
+   coverage gaps and code-computed attention signals. It retains the dossier
+   as `network-privacy-dossier/<device_id>.json` (document version 2) so the
+   report can cite the exact revision. A dossier over its 16,000-byte budget
+   drops listed advisories first, then the least important DNS destinations,
+   and says so in its coverage lines.
 2. It starts `assess_network_device`. The assessor reads only that dossier and
    returns structured JSON. The script rejects HTML, tables, raw identifiers,
    Markdown structure, exfiltration claims and signals the dossier does not
@@ -262,7 +336,13 @@ device, then choose **Assess this device** under **Agent assessment**.
    assessment failed" with the run and **Retry**.
 4. The script renders the report in plain language under one stable name per
    device (`Network privacy assessment / <device_id>`); later runs revise it
-   rather than adding drafts.
+   rather than adding drafts. Its **Supplemental information** section, before
+   Evidence, is written by the script from the dossier alone: what the device
+   says it is, the advisories for that model, and vendor features worth
+   checking, each with its source and date. Agents may use these facts to
+   explain an observation but cannot add to or reword that section, and the
+   facts are never findings: a reported model is the device's claim, an
+   advisory is about the model, and a vendor note is something to check.
 
 While a report awaits review, **Accept and make final** finalises that
 revision in Plowshare and **Dismiss without finalising** hides it locally
@@ -276,8 +356,11 @@ Only one assessment runs at a time, a device in review cannot be reassessed
 until it is accepted or dismissed, and at most 12 start per UTC day. The
 optional background queue (Devices, **Background device assessments**) is off
 by default; when enabled it assesses devices with signals that were never
-assessed, then devices whose signals changed, within the configured daily
-limit. Agents can also read dossiers through the `network_devices` and
+assessed, then never-assessed devices that described themselves or have an
+advisory search, then devices whose signals changed or whose supplemental
+facts changed (new firmware, another model, a new advisory) since their last
+assessment started, within the configured daily limit. A daily re-description
+with the same answer is not a change. Agents can also read dossiers through the `network_devices` and
 `network_device` tools.
 
 Signals direct attention; they are not findings. The rules and thresholds are

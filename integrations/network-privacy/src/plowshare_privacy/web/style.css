@@ -341,7 +341,8 @@ body:has(#view-devices:not([hidden]) #side-pane:not([hidden])) :is(.masthead, ma
 .share { display: block; height: 3px; margin-top: 4px; min-width: 2px; background: var(--umber); box-shadow: none; }
 .share.seg-advertising, .share.seg-measurement, .share.seg-telemetry { background-color: transparent; height: 5px; box-shadow: inset 0 0 0 1px var(--gilt); }
 .share.seg-advertising { background: var(--gilt); }
-.linked-issue { margin: 8px 0; padding: 10px 14px 14px; border: 1px solid var(--umber); }
+.linked-issue, .known-item { margin: 8px 0; padding: 10px 14px 14px; border: 1px solid var(--umber); }
+.known-item p { margin: 2px 0; font-size: 14px; }
 .status-line { margin: 2px 0 6px; font: 500 14.5px var(--structure); color: var(--gilt); }
 .tool-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .tool-heading h2 { font-size: 17px; color: var(--gilt); }
@@ -377,6 +378,7 @@ body:has(#view-devices:not([hidden]) #side-pane:not([hidden])) :is(.masthead, ma
 #monitor-form > input, #monitor-form > textarea { margin-bottom: 4px; }
 #monitor-form > label { margin-top: 14px; }
 .monitor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px; margin-top: 18px; }
+.monitor-actions > p { flex-basis: 100%; margin: -6px 0 0; }
 .form-grid { display: grid; gap: 16px; max-width: 760px; }
 
 /* Readers */

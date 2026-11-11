@@ -28,8 +28,10 @@ Admission rules: one ``pending``/``running`` entry across all devices; no new
 run for a device in ``review``/``accepting``; at most ``DAILY_CEILING``
 admissions per UTC day in total. The optional background queue (limit 0, off,
 by default) admits only while today's admissions are below its own limit:
-first signalled devices never assessed, then devices whose signal set changed
-since their last settled assessment.
+first signalled devices never assessed, then never-assessed devices with
+supplemental facts (something the device said about itself, or an advisory
+search), then devices whose signal set changed, or whose facts changed after
+their last admission, since their last settled assessment.
 
 Concurrency: one asyncio lock serialises every operation that awaits the
 server, so an admission decision cannot interleave with another. ``dismiss``
@@ -68,6 +70,7 @@ from .contracts import (
     uuid,
 )
 from .device_dossier import SIGNAL_ORDER, build_dossier, device_signals, parse_device_id
+from .device_facts import DeviceFacts
 from .device_inventory import DeviceCard, DeviceInventory
 from .diagnostics import refusal_detail
 from .dossier_port import DossierRetention
@@ -352,11 +355,14 @@ class DeviceAssessments:
         dossiers: DossierRetention,
         inventory: Callable[[], DeviceInventory],
         *,
+        facts: Callable[[str], DeviceFacts | None] = lambda _: None,
         clock: Callable[[], str] = utc_now,
         new_id: Callable[[], str] = lambda: str(uuid4()),
     ):
         self.journal, self.port, self.dossiers = journal, port, dossiers
         self.inventory, self.clock, self.new_id = inventory, clock, new_id
+        # Retained supplemental facts by device ID (Worker.device_facts).
+        self.facts = facts
         self.lock = asyncio.Lock()
         self.error: str | None = None
         # Devices whose dossier cannot be built are skipped by the background
@@ -564,7 +570,7 @@ class DeviceAssessments:
         note = self._assess_note(entry)
         if note is not None:
             raise AssessmentConflict(note)
-        dossier = build_dossier(card)
+        dossier = build_dossier(card, facts=self.facts(device))
         retained = await self.dossiers.retain(dossier)
         previous = await self.port.newest_report(device)
         known = entry.latest_report if entry is not None else None
@@ -717,22 +723,36 @@ class DeviceAssessments:
                 raise
 
     def _background_candidate(self) -> DeviceCard | None:
-        """Signalled devices never assessed first, then changed signal sets."""
-        changed = None
+        """The next device the background queue should assess, if any.
+
+        In order: a signalled device never assessed; a never-assessed device
+        with learned facts; a settled device whose (non-empty) signal set
+        changed or whose facts changed after its last admission. Facts change
+        only when their content does (``DeviceFacts.updated_at``), so a daily
+        re-description with the same answer requeues nothing.
+        """
+        learned = changed = None
         for device, card in monitored_devices(self.inventory()):
-            signals = {signal.code for signal in device_signals(card)}
-            if not signals or device in self._unbuildable:
+            if device in self._unbuildable:
                 continue
+            signals = {signal.code for signal in device_signals(card)}
+            facts = self.facts(device)
+            known = _learned(facts)
             entry = self._entry(device)
             if entry is None:
-                return card
-            if (
-                changed is None
-                and entry.phase in _SETTLED
-                and signals != set(entry.signals)
-            ):
-                changed = card
-        return changed
+                if signals:
+                    return card
+                if learned is None and known:
+                    learned = card
+                continue
+            if changed is None and entry.phase in _SETTLED:
+                if (signals and signals != set(entry.signals)) or (
+                    known
+                    and facts is not None
+                    and epoch(facts.updated_at) > epoch(entry.requested_at)
+                ):
+                    changed = card
+        return learned or changed
 
     async def run(self, stop: asyncio.Event) -> None:
         if not self._journal_available:
@@ -754,6 +774,14 @@ class DeviceAssessments:
                 await asyncio.wait_for(stop.wait(), 30)
             except TimeoutError:
                 continue
+
+
+def _learned(facts: DeviceFacts | None) -> bool:
+    """True when the facts hold something to assess: a self-description or a search."""
+    return facts is not None and (
+        bool(facts.descriptions)
+        or (facts.advisories is not None and facts.advisories.status == "searched")
+    )
 
 
 def _day(stamp: str) -> object:

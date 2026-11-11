@@ -35,6 +35,8 @@ from .console_port import SdkConsolePort
 from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
 from .device_assessments import AssessmentJournal, DeviceAssessments
+from .device_describer import LocalDeviceDescriber
+from .device_facts import DeviceFactsJournal, DeviceFactsService
 from .device_profiles import DeviceProfiles, FileProfileIntents
 from .discovery import LocalDeviceDiscovery
 from .dossier_port import DeviceDossiers, FileDossierIntents, SdkDossierPort
@@ -50,7 +52,7 @@ from .peer_journal import FilePeerReceipts
 from .ports import SdkPrivacyPort
 from .presence import PresenceHistory, PresenceView, PresenceWatch
 from .profile_port import SdkProfilePort
-from .profile_research import ProfileResearch, ResearchJournal
+from .profile_research import ProfileResearch, ResearchJournal, reviewed_model
 from .profile_research_port import SdkResearchPort
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
@@ -292,6 +294,7 @@ async def execute(args: argparse.Namespace) -> None:
                     SdkAssessmentPort(lambda: client, config, lambda: worker.port),
                     dossiers,
                     worker.device_inventory,
+                    facts=worker.device_facts,
                 )
                 if dossiers is not None
                 else None
@@ -442,6 +445,28 @@ async def execute(args: argparse.Namespace) -> None:
                     advisories,
                 )
                 if operator_store is not None and config.collection.mode == "tcp"
+                else None
+            )
+
+            def confirmed_model(device_id: str) -> str | None:
+                return (
+                    reviewed_model(research.ledger, device_id)
+                    if research is not None
+                    else None
+                )
+
+            # The facts step does nothing until collection.deviceDescriptions is
+            # enabled; it reads the active plan so settings apply between devices.
+            worker.facts = (
+                DeviceFactsService(
+                    DeviceFactsJournal(config.state_directory),
+                    LocalDeviceDescriber(lambda: worker.config.collection.targets),
+                    lambda: worker.config.collection,
+                    advisories,
+                    managed_products,
+                    confirmed_model,
+                )
+                if config.collection.mode == "tcp"
                 else None
             )
 

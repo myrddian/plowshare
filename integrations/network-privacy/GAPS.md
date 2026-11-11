@@ -102,13 +102,14 @@ older servers still apply the registered-owner/Manager restriction.
 
 ## Finalising agent-written reports with the service credential
 
-Device assessments are finalised from the dashboard with `information.finalise`
-using the collector's project-scoped service credential. Whether that principal
-may finalise reports its own Application runs produced has not been verified
-against a live server. If it is refused, the dashboard keeps the report in
-review and directs the operator to finalise it in Plowshare, then check status.
-A general rule that an Application's execution identity may finalise reports
-from its own runs would be a separately authorized platform decision.
+Resolved by observation, not a platform change. On 12 November 2026 the
+collector's project-scoped service credential finalised a device assessment
+report written by its own `assess_network_device` run on a live server, using
+`information.finalise`. A first attempt made seconds after the report was
+written was refused with "a final report must complete processing first";
+that is a processing wait, not an authority refusal, and the dashboard kept
+the report in review without resending. Accepting again after processing
+finished succeeded.
 
 ## Finding reports about one device
 

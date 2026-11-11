@@ -275,7 +275,7 @@
         <section id="background-assessments" class="panel setup-panel" hidden>
           <div class="panel-heading"><h2>Background device assessments</h2></div>
           <div class="panel-body">
-            <p>Assess devices with Plowshare without being asked: first devices with a signal that were never assessed, then devices whose signals changed since their last assessment. Each assessment uses model calls and report-processing allowance.</p>
+            <p>Assess devices with Plowshare without being asked: first devices with a signal that were never assessed, then never-assessed devices that described themselves, then devices whose signals or reported facts changed since their last assessment. Each assessment uses model calls and report-processing allowance.</p>
             <form id="assessment-settings" class="row">
               <label>Background assessments per UTC day<input id="assessment-limit" type="number" min="0" max="12" step="1" inputmode="numeric" required></label>
               <button type="submit">Save limit</button>
@@ -348,6 +348,8 @@
                 <label class="check"><input id="enabled" type="checkbox">Enable collection</label>
                 <label class="check"><input id="quick-scan" type="checkbox">Quick presence checks every 2–5 minutes</label>
                 <label class="check"><input id="dns-profiles" type="checkbox">Profile device DNS activity with Pi-hole</label>
+                <label class="check"><input id="device-descriptions" type="checkbox" aria-describedby="device-descriptions-help">Ask monitored devices to describe themselves</label>
+                <p class="hint" id="device-descriptions-help">Sends one direct query to each monitored device at most once a day. When an advisory source is configured, public advisories are looked up for the model; only the model name goes to NVD.</p>
                 <button id="save-monitoring" type="submit">Save monitoring</button>
                 <span id="settings-detail" class="hint"></span>
               </div>

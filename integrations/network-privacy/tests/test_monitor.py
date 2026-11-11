@@ -146,6 +146,23 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         await self.settings.apply_pending()
         self.assertFalse(self.worker.config.collection.dns_profiles)
 
+    async def test_device_descriptions_follow_quick_check_settings(self) -> None:
+        self.assertFalse(self.settings.view().device_descriptions)
+        with self.assertRaisesRegex(ValueError, "require quick presence checks"):
+            await self.settings.save(replace(CHOICE, device_descriptions=True))
+        await self.settings.save(
+            replace(CHOICE, quick_scan=True, device_descriptions=True)
+        )
+        await self.settings.apply_pending()
+        self.assertTrue(self.worker.config.collection.device_descriptions)
+        self.assertTrue(self.settings.view().device_descriptions)
+        # Omitting the field keeps the saved choice; turning quick checks off clears it.
+        await self.settings.save(CHOICE)
+        self.assertTrue(self.settings.view().device_descriptions)
+        await self.settings.save(replace(CHOICE, quick_scan=False))
+        await self.settings.apply_pending()
+        self.assertFalse(self.worker.config.collection.device_descriptions)
+
     async def test_completed_evidence_survives_scope_change_and_restart(self) -> None:
         await self.settings.save(CHOICE)
         await self.settings.apply_pending()

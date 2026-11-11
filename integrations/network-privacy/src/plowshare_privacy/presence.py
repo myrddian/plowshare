@@ -667,12 +667,16 @@ class PresenceWatch:
         self._cached = PresenceView()
         self._cached_dns = False
         self._previous: PresenceSample | None = None
+        # The most recently recorded sample, for steps that follow a successful
+        # check (device facts). Cleared by a reset or a failed check.
+        self.latest: PresenceSample | None = None
 
     def reset(self) -> None:
         self.due = None
         self.since = None
         self.issues = ()
         self._previous = None
+        self.latest = None
 
     def wait_seconds(self) -> float:
         return (
@@ -719,12 +723,14 @@ class PresenceWatch:
                         "DNS activity could not be sampled in this quick check.",
                     )
             self.history.record(scope, sample, dns)
+            self.latest = sample
             self._previous = sample if plan.dns_profiles else None
             self._cached_until = 0.0
             self.issues = (*sample.issues, *dns_issues)
             self.since = sample.checked_at
         except (OSError, ValueError, TimeoutError, sqlite3.Error):
             self._previous = None
+            self.latest = None
             self.issues = (
                 "Quick presence check failed; it was excluded from the history.",
             )
