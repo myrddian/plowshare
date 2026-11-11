@@ -57,34 +57,38 @@ test('DNS profiling is a separate setting and shows blocked lookups as DNS evide
   };
   const tree = vm.runInContext('renderDnsActivity(activity)', context);
   const rendered = JSON.stringify(tree);
-  assert.match(rendered, /Partial coverage in 1 windows/);
+  assert.match(rendered, /Partial coverage in 1 window\. Pi-hole reported 12 matching lookups/);
   assert.match(rendered, /Counts are sampled DNS lookups, not connections or bytes\. Traffic volume is under How much it sends; which host received those bytes is not observed\./);
   // Destinations are a table: one row per domain under labelled columns.
   const texts = node => [node.textContent, ...(node.children || []).flatMap(texts)].filter(Boolean);
   const rows = tree.children.find(child => child.tag === 'table').children.map(texts);
+  // A domain is split into labels so it can wrap only after a dot.
   assert.deepEqual(rows, [
-    ['Destination', 'Queries', 'Reported blocked'],
-    ['ads.example', 'Fixture Ads', '3', '2'],
+    ['Destination', 'Lookups', 'Reported blocked'],
+    ['ads.', 'example', 'Fixture Ads', '3', '2'],
   ]);
 
   context.silent = {...context.activity, from_at:'2026-01-01T00:00:00Z',
     until_at:'2026-01-01T07:30:00Z', windows:90, partial_windows:0, queries_read:0,
     queries_available:0, groups:[], pihole_silent:true};
   assert.match(JSON.stringify(vm.runInContext('renderDnsActivity(silent)', context)),
-    /No DNS queries reached Pi-hole in 90 confirmed checks over 7 hours/);
+    /No DNS lookups reached Pi-hole in 90 confirmed checks over 7 hours/);
   context.grouped = {...context.activity, groups:[
     {kind:'measurement', queries:4, distinct:1, destinations:[]},
     {kind:'telemetry', queries:2, distinct:1, destinations:[]},
     {kind:'local', queries:9, distinct:1, destinations:[]}]};
   assert.equal(vm.runInContext('behaviouralQueries(grouped)', context), 6);
   assert.match(JSON.stringify(vm.runInContext('renderDnsActivity(grouped)', context)),
-    /Audience measurement & content recognition · 4 queries/);
+    /Audience measurement and content recognition · 4 lookups/);
 
   context.traffic = {from_at:'2026-01-01T00:00:00Z', until_at:'2026-01-02T00:00:00Z',
     samples:300, to_device_bytes:1234567890, from_device_bytes:2048, resets:2};
   const traffic = JSON.stringify(vm.runInContext('renderTraffic(traffic)', context));
   assert.match(traffic, /1.2 GB to device · 2.0 KB from device/);
   assert.match(traffic, /2 intervals skipped after a counter reset/);
+  assert.match(traffic, /“to device” is what the network sent the device/);
+  context.traffic.resets = 1;
+  assert.match(JSON.stringify(vm.runInContext('renderTraffic(traffic)', context)), /1 interval skipped after a counter reset/);
   assert.match(traffic, /counters show volume, not which hosts/i);
   assert.match(traffic, /Totals include local traffic/);
   assert.equal(vm.runInContext('formatBytes(999)', context), '999 B');
@@ -411,7 +415,12 @@ test('the assessment block renders each state with plain actions', async () => {
   assert.match(failed.text, /Last assessment failed/);
   assert.match(failed.text, /budget cap/);
   assert.match(failed.text, /orc_fixture_1/);
-  assert.deepEqual(failed.buttons, ['Retry']);
+  assert.deepEqual(failed.buttons, ['Retry assessment']);
+  // The second agent's check never reads as the operator's own Accept.
+  assert.match(review.text, /Checked by a second agent: passed\./);
+  assert.doesNotMatch(review.text, /verdict|accepted/i);
+  const corrected = render({state:'accepted', report:'22222222-2222-4222-8222-222222222222', review:'needs_corrections', decided_at:'2026-11-11T10:00:00Z'}, '# Report');
+  assert.match(corrected.text, /Checked by a second agent: passed after one round of corrections/);
 });
 
 test('assessment actions post once, reread the view and poll only while running', async () => {
@@ -447,4 +456,57 @@ test('assessment actions post once, reread the view and poll only while running'
   assert.match(context.document.getElementById('notice').textContent, /refused finalising/);
   assert.equal(requests.filter(item => item.url.endsWith('/accept')).length, 1);
   assert.equal(requests.at(-1).url, '/api/devices/mac%3A02%3A00%3A00%3A00%3A00%3A0a/assessment');
+});
+
+test('work that spends model calls is confirmed in place before it is sent', async () => {
+  const {context} = await dashboard();
+  assessmentDom(context);
+  let sent = 0;
+  context.send = async () => {sent += 1;};
+  const group = vm.runInContext("confirmedAction('Assess this device', undefined, 'Confirm assessment', 'This uses model calls.', send)", context);
+  const labels = () => group.children.map(child => child.textContent);
+  assert.deepEqual(labels(), ['Assess this device']);
+  const start = group.children[0];
+  start.focus = () => {};
+  context.document.createElement = (create => tag => ({...create(tag), focus() {}}))(context.document.createElement);
+  start.listeners.click();
+  // The cost is stated above the button that sends the work.
+  assert.deepEqual(labels(), ['This uses model calls.', 'Confirm assessment', 'Cancel']);
+  assert.equal(sent, 0);
+  group.children[2].listeners.click();
+  assert.deepEqual(labels(), ['Assess this device']);
+  assert.equal(sent, 0);
+  start.listeners.click();
+  await group.children[1].listeners.click();
+  assert.equal(sent, 1);
+});
+
+test('an action message survives a refresh and stays until it is dismissed', async () => {
+  const {context, node} = await dashboard();
+  vm.runInContext("notice('Scan requested.'); condition('Collector needs attention.', true); condition('');", context);
+  assert.equal(node('notice').textContent, 'Scan requested.');
+  assert.equal(node('notice-bar').hidden, false);
+  assert.equal(node('condition').textContent, '');
+  node('notice-dismiss').listeners.click();
+  assert.equal(node('notice').textContent, '');
+  assert.equal(node('notice-bar').hidden, true);
+  const source = fs.readFileSync(path.join(__dirname, '../src/plowshare_privacy/web/app.js'), 'utf8');
+  const start = source.indexOf('async function refresh()');
+  // The periodic refresh writes the standing condition only.
+  assert.doesNotMatch(source.slice(start, source.indexOf('await pollAssessment()', start)), /\bnotice\(/);
+});
+
+test('counts, dates and state words are written one way', async () => {
+  const {context} = await dashboard();
+  const run = source => vm.runInContext(source, context);
+  assert.equal(run("plural(1, 'window', 'windows')"), '1 window');
+  assert.equal(run("plural(0, 'window', 'windows')"), '0 windows');
+  assert.equal(run("plural(1790, 'lookup', 'lookups')"), `${new Intl.NumberFormat().format(1790)} lookups`);
+  assert.equal(run("statusLabel('potentially_affected')"), 'Potentially affected');
+  assert.equal(run("statusLabel('draft')"), 'Draft');
+  assert.equal(run("formatWhen('')"), '');
+  assert.equal(run("formatWhen('not a date')"), 'not a date');
+  // A date-only value is a calendar day in every time zone.
+  assert.equal(run("formatDay('2026-02-03')"), new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeZone:'UTC'}).format(new Date('2026-02-03')));
+  assert.doesNotMatch(run("formatWhen('2026-11-12T08:38:15Z')"), /:15/);
 });

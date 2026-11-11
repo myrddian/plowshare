@@ -31,20 +31,20 @@
         <input id="token" type="password" autocomplete="off" placeholder="Enter your configured web token" required>
         <button type="submit">Connect dashboard</button>
       </div>
-      <small>Your token stays in this tab’s memory. It is separate from the Plowshare credential.</small>
+      <p class="hint">Your token stays in this tab’s memory. It is separate from the Plowshare credential.</p>
     </form>
-    <p id="notice" class="notice" role="status" aria-live="polite">Connect to view this collector’s private evidence.</p>
+    <p id="condition" class="notice" role="status" aria-live="polite">Connect to view this collector’s private evidence.</p>
     <section id="dashboard" hidden>
       <div class="toolbar">
         <div class="project-context">
           <span id="project" class="project-name">Project</span>
           <span id="collector">Collector</span>
-          <span id="mode" class="pill">Not connected</span>
+          <span id="mode" class="tag">Not connected</span>
         </div>
         <div class="actions">
-          <button id="refresh" class="secondary">Refresh</button>
-          <button id="scan">Request a scan</button>
-          <button id="disconnect" class="quiet">Disconnect</button>
+          <button id="scan" type="button">Request a scan</button>
+          <button id="refresh" type="button" class="secondary">Refresh</button>
+          <button id="disconnect" type="button" class="quiet">Disconnect</button>
         </div>
       </div>
       <nav class="view-nav" role="tablist" aria-label="Dashboard views">
@@ -74,7 +74,7 @@
           </article>
           <article class="leaf leaf-left">
             <h2>Out of Pi-hole’s sight</h2>
-            <p class="leaf-lede">On the network for hours with no DNS query reaching Pi-hole.</p>
+            <p class="leaf-lede">On the network for hours with no DNS lookup reaching Pi-hole.</p>
             <div id="q-silent" class="leaf-rows"></div>
             <p class="limit">A visibility gap, not proof of misbehaviour. The device may be idle, or it may use its own DNS servers or DNS over HTTPS, which Pi-hole cannot see.</p>
           </article>
@@ -82,13 +82,13 @@
             <h2>Data volume</h2>
             <p class="leaf-lede">Ranked by bytes from the device, with bytes to the device beneath.</p>
             <div id="q-volume" class="leaf-rows"></div>
-            <p class="limit">UniFi client byte counters; 24-hour totals are lower bounds. They include local traffic, such as a camera recording to a local recorder or a backup to a NAS, and say nothing about destinations. Direction follows UniFi: “to device” is what the network sent the client.</p>
+            <p class="limit">UniFi byte counters; 24-hour totals are lower bounds. They include local traffic, such as a camera recording to a local recorder or a backup to a NAS, and say nothing about destinations. Direction follows UniFi: “to device” is what the network sent the device.</p>
           </article>
           <article class="leaf leaf-base">
             <h2>On the network</h2>
             <p class="base-counts"><strong id="device-count">—</strong> devices observed <span class="sep" aria-hidden="true">·</span> <strong id="candidate-count">—</strong> candidate addresses not yet observed</p>
             <p id="q-network" class="base-types"></p>
-            <button id="open-devices" type="button" class="secondary">Open the device list</button>
+            <button id="open-devices" type="button" class="secondary">Open device list</button>
           </article>
         </section>
 
@@ -116,11 +116,11 @@
         </aside>
 
         <div class="overview-grid">
-          <section class="panel schedule-panel">
-            <div class="panel-heading"><h2>Monitoring schedule</h2><span id="schedule-runtime" class="pill">Checking schedule…</span></div>
-            <div class="setup-content">
+          <section class="panel">
+            <div class="panel-heading"><h2>Monitoring schedule</h2><span id="schedule-runtime" class="tag">Checking schedule…</span></div>
+            <div class="panel-body">
               <p class="hint">Pause or resume future scans.</p>
-              <div class="actions schedule-actions">
+              <div class="actions">
                 <button id="pause-schedule" type="button" disabled>Pause monitoring</button>
                 <button id="resume-schedule" type="button" disabled>Resume monitoring</button>
                 <button id="check-schedule" type="button" class="secondary" disabled>Check schedule state</button>
@@ -134,48 +134,57 @@
           </section>
         </div>
 
-        <details id="system-health" class="panel diagnostics">
+        <details id="system-health" class="panel">
           <summary class="panel-heading"><h2>System health</h2><span id="health-summary">Checking connection…</span></summary>
-          <div class="setup-content">
-            <div class="recovery-toolbar"><p class="hint">Connection, permissions and retained work.</p><button id="recover" class="secondary">Check retained work</button></div>
-            <div id="health" class="health-grid"></div>
+          <div class="panel-body">
+            <p class="hint">Connection, permissions and retained work.</p>
+            <dl id="health" class="facts"></dl>
+            <p id="health-detail" class="hint"></p>
             <div id="recovery"></div>
+            <div class="actions"><button id="recover" type="button" class="secondary">Check retained work</button></div>
           </div>
         </details>
       </section>
 
       <section id="view-devices" role="tabpanel" aria-labelledby="tab-devices" hidden>
 
-        <section class="panel setup-panel inventory">
-          <div class="panel-heading"><h2>Device inventory</h2><button id="check-moves" class="secondary">Check moved devices</button></div>
+        <section class="panel inventory">
+          <div class="panel-heading"><h2>Device list</h2><button id="check-moves" type="button" class="secondary">Check moved devices</button></div>
           <p id="quick-presence-status" class="hint inventory-status" role="status"></p>
           <div class="device-search">
             <div class="field-search"><label for="device-search">Find a device</label><input id="device-search" type="search" placeholder="Name, IP, MAC address or vendor"></div>
             <button id="filters-toggle" type="button" class="secondary filters-toggle" aria-expanded="false" aria-controls="device-filters">Filter and order</button>
             <div id="device-filters" class="filters">
               <div><label for="device-presence">Show</label><select id="device-presence"><option value="observed">Observed devices</option><option value="candidate">Candidate addresses</option></select></div>
-              <div><label for="device-sort">Order</label><select id="device-sort"><option value="inventory">Inventory order</option><option value="third">Most ad, measurement and telemetry lookups</option><option value="from">Most sent from device</option><option value="to">Most sent to device</option><option value="name">Name</option></select></div>
+              <div><label for="device-sort">Order</label><select id="device-sort"><option value="inventory">List order</option><option value="third">Most ad, measurement and telemetry lookups</option><option value="from">Most sent from device</option><option value="to">Most sent to device</option><option value="name">Name</option></select></div>
               <div id="device-signals" class="signal-filter" role="group" aria-label="Filter observed devices by signal">
                 <button id="signal-all" type="button" class="chip" aria-pressed="true">All observed</button>
-                <button id="signal-third" type="button" class="chip" aria-pressed="false">Ad, measurement or telemetry lookups</button>
+                <button id="signal-third" type="button" class="chip" aria-pressed="false">Ad, measurement and telemetry lookups</button>
                 <button id="signal-silent" type="button" class="chip chip-silent" aria-pressed="false">No DNS via Pi-hole</button>
               </div>
             </div>
             <p id="device-shown" class="shown" role="status"></p>
           </div>
-          <p id="device-filter-empty" class="setup-content hint" hidden>No addresses match these filters.</p>
+          <p id="device-filter-empty" class="filter-empty empty" hidden>No addresses match these filters.</p>
           <div id="device-cards" class="ledger"></div>
-          <p class="limit ledger-limit">Lookups are sampled DNS queries seen by Pi-hole in the last 24 hours, not connections. Byte totals are UniFi counters and lower bounds (a triangle marks totals that skipped a counter reset); they include local traffic and say nothing about destinations. “No DNS via Pi-hole” is a visibility gap, not proof of misbehaviour. Open a device for its sources and coverage.</p>
-          <div id="moves" class="setup-content"></div>
+          <p class="limit ledger-limit">Lookups are sampled from Pi-hole’s DNS log for the last 24 hours; they are not connections. Byte totals are UniFi counters and lower bounds (a triangle marks totals that skipped a counter reset); they include local traffic and say nothing about destinations. “No DNS via Pi-hole” is a visibility gap, not proof of misbehaviour. Open a device for its sources and coverage.</p>
+          <div id="moves"></div>
         </section>
 
 
         <aside id="side-pane" class="side-pane" aria-labelledby="pane-title" hidden>
-          <div class="pane-head"><h2 id="pane-title" tabindex="-1">Device</h2><button id="pane-close" type="button" class="secondary">Close</button></div>
+          <div class="pane-head">
+            <h2 id="pane-title" tabindex="-1">Device</h2>
+            <div class="actions"><button id="pane-back" type="button" class="secondary" hidden>Back to device</button><button id="pane-close" type="button" class="quiet">Close</button></div>
+          </div>
+          <nav id="pane-nav" class="pane-nav" aria-label="Sections of this device" hidden></nav>
           <div id="pane-body" class="pane-body">
             <div id="device-view" hidden>
+              <div id="device-identity"></div>
+              <div id="device-assessment"></div>
               <div id="device-facts"></div>
               <div id="device-analysis"></div>
+              <div id="device-history"></div>
             </div>
             <div class="pane-editor">
             <form id="profile-form" hidden>
@@ -191,36 +200,34 @@
               <label class="wide">Operator notes<textarea id="profile-notes" maxlength="2048" rows="4"></textarea></label>
               <fieldset><legend>Linked privacy issues and mitigation progress</legend><p class="hint">Choose up to four issues. Links retain the reviewed plan; progress is your report of actions performed separately.</p><div id="profile-issue-links"></div></fieldset>
               <p class="hint">Saving creates a new immutable Information revision. It does not change scanning scope or network settings. Existing source-processing allowances apply.</p>
-              <div class="row"><button id="save-profile" type="submit">Save project document</button><button id="cancel-profile" type="button" class="secondary">Close editor</button></div>
+              <div class="actions"><button id="save-profile" type="submit">Save profile</button><button id="cancel-profile" type="button" class="quiet">Close editor</button></div>
             </form>
             <div id="profile-history"></div>
             <div id="profile-markdown" class="document-reader" hidden></div>
             </div>
-        <section id="device-research" class="pane-section pane-tool" aria-labelledby="research-title" hidden>
-          <div class="tool-heading"><h2 id="research-title">Research a device</h2><button id="close-research" type="button" class="secondary">Close</button></div>
-          <div class="panel-body">
-            <p id="research-observation" class="hint"></p>
-            <button id="research-unifi" type="button" class="secondary">Read UniFi product details</button>
-            <p id="research-unifi-result" role="status" class="hint"></p>
-            <form id="research-form">
-              <label>Public manufacturer and exact model<input id="research-model" maxlength="128" required></label>
-              <p class="hint" id="research-search-status">Advisory search sends only this public model name to NVD. Review it before searching.</p>
-              <div class="row"><button id="research-search" type="submit">Look up advisories</button><button id="research-profile" type="button" class="secondary">Use model in profile editor</button></div>
-            </form>
-            <div id="research-results" aria-live="polite"></div>
-          </div>
-        </section>
+            <section id="device-research" class="pane-section" aria-labelledby="research-title" hidden>
+              <h3 id="research-title">Product and advisories</h3>
+              <p id="research-observation" class="hint"></p>
+              <div class="actions"><button id="research-unifi" type="button" class="secondary">Read UniFi product details</button></div>
+              <p id="research-unifi-result" role="status" class="hint"></p>
+              <form id="research-form" class="form-grid">
+                <label>Public manufacturer and exact model<input id="research-model" maxlength="128" required></label>
+                <p class="hint" id="research-search-status">Advisory search sends only this public model name to NVD. Review it before searching.</p>
+                <div class="actions"><button id="research-search" type="submit">Look up advisories</button><button id="research-profile" type="button" class="secondary">Use model in profile editor</button><button id="close-research" type="button" class="quiet">Close lookup</button></div>
+              </form>
+              <div id="research-results" aria-live="polite"></div>
+            </section>
             <div class="pane-editor">
             <form id="background-draft" hidden>
               <h3>Agent research draft: <span id="background-draft-title"></span></h3>
               <div id="background-draft-content"></div>
               <label>Confirmed public model, if known<input id="background-draft-model" maxlength="128"></label>
               <label>Feedback for the model<textarea id="background-draft-feedback" maxlength="512" rows="2"></textarea></label>
-              <div class="row">
+              <div class="actions">
                 <button type="submit" id="background-draft-research">Research with feedback</button>
                 <button type="button" id="background-draft-editor" class="secondary">Use draft in profile editor</button>
                 <button type="button" id="background-draft-reviewed" class="secondary">Mark reviewed</button>
-                <button type="button" id="background-draft-dismiss" class="secondary">Dismiss</button>
+                <button type="button" id="background-draft-dismiss" class="danger">Dismiss draft</button>
               </div>
             </form>
             </div>
@@ -235,12 +242,12 @@
               <label>Sources last checked<input id="issue-checked" type="date" required></label>
               <fieldset><legend>Source citations</legend><div id="issue-sources"></div><button id="add-issue-source" type="button" class="secondary">Add source</button></fieldset>
               <fieldset class="mitigation"><legend>Proposed mitigation for a linked device</legend>
-                <label>Mechanism<select id="issue-mechanism"><option value="firewall">Router / firewall rule</option><option value="pihole">Pi-hole domain block</option><option value="segmentation">Network segmentation</option><option value="device_setting">Device privacy setting</option></select></label>
+                <label>Mechanism<select id="issue-mechanism"><option value="firewall">Router or firewall rule</option><option value="pihole">Pi-hole domain block</option><option value="segmentation">Network segmentation</option><option value="device_setting">Device privacy setting</option></select></label>
                 <label>Direction<select id="issue-direction"><option value="outbound">Outbound from device</option><option value="inbound">Inbound to device</option><option value="lateral">Between local devices</option><option value="not_applicable">Not a traffic rule</option></select></label>
-                <label>Action<select id="issue-action"><option value="block">Block</option><option value="restrict">Restrict</option><option value="disable">Disable setting/service</option></select></label>
-                <label>Source<select id="issue-source-kind"><option value="device">This device</option><option value="peer">An IP / network / internet</option></select></label>
+                <label>Action<select id="issue-action"><option value="block">Block</option><option value="restrict">Restrict</option><option value="disable">Disable setting or service</option></select></label>
+                <label>Source<select id="issue-source-kind"><option value="device">This device</option><option value="peer">An IP, network or the internet</option></select></label>
                 <label id="issue-source-address-label">Source IP or network<input id="issue-source" maxlength="253" required placeholder="Exact source IP/CIDR or internet"></label>
-                <label id="issue-destination-choice-label">Destination<select id="issue-destination-kind"><option value="peer">An IP / network / internet</option><option value="device">This device</option></select></label>
+                <label id="issue-destination-choice-label">Destination<select id="issue-destination-kind"><option value="peer">An IP, network or the internet</option><option value="device">This device</option></select></label>
                 <label id="issue-destination-address-label">Destination IP/domain or setting<input id="issue-destination" maxlength="253" required placeholder="IP/CIDR or internet · domain · setting"></label>
                 <label>Protocol<select id="issue-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="any">All protocols</option><option value="not_applicable">Not a port rule</option></select></label>
                 <label>Destination ports<input id="issue-ports" placeholder="Up to eight comma-separated ports"></label>
@@ -251,32 +258,31 @@
                 <label class="wide">Rollback procedure<textarea id="issue-rollback" maxlength="768" rows="2" required></textarea></label>
               </fieldset>
               <p class="hint">Save this shared issue first, then open a device profile to record applicability and progress. A listening-port scan cannot establish outbound traffic or that a mitigation works.</p>
-              <div class="row"><button id="save-issue" type="submit">Save issue document</button><button id="cancel-issue" type="button" class="secondary">Close editor</button></div>
+              <div class="actions"><button id="save-issue" type="submit">Save issue</button><button id="cancel-issue" type="button" class="quiet">Close editor</button></div>
             </form>
             <div id="issue-history"></div>
             <div id="issue-markdown" class="document-reader" hidden></div>
             </div>
-            <div id="device-history"></div>
           </div>
         </aside>
 
-        <section id="background-research" class="panel setup-panel" hidden>
+        <section id="background-research" class="panel" hidden>
           <div class="panel-heading"><h2>Background device profiles</h2><span id="background-research-count"></span></div>
           <div class="panel-body">
             <p>Use recent quick sightings to draft profiles with Plowshare. The model sees device-name, vendor and service clues. NVD receives only confirmed public model names.</p>
             <label class="check"><input type="checkbox" id="background-research-enabled"> Enable background profile research</label>
             <p class="hint">Requires quick presence checks. One draft runs at a time, up to four admissions per UTC day. Review each draft before saving a profile.</p>
-            <button type="button" id="background-research-load" class="secondary">Load drafts and activity</button>
+            <div class="actions"><button type="button" id="background-research-load" class="secondary">Load drafts and activity</button></div>
             <p id="background-research-detail" role="status" class="hint"></p>
             <div id="background-research-list" class="entries"></div>
           </div>
         </section>
 
-        <section id="background-assessments" class="panel setup-panel" hidden>
+        <section id="background-assessments" class="panel" hidden>
           <div class="panel-heading"><h2>Background device assessments</h2></div>
           <div class="panel-body">
             <p>Assess devices with Plowshare without being asked: first devices with a signal that were never assessed, then never-assessed devices that described themselves, then devices whose signals or reported facts changed since their last assessment. Each assessment uses model calls and report-processing allowance.</p>
-            <form id="assessment-settings" class="row">
+            <form id="assessment-settings" class="inline-form">
               <label>Background assessments per UTC day<input id="assessment-limit" type="number" min="0" max="12" step="1" inputmode="numeric" required></label>
               <button type="submit">Save limit</button>
             </form>
@@ -285,22 +291,22 @@
           </div>
         </section>
 
-        <details id="device-profiles" class="panel setup-panel" hidden>
+        <details id="device-profiles" class="panel" hidden>
           <summary class="panel-heading"><h2>Device knowledge base</h2><span>Project documents · operator-confirmed context</span></summary>
           <div class="panel-body">
             <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
-            <div class="row"><button id="load-profiles" type="button">Load profiles</button><button id="new-profile" type="button" class="secondary">Create device profile</button><button id="reconcile-profiles" type="button" class="secondary">Check retained writes</button></div>
+            <div class="actions"><button id="new-profile" type="button" class="secondary">Create device profile</button><button id="load-profiles" type="button" class="secondary">Load profiles</button><button id="reconcile-profiles" type="button" class="secondary">Check retained writes</button></div>
             <p id="profile-detail" class="hint">Load existing profiles or create one for a monitored device. A profile opens beside the list for reading and editing.</p>
             <div id="profile-records" class="entries"></div>
             <div id="profile-intents" class="hint"></div>
           </div>
         </details>
 
-        <details id="privacy-issues" class="panel setup-panel" hidden>
-          <summary class="panel-heading"><h2>Privacy issues &amp; mitigations</h2><span>Shared issue documents · proposed actions</span></summary>
+        <details id="privacy-issues" class="panel" hidden>
+          <summary class="panel-heading"><h2>Privacy issues and mitigations</h2><span>Shared issue documents · proposed actions</span></summary>
           <div class="panel-body">
             <p>Keep source-backed issues here, then link them to affected devices in their profiles. Firewall and Pi-hole plans are suggestions for you to review and apply separately.</p>
-            <div class="row"><button id="load-issues" type="button">Load issues</button><button id="new-issue" type="button" class="secondary">Create privacy issue</button><button id="reconcile-issues" type="button" class="secondary">Check retained writes</button></div>
+            <div class="actions"><button id="new-issue" type="button" class="secondary">Create privacy issue</button><button id="load-issues" type="button" class="secondary">Load issues</button><button id="reconcile-issues" type="button" class="secondary">Check retained writes</button></div>
             <p id="issue-detail" class="hint">No network settings are changed by saving a plan.</p>
             <div id="issue-records" class="entries"></div>
             <div id="issue-intents" class="hint"></div>
@@ -309,28 +315,28 @@
       </section>
 
       <section id="view-findings" role="tabpanel" aria-labelledby="tab-findings" hidden>
-        <div class="findings-workspace">
+        <div class="workspace">
           <div class="stack">
             <section class="panel"><div class="panel-heading"><h2>Findings to review</h2><span>Expected changes keep their evidence</span></div><div id="findings" class="entries"></div></section>
-            <section class="panel reports"><div class="panel-heading"><h2>Agent investigations</h2><span>From Plowshare</span></div><div id="reports" class="entries"><p class="empty">Loading reports…</p></div></section>
+            <section class="panel"><div class="panel-heading"><h2>Agent investigations</h2><span>From Plowshare</span></div><div id="reports" class="entries"><p class="empty">Loading reports…</p></div></section>
           </div>
-          <section id="report-panel" class="panel reader-panel"><div class="panel-heading"><h2>Investigation report</h2><span id="report-selection">Select a report</span><button id="close-report" type="button" class="secondary reader-close">Close</button></div><div id="report-content" class="report-reader"><p class="empty">Select an investigation to read its findings, sources and proposed mitigations.</p></div></section>
+          <section id="report-panel" class="panel reader-panel"><div class="panel-heading"><h2>Investigation report</h2><span id="report-selection">Select a report</span><button id="close-report" type="button" class="quiet reader-close">Close</button></div><div id="report-content" class="report-reader"><p class="empty">Select an investigation to read its findings, sources and proposed mitigations.</p></div></section>
         </div>
       </section>
 
       <section id="view-evidence" role="tabpanel" aria-labelledby="tab-evidence" hidden>
         <div class="workspace">
           <section class="panel"><div class="panel-heading"><h2>Collections</h2><span>Latest 50</span></div><div id="collections" class="entries"><p class="empty">Loading collections…</p></div></section>
-          <section id="evidence-panel" class="panel reader-panel"><div class="panel-heading"><h2>Collection evidence</h2><span id="selection">Select a collection</span><button id="close-evidence" type="button" class="secondary reader-close">Close</button></div><div id="evidence" class="evidence"><p class="empty">Each collection keeps its scope, observations, changes and gaps. Select one to inspect the evidence.</p></div></section>
+          <section id="evidence-panel" class="panel reader-panel"><div class="panel-heading"><h2>Collection evidence</h2><span id="selection">Select a collection</span><button id="close-evidence" type="button" class="quiet reader-close">Close</button></div><div id="evidence" class="evidence"><p class="empty">Each collection keeps its scope, observations, changes and gaps. Select one to inspect the evidence.</p></div></section>
         </div>
-        <p class="limit footnote">An observed DNS query does not reveal its encrypted payload. A published collection does not mean an investigation has finished. Missing sources remain visible as gaps.</p>
+        <p class="limit footnote">An observed DNS lookup does not reveal its encrypted payload. A published collection does not mean an investigation has finished. Missing sources remain visible as gaps.</p>
       </section>
 
       <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
-        <p class="settings-intro">Choose devices and connections here. Saving settings does not start a scan or resume the schedule.</p>
-        <section id="monitoring" class="panel setup-panel" hidden>
+        <p class="view-intro">Choose devices and connections here. Saving settings does not start a scan or resume the schedule.</p>
+        <section id="monitoring" class="panel" hidden>
           <div class="panel-heading"><h2>Choose what to monitor</h2><span id="monitor-state">Device discovery</span></div>
-          <div class="setup-content">
+          <div class="panel-body">
             <p>Find devices on your network, then select the ones you want to watch.</p>
             <form id="discover-form" class="discover-form">
               <div><label for="network">Network subnet</label><input id="network" placeholder="Private network CIDR, e.g. 192.168.0.0/24" required></div>
@@ -341,7 +347,7 @@
             <div id="devices" class="devices"></div>
             <form id="monitor-form">
               <label for="targets">Addresses to watch</label><input id="targets" aria-describedby="targets-help" placeholder="Private IPv4 addresses or a subnet such as 192.168.0.0/24">
-              <p class="hint" id="targets-help">Subnet addresses start as candidates. An open TCP service or an observed identity adds the address to the device inventory.</p>
+              <p class="hint" id="targets-help">Subnet addresses start as candidates. An open TCP service or an observed identity adds the address to the device list.</p>
               <label for="device-labels">Device names</label><textarea id="device-labels" rows="3" placeholder="One selected address=name per line, e.g. 192.168.0.12=Living room TV"></textarea>
               <p class="hint" id="identity-source">Names help identify devices. Pi-hole v6 and UniFi can add observed device identities.</p>
               <div class="monitor-actions">
@@ -356,20 +362,20 @@
             </form>
           </div>
         </section>
-        <details class="panel setup-panel">
+        <details class="panel">
           <summary class="panel-heading"><h2>Connect Pi-hole v6</h2><span>Optional device identity and DNS evidence</span></summary>
-          <form id="pihole-form" class="setup-content form-grid">
+          <form id="pihole-form" class="panel-body form-grid">
             <label>Pi-hole origin<input id="pihole-origin" type="url" placeholder="Your Pi-hole HTTP(S) origin" required></label>
             <label>Application password<input id="pihole-password" type="password" autocomplete="off" required></label>
-            <div class="actions"><button id="pihole-test" type="button" class="secondary">Test connection</button><button id="pihole-save" type="submit" disabled>Save connection</button></div>
+            <div class="actions"><button id="pihole-save" type="submit" disabled>Save connection</button><button id="pihole-test" type="button" class="secondary">Test connection</button></div>
             <p id="pihole-saved" class="hint" role="status">Checking saved connection…</p>
             <p id="pihole-blocker" class="hint"></p>
             <p id="pihole-detail" class="hint" role="status" aria-live="polite">Save stores your connection and password in a private file, even when disconnected. Test connection is optional.</p>
           </form>
         </details>
-        <details class="panel setup-panel">
+        <details class="panel">
           <summary class="panel-heading"><h2>Investigation and alert preferences</h2></summary>
-          <form id="preferences-form" class="setup-content form-grid">
+          <form id="preferences-form" class="panel-body form-grid">
             <label class="check"><input id="automatic" type="checkbox">Automatically investigate new findings</label>
             <label>Daily automatic investigation limit<input id="daily-limit" type="number" min="1" max="50" required></label>
             <label>Cooldown in minutes<input id="cooldown" type="number" min="0" max="1440" required></label>
@@ -378,21 +384,25 @@
             <p class="hint">Limits control admission of automatic investigations, including the baseline. They do not cap tokens or monetary spend. Explicit investigations may admit additional paid work.</p>
           </form>
         </details>
-        <details class="panel setup-panel">
+        <details class="panel">
           <summary class="panel-heading"><h2>Change schedule frequency</h2><span>Changes deploy an Application revision</span></summary>
-          <form id="schedule-form" class="setup-content form-grid">
+          <form id="schedule-form" class="panel-body form-grid">
             <label>Frequency<select id="frequency"><option value="15m">Every 15 minutes</option><option value="hourly">Hourly</option><option value="daily">Daily at 09:00</option></select></label>
             <label>Time zone<input id="zone" placeholder="IANA time zone" required></label>
             <label class="check"><input id="schedule-paused" type="checkbox">Start this revision paused</label>
             <label>Deployment administrator password<input id="administrator-password" type="password" autocomplete="off" required></label>
             <div class="actions"><button type="submit">Review schedule revision</button><button id="check-deployment" type="button" class="secondary">Check retained deployment</button></div>
             <p id="deployment-state" class="hint"></p>
-            <div id="schedule-draft" hidden><div id="schedule-review" class="hint"></div><label>Server FileStore<select id="schedule-store"></select></label><button id="deploy-schedule" type="button">Deploy reviewed revision</button></div>
+            <div id="schedule-draft" class="form-grid" hidden><div id="schedule-review" class="hint"></div><label>Server FileStore<select id="schedule-store"></select></label><div class="actions"><button id="deploy-schedule" type="button">Deploy reviewed revision</button></div></div>
             <p class="hint">Review uses a temporary administrator login. Enter the password again to deploy; it is never saved. The collector continues running with its separate service account.</p>
           </form>
         </details>
       </section>
     </section>
+    <div id="notice-bar" class="notice message" hidden>
+      <p id="notice" role="status" aria-live="polite"></p>
+      <button id="notice-dismiss" type="button" class="quiet">Dismiss</button>
+    </div>
   </main>
   <footer>Network Privacy Watch <span>Evidence stays in your Plowshare project.</span></footer>
 </body>
