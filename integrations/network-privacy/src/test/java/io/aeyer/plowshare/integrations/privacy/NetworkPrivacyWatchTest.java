@@ -238,9 +238,9 @@ class NetworkPrivacyWatchTest {
         java.util.List.of("privacy_device_assessor", "privacy_reviewer"),
         json(manifest.path("calls")));
     assertTrue(manifest.path("scopes").isEmpty());
-    // Three agent runs normally and four with a correction; each run's own tool
-    // turns also draw on the orchestration allowance.
-    assertTrue(manifest.path("max-model-calls").asInt() <= 24);
+    // Three agent runs normally, four with a correction and at most one repair
+    // run; each run's own tool turns also draw on the orchestration allowance.
+    assertTrue(manifest.path("max-model-calls").asInt() <= 28);
     assertEquals(1, manifest.path("max-returns").asInt());
   }
 

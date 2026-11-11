@@ -137,9 +137,12 @@ class NetworkDeviceAssessmentTest {
     var host = new Host(PREVIOUS);
     host.assessor.add(assessment().toString());
     host.reviewer.add(review("needs_corrections", "c1", "weakened").toString());
+    // The repair run repeats the added concern, so the run fails.
+    host.assessor.add(twoConcerns().toString());
     host.assessor.add(twoConcerns().toString());
     var failure = assertThrows(IllegalStateException.class, host::finish);
     assertTrue(failure.getMessage().contains("c2"), failure.getMessage());
+    assertTrue(host.assessorTasks.get(2).contains("c2"), host.assessorTasks.get(2));
     assertEquals(0, host.writes);
   }
 
@@ -165,8 +168,11 @@ class NetworkDeviceAssessmentTest {
     }
     for (String assessor : new String[] {"not JSON", "<|channel|>final " + assessment(), "[]"}) {
       var host = new Host(PREVIOUS);
+      // The first invalid answer gets one repair run; the second fails the run.
+      host.assessor.add(assessor);
       host.assessor.add(assessor);
       assertThrows(IllegalStateException.class, host::finish, assessor);
+      assertEquals(2, host.assessorTasks.size());
       assertEquals(0, host.writes);
       assertEquals(0, host.reviewerTasks.size());
     }
@@ -192,6 +198,7 @@ class NetworkDeviceAssessmentTest {
       edit.accept(value);
       var host = new Host(PREVIOUS);
       host.assessor.add(value.toString());
+      host.assessor.add(value.toString());
       assertThrows(IllegalStateException.class, host::finish, value.toString());
       assertEquals(0, host.reviewerTasks.size(), value.toString());
       assertEquals(0, host.writes);
@@ -199,30 +206,141 @@ class NetworkDeviceAssessmentTest {
   }
 
   @Test
-  void unknown_enums_absent_signals_and_extra_fields_are_rejected() throws Exception {
+  void unknown_enums_and_missing_fields_are_rejected() throws Exception {
     List<Consumer<ObjectNode>> edits =
         List.of(
             a -> ((ObjectNode) a.path("what_it_is")).put("confidence", "certain"),
             a -> ((ObjectNode) a.path("concerns").get(0)).put("level", "critical"),
             a -> ((ObjectNode) a.path("concerns").get(0)).put("confidence", "sure"),
-            a -> ((ObjectNode) a.path("who_it_talks_to").get(0)).put("purpose", "spyware"),
-            // Advertising is a known purpose, but this dossier has no advertising lookups.
-            a -> ((ObjectNode) a.path("who_it_talks_to").get(0)).put("purpose", "advertising"),
-            a -> ((ArrayNode) a.path("concerns").get(0).path("signals")).add("upload_heavy"),
-            a -> ((ArrayNode) a.path("concerns").get(0).path("signals")).add("made_up"),
-            a -> ((ArrayNode) a.path("concerns").get(0).path("signals")).removeAll(),
-            a -> ((ObjectNode) a.path("concerns").get(0)).put("id", "concern-1"),
-            a -> a.put("verdict", "accepted"),
             a -> a.remove("questions"),
-            a -> a.put("in_short", "word ".repeat(61).trim()));
+            a -> ((ObjectNode) a.path("concerns").get(0)).remove("fact"));
     for (var edit : edits) {
       var value = assessment();
       edit.accept(value);
       var host = new Host(PREVIOUS);
       host.assessor.add(value.toString());
+      host.assessor.add(value.toString());
       assertThrows(IllegalStateException.class, host::finish, value.toString());
       assertEquals(0, host.writes, value.toString());
     }
+  }
+
+  @Test
+  void form_problems_are_fixed_and_listed_in_the_evidence() throws Exception {
+    record Case(Consumer<ObjectNode> edit, String note, Consumer<JsonNode> check) {}
+    List<Case> cases =
+        List.of(
+            // Advertising is a known purpose, but this dossier has no advertising lookups.
+            new Case(
+                a -> ((ObjectNode) a.path("who_it_talks_to").get(0)).put("purpose", "advertising"),
+                "this device has no advertising lookups",
+                r -> assertFalse(r.path("text").asText().contains("OzTAM measures"))),
+            new Case(
+                a -> ((ObjectNode) a.path("who_it_talks_to").get(0)).put("purpose", "spyware"),
+                "this device has no spyware lookups",
+                r -> {}),
+            new Case(
+                a -> ((ArrayNode) a.path("concerns").get(0).path("signals")).add("upload_heavy"),
+                "Removed signal",
+                r -> assertEquals(1, r.path("findings").size())),
+            new Case(
+                a -> ((ArrayNode) a.path("concerns").get(0).path("signals")).add("made_up"),
+                "Removed signal",
+                r -> {}),
+            new Case(
+                a -> ((ObjectNode) a.path("concerns").get(0)).put("id", "concern-1"),
+                "Renumbered concern ids",
+                r -> assertEquals("c1", r.path("findings").get(0).path("id").asText())),
+            new Case(
+                a -> a.put("verdict", "accepted"), "Ignored unexpected assessment fields", r -> {}),
+            new Case(
+                a -> a.put("in_short", "This is a long sentence. ".repeat(20).trim()),
+                "Shortened in short",
+                r -> {}),
+            new Case(
+                a ->
+                    ((ObjectNode) a.path("concerns").get(0))
+                        .put("fact", "The TV looked up OzTAM. " + "x".repeat(500)),
+                "Shortened concerns 1 fact to 400 characters",
+                r -> assertTrue(r.path("text").asText().contains("The TV looked up OzTAM."))));
+    for (var item : cases) {
+      var value = assessment();
+      item.edit().accept(value);
+      var host = new Host(PREVIOUS);
+      host.assessor.add(value.toString());
+      host.reviewer.add(review("accepted", "c1", "holds").toString());
+      host.finish();
+      assertEquals(1, host.writes, value.toString());
+      assertEquals(1, host.assessorTasks.size(), "Form fixes need no repair run");
+      var text = host.report.path("text").asText();
+      var evidence = text.substring(text.indexOf("Automatic fixes to the assessor answer:"));
+      assertTrue(evidence.contains(item.note()), evidence);
+      item.check().accept(host.report);
+    }
+  }
+
+  @Test
+  void a_concern_without_a_valid_signal_becomes_an_open_question() throws Exception {
+    // PROD's first TV run cited the DNS purpose "telemetry" as a signal code.
+    var value = assessment();
+    ((ArrayNode) value.path("concerns").get(0).path("signals")).removeAll().add("telemetry");
+    var host = new Host(PREVIOUS);
+    host.assessor.add(value.toString());
+    host.reviewer.add(review("accepted").toString());
+    host.finish();
+    assertEquals(1, host.writes);
+    assertEquals(1, host.assessorTasks.size());
+    var reviewed = payload(host.reviewerTasks.getFirst()).path("assessment");
+    assertEquals(0, reviewed.path("concerns").size());
+    assertTrue(
+        reviewed
+            .path("questions")
+            .get(1)
+            .asText()
+            .contains("Worth checking, though nothing in this data shows it: Viewing measurement"));
+    String first = host.assessorTasks.get(0).split("\\nDATA:\\n", 2)[0];
+    assertTrue(
+        first.contains("Allowed concern signals for this device, copied exactly: measurement_dns."),
+        first);
+    assertTrue(host.report.path("text").asText().contains("Moved concern"));
+  }
+
+  @Test
+  void a_safety_problem_gets_one_repair_run_with_the_validator_message() throws Exception {
+    var invalid = assessment();
+    invalid.put("in_short", "Ports 443<br>8009 are open.");
+    var host = new Host(PREVIOUS);
+    host.assessor.add(invalid.toString());
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    assertEquals(1, host.writes);
+    assertEquals(2, host.assessorTasks.size());
+    String repair = host.assessorTasks.get(1).split("\\nDATA:\\n", 2)[0];
+    assertTrue(repair.contains("rejected by the validator"), repair);
+    assertTrue(repair.contains("HTML and markup are not allowed"), repair);
+    assertEquals(assessment(), payload(host.reviewerTasks.getFirst()).path("assessment"));
+  }
+
+  @Test
+  void host_refusals_are_not_repaired() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add("E_NO_EXEC: delegate unavailable");
+    assertThrows(IllegalStateException.class, host::finish);
+    assertEquals(1, host.assessorTasks.size());
+    assertEquals(0, host.writes);
+  }
+
+  @Test
+  void the_draft_and_correction_share_one_repair() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add("not JSON");
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(review("needs_corrections", "c1", "weakened").toString());
+    host.assessor.add("not JSON");
+    assertThrows(IllegalStateException.class, host::finish);
+    assertEquals(3, host.assessorTasks.size());
+    assertEquals(0, host.writes);
   }
 
   @Test

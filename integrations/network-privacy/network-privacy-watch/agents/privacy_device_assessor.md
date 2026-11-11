@@ -59,7 +59,10 @@ Return only one JSON object with exactly these fields:
 - concerns: up to 5 of {id (c1 to c5, unique), title (100), level
   (potential_breach, worth_checking or expected), fact (400), inference (400),
   confidence (high, medium or low), signals (1 to 6 codes present in
-  DATA.dossier.signals), mitigation (400), verify (300)}.
+  DATA.dossier.signals, copied exactly as the task lists them),
+  mitigation (400), verify (300)}. DNS purposes such as telemetry or
+  measurement are not signal codes. A concern no listed signal supports is
+  not a concern; mention it in what_it_sends or questions instead.
 - questions: up to 5 strings (200) the owner could answer.
 
 Numbers in parentheses are character limits. When DATA.review is present, you
