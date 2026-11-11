@@ -70,3 +70,7 @@ Coverage:
 - The port scan covers only the configured TCP ports; other services are unknown.
 - DNS lookups show names resolved, not data sent.
 - Byte totals include local traffic and say nothing about destinations.
+
+Automatic fixes to the assessor answer:
+
+- None

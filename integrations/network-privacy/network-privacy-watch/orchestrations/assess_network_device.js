@@ -113,7 +113,7 @@ function initial(input) {
   return {stage: 0, pending: null, entered: false, request,
     reading: {revision: request.dossier, text: '', total: null}, ready: false, waits: 0,
     dossier: null, inputs: null, draft: null, review: null, correction: null, report: null,
-    repair: null, repairs: 0};
+    repair: null, repairs: 0, fixes: []};
 }
 
 // One repair run per assessment: an assessor answer that breaks the contract
@@ -179,56 +179,130 @@ function agentJson(raw, field) {
   return parsed.value;
 }
 
-// Validates the assessor's whole object and returns a trimmed copy. Every
-// string passes prose(); enums, counts, ids and signals are checked against the
-// contract and the dossier before anything is reviewed or written.
-function assessmentResult(raw, dossier) {
-  const value = record(agentJson(raw, 'Assessor'), 'assessment',
+// Validates the assessor's whole object and returns a trimmed copy.
+// Two kinds of problem are treated differently:
+// - Safety: markup, tables, identifiers, exfiltration claims, unknown enums,
+//   missing fields or invalid JSON are rejected (one repair run, see
+//   repairable). Nothing is guessed or fabricated for them.
+// - Form: overlong text, extra fields, too many items, a signal code or DNS
+//   purpose this dossier does not contain, or malformed concern ids. These are
+//   fixed here, by removing or shortening, never by adding claims, and each
+//   fix is listed in the report's Evidence section.
+// A concern left with no valid signal becomes an open question, because the
+// report may only raise concerns that something in the dossier supports.
+function assessmentResult(raw, dossier, options) {
+  const fixes = [];
+  const fix = message => { if (fixes.length < 16) fixes.push(message); };
+  // Readable field names for the Evidence list: concerns[0].fact -> concerns 1 fact.
+  const label = field => field.replace(/\[(\d+)\]/g, (_, n) => ' ' + (Number(n) + 1)).replace(/[._]/g, ' ');
+  const fields = (value, field, keys) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) fail('Invalid ' + field);
+    const missing = keys.filter(key => !Object.prototype.hasOwnProperty.call(value, key));
+    if (missing.length) fail('Invalid ' + field + ': missing ' + missing.join(', '));
+    const extra = Object.keys(value).filter(key => !keys.includes(key));
+    if (extra.length) fix('Ignored unexpected ' + label(field) + ' fields: ' + plain(extra.join(', '), 120) + '.');
+    return value;
+  };
+  const fit = (value, field, limit) => {
+    if (typeof value !== 'string' || value.length <= limit) return prose(value, field, limit);
+    fix('Shortened ' + label(field) + ' to ' + limit + ' characters.');
+    return prose(shorten(value, limit), field, limit);
+  };
+  const upTo = (value, field, min, max) => {
+    const items = list(value, field, min, Number.MAX_SAFE_INTEGER);
+    if (items.length > max) fix('Kept the first ' + max + ' of ' + items.length + ' ' + label(field) + '.');
+    return items.slice(0, max);
+  };
+  const value = fields(agentJson(raw, 'Assessor'), 'assessment',
     ['in_short', 'what_it_is', 'who_it_talks_to', 'what_it_sends', 'concerns', 'questions']);
-  const inShort = prose(value.in_short, 'in_short', 480);
-  if (inShort.split(/\s+/).length > 60) fail('Invalid in_short: more than 60 words');
-  const what = record(value.what_it_is, 'what_it_is', ['text', 'confidence', 'basis']);
+  let inShort = fit(value.in_short, 'in_short', 480);
+  if (inShort.split(/\s+/).length > 60) {
+    fix('Shortened in short to 60 words.');
+    inShort = words(inShort, 60);
+  }
+  const what = fields(value.what_it_is, 'what_it_is', ['text', 'confidence', 'basis']);
   const purposes = (dossier.dns?.groups || []).map(group => group.kind);
   const signals = dossier.signals.map(signal => signal.code);
-  const ids = new Set();
+  const questions = upTo(value.questions, 'questions', 0, 5).map((item, i) => fit(item, 'questions[' + i + ']', 200));
+  const concerns = [];
+  upTo(value.concerns, 'concerns', 0, 5).forEach((item, i) => {
+    const field = 'concerns[' + i + ']';
+    const concern = fields(item, field, ['id', 'title', 'level', 'fact', 'inference', 'confidence', 'signals', 'mitigation', 'verify']);
+    const title = fit(concern.title, field + '.title', 100);
+    const cited = [];
+    for (const code of list(concern.signals, field + '.signals', 0, Number.MAX_SAFE_INTEGER)) {
+      if (typeof code === 'string' && signals.includes(code) && !cited.includes(code)) cited.push(code);
+      else fix('Removed signal ' + plain(JSON.stringify(String(code)).slice(0, 48), 64) + ' from concern "' + plain(title, 100) + '": this device has no such signal.');
+    }
+    if (!cited.length) {
+      fix('Moved concern "' + plain(title, 100) + '" to open questions: no signal in this data supports it.');
+      if (questions.length < 5) questions.push(fit('Worth checking, though nothing in this data shows it: ' + title, 'questions[' + questions.length + ']', 200));
+      return;
+    }
+    concerns.push({id: concern.id, title,
+      level: member(concern.level, field + '.level', LEVELS),
+      fact: fit(concern.fact, field + '.fact', 400), inference: fit(concern.inference, field + '.inference', 400),
+      confidence: member(concern.confidence, field + '.confidence', CONFIDENCE), signals: cited,
+      mitigation: fit(concern.mitigation, field + '.mitigation', 400), verify: fit(concern.verify, field + '.verify', 300)});
+  });
+  // A draft's ids are renumbered when malformed; a correction must keep the
+  // reviewed ids, so a bad one there is still rejected.
+  const ids = concerns.map(concern => concern.id);
+  const valid = ids.every(id => typeof id === 'string' && /^c[1-5]$/.test(id)) && new Set(ids).size === ids.length;
+  if (!valid) {
+    if (!options.renumber) fail('Invalid concern ids: a correction must keep the reviewed ids');
+    fix('Renumbered concern ids.');
+    concerns.forEach((concern, i) => { concern.id = 'c' + (i + 1); });
+  }
+  const talks = [];
+  upTo(value.who_it_talks_to, 'who_it_talks_to', 0, 8).forEach((item, i) => {
+    const field = 'who_it_talks_to[' + i + ']';
+    const party = fields(item, field, ['party', 'purpose', 'observation', 'meaning']);
+    const name = fit(party.party, field + '.party', 80);
+    if (!PURPOSES.includes(party.purpose) || !purposes.includes(party.purpose)) {
+      fix('Removed "' + plain(name, 80) + '" from who it talks to: this device has no ' + plain(String(party.purpose), 32) + ' lookups.');
+      return;
+    }
+    talks.push({party: name, purpose: party.purpose,
+      observation: fit(party.observation, field + '.observation', 300), meaning: fit(party.meaning, field + '.meaning', 300)});
+  });
+  const sends = fields(value.what_it_sends, 'what_it_sends', ['observed', 'unknown']);
   return {
-    in_short: inShort,
-    what_it_is: {
-      text: prose(what.text, 'what_it_is.text', 400),
-      confidence: member(what.confidence, 'what_it_is.confidence', CONFIDENCE),
-      basis: list(what.basis, 'what_it_is.basis', 1, 6).map((item, i) => prose(item, 'what_it_is.basis[' + i + ']', 200))
+    value: {
+      in_short: inShort,
+      what_it_is: {
+        text: fit(what.text, 'what_it_is.text', 400),
+        confidence: member(what.confidence, 'what_it_is.confidence', CONFIDENCE),
+        basis: upTo(what.basis, 'what_it_is.basis', 1, 6).map((item, i) => fit(item, 'what_it_is.basis[' + i + ']', 200))
+      },
+      who_it_talks_to: talks,
+      what_it_sends: {observed: fit(sends.observed, 'what_it_sends.observed', 400), unknown: fit(sends.unknown, 'what_it_sends.unknown', 400)},
+      concerns,
+      questions
     },
-    who_it_talks_to: list(value.who_it_talks_to, 'who_it_talks_to', 0, 8).map((item, i) => {
-      const field = 'who_it_talks_to[' + i + ']';
-      const party = record(item, field, ['party', 'purpose', 'observation', 'meaning']);
-      member(party.purpose, field + '.purpose', PURPOSES);
-      if (!purposes.includes(party.purpose)) fail('Invalid ' + field + '.purpose: no ' + party.purpose + ' lookups in the dossier');
-      return {party: prose(party.party, field + '.party', 80), purpose: party.purpose,
-        observation: prose(party.observation, field + '.observation', 300), meaning: prose(party.meaning, field + '.meaning', 300)};
-    }),
-    what_it_sends: (() => {
-      const sends = record(value.what_it_sends, 'what_it_sends', ['observed', 'unknown']);
-      return {observed: prose(sends.observed, 'what_it_sends.observed', 400), unknown: prose(sends.unknown, 'what_it_sends.unknown', 400)};
-    })(),
-    concerns: list(value.concerns, 'concerns', 0, 5).map((item, i) => {
-      const field = 'concerns[' + i + ']';
-      const concern = record(item, field, ['id', 'title', 'level', 'fact', 'inference', 'confidence', 'signals', 'mitigation', 'verify']);
-      if (typeof concern.id !== 'string' || !/^c[1-5]$/.test(concern.id) || ids.has(concern.id)) fail('Invalid ' + field + '.id');
-      ids.add(concern.id);
-      const cited = list(concern.signals, field + '.signals', 1, SIGNALS.length);
-      if (new Set(cited).size !== cited.length) fail('Invalid ' + field + '.signals: repeated signal');
-      for (const code of cited) {
-        member(code, field + '.signals', SIGNALS);
-        if (!signals.includes(code)) fail('Invalid ' + field + '.signals: ' + code + ' is not in the dossier');
-      }
-      return {id: concern.id, title: prose(concern.title, field + '.title', 100),
-        level: member(concern.level, field + '.level', LEVELS),
-        fact: prose(concern.fact, field + '.fact', 400), inference: prose(concern.inference, field + '.inference', 400),
-        confidence: member(concern.confidence, field + '.confidence', CONFIDENCE), signals: cited,
-        mitigation: prose(concern.mitigation, field + '.mitigation', 400), verify: prose(concern.verify, field + '.verify', 300)};
-    }),
-    questions: list(value.questions, 'questions', 0, 5).map((item, i) => prose(item, 'questions[' + i + ']', 200))
+    fixes
   };
+}
+
+// Shortens to whole sentences within the limit when possible, else whole
+// words with an ellipsis. It only removes text, so it cannot add a claim.
+function shorten(value, limit) {
+  const text = String(value).trim();
+  if (text.length <= limit) return text;
+  const head = text.slice(0, limit);
+  const sentence = head.search(/[.!?](?=\s[^.!?]*$)/);
+  if (sentence >= limit / 3) return head.slice(0, sentence + 1);
+  const space = head.lastIndexOf(' ', limit - 2);
+  return (space > 0 ? head.slice(0, space) : head.slice(0, limit - 1)).replace(/[\s,;:]+$/, '') + '…';
+}
+function words(value, count) {
+  const sentences = value.match(/[^.!?]+[.!?]+(\s|$)/g) || [value];
+  let out = '';
+  for (const sentence of sentences) {
+    if ((out + sentence).trim().split(/\s+/).length > count) break;
+    out += sentence;
+  }
+  return out.trim() || value.split(/\s+/).slice(0, count).join(' ') + '…';
 }
 
 // The reviewer judges every concern the assessor returned, exactly once.
@@ -367,7 +441,9 @@ function render(state) {
     'Signals:', '',
     ...(dossier.signals.length ? dossier.signals.map(signal => '- `' + signal.code + '`: ' + plain(signal.basis, 512)) : ['- None']), '',
     'Coverage:', '',
-    ...(dossier.coverage.length ? dossier.coverage.map(line => '- ' + plain(line, 512)) : ['- No coverage notes']), '');
+    ...(dossier.coverage.length ? dossier.coverage.map(line => '- ' + plain(line, 512)) : ['- No coverage notes']), '',
+    'Automatic fixes to the assessor answer:', '',
+    ...((state.fixes || []).length ? state.fixes.map(line => '- ' + plain(line, 400)) : ['- None']), '');
   return out.join('\n');
 }
 
@@ -425,19 +501,24 @@ function consume(state, input, todo) {
       state.reading = null;
     }
   } else if (pending === 'assessor') {
-    repairable(state, () => { state.draft = assessmentResult(input.result, state.dossier); });
+    repairable(state, () => {
+      const parsed = assessmentResult(input.result, state.dossier, {renumber: true});
+      state.draft = parsed.value;
+      state.fixes = parsed.fixes;
+    });
   } else if (pending === 'reviewer') {
     state.review = reviewResult(input.result, state.draft);
   } else if (pending === 'correction') {
     repairable(state, () => {
-      const corrected = assessmentResult(input.result, state.dossier);
+      const parsed = assessmentResult(input.result, state.dossier, {renumber: false});
+      const corrected = parsed.value;
       const reviewed = state.draft.concerns.map(concern => concern.id);
       for (const concern of corrected.concerns) {
         if (!reviewed.includes(concern.id)) fail('Corrected assessment added concern ' + concern.id + ', which was never reviewed');
       }
       state.correction = corrected;
-    });
-  } else if (pending === 'report') {
+      state.fixes = state.fixes.concat(parsed.fixes).slice(0, 16);
+    });  } else if (pending === 'report') {
     const receipt = json(toolResult(input.result), 'report admission');
     uuid(receipt.revision, 'report revision');
     uuid(receipt.resource, 'report resource');
