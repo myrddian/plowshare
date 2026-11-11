@@ -316,11 +316,19 @@ var PrivacyMarkdown = (() => {
       return null;
     }
   }
+  var lineBreak = /<br\s*\/?>/i;
+  function appendText(parent, text) {
+    const parts = text.split(lineBreak);
+    parts.forEach((part, index) => {
+      if (index) parent.append(document.createElement("br"));
+      if (part) parent.append(document.createTextNode(part));
+    });
+  }
   function appendSpans(parent, spans) {
     for (const span of spans) {
       switch (span.kind) {
         case "text":
-          parent.append(document.createTextNode(span.text));
+          appendText(parent, span.text);
           break;
         case "code":
           parent.append(node("code", span.text));

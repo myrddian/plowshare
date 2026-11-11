@@ -16,10 +16,22 @@ function webAddress(address) {
   }
 }
 
+// Models often put a literal <br> inside Markdown table cells, where Markdown
+// has no line-break syntax. Only that exact tag becomes a <br> element; every
+// other angle-bracket sequence stays inert text, so no HTML is interpreted.
+const lineBreak = /<br\s*\/?>/i;
+function appendText(parent, text) {
+  const parts = text.split(lineBreak);
+  parts.forEach((part, index) => {
+    if (index) parent.append(document.createElement('br'));
+    if (part) parent.append(document.createTextNode(part));
+  });
+}
+
 function appendSpans(parent, spans) {
   for (const span of spans) {
     switch (span.kind) {
-      case 'text': parent.append(document.createTextNode(span.text)); break;
+      case 'text': appendText(parent, span.text); break;
       case 'code': parent.append(node('code', span.text)); break;
       case 'strong':
       case 'em': {

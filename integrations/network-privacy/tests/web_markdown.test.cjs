@@ -50,4 +50,16 @@ test('tool names and partial Markdown remain visible without swallowing text', (
   assert.match(result.textContent, /file_read and file_glob \*\*unfinished/);
   assert.match(result.textContent, /partial/);
 });
+test('a literal <br> in text becomes a line break and nothing else is interpreted', () => {
+  const result = reader()('| Item | Observation |\n| --- | --- |\n| Ports | 192.0.2.1 (open)<br>• 192.0.2.2 (open)<BR/>end |\n\nLine one<br />line two <b>bold</b>');
+  const cell = nodes(result,'td')[1];
+  assert.equal(nodes(cell,'br').length, 2);
+  assert.doesNotMatch(cell.textContent, /<br/i);
+  assert.match(cell.textContent, /192\.0\.2\.1 \(open\)• 192\.0\.2\.2 \(open\)end/);
+  const paragraph = nodes(result,'p').at(-1);
+  assert.equal(nodes(paragraph,'br').length, 1);
+  // Any other tag stays inert text.
+  assert.match(paragraph.textContent, /<b>bold<\/b>/);
+  assert.equal(nodes(result,'b').length, 0);
+});
 module.exports = {reader, nodes};
