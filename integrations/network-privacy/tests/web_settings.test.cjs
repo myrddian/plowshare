@@ -55,10 +55,17 @@ test('DNS profiling is a separate setting and shows blocked lookups as DNS evide
     groups:[{kind:'advertising', queries:3, distinct:1,
       destinations:[{domain:'ads.example', provider:'Fixture Ads', queries:3, blocked:2}]}],
   };
-  const rendered = JSON.stringify(vm.runInContext('renderDnsActivity(activity)', context));
+  const tree = vm.runInContext('renderDnsActivity(activity)', context);
+  const rendered = JSON.stringify(tree);
   assert.match(rendered, /Partial coverage in 1 windows/);
-  assert.match(rendered, /Connections and data transfers require gateway flow records/);
-  assert.match(rendered, /ads.example · Fixture Ads · 3 queries · 2 reported blocked/);
+  assert.match(rendered, /Counts are sampled DNS lookups, not connections or bytes\. Traffic volume is under How much it sends; which host received those bytes is not observed\./);
+  // Destinations are a table: one row per domain under labelled columns.
+  const texts = node => [node.textContent, ...(node.children || []).flatMap(texts)].filter(Boolean);
+  const rows = tree.children.find(child => child.tag === 'table').children.map(texts);
+  assert.deepEqual(rows, [
+    ['Destination', 'Queries', 'Reported blocked'],
+    ['ads.example', 'Fixture Ads', '3', '2'],
+  ]);
 
   context.silent = {...context.activity, from_at:'2026-01-01T00:00:00Z',
     until_at:'2026-01-01T07:30:00Z', windows:90, partial_windows:0, queries_read:0,

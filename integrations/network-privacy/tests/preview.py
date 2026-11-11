@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -15,6 +16,7 @@ from typing import Awaitable, Callable
 from uuid import uuid4
 
 from aiohttp import web
+from aiohttp.typedefs import Handler, Middleware
 from plowshare.contracts import InformationRevisionDto
 from support import (
     EXAMPLES,
@@ -44,7 +46,31 @@ from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
 
 
-async def preview(bind: str, port: int) -> None:
+def sample_overview(total: int | None = None) -> Middleware:
+    """Replace the overview's device list with the synthetic household network."""
+    from preview_sample import sample_devices, scaled_network
+
+    @web.middleware
+    async def middleware(request: web.Request, handler: Handler) -> web.StreamResponse:
+        response = await handler(request)
+        if request.path != "/api/overview" or not isinstance(response, web.Response):
+            return response
+        body = json.loads(response.text or "{}")
+        if total is None:
+            body["devices"] = sample_devices()
+        else:
+            body["devices"], body["candidates"] = scaled_network(total)
+        return web.json_response(body, status=response.status)
+
+    return middleware
+
+
+async def preview(
+    bind: str,
+    port: int,
+    sample_network: bool = False,
+    sample_devices: int | None = None,
+) -> None:
     with tempfile.TemporaryDirectory() as folder:
         config = configuration(Path(folder))
         config = replace(
@@ -144,17 +170,17 @@ async def preview(bind: str, port: int) -> None:
                 ),
             ),
         )
-        runner = web.AppRunner(
-            application(
-                worker,
-                "fixture-web-token-1234567890",
-                console=console,
-                profiles=profiles,
-                issues=issues,
-                settings=PreviewSettings(),
-            ),
-            access_log=None,
+        app = application(
+            worker,
+            "fixture-web-token-1234567890",
+            console=console,
+            profiles=profiles,
+            issues=issues,
+            settings=PreviewSettings(),
         )
+        if sample_network or sample_devices is not None:
+            app.middlewares.append(sample_overview(sample_devices))
+        runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         stop = asyncio.Event()
         task = asyncio.create_task(worker.run(stop))
@@ -179,5 +205,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bind", required=True)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument(
+        "--sample-network",
+        action="store_true",
+        help="Show a synthetic household of devices for design review",
+    )
+    parser.add_argument(
+        "--sample-devices",
+        type=int,
+        help="Repeat the synthetic devices up to this many, plus 160 candidates",
+    )
     arguments = parser.parse_args()
-    asyncio.run(preview(arguments.bind, arguments.port))
+    asyncio.run(
+        preview(
+            arguments.bind,
+            arguments.port,
+            arguments.sample_network,
+            arguments.sample_devices,
+        )
+    )
