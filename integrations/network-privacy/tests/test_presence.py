@@ -45,13 +45,16 @@ PLAN = CollectionPlan(
 class ManagedFixture:
     """A UniFi-like source that knows which MACs are adopted infrastructure."""
 
-    def __init__(self, managed: set[str]):
+    def __init__(
+        self, managed: set[str], devices: tuple[DeviceIdentity, ...] = ()
+    ) -> None:
         self.managed = managed
+        self.devices = devices
 
     async def identify(
         self, targets: tuple[str, ...], observed_at: str
     ) -> IdentitySample:
-        return IdentitySample()
+        return IdentitySample(devices=self.devices)
 
     async def managed_sightings(
         self,
@@ -341,6 +344,69 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
         assert read.await_args is not None
         self.assertEqual(read.await_args.args[0], (A,))
         self.assertEqual([window.device for window in windows], ["mac:" + MAC])
+
+    async def test_quick_check_marks_adopted_unifi_infrastructure(self) -> None:
+        inventory = ManagedFixture(
+            managed={"mac:" + OTHER_MAC},
+            devices=(
+                identity(A, "unifi", 300),
+                identity(B, "unifi", 300, OTHER_MAC),
+            ),
+        )
+        collector = NetworkCollector("fixture", PLAN, identity_source=inventory)
+        with (
+            patch("plowshare_privacy.collection.utc_now", return_value=at(300)),
+            patch(
+                "plowshare_privacy.collection._quick_connect", new_callable=AsyncMock
+            ) as connect,
+        ):
+            connect.return_value = False
+            sample = await collector.collect_presence(at(120))
+        self.assertEqual(sample.infrastructure, frozenset({"mac:" + OTHER_MAC}))
+
+    async def test_infrastructure_drops_dns_windows_recorded_before_the_rule(
+        self,
+    ) -> None:
+        # An earlier release profiled adopted switches and access points. Their
+        # retained windows must not keep them flagged once they are recognised.
+        with tempfile.TemporaryDirectory() as folder:
+            history = PresenceHistory(Path(folder).resolve())
+            scope = scope_fingerprint(PLAN)
+            switch, client = "mac:" + OTHER_MAC, "mac:" + MAC
+            empty = QuerySample((), 0, 0, ())
+            step_seconds = MIN_SILENT_SECONDS // MIN_SILENT_WINDOWS + 1
+            sightings = (
+                Sighting(A, identity(A, "unifi", 0)),
+                Sighting(B, identity(B, "unifi", 0, OTHER_MAC)),
+            )
+            last = 0
+            for step in range(MIN_SILENT_WINDOWS + 1):
+                seconds = step * step_seconds
+                windows = (
+                    (
+                        DnsActivityWindow(switch, at(last), empty),
+                        DnsActivityWindow(client, at(last), empty),
+                    )
+                    if step
+                    else ()
+                )
+                history.record(scope, PresenceSample(at(seconds), sightings), windows)
+                last = seconds
+            before = history.view(scope, epoch(at(last)), include_dns=True).dns
+            self.assertTrue(before[switch].pihole_silent)
+            history.record(
+                scope,
+                PresenceSample(
+                    at(last + step_seconds),
+                    sightings,
+                    infrastructure=frozenset({switch}),
+                ),
+            )
+            after = history.view(
+                scope, epoch(at(last + step_seconds)), include_dns=True
+            ).dns
+            self.assertNotIn(switch, after)
+            self.assertTrue(after[client].pihole_silent)
 
     async def test_traffic_volume_sums_counter_deltas_and_skips_resets(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

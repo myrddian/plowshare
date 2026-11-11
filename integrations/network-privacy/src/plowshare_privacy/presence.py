@@ -58,6 +58,10 @@ class PresenceSample:
     issues: tuple[str, ...] = ()
     ambiguous_addresses: frozenset[str] = frozenset()
     traffic: tuple[TrafficCounter, ...] = ()
+    # Device keys this check recognised as adopted UniFi infrastructure. They
+    # are never Pi-hole DNS clients, so recording the check also discards any
+    # DNS windows retained for them, including ones an earlier release wrote.
+    infrastructure: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -405,6 +409,13 @@ class PresenceHistory:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (self._dns_row(sweep, item) for item in dns),
+            )
+            connection.executemany(
+                """
+                DELETE FROM dns_activity WHERE device=?
+                AND sweep_id IN (SELECT id FROM sweep WHERE scope=?)
+                """,
+                ((device, scope) for device in sorted(sample.infrastructure)),
             )
             connection.executemany(
                 """

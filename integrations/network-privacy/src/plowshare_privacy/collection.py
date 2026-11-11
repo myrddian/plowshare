@@ -195,6 +195,16 @@ class NetworkCollector:
             tuple(dict.fromkeys(issues)),
         )
 
+    def _infrastructure(self, identity: DeviceIdentity) -> bool:
+        """Adopted UniFi gateways, switches and access points.
+
+        They are network infrastructure, not DNS clients of Pi-hole; profiling
+        them would only produce a misleading "no DNS" result.
+        """
+        return isinstance(
+            self.identity_source, ManagedInventory
+        ) and self.identity_source.recently_managed(identity)
+
     async def collect_presence(self, since: str) -> PresenceSample:
         """Sample positive evidence only, without building or publishing a full scan."""
         plan = self.plan
@@ -287,6 +297,13 @@ class NetworkCollector:
             tuple(dict.fromkeys(issues)),
             ambiguous,
             traffic,
+            frozenset(
+                sighting.key
+                for sighting in sightings.values()
+                if sighting.identity is not None
+                and sighting.identity.mac
+                and self._infrastructure(sighting.identity)
+            ),
         )
 
     async def collect_dns_activity(
@@ -325,13 +342,7 @@ class NetworkCollector:
             and item.identity.mac
             and old.get(item.address) == item.key
             and prior_counts[item.key] == current_counts[item.key] == 1
-            # Adopted UniFi gateways, switches and access points are network
-            # infrastructure, not DNS clients of Pi-hole; profiling them would
-            # only produce a misleading "no DNS" result.
-            and not (
-                isinstance(self.identity_source, ManagedInventory)
-                and self.identity_source.recently_managed(item.identity)
-            )
+            and not self._infrastructure(item.identity)
         }
         if not confirmed:
             return (), ()

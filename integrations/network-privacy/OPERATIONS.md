@@ -195,7 +195,9 @@ no queries from its address, with no partial or failed read in any window.
 Shorter quiet spells are ordinary: devices that resolve rarely can cache DNS
 answers for hours. Adopted UniFi gateways, switches and access points are not
 profiled at all, because they are network infrastructure rather than DNS clients
-of Pi-hole. The badge is a visibility finding, not an accusation: the device may
+of Pi-hole. The first quick check that recognises one also discards any DNS
+windows already retained for it, including windows an earlier release recorded,
+so an upgrade clears their badge at that check rather than a day later. The badge is a visibility finding, not an accusation: the device may
 be idle, or it may use hard-coded DNS servers or DNS over HTTPS, which Pi-hole
 cannot see. Cameras and media devices often do the latter. Router rules that
 redirect port 53 to Pi-hole, or blocking known DoH endpoints, restore visibility.
