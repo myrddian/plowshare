@@ -1,6 +1,6 @@
 # Lounge TV: privacy assessment
 
-Assessed 2026-11-11. Reviewer verdict: accepted.
+Assessed 2026-11-11 09:30 UTC. Reviewer verdict: accepted.
 
 ## In short
 
