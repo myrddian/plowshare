@@ -99,3 +99,20 @@ registrar ownership is preserved. The worker gains no definition/deployment or
 permission-management authority. The dashboard uses its scoped service connection
 without requesting a human password. Deploy the server fix before updating it;
 older servers still apply the registered-owner/Manager restriction.
+
+## Finalising agent-written reports with the service credential
+
+Device assessments are finalised from the dashboard with `information.finalise`
+using the collector's project-scoped service credential. Whether that principal
+may finalise reports its own Application runs produced has not been verified
+against a live server. If it is refused, the dashboard keeps the report in
+review and directs the operator to finalise it in Plowshare, then check status.
+A general rule that an Application's execution identity may finalise reports
+from its own runs would be a separately authorized platform decision.
+
+## Finding reports about one device
+
+There is no catalogue query for "reports about device X". The collector finds
+an assessment by its stable name and refuses to start a new run when the
+catalogue is ambiguous, so it never creates a second report resource for the
+same device.

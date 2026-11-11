@@ -345,3 +345,106 @@ test('device profile selection follows a confirmed MAC when its former IP is reu
   await vm.runInContext("openDeviceProfile('192.168.1.20','02:00:00:00:00:01')", context);
   assert.equal(vm.runInContext('selectedProfile', context), 'first');
 });
+
+function assessmentDom(context) {
+  context.document.createElement = tag => ({
+    tag, children: [], listeners: {}, append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; },
+    addEventListener(name, handler) { this.listeners[name] = handler; },
+  });
+}
+const assessmentTexts = node => [node.textContent, ...(node.children || []).flatMap(assessmentTexts)].filter(Boolean);
+const assessmentButtons = nodes => nodes.flatMap(function walk(node) {
+  return [...(node.tag === 'button' ? [node] : []), ...(node.children || []).flatMap(walk)];
+});
+const assessmentBase = {
+  device_id:'mac:02:00:00:00:00:0a', pending:null, request_id:'11111111-1111-4111-8111-111111111111',
+  run_id:'orc_fixture_1', report:null, requested_at:'2026-11-11T09:00:00Z', decided_at:null,
+  review:null, concerns:[], detail:null, can_assess:false, can_accept:false, can_dismiss:false, assess_note:null,
+};
+
+test('the assessment block renders each state with plain actions', async () => {
+  const {context} = await dashboard();
+  assessmentDom(context);
+  const render = (view, report = null) => {
+    context.view = {...assessmentBase, ...view}; context.report = report;
+    const nodes = vm.runInContext('renderAssessment(view, report)', context);
+    return {text: nodes.flatMap(assessmentTexts).join(' | '), buttons: Array.from(assessmentButtons(nodes), button => button.textContent), nodes};
+  };
+  const idle = render({state:'idle', request_id:null, run_id:null, requested_at:null, can_assess:true});
+  assert.match(idle.text, /Not assessed/);
+  assert.deepEqual(idle.buttons, ['Assess this device']);
+  const blocked = render({state:'idle', request_id:null, run_id:null, assess_note:'Another device’s assessment is running. One runs at a time.'});
+  assert.deepEqual(blocked.buttons, []);
+  assert.match(blocked.text, /Another device’s assessment is running/);
+
+  const starting = render({state:'running', pending:'admission', run_id:null});
+  assert.match(starting.text, /not sent again/);
+  assert.deepEqual(starting.buttons, ['Check status']);
+  const running = render({state:'running'});
+  assert.match(running.text, /Assessment running/);
+  assert.match(running.text, /orc_fixture_1/);
+  assert.deepEqual(running.buttons, []);
+
+  const review = render({state:'review', report:'22222222-2222-4222-8222-222222222222', review:'accepted', can_accept:true, can_dismiss:true}, '# Living room TV: privacy assessment');
+  assert.match(review.text, /Awaiting your review/);
+  assert.deepEqual(review.buttons, ['Accept and make final', 'Dismiss without finalising']);
+  assert.ok(JSON.stringify(review.nodes).includes('# Living room TV: privacy assessment'));
+  const refused = render({state:'review', report:'22222222-2222-4222-8222-222222222222', review:'accepted', can_accept:true, can_dismiss:true,
+    detail:'Plowshare refused finalising this assessment report (FORBIDDEN): Write access is required.'}, '# Report');
+  assert.match(refused.text, /Write access is required/);
+  assert.deepEqual(refused.buttons, ['Accept and make final', 'Dismiss without finalising', 'Check status']);
+  const accepting = render({state:'review', pending:'accept', report:'22222222-2222-4222-8222-222222222222', review:'accepted'}, '# Report');
+  assert.match(accepting.text, /Accept sent, not yet confirmed/);
+  assert.deepEqual(accepting.buttons, ['Check status']);
+
+  const accepted = render({state:'accepted', report:'22222222-2222-4222-8222-222222222222', review:'accepted', decided_at:'2026-11-11T10:00:00Z', can_assess:true}, '# Report');
+  assert.match(accepted.text, /Accepted/);
+  assert.match(accepted.text, /final in Plowshare/);
+  assert.deepEqual(accepted.buttons, ['Assess again']);
+  const dismissed = render({state:'dismissed', report:'22222222-2222-4222-8222-222222222222', review:'accepted', decided_at:'2026-11-11T10:00:00Z', can_assess:true});
+  assert.match(dismissed.text, /Dismissed/);
+  assert.ok(!JSON.stringify(dismissed.nodes).includes('# Report'));
+  assert.deepEqual(dismissed.buttons, ['Assess again']);
+
+  const failed = render({state:'failed', detail:'The run reached its model-call or budget cap. No report was written.', can_assess:true});
+  assert.match(failed.text, /Last assessment failed/);
+  assert.match(failed.text, /budget cap/);
+  assert.match(failed.text, /orc_fixture_1/);
+  assert.deepEqual(failed.buttons, ['Retry']);
+});
+
+test('assessment actions post once, reread the view and poll only while running', async () => {
+  const {context} = await dashboard();
+  assessmentDom(context);
+  const requests = [];
+  let view = {...assessmentBase, state:'idle', request_id:null, run_id:null, can_assess:true};
+  context.fetch = async (url, options) => {
+    requests.push({url, method:options.method || 'GET', body:options.body});
+    if (url.endsWith('/assess')) view = {...assessmentBase, state:'running'};
+    if (url.endsWith('/accept')) return {ok:false, status:409, json:async () => ({error:'Plowshare refused finalising this assessment report.'})};
+    if (url.endsWith('/report')) return {ok:true, json:async () => ({revision:view.report, text:'# Living room TV: privacy assessment'})};
+    return {ok:true, json:async () => view};
+  };
+  context.block = context.document.createElement('div');
+  vm.runInContext("selectedDevice = '192.0.2.10'; deviceAssessment = {address:'192.0.2.10', deviceId:'mac:02:00:00:00:00:0a', block, view:null, report:null};", context);
+  await vm.runInContext('reloadAssessment()', context);
+  assert.deepEqual(requests.map(item => item.url), ['/api/devices/mac%3A02%3A00%3A00%3A00%3A00%3A0a/assessment']);
+  await vm.runInContext("assessmentAction('assess')", context);
+  assert.deepEqual(requests.slice(1).map(item => [item.method, item.url, item.body]), [
+    ['POST', '/api/devices/mac%3A02%3A00%3A00%3A00%3A00%3A0a/assessment/assess', '{}'],
+    ['GET', '/api/devices/mac%3A02%3A00%3A00%3A00%3A00%3A0a/assessment', undefined],
+  ]);
+  await vm.runInContext('pollAssessment()', context);
+  assert.equal(requests.length, 4);
+  view = {...assessmentBase, state:'review', report:'22222222-2222-4222-8222-222222222222', review:'accepted', can_accept:true, can_dismiss:true};
+  await vm.runInContext('pollAssessment()', context);
+  assert.equal(requests.at(-1).url, '/api/devices/mac%3A02%3A00%3A00%3A00%3A00%3A0a/assessment/report');
+  const count = requests.length;
+  await vm.runInContext('pollAssessment()', context);
+  assert.equal(requests.length, count);
+  await vm.runInContext("assessmentAction('accept')", context);
+  assert.match(context.document.getElementById('notice').textContent, /refused finalising/);
+  assert.equal(requests.filter(item => item.url.endsWith('/accept')).length, 1);
+  assert.equal(requests.at(-1).url, '/api/devices/mac%3A02%3A00%3A00%3A00%3A00%3A0a/assessment');
+});

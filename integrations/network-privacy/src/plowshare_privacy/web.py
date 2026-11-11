@@ -27,6 +27,12 @@ from .contracts import (
     text,
     uuid,
 )
+from .device_assessments import (
+    AssessmentConflict,
+    AssessmentControl,
+    AssessmentView,
+    UnknownDevice,
+)
 from .device_inventory import DeviceCard
 from .device_profiles import DeviceProfile, ProfileFields, ProfileManagement, field
 from .diagnostics import refusal_detail
@@ -57,6 +63,7 @@ def application(
     advisories: AdvisoryLookup | None = None,
     managed_products: Callable[[], ManagedProductLookup | None] | None = None,
     profile_research: ResearchReview | None = None,
+    assessments: AssessmentControl | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -106,8 +113,10 @@ def application(
                 raise web.HTTPUnsupportedMediaType(text="JSON is required")
         try:
             response = await handler(request)
-        except (SettingsBusy, ReconciliationRequired) as error:
+        except (SettingsBusy, ReconciliationRequired, AssessmentConflict) as error:
             response = web.json_response({"error": str(error)}, status=409)
+        except UnknownDevice as error:
+            response = web.json_response({"error": str(error)}, status=404)
         except ToolAttention:
             response = web.json_response(
                 {
@@ -475,6 +484,75 @@ def application(
         )
         return web.json_response({"updated": True})
 
+    def assessment_service() -> AssessmentControl:
+        if assessments is None:
+            raise web.HTTPNotFound(text="Device assessments are not available")
+        return assessments
+
+    def assessment_device(request: web.Request) -> str:
+        # The service validates the ID and checks it against the current
+        # inventory; unknown devices are 404 through UnknownDevice.
+        return text(request.match_info["device_id"], 64)
+
+    def assessment_response(view: AssessmentView, status: int = 200) -> web.Response:
+        return web.json_response(asdict(view), status=status)
+
+    async def assessment_view(request: web.Request) -> web.Response:
+        return assessment_response(
+            assessment_service().view(assessment_device(request))
+        )
+
+    async def assessment_report(request: web.Request) -> web.Response:
+        return web.json_response(
+            asdict(await assessment_service().report(assessment_device(request)))
+        )
+
+    async def assessment_assess(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        view = await assessment_service().assess(assessment_device(request))
+        return assessment_response(view, 202 if view.state == "running" else 200)
+
+    async def assessment_accept(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        view = await assessment_service().accept(assessment_device(request))
+        if view.state == "review" and view.pending is None:
+            # Refused or unsent: the device stays in review with the reason.
+            return web.json_response(
+                {"error": view.detail, "assessment": asdict(view)}, status=409
+            )
+        return assessment_response(view, 202 if view.pending else 200)
+
+    async def assessment_check(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        return assessment_response(
+            await assessment_service().check(assessment_device(request))
+        )
+
+    async def assessment_dismiss(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        return assessment_response(
+            assessment_service().dismiss(assessment_device(request))
+        )
+
+    async def assessment_settings(request: web.Request) -> web.Response:
+        service = assessment_service()
+        return web.json_response(
+            {
+                "background_limit": service.ledger.background_limit,
+                "detail": service.error,
+            }
+        )
+
+    async def save_assessment_settings(request: web.Request) -> web.Response:
+        row = object_fields(parse_json(await request.read()), {"background_limit"})
+        service = assessment_service()
+        if type(row["background_limit"]) is not int:
+            raise ValueError("Choose a whole number of assessments a day")
+        service.set_background_limit(row["background_limit"])
+        return web.json_response(
+            {"background_limit": service.ledger.background_limit, "detail": None}
+        )
+
     async def profile_advisories(request: web.Request) -> web.Response:
         if advisories is None:
             raise web.HTTPNotFound(text="Advisory lookup is not configured")
@@ -680,6 +758,7 @@ def application(
                 if profile_research is not None
                 else 0,
                 "issues_available": issues is not None,
+                "device_assessments_available": assessments is not None,
                 "state": worker.state,
                 "detail": worker.detail,
                 "requests": [
@@ -831,6 +910,17 @@ def application(
     app.router.add_post("/api/profile-research/{identity}", research_review)
     app.router.add_post("/api/devices/{address}/product", device_product)
     app.router.add_post("/api/devices/{address}/advisories", device_advisories)
+    app.router.add_get("/api/devices/{device_id}/assessment", assessment_view)
+    app.router.add_get("/api/devices/{device_id}/assessment/report", assessment_report)
+    for action, handler in (
+        ("assess", assessment_assess),
+        ("accept", assessment_accept),
+        ("check", assessment_check),
+        ("dismiss", assessment_dismiss),
+    ):
+        app.router.add_post("/api/devices/{device_id}/assessment/" + action, handler)
+    app.router.add_get("/api/device-assessments", assessment_settings)
+    app.router.add_post("/api/device-assessments", save_assessment_settings)
     app.router.add_get("/api/profiles", profile_list)
     app.router.add_get("/api/profiles/{identity}/{revision}", profile_source)
     app.router.add_post(

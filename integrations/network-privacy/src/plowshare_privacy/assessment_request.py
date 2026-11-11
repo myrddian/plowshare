@@ -90,6 +90,29 @@ class ConcernOutcome:
     level: ConcernLevel
     verdict: ConcernVerdict
 
+    @classmethod
+    def decode(cls, value: object) -> ConcernOutcome:
+        concern = object_fields(value, {"id", "level", "verdict"})
+        identity, level, verdict = concern["id"], concern["level"], concern["verdict"]
+        if (
+            not isinstance(identity, str)
+            or not _CONCERN_ID.fullmatch(identity)
+            or level not in _LEVELS
+            or verdict not in _VERDICTS
+        ):
+            raise ValueError("Invalid assessment concern")
+        return cls(identity, level, verdict)  # type: ignore[arg-type]
+
+
+def concern_outcomes(value: object) -> tuple[ConcernOutcome, ...]:
+    """At most five reviewed concerns with distinct IDs."""
+    if not isinstance(value, list) or len(value) > 5:
+        raise ValueError("Invalid assessment concerns")
+    concerns = tuple(ConcernOutcome.decode(item) for item in value)
+    if len({c.id for c in concerns}) != len(concerns):
+        raise ValueError("Duplicate assessment concern")
+    return concerns
+
 
 @dataclass(frozen=True)
 class AssessmentResult:
@@ -121,26 +144,7 @@ class AssessmentResult:
         review, corrected = row["review"], row["corrected"]
         if review not in _REVIEWS or type(corrected) is not bool:
             raise ValueError("Invalid assessment review outcome")
-        if not isinstance(row["concerns"], list) or len(row["concerns"]) > 5:
-            raise ValueError("Invalid assessment concerns")
-        concerns = []
-        for value in row["concerns"]:
-            concern = object_fields(value, {"id", "level", "verdict"})
-            identity, level, verdict = (
-                concern["id"],
-                concern["level"],
-                concern["verdict"],
-            )
-            if (
-                not isinstance(identity, str)
-                or not _CONCERN_ID.fullmatch(identity)
-                or level not in _LEVELS
-                or verdict not in _VERDICTS
-            ):
-                raise ValueError("Invalid assessment concern")
-            concerns.append(ConcernOutcome(identity, level, verdict))  # type: ignore[arg-type]
-        if len({c.id for c in concerns}) != len(concerns):
-            raise ValueError("Duplicate assessment concern")
+        concerns = concern_outcomes(row["concerns"])
         return cls(
             parse_device_id(row["device_id"]),
             uuid(row["dossier"]),
@@ -148,7 +152,7 @@ class AssessmentResult:
             uuid(report["resource"]),
             review,  # type: ignore[arg-type]
             corrected,
-            tuple(concerns),
+            concerns,
         )
 
     def require(self, request: AssessmentRequest) -> None:

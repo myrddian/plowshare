@@ -13,8 +13,9 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
-from plowshare import Delivery, TransportError
+from plowshare import Delivery, Refusal, TransportError
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
+from test_device_assessments import Dossiers, Runs
 
 from plowshare_privacy.advisories import AdvisoryLookup, AdvisoryPage
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
@@ -30,6 +31,7 @@ from plowshare_privacy.contracts import (
     PiHolePlan,
     TcpObservation,
 )
+from plowshare_privacy.device_assessments import AssessmentJournal, DeviceAssessments
 from plowshare_privacy.device_inventory import DeviceInventory, device_inventory
 from plowshare_privacy.discovery import (
     DiscoveredDevice,
@@ -781,3 +783,176 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tested.connected)
         self.assertFalse(tested.saved)
         self.assertEqual(tuple(self.root.glob("pihole-*.password")), ())
+
+    async def test_device_assessment_routes_check_access_inventory_and_state(
+        self,
+    ) -> None:
+        address, mac = "192.168.90.2", "02:00:00:00:00:01"
+        stamp = "2026-01-01T00:00:00Z"
+        device = "mac:" + mac
+        identity = DeviceIdentity(
+            address, device, None, "lounge-tv", mac, None, "unifi", stamp, stamp
+        )
+        inventory = device_inventory(
+            (address,),
+            (),
+            (),
+            PresenceView(sightings={address: Sighting(address, identity)}),
+        )
+        runs = Runs()
+        assessments = DeviceAssessments(
+            AssessmentJournal(self.root),
+            runs,
+            Dossiers(),
+            lambda: inventory,
+            clock=lambda: stamp,
+        )
+        headers = {"Authorization": "Bearer " + TOKEN}
+        path = f"/api/devices/{device}/assessment"
+        async with TestClient(
+            TestServer(
+                application(
+                    self.worker, TOKEN, console=self.console, assessments=assessments
+                )
+            )
+        ) as client:
+            self.assertEqual((await client.get(path)).status, 401)
+            self.assertEqual((await client.post(path + "/assess", json={})).status, 401)
+            status = await (await client.get("/api/status", headers=headers)).json()
+            self.assertTrue(status["device_assessments_available"])
+            idle = await client.get(path, headers=headers)
+            self.assertEqual(idle.status, 200)
+            body = await idle.json()
+            self.assertEqual((body["state"], body["can_assess"]), ("idle", True))
+            self.assertEqual(
+                (
+                    await client.get(
+                        "/api/devices/mac:02:00:00:00:00:09/assessment",
+                        headers=headers,
+                    )
+                ).status,
+                404,
+            )
+            self.assertEqual(
+                (
+                    await client.get(
+                        f"/api/devices/{address}/assessment", headers=headers
+                    )
+                ).status,
+                400,
+            )
+            self.assertEqual(
+                (
+                    await client.post(
+                        path + "/assess", headers=headers, json={"device": device}
+                    )
+                ).status,
+                400,
+            )
+            await client.post("/api/session", headers=headers, json={})
+            self.assertEqual(
+                (
+                    await client.post(
+                        path + "/assess",
+                        json={},
+                        headers={"Origin": "https://foreign.invalid"},
+                    )
+                ).status,
+                403,
+            )
+            self.assertEqual(runs.starts, [])
+            started = await client.post(path + "/assess", headers=headers, json={})
+            self.assertEqual(started.status, 202)
+            self.assertEqual((await started.json())["state"], "running")
+            again = await client.post(path + "/assess", headers=headers, json={})
+            self.assertEqual(again.status, 409)
+            self.assertIn("already running", (await again.json())["error"])
+            self.assertEqual(
+                (await client.get(path + "/report", headers=headers)).status, 409
+            )
+            revision = runs.finish(runs.starts[0][1])
+            await assessments.poll()
+            review = await (await client.get(path, headers=headers)).json()
+            self.assertEqual((review["state"], review["report"]), ("review", revision))
+            report = await (await client.get(path + "/report", headers=headers)).json()
+            self.assertEqual(report["revision"], revision)
+            self.assertIn("privacy assessment", report["text"])
+            runs.finalise_error = Refusal("FORBIDDEN", "Write access is required")
+            refused = await client.post(path + "/accept", headers=headers, json={})
+            self.assertEqual(refused.status, 409)
+            failure = await refused.json()
+            self.assertIn("Write access is required", failure["error"])
+            self.assertIn("Reports collection", failure["error"])
+            self.assertEqual(failure["assessment"]["state"], "review")
+            runs.finalise_error = None
+            accepted = await client.post(path + "/accept", headers=headers, json={})
+            self.assertEqual(accepted.status, 200)
+            self.assertEqual((await accepted.json())["state"], "accepted")
+            self.assertEqual(
+                (await client.post(path + "/dismiss", headers=headers, json={})).status,
+                409,
+            )
+            settings = "/api/device-assessments"
+            self.assertEqual(
+                (await (await client.get(settings, headers=headers)).json())[
+                    "background_limit"
+                ],
+                0,
+            )
+            self.assertEqual(
+                (
+                    await client.post(
+                        settings, headers=headers, json={"background_limit": 99}
+                    )
+                ).status,
+                400,
+            )
+            saved = await client.post(
+                settings, headers=headers, json={"background_limit": 2}
+            )
+            self.assertEqual((await saved.json())["background_limit"], 2)
+        self.assertEqual(len(runs.finalised), 2)
+        async with TestClient(
+            TestServer(application(self.worker, TOKEN, console=self.console))
+        ) as client:
+            self.assertEqual((await client.get(path, headers=headers)).status, 404)
+            status = await (await client.get("/api/status", headers=headers)).json()
+            self.assertFalse(status["device_assessments_available"])
+
+    async def test_device_assessment_dismiss_is_local(self) -> None:
+        address, mac = "192.168.90.2", "02:00:00:00:00:01"
+        stamp = "2026-01-01T00:00:00Z"
+        device = "mac:" + mac
+        identity = DeviceIdentity(
+            address, device, None, "lounge-tv", mac, None, "unifi", stamp, stamp
+        )
+        inventory = device_inventory(
+            (address,),
+            (),
+            (),
+            PresenceView(sightings={address: Sighting(address, identity)}),
+        )
+        runs = Runs()
+        assessments = DeviceAssessments(
+            AssessmentJournal(self.root), runs, Dossiers(), lambda: inventory
+        )
+        headers = {"Authorization": "Bearer " + TOKEN}
+        path = f"/api/devices/{device}/assessment"
+        await assessments.assess(device)
+        runs.finish(runs.starts[0][1])
+        await assessments.poll()
+        calls = list(runs.calls)
+        async with TestClient(
+            TestServer(
+                application(
+                    self.worker, TOKEN, console=self.console, assessments=assessments
+                )
+            )
+        ) as client:
+            dismissed = await client.post(path + "/dismiss", headers=headers, json={})
+            self.assertEqual(dismissed.status, 200)
+            self.assertEqual((await dismissed.json())["state"], "dismissed")
+            self.assertEqual(
+                (await client.get(path + "/report", headers=headers)).status, 409
+            )
+        self.assertEqual(runs.calls, calls)

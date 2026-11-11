@@ -27,6 +27,8 @@ let researchBusy = false;
 let issueEdit = null;
 let issueBlocked = false;
 let issuesAvailable = false;
+let assessmentsAvailable = false;
+let assessmentSettingsLoaded = false;
 const byId = (name) => document.getElementById(name);
 
 const views = {
@@ -238,6 +240,9 @@ async function refresh() {
       : 'Enable the collector’s NVD lookup to search here. You can still review product clues and edit a profile.';
     if (!researchDevice) byId('research-search').disabled = !advisoriesAvailable;
     issuesAvailable = !!status.issues_available;
+    assessmentsAvailable = !!status.device_assessments_available;
+    byId('background-assessments').hidden = !assessmentsAvailable;
+    if (assessmentsAvailable && !assessmentSettingsLoaded) await loadAssessmentSettings();
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
     byId('collector').textContent = status.collector;
@@ -262,6 +267,7 @@ async function refresh() {
     if (unknown) notice(`Request ${unknown.request_id} needs reconciliation. It has not been resent.`, true);
     else if (reportResult.error) notice(reportResult.error.message, true);
     else notice(status.state === 'attention_required' ? status.detail : '', status.state === 'attention_required');
+    await pollAssessment().catch(error => notice(error.message, true));
   } finally {refreshPending = false; byId('refresh').disabled = false;}
 }
 byId('connect').addEventListener('submit', event => {
@@ -869,7 +875,7 @@ function renderDeviceView(device) {
   byId('device-facts').replaceChildren(identity, talks, sends, ports);
 
   const history = paneSection('Evidence history');
-  history.append(element('p', `${device.history.length} collections at this address. Reading one opens it in the Evidence view.`, 'hint'));
+  history.append(element('p', `${device.history.length} ${device.history.length === 1 ? 'collection' : 'collections'} at this address. Reading one opens it in the Evidence view.`, 'hint'));
   for (const id of [...device.history].reverse()) {
     history.append(actionButton(`Read collection ${id.slice(0,8)}`, 'entry', () => showEvidence(id)));
   }
@@ -956,7 +962,9 @@ async function loadDeviceAnalysis(device) {
     notes.append(element('p', error.message, 'notice error'));
   }
   try {
-    assessment.append(element('p', 'No agent assessment for this device yet. Agents investigate collections, not single devices; their reports are under Findings.', 'empty'));
+    const block = element('div', undefined, 'assessment-block');
+    assessment.append(block);
+    await openAssessment(device, block);
     if (!byId('background-research').hidden) {
       const queue = await api('/api/profile-research');
       const entry = queue.entries.find(item => item.address === device.address);
@@ -975,6 +983,139 @@ async function loadDeviceAnalysis(device) {
   }
   if (!stale()) panel.replaceChildren(notes, assessment, product);
 }
+
+// The agent assessment of one device. The collector's ledger holds its state;
+// the report text is read once per revision. While a run is starting or
+// running, or an Accept is unconfirmed, the five-second refresh rereads only
+// the state. Nothing here resends a request whose outcome is unknown: Check
+// status only reads.
+let deviceAssessment = null;
+let assessmentBusy = false;
+function assessmentPath(deviceId, suffix = '') {
+  return `/api/devices/${encodeURIComponent(deviceId)}/assessment${suffix}`;
+}
+function when(stamp) {
+  return stamp ? new Date(stamp).toLocaleString() : '';
+}
+function renderAssessment(view, report) {
+  const nodes = [];
+  const button = (label, action, className) => {
+    const control = actionButton(label, className, () => assessmentAction(action));
+    control.disabled = assessmentBusy;
+    return control;
+  };
+  const verdict = view.review === 'needs_corrections' ? 'accepted after one correction round' : 'accepted';
+  const run = view.run_id ? element('p', 'Run ', 'hint') : null;
+  if (run) run.append(element('span', view.run_id, 'data'));
+  if (view.state === 'idle') {
+    nodes.push(element('p', 'Not assessed', 'status-line'),
+      element('p', 'An agent reads this device’s observations (what it is, who it talks to and how much it sends) and explains them in plain language. A second agent checks each concern against the same data. The report stays a draft until you accept it.', 'hint'));
+  } else if (view.state === 'running') {
+    nodes.push(element('p', view.pending === 'admission' ? 'Starting' : 'Assessment running', 'status-line'),
+      element('p', view.pending === 'admission'
+        ? 'Plowshare has not confirmed the start. It is not sent again; its admission receipt settles it.'
+        : `Requested ${when(view.requested_at)}. This view updates while the run continues.`, 'hint'));
+    if (run) nodes.push(run);
+  } else if (view.state === 'review') {
+    nodes.push(element('p', view.pending === 'accept' ? 'Accept sent, not yet confirmed' : 'Awaiting your review', 'status-line'),
+      element('p', view.pending === 'accept'
+        ? 'Plowshare has not confirmed the report is final. Accept is not sent again; Check status reads it.'
+        : `Assessed ${when(view.requested_at)}. Reviewer verdict: ${verdict}. Accept makes this report final in Plowshare. Dismiss hides it here and leaves it in Plowshare as a draft.`, 'hint'));
+  } else if (view.state === 'accepted') {
+    nodes.push(element('p', 'Accepted ' + when(view.decided_at), 'status-line'),
+      element('p', `This report is final in Plowshare. Assessed ${when(view.requested_at)}; reviewer verdict: ${verdict}.`, 'hint'));
+  } else if (view.state === 'dismissed') {
+    nodes.push(element('p', 'Dismissed ' + when(view.decided_at), 'status-line'),
+      element('p', 'You dismissed this draft. It stays in Plowshare as history and is not shown here.', 'hint'));
+  } else if (view.state === 'failed') {
+    nodes.push(element('p', 'Last assessment failed', 'status-line'));
+    if (run) nodes.push(run);
+  }
+  if (view.detail) nodes.push(element('p', view.detail, view.state === 'failed' || (view.state === 'review' && !view.pending) ? 'notice error' : 'hint'));
+  // Decisions sit with the state line, above a report that can be long.
+  const actions = element('div', undefined, 'row');
+  if (view.can_accept) actions.append(button('Accept and make final', 'accept'));
+  if (view.can_dismiss) actions.append(button('Dismiss without finalising', 'dismiss', 'secondary'));
+  if (view.pending || (view.state === 'review' && view.detail)) actions.append(button('Check status', 'check', 'secondary'));
+  if (view.can_assess) {
+    actions.append(view.state === 'idle' ? button('Assess this device', 'assess')
+      : view.state === 'failed' ? button('Retry', 'assess')
+      : button('Assess again', 'assess', 'secondary'));
+  }
+  nodes.push(actions);
+  if (!view.can_assess && view.assess_note) nodes.push(element('p', view.assess_note, 'hint'));
+  if (report && (view.state === 'review' || view.state === 'accepted')) {
+    const reader = element('div', undefined, 'document-reader');
+    reader.append(PrivacyMarkdown.render(report));
+    nodes.push(reader);
+  }
+  return nodes;
+}
+function showAssessment() {
+  if (!deviceAssessment || deviceAssessment.address !== selectedDevice || !deviceAssessment.view) return;
+  deviceAssessment.block.replaceChildren(...renderAssessment(deviceAssessment.view, deviceAssessment.report?.text || null));
+}
+async function reloadAssessment() {
+  const current = deviceAssessment;
+  if (!current) return;
+  const view = await api(assessmentPath(current.deviceId));
+  let report = current.report;
+  if (view.report && (view.state === 'review' || view.state === 'accepted') && report?.revision !== view.report) {
+    report = await api(assessmentPath(current.deviceId, '/report'));
+  }
+  if (deviceAssessment !== current) return;
+  current.view = view; current.report = report;
+  showAssessment();
+}
+async function openAssessment(device, block) {
+  deviceAssessment = null;
+  if (!assessmentsAvailable) {
+    block.append(element('p', 'Device assessments are not enabled on this collector.', 'hint'));
+    return;
+  }
+  const deviceId = device.identity?.mac ? device.identity.device_id : null;
+  if (!deviceId) {
+    block.append(element('p', 'Not assessed. An assessment needs a confirmed MAC address; this device is known by its address only.', 'hint'));
+    return;
+  }
+  deviceAssessment = {address: device.address, deviceId, block, view: null, report: null};
+  await reloadAssessment();
+}
+async function assessmentAction(action) {
+  const current = deviceAssessment;
+  if (!current || assessmentBusy) return;
+  assessmentBusy = true; showAssessment();
+  try {
+    await api(assessmentPath(current.deviceId, '/' + action), {method:'POST', body:'{}'});
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    assessmentBusy = false;
+  }
+  await reloadAssessment();
+}
+async function pollAssessment() {
+  const view = deviceAssessment?.view;
+  if (!view || deviceAssessment.address !== selectedDevice || assessmentBusy) return;
+  if (view.state === 'running' || view.pending) await reloadAssessment();
+}
+async function loadAssessmentSettings() {
+  const settings = await api('/api/device-assessments');
+  byId('assessment-limit').value = String(settings.background_limit);
+  byId('assessment-settings-detail').textContent = settings.detail || (settings.background_limit ? `Up to ${settings.background_limit} background assessments a day.` : 'Background assessment is off.');
+  assessmentSettingsLoaded = true;
+}
+byId('assessment-settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  try {
+    const limit = Number(byId('assessment-limit').value);
+    if (!Number.isInteger(limit)) throw new Error('Choose a whole number of assessments a day.');
+    await api('/api/device-assessments', {method:'POST', body:JSON.stringify({background_limit:limit})});
+    await loadAssessmentSettings();
+  } catch (error) {
+    byId('assessment-settings-detail').textContent = error.message;
+  }
+});
 
 const inventoryOrders = {
   third: (a, b) => behaviouralQueries(b.dns_activity) - behaviouralQueries(a.dns_activity),
