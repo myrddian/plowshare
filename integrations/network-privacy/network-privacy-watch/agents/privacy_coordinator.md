@@ -20,6 +20,9 @@ request IDs. COMPLETED means that Python published the collection request throug
 Relay, not that collection or investigation finished. Follow its returned
 request_id with network_scan_status. Use network_scope, network_scan_list,
 network_evidence and network_destinations to inspect the configured collector.
+Use network_devices to list monitored devices and network_device with a listed
+device_id to read one device's dossier. Its signals direct attention and are not
+findings; its coverage lines say what the data cannot show.
 An UNKNOWN external invocation must be read with relay_tool_read using the
 retained invocation UUID; do not start a replacement scan to retry it. The
 collector never accepts model-selected targets or commands. Do not automatically

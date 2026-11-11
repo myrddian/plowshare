@@ -61,13 +61,27 @@ class NetworkPrivacyWatchTest {
     assertTrue(coordinator.dynamic());
     assertFalse(coordinator.tools().stream().anyMatch(name -> name.startsWith("network_")));
     var policy = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
-    assertEquals(6, policy.toolScopes().getFirst().grants().size());
+    assertEquals(8, policy.toolScopes().getFirst().grants().size());
+    assertEquals(6, policy.toolScopes().get(1).grants().size());
     assertTrue(
         policy.permits(
             policy.executionAccount(), "privacy_coordinator", "privacy-scanner", "network_scan"));
     assertFalse(
         policy.permits(
             policy.executionAccount(), "privacy_analyst", "privacy-scanner", "network_scan"));
+    for (String agent : Set.of("privacy_coordinator", "privacy_analyst", "privacy_reviewer")) {
+      for (String tool : Set.of("network_devices", "network_device")) {
+        assertTrue(
+            policy.permits(policy.executionAccount(), agent, "privacy-scanner", tool),
+            agent + " " + tool);
+      }
+    }
+    assertFalse(
+        policy.permits(
+            policy.executionAccount(),
+            "privacy_device_profiler",
+            "privacy-scanner",
+            "network_device"));
   }
 
   @Test
@@ -143,7 +157,7 @@ class NetworkPrivacyWatchTest {
                     io.aeyer.plowshare.server.relay.tools.RelayToolDefinition.class));
     var properties = new io.aeyer.plowshare.server.relay.tools.RelayToolProperties();
     properties.setBindings(bindings);
-    assertEquals(6, properties.getBindings().size());
+    assertEquals(8, properties.getBindings().size());
     var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
     var coordinator = agents.get("privacy_coordinator");
     var scopes = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);

@@ -84,6 +84,18 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence_schema["properties"]["limit"]["maximum"], 32)
         self.assertIn("devices", evidence_schema["properties"]["section"]["enum"])
         self.assertEqual(evidence_schema["required"], ["scan_id"])
+        schemas = {item["name"]: item["input_schema"] for item in catalogue}
+        self.assertEqual(
+            schemas["network.device"]["properties"]["device_id"]["pattern"],
+            "^mac:[0-9a-f]{2}(:[0-9a-f]{2}){5}$",
+        )
+        self.assertEqual(schemas["network.device"]["required"], ["device_id"])
+        self.assertEqual(
+            set(schemas["network.devices"]["properties"]), {"offset", "limit"}
+        )
+        self.assertEqual(
+            schemas["network.devices"]["properties"]["limit"]["maximum"], 32
+        )
         identity = str(uuid4())
 
         async def call(name: str, arguments: dict[str, str]) -> str:
@@ -114,6 +126,9 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         destinations = await call("network.destinations", {"scan_id": scan.scan_id})
         self.assertIn("streaming.example", destinations)
         self.assertIn('"mode": "fixture"', destinations)
+        devices = json.loads(await call("network.devices", {}))
+        self.assertEqual(devices["next_offset"], None)
+        self.assertEqual(len(devices["devices"]), devices["total"])
 
     async def test_tools_refuse_unknown_capabilities_scope_and_identity(self) -> None:
         for name, arguments in (
@@ -122,6 +137,9 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
             ("network.scan", {"request_id": str(uuid4()), "ports": [443]}),
             ("network.scan_status", {"request_id": str(uuid4())}),
             ("network.evidence", {"scan_id": str(uuid4())}),
+            ("network.device", {"device_id": "mac:02:00:00:00:09:09"}),
+            ("network.device", {"device_id": "10.1.2.10"}),
+            ("network.devices", {"targets": ["192.0.2.10"]}),
         ):
             response = await self.client.post(
                 "/api/tools/" + name, headers=self.headers, json=arguments

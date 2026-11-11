@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -18,9 +19,15 @@ from plowshare_privacy.journal import FileReceipts
 from plowshare_privacy.native_tools import DECLARATIONS
 from plowshare_privacy.tool_journal_upgrade import (
     LEGACY_DECLARATIONS,
+    PAGED_DECLARATIONS,
     open_tool_journal,
     receipt_stages,
 )
+
+# The six-tool paged binding that deployments already hold. If this digest
+# changes, existing paged journals refuse to open: freeze the old declarations
+# instead of editing them.
+PAGED_BINDING = "c2374bb551061811a7287459a45aa0a0cdbe83002e134de0effc09bdba3c55a6"
 
 
 def receipt() -> ToolReceipt:
@@ -128,7 +135,7 @@ class JournalUpgradeTest(unittest.TestCase):
             with SqliteToolJournal(
                 target,
                 configuration=deployment_config(
-                    "fixture", "scanner", "owner", DECLARATIONS
+                    "fixture", "scanner", "owner", PAGED_DECLARATIONS
                 ),
             ) as store:
                 store.save(receipt_stages(receipt())[0])
@@ -163,3 +170,85 @@ class JournalUpgradeTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "optional read-page"):
                     with open_tool_journal(directory, "fixture", "scanner", "owner"):
                         self.fail("scan argument change admitted")
+
+
+class DeviceToolTransitionTest(unittest.TestCase):
+    def test_paged_binding_is_frozen_and_device_tools_are_the_only_additions(
+        self,
+    ) -> None:
+        configuration = deployment_config(
+            "fixture", "scanner", "owner", PAGED_DECLARATIONS
+        )
+        self.assertEqual(
+            hashlib.sha256(configuration.encode()).hexdigest(), PAGED_BINDING
+        )
+        self.assertEqual(
+            {tool.name for tool in DECLARATIONS}
+            - {tool.name for tool in PAGED_DECLARATIONS},
+            {"network_devices", "network_device"},
+        )
+
+    def test_paged_history_moves_to_the_device_journal_without_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "relay-tools"
+            paged = directory.parent / "relay-tools-paged"
+            # A deployment that already ran the six-tool paged collector.
+            with SqliteToolJournal(
+                paged,
+                configuration=deployment_config(
+                    "fixture", "scanner", "owner", PAGED_DECLARATIONS
+                ),
+            ) as store:
+                rows = []
+                for phase in range(4):
+                    stages = receipt_stages(receipt())
+                    for stage in stages[: phase + 1]:
+                        store.save(stage)
+                    rows.append(stages[phase])
+                retained = store.all()
+            (paged / "transition.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "source": None,
+                        "target": hashlib.sha256(
+                            deployment_config(
+                                "fixture", "scanner", "owner", PAGED_DECLARATIONS
+                            ).encode()
+                        ).hexdigest(),
+                        "receipts": 0,
+                        "digest": hashlib.sha256(b"[]").hexdigest(),
+                    }
+                )
+            )
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(current.all(), retained)
+                item = receipt()
+                for stage in receipt_stages(item):
+                    current.save(stage)
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(set(current.all()), {*retained, item})
+            marker = json.loads(
+                (directory.parent / "relay-tools-devices/transition.json").read_text()
+            )
+            self.assertEqual(marker["receipts"], len(retained))
+            # The paged history is retained unchanged for inspection.
+            with SqliteToolJournal(
+                paged,
+                configuration=deployment_config(
+                    "fixture", "scanner", "owner", PAGED_DECLARATIONS
+                ),
+            ) as store:
+                self.assertEqual(store.all(), retained)
+                store.save(receipt_stages(receipt())[0])
+            with self.assertRaisesRegex(ValueError, "Foreign tool transition"):
+                with open_tool_journal(directory, "fixture", "scanner", "owner"):
+                    self.fail("changed paged history admitted")
+
+    def test_fresh_install_opens_only_the_device_journal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "relay-tools"
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(current.all(), ())
+            self.assertFalse((directory.parent / "relay-tools-paged").exists())
+            self.assertTrue((directory.parent / "relay-tools-devices").is_dir())

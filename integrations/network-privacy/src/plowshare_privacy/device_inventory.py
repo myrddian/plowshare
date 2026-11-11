@@ -3,7 +3,13 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from .contracts import DeviceIdentity, DeviceLabel, DnsObservation, TcpObservation
+from .contracts import (
+    CollectionPlan,
+    DeviceIdentity,
+    DeviceLabel,
+    DnsObservation,
+    TcpObservation,
+)
 from .device_detection import DeviceDetection, detect_device
 from .dns_activity import DnsActivity
 from .journal import Receipt
@@ -184,3 +190,45 @@ def device_inventory(
             )
         )
     return DeviceInventory(tuple(devices), tuple(candidates))
+
+
+class InventoryProjection:
+    """Reuse one inventory projection while its inputs are the same objects.
+
+    The dashboard and the agent read tools share one instance through the
+    worker, so neither recomputes the projection the other just built.
+    Receipts are immutable once done and the presence view is a cached object
+    (PresenceWatch.view), so identity comparison is the freshness check: a new
+    receipt, a new presence view or a changed plan rebuilds; anything else
+    returns the projection already in memory without rescanning evidence.
+    """
+
+    def __init__(self) -> None:
+        self._plan: CollectionPlan | None = None
+        self._receipts: tuple[Receipt, ...] = ()
+        self._presence: PresenceView | None = None
+        self._inventory = DeviceInventory()
+
+    def current(
+        self,
+        plan: CollectionPlan,
+        receipts: tuple[Receipt, ...],
+        presence: PresenceView,
+    ) -> DeviceInventory:
+        done = tuple(item for item in receipts if item.phase == "done")
+        # The active plan fences visibility, so a plan change always rebuilds.
+        if (
+            plan != self._plan
+            or presence is not self._presence
+            or len(done) != len(self._receipts)
+            or any(
+                current is not cached for current, cached in zip(done, self._receipts)
+            )
+        ):
+            self._inventory = device_inventory(
+                plan.targets, plan.labels, done, presence
+            )
+            self._presence = presence
+            self._plan = plan
+            self._receipts = done
+        return self._inventory

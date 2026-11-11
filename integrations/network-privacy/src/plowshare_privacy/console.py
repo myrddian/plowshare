@@ -20,7 +20,6 @@ from plowshare import Delivery, Refusal, TransportError
 from .collection import scope_fingerprint
 from .console_port import Admission, AgentHealth, ConsolePort, RunSummary, ScheduleView
 from .contracts import (
-    CollectionPlan,
     DeviceIdentity,
     PiHolePlan,
     identifier,
@@ -31,13 +30,11 @@ from .contracts import (
     utc_now,
     uuid,
 )
-from .device_inventory import DeviceInventory, device_inventory
+from .device_inventory import DeviceInventory
 from .discovery import DeviceDiscovery
-from .journal import Receipt
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Finding, OperatorStore, findings
 from .pihole import PiHoleV6
-from .presence import PresenceView
 from .private_files import replace_private
 from .worker import Worker
 
@@ -192,10 +189,6 @@ class OperatorConsole:
         self.health_lock = asyncio.Lock()
         self.cached: Health | None = None
         self.cache_until = 0.0
-        self._device_plan: CollectionPlan | None = None
-        self._device_receipts: tuple[Receipt, ...] = ()
-        self._device_inventory = DeviceInventory()
-        self._device_presence: PresenceView | None = None
         self.journal = journal
 
     @property
@@ -220,29 +213,8 @@ class OperatorConsole:
         self.store.acknowledge(identity, expected)
 
     def inventory(self) -> DeviceInventory:
-        plan = self.worker.config.collection
-        receipts = tuple(
-            item for item in self.worker.receipts.all() if item.phase == "done"
-        )
-        presence = self.worker.presence_view()
-        # The active plan fences visibility. Immutable receipts let the dashboard
-        # reuse one projection across refreshes without rescanning the evidence.
-        if (
-            plan != self._device_plan
-            or presence is not self._device_presence
-            or len(receipts) != len(self._device_receipts)
-            or any(
-                current is not cached
-                for current, cached in zip(receipts, self._device_receipts)
-            )
-        ):
-            self._device_inventory = device_inventory(
-                plan.targets, plan.labels, receipts, presence
-            )
-            self._device_presence = presence
-            self._device_plan = plan
-            self._device_receipts = receipts
-        return self._device_inventory
+        # The worker owns the shared projection; agent read tools reuse it too.
+        return self.worker.device_inventory()
 
     async def health(self) -> Health:
         async with self.health_lock:

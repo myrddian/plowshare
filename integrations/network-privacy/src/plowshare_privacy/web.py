@@ -593,13 +593,19 @@ def application(
         result: list[dict[str, object]] = []
         for definition in DEFINITIONS:
             properties: dict[str, object] = {}
-            if definition.parameter:
+            if definition.parameter == "device_id":
+                properties["device_id"] = {
+                    "type": "string",
+                    "pattern": "^mac:[0-9a-f]{2}(:[0-9a-f]{2}){5}$",
+                }
+            elif definition.parameter:
                 properties[definition.parameter] = {"type": "string", "format": "uuid"}
             if definition.name in {
                 "network.scope",
                 "network.scan_list",
                 "network.evidence",
                 "network.destinations",
+                "network.devices",
             }:
                 properties["offset"] = {"type": "integer", "minimum": 0}
                 properties["limit"] = {

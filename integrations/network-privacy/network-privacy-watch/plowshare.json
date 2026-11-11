@@ -28,7 +28,9 @@
         "network_scan_status",
         "network_scan_list",
         "network_evidence",
-        "network_destinations"
+        "network_destinations",
+        "network_devices",
+        "network_device"
       ]
     },
     {
@@ -38,7 +40,9 @@
         "network_scope",
         "network_scan_list",
         "network_evidence",
-        "network_destinations"
+        "network_destinations",
+        "network_devices",
+        "network_device"
       ]
     }
   ],
