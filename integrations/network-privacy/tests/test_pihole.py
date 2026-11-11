@@ -567,6 +567,7 @@ class PiHoleConfigurationTest(unittest.TestCase):
             old = asdict(plan)
             old.pop("quick_scan")
             old.pop("dns_profiles")
+            old.pop("device_descriptions")
             old.pop("enabled")
             old.pop("labels")
             old.pop("pihole")

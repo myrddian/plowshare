@@ -210,6 +210,56 @@ is available from UniFi client counters (see below). For per-connection
 sessions, UniFi provides a separate [Traffic Flows export](https://help.ui.com/hc/en-us/articles/32201256219799-Traffic-Flows-and-Traffic-Logging-in-UniFi-Network)
 that this collector does not read.
 
+### Device descriptions
+
+Many TVs, speakers, streamers and printers describe themselves on the local
+network. With this option on, the collector asks watched devices directly.
+File-managed collectors set `collection.deviceDescriptions` to `true` alongside
+`collection.quickScan`. The settings API accepts `deviceDescriptions`. The
+option is off by default, and turning quick checks off turns it off too.
+
+What is sent, and to whom:
+
+- Only devices that a successful quick check confirmed by MAC at a watched
+  private address are asked. Adopted UniFi infrastructure, IP-only sightings
+  and addresses with conflicting MACs are skipped.
+- One SSDP search (`M-SEARCH`, `ssdp:all`) goes to the device's own address on
+  UDP 1900. If the reply gives a description location on plain HTTP at that
+  same address (any port), the collector fetches it once. Redirects are
+  refused, the fetch has a 2-second total timeout and a 64 KiB limit, and XML
+  that declares a document type or entities is refused.
+- Up to three unicast mDNS queries go to the device's address on UDP 5353:
+  the services it advertises, then their instances and TXT records, for at
+  most eight services and eight instances.
+- Nothing is broadcast or multicast. Replies from any other address are
+  ignored. Each reply wait is at most 2 seconds.
+
+How often: each device is asked at most once a day, or sooner if its MAC is
+seen at a different watched address. Each quick check asks at most four
+devices, oldest first, at least 250 ms apart. The step runs in the background
+after the check is recorded, so it never delays presence history, scans or
+intake.
+
+What is kept: manufacturer, model name, model number, an explicit firmware or
+software version field, and the advertised service types as short labels such
+as "screen casting (DIAL)". Serial numbers, UUIDs, friendly names, mDNS
+instance names, URLs, MAC and IP addresses are discarded before anything is
+stored. A device that does not answer is normal and is not a finding; it keeps
+its earlier description, with its original collection time, until it is seen
+at another address.
+
+Public advisories: when `PLOWSHARE_PRIVACY_NVD_ORIGIN` is configured (see
+**UniFi identity** below), the collector looks up one public model string per
+device. It uses the model you confirmed in background device profile review
+first, then a model the UniFi controller confirms, then the model the device
+reported. Only that model string is sent to NVD, and each model is looked up at
+most once a week. Without an NVD origin nothing leaves the network.
+
+Facts stay in the collector's private `device-facts.json` in the state
+directory. The file holds at most 256 devices, and the least recently asked
+device is dropped first. A damaged file is preserved and stops new facts until
+it is inspected. Facts are not published to Plowshare by this step.
+
 ### UniFi traffic volume
 
 The Network Integration API used for identity has no per-client traffic. With

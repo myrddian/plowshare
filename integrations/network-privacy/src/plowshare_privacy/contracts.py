@@ -563,6 +563,9 @@ class CollectionPlan:
     unifi: UniFiPlan | None = None
     quick_scan: bool = False
     dns_profiles: bool = False
+    # Ask confirmed devices to describe themselves after quick checks
+    # (unicast SSDP/mDNS); see device_facts. Local presence work only.
+    device_descriptions: bool = False
 
 
 @dataclass(frozen=True)
@@ -640,6 +643,7 @@ class Configuration:
                 "unifi",
                 "quickScan",
                 "dnsProfiles",
+                "deviceDescriptions",
             },
         )
         mode = plan["mode"]
@@ -708,6 +712,11 @@ class Configuration:
                 raise ValueError(
                     "DNS activity profiles require quick presence checks and Pi-hole"
                 )
+            device_descriptions = plan.get("deviceDescriptions", False)
+            if type(device_descriptions) is not bool:
+                raise ValueError("Device descriptions must be a boolean")
+            if device_descriptions and not quick_scan:
+                raise ValueError("Device descriptions require quick presence checks")
             if pihole is not None and observations is not None:
                 raise ValueError("Choose either Pi-hole or a DNS observation file")
             collection = CollectionPlan(
@@ -724,6 +733,7 @@ class Configuration:
                 UniFiPlan.decode(plan["unifi"]) if "unifi" in plan else None,
                 quick_scan,
                 dns_profiles,
+                device_descriptions,
             )
         tokens = (
             identifier(row["tokenEnvironment"]),

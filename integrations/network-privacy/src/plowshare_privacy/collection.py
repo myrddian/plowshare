@@ -48,6 +48,7 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
     # Local presence sampling does not change full collection evidence or receipts.
     values.pop("quick_scan")
     values.pop("dns_profiles")
+    values.pop("device_descriptions")
     # Default-enabled plans retain their historical fingerprints and journal identity.
     if plan.enabled:
         values.pop("enabled")

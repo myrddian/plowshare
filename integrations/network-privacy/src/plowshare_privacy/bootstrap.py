@@ -752,7 +752,14 @@ def connect_pihole(setup: Setup, origin: str, application_password: str) -> None
     plan = object_fields(
         row["collection"],
         {"mode", "targets", "ports", "timeoutSeconds", "concurrency"},
-        {"enabled", "deviceLabels", "unifi", "quickScan", "dnsProfiles"},
+        {
+            "enabled",
+            "deviceLabels",
+            "unifi",
+            "quickScan",
+            "dnsProfiles",
+            "deviceDescriptions",
+        },
     )
     path = setup.collector.parent / ("pihole-password-" + str(uuid4()))
     plan["pihole"] = {

@@ -362,6 +362,7 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         original = asdict(plan)
         original.pop("quick_scan")
         original.pop("dns_profiles")
+        original.pop("device_descriptions")
         original.pop("enabled")
         original.pop("labels")
         original.pop("pihole")
