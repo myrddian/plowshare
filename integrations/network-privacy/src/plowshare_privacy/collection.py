@@ -325,6 +325,13 @@ class NetworkCollector:
             and item.identity.mac
             and old.get(item.address) == item.key
             and prior_counts[item.key] == current_counts[item.key] == 1
+            # Adopted UniFi gateways, switches and access points are network
+            # infrastructure, not DNS clients of Pi-hole; profiling them would
+            # only produce a misleading "no DNS" result.
+            and not (
+                isinstance(self.identity_source, ManagedInventory)
+                and self.identity_source.recently_managed(item.identity)
+            )
         }
         if not confirmed:
             return (), ()

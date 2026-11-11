@@ -373,6 +373,7 @@ function renderTraffic(traffic) {
   details.append(element('p', `UniFi client byte counters · ${bounds} · ${traffic.samples} quick checks`, 'hint'));
   if (traffic.resets) details.append(element('p', `${traffic.resets} intervals skipped after a counter reset (reconnect or controller restart). Totals are a lower bound.`, 'hint'));
   details.append(element('p', 'Direction follows UniFi: "to device" is what the network sent the client. Counters show volume, not which hosts received it.', 'hint'));
+  details.append(element('p', 'Totals include local traffic, such as a camera recording to a local video recorder or a backup to a NAS, not only internet traffic.', 'hint'));
   return details;
 }
 function renderDnsActivity(activity) {
@@ -380,7 +381,8 @@ function renderDnsActivity(activity) {
   const details = element('details');
   details.append(element('summary', `DNS activity · ${activity.queries_read} sampled queries in the last 24 hours`));
   if (activity.pihole_silent) {
-    details.append(element('p', `No DNS queries reached Pi-hole in ${activity.windows} confirmed windows while this device was on the network. It may be idle, or it may use its own DNS servers or DNS over HTTPS, which Pi-hole cannot see.`, 'notice'));
+    const hours = Math.floor((new Date(activity.until_at) - new Date(activity.from_at)) / 3600000);
+    details.append(element('p', `No DNS queries reached Pi-hole in ${activity.windows} confirmed checks over ${hours} hours while this device was on the network. It may be idle, or it may use its own DNS servers or DNS over HTTPS, which Pi-hole cannot see.`, 'notice'));
   }
   const bounds = [activity.from_at, activity.until_at].map(value => new Date(value).toLocaleString()).join(' to ');
   details.append(element('p', `Pi-hole · ${bounds} · ${activity.windows} observed windows`, 'hint'));
@@ -568,7 +570,7 @@ function renderOverview(value) {
     card.append(element('p', device.services.map(item => `${item.port}: ${item.status}`).join(' · '), 'hint'));
     if (device.detection) card.append(renderDeviceDetection(device.detection));
     const flags = [];
-    if (device.dns_activity?.pihole_silent) flags.push('Bypasses Pi-hole?');
+    if (device.dns_activity?.pihole_silent) flags.push('No DNS via Pi-hole');
     const tracking = behaviouralQueries(device.dns_activity);
     if (tracking) flags.push(`${tracking} ad, measurement or telemetry lookups`);
     if (flags.length) {

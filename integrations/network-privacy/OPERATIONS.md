@@ -189,11 +189,14 @@ Suffixes match on label boundaries and the longest match wins, so
 `logs.netflix.com` is telemetry while other `netflix.com` names are streaming.
 Unknown vendor clouds stay unclassified rather than guessed.
 
-**Devices that bypass Pi-hole.** A card warns when a device was confirmed on the
-network for at least six consecutive windows (about a quarter of an hour) and
-Pi-hole recorded no queries from its address, with no partial or failed read in
-any window. This is a visibility finding, not an accusation: the device may be
-idle, or it may use hard-coded DNS servers or DNS over HTTPS, which Pi-hole
+**No DNS via Pi-hole.** A card shows this badge when a device was confirmed on
+the network across at least six hours and 24 quick checks, and Pi-hole recorded
+no queries from its address, with no partial or failed read in any window.
+Shorter quiet spells are ordinary: devices that resolve rarely can cache DNS
+answers for hours. Adopted UniFi gateways, switches and access points are not
+profiled at all, because they are network infrastructure rather than DNS clients
+of Pi-hole. The badge is a visibility finding, not an accusation: the device may
+be idle, or it may use hard-coded DNS servers or DNS over HTTPS, which Pi-hole
 cannot see. Cameras and media devices often do the latter. Router rules that
 redirect port 53 to Pi-hole, or blocking known DoH endpoints, restore visibility.
 
@@ -231,8 +234,10 @@ so totals are a lower bound. Bytes are attributed only when the same quick check
 confirmed the same MAC at the same address; two MACs at one address get none.
 Volumes are local presence data: they never change evidence scope, receipts or
 the full-collection fingerprint, and they say nothing about which remote hosts
-received the bytes. Pair them with the DNS profile to see where a device is
-likely sending them.
+received the bytes. UniFi counts all of a client's traffic, including local
+traffic such as a camera recording to a local video recorder or a backup to a
+NAS, so a large "from device" figure is not by itself internet upload. Pair
+volumes with the DNS profile to see where a device is likely sending them.
 
 ### UniFi identity
 
