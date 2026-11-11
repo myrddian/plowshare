@@ -4,6 +4,7 @@
  */
 
 import { icon } from './icons.ts';
+import { ownedEvent } from './events.ts';
 
 export interface FileBrowserEntry {
   readonly name: string;
@@ -175,11 +176,7 @@ export class FileBrowserSession {
     this.current = value;
     const key = this.draftKey(value.path);
     const prior = this.drafts.get(key);
-    if (
-      !prior ||
-      prior.text === prior.original ||
-      prior.text === value.text
-    ) {
+    if (!prior || prior.text === prior.original || prior.text === value.text) {
       this.draft = {
         text: value.text,
         original: value.text,
@@ -312,19 +309,18 @@ export function installFileBrowser(
     host.querySelector<T>(selector)!;
   let painted = '';
 
-  const run = (work: () => Promise<unknown> | void) => async () => {
-    try {
-      await work();
-    } catch {
-      // session.error already set
-    } finally {
-      render();
-    }
-  };
+  const run = (work: () => Promise<unknown> | void) =>
+    ownedEvent(async () => {
+      try {
+        await work();
+      } finally {
+        render();
+      }
+    });
 
   get<HTMLFormElement>('[data-jump]').addEventListener('submit', (event) => {
     event.preventDefault();
-    void run(() => session.jump(get<HTMLInputElement>('[data-path]').value))();
+    run(() => session.jump(get<HTMLInputElement>('[data-path]').value))();
   });
 
   get('[data-read-current]').addEventListener(
@@ -379,7 +375,8 @@ export function installFileBrowser(
           toggle.addEventListener(
             'click',
             run(async () => {
-              if (session.expanded.has(entry.path)) session.collapse(entry.path);
+              if (session.expanded.has(entry.path))
+                session.collapse(entry.path);
               else await session.expand(entry.path);
             }),
           );
@@ -391,7 +388,8 @@ export function installFileBrowser(
           label.addEventListener(
             'click',
             run(async () => {
-              if (session.expanded.has(entry.path)) session.collapse(entry.path);
+              if (session.expanded.has(entry.path))
+                session.collapse(entry.path);
               else await session.expand(entry.path);
             }),
           );

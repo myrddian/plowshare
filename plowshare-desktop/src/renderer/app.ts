@@ -367,10 +367,7 @@ async function loadHistory(id = selected, before?: number) {
     historyBusy.delete(id);
   }
 }
-async function choose(
-  id: string,
-  options: { keepApplication?: boolean } = {},
-) {
+async function choose(id: string, options: { keepApplication?: boolean } = {}) {
   if (!options.keepApplication) {
     application.close();
     personalVisible = false;
@@ -421,9 +418,7 @@ async function chooseScope(nextScope: string) {
     error(reason instanceof Error ? reason.message : errorMessage(reason));
   }
 }
-async function newConversation(
-  options: { keepApplication?: boolean } = {},
-) {
+async function newConversation(options: { keepApplication?: boolean } = {}) {
   if (
     busy ||
     (state.mode === 'live' && !state.connected) ||
@@ -1325,9 +1320,7 @@ function renderPersonal() {
     $('#personal-content'),
     (personal.error ? `<p role="alert">${esc(personal.error)}</p>` : '') +
       bots +
-      (bots
-        ? ''
-        : '<p>No personal bots are available for this account.</p>'),
+      (bots ? '' : '<p>No personal bots are available for this account.</p>'),
   );
 }
 $('#personal-sections').addEventListener('click', (event) => {

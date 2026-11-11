@@ -671,6 +671,17 @@ export class DesktopClient {
         this.retainedConversations.keys().next().value!,
       );
   }
+  /** Register an inspected target without adding it to the account's chat list. */
+  retainInspection(row: Conversation) {
+    if (this.options.project && row.project !== this.options.project)
+      throw new Error('The conversation belongs to another project.');
+    this.state.inspectedConversations = [
+      ...(this.state.inspectedConversations ?? []).filter(
+        (item) => item.id !== row.id,
+      ),
+      structuredClone(row),
+    ].slice(-1000);
+  }
   private timers = new Map<string, ReturnType<typeof setInterval>>();
   private demoTimers = new Map<string, ReturnType<typeof setInterval>>();
   private scopeReads = new Map<string, number>();
@@ -1012,9 +1023,10 @@ export class DesktopClient {
         const row = this.state.applicationActivity?.items.find(
           (item) => item.id === request.conversation,
         );
-        // Same custody gate as Processes: inventory visibility ≠ log follow.
-        if (row?.owner === this.state.handle)
-          this.retainConversation({
+        // Register only a server-returned selection. Follow/history still require
+        // live server READ authority and retain no creator-only client policy.
+        if (row)
+          this.retainInspection({
             id: row.id,
             ...(row.project ? { project: row.project } : {}),
             title: row.agent ?? row.id,
@@ -1093,16 +1105,15 @@ export class DesktopClient {
         for (const row of rows)
           if (
             request.type === 'proc.inspect' &&
-            row.id === request.payload.conversation &&
-            row.owner === this.state.handle
+            row.id === request.payload.conversation
           )
-            this.retainConversation({
+            this.retainInspection({
               id: row.id,
               ...(row.project ? { project: row.project } : {}),
               title: row.agent ?? row.id,
             });
-        // The audit is the answer; retained conversations above are main-process
-        // follow authority, which no renderer reads from this reply.
+        // These are known navigation targets. Metadata never substitutes for
+        // the server's authorization of a follow or a trajectory page.
         return { proc };
       }
       case 'usage-open':

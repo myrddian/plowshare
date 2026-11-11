@@ -30,15 +30,15 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
    * Writes this log's input selections, owned by the context's <em>attribution</em> axis.
    *
    * <p>{@code information_job_inputs.owner_handle} is {@code NOT NULL REFERENCES admins(handle)}
-   * (V83) and is the column {@code information_log_readable} compares the asking account against. A
+   * (V83) and records attribution independently of the reader's current ACL/RBAC grants. A
    * contained principal has no {@code admins} row by design (V218), so the acting axis cannot be
    * stored here at all: a contained run binding an input would violate the foreign key before any
    * authority question was reached. The log genuinely belongs to the container — that is the handle
    * {@code ConversationStore} wrote as its owner — so attribution is both the only axis this column
    * can hold and the correct one.
    *
-   * <p>This is a change of which axis is read, not of what the column means and not of any
-   * predicate over it. Every uncontained caller's two axes hold one value, so the stored row is
+   * <p>This is a change of which axis is read, not of what the column means and not of any input
+   * attribution. Every uncontained caller's two axes hold one value, so the stored row is
    * byte-identical to the one this statement wrote before.
    */
   public void bind(String job, InformationContext context, List<UUID> revisions) {
@@ -90,15 +90,14 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
   @Override
   public List<Input> inputs(String job) {
     return jdbc.query(
-        "SELECT owner_handle,revision_id,scope,project_name,include_shared FROM information_job_inputs WHERE job_id=?",
+        "SELECT DISTINCT revision_id,scope,project_name,include_shared FROM information_job_inputs WHERE job_id=?",
         (row, n) ->
             new Input(
-                row.getString(1),
-                row.getObject(2, UUID.class),
+                row.getObject(1, UUID.class),
                 new InformationContext.Selection(
-                    InformationContext.Scope.valueOf(row.getString(3).toUpperCase(Locale.ROOT)),
-                    row.getString(4),
-                    row.getBoolean(5))),
+                    InformationContext.Scope.valueOf(row.getString(2).toUpperCase(Locale.ROOT)),
+                    row.getString(3),
+                    row.getBoolean(4))),
         job);
   }
 

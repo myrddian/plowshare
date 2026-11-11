@@ -246,6 +246,8 @@ export interface DesktopState {
     | undefined;
   agents: Record<string, Agent[]>;
   conversations: Conversation[];
+  /** Bounded navigation metadata. Every trajectory/follow still asks the server for READ. */
+  inspectedConversations?: Conversation[];
   history: Record<string, History>;
   jobs: Job[];
   approvals: Approval[];
@@ -871,12 +873,15 @@ declare global {
   }
 }
 
-/** Only account-owned run detail makes an orchestration conversation inspectable. */
+/** Admit known navigation targets. Log disclosure remains a current server ACL/RBAC decision. */
 export function inspectionConversation(
   state: DesktopState,
   id: string,
 ): boolean {
-  const known = new Set(state.conversations.map((row) => row.id));
+  const known = new Set([
+    ...state.conversations.map((row) => row.id),
+    ...(state.inspectedConversations ?? []).map((row) => row.id),
+  ]);
   if (state.library?.search.value?.kind === 'conversation')
     for (const hit of (state.library.search.value.reply as LogSearchResponse)
       .hits)
@@ -887,9 +892,8 @@ export function inspectionConversation(
       detail.wire?.orchestration.callerConversation,
     ])
       if (conversation) known.add(conversation);
-  // proc.list / Application Activity inventory is metadata only (ADR 0031):
-  // fleet visibility does not admit log inputs or trajectory follows.
-  // Only traverse histories reachable from an account-owned inspection surface.
+  // Inventory registers navigation metadata. Follows check current server scope
+  // permissions, and each history page also checks retained-input ACLs.
   for (const parent of known)
     for (const entry of state.history[parent]?.entries ?? [])
       for (const call of entry.calls ?? [])

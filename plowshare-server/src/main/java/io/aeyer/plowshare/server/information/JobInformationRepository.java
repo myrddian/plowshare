@@ -5,7 +5,7 @@ import java.util.UUID;
 
 /** Persisted input lineage and readability; selection policy remains in InformationJobs. */
 public interface JobInformationRepository {
-  record Input(String owner, UUID revision, InformationContext.Selection selection) {}
+  record Input(UUID revision, InformationContext.Selection selection) {}
 
   boolean hasInputs(String log);
 

@@ -128,7 +128,10 @@ await test('ApplicationActivityClient lists with project and server visibility f
   await f.client.list('network-privacy-watch');
   assert.equal(f.state.applicationActivity?.project, 'network-privacy-watch');
   assert.equal(f.state.applicationActivity?.visibility, 'server');
-  assert.equal(f.state.applicationActivity?.items[0]?.id, 'cnv_32618B9065BBF8AC');
+  assert.equal(
+    f.state.applicationActivity?.items[0]?.id,
+    'cnv_32618B9065BBF8AC',
+  );
   assert.equal(f.state.applicationActivity?.items[0]?.agent, 'privacy_analyst');
 });
 

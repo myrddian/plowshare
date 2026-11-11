@@ -86,7 +86,7 @@ function memoryPort(
 
 await test('expand caches directory listings per session', async () => {
   const port = memoryPort(
-    new Map([
+    new Map<string, { text: string; writable?: boolean } | 'dir'>([
       ['agents', 'dir'],
       ['agents/bot.json', { text: '{}' }],
       ['notes.md', { text: 'hello' }],
@@ -96,7 +96,10 @@ await test('expand caches directory listings per session', async () => {
   await session.expand('');
   assert.equal(port.lists.length, 1);
   assert.deepEqual(
-    session.listing('')?.entries.map((row) => row.name).sort(),
+    session
+      .listing('')
+      ?.entries.map((row) => row.name)
+      .sort(),
     ['agents', 'notes.md'],
   );
   await session.expand('agents');
@@ -146,7 +149,7 @@ await test('save writes through the port and clears dirty when revision matches'
 await test('collapse forgets a directory without clearing sibling state', async () => {
   const session = new FileBrowserSession(
     memoryPort(
-      new Map([
+      new Map<string, { text: string; writable?: boolean } | 'dir'>([
         ['a', 'dir'],
         ['b', 'dir'],
         ['a/one.md', { text: '1' }],

@@ -291,6 +291,23 @@ back the whole deletion; there is no advertised asynchronous cleanup job or
 external blob reference counting. Deleted content cannot be restored. Unshare,
 withdrawal, exclusion and deletion commit safety reductions before hooks.
 
+## Retained log reads
+
+A trajectory reader needs current READ authority for the conversation's project
+and every exact information selection retained by that log and its ancestors.
+The input owner records execution attribution. It does not add a creator-only
+condition to ACL/RBAC disclosure. A project READER, CONTRIBUTOR or MANAGER can
+inspect an application log when the retained inputs and their dependencies are
+readable under that account's current grants and resource policies. Administrator
+control uses its assigned data grants for these checks.
+
+Personal selections, private resource ACLs, quarantined inputs, withdrawn sources,
+and dependency limits are evaluated by the existing knowledge permission predicates.
+Current scope permissions apply to follows. Input permission changes apply to
+subsequent trajectory pages, including cached reads. Desktop inventory rows
+provide navigation targets and each trajectory request
+is authorized by the server. Opening a log leaves its attribution intact.
+
 ## Hooks
 
 All production intake, acquisition, model processing, evidence/report recording

@@ -219,6 +219,10 @@ export class DesktopWorkspace {
         ...state.conversations,
         ...child.state.conversations,
       ]).filter((row) => !row.project || !unavailableProjects.has(row.project));
+      state.inspectedConversations = byId([
+        ...(state.inspectedConversations ?? []),
+        ...(child.state.inspectedConversations ?? []),
+      ]).filter((row) => !row.project || !unavailableProjects.has(row.project));
       state.jobs = byId([...state.jobs, ...child.state.jobs]);
       state.approvals = byId([...state.approvals, ...child.state.approvals]);
       state.answeringApprovals = [
@@ -384,10 +388,16 @@ export class DesktopWorkspace {
     }
   }
   private projectOfConversation(id: string) {
-    return this.state.conversations.find((row) => row.id === id)?.project;
+    return [
+      ...this.state.conversations,
+      ...(this.state.inspectedConversations ?? []),
+    ].find((row) => row.id === id)?.project;
   }
   private async conversationOwner(id: string) {
-    const row = this.state.conversations.find((value) => value.id === id);
+    const chat = this.state.conversations.find((value) => value.id === id);
+    const row =
+      chat ??
+      this.state.inspectedConversations?.find((value) => value.id === id);
     if (!row) {
       // A delegated conversation inherits the owning parent's authenticated session.
       // It need not be listed as a top-level chat, and must not be rerouted globally.
@@ -402,7 +412,8 @@ export class DesktopWorkspace {
     // written into, and `retainConversation` deep-copies before storing. See
     // the contract on `state`.
     const owner = await this.clientFor(row.project);
-    owner.retainConversation(row);
+    if (chat) owner.retainConversation(row);
+    else owner.retainInspection(row);
     return owner;
   }
   async followView(view: string, conversation?: string) {

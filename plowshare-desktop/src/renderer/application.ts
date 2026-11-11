@@ -40,7 +40,7 @@ export type ApplicationChatNest = {
  * `open` lands on Overview. Activity lists every LLM-bearing conversation for
  * this Application via proc.list (server visibility for admins). Own person
  * chats nest the existing chat; other inventory rows show metadata in-hub.
- * Trajectory opens only for account-owned logs (same custody as Processes).
+ * Trajectory reads use the server's current scoped permissions for each log.
  * Files mounts the reusable file-browser over application.files / read / save.
  */
 export function installApplication(
@@ -76,7 +76,6 @@ export function installApplication(
             <h3 data-activity-log-title></h3>
             <p data-activity-log-meta></p>
             <p data-activity-log-evidence class="file-browser-empty"></p>
-            <p class="file-browser-empty" data-activity-log-custody hidden></p>
             <button type="button" class="primary-button" data-activity-trajectory>Open trajectory</button>
           </div>
           <div class="activity-empty" data-activity-empty hidden><p>Select a conversation or log.</p></div>
@@ -187,8 +186,7 @@ export function installApplication(
         browser.render();
       }
     });
-  const scopeKey = () =>
-    `${project}\0${JSON.stringify(location ?? null)}`;
+  const scopeKey = () => `${project}\0${JSON.stringify(location ?? null)}`;
   const releaseChat = () => {
     if (nest) restoreChat(nest.chat, nest.home);
   };
@@ -267,18 +265,6 @@ export function installApplication(
       const evidence =
         listed?.items.find((row) => row.id === current.id)?.evidence ?? '';
       get('[data-activity-log-evidence]').textContent = evidence;
-      const open = get<HTMLButtonElement>('[data-activity-trajectory]');
-      open.hidden = !current.canOpenTrajectory;
-      open.disabled = !current.canOpenTrajectory;
-      const note = get('[data-activity-log-custody]');
-      if (current.canOpenTrajectory) {
-        note.hidden = true;
-        note.textContent = '';
-      } else {
-        note.hidden = false;
-        note.textContent =
-          'Trajectory stays on account-owned logs. This row is inventory metadata only.';
-      }
     }
   };
   const openTrajectory = (id: string) =>
@@ -382,7 +368,7 @@ export function installApplication(
     'click',
     run(async () => {
       const row = activityRows().find((item) => item.id === selected);
-      if (!row?.canOpenTrajectory) return;
+      if (!row) return;
       await openTrajectory(selected);
     }),
   );

@@ -495,6 +495,58 @@ await test('a delegated project trajectory stays on its parent session without r
   }
 });
 
+await test('an inspected application log follows its project session without becoming a chat', async () => {
+  const { workspace, sessions } = fixture();
+  try {
+    await connect(workspace);
+    workspace.control.retainInspection({
+      id: 'service-log',
+      project: 'Research',
+      title: 'Service analyst',
+    });
+    await workspace.followView('trajectory:service-log', 'service-log');
+    const owner = sessions.find((session) =>
+      session.calls.some(
+        (call) =>
+          call.type === 'conversation.list' &&
+          call.payload.project === 'Research',
+      ),
+    );
+    assert.ok(owner);
+    assert.ok(
+      owner.calls.some(
+        (call) =>
+          call.type === 'conversation.trajectory' &&
+          call.payload.conversation === 'service-log',
+      ),
+    );
+    assert.equal(
+      present(sessions[0]).calls.some(
+        (call) =>
+          call.type === 'conversation.trajectory' &&
+          call.payload.conversation === 'service-log',
+      ),
+      false,
+    );
+    assert.equal(
+      workspace.state.conversations.some((row) => row.id === 'service-log'),
+      false,
+    );
+    assert.equal(
+      workspace.state.inspectedConversations?.find(
+        (row) => row.id === 'service-log',
+      )?.project,
+      'Research',
+    );
+    await assert.rejects(
+      workspace.followView('unknown', 'unlisted-log'),
+      /available conversation/,
+    );
+  } finally {
+    await workspace.shutdown();
+  }
+});
+
 await test('a late project reconnect cannot replace a newer main chat selection', async () => {
   const { workspace, sessions, delayPeer: _delayPeer } = fixture();
   const delayPeer = _delayPeer.bind(undefined);

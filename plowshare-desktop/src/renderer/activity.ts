@@ -12,10 +12,7 @@ import {
   rememberSchedule,
   scheduledAction,
 } from './schedule-controls.ts';
-import {
-  rememberQuestion,
-  questionAction,
-} from './run-controls.ts';
+import { rememberQuestion, questionAction } from './run-controls.ts';
 import { runDetailHtml } from './run-detail.ts';
 import { replyState } from '../shared.ts';
 import type { ActivityView, DesktopState, Request } from '../shared.ts';

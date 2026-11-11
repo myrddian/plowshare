@@ -10,39 +10,38 @@ import type { ProcConversation } from 'plowshare-client-ts/operations/proc';
 const row = (
   id: string,
   extra: Partial<ProcConversation> = {},
-): ProcConversation =>
-  ({
-    id,
-    root: id,
-    parent: null,
-    origin: 'turn',
-    lifecycle: 'ACTIVE',
-    project: 'network-privacy-watch',
-    owner: 'enzo',
-    application: null,
-    actor: null,
-    actingSubject: null,
-    agent: null,
-    principal: 'enzo',
-    cause: null,
-    resource: null,
-    revision: null,
-    causationRoot: null,
-    causationParent: null,
-    causationDepth: null,
-    createdAt: '2026-11-09T10:55:01Z',
-    lastTurnAt: null,
-    state: 'IDLE',
-    evidence: 'retained database snapshot',
-    latestJob: null,
-    ending: null,
-    children: 0,
-    calls: 0,
-    attempts: 0,
-    activeCalls: 0,
-    repeatedCalls: 0,
-    ...extra,
-  }) as ProcConversation;
+): ProcConversation => ({
+  id,
+  root: id,
+  parent: null,
+  origin: 'turn',
+  lifecycle: 'ACTIVE',
+  project: 'network-privacy-watch',
+  owner: 'enzo',
+  application: null,
+  actor: null,
+  actingSubject: null,
+  agent: null,
+  principal: 'enzo',
+  cause: null,
+  resource: null,
+  revision: null,
+  causationRoot: null,
+  causationParent: null,
+  causationDepth: null,
+  createdAt: '2026-11-09T10:55:01Z',
+  lastTurnAt: null,
+  state: 'IDLE',
+  evidence: 'retained database snapshot',
+  latestJob: null,
+  ending: null,
+  children: 0,
+  calls: 0,
+  attempts: 0,
+  activeCalls: 0,
+  repeatedCalls: 0,
+  ...extra,
+});
 
 await test('activityVisibility uses server for admins and mine otherwise', () => {
   assert.equal(activityVisibility(true), 'server');
@@ -99,7 +98,7 @@ await test('applicationActivityRows prefers live work then newest logs', () => {
   assert.match(rows[2]!.subtitle, /@service/);
 });
 
-await test('applicationActivityRows admits trajectory only for account-owned logs', () => {
+await test('applicationActivityRows nests person chats without treating service ownership as READ authority', () => {
   const rows = applicationActivityRows(
     [
       row('cnv_mine', { owner: 'enzo', origin: 'turn' }),
@@ -112,13 +111,5 @@ await test('applicationActivityRows admits trajectory only for account-owned log
     { handle: 'enzo', titles: { cnv_mine: 'Mine' } },
   );
   assert.equal(rows.find((row) => row.id === 'cnv_mine')?.nestChat, true);
-  assert.equal(
-    rows.find((row) => row.id === 'cnv_mine')?.canOpenTrajectory,
-    true,
-  );
-  assert.equal(
-    rows.find((row) => row.id === 'cnv_service')?.canOpenTrajectory,
-    false,
-  );
   assert.equal(rows.find((row) => row.id === 'cnv_service')?.nestChat, false);
 });

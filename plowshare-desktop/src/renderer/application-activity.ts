@@ -13,8 +13,6 @@ export type ActivityListRow = {
   owner: string | null;
   agent: string | null;
   nestChat: boolean;
-  /** Same gate as Processes: trajectory needs account custody, not proc visibility. */
-  canOpenTrajectory: boolean;
   current: boolean;
 };
 
@@ -30,8 +28,7 @@ export function isLiveProcState(state: string) {
   return liveStates.has(state);
 }
 
-const stamp = (row: ProcConversation) =>
-  row.lastTurnAt ?? row.createdAt;
+const stamp = (row: ProcConversation) => row.lastTurnAt ?? row.createdAt;
 
 /**
  * Application Activity list from proc inventory: live work first, then newest
@@ -49,9 +46,7 @@ export function applicationActivityRows(
     const live =
       Number(isLiveProcState(b.state)) - Number(isLiveProcState(a.state));
     if (live) return live;
-    return (
-      stamp(b).localeCompare(stamp(a)) || a.id.localeCompare(b.id)
-    );
+    return stamp(b).localeCompare(stamp(a)) || a.id.localeCompare(b.id);
   });
   return ranked.map((row) => {
     const title =
@@ -78,7 +73,6 @@ export function applicationActivityRows(
       nestChat:
         row.origin === 'turn' &&
         (!!options.titles?.[row.id] || row.owner === options.handle),
-      canOpenTrajectory: row.owner === options.handle,
       current: options.selected === row.id,
     };
   });
