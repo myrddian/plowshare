@@ -214,7 +214,9 @@ that this collector does not read.
 
 Many TVs, speakers, streamers and printers describe themselves on the local
 network. With this option on, the collector asks watched devices directly.
-File-managed collectors set `collection.deviceDescriptions` to `true` alongside
+Turn it on in Settings with **Ask monitored devices to describe themselves**,
+next to the DNS profile option, then **Save monitoring**. File-managed
+collectors set `collection.deviceDescriptions` to `true` alongside
 `collection.quickScan`. The settings API accepts `deviceDescriptions`. The
 option is off by default, and turning quick checks off turns it off too.
 
@@ -258,7 +260,26 @@ most once a week. Without an NVD origin nothing leaves the network.
 Facts stay in the collector's private `device-facts.json` in the state
 directory. The file holds at most 256 devices, and the least recently asked
 device is dropped first. A damaged file is preserved and stops new facts until
-it is inspected. Facts are not published to Plowshare by this step.
+it is inspected. Facts are not published to Plowshare by this step; they reach
+Plowshare only inside a device's dossier when it is assessed.
+
+Where you see them: the device pane's **What we know about this device**
+block, between your notes and the agent assessment, shows what the device
+reported (with the protocol and date), the advisory lookup (NVD, the date, the
+model and where it came from, and up to five advisories, known-exploited and
+most severe first) and any vendor notes. Before the first answer it says "Not
+described yet", or "Device descriptions are off" when the option is off. The
+block reads `GET /api/devices/<device_id>/supplemental`, which only reads the
+retained facts; it never asks the device or NVD.
+
+Vendor notes are a short curated table in `vendor_notes.py`: viewing-tracking
+features that a manufacturer ships (for example Sony's Samba Interactive TV or
+Vizio's Viewing Data), what each collects, where to turn it off and the source.
+A note is shown for a TV or streaming player whose reported manufacturer, MAC
+vendor or UniFi vendor matches the manufacturer name. It is something to check,
+never an observation that the feature is on. Entries come from the vendor's own
+pages, except LG Live Plus, which is marked as reported by The Markup and
+Malwarebytes. Settings menus differ by model year.
 
 ### UniFi traffic volume
 
@@ -298,9 +319,12 @@ device, then choose **Assess this device** under **Agent assessment**.
 
 1. The collector builds the device's dossier from what it already holds:
    identity, open services, DNS grouped by purpose, Pi-hole silence, UniFi
-   traffic, explicit coverage gaps and code-computed attention signals. It
-   retains the dossier as `network-privacy-dossier/<device_id>.json` so the
-   report can cite the exact revision.
+   traffic, supplemental facts (see **Device descriptions**), explicit
+   coverage gaps and code-computed attention signals. It retains the dossier
+   as `network-privacy-dossier/<device_id>.json` (document version 2) so the
+   report can cite the exact revision. A dossier over its 16,000-byte budget
+   drops listed advisories first, then the least important DNS destinations,
+   and says so in its coverage lines.
 2. It starts `assess_network_device`. The assessor reads only that dossier and
    returns structured JSON. The script rejects HTML, tables, raw identifiers,
    Markdown structure, exfiltration claims and signals the dossier does not
@@ -312,7 +336,13 @@ device, then choose **Assess this device** under **Agent assessment**.
    assessment failed" with the run and **Retry**.
 4. The script renders the report in plain language under one stable name per
    device (`Network privacy assessment / <device_id>`); later runs revise it
-   rather than adding drafts.
+   rather than adding drafts. Its **Supplemental information** section, before
+   Evidence, is written by the script from the dossier alone: what the device
+   says it is, the advisories for that model, and vendor features worth
+   checking, each with its source and date. Agents may use these facts to
+   explain an observation but cannot add to or reword that section, and the
+   facts are never findings: a reported model is the device's claim, an
+   advisory is about the model, and a vendor note is something to check.
 
 While a report awaits review, **Accept and make final** finalises that
 revision in Plowshare and **Dismiss without finalising** hides it locally
@@ -326,8 +356,11 @@ Only one assessment runs at a time, a device in review cannot be reassessed
 until it is accepted or dismissed, and at most 12 start per UTC day. The
 optional background queue (Devices, **Background device assessments**) is off
 by default; when enabled it assesses devices with signals that were never
-assessed, then devices whose signals changed, within the configured daily
-limit. Agents can also read dossiers through the `network_devices` and
+assessed, then never-assessed devices that described themselves or have an
+advisory search, then devices whose signals changed or whose supplemental
+facts changed (new firmware, another model, a new advisory) since their last
+assessment started, within the configured daily limit. A daily re-description
+with the same answer is not a change. Agents can also read dossiers through the `network_devices` and
 `network_device` tools.
 
 Signals direct attention; they are not findings. The rules and thresholds are

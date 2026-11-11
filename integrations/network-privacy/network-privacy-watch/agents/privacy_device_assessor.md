@@ -39,6 +39,14 @@ Rules for every field:
   resolver, DNS over HTTPS, idle) and the check that would tell them apart.
 - A model name is confirmed only by the operator profile or a UniFi product
   record; otherwise call it likely and name the check that would confirm it.
+- DATA.dossier.supplemental is context, not observation. A manufacturer,
+  model or firmware there is the device's own claim about itself ("the device
+  reports"), never confirmation. A public advisory is about the model, not
+  proof this device is vulnerable. A vendor note is a feature worth checking,
+  not evidence that it is on. Use them to explain an observation (an advertised
+  remote-control service makes an open port expected), never restate them as
+  something the device was seen doing, and never raise a concern from them
+  alone. The script writes them in their own report section.
 - Mitigations name the mechanism (device setting, Pi-hole domain block, VLAN or
   firewall rule), the likely breakage and how to verify. Pi-hole blocks names,
   not addresses. Never claim a mitigation is applied.

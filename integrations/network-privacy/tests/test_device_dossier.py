@@ -7,10 +7,13 @@ import unittest
 from dataclasses import replace
 from uuid import uuid4
 
+from plowshare_privacy.advisories import Advisory, AdvisoryPage
 from plowshare_privacy.contracts import DeviceIdentity, TcpObservation
 from plowshare_privacy.device_detection import _SERVICE_RULES, detect_device
 from plowshare_privacy.device_dossier import (
     ADMIN_SERVICES,
+    MAX_ADVISORY_TEXT,
+    MAX_SUPPLEMENTAL_ADVISORIES,
     MIN_ADVERTISING_QUERIES,
     MIN_MEASUREMENT_QUERIES,
     MIN_TELEMETRY_QUERIES,
@@ -22,6 +25,11 @@ from plowshare_privacy.device_dossier import (
     device_signals,
     encode_dossier,
     parse_device_id,
+)
+from plowshare_privacy.device_facts import (
+    AdvisoryFacts,
+    DeviceDescription,
+    DeviceFacts,
 )
 from plowshare_privacy.device_inventory import DeviceCard
 from plowshare_privacy.dns_activity import (
@@ -111,6 +119,58 @@ def volume(to_device: int, from_device: int, resets: int = 0) -> TrafficVolume:
     return TrafficVolume(FROM_AT, UNTIL_AT, 97, to_device, from_device, resets)
 
 
+DESCRIBED_AT = "2026-01-01T07:10:00Z"
+MODEL = "BRAVIA KD-55X85K"
+
+
+def advisory(
+    number: int, severity: str | None, exploited: bool = False, day: int = 1
+) -> Advisory:
+    return Advisory(
+        f"CVE-2026-{number:04d}",
+        f"Advisory {number} for the fixture model. " + "Detail. " * 60,
+        f"2026-01-{day:02d}",
+        severity,
+        exploited,
+    )
+
+
+def facts(
+    *,
+    described: bool = True,
+    advisories: tuple[Advisory, ...] = (),
+    status: str = "searched",
+    device_id: str = "mac:" + MAC,
+) -> DeviceFacts:
+    description = DeviceDescription(
+        "upnp",
+        DESCRIBED_AT,
+        "Sony",
+        MODEL,
+        None,
+        "6.6.0",
+        ("screen casting (DIAL)", "remote control (Sony IRCC)"),
+    )
+    if status == "searched":
+        lookup = AdvisoryFacts(
+            "searched",
+            DESCRIBED_AT,
+            MODEL,
+            "device",
+            AdvisoryPage(MODEL, DESCRIBED_AT, len(advisories) + 4, advisories),
+        )
+    else:
+        lookup = AdvisoryFacts("model_unknown", DESCRIBED_AT)
+    return DeviceFacts(
+        device_id,
+        ADDRESS,
+        DESCRIBED_AT,
+        DESCRIBED_AT,
+        (description,) if described else (),
+        lookup,
+    )
+
+
 def codes(value: DeviceCard) -> set[str]:
     return {signal.code for signal in device_signals(value)}
 
@@ -163,9 +223,9 @@ class DeviceDossierTest(unittest.TestCase):
         ] + [("oztam.com.au", 12, 2), ("connectivitycheck.gstatic.com", 400, 0)]
         value = card(dns=activity(domains), traffic=volume(10, 5))
         full = build_dossier(value)
-        trimmed = build_dossier(value, budget=2600)
+        trimmed = build_dossier(value, budget=3600)
         self.assertGreater(trimmed.trimmed_destinations, 0)
-        self.assertLessEqual(len(encode_dossier(trimmed).encode()), 2600)
+        self.assertLessEqual(len(encode_dossier(trimmed).encode()), 3600)
         assert full.dns is not None and trimmed.dns is not None
         totals = {
             group.kind: (group.queries, group.distinct) for group in full.dns.groups
@@ -350,6 +410,108 @@ class DeviceDossierTest(unittest.TestCase):
         self.assertEqual(
             [signal["code"] for signal in decoded["signals"]], ["measurement_dns"]
         )
+
+
+class SupplementalTest(unittest.TestCase):
+    def test_device_reported_facts_and_ranked_bounded_advisories(self) -> None:
+        listed = (
+            advisory(1, "LOW", day=9),
+            advisory(2, "HIGH", day=1),
+            advisory(3, None),
+            advisory(4, "MEDIUM", exploited=True),
+            advisory(5, "HIGH", day=5),
+            advisory(6, "CRITICAL"),
+            advisory(7, "LOW", day=2),
+        )
+        dossier = build_dossier(card(), facts=facts(advisories=listed))
+        section = dossier.supplemental
+        self.assertEqual(section.described_at, DESCRIBED_AT)
+        [description] = section.descriptions
+        self.assertEqual(
+            (description.manufacturer, description.model_name, description.firmware),
+            ("Sony", MODEL, "6.6.0"),
+        )
+        self.assertEqual(description.source, "upnp")
+        assert section.advisories is not None
+        shown = [item.cve[-1] for item in section.advisories.advisories]
+        # Known exploited first, then severity, then newest.
+        self.assertEqual(shown, ["4", "6", "5", "2", "1"])
+        self.assertEqual(len(shown), MAX_SUPPLEMENTAL_ADVISORIES)
+        self.assertEqual(section.advisories.omitted, 2)
+        self.assertEqual(section.advisories.total, 11)
+        self.assertEqual(section.advisories.model_source, "device")
+        for item in section.advisories.advisories:
+            self.assertLessEqual(len(item.description), MAX_ADVISORY_TEXT)
+        self.assertEqual(
+            [note.feature for note in section.vendor_notes], ["Samba Interactive TV"]
+        )
+        text = "\n".join(dossier.coverage)
+        self.assertIn("device's own claims", text)
+        self.assertIn("Advisories match the model name", text)
+        self.assertIn("worth checking", text)
+        encoded = json.loads(encode_dossier(dossier))
+        self.assertEqual(
+            set(encoded["supplemental"]["descriptions"][0]),
+            {
+                "source",
+                "observed_at",
+                "manufacturer",
+                "model_name",
+                "model_number",
+                "firmware",
+                "services",
+            },
+        )
+
+    def test_no_facts_and_a_silent_device_are_coverage_lines_not_findings(
+        self,
+    ) -> None:
+        none = build_dossier(card())
+        self.assertIsNone(none.supplemental.described_at)
+        self.assertEqual(none.supplemental.descriptions, ())
+        self.assertIsNone(none.supplemental.advisories)
+        self.assertIn("has not been asked to describe itself", "\n".join(none.coverage))
+        self.assertIn(
+            "Public advisories have not been looked up", "\n".join(none.coverage)
+        )
+        # The network identity vendor alone still selects the vendor note.
+        self.assertEqual(len(none.supplemental.vendor_notes), 1)
+        silent = build_dossier(
+            card(), facts=facts(described=False, status="model_unknown")
+        )
+        text = "\n".join(silent.coverage)
+        self.assertIn("did not describe itself", text)
+        self.assertIn("not a finding", text)
+        self.assertIn("No public model name was available", text)
+        self.assertEqual(silent.signals, none.signals)
+
+    def test_budget_trims_advisories_before_destinations(self) -> None:
+        listed = tuple(advisory(n, "HIGH", day=n) for n in range(1, 6))
+        value = card(dns=activity([("oztam.com.au", 3, 0), ("youtube.com", 3, 0)]))
+        full = build_dossier(value, facts=facts(advisories=listed))
+        size = len(encode_dossier(full).encode())
+        trimmed = build_dossier(
+            value, facts=facts(advisories=listed), budget=size - 400
+        )
+        assert trimmed.supplemental.advisories is not None
+        self.assertLess(len(trimmed.supplemental.advisories.advisories), 5)
+        self.assertEqual(
+            len(trimmed.supplemental.advisories.advisories)
+            + trimmed.supplemental.advisories.omitted,
+            5,
+        )
+        self.assertEqual(trimmed.trimmed_destinations, 0)
+        self.assertTrue(
+            any("advisories omitted to fit" in line for line in trimmed.coverage)
+        )
+        # The most severe, newest advisory is kept.
+        self.assertEqual(
+            trimmed.supplemental.advisories.advisories[0].cve, "CVE-2026-0005"
+        )
+
+    def test_facts_for_another_device_are_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "another device"):
+            build_dossier(card(), facts=facts(device_id="mac:02:00:00:00:00:02"))
 
 
 if __name__ == "__main__":

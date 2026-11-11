@@ -21,8 +21,12 @@ uploaded or exfiltrated from DNS lookups or byte totals). Check that "No DNS via
 Pi-hole" is treated as a visibility gap, missing data is not read as zero and
 model names without operator or UniFi confirmation stay hypotheses. In
 DATA.dossier.traffic, to_device_bytes is what the device received and
-from_device_bytes is what it sent; weaken a concern that reverses them. Write notes
-as plain sentences without identifiers, HTML or tables.
+from_device_bytes is what it sent; weaken a concern that reverses them. Treat
+DATA.dossier.supplemental as context: a device-reported model or firmware is
+the device's claim, an advisory concerns the model rather than proving this
+device vulnerable, and a vendor note is something to check. Weaken or refute a
+concern that restates them as observed behaviour or rests on them alone. Write
+notes as plain sentences without identifiers, HTML or tables.
 
 Verify dates, collection scope, fixture labels, timeouts and incomplete DNS history.
 Listening ports do not prove outbound flows or vulnerabilities; DNS queries do not

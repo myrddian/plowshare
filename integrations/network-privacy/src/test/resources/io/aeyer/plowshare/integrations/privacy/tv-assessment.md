@@ -51,6 +51,22 @@ Worth checking. Confidence: medium.
 
 - Which apps on the TV are used for broadcast catch-up?
 
+## Supplemental information
+
+The device describes itself as Sony BRAVIA KD-55X85K, firmware 6.6.0 (reported over the local network via UPnP, 2026-01-01).
+
+It advertises over UPnP: screen casting (DIAL), media rendering (DLNA), remote control (Sony IRCC).
+
+It advertises over mDNS: screen casting (Google Cast).
+
+These are the device's own claims, not confirmed identity.
+
+Public advisories for this model (NVD, checked 2026-01-01, model BRAVIA KD-55X85K from the device's own description): none found.
+
+Worth checking: Samba Interactive TV (some BRAVIA TV models) — Sony describes it as third-party content recognition that uses viewing history for recommendations and adverts; Sony says it does not recognise content inside installed apps such as Netflix. To turn it off: System Preferences → Samba Interactive TV → Disable (older Android TV: Home → Settings → Preferences → Setup → Network → Samba Interactive TV). Menus may vary by model year. Source: Sony support article (https://www.sony.com.au/electronics/support/articles/00182856); Sony BRAVIA Help Guide (https://helpguide.sony.net/tv/gmxl4/v1/en/060nhm-06-01-06.html).
+
+Vendor notes are features this manufacturer ships, not observations of this device.
+
 ## Evidence
 
 - Device: `mac:02:00:00:00:00:01` at 10.1.2.10
@@ -72,6 +88,9 @@ Coverage:
 - The port scan covers only the configured TCP ports; other services are unknown.
 - DNS lookups show names resolved, not data sent.
 - Byte totals include local traffic and say nothing about destinations.
+- The manufacturer, model and firmware under supplemental are the device's own claims over the local network, not confirmed identity.
+- Advisories match the model name, not this device's firmware or settings; a listed advisory may not apply to it.
+- Vendor notes are features worth checking for this manufacturer, not observations of this device.
 
 Automatic fixes to the assessor answer:
 

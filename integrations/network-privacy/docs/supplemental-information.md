@@ -1,6 +1,23 @@
 # Supplemental information and automatic assessment
 
-Status: proposal, awaiting approval. Nothing here is built yet.
+Status: built. Device facts (`device_facts.py`, `device_describer.py`), the
+dossier's `supplemental` section, the report section, the dashboard block, the
+Settings option, vendor notes and the facts-changed requeue are in place; see
+OPERATIONS.md ("Device descriptions", "Device privacy assessments").
+
+Deviations from this proposal:
+
+- The script does not yet check agent text against supplemental facts. Agents
+  are told the facts are context, the reviewer weakens or refutes concerns
+  that restate them as observations, and the section itself is code-written.
+- Vendor notes cannot tell a TV from a streaming player (detection groups
+  them), so each note names the products it applies to instead.
+- Amazon Fire TV is not in the vendor table: its only source was on an
+  unexpected Amazon host. LG Live Plus is included, attributed to reporting.
+- The dossier document moved to version 2. Version 1 revisions are still read
+  and are revised on the next retention.
+- The proposed daily limit of 4 is not a default; the background limit stays
+  0 (off) until you set it.
 
 ## Goal
 

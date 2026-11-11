@@ -36,6 +36,15 @@ const CONCERN_VERDICTS = ['holds', 'weakened', 'refuted'];
 const LEVEL_LABEL = {potential_breach: 'Potential breach', worth_checking: 'Worth checking', expected: 'Expected behaviour'};
 const PURPOSE_LABEL = {advertising: 'advertising', measurement: 'audience measurement', telemetry: 'telemetry',
   streaming: 'streaming', unclassified: 'unclassified service', connectivity: 'connectivity check', local: 'local name'};
+// Mirrors device_facts (sources, statuses, model sources) and vendor_notes.
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const CVE = /^CVE-\d{4}-\d{4,19}$/;
+const NOTE_URL = /^https:\/\/[a-z0-9.-]+(?:\/[A-Za-z0-9.\/%-]*)?$/;
+const DESCRIBED_BY = {upnp: 'UPnP', mdns: 'mDNS'};
+const ADVISORY_STATUS = ['searched', 'unavailable', 'model_unknown', 'not_configured'];
+const MODEL_FROM = {profile: 'your profile', unifi: 'the UniFi controller', device: 'the device\'s own description'};
+const SEVERITY = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NONE'];
 
 function fail(message) { throw new Error(message); }
 function text(value, field, limit) {
@@ -137,11 +146,69 @@ function repairable(state, accept) {
   }
 }
 
+function optional(value, field, limit) {
+  if (value !== null && (typeof value !== 'string' || value.length > limit)) fail('Invalid ' + field);
+  return value;
+}
+function stamp(value, field) {
+  if (typeof value !== 'string' || !STAMP.test(value)) fail('Invalid ' + field);
+  return value;
+}
+function count(value, field) {
+  if (!Number.isInteger(value) || value < 0) fail('Invalid ' + field);
+  return value;
+}
+// device_dossier.DossierSupplemental. Shape and bounds are checked here; every
+// string is still untrusted (the device wrote most of them) and the renderer
+// passes each through plain().
+function supplementalRecord(value) {
+  const section = record(value, 'dossier supplemental', ['described_at', 'updated_at', 'descriptions', 'advisories', 'vendor_notes']);
+  for (const key of ['described_at', 'updated_at']) if (section[key] !== null) stamp(section[key], 'supplemental ' + key);
+  for (const item of list(section.descriptions, 'supplemental descriptions', 0, 2)) {
+    record(item, 'supplemental description', ['source', 'observed_at', 'manufacturer', 'model_name', 'model_number', 'firmware', 'services']);
+    member(item.source, 'supplemental description source', Object.keys(DESCRIBED_BY));
+    stamp(item.observed_at, 'supplemental description observed_at');
+    for (const key of ['manufacturer', 'model_name', 'model_number', 'firmware']) optional(item[key], 'supplemental description ' + key, 128);
+    for (const service of list(item.services, 'supplemental services', 0, 16)) text(service, 'supplemental service', 64);
+  }
+  const lookup = section.advisories;
+  if (lookup !== null) {
+    record(lookup, 'supplemental advisories', ['status', 'checked_at', 'model', 'model_source', 'total', 'advisories', 'omitted', 'unavailable']);
+    member(lookup.status, 'supplemental advisory status', ADVISORY_STATUS);
+    stamp(lookup.checked_at, 'supplemental advisory checked_at');
+    optional(lookup.model, 'supplemental advisory model', 128);
+    if (lookup.model_source !== null) member(lookup.model_source, 'supplemental advisory model source', Object.keys(MODEL_FROM));
+    if (lookup.total !== null) count(lookup.total, 'supplemental advisory total');
+    count(lookup.omitted, 'supplemental advisory omitted');
+    optional(lookup.unavailable, 'supplemental advisory reason', 256);
+    for (const item of list(lookup.advisories, 'supplemental advisory list', 0, 10)) {
+      record(item, 'supplemental advisory', ['cve', 'severity', 'published_on', 'known_exploited', 'description']);
+      if (typeof item.cve !== 'string' || !CVE.test(item.cve)) fail('Invalid supplemental advisory cve');
+      if (item.severity !== null) member(item.severity, 'supplemental advisory severity', SEVERITY);
+      if (typeof item.published_on !== 'string' || !DAY.test(item.published_on)) fail('Invalid supplemental advisory date');
+      if (typeof item.known_exploited !== 'boolean') fail('Invalid supplemental advisory known_exploited');
+      text(item.description, 'supplemental advisory description', 600);
+    }
+  }
+  for (const note of list(section.vendor_notes, 'supplemental vendor notes', 0, 8)) {
+    record(note, 'supplemental vendor note', ['manufacturer', 'feature', 'applies_to', 'collects', 'turn_off', 'confidence', 'sources']);
+    for (const key of ['manufacturer', 'feature', 'applies_to', 'collects', 'turn_off']) text(note[key], 'supplemental vendor note ' + key, 512);
+    member(note.confidence, 'supplemental vendor note confidence', ['high', 'medium']);
+    for (const item of list(note.sources, 'supplemental vendor note sources', 1, 4)) {
+      record(item, 'supplemental vendor note source', ['title', 'url']);
+      text(item.title, 'supplemental vendor note source title', 128);
+      if (typeof item.url !== 'string' || item.url.length > 512 || !NOTE_URL.test(item.url)) fail('Invalid supplemental vendor note source url');
+    }
+  }
+  return section;
+}
+
 // The collector's document (dossier_port.DossierDocument). Only the fields the
-// script relies on are checked; the assessor reads the rest as data.
+// script relies on are checked; the assessor reads the rest as data. Version 2
+// added the supplemental section; a version 1 document has none (null here).
 function dossierRecord(source, request) {
   const document = record(json(source, 'retained dossier'), 'retained dossier', ['version', 'write_id', 'device_id', 'dossier']);
-  if (document.version !== 1) fail('Unsupported dossier document version');
+  if (document.version !== 1 && document.version !== 2) fail('Unsupported dossier document version');
   uuid(document.write_id, 'dossier write_id');
   const dossier = document.dossier;
   if (document.device_id !== request.device_id || dossier?.identity?.device_id !== request.device_id) {
@@ -159,6 +226,9 @@ function dossierRecord(source, request) {
     for (const group of list(dossier.dns.groups, 'dossier dns groups', 0, PURPOSES.length)) member(group?.kind, 'dossier dns group', PURPOSES);
   }
   if (dossier.services?.revision !== null) uuid(dossier.services?.revision, 'dossier services revision');
+  if (document.version === 2) supplementalRecord(dossier.supplemental);
+  else if (Object.prototype.hasOwnProperty.call(dossier, 'supplemental')) fail('Invalid version 1 dossier: unexpected supplemental');
+  else dossier.supplemental = null;
   // Profile and pinned issue revisions come from the retained record, so report
   // inputs always match what the assessor read.
   const inputs = [request.dossier];
@@ -369,6 +439,7 @@ function handoff(state, role) {
     data.review = {verdict: state.review.verdict, notes: state.review.notes, concerns: state.review.concerns};
     task = 'Correct your device assessment in DATA.assessment using the reviewer notes and per-concern verdicts in DATA.review. Keep the same concern ids and add no new concern. Return the complete corrected JSON object in the same shape.';
   }
+  task += '\nDATA.dossier.supplemental is context, not observation: a model or firmware there is the device\'s own claim, an advisory concerns the model and does not show this device is affected, and a vendor note is something to check. Never restate them as observed behaviour; the script reports them in their own section.';
   // Name the exact codes this dossier allows, so a DNS purpose such as
   // telemetry is not mistaken for the telemetry_dominant signal.
   const signals = state.dossier.signals.map(signal => signal.code);
@@ -398,6 +469,80 @@ function trafficSentence(traffic) {
     + bytes(Number(traffic.from_device_bytes)) + ' sent by this device and '
     + bytes(Number(traffic.to_device_bytes)) + ' sent to it.';
 }
+// Code-written context about the device, from the dossier only. Every value
+// is untrusted: device-reported strings go through plain() with a bound.
+function supplementalSection(section) {
+  // Identifiers belong only in Evidence; none should reach here, but a device
+  // or advisory text that carries one loses it rather than leaking it.
+  const clean = (value, limit) => plain(value, limit).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '(identifier removed)');
+  const out = ['## Supplemental information', ''];
+  if (section === null) return [...out, 'No supplemental information was collected for this device.', ''];
+  const day = value => clean(value, 40).slice(0, 10);
+  const lookup = section.advisories;
+  if (section.described_at === null && lookup === null && !section.vendor_notes.length) {
+    return [...out, 'Nothing is known about this device beyond its network traffic: it has not been asked to describe itself and no advisories were looked up.', ''];
+  }
+  if (section.described_at === null) {
+    out.push('The device has not been asked to describe itself; device descriptions may be off or not yet run.', '');
+  } else if (!section.descriptions.length) {
+    out.push('The device did not describe itself when last asked (' + day(section.described_at) + '). Many devices do not; that is not a finding.', '');
+  }
+  for (const item of section.descriptions) {
+    const how = 'reported over the local network via ' + DESCRIBED_BY[item.source] + ', ' + day(item.observed_at);
+    const maker = item.manufacturer === null ? '' : clean(item.manufacturer, 64);
+    const model = item.model_name === null ? '' : clean(item.model_name, 96);
+    const name = model && maker && model.toLowerCase().startsWith(maker.toLowerCase()) ? model : [maker, model].filter(Boolean).join(' ');
+    const number = item.model_number === null ? '' : clean(item.model_number, 64);
+    const firmware = item.firmware === null ? '' : clean(item.firmware, 64);
+    if (name) {
+      out.push('The device describes itself as ' + name + (number && !name.includes(number) ? ' (model number ' + number + ')' : '')
+        + (firmware ? ', firmware ' + firmware : '') + ' (' + how + ').', '');
+    } else if (number || firmware) {
+      out.push('The device reports ' + [number && 'model number ' + number, firmware && 'firmware ' + firmware].filter(Boolean).join(' and ') + ' (' + how + ').', '');
+    }
+    const services = item.services.map(service => clean(service, 64)).filter(Boolean);
+    if (services.length) out.push('It advertises over ' + DESCRIBED_BY[item.source] + ': ' + services.join(', ') + '.', '');
+  }
+  if (section.descriptions.length) out.push('These are the device\'s own claims, not confirmed identity.', '');
+  if (lookup === null) {
+    out.push('Public advisories have not been looked up for this device.', '');
+  } else {
+    const model = lookup.model === null ? '' : clean(lookup.model, 128);
+    const from = lookup.model_source === null ? '' : ', model ' + model + ' from ' + MODEL_FROM[lookup.model_source];
+    if (lookup.status === 'model_unknown') {
+      out.push('Public advisories were not looked up: no public model name was available (checked ' + day(lookup.checked_at) + ').', '');
+    } else if (lookup.status === 'not_configured') {
+      out.push('Public advisories were not looked up: no advisory source is configured' + (model ? ' (model ' + model + ' from ' + MODEL_FROM[lookup.model_source] + ')' : '') + '.', '');
+    } else if (lookup.status === 'unavailable') {
+      out.push('Public advisories could not be looked up (NVD, ' + day(lookup.checked_at) + from + '): '
+        + (clean(lookup.unavailable || '', 256) || 'the lookup failed') + ' They are unknown, not none.', '');
+    } else {
+      const total = Number(lookup.total);
+      const lead = 'Public advisories for this model (NVD, checked ' + day(lookup.checked_at) + from + '): ';
+      if (!total) {
+        out.push(lead + 'none found.', '');
+      } else {
+        out.push(lead + total + ' found.', '');
+        for (const item of lookup.advisories) {
+          const facts = [item.severity ? item.severity.toLowerCase() : 'severity not rated', 'published ' + item.published_on];
+          if (item.known_exploited) facts.push('known exploited');
+          out.push('- ' + item.cve + ' (' + facts.join(', ') + '): ' + clean(item.description, 240));
+        }
+        const unlisted = total - lookup.advisories.length;
+        if (unlisted > 0) out.push('', unlisted + (unlisted === 1 ? ' more is' : ' more are') + ' not listed here.');
+        out.push('', 'An advisory is about the model, not proof that this device is affected; check whether the firmware it names matches.', '');
+      }
+    }
+  }
+  for (const note of section.vendor_notes) {
+    const sources = note.sources.map(item => clean(item.title, 128) + ' (' + item.url + ')').join('; ');
+    out.push('Worth checking: ' + clean(note.feature, 128) + ' (' + clean(note.applies_to, 160) + ') — ' + clean(note.collects, 400)
+      + ' To turn it off: ' + clean(note.turn_off, 300).replace(/\.$/, '') + '. Menus may vary by model year. Source: ' + sources + '.', '');
+  }
+  if (section.vendor_notes.length) out.push('Vendor notes are features this manufacturer ships, not observations of this device.', '');
+  return out;
+}
+
 function bytes(value) {
   if (value >= 1e9) return (value / 1e9).toFixed(1) + ' GB';
   if (value >= 1e6) return Math.round(value / 1e6) + ' MB';
@@ -453,6 +598,7 @@ function render(state) {
   }
   out.push('## Open questions', '');
   out.push(...(final.questions.length ? final.questions.map(question => '- ' + question) : ['None.']), '');
+  out.push(...supplementalSection(dossier.supplemental));
   const counts = {holds: 0, weakened: 0, refuted: 0};
   review.concerns.forEach(concern => counts[concern.verdict]++);
   const profile = dossier.profile;

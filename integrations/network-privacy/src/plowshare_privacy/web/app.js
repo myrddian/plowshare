@@ -355,6 +355,7 @@ async function loadSettings() {
   byId('enabled').checked = settings.enabled;
   byId('quick-scan').checked = settings.quick_scan === true;
   byId('dns-profiles').checked = settings.dns_profiles === true;
+  byId('device-descriptions').checked = settings.device_descriptions === true;
   byId('targets').value = settings.targets.join(', ');
   byId('ports').value = settings.ports.join(',');
   byId('device-labels').value = (settings.labels || []).map(label => `${label.address}=${label.label}`).join('\n');
@@ -376,9 +377,11 @@ byId('use-subnet').addEventListener('click', () => {
   for (const checkbox of byId('devices').querySelectorAll('input')) checkbox.checked = false;
   byId('settings-detail').textContent = 'Subnet scope prepared. Save monitoring to validate and retain it; no scan has started.';
 });
-for (const id of ['targets','ports','device-labels','enabled','quick-scan','dns-profiles']) byId(id).addEventListener('input', () => {
-  if (id === 'quick-scan' && !byId('quick-scan').checked) byId('dns-profiles').checked = false;
-  if (id === 'dns-profiles' && byId('dns-profiles').checked) byId('quick-scan').checked = true;
+// DNS profiles and device descriptions both run after quick checks, so each
+// needs quick checks on and turning quick checks off clears them.
+for (const id of ['targets','ports','device-labels','enabled','quick-scan','dns-profiles','device-descriptions']) byId(id).addEventListener('input', () => {
+  if (id === 'quick-scan' && !byId('quick-scan').checked) {byId('dns-profiles').checked = false; byId('device-descriptions').checked = false;}
+  if ((id === 'dns-profiles' || id === 'device-descriptions') && byId(id).checked) byId('quick-scan').checked = true;
   monitoringDraft = true;
   byId('settings-detail').textContent = 'Monitoring changes are not saved. Choose Save monitoring to retain them.';
 });
@@ -524,7 +527,7 @@ byId('monitor-form').addEventListener('submit', async event => {
       if (separator < 1 || !name  || Object.hasOwn(labels, address)) throw new Error('Use one selected address=name per line, without duplicate addresses.');
       labels[address] = name;
     }
-    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels, quickScan:byId('quick-scan').checked,dnsProfiles:byId('dns-profiles').checked})});
+    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels, quickScan:byId('quick-scan').checked,dnsProfiles:byId('dns-profiles').checked,deviceDescriptions:byId('device-descriptions').checked})});
     monitoringDraft = false;
     renderMonitorSettings(result);
     notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
@@ -909,6 +912,7 @@ async function loadDeviceAnalysis(device) {
   const panel = byId('device-analysis');
   const stale = () => selectedDevice !== device.address;
   const notes = paneSection('Your notes and expectations');
+  const known = paneSection('What we know about this device');
   const assessment = paneSection('Agent assessment');
   const product = paneSection('Product and advisories');
   product.append(element('p', 'Confirm the product with UniFi, then search the public NVD advisory database by model name. No agent is involved.', 'hint'),
@@ -962,6 +966,15 @@ async function loadDeviceAnalysis(device) {
     notes.append(element('p', error.message, 'notice error'));
   }
   try {
+    if (mac && device.identity?.device_id) {
+      known.append(...renderSupplemental(await api(`/api/devices/${encodeURIComponent(device.identity.device_id)}/supplemental`)));
+    } else {
+      known.append(element('p', 'Not available: this device is known by its address only. Device descriptions need a confirmed MAC address.', 'hint'));
+    }
+  } catch (error) {
+    known.append(element('p', error.message, 'notice error'));
+  }
+  try {
     const block = element('div', undefined, 'assessment-block');
     assessment.append(block);
     await openAssessment(device, block);
@@ -981,7 +994,88 @@ async function loadDeviceAnalysis(device) {
   } catch (error) {
     assessment.append(element('p', error.message, 'notice error'));
   }
-  if (!stale()) panel.replaceChildren(notes, assessment, product);
+  if (!stale()) panel.replaceChildren(notes, known, assessment, product);
+}
+
+// What the device said about itself, public advisories for its model and
+// vendor features worth checking, from the collector's retained facts. Every
+// value is shown with textContent: device-reported strings are untrusted.
+const describedBy = {upnp:'UPnP', mdns:'mDNS'};
+const modelFrom = {profile:'your profile', unifi:'the UniFi controller', device:'the device’s own description'};
+function shortDate(stamp) {
+  return stamp ? new Date(stamp).toLocaleDateString() : '';
+}
+function renderSupplemental(body) {
+  const section = body.supplemental;
+  const nodes = [];
+  if (section.described_at === null) {
+    nodes.push(element('p', body.enabled
+      ? 'Not described yet. The collector asks each monitored device to describe itself at most once a day, after quick checks.'
+      : 'Device descriptions are off — turn them on in Settings.', 'hint'));
+  } else if (!section.descriptions.length) {
+    nodes.push(element('p', `The device did not describe itself when last asked (${shortDate(section.described_at)}). Many devices do not; that is not a finding.`, 'hint'));
+  }
+  if (section.descriptions.length) {
+    nodes.push(element('h4', 'Reported by the device'));
+    for (const item of section.descriptions) {
+      const list = element('dl', undefined, 'facts');
+      if (item.manufacturer) fact(list, 'Manufacturer', item.manufacturer);
+      if (item.model_name) fact(list, 'Model', item.model_name);
+      if (item.model_number) fact(list, 'Model number', item.model_number, 'data');
+      if (item.firmware) fact(list, 'Firmware', item.firmware, 'data');
+      if (item.services.length) fact(list, 'Advertises', item.services.join(' · '));
+      fact(list, 'Source', `${describedBy[item.source] || item.source} on the local network · ${shortDate(item.observed_at)}`);
+      nodes.push(list);
+    }
+    nodes.push(element('p', 'These are the device’s own claims, not confirmed identity.', 'limit'));
+  }
+  nodes.push(element('h4', 'Public security advisories'));
+  const lookup = section.advisories;
+  const from = lookup?.model ? ` · model ${lookup.model} from ${modelFrom[lookup.model_source] || 'an unknown source'}` : '';
+  if (!lookup) {
+    nodes.push(element('p', 'Not looked up yet.', 'hint'));
+  } else if (lookup.status === 'model_unknown') {
+    nodes.push(element('p', `Not looked up: no public model name was available (${shortDate(lookup.checked_at)}).`, 'hint'));
+  } else if (lookup.status === 'not_configured') {
+    nodes.push(element('p', 'Not looked up: no advisory source is configured on this collector.', 'hint'));
+  } else if (lookup.status === 'unavailable') {
+    nodes.push(element('p', `The NVD lookup did not complete (${shortDate(lookup.checked_at)}${from}). ${lookup.unavailable || ''} Advisories are unknown, not none.`, 'hint unmeasured'));
+  } else {
+    nodes.push(element('p', `NVD · checked ${shortDate(lookup.checked_at)}${from} · ${lookup.total ? lookup.total + ' found' : 'none found'}`, 'hint'));
+    for (const item of lookup.advisories) {
+      const entry = element('article', undefined, 'known-item');
+      const facts = [item.severity ? item.severity[0] + item.severity.slice(1).toLowerCase() : 'Severity not rated', 'published ' + item.published_on];
+      if (item.known_exploited) facts.push('known exploited');
+      entry.append(element('p', item.cve, 'data'), element('p', facts.join(' · '), 'status-line'), element('p', item.description, 'hint'));
+      nodes.push(entry);
+    }
+    const unlisted = (lookup.total || 0) - lookup.advisories.length;
+    if (unlisted > 0) nodes.push(element('p', `${unlisted} more not listed here.`, 'hint'));
+    if (lookup.total) nodes.push(element('p', 'An advisory is about the model, not proof that this device is affected. Check whether the firmware it names matches.', 'limit'));
+  }
+  if (section.vendor_notes.length) {
+    nodes.push(element('h4', 'Worth checking'));
+    for (const note of section.vendor_notes) {
+      const entry = element('article', undefined, 'known-item');
+      entry.append(element('h5', `${note.feature} (${note.applies_to})`), element('p', note.collects),
+        element('p', `To turn it off: ${note.turn_off.replace(/\.$/, '')}. Menus may vary by model year.`, 'hint'));
+      const sources = element('p', 'Source: ', 'hint');
+      note.sources.forEach((source, index) => {
+        if (index) sources.append(document.createTextNode('; '));
+        if (/^https:\/\//.test(source.url)) {
+          const link = element('a', source.title);
+          link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          sources.append(link);
+        } else {
+          sources.append(document.createTextNode(source.title));
+        }
+      });
+      entry.append(sources);
+      nodes.push(entry);
+    }
+    nodes.push(element('p', 'Features this manufacturer ships, not observations of this device.', 'limit'));
+  }
+  return nodes;
 }
 
 // The agent assessment of one device. The collector's ledger holds its state;
@@ -1297,6 +1391,7 @@ function renderMonitorSettings(settings) {
   byId('save-monitoring').disabled = !monitorEditable;
   byId('quick-scan').disabled = !monitorEditable;
   byId('dns-profiles').disabled = !monitorEditable || !settings.pihole_configured;
+  byId('device-descriptions').disabled = !monitorEditable;
   byId('settings-detail').textContent = monitoringDraft ? 'Monitoring changes are not saved. Choose Save monitoring to retain them. ' + settings.detail : settings.detail;
   renderPiHoleSaved(settings.pihole_configured, settings.pending);
   byId('pihole-save').disabled = !monitorEditable || piholePending;

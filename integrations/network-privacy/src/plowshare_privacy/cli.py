@@ -294,6 +294,7 @@ async def execute(args: argparse.Namespace) -> None:
                     SdkAssessmentPort(lambda: client, config, lambda: worker.port),
                     dossiers,
                     worker.device_inventory,
+                    facts=worker.device_facts,
                 )
                 if dossiers is not None
                 else None

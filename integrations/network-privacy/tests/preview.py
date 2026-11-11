@@ -57,11 +57,22 @@ from plowshare_privacy.worker import Worker
 
 
 def sample_overview(total: int | None = None) -> Middleware:
-    """Replace the overview's device list with the synthetic household network."""
-    from preview_sample import sample_devices, scaled_network
+    """Replace the overview's device list and device facts with the synthetic network."""
+    from preview_sample import sample_devices, sample_supplemental, scaled_network
 
     @web.middleware
     async def middleware(request: web.Request, handler: Handler) -> web.StreamResponse:
+        parts = request.path.split("/")
+        if (
+            request.method == "GET"
+            and len(parts) == 5
+            and parts[1:3] == ["api", "devices"]
+            and parts[4] == "supplemental"
+        ):
+            try:
+                return web.json_response(sample_supplemental(parts[3]))
+            except KeyError:
+                raise web.HTTPNotFound(text="Choose a monitored sample device")
         response = await handler(request)
         if request.path != "/api/overview" or not isinstance(response, web.Response):
             return response

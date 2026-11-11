@@ -33,6 +33,7 @@ from .device_assessments import (
     AssessmentView,
     UnknownDevice,
 )
+from .device_dossier import card_supplemental, parse_device_id
 from .device_inventory import DeviceCard
 from .device_profiles import DeviceProfile, ProfileFields, ProfileManagement, field
 from .diagnostics import refusal_detail
@@ -45,7 +46,13 @@ from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
 from .profile_research import ResearchReview
 from .schedule_editor import ScheduleManagement
-from .tools import DEFINITIONS, PrivacyTools, WorkerTools, decode_call
+from .tools import (
+    DEFINITIONS,
+    PrivacyTools,
+    WorkerTools,
+    decode_call,
+    monitored_devices,
+)
 from .worker import ReconciliationRequired, Worker
 
 
@@ -484,6 +491,31 @@ def application(
         )
         return web.json_response({"updated": True})
 
+    async def device_supplemental(request: web.Request) -> web.Response:
+        """What the device said about itself, its advisories and vendor notes.
+
+        The same projection the dossier carries, read from the retained facts
+        journal; nothing is collected or looked up by this request. ``enabled``
+        is whether device descriptions are on in the active configuration.
+        """
+        device = parse_device_id(text(request.match_info["device_id"], 64))
+        card = next(
+            (c for d, c in monitored_devices(worker.device_inventory()) if d == device),
+            None,
+        )
+        if card is None:
+            raise UnknownDevice(
+                "Choose a monitored device with a confirmed MAC address"
+            )
+        return web.json_response(
+            {
+                "enabled": worker.config.collection.device_descriptions,
+                "supplemental": asdict(
+                    card_supplemental(card, worker.device_facts(device))
+                ),
+            }
+        )
+
     def assessment_service() -> AssessmentControl:
         if assessments is None:
             raise web.HTTPNotFound(text="Device assessments are not available")
@@ -910,6 +942,7 @@ def application(
     app.router.add_post("/api/profile-research/{identity}", research_review)
     app.router.add_post("/api/devices/{address}/product", device_product)
     app.router.add_post("/api/devices/{address}/advisories", device_advisories)
+    app.router.add_get("/api/devices/{device_id}/supplemental", device_supplemental)
     app.router.add_get("/api/devices/{device_id}/assessment", assessment_view)
     app.router.add_get("/api/devices/{device_id}/assessment/report", assessment_report)
     for action, handler in (
