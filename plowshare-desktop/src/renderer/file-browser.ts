@@ -1,5 +1,6 @@
 /**
- * Reusable Desktop file browser: expandable tree beside a file editor.
+ * Reusable Desktop file browser: expandable tree beside a plain-text code
+ * editor (textarea with a synchronized line-number gutter).
  * Hosts supply a {@link FileBrowserPort}; Application/Project chrome stays outside.
  */
 
@@ -96,6 +97,22 @@ export class FileBrowserSession {
       !!this.current &&
       !!this.draft &&
       this.draft.revision !== this.current.revision
+    );
+  }
+
+  /**
+   * True when a save would be attempted and accepted locally: the port can
+   * write, the file is writable, the draft differs and is based on the current
+   * revision, and no other operation is in flight. The Save button and the
+   * keyboard shortcut share this gate; {@link save} still enforces it.
+   */
+  get savable() {
+    return (
+      !!this.port.save &&
+      !!this.current?.writable &&
+      !this.busy &&
+      !this.revisionConflict &&
+      this.dirty
     );
   }
 
@@ -277,37 +294,55 @@ export function installFileBrowser(
   const pathDataset = options.pathDataset;
   const canSave = typeof port.save === 'function';
   host.classList.add('file-browser');
-  host.innerHTML = `<div class="file-browser-toolbar">
-      <details class="file-browser-jump">
-        <summary>Jump to relative path</summary>
-        <form data-jump><input data-path autocomplete="off" placeholder="Folder or file" aria-label="Relative path"><button type="submit" data-jump-go>Go</button></form>
-      </details>
-      <p data-status role="status"></p>
-      <p data-error role="alert" hidden></p>
-    </div>
-    <div class="file-browser-split">
-      <div class="file-browser-tree" data-tree role="tree" aria-label="Files"></div>
+  // One frame: tree pane (jump field above it), editor pane, and a slim
+  // footer that owns listing status, errors and the caret position.
+  host.innerHTML = `<div class="file-browser-split">
+      <div class="file-browser-side">
+        <form class="file-browser-jump" data-jump>
+          <input data-path autocomplete="off" spellcheck="false" placeholder="Go to path…" aria-label="Relative path">
+          <button type="submit" data-jump-go>Go</button>
+        </form>
+        <div class="file-browser-tree" data-tree role="tree" aria-label="Files"></div>
+      </div>
       <section class="file-browser-editor" data-editor>
         <div class="file-browser-empty-editor" data-editor-empty>
           <span data-icon-slot>${icon('file')}</span>
           <p>Select a file to open</p>
         </div>
-        <div data-editor-body hidden>
-          <h3 data-file-title></h3>
-          <p data-permission></p>
-          <label>File content<textarea data-text class="personal-preview" spellcheck="false" aria-label="File content"></textarea></label>
-          <div class="file-browser-actions">
-            <button type="button" data-read-current>Read current file</button>
+        <div class="file-browser-document" data-editor-body hidden>
+          <header class="file-browser-bar">
+            <h3 class="file-browser-title" data-file-title></h3>
+            <span class="file-browser-dirty" data-dirty role="img" aria-label="Unsaved changes" title="Unsaved changes" hidden></span>
+            <span class="file-browser-badge" data-permission></span>
+            <div class="file-browser-actions">
+              <button type="button" data-read-current title="Read the current file from the server">Reload</button>
+              <button type="button" class="is-primary" data-save aria-keyshortcuts="Meta+S Control+S" title="Save file (Cmd/Ctrl+S)" ${canSave ? '' : 'hidden'}>Save</button>
+            </div>
+          </header>
+          <div class="file-browser-conflict" data-conflict hidden>
+            <p>The server file changed. Your draft is retained; read and review the current file before saving.</p>
             <button type="button" data-use-current hidden>Use current file and discard draft</button>
-            <button type="button" data-save ${canSave ? '' : 'hidden'}>Save file</button>
+          </div>
+          <div class="file-browser-code">
+            <div class="file-browser-gutter" data-gutter aria-hidden="true"></div>
+            <textarea data-text wrap="off" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="File content"></textarea>
           </div>
         </div>
       </section>
-    </div>`;
+    </div>
+    <footer class="file-browser-foot">
+      <p data-status role="status"></p>
+      <p data-error role="alert" hidden></p>
+      <span class="file-browser-position" data-position></span>
+    </footer>`;
 
   const get = <T extends HTMLElement = HTMLElement>(selector: string) =>
     host.querySelector<T>(selector)!;
+  const text = get<HTMLTextAreaElement>('[data-text]');
+  const gutter = get('[data-gutter]');
   let painted = '';
+  let paintedPath = '';
+  let gutterLines = 0;
 
   const run = (work: () => Promise<unknown> | void) =>
     ownedEvent(async () => {
@@ -334,14 +369,29 @@ export function installFileBrowser(
     session.discardDraft();
     render();
   });
-  get<HTMLTextAreaElement>('[data-text]').addEventListener('input', () => {
-    session.setDraft(get<HTMLTextAreaElement>('[data-text]').value);
-    render();
+  // Typing only changes the draft, so repaint the editor chrome and leave the
+  // tree (and its focus) alone.
+  text.addEventListener('input', () => {
+    session.setDraft(text.value);
+    renderEditor();
   });
+  // The gutter never scrolls on its own; it follows the text vertically.
+  text.addEventListener('scroll', () => {
+    gutter.scrollTop = text.scrollTop;
+  });
+  for (const type of ['keyup', 'mouseup', 'focus', 'select'])
+    text.addEventListener(type, renderPosition);
   get('[data-save]').addEventListener(
     'click',
     run(() => session.save()),
   );
+  // Cmd/Ctrl+S anywhere inside the browser. The shortcut is always consumed so
+  // the page never sees it, but it only saves what the Save button would.
+  host.addEventListener('keydown', (event) => {
+    if (!isSaveShortcut(event)) return;
+    event.preventDefault();
+    if (session.savable) run(() => session.save())();
+  });
 
   function markPath(button: HTMLElement, path: string) {
     button.dataset.applicationPath = path;
@@ -349,9 +399,27 @@ export function installFileBrowser(
     if (pathDataset) button.dataset[pathDataset] = path;
   }
 
+  /** Rebuilding the tree drops focus; remember which row control held it. */
+  function focusedTreeControl(tree: HTMLElement) {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !tree.contains(active)) return;
+    const path = active.closest<HTMLElement>('[data-path]')?.dataset.path;
+    if (path === undefined) return;
+    return {
+      path,
+      toggle: active.classList.contains('file-browser-toggle'),
+    };
+  }
+
   function renderTree() {
     const tree = get('[data-tree]');
+    const focused = focusedTreeControl(tree);
     tree.replaceChildren();
+    const toggleDirectory = (path: string) =>
+      run(async () => {
+        if (session.expanded.has(path)) session.collapse(path);
+        else await session.expand(path);
+      });
     const walk = (path: string, depth: number) => {
       const listing = session.listing(path);
       if (!listing) return;
@@ -361,6 +429,11 @@ export function installFileBrowser(
         row.style.setProperty('--depth', String(depth));
         row.setAttribute('role', 'treeitem');
         row.dataset.path = entry.path;
+        const label = document.createElement('button');
+        label.type = 'button';
+        label.className = 'file-browser-name';
+        label.title = entry.path;
+        markPath(label, entry.path);
         if (entry.directory) {
           const open = session.expanded.has(entry.path);
           row.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -372,42 +445,15 @@ export function installFileBrowser(
             'aria-label',
             open ? `Collapse ${entry.name}` : `Expand ${entry.name}`,
           );
-          toggle.addEventListener(
-            'click',
-            run(async () => {
-              if (session.expanded.has(entry.path))
-                session.collapse(entry.path);
-              else await session.expand(entry.path);
-            }),
-          );
-          const label = document.createElement('button');
-          label.type = 'button';
-          label.className = 'file-browser-name';
+          toggle.addEventListener('click', toggleDirectory(entry.path));
           label.innerHTML = `${icon('folder')}<span>${escapeText(entry.name)}</span>`;
-          markPath(label, entry.path);
-          label.addEventListener(
-            'click',
-            run(async () => {
-              if (session.expanded.has(entry.path))
-                session.collapse(entry.path);
-              else await session.expand(entry.path);
-            }),
-          );
+          label.addEventListener('click', toggleDirectory(entry.path));
           row.append(toggle, label);
-          if (listing.more && entry === listing.entries.at(-1)) {
-            const more = document.createElement('span');
-            more.className = 'file-browser-more';
-            more.textContent = 'More entries not shown';
-            row.append(more);
-          }
           tree.append(row);
           if (open) walk(entry.path, depth + 1);
         } else {
-          const label = document.createElement('button');
-          label.type = 'button';
-          label.className = 'file-browser-name';
+          row.classList.add('is-file');
           label.innerHTML = `${icon('file')}<span>${escapeText(entry.name)}</span>`;
-          markPath(label, entry.path);
           if (session.document?.path === entry.path)
             label.setAttribute('aria-current', 'true');
           label.addEventListener(
@@ -417,6 +463,13 @@ export function installFileBrowser(
           row.append(label);
           tree.append(row);
         }
+      }
+      if (listing.more) {
+        const more = document.createElement('p');
+        more.className = 'file-browser-more';
+        more.style.setProperty('--depth', String(depth));
+        more.textContent = 'More entries not shown';
+        tree.append(more);
       }
       if (!listing.entries.length && path === '') {
         const empty = document.createElement('p');
@@ -434,45 +487,126 @@ export function installFileBrowser(
         : 'Open this location to browse files.';
       tree.append(hint);
     }
-  }
-
-  function render() {
-    get('[data-error]').hidden = !session.error;
-    get('[data-error]').textContent = session.error;
-    get('[data-status]').textContent = session.status;
-    for (const button of host.querySelectorAll('button'))
-      button.disabled = session.busy && !button.matches('[data-use-current]');
-    renderTree();
-    const source = session.document;
-    const empty = get('[data-editor-empty]');
-    const body = get('[data-editor-body]');
-    empty.hidden = !!source;
-    body.hidden = !source;
-    if (!source || session.draftText === undefined) {
-      painted = '';
+    if (!focused) return;
+    for (const row of tree.querySelectorAll<HTMLElement>('[data-path]')) {
+      if (row.dataset.path !== focused.path) continue;
+      const control =
+        (focused.toggle
+          ? row.querySelector<HTMLElement>('.file-browser-toggle')
+          : null) ?? row.querySelector<HTMLElement>('.file-browser-name');
+      control?.focus();
       return;
     }
-    const text = get<HTMLTextAreaElement>('[data-text]');
+  }
+
+  /** Path with the directory part truncated first so the file name survives. */
+  function renderTitle(path: string) {
+    const title = get('[data-file-title]');
+    if (title.title === path) return;
+    const slash = path.lastIndexOf('/') + 1;
+    const directory = document.createElement('span');
+    directory.className = 'file-browser-title-directory';
+    directory.textContent = path.slice(0, slash);
+    const name = document.createElement('span');
+    name.className = 'file-browser-title-name';
+    name.textContent = path.slice(slash);
+    title.title = path;
+    title.replaceChildren(directory, name);
+  }
+
+  function renderGutter(value: string) {
+    const lines = lineCount(value);
+    if (lines === gutterLines) return;
+    gutterLines = lines;
+    gutter.textContent = lineNumbers(lines);
+    gutter.style.setProperty(
+      '--digits',
+      String(Math.max(2, String(lines).length)),
+    );
+    gutter.scrollTop = text.scrollTop;
+  }
+
+  function renderPosition() {
+    const position = get('[data-position]');
+    if (!session.document || session.draftText === undefined) {
+      position.textContent = '';
+      return;
+    }
+    const caret = cursorPosition(text.value, text.selectionStart);
+    position.textContent = `Ln ${caret.line}, Col ${caret.column} · ${gutterLines} ${gutterLines === 1 ? 'line' : 'lines'}`;
+  }
+
+  /** Status, errors and caret. The open file's path is already the editor
+   * title, so a status that only repeats it is not shown a second time. */
+  function renderFooter() {
+    const error = get('[data-error]');
+    error.hidden = !session.error;
+    error.textContent = session.error;
+    const status = get('[data-status]');
+    status.textContent =
+      session.status === session.document?.path ? '' : session.status;
+    status.hidden = !!session.error;
+    renderPosition();
+  }
+
+  /** Editor pane only: safe to call on every keystroke. */
+  function renderEditor() {
+    const source = session.document;
+    get('[data-editor-empty]').hidden = !!source;
+    get('[data-editor-body]').hidden = !source;
+    if (!source || session.draftText === undefined) {
+      painted = '';
+      paintedPath = '';
+      renderPosition();
+      return;
+    }
     const key = `${source.path}\0${source.revision}`;
     if (painted !== key || text.value !== session.draftText)
       text.value = session.draftText;
     painted = key;
+    renderGutter(text.value);
+    if (paintedPath !== source.path) {
+      // A different file starts at its top-left corner.
+      paintedPath = source.path;
+      text.scrollTop = 0;
+      text.scrollLeft = 0;
+      gutter.scrollTop = 0;
+    }
     text.readOnly = !source.writable || session.busy || !canSave;
-    get('[data-file-title]').textContent = source.path;
-    get('[data-permission]').textContent = session.revisionConflict
+    renderTitle(source.path);
+    get('[data-dirty]').hidden = !session.dirty;
+    const permission = get('[data-permission]');
+    const conflict = session.revisionConflict;
+    const writable = source.writable && canSave;
+    permission.textContent = conflict
+      ? 'Changed on server'
+      : writable
+        ? 'Writable'
+        : 'Read only';
+    permission.title = conflict
       ? 'The server file changed. Your draft is retained; read and review the current file before saving.'
-      : source.writable && canSave
+      : writable
         ? 'Write allowed for this file.'
         : 'Read only for your account or this workspace path.';
+    permission.dataset.state = conflict
+      ? 'conflict'
+      : writable
+        ? 'writable'
+        : 'read-only';
+    get('[data-conflict]').hidden = !canSave || !conflict;
     get('[data-read-current]').hidden = !canSave;
-    get('[data-use-current]').hidden = !canSave || !session.revisionConflict;
+    get('[data-use-current]').hidden = !canSave || !conflict;
     get('[data-save]').hidden = !canSave;
-    get<HTMLButtonElement>('[data-save]').disabled =
-      !canSave ||
-      !source.writable ||
-      session.busy ||
-      session.revisionConflict ||
-      !session.dirty;
+    get<HTMLButtonElement>('[data-save]').disabled = !session.savable;
+    renderPosition();
+  }
+
+  function render() {
+    for (const button of host.querySelectorAll('button'))
+      button.disabled = session.busy && !button.matches('[data-use-current]');
+    renderTree();
+    renderEditor();
+    renderFooter();
   }
 
   return {
@@ -483,6 +617,7 @@ export function installFileBrowser(
       session.reset();
       get<HTMLInputElement>('[data-path]').value = '';
       painted = '';
+      paintedPath = '';
       render();
     },
     async openRoot() {
@@ -496,6 +631,54 @@ export function installFileBrowser(
         ?.focus();
     },
   };
+}
+
+/** Number of editor lines; a trailing newline starts a final empty line. */
+export function lineCount(text: string) {
+  let lines = 1;
+  for (let at = text.indexOf('\n'); at >= 0; at = text.indexOf('\n', at + 1))
+    lines += 1;
+  return lines;
+}
+
+/** Gutter text: one right-aligned number per editor line. */
+export function lineNumbers(lines: number) {
+  let numbers = '';
+  for (let line = 1; line <= lines; line += 1)
+    numbers += line === 1 ? '1' : `\n${line}`;
+  return numbers;
+}
+
+/** One-based line and column of a caret offset, clamped to the text. */
+export function cursorPosition(text: string, offset: number) {
+  const end = Math.max(0, Math.min(offset, text.length));
+  let line = 1;
+  let lineStart = 0;
+  for (
+    let at = text.indexOf('\n');
+    at >= 0 && at < end;
+    at = text.indexOf('\n', at + 1)
+  ) {
+    line += 1;
+    lineStart = at + 1;
+  }
+  return { line, column: end - lineStart + 1 };
+}
+
+/** Cmd+S or Ctrl+S with no other modifier. */
+export function isSaveShortcut(event: {
+  readonly key: string;
+  readonly metaKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly altKey: boolean;
+  readonly shiftKey: boolean;
+}) {
+  return (
+    event.key.toLowerCase() === 's' &&
+    event.metaKey !== event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey
+  );
 }
 
 function escapeText(value: string) {

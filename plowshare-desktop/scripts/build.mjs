@@ -18,5 +18,5 @@ await build({ entryPoints: ['src/renderer/library.ts'], outfile: 'build/renderer
 await build({ entryPoints: ['src/renderer/usage.ts'], outfile: 'build/renderer/usage.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
 await build({ entryPoints: ['src/renderer/relay.ts'], outfile: 'build/renderer/relay.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
 await build({ entryPoints: ['src/renderer/proc.ts'], outfile: 'build/renderer/proc.js', bundle: true, platform: 'browser', target: 'chrome130', ...renderer });
-for (const file of ['administration.css', 'proc.html', 'proc.css', 'relay.html', 'relay.css', 'usage.html', 'usage.css', 'index.html', 'trajectory.html', 'activity.html', 'style.css', 'desktop.css', 'board.html', 'board.css', 'library.html', 'library.css']) await copyFile(`src/renderer/${file}`, `build/renderer/${file}`);
+for (const file of ['administration.css', 'proc.html', 'proc.css', 'relay.html', 'relay.css', 'usage.html', 'usage.css', 'index.html', 'trajectory.html', 'activity.html', 'style.css', 'desktop.css', 'application-hub.css', 'file-browser.css', 'workspace-slot.css', 'board.html', 'board.css', 'library.html', 'library.css']) await copyFile(`src/renderer/${file}`, `build/renderer/${file}`);
 console.log('Built Electron main, isolated preload and renderer.');

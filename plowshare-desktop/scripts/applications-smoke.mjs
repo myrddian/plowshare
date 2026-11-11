@@ -159,11 +159,19 @@ try {
   await page.locator('#application-panel nav [data-hub="schedules"]').click();
   const schedules = await documentWith('activity.html', async candidate => (await candidate.locator('#activity-title').textContent()) === 'Scheduled work');
   await expect(schedules.locator('#activity-list-note')).toContainText('No schedules for Managed app');
+  // Scheduled work is hosted inside the hub: header and tabs stay in place.
+  await expect(page.locator('#application-panel')).toBeVisible();
+  await expect(page.locator('#application-panel nav [data-hub="schedules"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#application-panel [data-workspace-slot="schedules"]')).toBeVisible();
+  await expect(page.locator('#workspace-view-host')).toBeHidden();
   await page.locator('[data-project="Managed app"]').click();
   await expect(page.locator('#application-panel')).toBeVisible();
   await page.locator('#application-panel nav [data-hub="relay"]').click();
   const relay = await documentWith('relay.html', async candidate => (await candidate.locator('#relay-scope').inputValue()) === 'Managed app');
   await expect(relay.locator('#relay-scope')).toHaveValue('Managed app');
+  await expect(page.locator('#application-panel')).toBeVisible();
+  await expect(page.locator('#application-panel [data-workspace-slot="relay"]')).toBeVisible();
+  await expect(page.locator('#workspace-view-host')).toBeHidden();
   const hubFiles = page.locator('#application-panel nav [data-hub="files"]');
   fixture.setPauseApplicationFiles(true);
   try {

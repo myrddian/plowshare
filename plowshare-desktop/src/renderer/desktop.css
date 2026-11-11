@@ -106,6 +106,31 @@
 .activity-options ul { padding-left:20px; line-height:1.9; }
 .activity-options pre { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.8 var(--mono); color:#bdb29c; }
 @media(max-width:1000px) { .activity-workspace { padding:20px; } .activity-columns { grid-template-columns:var(--activity-width,260px) minmax(0,1fr); } #activity-detail { padding:24px; } }
+/* Activity may be placed in a narrow slot (Application hub Schedules); size to the page. */
+.activity-workspace { container:activity / inline-size; }
+.activity-toolbar>div { min-width:0; }
+.activity-toolbar>button { flex-shrink:0; white-space:nowrap; }
+#activity-list nav.run-actions { gap:4px 10px; margin:8px 6px; font-size:11px; color:var(--muted); }
+#activity-list nav.run-actions [role=status] { color:var(--ink); }
+.activity-tabs { flex-wrap:wrap; }
+@container activity (max-width:860px) {
+  .activity-toolbar { padding-bottom:12px; }
+  .activity-toolbar h1 { font-size:17px; }
+  .activity-tabs { gap:4px; margin-bottom:10px; }
+  .activity-tabs button { padding:6px 10px; }
+  .activity-columns { grid-template-columns:var(--activity-width,240px) minmax(0,1fr); }
+  #activity-detail { padding:18px 20px; }
+  #activity-detail h2 { font-size:17px; }
+}
+/* Too narrow for a list beside its detail: the list sits above. */
+@container activity (max-width:640px) {
+  .activity-columns { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(140px,2fr) minmax(0,3fr); }
+  .activity-columns>.pane-resizer { display:none; }
+  .activity-list-column { border-right:0; border-bottom:1px solid #33312a; }
+  .activity-list-column>footer { padding:8px 14px; }
+  .activity-list-column>.search-field { margin:10px; }
+  #activity-detail { padding:16px; }
+}
 .main-area { background:radial-gradient(ellipse at 50% 30%,#26231c33,transparent 75%),var(--bg); }
 .stage { gap:24px; grid-template-columns:minmax(0,1fr) var(--context-width,280px); }
 .chat { border-color:#454036; border-radius:13px; box-shadow:0 16px 45px #0004; background:#1c1c1b; }
@@ -669,8 +694,52 @@
 .embedded-view>.titlebar { display:none; }
 .embedded-view .trajectory-workspace,.embedded-view .activity-workspace,.embedded-view .board-workspace { height:100vh; }
 .embedded-view .activity-workspace,.embedded-view .board-workspace { padding:16px 0 0; }
-.embedded-view .trajectory-toolbar { padding:16px 0; }
-.embedded-view .trajectory-strip { margin-left:0; margin-right:0; }
+.embedded-view .trajectory-toolbar { padding:16px 18px 14px; }
+.embedded-view .trajectory-strip { margin:0 18px 14px; }
+/*
+ * Workspace pages are their own documents, so they size to whatever region
+ * the main window gives them: the full workspace or a narrower slot such as
+ * the Application hub's Activity pane. Layout follows the page's own width.
+ */
+.trajectory-workspace { container:trajectory / inline-size; }
+.trajectory-toolbar>div { min-width:0; }
+.trajectory-toolbar p { overflow-wrap:anywhere; }
+.trajectory-actions button { white-space:nowrap; }
+@container trajectory (max-width:900px) {
+  .trajectory-toolbar { gap:12px; }
+  .trajectory-toolbar h1 { font-size:17px; letter-spacing:-.2px; }
+  .trajectory-toolbar h1>.icon { width:17px; height:17px; }
+  .trajectory-actions { gap:4px; }
+  .trajectory-columns { grid-template-columns:var(--trajectory-width,minmax(280px,1fr)) minmax(0,1fr); }
+  .trajectory-filter { padding:10px 14px; }
+  .trajectory-row { gap:7px; padding:7px 12px; }
+  .step-kind { max-width:40%; flex-shrink:1; min-width:0; }
+  .step-outcome { display:none; }
+  .trajectory-log-footer { padding:9px 14px; }
+  .trajectory-detail>header { padding:14px 18px; }
+  .trajectory-detail h2 { font-size:14px; }
+  #trajectory-detail-content { padding:4px 18px 24px; }
+  .trajectory-text-section { padding:13px 0; }
+  .trajectory-detail pre { font-size:11px; line-height:1.75; }
+}
+/* Too narrow for two readable columns: the log sits above its detail. */
+@container trajectory (max-width:680px) {
+  .trajectory-columns { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(150px,2fr) minmax(0,3fr); }
+  .trajectory-columns>.pane-resizer { display:none; }
+  .trajectory-log { border-right:0; border-bottom:1px solid var(--line); }
+  .trajectory-log-footer>span:last-child { display:none; }
+  .trajectory-log-footer>span:first-child { flex:1; }
+  .step-outcome { display:block; max-width:30%; overflow:hidden; text-overflow:ellipsis; }
+  .trajectory-row.answer .step-outcome { white-space:nowrap; max-width:30%; }
+}
+@container trajectory (max-width:480px) {
+  .embedded-view .trajectory-toolbar { padding:12px 14px 10px; }
+  .embedded-view .trajectory-strip { margin:0 14px 10px; }
+  .trajectory-toolbar { align-items:flex-start; }
+  .trajectory-actions button { padding:6px 8px; }
+  .step-outcome { display:none; }
+  .step-turn { display:none; }
+}
 .workspace-manage .operator-dialog { position:static; width:100%; height:100%; max-height:none; max-width:none; margin:0; border:0; border-radius:0; box-shadow:none; padding:20px 0; }
 @media(max-width:1200px) { .workspace-view-host { margin:0 20px 25px; } }
 
@@ -767,71 +836,6 @@
 .information-panel form[data-tag-groups] label { display: flex; flex-direction: column; gap: 6px; }
 .information-panel form[data-tag-groups] textarea { width: 100%; min-height: 90px; resize: vertical; }
 
-#application-panel { padding: clamp(18px, 3vw, 40px); overflow: auto; min-width: 0; flex: 1; }
-#application-panel header, #application-panel nav, .application-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
-#application-panel nav { justify-content: flex-start; margin-block: 20px; }
-#application-panel [data-hub-nav] button[aria-current="page"] { background: #30291e; color: #dfc389; }
-#application-panel [data-overview-tiles] { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-#application-panel [data-overview-tiles] button { display: block; width: 100%; text-align: left; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #1c1c19; }
-#application-panel [data-overview-tiles] button strong { display: block; }
-#application-panel [data-overview-tiles] button small { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; }
-#application-panel .application-secondary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-#application-panel .application-secondary button { color: var(--muted); }
-#application-panel [data-schedules], #application-panel [data-relay], #application-panel [data-access] { max-width: 62ch; color: var(--muted); }
-#application-panel [data-summary] { overflow-wrap: anywhere; }
-#application-panel [data-source],
-#application-panel [data-activity] { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
-#application-panel [data-activity] .application-activity-split { min-height: min(70vh, 640px); }
-#application-panel .application-conversation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 4px; }
-#application-panel .application-conversation-toolbar strong { font-size: 12px; font-weight: 500; color: var(--muted); }
-#application-panel .application-activity-actions { display: flex; gap: 4px; }
-#application-panel .application-activity-list,
-#application-panel .application-activity-embed { border: 1px solid var(--line); border-radius: 12px; background: var(--panel, #1c1c19); min-height: 280px; }
-#application-panel .application-activity-list { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-#application-panel [data-activity-tree] { overflow: auto; min-height: 0; flex: 1; padding: 4px 6px 8px; }
-#application-panel [data-activity-tree] .conversation-row,
-#application-panel [data-activity-tree] .activity-row { width: 100%; }
-#application-panel .application-activity-embed { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 0; overflow: hidden; }
-#application-panel .application-conversation-embed,
-#application-panel .application-activity-log { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
-#application-panel .application-activity-log { padding: 16px; gap: 10px; }
-#application-panel .application-activity-log h3 { margin: 0; }
-#application-panel .application-activity-log [data-activity-log-meta] { color: var(--muted); overflow-wrap: anywhere; }
-#application-panel [data-activity-empty] { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
-#chat.application-nested { position: relative; inset: auto; width: 100%; height: 100%; min-height: 420px; transform: none !important; box-shadow: none; border-radius: 12px; }
-#chat.application-nested .chat-grip { cursor: default; opacity: .3; }
-#application-panel [data-file-browser],
-#personal-file-browser { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-.file-browser { display: flex; flex-direction: column; gap: 12px; min-height: min(70vh, 640px); }
-.file-browser-toolbar { display: flex; flex-direction: column; gap: 6px; }
-.file-browser-jump { color: var(--muted); font-size: 0.9em; }
-.file-browser-jump summary { cursor: pointer; user-select: none; }
-.file-browser-jump form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
-.file-browser-jump input { flex: 1 1 200px; min-width: 0; }
-.file-browser-split { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 12px; min-height: 0; flex: 1; }
-.file-browser-tree,
-.file-browser-editor { border: 1px solid var(--line); border-radius: 12px; background: var(--panel, #1c1c19); min-height: 280px; }
-.file-browser-tree { overflow: auto; padding: 6px; }
-.file-browser-row { display: flex; align-items: center; gap: 2px; padding-left: calc(var(--depth, 0) * 16px); }
-.file-browser-toggle { flex: 0 0 auto; width: 28px; height: 36px; padding: 0; color: var(--muted); background: transparent; border: 0; display: inline-flex; align-items: center; justify-content: center; }
-.file-browser-toggle .icon { width: 14px; height: 14px; transform: rotate(-90deg); transition: transform .12s; }
-.file-browser-toggle.is-open .icon { transform: rotate(0deg); }
-.file-browser-name { flex: 1 1 auto; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; overflow-wrap: anywhere; background: transparent; border: 0; color: inherit; padding: 12px; border-radius: 8px; }
-.file-browser-name .icon { width: 18px; height: 18px; flex: 0 0 auto; color: #dfc389; opacity: .85; }
-.file-browser-name[aria-current="true"] { background: #30291e; color: #dfc389; }
-.file-browser-name:hover { background: #24241f; }
-.file-browser-empty, .file-browser-more { color: var(--muted); margin: 8px; font-size: 0.9em; }
-.file-browser-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 16px; }
-.file-browser-empty-editor { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); text-align: center; padding: 24px; }
-.file-browser-empty-editor .icon { width: 28px; height: 28px; color: #dfc389; opacity: .7; }
-.file-browser-empty-editor p { margin: 0; }
-.file-browser-editor [data-text] { width: 100%; min-height: 280px; resize: vertical; font-family: monospace; tab-size: 2; line-height: 1.6; }
-.file-browser-editor label { display: block; }
-.file-browser-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.file-browser [data-status], .file-browser [data-permission], .file-browser [data-error] { overflow-wrap: anywhere; margin: 0; }
-@media (max-width: 720px) {
-  .file-browser-split { grid-template-columns: 1fr; }
-}
 .connection-menu {
   position: fixed;
   inset: 60px 12px auto auto;

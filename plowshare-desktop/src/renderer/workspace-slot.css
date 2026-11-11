@@ -1,0 +1,11 @@
+/*
+ * Workspace slot: an element that hosts a native workspace page (see
+ * workspace-slots.ts). The page covers the slot's bounds; the placeholder
+ * underneath shows only while the page loads or after it failed to open.
+ * Slots must have real, stable bounds, so give them a flex or grid track.
+ */
+.workspace-slot { flex: 1; min-height: 0; min-width: 0; position: relative; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.workspace-slot[hidden] { display: none; }
+.workspace-slot-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; color: var(--muted); text-align: center; }
+.workspace-slot-placeholder p { margin: 0; max-width: 60ch; overflow-wrap: anywhere; }
+.workspace-slot-placeholder [data-slot-error] { color: #f2c69a; }
