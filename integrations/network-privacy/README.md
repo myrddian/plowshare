@@ -496,6 +496,8 @@ properties and identifies read versus Relay submission effects. Invoke it with
 | `network.scan_list` | Optional `offset`, `limit` | Receipt page with bounded previews and full counts |
 | `network.evidence` | `scan_id`; optional `section`, `offset`, `limit` | Small complete evidence or a large-scan summary; explicit sections return pages |
 | `network.destinations` | `scan_id`; optional `offset`, `limit` | Small legacy observations or paged DNS destinations |
+| `network.devices` | Optional `offset`, `limit` | Page of monitored devices with a confirmed MAC: `device_id`, name, address and signal codes; `unavailable` counts devices without one |
+| `network.device` | `{"device_id":"mac:<canonical MAC>"}` from `network.devices` | One device dossier: identity, detection, presence, open ports, DNS purpose groups, Pi-hole silence, traffic volume, coverage and signals |
 
 Read pages default to 32 records (scan lists: 50); serialized size may produce
 smaller pages. Follow `next_offset` until null, using the same retained scan UUID
@@ -504,6 +506,17 @@ and `issues`; provide a section when requesting evidence offsets. Summary counts
 cover the whole retained scan. `issues_complete` identifies a shortened gap
 preview; page the `issues` section for every gap. Scope pages include a fingerprint;
 restart that read if the configuration changes between pages. Reading never scans.
+
+Device tools read the same inventory the dashboard draws: completed scan
+receipts plus the 24-hour quick presence view. `device_id` selects among the
+current monitored devices; it is never an address, and an ID that is unknown,
+address-only or currently seen at two addresses is refused. A dossier states
+missing DNS or byte counters as `coverage` lines, never as zero. It keeps group
+totals when it drops lower-ranked destinations to fit the reply budget and counts
+them in `omitted` and `trimmed_destinations`. `signals` are deterministic
+attention flags (`measurement_dns`, `advertising_dns`, `telemetry_dominant`,
+`dns_bypass`, `upload_heavy`, `open_admin_service`) whose thresholds are
+documented in `src/plowshare_privacy/device_dossier.py`; they are not findings.
 
 All calls require the configured web bearer. Scan calls retain the caller's
 request identity before SDK publication and use the same Relay pipeline as the
@@ -520,17 +533,18 @@ path.
 ## Agent tools through the SDK
 
 The coordinator sets `dynamic: true` and receives `network_scope`, `network_scan`,
-`network_scan_status`, `network_scan_list`, `network_evidence` and
-`network_destinations` through the `network_scanning` provider scope explicitly
-assigned in root `plowshare.json`. These external names are absent from its `tools`
-field. That scope grants both visibility and execution, limited to these six tools
-and the configured execution principal. `relay_tool_read` retains its ordinary
+`network_scan_status`, `network_scan_list`, `network_evidence`,
+`network_destinations`, `network_devices` and `network_device` through the
+`network_scanning` provider scope explicitly assigned in root `plowshare.json`.
+These external names are absent from its `tools` field. That scope grants both
+visibility and execution, limited to these eight tools and the configured
+execution principal. `relay_tool_read` retains its ordinary
 named built-in grant in `tools`. Loading validates the policy; discovery and
 per-call permission/availability checks happen at runtime.
 The SDK exposes a declaration and async Python handler for each capability; Plowshare installs the façade into its
 normal tool registry. Analyst and reviewer receive only the explicit
-`network_evidence_read` scope (scope, list, evidence and destinations); they have
-no scan tool grant. The model never constructs a Relay envelope or selects a
+`network_evidence_read` scope (scope, list, evidence, destinations and the two
+device read tools); they have no scan tool grant. The model never constructs a Relay envelope or selects a
 provider or topic.
 
 For legacy server startup bindings, the SDK can still export matching declarations

@@ -77,6 +77,44 @@
               }
             ],
             "timeoutSeconds": 30
+          },
+          {
+            "project": "network-privacy-watch",
+            "provider": "privacy-scanner",
+            "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+            "name": "network_devices",
+            "description": "List monitored devices with a confirmed MAC (offset/limit): device_id, name, address and attention signals. Follow next_offset.",
+            "parameters": [
+              {
+                "name": "offset",
+                "type": "INTEGER",
+                "description": "Page offset; follow the returned next_offset.",
+                "required": false
+              },
+              {
+                "name": "limit",
+                "type": "INTEGER",
+                "description": "Maximum page records: 1-32.",
+                "required": false
+              }
+            ],
+            "timeoutSeconds": 30
+          },
+          {
+            "project": "network-privacy-watch",
+            "provider": "privacy-scanner",
+            "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+            "name": "network_device",
+            "description": "Read one monitored device's dossier: identity, open services, DNS purpose groups, traffic volume, coverage gaps and signals. Signals direct attention; they are not findings.",
+            "parameters": [
+              {
+                "name": "device_id",
+                "type": "STRING",
+                "description": "A device_id from network_devices: mac: and a canonical MAC address.",
+                "required": true
+              }
+            ],
+            "timeoutSeconds": 30
           }
         ]
       }

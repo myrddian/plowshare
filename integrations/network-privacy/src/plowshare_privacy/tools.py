@@ -3,13 +3,15 @@
 The scan tool admits work through Relay. Read tools inspect adapter-owned receipts,
 so collection completion is never confused with publication or an agent report.
 No caller can supply an address, port, executable, filesystem path or server origin.
+Device tools select among the current monitored inventory by MAC identity only.
 """
 
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import asdict, dataclass, replace
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 from .collection import scope_fingerprint
 from .contracts import (
@@ -23,6 +25,15 @@ from .contracts import (
     object_fields,
     uuid,
 )
+from .device_dossier import (
+    DeviceDossier,
+    SignalCode,
+    build_dossier,
+    confirmed_device_id,
+    device_signals,
+    parse_device_id,
+)
+from .device_inventory import DeviceCard, DeviceInventory
 from .journal import Publication, Receipt, ScanOrigin
 from .limits import BATCH_SIZE, MAX_CHANGES, MAX_TARGETS, TOOL_REPLY_BYTES
 from .worker import Worker
@@ -33,7 +44,7 @@ class ToolDefinition:
     name: str
     description: str
     effect: Literal["read", "relay_submission"]
-    parameter: Literal["request_id", "scan_id"] | None = None
+    parameter: Literal["request_id", "scan_id", "device_id"] | None = None
 
 
 DEFINITIONS = (
@@ -70,6 +81,17 @@ DEFINITIONS = (
         "Read observed DNS destinations from a collection; queries do not prove transmitted content.",
         "read",
         "scan_id",
+    ),
+    ToolDefinition(
+        "network.devices",
+        "List monitored devices with a confirmed MAC (offset/limit): device_id, name, address and attention signals. Follow next_offset.",
+        "read",
+    ),
+    ToolDefinition(
+        "network.device",
+        "Read one monitored device's dossier: identity, open services, DNS purpose groups, traffic volume, coverage gaps and signals. Signals direct attention; they are not findings.",
+        "read",
+        "device_id",
     ),
 )
 
@@ -142,8 +164,33 @@ class DestinationsCall:
             raise ValueError("Invalid destination page intent")
 
 
+@dataclass(frozen=True)
+class DevicesCall:
+    offset: int = 0
+    limit: int = BATCH_SIZE
+
+    def __post_init__(self) -> None:
+        integer(self.offset, 0, MAX_TARGETS)
+        integer(self.limit, 1, BATCH_SIZE)
+
+
+@dataclass(frozen=True)
+class DeviceCall:
+    device_id: str
+
+    def __post_init__(self) -> None:
+        parse_device_id(self.device_id)
+
+
 ToolCall = (
-    ScopeCall | ScanCall | StatusCall | ListCall | EvidenceCall | DestinationsCall
+    ScopeCall
+    | ScanCall
+    | StatusCall
+    | ListCall
+    | EvidenceCall
+    | DestinationsCall
+    | DevicesCall
+    | DeviceCall
 )
 
 
@@ -162,6 +209,15 @@ def decode_call(name: str, arguments: object) -> ToolCall:
             if name == "network.scope"
             else ListCall(offset, limit)
         )
+    if name == "network.devices":
+        row = object_fields(arguments, set(), {"offset", "limit"})
+        return DevicesCall(
+            integer(row.get("offset", 0), 0, MAX_TARGETS),
+            integer(row.get("limit", BATCH_SIZE), 1, BATCH_SIZE),
+        )
+    if name == "network.device":
+        row = object_fields(arguments, {"device_id"})
+        return DeviceCall(parse_device_id(row["device_id"]))
     if name in ("network.scan", "network.scan_status"):
         row = object_fields(arguments, {"request_id"})
         identity = uuid(row["request_id"])
@@ -288,6 +344,30 @@ class EvidenceCounts:
     issues: int
 
 
+@dataclass(frozen=True)
+class DeviceSummary:
+    device_id: str
+    name: str
+    address: str
+    signals: tuple[SignalCode, ...]
+
+
+@dataclass(frozen=True)
+class DevicesResult:
+    """A page of the monitored inventory in configured target order.
+
+    ``total`` counts devices with exactly one current confirmed-MAC card.
+    ``unavailable`` counts inventory devices without one (address-only, or the
+    same MAC currently seen at two addresses); they have no dossier.
+    """
+
+    devices: tuple[DeviceSummary, ...]
+    total: int
+    unavailable: int
+    offset: int
+    next_offset: int | None
+
+
 EvidenceRecord = TcpObservation | DnsObservation | DeviceIdentity | str
 
 
@@ -333,7 +413,27 @@ ToolResult = (
     | EvidenceResult
     | DestinationsResult
     | EvidencePageResult
+    | DevicesResult
+    | DeviceDossier
 )
+
+
+def monitored_devices(
+    inventory: DeviceInventory,
+) -> tuple[tuple[str, DeviceCard], ...]:
+    """Cards that can be selected by device_id: one current card per confirmed MAC.
+
+    A MAC currently associated with two addresses is ambiguous; picking either
+    would attribute one card's DNS and traffic to the other, so both are left
+    out and counted as unavailable.
+    """
+    ids = [confirmed_device_id(card) for card in inventory.devices]
+    seen = Counter(ids)
+    return tuple(
+        (device_id, card)
+        for card, device_id in zip(inventory.devices, ids)
+        if device_id is not None and seen[device_id] == 1
+    )
 
 
 class PrivacyTools(Protocol):
@@ -343,8 +443,15 @@ class PrivacyTools(Protocol):
 
 
 class WorkerTools:
-    def __init__(self, worker: Worker):
+    def __init__(
+        self,
+        worker: Worker,
+        inventory: Callable[[], DeviceInventory] | None = None,
+    ):
         self.worker = worker
+        # Device tools read the worker's shared inventory projection, the same
+        # one the dashboard draws, unless a caller supplies a fixed source.
+        self.inventory = inventory if inventory is not None else worker.device_inventory
 
     def summary(self, receipt: Receipt) -> ScanSummary:
         evidence = receipt.evidence
@@ -457,6 +564,21 @@ class WorkerTools:
                 publication.state if publication else "received",
                 self.summary(receipt) if receipt else None,
             )
+        if isinstance(call, DevicesCall):
+            return self.devices(call)
+        if isinstance(call, DeviceCall):
+            # One projection per call; the card chosen here is the one built.
+            chosen = next(
+                (
+                    card
+                    for device_id, card in monitored_devices(self.inventory())
+                    if device_id == call.device_id
+                ),
+                None,
+            )
+            if chosen is None:
+                raise ValueError("Unknown monitored device")
+            return build_dossier(chosen, budget=TOOL_REPLY_BYTES)
         result = self.evidence(call.scan_id)
         evidence = result.evidence
         if isinstance(call, EvidenceCall):
@@ -481,6 +603,39 @@ class WorkerTools:
         ):
             return legacy
         return self.page(result, "dns", call.offset, call.limit)
+
+    def devices(self, call: DevicesCall) -> DevicesResult:
+        inventory = self.inventory()
+        cards = monitored_devices(inventory)
+        if not 0 <= call.offset <= len(cards):
+            raise ValueError("Device page offset is unavailable")
+        selected = cards[call.offset : call.offset + call.limit]
+        listing = DevicesResult(
+            tuple(
+                DeviceSummary(
+                    device_id,
+                    card.name,
+                    card.address,
+                    tuple(signal.code for signal in device_signals(card)),
+                )
+                for device_id, card in selected
+            ),
+            len(cards),
+            len(inventory.devices) - len(cards),
+            call.offset,
+            call.offset + len(selected)
+            if call.offset + len(selected) < len(cards)
+            else None,
+        )
+        while not tool_fits(listing) and len(listing.devices) > 1:
+            listing = replace(
+                listing,
+                devices=listing.devices[:-1],
+                next_offset=call.offset + len(listing.devices) - 1,
+            )
+        if not tool_fits(listing):
+            raise ValueError("Device metadata exceeds the tool page budget")
+        return listing
 
     def page(
         self, result: EvidenceResult, section: str, offset: int, limit: int

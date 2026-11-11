@@ -25,7 +25,15 @@ from .tools import ToolCall as PrivacyCall
 
 def parameters(name: str, parameter: str | None) -> tuple[Parameter, ...]:
     values = []
-    if parameter is not None and name != "network.scan":
+    if parameter == "device_id":
+        values.append(
+            Parameter(
+                parameter,
+                "STRING",
+                "A device_id from network_devices: mac: and a canonical MAC address.",
+            )
+        )
+    elif parameter is not None and name != "network.scan":
         values.append(
             Parameter(
                 parameter, "STRING", "Canonical UUID of the retained request or scan."
@@ -36,6 +44,7 @@ def parameters(name: str, parameter: str | None) -> tuple[Parameter, ...]:
         "network.scan_list",
         "network.evidence",
         "network.destinations",
+        "network.devices",
     }:
         values.extend(
             (
@@ -48,7 +57,9 @@ def parameters(name: str, parameter: str | None) -> tuple[Parameter, ...]:
                 Parameter(
                     "limit",
                     "INTEGER",
-                    "Maximum page records: 1-32 (scan list: 1-50).",
+                    "Maximum page records: 1-32."
+                    if name == "network.devices"
+                    else "Maximum page records: 1-32 (scan list: 1-50).",
                     required=False,
                 ),
             )

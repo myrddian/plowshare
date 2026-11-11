@@ -27,14 +27,17 @@ from plowshare.tool_journal import SqliteToolJournal
 from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
 from .advisories import NvdAdvisories
+from .assessment_port import SdkAssessmentPort
 from .collection import NetworkCollector
 from .collector_factory import configured_collector
 from .console import FileManualInvestigations, OperatorConsole
 from .console_port import SdkConsolePort
 from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
+from .device_assessments import AssessmentJournal, DeviceAssessments
 from .device_profiles import DeviceProfiles, FileProfileIntents
 from .discovery import LocalDeviceDiscovery
+from .dossier_port import DeviceDossiers, FileDossierIntents, SdkDossierPort
 from .identity_source import ManagedProductLookup
 from .issue_port import SdkIssuePort
 from .issue_records import FileIssueIntents, PrivacyIssues
@@ -270,6 +273,30 @@ async def execute(args: argparse.Namespace) -> None:
                 else None
             )
 
+            # Per-device assessments read the same inventory as the dashboard and
+            # the network_device tool. Their ports read the current connection
+            # cell, so operator recovery reaches them without a rebuild.
+            dossiers = (
+                DeviceDossiers(
+                    SdkDossierPort(client, config, worker.port),
+                    FileDossierIntents(
+                        Path(args.config).parent, config.project, config.collector
+                    ),
+                )
+                if operator_store
+                else None
+            )
+            assessments = (
+                DeviceAssessments(
+                    AssessmentJournal(config.state_directory),
+                    SdkAssessmentPort(lambda: client, config, lambda: worker.port),
+                    dossiers,
+                    worker.device_inventory,
+                )
+                if dossiers is not None
+                else None
+            )
+
             async def recover(reconcile_manual: Callable[[], Awaitable[None]]) -> None:
                 nonlocal client, native
                 async with worker.request_lock:
@@ -317,6 +344,10 @@ async def execute(args: argparse.Namespace) -> None:
                             )
                         if console is not None:
                             console.port = SdkConsolePort(replacement, worker.config)
+                        if dossiers is not None:
+                            dossiers.port = SdkDossierPort(
+                                replacement, worker.config, worker.port
+                            )
                         if peer is not None:
                             peer.port = SdkOutgoingPort(replacement, worker.config)
                         if native_journal is not None:
@@ -427,6 +458,7 @@ async def execute(args: argparse.Namespace) -> None:
                     advisories=advisories,
                     managed_products=managed_products,
                     profile_research=research,
+                    assessments=assessments,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
                     )
@@ -438,6 +470,7 @@ async def execute(args: argparse.Namespace) -> None:
             await runner.setup()
             task: asyncio.Task[None] | None = None
             research_task: asyncio.Task[None] | None = None
+            assessment_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
                 await site.start()
@@ -482,13 +515,15 @@ async def execute(args: argparse.Namespace) -> None:
                 )
                 if research is not None:
                     research_task = asyncio.create_task(research.run(stop))
+                if assessments is not None:
+                    assessment_task = asyncio.create_task(assessments.run(stop))
                 await stop.wait()
             finally:
                 stop.set()
-                for running in (research_task, task):
+                for running in (assessment_task, research_task, task):
                     if running is not None:
                         running.cancel()
-                for running in (research_task, task):
+                for running in (assessment_task, research_task, task):
                     if running is not None:
                         try:
                             await running

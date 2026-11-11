@@ -239,6 +239,51 @@ traffic such as a camera recording to a local video recorder or a backup to a
 NAS, so a large "from device" figure is not by itself internet upload. Pair
 volumes with the DNS profile to see where a device is likely sending them.
 
+### Device privacy assessments
+
+Each monitored device with a confirmed MAC can get an agent assessment. Open the
+device, then choose **Assess this device** under **Agent assessment**.
+
+1. The collector builds the device's dossier from what it already holds:
+   identity, open services, DNS grouped by purpose, Pi-hole silence, UniFi
+   traffic, explicit coverage gaps and code-computed attention signals. It
+   retains the dossier as `network-privacy-dossier/<device_id>.json` so the
+   report can cite the exact revision.
+2. It starts `assess_network_device`. The assessor reads only that dossier and
+   returns structured JSON. The script rejects HTML, tables, raw identifiers,
+   Markdown structure, exfiltration claims and signals the dossier does not
+   contain.
+3. The reviewer gives a verdict for every concern. One correction round is
+   allowed. Refuted concerns are removed and weakened potential breaches drop to
+   "worth checking". If the reviewer could not check the work, or either agent's
+   output is invalid, **no report is written** and the device shows "Last
+   assessment failed" with the run and **Retry**.
+4. The script renders the report in plain language under one stable name per
+   device (`Network privacy assessment / <device_id>`); later runs revise it
+   rather than adding drafts.
+
+While a report awaits review, **Accept and make final** finalises that
+revision in Plowshare and **Dismiss without finalising** hides it locally
+without calling the server. A refused Accept keeps the report in review and
+shows the reason; nothing is resent. If the collector's service account may not
+finalise reports its runs produced, finalise it from Plowshare's Reports
+collection and choose **Check status**. An unconfirmed Accept stays pending
+until a status read shows the report final.
+
+Only one assessment runs at a time, a device in review cannot be reassessed
+until it is accepted or dismissed, and at most 12 start per UTC day. The
+optional background queue (Devices, **Background device assessments**) is off
+by default; when enabled it assesses devices with signals that were never
+assessed, then devices whose signals changed, within the configured daily
+limit. Agents can also read dossiers through the `network_devices` and
+`network_device` tools.
+
+Signals direct attention; they are not findings. The rules and thresholds are
+constants in `device_dossier.py`: any advertising or measurement lookup,
+telemetry of at least 20 lookups and half of service lookups, Pi-hole silence,
+at least 1 GB sent and more sent than received, and an exposed SSH, Telnet,
+HTTP or remote desktop service.
+
 ### UniFi identity
 
 UniFi reads connected wired and wireless clients through the controller's local

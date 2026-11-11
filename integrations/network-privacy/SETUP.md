@@ -509,6 +509,13 @@ journals and the marker; foreign bindings, conflicting copies or changed legacy
 history refuse startup. Downgrades after new invocations need reviewed recovery;
 do not erase journals to force startup.
 
+The device read tools (`network_devices`, `network_device`) add a second step of
+the same kind: the paged history in `state/relay-tools-paged` is copied into
+`state/relay-tools-devices` with its own `transition.json`, and the paged journal
+is kept unchanged. Only read tools may be added this way. Add both names to the
+`grants` of `network_scanning` and `network_evidence_read` in the staged
+`plowshare.json`, as in the package, so agents can see them.
+
 ## Upgrade the Application and collector
 
 Stop the external collector first, including its enrolled background service.

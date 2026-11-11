@@ -44,13 +44,13 @@ directory.
 | --- | --- |
 | `plowshare.json` | Application identity `network-privacy-watch`, account grants and limits |
 | `agents/` | Built-in grants and dynamic opt-in; external access comes from manifest provider scopes |
-| `orchestrations/` | Deterministic schedule action and agent investigation workflow |
+| `orchestrations/` | Deterministic schedule action, scan investigation, device profile research and per-device privacy assessment |
 | `schedules/network_scan.json` | Packaged scan schedule, initially paused |
 | `Relay/` | Project topics and the scan-completion route |
 | `server/` | Project tool/provider catalogue, Relay ports and service-owned worker enrollment |
 
 The coordinator sets `dynamic: true`; its `tools` field lists built-in grants.
-The six external network tools are granted through the `network_scanning` provider
+The eight external network tools are granted through the `network_scanning` provider
 scope in `plowshare.json`, without listing them again in the agent definition.
 Analyst and reviewer opt into dynamic tools and receive the separate
 `network_evidence_read` scope, which excludes scan submission.
@@ -142,6 +142,22 @@ text to the reviewer and assembles the draft from the actual review. Agents supp
 judgments within the shared allowance. Missing assessments, unavailable evidence
 and invalid tool results stop work explicitly. The collector remains an external
 Python integration.
+
+Per-device privacy assessment uses `orchestrations/assess_network_device.js`.
+The collector starts it for one device with a retained dossier revision
+(`network-privacy-dossier/<device_id>.json`); scan completions never start it.
+The script reads the complete dossier, asks `privacy_device_assessor` for JSON
+and validates every field: no HTML, tables, Markdown structure or identifiers in
+agent text, only known levels and purposes, and only signals present in the
+dossier. `privacy_reviewer` returns a verdict per concern. `needs_corrections`
+allows one correction round, after which code removes refuted concerns and
+lowers weakened potential breaches to worth checking. `not_checked` or invalid
+JSON from either agent fails the run and writes nothing. Code renders the report
+(plain findings first, identifiers only in its Evidence appendix) and writes it
+as `Network privacy assessment / <device_id>`, a `feedback` revision of the
+previous assessment, with the dossier, profile and issue revisions as inputs and
+the per-concern findings and review as report metadata. The run cannot finalise
+it.
 
 Operator admission preferences and acknowledgements live in the external collector,
 separately from evidence. New completion decisions are immutable once retained;

@@ -21,6 +21,7 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .device_inventory import DeviceInventory, InventoryProjection
 from .diagnostics import refusal_detail
 from .journal import Publication, Receipt, Receipts, ScanOrigin
 from .limits import MAX_EVIDENCE_BYTES
@@ -51,6 +52,9 @@ class ActiveRequests:
         return await self.target.poll()
 
 
+_NO_PRESENCE = PresenceView()
+
+
 class Worker:
     def __init__(
         self,
@@ -70,6 +74,7 @@ class Worker:
         self.port = port
         self.receipts = receipts
         self.collector = collector
+        self.inventory_projection = InventoryProjection()
         self.consumer = str(uuid4())
         self.lock = asyncio.Lock()
         self.request_lock = asyncio.Lock()
@@ -413,10 +418,18 @@ class Worker:
 
     def presence_view(self) -> PresenceView:
         if self.presence is None:
-            return PresenceView()
+            # One shared empty view keeps the inventory projection's identity
+            # check stable when quick presence is not configured.
+            return _NO_PRESENCE
         plan = self.config.collection
         return self.presence.view(
             scope_fingerprint(plan), include_dns=plan.enabled and plan.dns_profiles
+        )
+
+    def device_inventory(self) -> DeviceInventory:
+        """The monitored inventory from done receipts and the current presence view."""
+        return self.inventory_projection.current(
+            self.config.collection, self.receipts.all(), self.presence_view()
         )
 
     def presence_status(self) -> PresenceStatus:

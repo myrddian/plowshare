@@ -31,7 +31,17 @@ from test_operator_console import ConsoleFixture, Settings
 from test_privacy_issues import IssueDocuments
 from test_privacy_issues import fields as issue_fields
 
+from plowshare_privacy.assessment_request import ConcernOutcome
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
+from plowshare_privacy.contracts import utc_now
+from plowshare_privacy.device_assessments import (
+    AssessmentConflict,
+    AssessmentLedger,
+    AssessmentReport,
+    AssessmentView,
+    UnknownDevice,
+)
+from plowshare_privacy.device_dossier import parse_device_id
 from plowshare_privacy.device_profiles import (
     DeviceProfiles,
     FileProfileIntents,
@@ -63,6 +73,121 @@ def sample_overview(total: int | None = None) -> Middleware:
         return web.json_response(body, status=response.status)
 
     return middleware
+
+
+class PreviewAssessments:
+    """An in-memory ``AssessmentControl`` for the sample network; nothing reaches Plowshare.
+
+    The Living room TV starts awaiting review with a hand-written report, the
+    Driveway camera starts failed, and other sample devices start unassessed.
+    Assess finishes immediately into review with the same sample report, so
+    every state can be clicked through in the browser.
+    """
+
+    def __init__(self) -> None:
+        from preview_sample import TV_REPORT, sample_assessments, sample_devices
+
+        self._ledger = AssessmentLedger()
+        self.error: str | None = None
+        self.views: dict[str, AssessmentView] = {}
+        self.texts: dict[str, str] = {}
+        self.sample_report = TV_REPORT
+        for device in sample_devices():
+            device_id = device["identity"]["device_id"]
+            self.views[device_id] = AssessmentView(
+                device_id, "idle", None, None, None, None, None, None, None,
+                (), None, True, False, False, None,
+            )  # fmt: skip
+        for device_id, (row, report) in sample_assessments().items():
+            concerns = tuple(ConcernOutcome(**item) for item in row["concerns"])
+            self.views[device_id] = AssessmentView(**{**row, "concerns": concerns})
+            if report is not None:
+                self.texts[device_id] = report
+
+    @property
+    def ledger(self) -> AssessmentLedger:
+        return self._ledger
+
+    def view(self, device_id: str) -> AssessmentView:
+        if parse_device_id(device_id) not in self.views:
+            raise UnknownDevice(
+                "Choose a monitored device with a confirmed MAC address"
+            )
+        return self.views[device_id]
+
+    def _set(self, view: AssessmentView) -> AssessmentView:
+        self.views[view.device_id] = view
+        return view
+
+    async def assess(self, device_id: str) -> AssessmentView:
+        current = self.view(device_id)
+        if not current.can_assess:
+            raise AssessmentConflict("This device cannot be assessed now")
+        self.texts[device_id] = self.sample_report
+        return self._set(
+            replace(
+                current,
+                state="review",
+                request_id=str(uuid4()),
+                run_id="orc_preview_" + device_id[-2:],
+                report=str(uuid4()),
+                requested_at=utc_now(),
+                decided_at=None,
+                review="accepted",
+                detail=None,
+                can_assess=False,
+                can_accept=True,
+                can_dismiss=True,
+            )
+        )
+
+    async def accept(self, device_id: str) -> AssessmentView:
+        current = self.view(device_id)
+        if current.state != "review":
+            raise AssessmentConflict(
+                "Only an assessment awaiting review can be accepted"
+            )
+        return self._set(
+            replace(
+                current,
+                state="accepted",
+                decided_at=utc_now(),
+                can_assess=True,
+                can_accept=False,
+                can_dismiss=False,
+            )
+        )
+
+    async def check(self, device_id: str) -> AssessmentView:
+        return self.view(device_id)
+
+    def dismiss(self, device_id: str) -> AssessmentView:
+        current = self.view(device_id)
+        if current.state != "review":
+            raise AssessmentConflict(
+                "Only an assessment awaiting review can be dismissed"
+            )
+        return self._set(
+            replace(
+                current,
+                state="dismissed",
+                decided_at=utc_now(),
+                can_assess=True,
+                can_accept=False,
+                can_dismiss=False,
+            )
+        )
+
+    async def report(self, device_id: str) -> AssessmentReport:
+        current = self.view(device_id)
+        if current.report is None or current.state not in {"review", "accepted"}:
+            raise AssessmentConflict("This device has no assessment report to show")
+        return AssessmentReport(current.report, self.texts[device_id])
+
+    def set_background_limit(self, limit: int) -> None:
+        if not 0 <= limit <= 12:
+            raise ValueError("Choose between 0 and 12 assessments a day")
+        self._ledger = replace(self._ledger, background_limit=limit)
 
 
 async def preview(
@@ -177,6 +302,9 @@ async def preview(
             profiles=profiles,
             issues=issues,
             settings=PreviewSettings(),
+            assessments=PreviewAssessments()
+            if sample_network or sample_devices is not None
+            else None,
         )
         if sample_network or sample_devices is not None:
             app.middlewares.append(sample_overview(sample_devices))

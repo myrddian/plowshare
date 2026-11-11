@@ -20,6 +20,7 @@ from plowshare.tools import Parameter, ToolDeclaration, ToolReceipt, deployment_
 from .contracts import load_json, object_fields
 from .native_tools import DECLARATIONS
 from .private_files import replace_private
+from .tools import DEFINITIONS
 
 # These exact v1 descriptors are the historical SDK binding, not an alternate
 # registry. Only the reviewed paged-read additions are allowed to migrate it.
@@ -77,11 +78,45 @@ LEGACY_DECLARATIONS = (
 )
 
 
-def compatible_descriptors() -> None:
-    old = {tool.name: tool for tool in LEGACY_DECLARATIONS}
-    new = {tool.name: tool for tool in DECLARATIONS}
-    if set(old) != set(new):
+# Tools added after the paged binding. Only read tools may be added this way;
+# their history starts empty, so nothing about earlier receipts changes.
+DEVICE_TOOLS = frozenset({"network_devices", "network_device"})
+# The exact six-tool paged binding that deployments already hold. It is the
+# current declarations without the device tools; a test pins its digest so an
+# edit to an older tool cannot silently orphan existing paged journals.
+PAGED_DECLARATIONS = tuple(
+    tool for tool in DECLARATIONS if tool.name not in DEVICE_TOOLS
+)
+# Optional read-page arguments reviewed for the v1 to paged transition.
+_PAGE_ADDITIONS = {
+    "network_scope": {"offset": "INTEGER", "limit": "INTEGER"},
+    "network_scan_list": {"offset": "INTEGER", "limit": "INTEGER"},
+    "network_evidence": {
+        "offset": "INTEGER",
+        "limit": "INTEGER",
+        "section": "STRING",
+    },
+    "network_destinations": {"offset": "INTEGER", "limit": "INTEGER"},
+}
+
+
+def _compatible(
+    previous: tuple[ToolDeclaration, ...],
+    following: tuple[ToolDeclaration, ...],
+    additions: dict[str, dict[str, str]],
+    added_tools: frozenset[str],
+) -> None:
+    old = {tool.name: tool for tool in previous}
+    new = {tool.name: tool for tool in following}
+    if set(new) != set(old) | added_tools or set(old) & added_tools:
         raise ValueError("Tool identity changed; no automatic journal transition")
+    reads = {
+        definition.name.replace(".", "_")
+        for definition in DEFINITIONS
+        if definition.effect == "read"
+    }
+    if not added_tools <= reads:
+        raise ValueError("Only read tools may be added by a journal transition")
     for name, prior in old.items():
         current = new[name]
         before = {parameter.name: parameter for parameter in prior.parameters}
@@ -97,22 +132,19 @@ def compatible_descriptors() -> None:
                 after[parameter.name].required,
             ):
                 raise ValueError("Required tool arguments changed")
-        additions = {
-            "network_scope": {"offset": "INTEGER", "limit": "INTEGER"},
-            "network_scan_list": {"offset": "INTEGER", "limit": "INTEGER"},
-            "network_evidence": {
-                "offset": "INTEGER",
-                "limit": "INTEGER",
-                "section": "STRING",
-            },
-            "network_destinations": {"offset": "INTEGER", "limit": "INTEGER"},
-        }.get(name, {})
+        allowed = additions.get(name, {})
         if any(
-            parameter.required or additions.get(parameter.name) != parameter.type
+            parameter.required or allowed.get(parameter.name) != parameter.type
             for parameter in current.parameters
             if parameter.name not in before
         ):
             raise ValueError("Only reviewed optional read-page arguments may be added")
+
+
+def compatible_descriptors() -> None:
+    """Each transition step may add only reviewed optional arguments or read tools."""
+    _compatible(LEGACY_DECLARATIONS, PAGED_DECLARATIONS, _PAGE_ADDITIONS, frozenset())
+    _compatible(PAGED_DECLARATIONS, DECLARATIONS, {}, DEVICE_TOOLS)
 
 
 def receipt_stages(receipt: ToolReceipt) -> tuple[ToolReceipt, ...]:
@@ -137,23 +169,97 @@ def receipt_digest(receipts: tuple[ToolReceipt, ...]) -> str:
     ).hexdigest()
 
 
+def _transition(
+    stores: ExitStack,
+    legacy: SqliteToolJournal | None,
+    target: Path,
+    configuration: str,
+) -> SqliteToolJournal:
+    """Open ``target`` and copy ``legacy``'s frozen history into it exactly once.
+
+    The marker records the source binding, count and digest. Once it exists, the
+    source must still match it: a source that gained work after the copy means
+    an older binary ran, and its effects would otherwise be lost.
+    """
+    target_identity = hashlib.sha256(configuration.encode()).hexdigest()
+    marker = target / "transition.json"
+    current = stores.enter_context(
+        SqliteToolJournal(target, configuration=configuration)
+    )
+    source = legacy.all() if legacy else ()
+    digest = receipt_digest(source)
+    if marker.exists():
+        if marker.is_symlink() or marker.resolve() != marker:
+            raise ValueError("Tool transition receipt cannot be linked")
+        row = object_fields(
+            load_json(marker), {"version", "source", "target", "receipts", "digest"}
+        )
+        if (
+            type(row["version"]) is not int
+            or row["version"] != 1
+            or row["target"] != target_identity
+            or row["source"] != (legacy.identity if legacy else None)
+            or type(row["receipts"]) is not int
+            or row["receipts"] != len(source)
+            or row["digest"] != digest
+        ):
+            raise ValueError("Foreign tool transition receipt")
+        return current
+    retained = {receipt.invocation_id: receipt for receipt in source}
+    existing = current.all()
+    if any(
+        receipt.invocation_id not in retained
+        or receipt not in receipt_stages(retained[receipt.invocation_id])
+        for receipt in existing
+    ):
+        raise ValueError("Unmarked tool journal contains conflicting work")
+    copied = {receipt.invocation_id: receipt for receipt in existing}
+    for receipt in source:
+        stages = receipt_stages(receipt)
+        start = (
+            stages.index(copied[receipt.invocation_id]) + 1
+            if receipt.invocation_id in copied
+            else 0
+        )
+        for stage in stages[start:]:
+            current.save(stage)
+    if current.all() != source:
+        raise ValueError("Tool receipt copy did not settle")
+    replace_private(
+        marker,
+        json.dumps(
+            {
+                "version": 1,
+                "source": legacy.identity if legacy else None,
+                "target": target_identity,
+                "receipts": len(source),
+                "digest": digest,
+            }
+        )
+        + "\n",
+    )
+    return current
+
+
 @contextmanager
 def open_tool_journal(
     directory: Path, project: str, provider: str, account: str
 ) -> Iterator[SqliteToolJournal]:
-    """Keep SDK configuration checks intact while retaining the v1 history.
+    """Keep SDK configuration checks intact while retaining earlier histories.
 
     Caller must hold the collector receipt process lock throughout this context.
-    Copy public typed receipts before admitting a new provider. Partial copies
-    are checked and resumed locally; neither handlers nor Relay mutations run.
-    A durable marker fences the transition once the complete copy is confirmed.
-    Pending phases remain pending and are handled by the SDK's normal recovery.
+    The chain is v1 ``directory`` -> ``<directory>-paged`` (six tools with read
+    pagination) -> ``<directory>-devices`` (adds the device read tools). Each
+    step copies public typed receipts before admitting the new provider. Partial
+    copies are checked and resumed locally; neither handlers nor Relay mutations
+    run. A durable marker fences each step once its complete copy is confirmed.
+    Pending phases remain pending and are handled by the SDK's normal recovery
+    in the newest journal. Older journals stay open, unchanged, for the life of
+    the context, and a fresh install creates only the newest journal.
     """
     compatible_descriptors()
-    configuration = deployment_config(project, provider, account, DECLARATIONS)
-    target_identity = hashlib.sha256(configuration.encode()).hexdigest()
-    target = directory.parent / (directory.name + "-paged")
-    marker = target / "transition.json"
+    paged = directory.parent / (directory.name + "-paged")
+    devices = directory.parent / (directory.name + "-devices")
     with ExitStack() as stores:
         legacy = None
         if (directory / "relay-tools.sqlite").exists():
@@ -165,59 +271,17 @@ def open_tool_journal(
                     ),
                 )
             )
-        current = stores.enter_context(
-            SqliteToolJournal(target, configuration=configuration)
+        previous = None
+        if legacy is not None or (paged / "relay-tools.sqlite").exists():
+            previous = _transition(
+                stores,
+                legacy,
+                paged,
+                deployment_config(project, provider, account, PAGED_DECLARATIONS),
+            )
+        yield _transition(
+            stores,
+            previous,
+            devices,
+            deployment_config(project, provider, account, DECLARATIONS),
         )
-        source = legacy.all() if legacy else ()
-        digest = receipt_digest(source)
-        if marker.exists():
-            if marker.is_symlink() or marker.resolve() != marker:
-                raise ValueError("Tool transition receipt cannot be linked")
-            row = object_fields(
-                load_json(marker), {"version", "source", "target", "receipts", "digest"}
-            )
-            if (
-                type(row["version"]) is not int
-                or row["version"] != 1
-                or row["target"] != target_identity
-                or row["source"] != (legacy.identity if legacy else None)
-                or type(row["receipts"]) is not int
-                or row["receipts"] != len(source)
-                or row["digest"] != digest
-            ):
-                raise ValueError("Foreign tool transition receipt")
-        else:
-            retained = {receipt.invocation_id: receipt for receipt in source}
-            existing = current.all()
-            if any(
-                receipt.invocation_id not in retained
-                or receipt not in receipt_stages(retained[receipt.invocation_id])
-                for receipt in existing
-            ):
-                raise ValueError("Unmarked tool journal contains conflicting work")
-            copied = {receipt.invocation_id: receipt for receipt in existing}
-            for receipt in source:
-                stages = receipt_stages(receipt)
-                start = (
-                    stages.index(copied[receipt.invocation_id]) + 1
-                    if receipt.invocation_id in copied
-                    else 0
-                )
-                for stage in stages[start:]:
-                    current.save(stage)
-            if current.all() != source:
-                raise ValueError("Tool receipt copy did not settle")
-            replace_private(
-                marker,
-                json.dumps(
-                    {
-                        "version": 1,
-                        "source": legacy.identity if legacy else None,
-                        "target": target_identity,
-                        "receipts": len(source),
-                        "digest": digest,
-                    }
-                )
-                + "\n",
-            )
-        yield current

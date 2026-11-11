@@ -61,13 +61,29 @@ class NetworkPrivacyWatchTest {
     assertTrue(coordinator.dynamic());
     assertFalse(coordinator.tools().stream().anyMatch(name -> name.startsWith("network_")));
     var policy = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
-    assertEquals(6, policy.toolScopes().getFirst().grants().size());
+    assertEquals(8, policy.toolScopes().getFirst().grants().size());
+    assertEquals(6, policy.toolScopes().get(1).grants().size());
     assertTrue(
         policy.permits(
             policy.executionAccount(), "privacy_coordinator", "privacy-scanner", "network_scan"));
     assertFalse(
         policy.permits(
             policy.executionAccount(), "privacy_analyst", "privacy-scanner", "network_scan"));
+    for (String agent : Set.of("privacy_coordinator", "privacy_analyst", "privacy_reviewer")) {
+      for (String tool : Set.of("network_devices", "network_device")) {
+        assertTrue(
+            policy.permits(policy.executionAccount(), agent, "privacy-scanner", tool),
+            agent + " " + tool);
+      }
+    }
+    for (String agent : Set.of("privacy_device_profiler", "privacy_device_assessor")) {
+      assertFalse(
+          policy.permits(policy.executionAccount(), agent, "privacy-scanner", "network_device"),
+          agent);
+    }
+    var assessor = loaded.enabled().get("privacy_device_assessor");
+    assertEquals(Set.of("information_read"), Set.copyOf(assessor.tools()));
+    assertFalse(assessor.dynamic());
   }
 
   @Test
@@ -143,7 +159,7 @@ class NetworkPrivacyWatchTest {
                     io.aeyer.plowshare.server.relay.tools.RelayToolDefinition.class));
     var properties = new io.aeyer.plowshare.server.relay.tools.RelayToolProperties();
     properties.setBindings(bindings);
-    assertEquals(6, properties.getBindings().size());
+    assertEquals(8, properties.getBindings().size());
     var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
     var coordinator = agents.get("privacy_coordinator");
     var scopes = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
@@ -180,9 +196,16 @@ class NetworkPrivacyWatchTest {
             "privacy_coordinator",
             "privacy_analyst",
             "privacy_reviewer",
-            "privacy_device_profiler"),
+            "privacy_device_profiler",
+            "privacy_device_assessor"),
         agents.names());
-    for (String name : Set.of("investigate_network", "privacy_tick", "profile_network_device")) {
+    assertTrue(agents.get("privacy_coordinator").calls().contains("privacy_device_assessor"));
+    for (String name :
+        Set.of(
+            "investigate_network",
+            "privacy_tick",
+            "profile_network_device",
+            "assess_network_device")) {
       String suffix = ".js";
       Path source = definitions.resolve("orchestrations/" + name + suffix);
       var loaded =
@@ -201,6 +224,30 @@ class NetworkPrivacyWatchTest {
     assertTrue(schedule.paused());
     assertEquals("privacy_tick", schedule.action().name());
     assertEquals("privacy_coordinator", schedule.action().agent());
+  }
+
+  @Test
+  void device_assessment_reads_and_writes_information_and_calls_only_its_two_agents()
+      throws Exception {
+    var manifest =
+        ScriptProgram.manifest(
+            Files.readString(application.resolve("orchestrations/assess_network_device.js")));
+    assertEquals(
+        java.util.List.of("information_read", "information_write"), json(manifest.path("tools")));
+    assertEquals(
+        java.util.List.of("privacy_device_assessor", "privacy_reviewer"),
+        json(manifest.path("calls")));
+    assertTrue(manifest.path("scopes").isEmpty());
+    // Three agent runs normally and four with a correction; each run's own tool
+    // turns also draw on the orchestration allowance.
+    assertTrue(manifest.path("max-model-calls").asInt() <= 24);
+    assertEquals(1, manifest.path("max-returns").asInt());
+  }
+
+  private static java.util.List<String> json(com.fasterxml.jackson.databind.JsonNode array) {
+    var result = new java.util.ArrayList<String>();
+    array.forEach(value -> result.add(value.asText()));
+    return result;
   }
 
   @Test

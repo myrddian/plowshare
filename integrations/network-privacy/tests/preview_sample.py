@@ -362,3 +362,165 @@ def scaled_network(total: int) -> tuple[list[Row], list[Row]]:
         for octet in range(1, 161)
     ]
     return devices, candidates
+
+
+# Assessments for the sample network. Run IDs and revisions are fake and the
+# report text is hand-written in the shape the assess_network_device script
+# renders; no Plowshare server or model produced it.
+TV_DEVICE = "mac:02:00:00:00:00:0a"
+CAMERA_DEVICE = "mac:02:00:00:00:00:14"
+TV_REPORT_REVISION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+
+TV_REPORT = """# Living room TV: privacy assessment
+
+Assessed 11 November 2026. Reviewer verdict: accepted.
+
+## In short
+
+The TV looked up Samba TV's content-recognition service 96 times in a day. That is consistent with the TV identifying what is on screen and reporting it. It also looked up OzTAM, an audience-measurement company, 412 times, and an advertising service that Pi-hole blocked every time.
+
+## What it is
+
+An Android-based smart TV used for streaming and broadcast catch-up.
+
+Confidence: medium. This rests on:
+
+- The device name says it is a TV.
+- Ports 8008 and 8009 answer, which is how Google Cast receivers are reached.
+- Most named lookups are for ABC iview, Netflix and Google services.
+
+## Who it talks to
+
+- Samba TV (content recognition): Looked up 96 times; 40 were blocked. Samba TV matches what is on screen against known programmes and adverts.
+- OzTAM (audience measurement): Looked up 412 times; none were blocked. OzTAM measures Australian TV audiences for broadcasters.
+- Google Ads (advertising): Looked up 58 times; all 58 were blocked.
+- ABC iview and Netflix (streaming): Looked up 360 times. Ordinary streaming use.
+
+## What it sends
+
+About 412 MB left the TV and 18.4 GB reached it over 24 hours. One counter reset was skipped, so both are lower bounds.
+
+Where the outgoing bytes went, and what they contained, cannot be told from this data.
+
+DNS lookups show that a name was looked up, not that data was sent. Byte totals show volume only; they include local traffic and do not name a destination.
+
+## What is concerning
+
+### 1. Viewing recognised by Samba TV
+
+Worth checking. Confidence: high.
+
+- Fact: The TV looked up a Samba TV content-recognition name 96 times, and 56 of those lookups were answered.
+- Inference: The TV's built-in viewing-data feature is probably on and reporting what is watched, including from connected devices.
+
+### 2. Viewing measurement by OzTAM
+
+Worth checking. Confidence: medium.
+
+- Fact: The TV looked up an OzTAM measurement name 412 times; none were blocked.
+- Inference: A broadcaster app on the TV is probably reporting what is watched to OzTAM.
+
+### 3. Advertising lookups
+
+Expected. Confidence: high.
+
+- Fact: All 58 lookups for Google's advertising service were blocked by Pi-hole.
+- Inference: Apps on the TV request adverts; the block is working.
+
+## What you can do
+
+### 1. Viewing recognised by Samba TV
+
+- Mitigation: Turn off viewing information or content recognition in the TV's privacy settings, then block samba.tv in Pi-hole.
+- How to verify: Check that the Pi-hole query log shows no further answered Samba TV lookups after a day of normal use.
+
+### 2. Viewing measurement by OzTAM
+
+- Mitigation: Block oztam.com.au in Pi-hole. Some catch-up apps may refuse to play.
+- How to verify: Check that the Pi-hole query log shows the OzTAM lookups as blocked.
+
+### 3. Advertising lookups
+
+- Mitigation: None needed; the existing Pi-hole block covers it.
+- How to verify: Keep an eye on the blocked count staying equal to the total.
+
+## Open questions
+
+- Was viewing information turned on during the TV's first setup?
+- Which catch-up apps are used on the TV?
+
+## Evidence
+
+- Device: `mac:02:00:00:00:00:0a` at 192.0.2.10
+- Dossier revision: `dddddddd-dddd-4ddd-8ddd-ddddddddddd1`
+- Port scan revision: `00000000-0000-5000-8000-000000000010`
+- Operator profile revision: none
+- Previous assessment revision: none
+- DNS window: 24 hours, 288 windows, 3 partial
+- Traffic window: 24 hours, 412 MB from the device and 18.4 GB to it; 1 counter reset
+- Review: accepted; concerns 3 held, 0 weakened, 0 refuted and removed
+
+Signals:
+
+- `measurement_dns`: 508 lookups to measurement destinations (OzTAM, Samba TV); 40 blocked
+- `advertising_dns`: 58 lookups to advertising destinations (Google Ads); 58 blocked
+
+Coverage:
+
+- The port scan covers only the configured TCP ports; other services are unknown.
+- DNS lookups show names resolved, not data sent.
+- Byte totals include local traffic and say nothing about destinations.
+"""
+
+
+def sample_assessments() -> dict[str, tuple[Row, str | None]]:
+    """Device ID to (assessment view row, report text) for the preview."""
+    base: Row = {
+        "pending": None,
+        "run_id": None,
+        "report": None,
+        "requested_at": None,
+        "decided_at": None,
+        "review": None,
+        "concerns": [],
+        "detail": None,
+        "can_assess": False,
+        "can_accept": False,
+        "can_dismiss": False,
+        "assess_note": None,
+    }
+    return {
+        TV_DEVICE: (
+            {
+                **base,
+                "device_id": TV_DEVICE,
+                "state": "review",
+                "request_id": "11111111-1111-4111-8111-1111111111a1",
+                "run_id": "orc_preview_tv_01",
+                "report": TV_REPORT_REVISION,
+                "requested_at": _at(40),
+                "review": "accepted",
+                "concerns": [
+                    {"id": "c1", "level": "worth_checking", "verdict": "holds"},
+                    {"id": "c2", "level": "worth_checking", "verdict": "holds"},
+                    {"id": "c3", "level": "expected", "verdict": "holds"},
+                ],
+                "can_accept": True,
+                "can_dismiss": True,
+            },
+            TV_REPORT,
+        ),
+        CAMERA_DEVICE: (
+            {
+                **base,
+                "device_id": CAMERA_DEVICE,
+                "state": "failed",
+                "request_id": "11111111-1111-4111-8111-1111111111a2",
+                "run_id": "orc_preview_cam_01",
+                "requested_at": _at(95),
+                "detail": "The run reached its model-call or budget cap. No report was written.",
+                "can_assess": True,
+            },
+            None,
+        ),
+    }

@@ -14,6 +14,14 @@ Do not search another conversation for it or reread complete scan text routinely
 Use information_read only for missing evidence or a specific unresolved check.
 Follow the requested response schema and return concrete corrections and gaps.
 
+For a device assessment, DATA.dossier replaces scan texts and DATA.assessment is
+JSON. Judge every concern against the dossier: holds, weakened (level or
+confidence beyond its fact) or refuted (unsupported, or claiming data was sent,
+uploaded or exfiltrated from DNS lookups or byte totals). Check that "No DNS via
+Pi-hole" is treated as a visibility gap, missing data is not read as zero and
+model names without operator or UniFi confirmation stay hypotheses. Write notes
+as plain sentences without identifiers, HTML or tables.
+
 Verify dates, collection scope, fixture labels, timeouts and incomplete DNS history.
 Listening ports do not prove outbound flows or vulnerabilities; DNS queries do not
 prove payload transfer or exfiltration. Flag unsupported attribution and identity
