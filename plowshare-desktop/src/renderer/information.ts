@@ -741,6 +741,8 @@ export function installInformation(
     const extractionFailed =
       !!extraction &&
       ['failed', 'blocked', 'cancelled'].includes(String(extraction.state));
+    const extractionQueued = extraction?.state === 'pending';
+    const extractionRunning = extraction?.state === 'running';
     const blank = displayText(extraction?.error ?? '').includes(
       'extracted text is blank',
     );
@@ -860,11 +862,32 @@ export function installInformation(
             : !extracted
               ? 'Questions will be available after text extraction and passage preparation finish.'
               : 'The saved text is readable. Questions will be available after passage preparation finishes.';
+      const extractionTitle = blank
+        ? 'No readable text was extracted'
+        : extraction?.state === 'blocked'
+          ? 'Source text is blocked'
+          : extractionFailed
+            ? 'Source text is unavailable'
+            : extractionQueued
+              ? 'Source text is queued'
+              : extractionRunning
+                ? 'Extracting source text'
+                : 'Source processing status is unavailable';
+      const extractionDetail = blank
+        ? 'The server tried to extract this source but found no readable text.'
+        : extractionFailed
+          ? extraction?.error ||
+            'Text extraction did not finish. See Processing details for the server’s reason.'
+          : extractionQueued
+            ? 'Text extraction has not started. The server will process this source when it is eligible and a worker is available.'
+            : extractionRunning
+              ? 'The server is extracting this source. This view will update when it is ready.'
+              : 'Refresh to check the server’s processing status.';
       const textUnavailable =
         value.availability !== 'active'
           ? '<p>Source text is unavailable for this version.</p>'
           : !extracted
-            ? `<h3>${blank ? 'No readable text was extracted' : extractionFailed ? 'Source text is unavailable' : 'Preparing source text'}</h3><p>${blank ? 'The server tried to extract this source but found no readable text.' : extractionFailed ? 'Text extraction did not finish. See Processing details for the server’s reason.' : 'Text extraction has not finished yet. This view will update when it is ready.'}</p>${extractionFailed && manage ? `<p>${blank ? 'Open Manage source and paste readable text into Replacement text to save a new version. Retrying the same saved content may fail again.' : 'Open Manage source to retry incomplete work or supply replacement text as a new version.'}</p><button data-repair-source>Open Manage source</button>` : ''}`
+            ? `<h3>${escape(extractionTitle)}</h3><p>${escape(extractionDetail)}</p>${extractionFailed && manage ? `<p>${blank ? 'Open Manage source and paste readable text into Replacement text to save a new version. Retrying the same saved content may fail again.' : 'Open Manage source to retry incomplete work or supply replacement text as a new version.'}</p><button data-repair-source>Open Manage source</button>` : ''}`
             : '';
       const questionBusy =
         asking.has(id) ||
@@ -886,11 +909,15 @@ export function installInformation(
                       !content.authorisedStages.includes(step.stage),
                   )
                 ? 'Saved; processing awaits an explicit request'
-                : preparing
-                  ? 'Preparing source'
-                  : legacy
-                    ? 'Saved legacy text'
-                    : 'Processing complete';
+                : extractionQueued
+                  ? 'Queued for text extraction'
+                  : extractionRunning
+                    ? 'Extracting source text'
+                    : preparing
+                      ? 'Preparing source'
+                      : legacy
+                        ? 'Saved legacy text'
+                        : 'Processing complete';
       question.hidden = false;
       question.innerHTML = `<form data-ask data-ready="${sourceCanAsk}" class="information-ask"><label>Ask about this source<input name="question" aria-describedby="source-question-help-${host.id}" placeholder="What does this source say about…?" required></label><button class="primary-button" title="${escape(questionHelp)}" ${questionBusy || !sourceCanAsk ? 'disabled' : ''}>${questionBusy ? 'Reading…' : 'Ask source'}</button><p class="information-help" id="source-question-help-${host.id}">${escape(questionHelp)}</p></form>`;
       const metadata = content

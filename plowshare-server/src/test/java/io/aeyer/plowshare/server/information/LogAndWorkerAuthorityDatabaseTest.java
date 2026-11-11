@@ -887,7 +887,7 @@ class LogAndWorkerAuthorityDatabaseTest {
   }
 
   @Test
-  void workerValidityPreservesCyclesWithdrawalExclusionAndCreatorIndependence() {
+  void workerValidityPreservesHistoricalInputsCyclesWithdrawalAndCreatorIndependence() {
     var a = retained("reader", "one");
     var b = retained("other", "two");
     retained("reader", null);
@@ -906,7 +906,7 @@ class LogAndWorkerAuthorityDatabaseTest {
             .contains(a.revision()));
     jdbc.update("UPDATE information_revisions SET excluded=true WHERE id=?", b.revision());
     workerParity();
-    assertFalse(
+    assertTrue(
         jdbc.queryForList(
                 "SELECT revision FROM information_system_processing_revisions()", UUID.class)
             .contains(a.revision()));
@@ -918,6 +918,68 @@ class LogAndWorkerAuthorityDatabaseTest {
         jdbc.queryForList(
                 "SELECT revision FROM information_system_processing_revisions()", UUID.class)
             .contains(a.revision()));
+  }
+
+  @Test
+  void excludedHistoricalInputsAllowClaimsAndRenewalsButWithdrawalStillFencesWrites() {
+    var report = retained("reader", "one");
+    var audit = retained("reader", "one");
+    var historical = retained("other", "two");
+    jdbc.update(
+        "INSERT INTO information_inputs(derived_revision,input_revision) VALUES(?,?),(?,?)",
+        report.revision(),
+        audit.revision(),
+        audit.revision(),
+        historical.revision());
+    jdbc.update("UPDATE information_revisions SET excluded=true WHERE id=?", historical.revision());
+    stages(report);
+    stages(audit);
+    workerParity();
+    // Both the global scanner and exact-revision retry must accept a retired active input.
+    work.inTransaction(
+        () -> {
+          assertTrue(processing.candidate(null, false).isPresent());
+          var candidate = processing.candidate(report.revision(), false).orElseThrow();
+          assertEquals("extract", candidate.lease().stage());
+          processing.start(candidate.lease(), "fixture");
+          return null;
+        });
+    var lease =
+        work.inTransaction(
+            () -> {
+              var candidate = processing.candidate(audit.revision(), false).orElseThrow();
+              processing.start(candidate.lease(), "fixture");
+              return candidate.lease();
+            });
+    assertTrue(processing.renew(lease));
+    work.inTransaction(
+        () -> {
+          processing.requireLease(lease);
+          return null;
+        });
+    jdbc.update(
+        "UPDATE information_revisions SET availability='withdrawn' WHERE id=?",
+        historical.revision());
+    workerParity();
+    assertTrue(work.inTransaction(() -> processing.candidate(report.revision(), false).isEmpty()));
+    assertFalse(processing.renew(lease));
+    assertThrows(
+        InformationLifecycle.StaleLease.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  processing.requireLease(lease);
+                  return null;
+                }));
+    jdbc.update(
+        "UPDATE information_revisions SET availability='active' WHERE id=?", historical.revision());
+    assertTrue(processing.renew(lease), "active excluded input can resume a retained lease");
+    jdbc.update(
+        "UPDATE information_revisions SET availability='deleted' WHERE id=?",
+        historical.revision());
+    workerParity();
+    assertFalse(processing.renew(lease), "deletion still invalidates retained work");
+    assertTrue(work.inTransaction(() -> processing.candidate(report.revision(), false).isEmpty()));
   }
 
   @Test
