@@ -663,15 +663,20 @@ spaces remain private to their account owner. See [server administration](server
 An authorized Application can be inspected without connecting a local folder. In
 Desktop, each row under **Applications** reads as **Active on server** (and its
 type when shown). Opening one lands on the workflow hub **Overview**, with primary
-views **Conversations**, **Schedules**, **Relay**, **Files**, and **Access**.
+views **Activity**, **Schedules**, **Relay**, **Files**, and **Access**.
 **Files** opens the shared Desktop tree-and-editor file browser over the deployed
 server source; no local folder claim, union or checkout is required. Folders
 expand in the tree with folder/file icons; selecting a file opens it beside the
 tree. The same browser chrome is used for Personal **Resources** (and other
 personal file sections), read-only. **Runtime definitions**, **Memory** and
-**Boards** stay available as secondary actions from Overview. Hub
-**Conversations** returns to scoped conversations in the chat stage. Conversation
-histories retain their account ownership.
+**Boards** stay available as secondary actions from Overview. Hub **Activity** keeps the Application open with a Process inventory of every
+LLM-bearing conversation for that Application (person chats, delegations,
+orchestrations, submissions, events, and other origins). Server admins see
+fleet/service-owned rows; other accounts stay on own-owned work until a
+member-scoped inventory exists. Own person chats nest the existing chat panel; other rows show inventory
+metadata in-hub. Trajectory opens only for account-owned logs (fleet
+visibility does not admit log inputs). Header **Close** returns to the full chat stage.
+Conversation histories retain their account ownership.
 
 While an Application is selected, Info → **App files** is a short companion that
 opens the hub **Files** view. Info does not offer Connect folder or Project sync

@@ -43,6 +43,8 @@ import {
   decodeInformationCall,
 } from 'plowshare-client-ts/operations/information';
 import { ApplicationFilesClient } from './application-files.ts';
+import { ApplicationRunsClient } from './application-runs.ts';
+import { ApplicationActivityClient } from './application-activity.ts';
 import { LibraryClient } from './library.ts';
 import {
   resultOf,
@@ -420,6 +422,16 @@ export class DesktopClient {
     () => this.emit(),
   );
   readonly applicationFiles = new ApplicationFilesClient(
+    () => this.state,
+    (ask) => this.send(ask),
+    () => this.emit(),
+  );
+  readonly applicationRuns = new ApplicationRunsClient(
+    () => this.state,
+    (ask) => this.sendActivity(ask),
+    () => this.emit(),
+  );
+  readonly applicationActivity = new ApplicationActivityClient(
     () => this.state,
     (ask) => this.send(ask),
     () => this.emit(),
@@ -866,6 +878,24 @@ export class DesktopClient {
         )
       )
         this.applicationFiles.reset();
+      if (
+        this.state.applicationRuns &&
+        !rows.some(
+          (row) =>
+            row.name === this.state.applicationRuns?.project &&
+            row.kind === 'application',
+        )
+      )
+        this.applicationRuns.reset();
+      if (
+        this.state.applicationActivity &&
+        !rows.some(
+          (row) =>
+            row.name === this.state.applicationActivity?.project &&
+            row.kind === 'application',
+        )
+      )
+        this.applicationActivity.reset();
       this.state.projectListError = undefined;
     } catch (error) {
       if (generation !== this.generation) throw error;
@@ -907,6 +937,8 @@ export class DesktopClient {
     this.runs.reset();
     this.schedules.reset();
     this.applicationFiles.reset();
+    this.applicationRuns.reset();
+    this.applicationActivity.reset();
     this.library.reset();
     this.board.reset();
     this.operator.reset();
@@ -938,6 +970,8 @@ export class DesktopClient {
     this.runs.reset();
     this.schedules.reset();
     this.applicationFiles.reset();
+    this.applicationRuns.reset();
+    this.applicationActivity.reset();
     this.library.reset();
     this.board.reset();
     // Invalidate every pending read and subscription acknowledgement from this socket.
@@ -970,6 +1004,29 @@ export class DesktopClient {
     let conversation: string | undefined;
     let notice: string | undefined;
     switch (request.action) {
+      case 'application-activity':
+        await this.applicationActivity.list(request.project);
+        break;
+      case 'application-activity-open': {
+        this.applicationActivity.select(request.conversation);
+        const row = this.state.applicationActivity?.items.find(
+          (item) => item.id === request.conversation,
+        );
+        // Same custody gate as Processes: inventory visibility ≠ log follow.
+        if (row?.owner === this.state.handle)
+          this.retainConversation({
+            id: row.id,
+            ...(row.project ? { project: row.project } : {}),
+            title: row.agent ?? row.id,
+          });
+        break;
+      }
+      case 'application-runs':
+        await this.applicationRuns.list(request.project);
+        break;
+      case 'application-run-detail':
+        await this.applicationRuns.inspect(request.id);
+        break;
       case 'application-files':
         await this.applicationFiles.list(
           request.project,

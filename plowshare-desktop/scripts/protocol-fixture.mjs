@@ -629,9 +629,33 @@ export async function protocolFixture(options = {}) {
           if (!receipt) { receipt = {id:'orc_fixture_started_'+workflowReceipts.size,state:'running',requestId:payload.requestId};workflowReceipts.set(payload.requestId,receipt); }
           result={code:'ACCEPTED',payload:workflowAckMissing?{}:receipt};break;
         }
-        case 'orchestration.list':
+        case 'proc.list': {
+          const visibility = payload.visibility === 'server' ? 'server' : 'mine';
+          result.payload = {
+            snapshotAt: '2026-10-02T00:00:00Z',
+            selection: {
+              visibility,
+              project: payload.project ?? null,
+              conversation: null,
+              root: null,
+              causation: null,
+              active: null,
+              after: null,
+              limit: payload.limit ?? 100,
+            },
+            conversations: [],
+            total: 0,
+            cursor: null,
+            coverage: ['All retained non-archived conversation origins'],
+          };
+          break;
+        }
+        case 'orchestration.list': {
           if (refuseRuns && payload.state === 'waiting') { result = { code: 'BAD_REQUEST', said: 'Fixture live state unavailable' }; break; }
-          result.payload = { orchestrations: (payload.state ? runRows.filter(run => run.state === payload.state) : options.authoring ? [...runRows].sort((a,b) => b.createdAt.localeCompare(a.createdAt)) : [...runRows].reverse()).slice(0, payload.limit ?? 20) }; break;
+          let listed = payload.state ? runRows.filter(run => run.state === payload.state) : options.authoring ? [...runRows].sort((a,b) => b.createdAt.localeCompare(a.createdAt)) : [...runRows].reverse();
+          if (payload.project) listed = listed.filter(run => run.project === payload.project);
+          result.payload = { orchestrations: listed.slice(0, payload.limit ?? 20) }; break;
+        }
         case 'orchestration.status': {
           const run = runRows.find(run => run.id === payload.id);
           if (!run) { result = { code: 'BAD_REQUEST', said: 'Fixture run not found' }; break; }

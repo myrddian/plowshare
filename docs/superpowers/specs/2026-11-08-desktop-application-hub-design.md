@@ -113,7 +113,7 @@ navigation to:
 | View | Role |
 | --- | --- |
 | Overview | Summary tiles / entry points into the surfaces below |
-| Conversations | Conversations scoped to this Application |
+| Activity | Process inventory of every LLM-bearing conversation for this Application; nest own chats; Trajectory only for account-owned logs |
 | Schedules | Schedules belonging to this Application (empty state if none) |
 | Relay | Relay messages / routes scoped to this Application |
 | Files | Server source browser/editor (existing Application files flow) |
@@ -122,10 +122,12 @@ navigation to:
 Runtime definitions, Memory and Boards remain reachable if they already are for
 Applications, but they are not the primary story of the hub; the builder may
 place them as secondary actions on Overview or under an overflow rather than as
-peer primary tabs that drown Conversations / Schedules / Relay / Files.
+peer primary tabs that drown Activity / Schedules / Relay / Files.
 
-Closing / "Conversations" affordances that return to the chat stage must remain
-obvious so the hub does not trap the operator.
+Header **Close** returns to the chat stage so the hub does not trap the
+operator. Hub **Activity** keeps the Application open: own person chats nest
+the existing chat panel; other rows stay inventory metadata until the account
+owns the log and can open Trajectory.
 
 ### Info panel
 
