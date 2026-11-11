@@ -16,10 +16,13 @@ multi-slice effort.
 ## Suggested order
 
 1. Track A1–A2 (small, real defects).
-2. A3, A5 (transport throughput and wasteful lookups), then B1 (REST removal).
+2. A3, A5 (transport throughput and wasteful lookups), A11 and A13 (useful
+   request concurrency), then B1 (REST removal). A12 follows once pool
+   pressure is measured.
 3. A6 (push envelope and sequence numbers), which unblocks resumable streams and
    B2 (REST/SSE proxy).
-4. C1 (A2A rewrite), B3 (run durability), B4 (MCP server).
+4. C1 (A2A rewrite), B3 (run durability), B6 (whole-run futures), B4 (MCP
+   server).
 5. Tracks D–G as capacity allows.
 
 Items within a track are ordered; tracks are independent unless a **Depends on**
@@ -174,6 +177,60 @@ operation names with server constants; payload schemas are written by hand in
 TypeScript, and server records are hand-written Java. A1 is the kind of drift
 this would catch.
 
+### A11: classify common mutations instead of treating them as barriers (M)
+
+- [ ] Give frequently used mutations conflict keys so they stop serialising the
+  whole connection.
+
+**Evidence (verified):** `plowshare-server/.../ws/DispatchPolicy.java` `decode`
+returns `barrier()` for any operation not listed as an independent read, a
+resource lane or an observer. `agent.run`, `job.cancel`, `memory.write`,
+`memory.recall` (it counts uses), `orchestration.start` and `message.send` are
+all barriers: each waits for every earlier request on the connection and blocks
+every later one. `job.cancel` therefore queues behind slow earlier work, and
+`memory.recall` holds the barrier for its embedding call.
+
+**Scope and acceptance:** `job.cancel` gets its own lane or bypasses the queue so
+a cancel is never delayed by unrelated work. `agent.run` and `message.send` use
+RESOURCE lanes keyed by conversation or target instance; memory writes and
+recalls key on their home scope. Each new classification is audited the way
+`docs/dispatcher-read-audit.md` audits reads (effects, authority, ordering). A
+test shows a cancel completing while an earlier slow request on the same
+connection is still running.
+
+### A12: raise per-connection concurrency once pool pressure is admitted (M)
+
+- [ ] Express database pool starvation as `CAPACITY_EXHAUSTED`, then revisit the
+  per-connection defaults.
+
+**Evidence (verified):** `EventChannelConfig` defaults are
+`plowshare.transport.request-per-connection: 2` executing and
+`plowshare.transport.request-depth: 8` outstanding. Its comment says the 2 was
+inherited and is now the only transport execution bound, and that raising it
+would pressure the connection pool until starvation surfaces as
+`CAPACITY_EXHAUSTED`, which the code does not do yet.
+
+**Scope and acceptance:** pool exhaustion during admission or execution returns
+`CAPACITY_EXHAUSTED` (nothing started) rather than blocking or failing late; then
+choose new defaults from measurement. Load-test many concurrent finite reads on
+one connection and across connections before and after.
+
+### A13: every SDK waits at the advertised depth (S–M)
+
+- [ ] Make the Java, Go, Python and .NET SDKs queue locally at the depth bound
+  instead of failing.
+
+**Evidence (verified):** the `EventChannelConfig` comment records that those four
+SDKs adopt the advertised depth and fail the next request with `NOT_SUBMITTED`
+(the 9th at the default depth of 8); only the TypeScript SDK waits. External
+consumers issuing many futures therefore see refusals rather than backpressure.
+
+**Scope and acceptance:** each SDK holds excess calls in a bounded local queue,
+honours cancellation (context, token or future cancel) while queued, and
+optionally offers a non-blocking mode that keeps today's behaviour. Shared
+conformance fixtures cover queueing, cancellation while queued and the
+non-blocking mode.
+
 ---
 
 ## Track B: client API
@@ -256,6 +313,24 @@ turns at a clean boundary, never replaying a dangling call.
 - [ ] Bring the Java SDK to catalog parity, or correct `docs/sdks.md`'s parity
   claim.
 - [ ] Publish SDK packages and give the Go module a hosted path.
+
+### B6: a future for a whole run (S–M)
+
+- [ ] Add an SDK helper that resolves when a run ends, not when it is accepted.
+
+**Evidence (verified):** request futures resolve with the reply. For `agent.run`
+that reply is the job handle; the answer arrives later through job events and
+account pushes, or by polling `job.status`. No SDK offers a call whose promise or
+future resolves with the run's final outcome.
+
+**Scope and acceptance:** a helper such as `run(...).result()` in each SDK that
+starts the run, waits for its ending event, then reads the durable outcome and
+answer. It must not depend on streamed events alone, since they can be dropped
+(A4, A6): after a reconnect, missed event or timeout it falls back to a durable
+read. Endings that are not success (capped, cancelled, failed, interrupted) are
+returned as typed outcomes, not thrown as transport errors, and cancelling the
+local future never cancels server work unless the caller asks for `job.cancel`.
+Benefits from B3 so the job id still resolves after a server restart.
 
 ---
 
