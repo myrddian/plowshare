@@ -162,9 +162,15 @@ class NetworkDeviceAssessmentTest {
         }) {
       var host = new Host(PREVIOUS);
       host.assessor.add(assessment().toString());
+      // not_checked and host refusals end the run at once; other invalid
+      // reviews get the one repair run and fail on the second answer.
+      host.reviewer.add(reviewer);
       host.reviewer.add(reviewer);
       assertThrows(IllegalStateException.class, host::finish, reviewer);
       assertEquals(0, host.writes, reviewer);
+      boolean immediate =
+          reviewer.startsWith("E_NO_EXEC") || reviewer.contains("\"not_checked\",\"concerns\"");
+      assertEquals(immediate ? 1 : 2, host.reviewerTasks.size(), reviewer);
     }
     for (String assessor : new String[] {"not JSON", "<|channel|>final " + assessment(), "[]"}) {
       var host = new Host(PREVIOUS);
@@ -320,6 +326,51 @@ class NetworkDeviceAssessmentTest {
     assertTrue(repair.contains("rejected by the validator"), repair);
     assertTrue(repair.contains("HTML and markup are not allowed"), repair);
     assertEquals(assessment(), payload(host.reviewerTasks.getFirst()).path("assessment"));
+  }
+
+  @Test
+  void a_reviewer_may_name_exfiltration_to_refute_it() throws Exception {
+    // PROD's second TV run failed here: the reviewer is told to refute
+    // exfiltration claims and naturally wrote the word in its notes.
+    var host = new Host(PREVIOUS);
+    host.assessor.add(assessment().toString());
+    var reviewed = review("accepted", "c1", "holds");
+    reviewed.put("notes", "No exfiltration is claimed; DNS lookups cannot show it.");
+    ((ObjectNode) reviewed.path("concerns").get(0))
+        .put("note", "Holds; it makes no exfiltration claim.");
+    host.reviewer.add(reviewed.toString());
+    host.finish();
+    assertEquals(1, host.writes);
+    assertEquals(1, host.reviewerTasks.size());
+    assertTrue(
+        host.report.path("reviews").get(0).path("text").asText().contains("No exfiltration"));
+    assertFalse(host.report.path("text").asText().toLowerCase().contains("exfiltrat"));
+  }
+
+  @Test
+  void an_invalid_review_gets_one_repair_run() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(
+        review("accepted", "c1", "holds").put("notes", "See <b>this</b>.").toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    assertEquals(1, host.writes);
+    assertEquals(2, host.reviewerTasks.size());
+    String repair = host.reviewerTasks.get(1).split("\\nDATA:\\n", 2)[0];
+    assertTrue(repair.contains("Your previous review was rejected by the validator"), repair);
+    assertTrue(repair.contains("HTML and markup are not allowed"), repair);
+  }
+
+  @Test
+  void the_assessor_and_reviewer_share_one_repair() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add("not JSON");
+    host.assessor.add(assessment().toString());
+    host.reviewer.add("not JSON");
+    assertThrows(IllegalStateException.class, host::finish);
+    assertEquals(1, host.reviewerTasks.size());
+    assertEquals(0, host.writes);
   }
 
   @Test

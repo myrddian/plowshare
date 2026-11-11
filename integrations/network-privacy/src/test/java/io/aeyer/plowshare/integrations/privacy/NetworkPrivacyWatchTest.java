@@ -239,8 +239,9 @@ class NetworkPrivacyWatchTest {
         json(manifest.path("calls")));
     assertTrue(manifest.path("scopes").isEmpty());
     // Three agent runs normally, four with a correction and at most one repair
-    // run; each run's own tool turns also draw on the orchestration allowance.
-    assertTrue(manifest.path("max-model-calls").asInt() <= 28);
+    // run (which may be a reviewer run); each run's own tool turns also draw on
+    // the orchestration allowance.
+    assertTrue(manifest.path("max-model-calls").asInt() <= 32);
     assertEquals(1, manifest.path("max-returns").asInt());
   }
 
