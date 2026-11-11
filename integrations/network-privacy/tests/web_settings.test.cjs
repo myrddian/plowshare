@@ -429,6 +429,59 @@ test('device profile selection follows a confirmed MAC when its former IP is reu
   assert.equal(vm.runInContext('selectedProfile', context), 'first');
 });
 
+test('a profile opened from the knowledge base is edited under its own device, never another', async () => {
+  const {context, node} = await dashboard();
+  const tv = {address:'192.0.2.10', name:'Living room TV', identity:{source:'unifi', mac:'02:00:00:00:00:0a'}};
+  const speaker = {address:'192.0.2.20', name:'Kitchen speaker', identity:{source:'unifi', mac:'02:00:00:00:00:0b'}};
+  const profile = (name, fields) => ({profile:{profile_id:name, fields:{name, owner:'', model:'', purpose:'',
+    expected_services:'', notes:'', addresses:[], issues:[], device_mac:null, ...fields}}, revision:'r-' + name, versions:[], evidence:[]});
+  context.profileViews = {
+    speaker:profile('Speaker', {device_mac:speaker.identity.mac, addresses:['192.0.2.20']}),
+    tvByAddress:profile('TV notes', {addresses:['192.0.2.10']}),
+    garage:profile('Garage camera', {device_mac:'02:00:00:00:00:0c', addresses:['192.0.2.30']}),
+  };
+  context.overview = {devices:[tv, speaker]};
+  context.fetch = async url => ({ok:true, json:async () => url === '/api/monitoring' ? {targets:[]} : {}});
+  vm.runInContext(`overview = globalThis.overview;
+    profileReceipts = async () => {}; renderIssueLinks = async () => {};
+    renderDeviceView = device => { renderedDevice = device.address; }; loadDeviceAnalysis = () => {};
+    advisoryLookup = () => ({});
+    var renderedDevice = null;`, context);
+  vm.runInContext("openDevice('192.0.2.10')", context);
+  assert.equal(node('pane-title').textContent, 'Living room TV');
+
+  // Bound by MAC to another monitored device: the pane switches to that device.
+  await vm.runInContext('editProfile(profileViews.speaker)', context);
+  assert.equal(vm.runInContext('selectedDevice', context), '192.0.2.20');
+  assert.equal(vm.runInContext('renderedDevice', context), '192.0.2.20');
+  assert.equal(node('pane-title').textContent, 'Kitchen speaker');
+  assert.equal(node('profile-form').hidden, false);
+  assert.equal(node('pane-back').hidden, false);
+
+  // An address-only profile of the open device stays under that device.
+  vm.runInContext("closeEditors(); openDevice('192.0.2.10')", context);
+  await vm.runInContext('editProfile(profileViews.tvByAddress)', context);
+  assert.equal(vm.runInContext('selectedDevice', context), '192.0.2.10');
+  assert.equal(node('pane-title').textContent, 'Living room TV');
+
+  // Not a monitored device: the view is titled by the profile, and the
+  // previous device's facts are not kept beside it.
+  await vm.runInContext('editProfile(profileViews.garage)', context);
+  assert.equal(vm.runInContext('selectedDevice', context), null);
+  assert.equal(node('pane-title').textContent, 'Profile: Garage camera');
+  assert.equal(node('device-view').hidden, true);
+  assert.equal(node('pane-back').hidden, true);
+  assert.deepEqual(node('device-identity').children, []);
+  assert.equal(node('profile-form').hidden, false);
+  assert.equal(node('side-pane').hidden, false);
+
+  // A new profile from the knowledge base has no device either.
+  vm.runInContext("closeEditors(); openDevice('192.0.2.20'); crypto = {randomUUID: () => 'new-profile'}", context);
+  await vm.runInContext('editProfile(null)', context);
+  assert.equal(vm.runInContext('selectedDevice', context), null);
+  assert.equal(node('pane-title').textContent, 'New device profile');
+});
+
 function assessmentDom(context) {
   context.document.createElement = tag => ({
     tag, children: [], listeners: {}, append(...children) { this.children.push(...children); },

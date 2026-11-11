@@ -874,9 +874,12 @@ function syncPane() {
   byId('device-view').hidden = !device || editing;
   byId('pane-nav').hidden = !device || editing;
   byId('pane-back').hidden = !device || !editing;
+  // Without a device, an editor names what it edits; editProfile has already
+  // moved the selection to the profile's own device when it is monitored.
   byId('pane-title').textContent = device ? device.name
     : visible('issue-form') || visible('issue-markdown') ? 'Privacy issue'
-    : visible('background-draft') ? 'Agent research draft' : 'Device profile';
+    : visible('background-draft') ? 'Agent research draft'
+    : profileEdit ? (profileEdit.name ? 'Profile: ' + profileEdit.name : 'New device profile') : 'Device profile';
   byId('side-pane').hidden = !device && !editing;
   if (opened) body.scrollTop = 0;
   if (!editing && paneReturn) {
@@ -1989,11 +1992,26 @@ function advisoryLookup(view) {
   return panel;
 }
 
+// The monitored device a profile describes, or null. A confirmed MAC names
+// it. An address alone does not establish identity, so an address-only
+// profile belongs only to the open device it was opened from.
+function profileDevice(fields, deviceMac) {
+  const devices = overview?.devices || [];
+  const mac = fields.device_mac || deviceMac;
+  if (mac) return devices.find(device => knownIdentity(device).known?.mac === mac) || null;
+  return devices.find(device => device.address === selectedDevice && fields.addresses.includes(device.address)) || null;
+}
 async function editProfile(view, address = null, deviceMac = null) {
   await profileReceipts();
   const settings = await api('/api/monitoring');
   const fields = view ? view.profile.fields : {name:'',owner:'',model:'',purpose:'',expected_services:'',notes:'',addresses:address ? [address] : []};
-  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null, deviceMac:view?.profile.fields.device_mac || deviceMac};
+  // The pane's title and device facts must be those of the profile being
+  // edited. Switching first, because opening or closing a device closes
+  // any editor that is open.
+  const owner = profileDevice(fields, deviceMac);
+  if (owner && owner.address !== selectedDevice) openDevice(owner.address);
+  else if (!owner && selectedDevice) closePane();
+  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null, deviceMac:view?.profile.fields.device_mac || deviceMac, name:fields.name};
   byId('profile-mac').textContent = profileEdit.deviceMac
     ? 'Confirmed device MAC · ' + profileEdit.deviceMac
     : 'Address-only profile. A matching address alone does not establish device identity.';
