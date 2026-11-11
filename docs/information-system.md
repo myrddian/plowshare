@@ -258,17 +258,21 @@ revision/generation fencing against late writes. Model responses are checkpointe
 before post gates, so a denied completion can reuse paid work.
 
 Admission retains the source; it does not guarantee extraction is already ready.
-Inspect `information.status` before reading newly admitted evidence. The worker
-uses the source owner's authenticated principal throughout processing. Service
-tokens use their owning service account's live project membership, capped by the
-token's project scope and current Application grants; token principals do not need
-separate membership rows. Processing requires ongoing project visibility, including
-for already admitted work, and checks it again at renewal and checkpoint commit.
-Expired or revoked tokens, disabled accounts and withdrawn project access prevent
-new processing and late writes. Pending work remains retained; restoring access
-allows the queue to resume without uploading the source again. Running work resumes
-once its existing lease expires. Processing attribution and retained ownership do
-not change.
+Inspect `information.status` before reading newly admitted evidence. A pending
+extraction is queued, not running; Desktop distinguishes it from a running
+extraction and from failed or blocked work.
+
+Preparation runs under SYSTEM's bounded document-processing authority, not the
+creator's login or token. Queue admission, lease renewal and checkpoint commits
+recheck the current scope, exact retained input availability, generation and stage
+authorization. Excluding an active historical input from discovery does not revoke
+its use by an already retained report. This lets publishers retire old manual
+versions without stranding reports that cite them. Withdrawal, deletion and missing
+knowledge homes still prevent processing and late writes; caller READ checks,
+privacy, discovery filters and processing allowances remain in force. Restoring
+valid inputs lets pending work resume without uploading the report again. Running
+work resumes after its existing lease expires. Ownership and provenance do not
+change.
 
 Reports are documents from admission. `information.record.report` retains Markdown,
 all inputs, exact evidence citations and optional objectives/findings/reviews/scope

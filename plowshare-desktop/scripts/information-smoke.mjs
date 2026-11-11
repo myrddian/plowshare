@@ -36,13 +36,17 @@ try {
   assert.equal(count('information.read'),0,'Coalesced invalidation refetches status without reading absent text.');
   await sources.locator('[data-repair-source]').click();await expect(sources.locator('[data-revise] textarea')).toBeFocused();await expect(sources.locator('[data-manage-source]')).toHaveAttribute('open','');
   await mkdir('build/smoke',{recursive:true});await library.screenshot({path:'build/smoke/information-extraction-failed.png'});
-  fixture.setInformationExtraction('pending');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-source]')).toContainText('Preparing source text');assert.equal(count('information.read'),0);
+  fixture.setInformationExtraction('blocked');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-source]')).toContainText('Source text is blocked');await expect(sources.locator('[data-source]')).toContainText('A retained source was withdrawn; restore it before retrying.');await expect(sources.locator('.information-source-heading')).toContainText('Needs attention');assert.equal(count('information.read'),0);
+  fixture.setInformationExtraction('pending');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-source]')).toContainText('Source text is queued');assert.equal(count('information.read'),0);
+  await expect(sources.locator('.information-source-heading')).toContainText('Queued for text extraction');await expect(sources.locator('[data-source]')).toContainText('has not started');
+  fixture.setInformationExtraction('running');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-source]')).toContainText('Extracting source text');await expect(sources.locator('.information-source-heading')).toContainText('Extracting source text');assert.equal(count('information.read'),0);
   fixture.setInformationExtraction('ready');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-passage]')).toContainText('A retained claim.');await expect(sources.locator('[data-ask] button')).toBeEnabled();
   fixture.setInformationReadError('this revision has not been extracted');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-source]')).toContainText('no saved extraction');await expect(sources.locator('[data-source]')).not.toContainText('Error invoking remote method');
   const reads=count('information.read'),afterFailure=count('information.status');await library.evaluate(()=>document.activeElement?.blur());fixture.publish({kind:'information.invalidated'});await expect.poll(()=>count('information.status'),{timeout:8000}).toBe(afterFailure+1);
   await expect(sources.locator('[data-source]')).toContainText('no saved extraction');
-  assert.equal(count('information.read'),reads,'Unchanged status does not replay a refused read.');
-  fixture.setInformationReadError('');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-passage]')).toContainText('A retained claim.');assert.equal(count('information.read'),reads+1,'Explicit refresh can recover after a read failure.');
+  // A refused read is recovery state, not cached text; an authorized invalidation checks it once.
+  await expect.poll(()=>count('information.read')).toBe(reads+1);
+  fixture.setInformationReadError('');await sources.locator('[data-refresh]').click();await expect(sources.locator('[data-passage]')).toContainText('A retained claim.');assert.equal(count('information.read'),reads+2,'Explicit refresh can recover after a read failure.');
   assert.equal(count('information.retry'),0);assert.equal(count('information.ask'),0);assert.deepEqual(errors,[]);
   await sources.locator('[data-faceting] > summary').click();
   await expect(sources.locator('[data-facet-total]')).toHaveText('· 1 version');
@@ -91,5 +95,5 @@ try {
   await expect(sources.locator('[data-tags]')).toHaveCount(0);assert.equal(count('information.tags'),0);
   assert.deepEqual(errors,[]);
   await library.screenshot({path:'build/smoke/information-facets.png'});
-  console.log('PASS: failed/pending extraction states, no absent-text reads or paid submissions, accurate pending labels, replacement-text recovery, readable recovery no polling loop after a refused read, intersected facet filters/counts, document-author display/filtering, distinct user/automatic tags, category graph browsing, owner group overrides and returning to automatic grouping.');
+  console.log('PASS: failed/pending extraction states, no absent-text reads or paid submissions, accurate pending labels, replacement-text recovery, readable recovery after a refused read, intersected facet filters/counts, document-author display/filtering, distinct user/automatic tags, category graph browsing, owner group overrides and returning to automatic grouping.');
 } finally {if(app)await app.close();await fixture.close();await rm(profile,{recursive:true,force:true});}
