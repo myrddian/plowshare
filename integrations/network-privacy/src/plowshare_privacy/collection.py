@@ -9,7 +9,7 @@ import json
 from collections import Counter
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable, Mapping, Protocol
 
 from .contracts import (
     CollectionPlan,
@@ -120,6 +120,23 @@ def changes(
     return tuple(difference)
 
 
+def mac_conflicts(
+    known: Mapping[str, DeviceIdentity], sample: IdentitySample
+) -> frozenset[str]:
+    """Addresses where ``sample`` names another MAC than a known identity that has one.
+
+    A known identity without a MAC (an address-only record) never conflicts;
+    a sample identity without a MAC conflicts with a known MAC.
+    """
+    return frozenset(
+        item.address
+        for item in sample.devices
+        if (prior := known.get(item.address)) is not None
+        and prior.mac
+        and item.mac != prior.mac
+    )
+
+
 class NetworkCollector:
     def __init__(
         self,
@@ -152,20 +169,65 @@ class NetworkCollector:
         self.pihole_activity = pihole_activity
         self.traffic_source = traffic_source
 
-    async def _identity_sample(self, observed: str) -> IdentitySample:
+    @property
+    def confirms_identity(self) -> bool:
+        """Whether any source can tie an address to a MAC (UniFi or Pi-hole)."""
+        return self.identity_source is not None or self.device_source is not None
+
+    async def confirm_identity(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        """A fresh read of who holds ``targets``, from every source collection uses.
+
+        UniFi's connected clients and adopted devices are merged as collection
+        merges them, then Pi-hole's network-table association is read through
+        the device source; its DNS rows are not used. An address on which the
+        sources name different MACs is ambiguous and has no identity, so a
+        caller can never trust one source over another that disagrees. Nothing
+        is probed and no worker lock is needed. Raises ValueError when no source
+        is configured or a source answers outside ``targets``.
+        """
+        if not self.confirms_identity:
+            raise ValueError("No UniFi or Pi-hole source can confirm identities")
+        sample = await self._identity_sample(observed_at, targets)
+        if self.device_source is None:
+            return sample
+        data = await self.device_source.read(targets, observed_at)
+        addresses = [device.address for device in data.devices]
+        if len(set(addresses)) != len(addresses) or not set(addresses) <= set(targets):
+            raise ValueError("Device source returned invalid or out-of-scope addresses")
+        pihole = {device.address: device for device in data.devices}
+        ambiguous = sample.ambiguous_addresses | mac_conflicts(pihole, sample)
+        # UniFi's identity wins where both agree, as in collection.
+        merged = pihole | {device.address: device for device in sample.devices}
+        return IdentitySample(
+            tuple(
+                identity
+                for address, identity in merged.items()
+                if address not in ambiguous
+            ),
+            frozenset(ambiguous),
+            tuple(dict.fromkeys((*data.issues, *sample.issues))),
+        )
+
+    async def _identity_sample(
+        self, observed: str, targets: tuple[str, ...] | None = None
+    ) -> IdentitySample:
+        """UniFi's connected and adopted identities for ``targets`` (default: the plan's)."""
         if self.identity_source is None:
             return IdentitySample()
-        samples = [await self.identity_source.identify(self.plan.targets, observed)]
+        scope_targets = self.plan.targets if targets is None else targets
+        samples = [await self.identity_source.identify(scope_targets, observed)]
         if isinstance(self.identity_source, ManagedInventory):
             samples.append(
                 await self.identity_source.managed_sightings(
-                    self.plan.targets, observed, samples[0].devices
+                    scope_targets, observed, samples[0].devices
                 )
             )
         devices: dict[str, DeviceIdentity] = {}
         ambiguous: set[str] = set()
         issues: list[str] = []
-        scope = frozenset(self.plan.targets)
+        scope = frozenset(scope_targets)
         for sample in samples:
             addresses = {identity.address for identity in sample.devices}
             if (
@@ -509,17 +571,14 @@ class NetworkCollector:
                 issues.extend(sample.issues)
                 for address in sample.ambiguous_addresses:
                     devices[address] = configured[address]
-                conflict = False
+                conflicts = mac_conflicts(devices, sample)
                 for item in sample.devices:
-                    previous_identity = devices[item.address]
-                    if previous_identity.mac and item.mac != previous_identity.mac:
-                        devices[item.address] = configured[item.address]
-                        conflict = True
-                    else:
-                        devices[item.address] = replace(
-                            item, label=labels.get(item.address)
-                        )
-                if conflict:
+                    devices[item.address] = (
+                        configured[item.address]
+                        if item.address in conflicts
+                        else replace(item, label=labels.get(item.address))
+                    )
+                if conflicts:
                     issues.append(
                         "identity_conflict: UniFi and Pi-hole disagreed on a selected IP's MAC address"
                     )

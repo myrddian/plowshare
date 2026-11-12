@@ -11,21 +11,34 @@ from typing import Awaitable, Callable
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
-from test_deep_scan import ADDRESSES, LAMP, Identities, Probe, monitored
+from test_deep_scan import (
+    ADDRESSES,
+    LAMP,
+    NOW,
+    OTHER,
+    Identities,
+    Probe,
+    monitored,
+    sighting,
+)
 from test_operator_console import ConsoleFixture, Settings
 
 from plowshare_privacy.collection import NetworkCollector
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
+from plowshare_privacy.contracts import DeviceIdentity
 from plowshare_privacy.deep_scan import (
     JOURNAL_UNREADABLE,
     DeepScanJournal,
     DeepScanner,
+    collector_identities,
     compose_scanner,
     open_scanner,
 )
 from plowshare_privacy.device_inventory import DeviceInventory
 from plowshare_privacy.discovery import LocalDeviceDiscovery
+from plowshare_privacy.identity_source import IdentitySample
 from plowshare_privacy.operator_state import FileOperatorStore
+from plowshare_privacy.pihole import DeviceData
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
 
@@ -250,6 +263,112 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         worker.collector = NetworkCollector(worker.config.collector, plan)
         self.assertFalse(scanner.available)
         self.assertIn("UniFi or Pi-hole", scanner.detail or "")
+
+    def collector_scanner(self, collector: NetworkCollector) -> DeepScanner:
+        """A scanner confirming identity through ``collector``, as compose_scanner wires it."""
+        worker = self.tcp_worker()
+        worker.collector = collector
+        self.probe = Probe({7})
+        return DeepScanner(
+            DeepScanJournal(self.root),
+            lambda: DeviceInventory(self.cards),
+            collector_identities(worker),
+            probe=self.probe,
+            ports=range(1, 11),
+        )
+
+    async def test_a_pihole_only_collector_can_deep_scan(self) -> None:
+        worker = self.tcp_worker()
+        plan = worker.config.collection
+        worker.collector = NetworkCollector(
+            worker.config.collector, plan, device_source=PiHole()
+        )
+        composed, _ = compose_scanner(worker, self.root, True)
+        assert composed is not None
+        self.assertTrue(composed.available)
+        self.assertIsNone(composed.detail)
+        scanner = self.collector_scanner(
+            NetworkCollector(worker.config.collector, plan, device_source=PiHole())
+        )
+        scanner.request(LAMP)
+        await scanner.poll()
+        [done] = scanner.ledger.results
+        self.assertEqual(("complete", (7,)), (done.state, done.open_ports))
+
+    async def test_an_adopted_unifi_device_is_confirmed(self) -> None:
+        plan = self.tcp_worker().config.collection
+        scanner = self.collector_scanner(
+            NetworkCollector(
+                self.worker.config.collector, plan, identity_source=Adopted()
+            )
+        )
+        scanner.request(LAMP)
+        await scanner.poll()
+        [done] = scanner.ledger.results
+        self.assertEqual("complete", done.state)
+
+    async def test_sources_that_disagree_on_the_mac_make_the_scan_unreliable(
+        self,
+    ) -> None:
+        plan = self.tcp_worker().config.collection
+        unifi = Identities()
+        unifi.script = [OTHER]
+        collector = NetworkCollector(
+            self.worker.config.collector,
+            plan,
+            device_source=PiHole(),
+            identity_source=unifi,
+        )
+        sample = await collector.confirm_identity((ADDRESSES[LAMP],), NOW)
+        self.assertEqual(frozenset({ADDRESSES[LAMP]}), sample.ambiguous_addresses)
+        self.assertEqual((), sample.devices)
+        unifi.script = [OTHER]
+        scanner = self.collector_scanner(collector)
+        scanner.request(LAMP)
+        await scanner.poll()
+        [done] = scanner.ledger.results
+        self.assertEqual("unreliable", done.state)
+        self.assertEqual([], self.probe.calls)
+
+
+class PiHole:
+    """A Pi-hole network table that knows each test device at its address."""
+
+    async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
+        known = {a: d.removeprefix("mac:") for d, a in ADDRESSES.items()}
+        return DeviceData(
+            tuple(
+                replace(sighting(address, known[address]), source="pihole-v6")
+                for address in targets
+                if address in known
+            ),
+            (),
+            None,
+            (),
+        )
+
+
+class Adopted:
+    """A UniFi controller that sees the device only among its adopted devices."""
+
+    async def identify(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        return IdentitySample()
+
+    async def managed_sightings(
+        self,
+        targets: tuple[str, ...],
+        observed_at: str,
+        clients: tuple[DeviceIdentity, ...] = (),
+    ) -> IdentitySample:
+        known = {a: d.removeprefix("mac:") for d, a in ADDRESSES.items()}
+        return IdentitySample(
+            tuple(sighting(a, known[a]) for a in targets if a in known)
+        )
+
+    def recently_managed(self, identity: DeviceIdentity) -> bool:
+        return True
 
 
 async def _recover(callback: Callable[[], Awaitable[None]]) -> None:

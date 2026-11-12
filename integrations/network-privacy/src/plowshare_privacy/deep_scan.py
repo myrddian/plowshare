@@ -44,7 +44,7 @@ from .contracts import (
 )
 from .device_dossier import parse_device_id
 from .device_inventory import DeviceInventory
-from .identity_source import DeviceIdentitySource
+from .identity_source import DeviceIdentitySource, IdentitySample
 from .private_files import replace_private
 from .tools import monitored_devices
 
@@ -986,21 +986,47 @@ def compose_scanner(
     """Build the scanner the collector serves, or None with the reason.
 
     Deep scans exist only beside the operator store and TCP collection. The
-    identity source is read from ``worker.collector`` on each use, so settings
-    that replace the collector change what confirms a device. A journal that
-    cannot be read disables deep scans only; collection is unaffected.
+    identity source (UniFi, its adopted devices and Pi-hole, merged as
+    collection merges them) is read from ``worker.collector`` on each use, so
+    settings that replace the collector change what confirms a device. A
+    journal that cannot be read disables deep scans only; collection is
+    unaffected.
     """
     if not operator_store or worker.config.collection.mode != "tcp":
         return None, None
+    return open_scanner(
+        root,
+        worker.device_inventory,
+        collector_identities(worker),
+        zone=lambda: worker.config.zone,
+    )
+
+
+@dataclass(frozen=True)
+class _CollectorIdentities:
+    """The collector's merged UniFi and Pi-hole identity read, as a scan source."""
+
+    collector: NetworkCollector
+
+    async def identify(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        return await self.collector.confirm_identity(targets, observed_at)
+
+
+def collector_identities(
+    worker: Worker,
+) -> Callable[[], DeviceIdentitySource | None]:
+    """Resolve the scan's identity source from ``worker.collector`` on each call.
+
+    None when the current collector has neither UniFi nor Pi-hole, so settings
+    that replace the collector change availability at once.
+    """
 
     def identities() -> DeviceIdentitySource | None:
         collector = worker.collector
-        return (
-            collector.identity_source
-            if isinstance(collector, NetworkCollector)
-            else None
-        )
+        if isinstance(collector, NetworkCollector) and collector.confirms_identity:
+            return _CollectorIdentities(collector)
+        return None
 
-    return open_scanner(
-        root, worker.device_inventory, identities, zone=lambda: worker.config.zone
-    )
+    return identities
