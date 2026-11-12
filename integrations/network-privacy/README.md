@@ -124,7 +124,7 @@ source or changing labels starts a new comparison baseline while preserving sett
 receipts. New snapshots add optional `devices` and `dns_window` fields to the v1
 format. Legacy receipts keep their exact retained encoding for reconciliation.
 Retained evidence is capped at 768 KiB, independently of the 16,000-byte tool
-reply budget. Each sweep retains every selected TCP observation and device identity
+reply budget. Each collection retains every selected TCP observation and device identity
 in one document. DNS samples are capped at 4,096 rows and may be reduced further
 with an explicit coverage gap. Large investigations receive a bounded context
 projection and can page relevant evidence; omitted rows never prove absence.
@@ -479,9 +479,11 @@ their run recorded.
 ### Deep port scans
 
 A deep scan checks every TCP port (1 to 65535) of one device at a time, not only
-the usual ones, and takes several minutes. It reaches private IPv4 addresses
-only. It is a plain TCP connect from the collector host: no UDP and no banners, and nothing is sent after a connection opens. A
-port that times out is recorded as unanswered, never as closed.
+the usual ones, and takes several minutes. It only ever probes a private IPv4
+address, even when the configuration watches other addresses. It is a plain TCP
+connect from the collector host: no UDP and no banners, and nothing is sent after
+a connection opens. A port that times out is recorded as unanswered, never as
+closed.
 
 A flagged assessment can start a scan automatically. Set the limit under
 Settings › Automatic deep scans per day, from 0 to 12 per household day; it is 0
