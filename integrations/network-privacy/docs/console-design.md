@@ -222,6 +222,7 @@ in `style.css`; a one-off value is a defect.
 | Record | `.record` | A ruled record that does not open and carries its own action row (a finding, a shared issue, a run). |
 | Card | `.card` | One boxed record inside a section: a linked issue, an advisory, a vendor note, a citation. |
 | Tag, badge, chip | `.tag`, `.badge` / `.status-line`, `button.chip` | A tag is a framed fact (mode, schedule state, the cyan signal). A badge or status line is a state word in gilt, always sentence case through `statusLabel`. A chip is a filter toggle with `aria-pressed`. |
+| Attention band | `section.attention` > `ul.attention-items` > `li.attention-item`, built by `attentionItem(figure, title, detail, label, action)`; `p.all-clear` when empty | First on Overview. One row per kind of item that needs the operator: a count in the display face, what it is, and the one `.secondary` action that deals with it. Rebuilt from each refresh, so a settled item leaves on its own. Counts only devices in the current inventory. |
 
 ### Copy
 
@@ -254,3 +255,14 @@ in `style.css`; a one-off value is a defect.
 - **Cinnabar gained one use**, the frame of a control that discards, because a
   fourth button variant needed a mark and a new colour would have cost more.
 - **System health is a fact list**, not a second grid of label and value.
+- **What needs the operator comes first.** Assessments awaiting review,
+  potential breaches, failed assessments, profile drafts, connection problems
+  and missing credentials are listed in the attention band at the top of
+  Overview, and the device list defaults to "Needs attention first". System
+  health opens itself once when it holds a problem.
+- **Assessment tags.** "Awaiting your review" is a gilt-framed tag; a potential
+  breach is the one filled gilt tag (the strongest gilt, not a new colour); a
+  failed assessment is cinnabar because it is an error.
+- **System health has three fact lists**: Status, Connections (Pi-hole, UniFi,
+  advisory source) and Deployment. Credentials appear as where they come from
+  and whether they are present, never as values.

@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import os
 import time
 from dataclasses import asdict
 from importlib.resources import files
 from ipaddress import IPv4Network
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from aiohttp import web
@@ -25,6 +27,7 @@ from .contracts import (
     parse_json,
     private_ipv4,
     text,
+    utc_now,
     uuid,
 )
 from .device_assessments import (
@@ -44,8 +47,10 @@ from .journal import Publication
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
-from .profile_research import ResearchReview
+from .profile_research import DAILY_LIMIT as RESEARCH_DAILY_LIMIT
+from .profile_research import ResearchReview, admitted_today
 from .schedule_editor import ScheduleManagement
+from .system_view import describe
 from .tools import (
     DEFINITIONS,
     PrivacyTools,
@@ -71,6 +76,7 @@ def application(
     managed_products: Callable[[], ManagedProductLookup | None] | None = None,
     profile_research: ResearchReview | None = None,
     assessments: AssessmentControl | None = None,
+    advisory_origin: str | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -187,6 +193,20 @@ def application(
                 else None,
                 "pending_deployment": schedule_editor.pending_request()
                 if schedule_editor
+                else None,
+                "system": asdict(
+                    describe(
+                        worker.config,
+                        advisory_origin if advisories is not None else None,
+                        os.environ,
+                        Path.is_file,
+                    )
+                ),
+                "assessments": {
+                    "summaries": [asdict(item) for item in assessments.summaries()],
+                    "usage": asdict(assessments.usage()),
+                }
+                if assessments is not None
                 else None,
             }
         )
@@ -784,6 +804,12 @@ def application(
                 "profile_research_available": profile_research is not None,
                 "profile_research_enabled": profile_research is not None
                 and profile_research.ledger.enabled,
+                "profile_research_used_today": admitted_today(
+                    profile_research.ledger, utc_now()
+                )
+                if profile_research is not None
+                else 0,
+                "profile_research_daily_limit": RESEARCH_DAILY_LIMIT,
                 "profile_drafts_waiting": sum(
                     entry.phase == "review" for entry in profile_research.ledger.entries
                 )

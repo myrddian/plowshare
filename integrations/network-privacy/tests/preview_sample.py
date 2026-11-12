@@ -497,6 +497,68 @@ Coverage:
 """
 
 
+def sample_system() -> Row:
+    """Connections for the sample network, on documentation addresses only."""
+    variable = {"source": "environment", "present": True}
+    return {
+        "pihole": {
+            "origin": "http://192.0.2.53",
+            "password": {
+                "purpose": "Pi-hole password",
+                "source": "file",
+                "variable": None,
+                "present": True,
+            },
+        },
+        "unifi": {
+            "controller": "https://192.0.2.1/proxy/network/integration",
+            "site": "88f7af54-98f8-306a-a1c7-c9349722b1f6",
+            "trust": "pinned",
+            "api_key": {
+                **variable,
+                "purpose": "UniFi API key",
+                "variable": "UNIFI_API_KEY",
+            },
+            "traffic_site": "default",
+        },
+        "advisory_origin": "https://services.nvd.nist.gov",
+        "deployment": {
+            "server_origin": "https://plowshare.example",
+            "project": "home-network",
+            "collector": "home-collector",
+            "request_topic": "privacy.scan.requested",
+            "result_topic": "privacy.scan.completed",
+            "group": "privacy-collectors",
+            "outgoing_peer": None,
+            "probe_timeout_seconds": 1.5,
+            "probe_concurrency": 32,
+            "credentials": [
+                {
+                    **variable,
+                    "purpose": "Plowshare service credential",
+                    "variable": "PLOWSHARE_PRIVACY_TOKEN",
+                },
+                {
+                    **variable,
+                    "purpose": "Dashboard access token",
+                    "variable": "PLOWSHARE_PRIVACY_WEB_TOKEN",
+                },
+                {
+                    "purpose": "Pi-hole password",
+                    "source": "file",
+                    "variable": None,
+                    "present": True,
+                },
+                {
+                    **variable,
+                    "purpose": "UniFi API key",
+                    "variable": "UNIFI_API_KEY",
+                },
+            ],
+        },
+    }
+
+
 def sample_assessments() -> dict[str, tuple[Row, str | None]]:
     """Device ID to (assessment view row, report text) for the preview."""
     base: Row = {

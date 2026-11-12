@@ -339,6 +339,33 @@ class AssessmentReport:
     text: str
 
 
+@dataclass(frozen=True)
+class AssessmentSummary:
+    """One device's assessment as the device list and Overview show it.
+
+    Built from the ledger alone, so listing every device costs no inventory or
+    server read. ``potential_breaches`` and ``worth_checking`` count reviewed
+    concerns the second agent did not refute, in a report that is awaiting
+    review or accepted; a dismissed report counts nothing.
+    """
+
+    device_id: str
+    state: State
+    pending: Literal["admission", "accept"] | None
+    processing: bool
+    potential_breaches: int
+    worth_checking: int
+
+
+@dataclass(frozen=True)
+class AssessmentUsage:
+    """Today's assessment admissions (UTC day) against the two limits."""
+
+    background_limit: int
+    used_today: int
+    daily_ceiling: int
+
+
 class AssessmentControl(Protocol):
     """The dashboard's view of assessments and the operator's decisions."""
 
@@ -349,6 +376,8 @@ class AssessmentControl(Protocol):
     def error(self) -> str | None: ...
 
     def view(self, device_id: str) -> AssessmentView: ...
+    def summaries(self) -> tuple[AssessmentSummary, ...]: ...
+    def usage(self) -> AssessmentUsage: ...
     async def assess(self, device_id: str) -> AssessmentView: ...
     async def accept(self, device_id: str) -> AssessmentView: ...
     async def check(self, device_id: str) -> AssessmentView: ...
@@ -484,6 +513,27 @@ class DeviceAssessments:
             can_dismiss=deciding,
             assess_note=note if open_to_assess else None,
             processing=processing,
+        )
+
+    def summaries(self) -> tuple[AssessmentSummary, ...]:
+        return tuple(
+            summary(
+                entry.device_id,
+                _STATE[entry.phase],
+                "admission"
+                if entry.phase == "pending"
+                else "accept"
+                if entry.phase == "accepting"
+                else None,
+                entry.phase == "review" and entry.report not in self._processed,
+                entry.concerns,
+            )
+            for entry in self.ledger.entries
+        )
+
+    def usage(self) -> AssessmentUsage:
+        return AssessmentUsage(
+            self.ledger.background_limit, len(self._today()), DAILY_CEILING
         )
 
     async def assess(self, device_id: str) -> AssessmentView:
@@ -820,6 +870,29 @@ def _learned(facts: DeviceFacts | None) -> bool:
     return facts is not None and (
         bool(facts.descriptions)
         or (facts.advisories is not None and facts.advisories.status == "searched")
+    )
+
+
+def summary(
+    device_id: str,
+    state: State,
+    pending: Literal["admission", "accept"] | None,
+    processing: bool,
+    concerns: tuple[ConcernOutcome, ...],
+) -> AssessmentSummary:
+    """Count the concerns a reader still has to weigh in a live report."""
+    live = (
+        tuple(c for c in concerns if c.verdict != "refuted")
+        if state in {"review", "accepted"}
+        else ()
+    )
+    return AssessmentSummary(
+        device_id,
+        state,
+        pending,
+        processing,
+        sum(c.level == "potential_breach" for c in live),
+        sum(c.level == "worth_checking" for c in live),
     )
 
 

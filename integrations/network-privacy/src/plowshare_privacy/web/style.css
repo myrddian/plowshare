@@ -81,17 +81,17 @@ ul { padding-left: 20px; }
 .vh, .cell-label, .unit { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* The frame: line-coloured shape with a surface layer inset by one pixel. */
-.panel, .connect, .leaf, .setup-callout {
+.panel, .connect, .leaf, .setup-callout, .attention {
   --cut: 14px; --k: var(--cut); --line: var(--umber);
   position: relative; min-width: 0; background: var(--line);
   clip-path: polygon(0 0, calc(100% - var(--k)) 0, 100% var(--k), 100% 100%, var(--k) 100%, 0 calc(100% - var(--k)));
 }
-.panel::before, .connect::before, .leaf::before, .setup-callout::before {
+.panel::before, .connect::before, .leaf::before, .setup-callout::before, .attention::before {
   content: ''; position: absolute; inset: 1px; z-index: 0; pointer-events: none; background: var(--bitumen);
   --k: calc(var(--cut) - .6px);
   clip-path: polygon(0 0, calc(100% - var(--k)) 0, 100% var(--k), 100% 100%, var(--k) 100%, 0 calc(100% - var(--k)));
 }
-.panel > *, .connect > *, .leaf > *, .setup-callout > * { position: relative; z-index: 1; }
+.panel > *, .connect > *, .leaf > *, .setup-callout > *, .attention > * { position: relative; z-index: 1; }
 
 /* Buttons. Four variants, one size:
    primary (no class) sends a change or starts work;
@@ -189,6 +189,11 @@ small { display: block; margin-top: var(--s2); }
 .tag { display: inline-flex; align-items: center; gap: var(--s2); padding: 0 var(--s2); border: var(--rule); font: 500 var(--text-sm)/1.6 var(--structure); color: var(--tallow); white-space: nowrap; }
 .tag.synthetic { border-color: var(--gilt); color: var(--gilt); }
 .tag-silent { border-color: var(--cyan); color: var(--cyan); }
+/* Assessment state in the device list. A potential breach is the one filled
+   tag: the strongest gilt, not a new colour. A failure is an error. */
+.tag-review { border-color: var(--gilt); color: var(--gilt); }
+.tag-breach { border-color: var(--gilt); background: var(--gilt); color: var(--obsidian); font-weight: 600; }
+.tag-failed { border-color: var(--cinnabar); color: var(--cinnabar); }
 .badge, .status-line { font: 600 var(--text-md)/1.4 var(--structure); color: var(--gilt); }
 .badge { white-space: nowrap; }
 .status-line { margin: 0 0 var(--s1); }
@@ -286,6 +291,20 @@ footer { display: flex; justify-content: space-between; gap: var(--s3); padding-
 .register-cell strong { display: block; margin: 2px 0; font: 600 var(--text-2xl)/1.3 var(--structure); overflow-wrap: anywhere; }
 .register-cell strong.figure { font: 500 var(--text-xl)/1.4 var(--data); }
 .register-cell p { margin: 0; font-size: var(--text-sm); color: var(--tallow); }
+/* The attention band: what needs the operator, first on Overview. One row per
+   kind of item, its count set large in the display face. */
+.attention { margin-bottom: var(--s5); padding: var(--s4) var(--inset) var(--s2); --line: var(--gilt); }
+.attention > h2 { font: 500 var(--text-md) var(--structure); color: var(--tallow); }
+.attention-items { margin: var(--s2) 0 0; padding: 0; list-style: none; }
+.attention-item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: var(--s1) var(--s4); padding: var(--s3) 0; }
+.attention-item + .attention-item { border-top: var(--rule-row); }
+.attention-figure { font: 400 var(--display-2)/1 var(--display); color: var(--gilt); font-variant-numeric: lining-nums tabular-nums; }
+.attention-text h3 { font-size: var(--text-name); }
+.attention-text p { margin: var(--s1) 0 0; }
+.all-clear { margin: 0 0 var(--s5); padding-left: var(--s4); border-left: var(--rule-frame); font-size: var(--text-md); color: var(--tallow); }
+.facts-title { margin: var(--s4) 0 0; font: 500 var(--text-md) var(--structure); color: var(--gilt); }
+.facts dd.missing { color: var(--cinnabar); }
+#system-health.attention-needed > summary span { color: var(--cinnabar); }
 .setup-callout { display: flex; align-items: center; justify-content: space-between; gap: var(--s5); margin-bottom: var(--s5); padding: var(--s4) var(--inset); --line: var(--gilt); }
 .setup-callout ul { margin: var(--s1) 0 0; font-size: var(--text-md); color: var(--tallow); }
 
@@ -544,6 +563,8 @@ details > .hint { display: flex; flex-wrap: wrap; justify-content: space-between
   .panel-heading { flex-wrap: wrap; gap: var(--s1) var(--s3); }
   .panel-heading > span:not(.tag) { text-align: left; }
   .setup-callout { flex-direction: column; align-items: flex-start; }
+  .attention-item { grid-template-columns: 44px minmax(0, 1fr); }
+  .attention-item > button { grid-column: 2; justify-self: start; }
   .connection-row { flex-direction: column; align-items: stretch; }
   .connect { padding: var(--s5) var(--inset) var(--s5); margin-top: var(--s5); }
   footer { flex-direction: column; }

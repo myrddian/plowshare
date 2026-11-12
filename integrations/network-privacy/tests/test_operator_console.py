@@ -337,9 +337,15 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
             (await client.post("/api/preferences", json=payload)).status, 401
         )
         headers = {"Authorization": "Bearer " + TOKEN}
+        response = await client.get("/api/overview", headers=headers)
+        self.assertEqual(response.status, 200)
+        overview = await response.json()
+        # Configuration is described, never disclosed; no assessments here.
         self.assertEqual(
-            (await client.get("/api/overview", headers=headers)).status, 200
+            overview["system"]["deployment"]["project"], self.worker.config.project
         )
+        self.assertNotIn(TOKEN, json.dumps(overview))
+        self.assertIsNone(overview["assessments"])
         self.assertEqual(
             (await client.post("/api/session", headers=headers, json={})).status, 200
         )
