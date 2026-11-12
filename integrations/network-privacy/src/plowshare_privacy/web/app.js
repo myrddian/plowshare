@@ -2273,6 +2273,7 @@ function scheduleBlocked(schedule, control, pending, pendingDeployment) {
 }
 function toolVisibility(agents) {
   if (agents.tool_visibility === 'awaiting_context') return 'Awaiting the first Ask conversation';
+  if (agents.tool_visibility === 'assistant_unserved') return 'Unavailable: the privacy assistant is not served';
   const total = agents.tools.length + agents.missing_tools.length;
   return `${agents.tools.length} of ${total} visible` + (agents.missing_tools.length ? ' · missing: ' + agents.missing_tools.join(', ') : '');
 }

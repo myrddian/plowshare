@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import signal
 from contextlib import AsyncExitStack, ExitStack
@@ -12,7 +13,7 @@ from dataclasses import asdict
 from functools import partial
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Iterable
 from uuid import uuid4
 
 from aiohttp import web
@@ -63,6 +64,27 @@ from .tool_journal_upgrade import open_tool_journal
 from .tools import WorkerTools
 from .web import application
 from .worker import ActiveRequests, ExternalRequests, ReconciliationRequired, Worker
+
+
+async def stop_tasks(tasks: Iterable[asyncio.Task[None] | None]) -> None:
+    """Cancel every task, then await every one.
+
+    A task that ended with an error is logged and does not stop the others
+    from being awaited, so shutdown always reaches its cleanup.
+    """
+    running = [value for value in tasks if value is not None]
+    for value in running:
+        value.cancel()
+    for value in running:
+        try:
+            await value
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            _log.exception("A background task failed")
+
+
+_log = logging.getLogger(__name__)
 
 
 def credential(name: str) -> str:
@@ -605,27 +627,9 @@ async def execute(args: argparse.Namespace) -> None:
                 await stop.wait()
             finally:
                 stop.set()
-                for running in (
-                    ask_task,
-                    deep_scan_task,
-                    assessment_task,
-                    research_task,
-                    task,
-                ):
-                    if running is not None:
-                        running.cancel()
-                for running in (
-                    ask_task,
-                    deep_scan_task,
-                    assessment_task,
-                    research_task,
-                    task,
-                ):
-                    if running is not None:
-                        try:
-                            await running
-                        except asyncio.CancelledError:
-                            pass
+                await stop_tasks(
+                    (ask_task, deep_scan_task, assessment_task, research_task, task)
+                )
                 await runner.cleanup()
                 if owns_handoff:
                     handoff.unlink(missing_ok=True)

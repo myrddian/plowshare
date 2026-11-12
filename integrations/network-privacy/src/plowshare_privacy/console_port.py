@@ -105,23 +105,25 @@ class SdkConsolePort:
         agents = (
             await self.client.request(AgentListRequest(project=self.config.project))
         ).require_payload()
-        expected = {"privacy_coordinator", "privacy_analyst", "privacy_reviewer"}
+        # The listing is requested for this project, so every row is the
+        # project's own agent; foreign names are dropped by the allowlist.
+        expected = {
+            "privacy_coordinator",
+            "privacy_analyst",
+            "privacy_reviewer",
+            "privacy_assistant",
+        }
         relevant = [value for value in agents if value.name in expected]
         served = {value.name for value in relevant if value.served}
-        coordinators = [
-            value
-            for value in relevant
-            if value.name == "privacy_coordinator" and value.served
-        ]
-        if len(coordinators) > 1:
-            raise ValueError("Ambiguous project coordinator")
+        if sum(value.name == "privacy_assistant" for value in relevant) > 1:
+            raise ValueError("Ambiguous project assistant")
         names = {item.name for item in DECLARATIONS}
         visible: set[str] = set()
         visibility = "awaiting_context"
         conversation = self.assistant()
-        if conversation is not None and "privacy_assistant" in {
-            value.name for value in agents if value.served
-        }:
+        if conversation is not None and "privacy_assistant" not in served:
+            visibility = "assistant_unserved"
+        elif conversation is not None:
             # Agent listings describe definition grants, not the live dynamic
             # registry. Project the assistant's own Ask conversation without
             # counting tokens or opening/running a conversation. The server

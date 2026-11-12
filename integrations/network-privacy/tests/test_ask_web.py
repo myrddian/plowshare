@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from dataclasses import replace
@@ -32,6 +33,7 @@ from plowshare_privacy.ask import (
     AskTurn,
     compose_ask,
 )
+from plowshare_privacy.cli import stop_tasks
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
 from plowshare_privacy.console_port import SdkConsolePort
 from plowshare_privacy.discovery import LocalDeviceDiscovery
@@ -299,11 +301,29 @@ class AssistantToolVisibilityTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.port.agents()
 
-    async def test_an_unserved_assistant_is_not_measured(self) -> None:
+    async def test_an_unserved_assistant_is_reported_not_measured(self) -> None:
         self.conversation = "conv-1"
         self.client.request.side_effect = [
             Reply("OK", None, (replace(self.assistant, served=False),))
         ]
         result = await self.port.agents()
-        self.assertEqual("awaiting_context", result.tool_visibility)
+        self.assertEqual("assistant_unserved", result.tool_visibility)
+        self.assertIn("privacy_assistant", result.unavailable)
         self.assertEqual(1, self.client.request.await_count)
+
+
+class StopTasksTest(unittest.IsolatedAsyncioTestCase):
+    async def test_every_task_is_awaited_even_when_one_failed(self) -> None:
+        async def failing() -> None:
+            raise RuntimeError("boom")
+
+        async def forever() -> None:
+            await asyncio.Event().wait()
+
+        broken = asyncio.create_task(failing())
+        await asyncio.sleep(0)
+        waiting = asyncio.create_task(forever())
+        with self.assertLogs("plowshare_privacy.cli", "ERROR") as logged:
+            await stop_tasks((broken, None, waiting))
+        self.assertTrue(waiting.cancelled())
+        self.assertIn("A background task failed", logged.output[0])

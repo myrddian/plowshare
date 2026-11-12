@@ -11,15 +11,18 @@ from uuid import uuid4
 
 from plowshare import Client, Refusal, Reply
 from plowshare.contracts import (
+    AgentListRequest,
     AgentViewDto,
     ContextSamplingDto,
     ContextSnapshotDto,
     ContextSnapshotDtoToolsItemDto,
+    ConversationContextSnapshotRequest,
     ConversationViewDto,
     OrchestrationReceiptRequest,
     OrchestrationReceiptResultDto,
     OrchestrationStartRequest,
     OrchestrationStartResultDto,
+    ProjectionMessageDto,
     ScheduleFileDto,
     ScheduleFilesRequest,
     ScheduleListRequest,
@@ -171,6 +174,77 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
                 for call in self.client.request.call_args_list
             )
         )
+
+    def assistant_port(self) -> SdkConsolePort:
+        return SdkConsolePort(self.client, self.config, lambda: self.conversation.id)
+
+    def assistant_snapshot(
+        self, conversation: str = "cnv_fixture", agent: str = "privacy_assistant"
+    ) -> ContextSnapshotDto:
+        message = ProjectionMessageDto(
+            parts=(),
+            role="user",
+            tool_call_id=None,
+            tool_calls=(),
+        )
+        return replace(
+            self.snapshot, conversation=conversation, agent=agent, messages=(message,)
+        )
+
+    async def test_agent_visibility_is_project_scoped_and_reads_no_messages(
+        self,
+    ) -> None:
+        assistant = replace(self.coordinator, name="privacy_assistant")
+        self.client.request.side_effect = [
+            Reply(
+                "OK",
+                None,
+                (
+                    self.coordinator,
+                    assistant,
+                    replace(self.coordinator, name="another-agent"),
+                ),
+            ),
+            Reply("OK", None, self.assistant_snapshot()),
+        ]
+        result = await self.assistant_port().agents()
+        requests = [call.args[0] for call in self.client.request.call_args_list]
+        self.assertIsInstance(requests[0], AgentListRequest)
+        self.assertEqual(requests[0].project, self.config.project)
+        self.assertIsInstance(requests[1], ConversationContextSnapshotRequest)
+        self.assertEqual(requests[1].conversation, self.conversation.id)
+        self.assertEqual(requests[1].agent, "privacy_assistant")
+        self.assertIs(requests[1].measure, False)
+        self.assertEqual(self.client.request.await_count, 2)
+        self.assertEqual(result.tools, ("network_evidence",))
+        self.assertIn("network_scan", result.missing_tools)
+        self.assertEqual(result.tool_visibility, "projected")
+        self.assertEqual(result.served, ("privacy_assistant", "privacy_coordinator"))
+        self.assertIn("privacy_reviewer", result.unavailable)
+        self.assertNotIn("another-agent", result.served)
+        # Only tool names survive; no message content is carried out.
+        self.assertFalse(hasattr(result, "messages"))
+        self.assertNotIn("user", repr(result))
+
+    async def test_unserved_assistant_is_listed_missing(self) -> None:
+        self.client.request.side_effect = [Reply("OK", None, (self.coordinator,))]
+        result = await self.assistant_port().agents()
+        self.assertEqual(result.tool_visibility, "assistant_unserved")
+        self.assertIn("privacy_assistant", result.unavailable)
+        self.assertEqual(self.client.request.await_count, 1)
+
+    async def test_foreign_conversation_or_agent_projection_is_refused(self) -> None:
+        assistant = replace(self.coordinator, name="privacy_assistant")
+        for snapshot in (
+            self.assistant_snapshot(conversation="cnv_foreign"),
+            self.assistant_snapshot(agent="privacy_coordinator"),
+        ):
+            self.client.request.side_effect = [
+                Reply("OK", None, (assistant,)),
+                Reply("OK", None, snapshot),
+            ]
+            with self.assertRaises(ValueError):
+                await self.assistant_port().agents()
 
     async def test_start_preserves_opaque_run_identity(self) -> None:
         from support import CountingCollector

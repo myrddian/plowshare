@@ -67,6 +67,7 @@ test('tool and agent counts come from the collector, and every missing tool is n
     '0 of 3 visible · missing: network_scan, network_scope, network_device');
   assert.equal(tools({tool_visibility:'projected', tools:['a', 'b'], missing_tools:[]}), '2 of 2 visible');
   assert.equal(tools({tool_visibility:'awaiting_context', tools:[], missing_tools:[]}), 'Awaiting the first Ask conversation');
+  assert.equal(tools({tool_visibility:'assistant_unserved', tools:[], missing_tools:[]}), 'Unavailable: the privacy assistant is not served');
 });
 
 test('disabled Pause and Resume always say why', () => {
