@@ -534,7 +534,7 @@ and durable investigation runtime.
 The **Ask** tab is a conversation with the privacy assistant, an agent for
 questions about network security: which devices are on the network, what they
 talk to, what is exposed and what to do about it. The tab appears once the
-collector can reach the assistant.
+collector has Ask enabled; if the assistant cannot be reached, the tab says why.
 
 The assistant answers from reads of the collector's retained evidence, device
 dossiers, profiles and issues. Bigger work it hands to the analyst, reviewer or
@@ -551,9 +551,9 @@ settings, Pi-hole, UniFi, the schedule, the time zone, limits or credentials,
 and it never changes the network: mitigation means suggesting a step and
 tracking it.
 
-The conversation has its own allowance of model calls and turns, set under
-Settings under "Privacy Watch conversation". **Top up** appears only when the allowance runs
-out. It raises the cap by the configured top-up size after you confirm. A
+The conversation has its own allowance of model calls and turns, set in
+Settings, under "Privacy Watch conversation". **Top up** appears only when the
+allowance runs out. It raises the cap by the configured top-up size after you confirm. A
 request that stops at the step limit asks you to ask again, more narrowly.
 
 Sending is blocked while a turn runs. If the collector cannot confirm that a
