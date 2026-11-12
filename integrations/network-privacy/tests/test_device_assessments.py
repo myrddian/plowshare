@@ -638,7 +638,7 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
             facts=self.facts.get,
             profile=profile,
             clock=lambda: self.now,
-            zone="Australia/Sydney",
+            zone=lambda: "Australia/Sydney",
         )
         await service.assess(TV)
         [dossier] = self.dossiers.retained
@@ -657,7 +657,7 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
             self.runs,
             self.dossiers,
             lambda: DeviceInventory(self.cards),
-            zone="UTC",
+            zone=lambda: "UTC",
         )
         rebuilt = restarted._entry(TV)
         assert rebuilt is not None
@@ -710,7 +710,7 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
             self.dossiers,
             lambda: DeviceInventory(self.cards),
             clock=lambda: self.now,
-            zone="Australia/Sydney",
+            zone=lambda: "Australia/Sydney",
         )
         # 09:00 UTC on the 11th is the evening of the 11th in Sydney; 13:30 UTC
         # is already the 12th there, so the earlier admission no longer counts.

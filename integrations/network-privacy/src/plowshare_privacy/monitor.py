@@ -15,6 +15,7 @@ from .contracts import (
     PiHolePlan,
     device_labels,
     expand_targets,
+    household_zone,
     integer,
     items,
     load_json,
@@ -161,6 +162,15 @@ class MonitorSettings(Protocol):
         The saved tuning (lookback, lookup limit, identity age and timeout) is
         kept; a first connection takes the defaults. A password previously
         read from an environment variable is replaced by ``password_file``.
+        """
+        ...
+
+    async def save_time_zone(self, zone: str | None) -> Configuration:
+        """Set the household zone (None removes it, so UTC is used) and apply it.
+
+        Unlike monitoring scope, the zone changes no collection, so it applies
+        at once without waiting for scans to settle. Returns the active
+        configuration.
         """
         ...
 
@@ -352,13 +362,43 @@ class FileMonitorSettings:
         return self.view()
 
     def _validate_scope(self, config: Configuration) -> None:
+        # A pending file may carry a newer household zone (save_time_zone
+        # writes it first); only collection scope may otherwise differ.
         if (
-            replace(config, collection=self.worker.config.collection)
+            replace(
+                config,
+                collection=self.worker.config.collection,
+                time_zone=self.worker.config.time_zone,
+            )
             != self.worker.config
         ):
             raise SettingsBusy(
                 "Configuration changed outside this dashboard; restart to review it."
             )
+
+    async def save_time_zone(self, zone: str | None) -> Configuration:
+        if zone is not None:
+            household_zone(zone)
+        async with self.save_lock:
+            self._saved_configuration()
+            # The pending copy first: if the collector stops between the two
+            # writes, the pending file holds the newer zone and applying it
+            # later keeps the operator's choice rather than reverting it.
+            targets = [self.path]
+            if self.pending_path.exists():
+                targets.insert(0, self.pending_path)
+            for target in targets:
+                row = load_json(target)
+                if not isinstance(row, dict):
+                    raise ValueError("Collector configuration must be an object")
+                if zone is None:
+                    row.pop("timeZone", None)
+                else:
+                    row["timeZone"] = zone
+                Configuration.decode(row, self.path)
+                replace_private(target, json.dumps(row, indent=2) + "\n")
+            self.worker.config = replace(self.worker.config, time_zone=zone)
+            return self.worker.config
 
     def _saved_configuration(self) -> Configuration:
         if Configuration.read(self.path) != self.worker.config:

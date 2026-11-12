@@ -33,7 +33,7 @@ from test_privacy_issues import fields as issue_fields
 
 from plowshare_privacy.assessment_request import ConcernOutcome
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
-from plowshare_privacy.contracts import utc_now
+from plowshare_privacy.contracts import Configuration, utc_now
 from plowshare_privacy.device_assessments import (
     AssessmentConflict,
     AssessmentLedger,
@@ -82,19 +82,13 @@ def sample_overview(total: int | None = None) -> Middleware:
             except KeyError:
                 raise web.HTTPNotFound(text="Choose a monitored sample device")
         response = await handler(request)
-        if request.path == "/api/status" and isinstance(response, web.Response):
-            # The sample household keeps Sydney time, as its System health says.
-            status = json.loads(response.text or "{}")
-            status["time_zone"], status["time_zone_configured"] = (
-                "Australia/Sydney",
-                True,
-            )
-            return web.json_response(status, status=response.status)
         if request.path != "/api/overview" or not isinstance(response, web.Response):
             return response
         body = json.loads(response.text or "{}")
         # Health agrees with the sample connections it sits beside.
+        zone = body["system"]["deployment"]["time_zone"]
         body["system"] = sample_system()
+        body["system"]["deployment"]["time_zone"] = zone
         body["health"]["pihole"] = (
             "Latest collection retained; inspect its observation time and DNS window"
         )
@@ -290,6 +284,9 @@ async def preview(
             FileManualInvestigations(Path(folder).resolve()),
         )
 
+        # The sample household keeps Sydney time until Settings changes it.
+        worker.config = replace(worker.config, time_zone="Australia/Sydney")
+
         class PreviewSettings(Settings):
             def view(self) -> MonitorView:
                 return MonitorView(
@@ -299,6 +296,11 @@ async def preview(
                     True,
                     "Synthetic fixture settings",
                 )
+
+            async def save_time_zone(self, zone: str | None) -> Configuration:
+                # In memory only, like the rest of the sample household.
+                worker.config = replace(worker.config, time_zone=zone)
+                return worker.config
 
         issues = PrivacyIssues(
             IssueDocuments(),

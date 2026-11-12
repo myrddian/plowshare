@@ -375,11 +375,22 @@
             </form>
           </div>
         </section>
+        <section id="household-zone" class="panel" hidden>
+          <div class="panel-heading"><h2>Household time zone</h2><span id="zone-state">Checking…</span></div>
+          <div class="panel-body">
+            <form id="zone-form" class="form-grid">
+              <label>Time zone<input id="zone-input" list="zone-names" maxlength="64" autocomplete="off" spellcheck="false" placeholder="A city zone, e.g. Europe/London" aria-describedby="zone-help" required></label>
+              <datalist id="zone-names"></datalist>
+              <p class="hint" id="zone-help">Used for every date on this dashboard, the times in new assessment reports and the midnight the daily limits reset at. It applies at once; reports already written keep their zone.</p>
+              <div class="actions"><button id="zone-save" type="submit">Save time zone</button><button id="zone-browser" type="button" class="secondary" hidden>Use this browser’s zone</button><button id="zone-clear" type="button" class="quiet" hidden>Use UTC instead</button></div>
+            </form>
+          </div>
+        </section>
         <section id="background-work" class="panel" hidden>
           <div class="panel-heading"><h2>Background work</h2><span>Work the collector starts without being asked</span></div>
           <div class="panel-body">
             <dl id="background-usage" class="facts"></dl>
-            <p class="hint">Days follow the household time zone shown under System health › Deployment. Change these on the Devices tab, where their drafts and reports are reviewed.</p>
+            <p class="hint">Days follow the household time zone above. Change these on the Devices tab, where their drafts and reports are reviewed.</p>
             <div class="actions"><button id="open-background" type="button" class="secondary">Open background work on Devices</button></div>
           </div>
         </section>

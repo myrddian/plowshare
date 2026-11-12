@@ -466,8 +466,9 @@ completed agent investigation. Draft/final report status comes from the project
 information store. The dashboard shows the latest 50 scan receipts and the first
 100 accessible project reports that include a retained scan input.
 
-Set the household time zone with an IANA name in the collector configuration,
-for example `"timeZone": "Australia/Sydney"`. The dashboard writes every date in
+Set the household time zone under Settings › Household time zone, or with an
+IANA name in the collector configuration, for example
+`"timeZone": "Australia/Sydney"`. A dashboard change applies at once. The dashboard writes every date in
 that zone and names it; assessment reports write theirs in it (the collector
 supplies the local times, since Application scripts have no time zone data); and
 the daily research and assessment limits reset at its midnight. Without

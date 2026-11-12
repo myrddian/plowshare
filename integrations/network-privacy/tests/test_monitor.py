@@ -63,6 +63,28 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
             self.receipts.__exit__(None, None, None)
             self.closed = True
 
+    async def test_the_household_zone_applies_at_once_beside_pending_scope(
+        self,
+    ) -> None:
+        # A pending monitoring change is waiting; the zone does not wait for it.
+        await self.settings.save(CHOICE)
+        active = await self.settings.save_time_zone("Australia/Sydney")
+        self.assertEqual(active.zone, "Australia/Sydney")
+        self.assertEqual(self.worker.config.time_zone, "Australia/Sydney")
+        self.assertEqual(Configuration.read(self.path).time_zone, "Australia/Sydney")
+        self.assertTrue(self.settings.view().pending)
+        # Applying the pending scope keeps the zone rather than reverting it.
+        await self.settings.apply_pending()
+        self.assertEqual(self.worker.config.time_zone, "Australia/Sydney")
+        self.assertEqual(self.worker.config.collection.targets, CHOICE.targets)
+        cleared = await self.settings.save_time_zone(None)
+        self.assertIsNone(cleared.time_zone)
+        self.assertEqual(cleared.zone, "UTC")
+        self.assertNotIn("timeZone", json.loads(self.path.read_text()))
+        with self.assertRaisesRegex(ValueError, "IANA time zone"):
+            await self.settings.save_time_zone("Mars/Olympus")
+        self.assertIsNone(Configuration.read(self.path).time_zone)
+
     async def test_enable_and_change_scope_without_restart_preserves_history(
         self,
     ) -> None:
@@ -218,6 +240,40 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(next(iter(response.cookies.values()))["max-age"], "0")
         self.assertFalse(self.worker.config.collection.enabled)
+
+    async def test_the_time_zone_route_saves_reports_and_refuses_unknown_zones(
+        self,
+    ) -> None:
+        client = TestClient(
+            TestServer(application(self.worker, TOKEN, settings=self.settings))
+        )
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        bearer = {"Authorization": "Bearer " + TOKEN}
+        status = await (await client.get("/api/status", headers=bearer)).json()
+        self.assertEqual(
+            (status["time_zone"], status["time_zone_configured"]), ("UTC", False)
+        )
+        response = await client.post(
+            "/api/time-zone", headers=bearer, json={"timeZone": "Europe/London"}
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(
+            await response.json(),
+            {"time_zone": "Europe/London", "time_zone_configured": True},
+        )
+        status = await (await client.get("/api/status", headers=bearer)).json()
+        self.assertEqual(status["time_zone"], "Europe/London")
+        for invalid in ({"timeZone": "Mars/Olympus"}, {"timeZone": 10}):
+            response = await client.post("/api/time-zone", headers=bearer, json=invalid)
+            self.assertEqual(response.status, 400)
+            self.assertIn("IANA time zone", (await response.json())["error"])
+        response = await client.post(
+            "/api/time-zone", headers=bearer, json={"timeZone": None}
+        )
+        self.assertEqual(
+            await response.json(), {"time_zone": "UTC", "time_zone_configured": False}
+        )
 
     async def test_unsettled_publications_allow_saving_but_fence_activation(
         self,

@@ -304,9 +304,10 @@ class ProfileResearch:
         advisories: AdvisoryLookup | None,
         *,
         clock: Callable[[], str] = utc_now,
-        zone: str = "UTC",
+        zone: Callable[[], str] = lambda: "UTC",
     ):
-        # Daily allowances follow the household's day (configuration timeZone).
+        # Daily allowances follow the household's day (configuration timeZone),
+        # read when used so a dashboard change applies at once.
         self.zone = zone
         self.journal = journal
         self.port = port
@@ -521,11 +522,12 @@ class ProfileResearch:
         if not self.ledger.enabled:
             return
         now = self.clock()
-        day = household_day(now, self.zone)
+        zone = self.zone()
+        day = household_day(now, zone)
         admissions = tuple(
             stamp
             for stamp in self.ledger.admissions
-            if household_day(stamp, self.zone) >= day
+            if household_day(stamp, zone) >= day
         )
         if len(admissions) >= DAILY_LIMIT:
             return

@@ -21,6 +21,7 @@ from plowshare.tools import ToolAttention
 from .advisories import AdvisoryLookup, AdvisoryUnavailable, public_model
 from .console import OperatorConsole
 from .contracts import (
+    household_zone,
     integer,
     items,
     object_fields,
@@ -701,6 +702,26 @@ def application(
             raise web.HTTPNotFound(text="Dashboard settings are not enabled")
         return web.json_response(asdict(await settings.save(choice)))
 
+    async def save_time_zone(request: web.Request) -> web.Response:
+        # The household zone: dates, report times and daily limits. A null
+        # value removes it, so the collector uses UTC.
+        row = object_fields(parse_json(await request.read()), {"timeZone"})
+        try:
+            zone = (
+                household_zone(row["timeZone"]) if row["timeZone"] is not None else None
+            )
+        except ValueError as error:
+            return web.json_response({"error": str(error)}, status=400)
+        if settings is None:
+            raise web.HTTPNotFound(text="Dashboard settings are not enabled")
+        config = await settings.save_time_zone(zone)
+        return web.json_response(
+            {
+                "time_zone": config.zone,
+                "time_zone_configured": config.time_zone is not None,
+            }
+        )
+
     async def previous_devices(request: web.Request) -> web.Response:
         result = discovery.latest() if discovery is not None else None
         return web.json_response(asdict(result) if result is not None else None)
@@ -955,6 +976,7 @@ def application(
     app.router.add_post("/api/session/logout", disconnect_session)
     app.router.add_get("/api/monitoring", monitoring)
     app.router.add_post("/api/monitoring", save_monitoring)
+    app.router.add_post("/api/time-zone", save_time_zone)
     app.router.add_get("/api/discovery", previous_devices)
     app.router.add_post("/api/discovery", find_devices)
     app.router.add_get("/api/status", status)

@@ -26,6 +26,7 @@ from plowshare_privacy.console_port import (
     ScheduleView,
 )
 from plowshare_privacy.contracts import (
+    Configuration,
     DeviceIdentity,
     DeviceLabel,
     PiHolePlan,
@@ -40,7 +41,7 @@ from plowshare_privacy.discovery import (
 )
 from plowshare_privacy.identity_source import ManagedProduct, ManagedProductLookup
 from plowshare_privacy.journal import FileReceipts, Receipt
-from plowshare_privacy.monitor import MonitorChoice, MonitorView
+from plowshare_privacy.monitor import MonitorChoice, MonitorView, SettingsBusy
 from plowshare_privacy.operator_state import (
     FileOperatorStore,
     InvestigationDecision,
@@ -64,6 +65,9 @@ class Settings:
 
     async def save_pihole(self, origin: str, password_file: Path) -> MonitorView:
         return self.view()
+
+    async def save_time_zone(self, zone: str | None) -> Configuration:
+        raise SettingsBusy("Fixture settings keep no time zone")
 
 
 class ConsoleFixture:

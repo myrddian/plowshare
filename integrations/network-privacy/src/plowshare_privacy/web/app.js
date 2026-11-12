@@ -128,6 +128,54 @@ const countFormat = new Intl.NumberFormat();
 let householdZone = 'UTC';
 let whenFormat, dayFormat;
 // dateStyle cannot be combined with timeZoneName, so the parts are explicit.
+// The household zone is a dashboard setting. The browser's own zone list
+// suggests names; the collector validates whatever is saved.
+const browserZone = (() => {try {return new Intl.DateTimeFormat().resolvedOptions().timeZone || null;} catch (error) {return null;}})();
+let zoneNamesListed = false, zoneBusy = false;
+function knownZones() {
+  try {return typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];} catch (error) {return [];}
+}
+function renderZoneSetting(status) {
+  const panel = byId('household-zone');
+  panel.hidden = !status.settings_available || typeof status.time_zone !== 'string';
+  if (panel.hidden) return;
+  const configured = !!status.time_zone_configured;
+  byId('zone-state').textContent = configured ? status.time_zone : 'Not set · UTC in use';
+  if (!zoneNamesListed) {
+    zoneNamesListed = true;
+    byId('zone-names').replaceChildren(...knownZones().map(name => {const option = element('option'); option.value = name; return option;}));
+  }
+  const input = byId('zone-input');
+  if (!zoneBusy && document.activeElement !== input && !input.dataset?.edited) input.value = configured ? status.time_zone : '';
+  const browser = byId('zone-browser');
+  browser.hidden = !browserZone || (configured && browserZone === status.time_zone);
+  if (browserZone) browser.textContent = `Use this browser’s zone (${browserZone})`;
+  byId('zone-clear').hidden = !configured;
+}
+async function saveZone(zone) {
+  if (zoneBusy) return;
+  const listed = knownZones();
+  if (zone !== null && listed.length && !listed.includes(zone) && zone !== 'UTC') {
+    notice(`${zone} is not a time zone this browser knows. Choose a name from the list, such as Europe/London.`, true);
+    return;
+  }
+  zoneBusy = true;
+  const button = byId(zone === null ? 'zone-clear' : 'zone-save');
+  setBusy(button, true);
+  try {
+    const result = await api('/api/time-zone', {method:'POST', body:JSON.stringify({timeZone:zone})});
+    if (byId('zone-input').dataset) delete byId('zone-input').dataset.edited;
+    setHouseholdZone(result.time_zone);
+    deviceSignature = '';
+    notice(result.time_zone_configured ? `Time zone set to ${result.time_zone}. Dates now show in it.` : 'Time zone removed. The collector uses UTC.');
+    await refresh();
+  } catch (error) {notice(error.message, true);}
+  finally {zoneBusy = false; setBusy(button, false);}
+}
+byId('zone-form').addEventListener('submit', event => {event.preventDefault(); saveZone(byId('zone-input').value.trim());});
+byId('zone-input').addEventListener('input', () => {if (byId('zone-input').dataset) byId('zone-input').dataset.edited = '1';});
+byId('zone-browser').addEventListener('click', () => {if (browserZone) {byId('zone-input').value = browserZone; saveZone(browserZone);}});
+byId('zone-clear').addEventListener('click', () => saveZone(null));
 function setHouseholdZone(zone) {
   try {
     whenFormat = new Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZone:zone, timeZoneName:'short'});
@@ -351,6 +399,7 @@ async function refresh() {
       setHouseholdZone(status.time_zone);
       deviceSignature = '';
     }
+    renderZoneSetting(status);
     if (Number.isInteger(status.max_ports)) {
       maxPorts = status.max_ports;
       byId('ports-help').textContent = `Up to ${maxPorts} ports, used both to find devices and to watch them. Each extra port adds time to Find devices.`;
@@ -421,6 +470,7 @@ byId('disconnect').addEventListener('click', async () => {
   byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
   setSignalFilter('all');
   selectedDevice = null; deviceSupplemental = null; setHouseholdZone('UTC');
+  byId('household-zone').hidden = true; byId('zone-input').value = '';
   for (const id of deviceParts) byId(id).replaceChildren();
   syncPane();
   byId('fixture-banner').hidden = true; byId('mode').classList.toggle('synthetic', false);
@@ -1705,7 +1755,7 @@ function renderSystem(system, health) {
   fact(deployment, 'Relay topics', `Requests on ${plan.request_topic}, results on ${plan.result_topic}`);
   fact(deployment, 'Relay group', plan.group, 'data');
   fact(deployment, 'Outgoing peer', plan.outgoing_peer || 'None');
-  fact(deployment, 'Time zone', plan.time_zone ? `${plan.time_zone}, for every date shown and the daily limits` : 'UTC: timeZone is not set in collector.json', plan.time_zone ? 'data' : undefined);
+  fact(deployment, 'Time zone', plan.time_zone ? `${plan.time_zone}, for every date shown and the daily limits` : 'UTC: not set. Choose one under Settings › Household time zone', plan.time_zone ? 'data' : undefined);
   fact(deployment, 'Port checks', `${plural(plan.probe_timeout_seconds, 'second', 'seconds')} timeout, ${formatCount(plan.probe_concurrency)} at a time`);
   for (const item of plan.credentials) credentialFact(deployment, item.purpose, item);
   const problem = !health.connected || health.recovery.length > 0 || missingCredentials(system).length > 0;
