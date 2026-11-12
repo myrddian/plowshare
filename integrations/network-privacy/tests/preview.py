@@ -82,6 +82,14 @@ def sample_overview(total: int | None = None) -> Middleware:
             except KeyError:
                 raise web.HTTPNotFound(text="Choose a monitored sample device")
         response = await handler(request)
+        if request.path == "/api/status" and isinstance(response, web.Response):
+            # The sample household keeps Sydney time, as its System health says.
+            status = json.loads(response.text or "{}")
+            status["time_zone"], status["time_zone_configured"] = (
+                "Australia/Sydney",
+                True,
+            )
+            return web.json_response(status, status=response.status)
         if request.path != "/api/overview" or not isinstance(response, web.Response):
             return response
         body = json.loads(response.text or "{}")

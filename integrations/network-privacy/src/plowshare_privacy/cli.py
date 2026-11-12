@@ -9,6 +9,7 @@ import os
 import signal
 from contextlib import AsyncExitStack, ExitStack
 from dataclasses import asdict
+from functools import partial
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -37,7 +38,7 @@ from .dashboard import RunningDashboard
 from .device_assessments import AssessmentJournal, DeviceAssessments
 from .device_describer import LocalDeviceDescriber
 from .device_facts import DeviceFactsJournal, DeviceFactsService
-from .device_profiles import DeviceProfiles, FileProfileIntents
+from .device_profiles import DeviceProfiles, FileProfileIntents, profile_for
 from .discovery import LocalDeviceDiscovery
 from .dossier_port import DeviceDossiers, FileDossierIntents, SdkDossierPort
 from .identity_source import ManagedProductLookup
@@ -295,6 +296,10 @@ async def execute(args: argparse.Namespace) -> None:
                     dossiers,
                     worker.device_inventory,
                     facts=worker.device_facts,
+                    profile=partial(profile_for, profiles)
+                    if profiles is not None
+                    else None,
+                    zone=config.zone,
                 )
                 if dossiers is not None
                 else None
@@ -443,6 +448,7 @@ async def execute(args: argparse.Namespace) -> None:
                     receipts,
                     managed_products,
                     advisories,
+                    zone=config.zone,
                 )
                 if operator_store is not None and config.collection.mode == "tcp"
                 else None

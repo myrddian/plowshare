@@ -87,8 +87,12 @@ class Dossiers:
     def __init__(self) -> None:
         self.retained: list[DeviceDossier] = []
         self.revisions: list[str] = []
+        self.zones: list[str] = []
 
-    async def retain(self, dossier: DeviceDossier) -> RetainedDossier:
+    async def retain(
+        self, dossier: DeviceDossier, zone: str = "UTC"
+    ) -> RetainedDossier:
+        self.zones.append(zone)
         self.retained.append(dossier)
         self.revisions.append(str(uuid4()))
         return RetainedDossier(
@@ -613,6 +617,121 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         [dossier] = self.dossiers.retained
         self.assertEqual(dossier.supplemental.described_at, "2026-11-11T08:00:00Z")
         self.assertEqual(dossier.supplemental.descriptions[0].manufacturer, "Sony")
+
+    async def test_the_confirmed_profile_and_household_zone_reach_the_run(
+        self,
+    ) -> None:
+        from plowshare_privacy.device_dossier import OperatorProfile, ProfileMatch
+
+        revision = str(uuid4())
+        seen: list[str] = []
+
+        async def profile(card: DeviceCard) -> ProfileMatch:
+            seen.append(card.address)
+            return ProfileMatch(OperatorProfile(revision, "Television", "HTTPS"))
+
+        service = DeviceAssessments(
+            AssessmentJournal(self.root),
+            self.runs,
+            self.dossiers,
+            lambda: DeviceInventory(self.cards),
+            facts=self.facts.get,
+            profile=profile,
+            clock=lambda: self.now,
+            zone="Australia/Sydney",
+        )
+        await service.assess(TV)
+        [dossier] = self.dossiers.retained
+        assert dossier.profile is not None
+        self.assertEqual(dossier.profile.revision, revision)
+        self.assertEqual(self.dossiers.zones, ["Australia/Sydney"])
+        [(_, request)] = self.runs.starts
+        encoded = json.loads(request.encode())
+        self.assertEqual(encoded["version"], 2)
+        self.assertEqual(encoded["time_zone"], "Australia/Sydney")
+        # 09:00 UTC on the 11th is 20:00 in Sydney (UTC+11 in November).
+        self.assertEqual(encoded["requested_local"], "2026-11-11 20:00 AEDT")
+        # The zone is retained with the entry, so a restart rebuilds the same request.
+        restarted = DeviceAssessments(
+            AssessmentJournal(self.root),
+            self.runs,
+            self.dossiers,
+            lambda: DeviceInventory(self.cards),
+            zone="UTC",
+        )
+        rebuilt = restarted._entry(TV)
+        assert rebuilt is not None
+        self.assertEqual(rebuilt.request().encode(), request.encode())
+
+    async def test_an_address_only_profile_is_named_in_coverage_not_used(
+        self,
+    ) -> None:
+        from plowshare_privacy.device_dossier import ProfileMatch
+
+        async def profile(card: DeviceCard) -> ProfileMatch:
+            return ProfileMatch(None, "address_only")
+
+        service = DeviceAssessments(
+            AssessmentJournal(self.root),
+            self.runs,
+            self.dossiers,
+            lambda: DeviceInventory(self.cards),
+            profile=profile,
+            clock=lambda: self.now,
+        )
+        await service.assess(TV)
+        [dossier] = self.dossiers.retained
+        self.assertIsNone(dossier.profile)
+        self.assertTrue(
+            any("matches this address only" in line for line in dossier.coverage)
+        )
+
+    async def test_an_unreadable_profile_list_starts_nothing(self) -> None:
+        async def profile(card: DeviceCard) -> object:
+            raise ConnectionError("profiles unavailable")
+
+        service = DeviceAssessments(
+            AssessmentJournal(self.root),
+            self.runs,
+            self.dossiers,
+            lambda: DeviceInventory(self.cards),
+            profile=profile,  # type: ignore[arg-type]
+            clock=lambda: self.now,
+        )
+        with self.assertRaises(ConnectionError):
+            await service.assess(TV)
+        self.assertEqual(self.dossiers.retained, [])
+        self.assertEqual(self.runs.starts, [])
+
+    async def test_the_daily_ceiling_counts_the_household_day(self) -> None:
+        sydney = DeviceAssessments(
+            AssessmentJournal(self.root),
+            self.runs,
+            self.dossiers,
+            lambda: DeviceInventory(self.cards),
+            clock=lambda: self.now,
+            zone="Australia/Sydney",
+        )
+        # 09:00 UTC on the 11th is the evening of the 11th in Sydney; 13:30 UTC
+        # is already the 12th there, so the earlier admission no longer counts.
+        await sydney.assess(TV)
+        self.assertEqual(sydney.usage().used_today, 1)
+        self.now = "2026-11-11T13:30:00Z"
+        self.assertEqual(sydney.usage().used_today, 0)
+        self.service = self.restart()
+        self.assertEqual(self.service.usage().used_today, 1)
+
+    async def test_a_ledger_entry_without_a_zone_still_decodes(self) -> None:
+        await self.service.assess(TV)
+        path = self.root / "device-assessments.json"
+        row = json.loads(path.read_text())
+        for entry in row["entries"]:
+            del entry["time_zone"]
+        path.write_text(json.dumps(row))
+        legacy = self.restart()._entry(TV)
+        assert legacy is not None
+        self.assertIsNone(legacy.time_zone)
+        self.assertEqual(json.loads(legacy.request().encode())["version"], 1)
 
     async def test_background_assesses_a_never_assessed_device_with_facts(
         self,

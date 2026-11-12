@@ -239,11 +239,11 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
         document = DossierDocument(str(uuid4()), DEVICE, payload)
         self.assertEqual(DossierDocument.read(document.text()), document)
         self.assertEqual(json.loads(document.text())["dossier"], json.loads(payload))
-        self.assertTrue(document.text().startswith('{"version":2,'))
+        self.assertTrue(document.text().startswith('{"version":3,'))
         for invalid in (
-            # Version 1 has no supplemental section; version 3 is unknown.
-            document.text().replace('"version":2', '"version":1'),
-            document.text().replace('"version":2', '"version":3'),
+            # Version 2 has no clock; version 4 is unknown.
+            document.text().replace('"version":3', '"version":2'),
+            document.text().replace('"version":3', '"version":4'),
             document.text()[:-1] + ',"extra":true}',
             document.text().replace(',"', ', "', 1),
             json.dumps({**json.loads(document.text()), "device_id": "ip:10.0.0.1"}),
@@ -252,8 +252,52 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
                 DossierDocument.read(invalid)
         with self.assertRaises(ValueError):
             DossierDocument(str(uuid4()), OTHER, payload)
+        with self.assertRaises(ValueError):
+            DossierDocument(str(uuid4()), DEVICE, payload, zone="Not/AZone")
 
-    async def test_a_version_1_revision_is_read_and_revised_to_version_2(
+    def test_the_clock_writes_each_printed_time_in_the_household_zone(self) -> None:
+        value = json.loads(encode_dossier(dossier()))
+        value["traffic"] = {
+            "from_at": "2026-11-11T13:30:00Z",
+            "until_at": "2026-11-12T01:00:00Z",
+            "samples": 2,
+            "to_device_bytes": 1,
+            "from_device_bytes": 2,
+            "resets": 0,
+        }
+        payload = json.dumps(value, separators=(",", ":"))
+        document = DossierDocument(
+            str(uuid4()), DEVICE, payload, zone="Australia/Sydney"
+        )
+        clock = json.loads(document.text())["clock"]
+        self.assertEqual(clock["zone"], "Australia/Sydney")
+        # Sydney is UTC+11 in November: the evening of the 11th UTC is the 12th.
+        self.assertEqual(
+            clock["times"]["2026-11-11T13:30:00Z"], "2026-11-12 00:30 AEDT"
+        )
+        self.assertEqual(
+            clock["times"]["2026-11-12T01:00:00Z"], "2026-11-12 12:00 AEDT"
+        )
+        self.assertEqual(DossierDocument.read(document.text()), document)
+        # A clock that does not derive from the payload and zone is rejected.
+        for tampered in (
+            document.text().replace("00:30 AEDT", "00:31 AEDT"),
+            document.text().replace('"zone":"Australia/Sydney"', '"zone":"UTC"'),
+        ):
+            with self.assertRaises(ValueError):
+                DossierDocument.read(tampered)
+
+    async def test_a_new_zone_revises_an_otherwise_unchanged_dossier(self) -> None:
+        first = await self.dossiers.retain(dossier())
+        again = await self.dossiers.retain(dossier())
+        self.assertFalse(again.changed)
+        moved = await self.dossiers.retain(dossier(), "Australia/Sydney")
+        self.assertTrue(moved.changed)
+        self.assertNotEqual(moved.revision, first.revision)
+        written = DossierDocument.read(self.remote.texts[moved.revision])
+        self.assertEqual(written.zone, "Australia/Sydney")
+
+    async def test_a_version_1_revision_is_read_and_revised_to_version_3(
         self,
     ) -> None:
         current = json.loads(encode_dossier(dossier()))
@@ -270,7 +314,7 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(retained.changed)
         self.assertEqual(self.remote.writes[-1][2], revision)
         written = DossierDocument.read(self.remote.texts[retained.revision])
-        self.assertEqual(written.version, 2)
+        self.assertEqual(written.version, 3)
 
     def test_journal_is_bound_to_project_collector_and_settled_receipts(self) -> None:
         document = DossierDocument(str(uuid4()), DEVICE, encode_dossier(dossier()))

@@ -10,7 +10,6 @@ import asyncio
 import json
 import re
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 from uuid import uuid4
@@ -21,6 +20,7 @@ from .advisories import AdvisoryLookup, AdvisoryPage, AdvisoryUnavailable, publi
 from .contracts import (
     DeviceIdentity,
     TcpObservation,
+    household_day,
     identifier,
     items,
     load_json,
@@ -268,13 +268,10 @@ class ResearchPort(Protocol):
     async def outcome(self, run_id: str) -> ResearchOutcome: ...
 
 
-def admitted_today(ledger: ResearchLedger, now: str) -> int:
-    """Admissions on ``now``'s UTC day, the window ``DAILY_LIMIT`` applies to."""
-    day = datetime.fromtimestamp(epoch(now), timezone.utc).date()
-    return sum(
-        datetime.fromtimestamp(epoch(stamp), timezone.utc).date() >= day
-        for stamp in ledger.admissions
-    )
+def admitted_today(ledger: ResearchLedger, now: str, zone: str = "UTC") -> int:
+    """Admissions on ``now``'s household day, the window ``DAILY_LIMIT`` applies to."""
+    day = household_day(now, zone)
+    return sum(household_day(stamp, zone) >= day for stamp in ledger.admissions)
 
 
 class ResearchReview(Protocol):
@@ -307,7 +304,10 @@ class ProfileResearch:
         advisories: AdvisoryLookup | None,
         *,
         clock: Callable[[], str] = utc_now,
+        zone: str = "UTC",
     ):
+        # Daily allowances follow the household's day (configuration timeZone).
+        self.zone = zone
         self.journal = journal
         self.port = port
         self.presence = presence
@@ -521,11 +521,11 @@ class ProfileResearch:
         if not self.ledger.enabled:
             return
         now = self.clock()
-        day = datetime.fromtimestamp(epoch(now), timezone.utc).date()
+        day = household_day(now, self.zone)
         admissions = tuple(
             stamp
             for stamp in self.ledger.admissions
-            if datetime.fromtimestamp(epoch(stamp), timezone.utc).date() >= day
+            if household_day(stamp, self.zone) >= day
         )
         if len(admissions) >= DAILY_LIMIT:
             return

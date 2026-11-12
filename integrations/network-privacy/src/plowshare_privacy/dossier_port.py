@@ -42,9 +42,11 @@ from plowshare.contracts import (
 from .contracts import (
     MAX_FILE_BYTES,
     Configuration,
+    household_zone,
     integer,
     items,
     load_json,
+    local_time,
     object_fields,
     parse_json,
     timestamp,
@@ -56,10 +58,12 @@ from .profile_port import RetainedSourceReader
 from .worker import ReconciliationRequired
 
 PREFIX = "network-privacy-dossier/"
-# Version 2 added the dossier's ``supplemental`` section. Version 1 revisions
-# retained before it are still read (for comparison and receipts) but never
-# written; a v1 payload never equals a v2 one, so the next retention revises it.
-DOCUMENT_VERSION = 2
+# Version 2 added the dossier's ``supplemental`` section. Version 3 adds the
+# envelope ``clock``: the household zone and each dossier timestamp the report
+# prints, written in that zone, so the report needs no time zone data of its
+# own. Older revisions are still read (for comparison and receipts) but never
+# written; they never equal a newer document, so the next retention revises it.
+DOCUMENT_VERSION = 3
 _DOSSIER_FIELDS = {
     1: frozenset(
         {
@@ -78,6 +82,34 @@ _DOSSIER_FIELDS = {
     ),
 }
 _DOSSIER_FIELDS[2] = _DOSSIER_FIELDS[1] | {"supplemental"}
+_DOSSIER_FIELDS[3] = _DOSSIER_FIELDS[2]
+
+
+def _report_times(dossier: dict[str, object]) -> tuple[str, ...]:
+    """The dossier timestamps the assessment report prints, in a stable order."""
+    found: list[object] = []
+    traffic = dossier.get("traffic")
+    if isinstance(traffic, dict):
+        found += [traffic.get("from_at"), traffic.get("until_at")]
+    section = dossier.get("supplemental")
+    if isinstance(section, dict):
+        found.append(section.get("described_at"))
+        for item in section.get("descriptions") or ():
+            if isinstance(item, dict):
+                found.append(item.get("observed_at"))
+        lookup = section.get("advisories")
+        if isinstance(lookup, dict):
+            found.append(lookup.get("checked_at"))
+    return tuple(dict.fromkeys(t for t in found if isinstance(t, str)))
+
+
+def clock_text(payload: str, zone: str) -> str:
+    """The compact version 3 clock for ``payload`` written in ``zone``."""
+    dossier = json.loads(payload)
+    times = {stamp: local_time(stamp, zone) for stamp in _report_times(dossier)}
+    return _compact({"zone": zone, "times": times})
+
+
 # A dossier is built to the 16,000-byte tool reply budget; the envelope adds
 # well under 200 bytes. The bound leaves room without admitting unbounded text.
 MAX_DOCUMENT_BYTES = 32768
@@ -111,12 +143,15 @@ class DossierDocument:
     device_id: str
     payload: str
     version: int = DOCUMENT_VERSION
+    # The household zone a version 3 clock is written in; unused before it.
+    zone: str = "UTC"
 
     def __post_init__(self) -> None:
         uuid(self.write_id)
         parse_device_id(self.device_id)
         if type(self.version) is not int or self.version not in _DOSSIER_FIELDS:
             raise ValueError("Unsupported dossier document version")
+        household_zone(self.zone)
         dossier = object_fields(
             parse_json(self.payload, maximum_bytes=MAX_DOCUMENT_BYTES),
             set(_DOSSIER_FIELDS[self.version]),
@@ -142,10 +177,19 @@ class DossierDocument:
             raise ValueError("Dossier document exceeds its size bound")
 
     @classmethod
-    def of(cls, write_id: str, dossier: DeviceDossier) -> DossierDocument:
-        return cls(write_id, dossier.identity.device_id, encode_dossier(dossier))
+    def of(
+        cls, write_id: str, dossier: DeviceDossier, zone: str = "UTC"
+    ) -> DossierDocument:
+        return cls(
+            write_id, dossier.identity.device_id, encode_dossier(dossier), zone=zone
+        )
+
+    @property
+    def clock(self) -> str | None:
+        return clock_text(self.payload, self.zone) if self.version >= 3 else None
 
     def text(self) -> str:
+        clock = self.clock
         return (
             '{"version":'
             + str(self.version)
@@ -153,6 +197,7 @@ class DossierDocument:
             + json.dumps(self.write_id)
             + ',"device_id":'
             + json.dumps(self.device_id)
+            + (',"clock":' + clock if clock is not None else "")
             + ',"dossier":'
             + self.payload
             + "}"
@@ -163,6 +208,7 @@ class DossierDocument:
         row = object_fields(
             parse_json(text, maximum_bytes=MAX_DOCUMENT_BYTES),
             {"version", "write_id", "device_id", "dossier"},
+            {"clock"},
         )
         version = row["version"]
         if type(version) is not int or version not in _DOSSIER_FIELDS:
@@ -171,8 +217,16 @@ class DossierDocument:
             row["device_id"], str
         ):
             raise ValueError("Invalid dossier document identity")
+        if (version >= 3) != ("clock" in row):
+            raise ValueError("Dossier clock does not match its version")
+        clock = object_fields(row["clock"], {"zone", "times"}) if version >= 3 else None
+        # The text() comparison below proves the times derive from the payload.
         document = cls(
-            row["write_id"], row["device_id"], _compact(row["dossier"]), version
+            row["write_id"],
+            row["device_id"],
+            _compact(row["dossier"]),
+            version,
+            household_zone(clock["zone"]) if clock is not None else "UTC",
         )
         if document.text() != text:
             raise ValueError("Dossier text differs from its validated record")
@@ -336,7 +390,9 @@ class FileDossierIntents:
 class DossierRetention(Protocol):
     """Retain a device's dossier and return the revision a report may cite."""
 
-    async def retain(self, dossier: DeviceDossier) -> RetainedDossier: ...
+    async def retain(
+        self, dossier: DeviceDossier, zone: str = "UTC"
+    ) -> RetainedDossier: ...
     async def reconcile(self) -> None: ...
 
 
@@ -363,7 +419,9 @@ class DeviceDossiers:
         # One writer per process; the journal is the cross-restart fence.
         self.lock = asyncio.Lock()
 
-    async def retain(self, dossier: DeviceDossier) -> RetainedDossier:
+    async def retain(
+        self, dossier: DeviceDossier, zone: str = "UTC"
+    ) -> RetainedDossier:
         """Upload, revise or reuse; raises before transport if the device is fenced.
 
         Reading the latest revision may be refused while its extraction is
@@ -379,9 +437,17 @@ class DeviceDossiers:
                 current = DossierDocument.read(await self.port.read(head.revision))
                 if current.device_id != device:
                     raise ValueError("Retained dossier belongs to another device")
-                if current.payload == payload:
+                # Reused only when the record and its clock are both current;
+                # an older version or another zone writes a new revision.
+                if (
+                    current.payload == payload
+                    and current.text()
+                    == DossierDocument(
+                        current.write_id, device, payload, zone=zone
+                    ).text()
+                ):
                     return RetainedDossier(device, head.revision, head.resource, False)
-            document = DossierDocument(self.new_id(), device, payload)
+            document = DossierDocument(self.new_id(), device, payload, zone=zone)
             expected = head.revision if head is not None else None
             intent = DossierIntent(
                 document.write_id, device, expected, document.text(), "pending"

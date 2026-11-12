@@ -44,6 +44,7 @@ from .discovery import DeviceDiscovery, DiscoveryPlan
 from .identity_source import ManagedProductLookup, ManagedProductUnavailable
 from .issue_records import IssueManagement
 from .journal import Publication
+from .limits import MAX_PORTS
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
@@ -710,7 +711,7 @@ def application(
         row = object_fields(parse_json(await request.read()), {"network", "ports"})
         plan = DiscoveryPlan(
             IPv4Network(text(row["network"], 64), strict=True),
-            tuple(integer(port, 1, 65535) for port in items(row["ports"], 8)),
+            tuple(integer(port, 1, 65535) for port in items(row["ports"], MAX_PORTS)),
             0.5,
             32,
         )
@@ -801,11 +802,18 @@ def application(
                 "settings_available": settings is not None,
                 "profiles_available": profiles is not None,
                 "advisories_available": profiles is not None and advisories is not None,
+                # Why a manual search is off, so the pane never contradicts the
+                # automatic lookups the collector retained for a device.
+                "advisories_configured": advisories is not None,
+                "max_ports": MAX_PORTS,
+                # Every date the dashboard shows is in this one zone.
+                "time_zone": worker.config.zone,
+                "time_zone_configured": worker.config.time_zone is not None,
                 "profile_research_available": profile_research is not None,
                 "profile_research_enabled": profile_research is not None
                 and profile_research.ledger.enabled,
                 "profile_research_used_today": admitted_today(
-                    profile_research.ledger, utc_now()
+                    profile_research.ledger, utc_now(), worker.config.zone
                 )
                 if profile_research is not None
                 else 0,

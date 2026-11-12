@@ -478,7 +478,7 @@ Vendor notes are features this manufacturer ships, not observations of this devi
 - Device: `mac:02:00:00:00:00:0a` at 192.0.2.10
 - Dossier revision: `dddddddd-dddd-4ddd-8ddd-ddddddddddd1`
 - Port scan revision: `00000000-0000-5000-8000-000000000010`
-- Operator profile revision: none
+- Operator profile revision: not used; see Coverage
 - Previous assessment revision: none
 - DNS window: 24 hours, 288 windows, 3 partial
 - Traffic window: 24 hours, 412 MB from the device and 18.4 GB to it; 1 counter reset
@@ -532,6 +532,7 @@ def sample_system() -> Row:
             "outgoing_peer": None,
             "probe_timeout_seconds": 1.5,
             "probe_concurrency": 32,
+            "time_zone": "Australia/Sydney",
             "credentials": [
                 {
                     **variable,

@@ -27,13 +27,16 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from .contracts import object_fields, parse_json, uuid
+from .contracts import household_zone, local_time, object_fields, parse_json, uuid
 from .device_dossier import parse_device_id
 
 DEFINITION = "assess_network_device"
 CALLER = "privacy_coordinator"
 REPORT_PREFIX = "Network privacy assessment / "
-REQUEST_VERSION = 1
+# Version 2 adds the household time zone and the local assessment time; a
+# request without a zone stays version 1, byte for byte. Results stay version 1.
+REQUEST_VERSION = 2
+RESULT_VERSION = 1
 
 ConcernLevel = Literal["potential_breach", "worth_checking", "expected"]
 ConcernVerdict = Literal["holds", "weakened", "refuted"]
@@ -57,6 +60,8 @@ class AssessmentRequest:
     dossier: str
     previous: str | None
     requested_at: str
+    # The household zone the report's dates are written in; None writes UTC.
+    time_zone: str | None = None
 
     def __post_init__(self) -> None:
         parse_device_id(self.device_id)
@@ -67,19 +72,23 @@ class AssessmentRequest:
             self.requested_at
         ):
             raise ValueError("requested_at must be a UTC timestamp ending in Z")
+        if self.time_zone is not None:
+            household_zone(self.time_zone)
 
     def encode(self) -> str:
-        return json.dumps(
-            {
-                "version": REQUEST_VERSION,
-                "device_id": self.device_id,
-                "dossier": self.dossier,
-                "previous": self.previous,
-                "requested_at": self.requested_at,
-            },
-            allow_nan=False,
-            separators=(",", ":"),
-        )
+        row: dict[str, object] = {
+            "version": 1 if self.time_zone is None else REQUEST_VERSION,
+            "device_id": self.device_id,
+            "dossier": self.dossier,
+            "previous": self.previous,
+            "requested_at": self.requested_at,
+        }
+        if self.time_zone is not None:
+            # Derived from requested_at and the entry's zone, so a rebuilt
+            # request is identical to the one first sent.
+            row["time_zone"] = self.time_zone
+            row["requested_local"] = local_time(self.requested_at, self.time_zone)
+        return json.dumps(row, allow_nan=False, separators=(",", ":"))
 
 
 @dataclass(frozen=True)
@@ -138,7 +147,7 @@ class AssessmentResult:
                 "concerns",
             },
         )
-        if type(row["version"]) is not int or row["version"] != REQUEST_VERSION:
+        if type(row["version"]) is not int or row["version"] != RESULT_VERSION:
             raise ValueError("Unsupported assessment result version")
         report = object_fields(row["report"], {"revision", "resource"})
         review, corrected = row["review"], row["corrected"]

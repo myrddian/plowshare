@@ -236,6 +236,26 @@ class OperatorProfile:
             raise ValueError("Choose at most four distinct privacy issues")
 
 
+# Why no operator profile reached a dossier although one exists: it was matched
+# by address only, or several profiles claim the device. Neither is used, since
+# an address alone does not establish identity.
+ProfileNote = Literal["address_only", "ambiguous"]
+
+
+@dataclass(frozen=True)
+class ProfileMatch:
+    """The operator profile chosen for a dossier, or why none was."""
+
+    profile: OperatorProfile | None
+    note: ProfileNote | None = None
+
+    def __post_init__(self) -> None:
+        if self.profile is not None and self.note is not None:
+            raise ValueError("A used profile needs no note")
+        if self.note not in (None, "address_only", "ambiguous"):
+            raise ValueError("Unsupported profile note")
+
+
 @dataclass(frozen=True)
 class SupplementalAdvisory:
     cve: str
@@ -564,6 +584,7 @@ def _coverage(
     trimmed: int,
     section: DossierSupplemental,
     trimmed_advisories: int = 0,
+    profile_note: ProfileNote | None = None,
 ) -> tuple[str, ...]:
     lines: list[str] = []
     if card.revision is None:
@@ -615,7 +636,17 @@ def _coverage(
                 f"{traffic.resets} counter resets dropped intervals; "
                 "byte totals are a lower bound."
             )
-    if profile is None:
+    if profile is None and profile_note == "address_only":
+        lines.append(
+            "A profile matches this address only and was not used: a matching "
+            "address does not establish identity. Expected behaviour is unknown."
+        )
+    elif profile is None and profile_note == "ambiguous":
+        lines.append(
+            "Several profiles claim this device; none was used. Expected "
+            "behaviour is unknown."
+        )
+    elif profile is None:
         lines.append("No operator profile supplied; expected behaviour is unknown.")
     lines.extend(_supplemental_coverage(section, trimmed_advisories))
     if trimmed:
@@ -678,6 +709,7 @@ def build_dossier(
     *,
     facts: DeviceFacts | None = None,
     budget: int = TOOL_REPLY_BYTES,
+    profile_note: ProfileNote | None = None,
 ) -> DeviceDossier:
     """Build the dossier and fit it to ``budget`` bytes.
 
@@ -694,6 +726,7 @@ def build_dossier(
         raise ValueError("A device dossier needs a confirmed MAC identity")
     if facts is not None and facts.device_id != device_id:
         raise ValueError("Device facts belong to another device")
+    ProfileMatch(profile, profile_note)
     section = card_supplemental(card, facts)
     dns = card.dns_activity
     groups = _groups(dns) if dns is not None else ()
@@ -739,7 +772,7 @@ def build_dossier(
         card.traffic,
         profile,
         section,
-        _coverage(card, profile, 0, section),
+        _coverage(card, profile, 0, section, 0, profile_note),
         device_signals(card),
     )
     # Advisories go first: each is about the model rather than this device's
@@ -757,7 +790,9 @@ def build_dossier(
         dossier = replace(
             dossier,
             supplemental=section,
-            coverage=_coverage(card, profile, 0, section, trimmed_advisories),
+            coverage=_coverage(
+                card, profile, 0, section, trimmed_advisories, profile_note
+            ),
         )
     dns_section = dossier.dns
     drop = _drop_order(groups)
@@ -777,7 +812,9 @@ def build_dossier(
         dossier = replace(
             dossier,
             dns=dns_section,
-            coverage=_coverage(card, profile, trimmed, section, trimmed_advisories),
+            coverage=_coverage(
+                card, profile, trimmed, section, trimmed_advisories, profile_note
+            ),
             trimmed_destinations=trimmed,
         )
     if _size(dossier) > budget:

@@ -21,6 +21,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UUID_ANYWHERE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const DEVICE_ID = /^mac:[0-9a-f]{2}(?::[0-9a-f]{2}){5}$/;
 const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+// A household time the collector wrote (contracts.local_time): date, time and
+// the zone's abbreviation. The script has no time zone data of its own.
+const LOCAL = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} [A-Za-z0-9+\-]{1,8}$/;
+const ZONE = /^[A-Za-z0-9_+\-]+(?:\/[A-Za-z0-9_+\-]+)*$/;
 const REPORT_PREFIX = 'Network privacy assessment / ';
 const OBJECTIVE = 'Identify what is privacy-relevant about this device from its retained dossier.';
 // The collector builds a dossier within 16,000 bytes; its envelope adds little.
@@ -114,16 +118,22 @@ function plain(value, limit) {
 
 function initial(input) {
   const envelope = json(text(input.message, 'start envelope', 8192), 'start envelope');
-  const request = record(json(text(envelope.request, 'assessment request', 4096), 'assessment request'),
-    'assessment request', ['version', 'device_id', 'dossier', 'previous', 'requested_at']);
-  if (request.version !== 1) fail('Unsupported assessment request version');
+  // Version 2 adds the household zone and the assessment time written in it.
+  const raw = json(text(envelope.request, 'assessment request', 4096), 'assessment request');
+  const keys = ['version', 'device_id', 'dossier', 'previous', 'requested_at'];
+  const request = record(raw, 'assessment request', raw?.version === 2 ? [...keys, 'time_zone', 'requested_local'] : keys);
+  if (request.version !== 1 && request.version !== 2) fail('Unsupported assessment request version');
+  if (request.version === 2) {
+    if (typeof request.time_zone !== 'string' || request.time_zone.length > 64 || !ZONE.test(request.time_zone)) fail('Invalid time_zone');
+    if (typeof request.requested_local !== 'string' || !LOCAL.test(request.requested_local)) fail('Invalid requested_local');
+  }
   if (typeof request.device_id !== 'string' || !DEVICE_ID.test(request.device_id)) fail('Invalid device_id');
   uuid(request.dossier, 'dossier revision');
   if (request.previous !== null && uuid(request.previous, 'previous assessment') === request.dossier) fail('Invalid previous assessment');
   if (typeof request.requested_at !== 'string' || !UTC.test(request.requested_at)) fail('Invalid requested_at');
   return {stage: 0, pending: null, entered: false, request,
     reading: {revision: request.dossier, text: '', total: null}, ready: false, waits: 0,
-    dossier: null, inputs: null, draft: null, review: null, correction: null, report: null,
+    dossier: null, inputs: null, clock: null, draft: null, review: null, correction: null, report: null,
     repair: null, repairs: 0, fixes: []};
 }
 
@@ -206,9 +216,23 @@ function supplementalRecord(value) {
 // The collector's document (dossier_port.DossierDocument). Only the fields the
 // script relies on are checked; the assessor reads the rest as data. Version 2
 // added the supplemental section; a version 1 document has none (null here).
+// Version 3 adds the clock: each printed timestamp in the household zone.
 function dossierRecord(source, request) {
-  const document = record(json(source, 'retained dossier'), 'retained dossier', ['version', 'write_id', 'device_id', 'dossier']);
-  if (document.version !== 1 && document.version !== 2) fail('Unsupported dossier document version');
+  const raw = json(source, 'retained dossier');
+  const keys = ['version', 'write_id', 'device_id', 'dossier'];
+  const document = record(raw, 'retained dossier', raw?.version === 3 ? [...keys, 'clock'] : keys);
+  if (document.version !== 1 && document.version !== 2 && document.version !== 3) fail('Unsupported dossier document version');
+  let clock = null;
+  if (document.version === 3) {
+    record(document.clock, 'dossier clock', ['zone', 'times']);
+    const times = document.clock.times;
+    if (times === null || typeof times !== 'object' || Array.isArray(times) || Object.keys(times).length > 64) fail('Invalid dossier clock times');
+    for (const [stamp, local] of Object.entries(times)) {
+      if (!UTC.test(stamp) || typeof local !== 'string' || !LOCAL.test(local)) fail('Invalid dossier clock time');
+    }
+    // Times written in another zone than the request's are not used.
+    if (request.version === 2 && document.clock.zone === request.time_zone) clock = times;
+  }
   uuid(document.write_id, 'dossier write_id');
   const dossier = document.dossier;
   if (document.device_id !== request.device_id || dossier?.identity?.device_id !== request.device_id) {
@@ -226,7 +250,7 @@ function dossierRecord(source, request) {
     for (const group of list(dossier.dns.groups, 'dossier dns groups', 0, PURPOSES.length)) member(group?.kind, 'dossier dns group', PURPOSES);
   }
   if (dossier.services?.revision !== null) uuid(dossier.services?.revision, 'dossier services revision');
-  if (document.version === 2) supplementalRecord(dossier.supplemental);
+  if (document.version >= 2) supplementalRecord(dossier.supplemental);
   else if (Object.prototype.hasOwnProperty.call(dossier, 'supplemental')) fail('Invalid version 1 dossier: unexpected supplemental');
   else dossier.supplemental = null;
   // Profile and pinned issue revisions come from the retained record, so report
@@ -237,7 +261,7 @@ function dossierRecord(source, request) {
     for (const issue of list(dossier.profile.issues, 'dossier profile issues', 0, 4)) inputs.push(uuid(issue?.revision, 'dossier issue revision'));
   }
   if (new Set(inputs).size !== inputs.length) fail('Dossier inputs repeat a revision');
-  return {dossier, inputs};
+  return {dossier, inputs, clock};
 }
 
 function agentJson(raw, field) {
@@ -468,24 +492,32 @@ function handoff(state, role) {
   return text(request, 'delegation payload', 131072);
 }
 
+// A dossier timestamp in the household zone when the collector wrote it there
+// (the version 3 clock), otherwise in UTC; either way the zone is named.
+function when(clock, stamp) {
+  const value = plain(stamp, 40);
+  if (clock && Object.prototype.hasOwnProperty.call(clock, value)) return clock[value];
+  return value.slice(0, 16).replace('T', ' ') + ' UTC';
+}
+
 // The direction is spelled out because UniFi's own terms (tx/rx) are from the
 // access point's side: to_device is what the device received.
-function trafficSentence(traffic) {
+function trafficSentence(traffic, clock) {
   if (!traffic) return 'No UniFi byte counters were available for this device.';
-  return 'Between ' + plain(traffic.from_at, 40).slice(0, 16).replace('T', ' ') + ' and '
-    + plain(traffic.until_at, 40).slice(0, 16).replace('T', ' ') + ' UTC, the network counted '
+  return 'Between ' + when(clock, traffic.from_at) + ' and '
+    + when(clock, traffic.until_at) + ', the network counted '
     + bytes(Number(traffic.from_device_bytes)) + ' sent by this device and '
     + bytes(Number(traffic.to_device_bytes)) + ' sent to it.';
 }
 // Code-written context about the device, from the dossier only. Every value
 // is untrusted: device-reported strings go through plain() with a bound.
-function supplementalSection(section) {
+function supplementalSection(section, clock) {
   // Identifiers belong only in Evidence; none should reach here, but a device
   // or advisory text that carries one loses it rather than leaking it.
   const clean = (value, limit) => plain(value, limit).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '(identifier removed)');
   const out = ['## Supplemental information', ''];
   if (section === null) return [...out, 'No supplemental information was collected for this device.', ''];
-  const day = value => clean(value, 40).slice(0, 10);
+  const day = value => clean(when(clock, value), 40).slice(0, 10);
   const lookup = section.advisories;
   if (section.described_at === null && lookup === null && !section.vendor_notes.length) {
     return [...out, 'Nothing is known about this device beyond its network traffic: it has not been asked to describe itself and no advisories were looked up.', ''];
@@ -568,7 +600,7 @@ function render(state) {
   const verdictLine = review.verdict === 'accepted' ? 'accepted' : 'corrections requested and applied in one round';
   const out = [];
   out.push('# ' + (plain(dossier.identity.name, 128) || 'Unnamed device') + ': privacy assessment', '',
-    'Assessed ' + request.requested_at.slice(0, 16).replace('T', ' ') + ' UTC. Reviewer verdict: ' + verdictLine + '.', '',
+    'Assessed ' + (request.version === 2 ? request.requested_local : when(null, request.requested_at)) + '. Reviewer verdict: ' + verdictLine + '.', '',
     '## In short', '', final.in_short, '',
     '## What it is', '', final.what_it_is.text, '',
     'Confidence: ' + final.what_it_is.confidence + '. This rests on:', '',
@@ -580,7 +612,7 @@ function render(state) {
   } else {
     out.push('No destinations are described. The Evidence section says what DNS data was available.');
   }
-  out.push('', '## What it sends', '', trafficSentence(dossier.traffic), '');
+  out.push('', '## What it sends', '', trafficSentence(dossier.traffic, state.clock), '');
   if (final.what_it_sends.observed) out.push(final.what_it_sends.observed, '');
   if (final.what_it_sends.unknown) out.push(final.what_it_sends.unknown, '');
   out.push(
@@ -606,7 +638,7 @@ function render(state) {
   }
   out.push('## Open questions', '');
   out.push(...(final.questions.length ? final.questions.map(question => '- ' + question) : ['None.']), '');
-  out.push(...supplementalSection(dossier.supplemental));
+  out.push(...supplementalSection(dossier.supplemental, state.clock));
   const counts = {holds: 0, weakened: 0, refuted: 0};
   review.concerns.forEach(concern => counts[concern.verdict]++);
   const profile = dossier.profile;
@@ -614,7 +646,9 @@ function render(state) {
     '- Device: `' + request.device_id + '` at ' + plain(dossier.identity.address, 64),
     '- Dossier revision: `' + request.dossier + '`',
     '- Port scan revision: ' + (dossier.services.revision ? '`' + dossier.services.revision + '`' : 'none retained'),
-    '- Operator profile revision: ' + (profile ? '`' + profile.revision + '`' : 'none'),
+    // Without a profile the coverage notes below say why: none saved, one
+    // matched by address only, or several claiming the device.
+    '- Operator profile revision: ' + (profile ? '`' + profile.revision + '`' : 'not used; see Coverage'),
     '- Linked issue revisions: ' + (profile && profile.issues.length ? profile.issues.map(issue => '`' + issue.revision + '`').join(', ') : 'none'),
     '- Previous assessment revision: ' + (request.previous ? '`' + request.previous + '`' : 'none'),
     '- DNS window: ' + (dossier.dns ? plain(dossier.dns.from_at, 40) + ' to ' + plain(dossier.dns.until_at, 40) + ', '
@@ -684,6 +718,7 @@ function consume(state, input, todo) {
       const retained = dossierRecord(reading.text, state.request);
       state.dossier = retained.dossier;
       state.inputs = retained.inputs;
+      state.clock = retained.clock;
       state.reading = null;
     }
   } else if (pending === 'assessor') {

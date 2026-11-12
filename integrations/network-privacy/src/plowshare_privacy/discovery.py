@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .contracts import integer, items, load_json, object_fields, text
+from .limits import MAX_PORTS
 from .monitor import replace_private
 
 
@@ -41,14 +42,14 @@ class DiscoveryPlan:
             )
         if (
             not self.ports
-            or len(self.ports) > 8
+            or len(self.ports) > MAX_PORTS
             or len(set(self.ports)) != len(self.ports)
             or any(
                 type(port) is not int or not 1 <= port <= 65535 for port in self.ports
             )
         ):
             raise ValueError(
-                "Discovery requires 1-8 unique TCP ports between 1 and 65535"
+                f"Discovery requires 1-{MAX_PORTS} unique TCP ports between 1 and 65535"
             )
         if (
             isinstance(self.timeout, bool)
