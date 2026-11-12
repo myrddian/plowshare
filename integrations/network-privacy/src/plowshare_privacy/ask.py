@@ -149,16 +149,24 @@ _SETTLED: dict[str, tuple[TurnState, Ending | None]] = {
 }
 # Consecutive failed status reads of one job (about a minute of polling)
 # after which the turn is settled as unreadable instead of staying running.
+# Accepted cost: a collector-to-server outage of about a minute settles a job
+# that may still be running. Nothing is resent; the user may ask again, and a
+# reply that lands later still appears in the conversation.
 MAX_JOB_FAILURES = 12
-# Refusal codes that pass: the job status may read next time. Any other
-# refusal (a changed role, credential or shape) will not heal by waiting.
-_PASSING_CODES = frozenset(
+# Refusal codes that settle a turn at once: the caller's own faults (protocol
+# Code.java 4xx), which will not heal by waiting. Every other refusal, any 5xx
+# or capacity code and any code this SDK does not know, is treated as passing
+# and counted towards MAX_JOB_FAILURES, so a new transient code cannot end a
+# turn that is still running. NOT_FOUND is handled separately as "lost".
+_FINAL_CODES = frozenset(
     {
-        "CAPACITY_EXHAUSTED",
-        "MODEL_UNAVAILABLE",
-        "CONFIG_UNAVAILABLE",
-        "ARCHIVE_UNAVAILABLE",
-        "INTERNAL_ERROR",
+        "BAD_REQUEST",
+        "CONFLICT",
+        "VALIDATION_FAILED",
+        "UNSUPPORTED_DOCUMENT",
+        "IMAGE_NOT_STORED_EMPTY",
+        "IMAGE_NOT_STORED_UNRECOGNISED",
+        "IMAGE_NOT_STORED_TOO_LARGE",
     }
 )
 # Outcome.Ending names (plowshare-server agents/Outcome.java). AWAITING ends a
@@ -585,9 +593,9 @@ class SdkAskPort:
         except Refusal as error:
             if error.code == _UNKNOWN_JOB:
                 return "lost"
-            if error.code in _PASSING_CODES:
-                raise
-            return "unreadable"
+            if error.code in _FINAL_CODES:
+                return "unreadable"
+            raise
         if not isinstance(view, ObservedJobDto) or view.id != job:
             raise ValueError("Foreign Ask job status")
         if view.state == "RUNNING":

@@ -837,14 +837,17 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await self.port.job_state("job-1"), "lost")
         # A refusal that will not heal by waiting settles as unreadable.
-        for code in ("BAD_REQUEST", "FORBIDDEN", "UNAUTHENTICATED"):
+        for code in ("BAD_REQUEST", "CONFLICT", "VALIDATION_FAILED"):
             with self.subTest(code=code):
                 self.client.request.return_value = Reply(code, "no", None)
                 self.assertEqual(await self.port.job_state("job-1"), "unreadable")
-        # A passing fault is retried by the next poll.
-        self.client.request.return_value = Reply("CAPACITY_EXHAUSTED", "busy", None)
-        with self.assertRaises(Refusal):
-            await self.port.job_state("job-1")
+        # A passing fault, including a server-side code not named anywhere
+        # here and a code this SDK does not know, is retried by the next poll.
+        for code in ("CAPACITY_EXHAUSTED", "EMBEDDING_UNAVAILABLE", "SOMETHING_NEW"):
+            with self.subTest(code=code):
+                self.client.request.return_value = Reply(code, "busy", None)
+                with self.assertRaises(Refusal):
+                    await self.port.job_state("job-1")
 
     async def test_open_refuses_an_unexpected_reply(self) -> None:
         self.client.request.return_value = reply(ObservedStartedJobDto(id="conv-1"))
