@@ -22,6 +22,7 @@ from .contracts import (
     private_ipv4,
 )
 from .journal import FileReceipts
+from .limits import MAX_PORTS
 from .private_files import replace_private as replace_private
 from .worker import Worker
 
@@ -68,15 +69,26 @@ class MonitorChoice:
         else:
             device_descriptions = None
         targets = expand_targets(row["targets"])
-        ports = tuple(integer(item, 1, 65535) for item in items(row["ports"], 8))
+        # The dashboard shares the collector configuration's port bound, so a
+        # configuration it loads can always be saved back unchanged.
+        ports = tuple(
+            integer(item, 1, 65535) for item in items(row["ports"], MAX_PORTS)
+        )
+        public = next((target for target in targets if not private_ipv4(target)), None)
+        if public is not None:
+            # Hand-written configuration may watch other addresses; the
+            # dashboard only ever directs probes at the private network.
+            raise ValueError(
+                f"{public} is not a private address. The dashboard watches private"
+                " addresses only; other addresses are set in collector.json."
+            )
         if (
             len(set(targets)) != len(targets)
             or len(set(ports)) != len(ports)
-            or not all(private_ipv4(target) for target in targets)
             or row["enabled"]
             and (not targets or not ports)
         ):
-            raise ValueError("Choose unique private device addresses and TCP ports")
+            raise ValueError("Choose unique device addresses and TCP ports")
         return cls(
             row["enabled"],
             targets,
@@ -271,7 +283,7 @@ class FileMonitorSettings:
                     "schedule",
                     "collection",
                 },
-                {"outgoingPeer"},
+                {"outgoingPeer", "timeZone"},
             )
             plan = object_fields(
                 row["collection"],

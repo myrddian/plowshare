@@ -7,11 +7,12 @@ import json
 import math
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import AbstractSet, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .limits import (
     MAX_CHANGES,
@@ -568,6 +569,37 @@ class CollectionPlan:
     device_descriptions: bool = False
 
 
+def household_day(stamp: str, zone: str) -> date:
+    """The calendar day ``stamp`` (a UTC timestamp) falls on in ``zone``."""
+    return (
+        datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        .astimezone(ZoneInfo(zone))
+        .date()
+    )
+
+
+def local_time(stamp: str, zone: str) -> str:
+    """``stamp`` in ``zone`` as ``YYYY-MM-DD HH:MM`` plus the zone's abbreviation."""
+    moment = datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(
+        ZoneInfo(zone)
+    )
+    return moment.strftime("%Y-%m-%d %H:%M ") + (moment.tzname() or "UTC")
+
+
+def household_zone(value: object) -> str:
+    """Accept an available IANA zone name such as ``Australia/Sydney``."""
+    if not isinstance(value, str) or not value or len(value) > 64:
+        raise ValueError("Choose an available IANA time zone for timeZone")
+    name = value
+    if name != name.strip() or name.startswith("/") or ".." in name:
+        raise ValueError("Choose an available IANA time zone for timeZone")
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValueError("Choose an available IANA time zone for timeZone") from None
+    return name
+
+
 @dataclass(frozen=True)
 class Configuration:
     origin: str
@@ -582,6 +614,15 @@ class Configuration:
     schedule: str
     collection: CollectionPlan
     outgoing_peer: str | None = None
+    # The household's IANA time zone. The dashboard, assessment reports and
+    # daily limits all use it, so one day means the same everywhere. None
+    # (not configured) uses UTC, and the dashboard says so.
+    time_zone: str | None = None
+
+    @property
+    def zone(self) -> str:
+        """The zone in effect: the configured one, else UTC."""
+        return self.time_zone or "UTC"
 
     @classmethod
     def read(cls, path: Path) -> Configuration:
@@ -605,7 +646,7 @@ class Configuration:
                 "schedule",
                 "collection",
             },
-            {"outgoingPeer"},
+            {"outgoingPeer", "timeZone"},
         )
         origin = text(row["origin"], 2048)
         url = urlsplit(origin)
@@ -768,6 +809,7 @@ class Configuration:
             identifier(row["schedule"]),
             collection,
             identifier(row["outgoingPeer"]) if "outgoingPeer" in row else None,
+            household_zone(row["timeZone"]) if "timeZone" in row else None,
         )
 
 

@@ -467,6 +467,50 @@ class NetworkDeviceAssessmentTest {
   }
 
   @Test
+  void a_household_zone_writes_report_times_in_that_zone_and_only_that_zone() throws Exception {
+    for (String zone : new String[] {"Australia/Sydney", "Europe/Paris"}) {
+      var retained = (ObjectNode) JSON.readTree(resource("tv-dossier.json"));
+      retained.put("version", 3);
+      var clock = retained.putObject("clock");
+      clock.put("zone", zone);
+      clock
+          .putObject("times")
+          .put("2026-01-01T00:00:00Z", "2026-01-01 11:00 AEDT")
+          .put("2026-01-01T08:00:00Z", "2026-01-01 19:00 AEDT");
+      var host = Host.of(PREVIOUS, retained.toString());
+      host.setRequest(
+          request(
+              Map.of(
+                  "version",
+                  2,
+                  "time_zone",
+                  "Australia/Sydney",
+                  "requested_local",
+                  "2026-11-11 20:30 AEDT")));
+      host.assessor.add(assessment().toString());
+      host.reviewer.add(review("accepted", "c1", "holds").toString());
+      host.finish();
+      String text = host.report.path("text").asText();
+      assertTrue(text.contains("Assessed 2026-11-11 20:30 AEDT. Reviewer verdict"), text);
+      // Times written in another zone than the request's are never used.
+      assertTrue(
+          text.contains(
+              zone.equals("Australia/Sydney")
+                  ? "Between 2026-01-01 11:00 AEDT and 2026-01-01 19:00 AEDT, the network"
+                  : "Between 2026-01-01 00:00 UTC and 2026-01-01 08:00 UTC, the network"),
+          text);
+    }
+    for (var invalid :
+        List.<Map<String, Object>>of(
+            Map.of("version", 2, "time_zone", "../etc", "requested_local", "2026-11-11 20:30 AEDT"),
+            Map.of("version", 2, "time_zone", "Australia/Sydney", "requested_local", "today"))) {
+      var host = new Host(PREVIOUS);
+      host.setRequest(request(invalid));
+      assertThrows(IllegalStateException.class, host::next, invalid.toString());
+    }
+  }
+
+  @Test
   void supplemental_information_lists_ranked_advisories_and_sanitises_device_text()
       throws Exception {
     var host =

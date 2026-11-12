@@ -23,7 +23,7 @@ Confidence: medium. This rests on:
 
 ## What it sends
 
-Between 2026-01-01 00:00 and 2026-01-01 08:00 UTC, the network counted 310 MB sent by this device and 4.2 GB sent to it.
+Between 2026-01-01 00:00 UTC and 2026-01-01 08:00 UTC, the network counted 310 MB sent by this device and 4.2 GB sent to it.
 
 Most of the volume went to the TV, which is consistent with streaming video.
 

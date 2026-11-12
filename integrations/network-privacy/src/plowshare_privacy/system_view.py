@@ -58,6 +58,8 @@ class Deployment:
     probe_timeout_seconds: float
     probe_concurrency: int
     credentials: tuple[Credential, ...]
+    # The configured household zone; None means not set, so UTC is used.
+    time_zone: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,5 +134,6 @@ def describe(
             plan.timeout,
             plan.concurrency,
             tuple(credentials),
+            config.time_zone,
         ),
     )

@@ -466,6 +466,19 @@ completed agent investigation. Draft/final report status comes from the project
 information store. The dashboard shows the latest 50 scan receipts and the first
 100 accessible project reports that include a retained scan input.
 
+Set the household time zone with an IANA name in the collector configuration,
+for example `"timeZone": "Australia/Sydney"`. The dashboard writes every date in
+that zone and names it; assessment reports write theirs in it (the collector
+supplies the local times, since Application scripts have no time zone data); and
+the daily research and assessment limits reset at its midnight. Without
+`timeZone` all three use UTC, and System health › Deployment says it is unset.
+Changing it affects new assessments only; reports already written keep the zone
+their run recorded.
+
+The dashboard and collector configuration share one bound of 16 TCP ports. The
+dashboard watches private addresses only; other addresses can be set by hand in
+the configuration, where quick presence checks still require private addresses.
+
 For headless operation, `once` performs one intake/collection pass. An operator
 process supervisor can run/restart the collector; Plowshare remains the scheduler
 and durable investigation runtime.

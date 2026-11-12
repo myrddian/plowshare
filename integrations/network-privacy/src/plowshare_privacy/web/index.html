@@ -284,7 +284,7 @@
           <div class="panel-body">
             <p>Use recent quick sightings to draft profiles with Plowshare. The model sees device-name, vendor and service clues. NVD receives only confirmed public model names.</p>
             <label class="check"><input type="checkbox" id="background-research-enabled"> Enable background profile research</label>
-            <p class="hint">Requires quick presence checks. One draft runs at a time, up to four admissions per UTC day. Review each draft before saving a profile.</p>
+            <p class="hint">Requires quick presence checks. One draft runs at a time, up to four admissions a day. Review each draft before saving a profile.</p>
             <div class="actions"><button type="button" id="background-research-load" class="secondary">Load drafts and activity</button></div>
             <p id="background-research-detail" role="status" class="hint"></p>
             <div id="background-research-list" class="entries"></div>
@@ -296,7 +296,7 @@
           <div class="panel-body">
             <p>Assess devices with Plowshare without being asked: first devices with a signal that were never assessed, then never-assessed devices that described themselves, then devices whose signals or reported facts changed since their last assessment. Each assessment uses model calls and report-processing allowance.</p>
             <form id="assessment-settings" class="inline-form">
-              <label>Background assessments per UTC day<input id="assessment-limit" type="number" min="0" max="12" step="1" inputmode="numeric" required></label>
+              <label>Background assessments per day<input id="assessment-limit" type="number" min="0" max="12" step="1" inputmode="numeric" required></label>
               <button type="submit">Save limit</button>
             </form>
             <p class="hint">0 turns background assessment off. One assessment runs at a time, and a device awaiting your review is not assessed again. Assessments you start from a device count toward the same day, up to 12 in all.</p>
@@ -353,14 +353,14 @@
             <p>Find devices on your network, then select the ones you want to watch.</p>
             <form id="discover-form" class="discover-form">
               <div><label for="network">Network subnet</label><input id="network" placeholder="Private network CIDR, e.g. 192.168.0.0/24" required></div>
-              <div><label for="ports">TCP ports to check</label><input id="ports" placeholder="Comma-separated ports, e.g. 80,443" required></div>
+              <div><label for="ports">TCP ports to check</label><input id="ports" aria-describedby="ports-help" placeholder="Comma-separated ports, e.g. 80,443" required><p class="hint" id="ports-help">Up to 16 ports, used both to find devices and to watch them. Each extra port adds time to Find devices.</p></div>
               <div class="actions"><button id="discover" type="submit">Find devices</button><button id="use-subnet" type="button" class="secondary">Monitor whole subnet</button></div>
             </form>
             <p id="discovery-detail" class="hint">Checks only the chosen ports. No device settings are changed.</p>
             <div id="devices" class="devices"></div>
             <form id="monitor-form">
               <label for="targets">Addresses to watch</label><input id="targets" aria-describedby="targets-help" placeholder="Private IPv4 addresses or a subnet such as 192.168.0.0/24">
-              <p class="hint" id="targets-help">Subnet addresses start as candidates. An open TCP service or an observed identity adds the address to the device list.</p>
+              <p class="hint" id="targets-help">Private addresses only; other addresses are set in collector.json. Subnet addresses start as candidates. An open TCP service or an observed identity adds the address to the device list.</p>
               <label for="device-labels">Device names</label><textarea id="device-labels" rows="3" placeholder="One selected address=name per line, e.g. 192.168.0.12=Living room TV"></textarea>
               <p class="hint" id="identity-source">Names help identify devices. Pi-hole v6 and UniFi can add observed device identities.</p>
               <div class="monitor-actions">
@@ -379,7 +379,7 @@
           <div class="panel-heading"><h2>Background work</h2><span>Work the collector starts without being asked</span></div>
           <div class="panel-body">
             <dl id="background-usage" class="facts"></dl>
-            <p class="hint">Days are UTC days. Change these on the Devices tab, where their drafts and reports are reviewed.</p>
+            <p class="hint">Days follow the household time zone shown under System health › Deployment. Change these on the Devices tab, where their drafts and reports are reviewed.</p>
             <div class="actions"><button id="open-background" type="button" class="secondary">Open background work on Devices</button></div>
           </div>
         </section>

@@ -30,7 +30,7 @@ Lifecycle of one device's entry (``phase``; the dashboard ``state`` in brackets)
 
 Admission rules: one ``pending``/``running`` entry across all devices; no new
 run for a device in ``review``/``accepting``; at most ``DAILY_CEILING``
-admissions per UTC day in total. The optional background queue (limit 0, off,
+admissions per household day in total. The optional background queue (limit 0, off,
 by default) admits only while today's admissions are below its own limit:
 first signalled devices never assessed, then never-assessed devices with
 supplemental facts (something the device said about itself, or an advisory
@@ -47,9 +47,8 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal, Protocol
+from typing import Awaitable, Callable, Literal, Protocol
 from uuid import uuid4
 
 from plowshare import Delivery, Refusal, TransportError
@@ -63,6 +62,7 @@ from .assessment_request import (
     concern_outcomes,
 )
 from .contracts import (
+    household_day,
     identifier,
     items,
     load_json,
@@ -73,7 +73,13 @@ from .contracts import (
     utc_now,
     uuid,
 )
-from .device_dossier import SIGNAL_ORDER, build_dossier, device_signals, parse_device_id
+from .device_dossier import (
+    SIGNAL_ORDER,
+    ProfileMatch,
+    build_dossier,
+    device_signals,
+    parse_device_id,
+)
 from .device_facts import DeviceFacts
 from .device_inventory import DeviceCard, DeviceInventory
 from .diagnostics import refusal_detail
@@ -86,7 +92,7 @@ from .worker import ReconciliationRequired
 MAX_ENTRIES = 256
 MAX_LEDGER_BYTES = 2 * 1024 * 1024
 # Each admission spends model calls and report-processing allowance. This bounds
-# on-demand and background admissions together, per UTC day.
+# on-demand and background admissions together, per household day.
 DAILY_CEILING = 12
 MAX_DETAIL = 1600
 
@@ -156,10 +162,17 @@ class AssessmentEntry:
     detail: str | None = None
     # The newest report revision known for this device, kept across failed runs.
     latest_report: str | None = None
+    # The household zone fixed when the run was admitted, so a rebuilt request
+    # matches the first; None for runs admitted before zones (UTC reports).
+    time_zone: str | None = None
 
     def request(self) -> AssessmentRequest:
         return AssessmentRequest(
-            self.device_id, self.dossier, self.previous, self.requested_at
+            self.device_id,
+            self.dossier,
+            self.previous,
+            self.requested_at,
+            self.time_zone,
         )
 
     @classmethod
@@ -185,6 +198,7 @@ class AssessmentEntry:
                 "detail",
                 "latest_report",
             },
+            {"time_zone"},
         )
         phase, trigger = row["phase"], row["trigger"]
         if phase not in _PHASES or trigger not in {"operator", "background"}:
@@ -223,8 +237,9 @@ class AssessmentEntry:
             timestamp(row["decided_at"]) if row["decided_at"] is not None else None,
             text(row["detail"], MAX_DETAIL) if row["detail"] is not None else None,
             optional_uuid["latest_report"],
+            text(row["time_zone"], 64) if row.get("time_zone") is not None else None,
         )
-        entry.request()  # Validates the device, dossier and timestamp together.
+        entry.request()  # Validates the device, dossier, timestamp and zone.
         reported = phase in _REPORTED
         # A failed start may have no run; every other phase after pending has one.
         has_run = entry.run_id is not None
@@ -253,10 +268,10 @@ class AssessmentEntry:
 @dataclass(frozen=True)
 class AssessmentLedger:
     version: int = 1
-    # Background admissions per UTC day; 0 means the background queue is off.
+    # Background admissions per household day; 0 means the background queue is off.
     background_limit: int = 0
     entries: tuple[AssessmentEntry, ...] = ()
-    # Admission times; only the current UTC day's are kept.
+    # Admission times; only the current household day's are kept.
     admissions: tuple[str, ...] = ()
 
     @classmethod
@@ -359,7 +374,7 @@ class AssessmentSummary:
 
 @dataclass(frozen=True)
 class AssessmentUsage:
-    """Today's assessment admissions (UTC day) against the two limits."""
+    """Today's assessment admissions (household day) against the two limits."""
 
     background_limit: int
     used_today: int
@@ -397,9 +412,16 @@ class DeviceAssessments:
         inventory: Callable[[], DeviceInventory],
         *,
         facts: Callable[[str], DeviceFacts | None] = lambda _: None,
+        profile: Callable[[DeviceCard], Awaitable[ProfileMatch]] | None = None,
         clock: Callable[[], str] = utc_now,
         new_id: Callable[[], str] = lambda: str(uuid4()),
+        zone: str = "UTC",
     ):
+        # The daily ceiling counts the household's day (configuration timeZone).
+        self.zone = zone
+        # ``profile`` reads the operator's saved profiles when an assessment
+        # starts; None means this collector keeps no profiles.
+        self.profile = profile
         self.journal, self.port, self.dossiers = journal, port, dossiers
         self.inventory, self.clock, self.new_id = inventory, clock, new_id
         # Retained supplemental facts by device ID (Worker.device_facts).
@@ -450,8 +472,10 @@ class DeviceAssessments:
         )
 
     def _today(self) -> tuple[str, ...]:
-        day = _day(self.clock())
-        return tuple(a for a in self.ledger.admissions if _day(a) == day)
+        day = household_day(self.clock(), self.zone)
+        return tuple(
+            a for a in self.ledger.admissions if household_day(a, self.zone) == day
+        )
 
     def _card(self, device_id: str) -> DeviceCard:
         device = parse_device_id(device_id)
@@ -474,7 +498,10 @@ class DeviceAssessments:
         if active is not None and (entry is None or active is not entry):
             return "Another device's assessment is running. One runs at a time."
         if len(self._today()) >= DAILY_CEILING:
-            return f"The daily limit of {DAILY_CEILING} assessments is reached. Try again after midnight UTC."
+            return (
+                f"The daily limit of {DAILY_CEILING} assessments is reached."
+                f" Try again after midnight ({self.zone})."
+            )
         return None
 
     # Dashboard projection and decisions.
@@ -651,8 +678,17 @@ class DeviceAssessments:
         note = self._assess_note(entry)
         if note is not None:
             raise AssessmentConflict(note)
-        dossier = build_dossier(card, facts=self.facts(device))
-        retained = await self.dossiers.retain(dossier)
+        # The operator's expectations are read fresh for each assessment, so a
+        # profile saved a moment ago is the one the report cites. A failed read
+        # stops here: nothing is retained or started without it.
+        match = await self.profile(card) if self.profile is not None else None
+        dossier = build_dossier(
+            card,
+            match.profile if match is not None else None,
+            facts=self.facts(device),
+            profile_note=match.note if match is not None else None,
+        )
+        retained = await self.dossiers.retain(dossier, self.zone)
         previous = await self.port.newest_report(device)
         known = entry.latest_report if entry is not None else None
         if known is not None and previous is None:
@@ -672,6 +708,7 @@ class DeviceAssessments:
             tuple(signal.code for signal in dossier.signals),
             "pending",
             latest_report=previous,
+            time_zone=self.zone,
         )
         pending.request()
         # Flushed before transport: the request UUID is the only way to settle it.
@@ -894,7 +931,3 @@ def summary(
         sum(c.level == "potential_breach" for c in live),
         sum(c.level == "worth_checking" for c in live),
     )
-
-
-def _day(stamp: str) -> object:
-    return datetime.fromtimestamp(epoch(stamp), timezone.utc).date()

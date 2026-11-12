@@ -29,6 +29,8 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .device_dossier import LinkedIssue, OperatorProfile, ProfileMatch
+from .device_inventory import DeviceCard
 from .journal import Receipt, Receipts
 from .limits import MAX_TARGETS
 from .presence import PresenceView, epoch
@@ -230,6 +232,54 @@ class ProfileView:
     revision: str
     versions: tuple[ProfileVersion, ...]
     evidence: tuple[str, ...]
+
+
+def assessment_profile(
+    views: tuple[ProfileView, ...], mac: str | None, address: str
+) -> ProfileMatch:
+    """Choose the profile an assessment reads, by the device pane's rule.
+
+    Only a profile confirmed for the device's MAC address is used. A profile
+    associated by address alone, or several claiming the device, yields no
+    profile and a note the dossier states, so the report says why.
+    """
+    confirmed = [
+        view
+        for view in views
+        if mac is not None and view.profile.fields.device_mac == mac
+    ]
+    if len(confirmed) > 1:
+        return ProfileMatch(None, "ambiguous")
+    if confirmed:
+        view = confirmed[0]
+        fields = view.profile.fields
+        return ProfileMatch(
+            OperatorProfile(
+                view.revision,
+                fields.purpose,
+                fields.expected_services,
+                tuple(
+                    LinkedIssue(
+                        link.issue_id,
+                        link.revision,
+                        link.applicability,
+                        link.mitigation_status,
+                    )
+                    for link in fields.issues
+                ),
+            )
+        )
+    by_address = [
+        view
+        for view in views
+        if view.profile.fields.device_mac is None
+        and address in view.profile.fields.addresses
+    ]
+    if by_address:
+        return ProfileMatch(
+            None, "address_only" if len(by_address) == 1 else "ambiguous"
+        )
+    return ProfileMatch(None)
 
 
 class ProfilePort(Protocol):
@@ -619,3 +669,9 @@ class DeviceProfiles:
                 self.intents.save(
                     replace(intent, phase="confirmed", revision=matches[0].revision)
                 )
+
+
+async def profile_for(profiles: ProfileManagement, card: DeviceCard) -> ProfileMatch:
+    """The profile an assessment of ``card`` reads, from the current profile list."""
+    mac = card.identity.mac if card.identity is not None else None
+    return assessment_profile(await profiles.list(), mac, card.address)

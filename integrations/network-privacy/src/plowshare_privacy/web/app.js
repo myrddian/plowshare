@@ -22,6 +22,10 @@ let findingSignature = null;
 let profileEdit = null;
 let profileBlocked = false;
 let advisoriesAvailable = false;
+let advisoriesConfigured = false;
+// The open device's retained supplemental facts, so the lookup form starts from
+// the model the device reported instead of asking for it again.
+let deviceSupplemental = null;
 let researchDevice = null;
 let selectedResearch = null;
 let researchBusy = false;
@@ -117,10 +121,26 @@ function element(tag, content, className) {
 }
 // One way to write counts, dates and states, so the same fact reads the same
 // in every view. Dates follow the browser's locale with the month spelled
-// out; a date-only value is a calendar day and is never shifted by time zone.
+// out, in the household time zone the collector reports (the one assessment
+// reports and daily limits use), with the zone named on every time. A
+// date-only value is a calendar day and is never shifted by time zone.
 const countFormat = new Intl.NumberFormat();
-const whenFormat = new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeStyle:'short'});
-const dayFormat = new Intl.DateTimeFormat(undefined, {dateStyle:'medium'});
+let householdZone = 'UTC';
+let whenFormat, dayFormat;
+// dateStyle cannot be combined with timeZoneName, so the parts are explicit.
+function setHouseholdZone(zone) {
+  try {
+    whenFormat = new Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZone:zone, timeZoneName:'short'});
+    dayFormat = new Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric', timeZone:zone});
+    householdZone = zone;
+  } catch (error) {
+    // The collector validated the zone; a browser without it shows UTC, and
+    // every time still names its zone, so nothing reads as household time.
+    if (zone === 'UTC') throw error;
+    setHouseholdZone('UTC');
+  }
+}
+setHouseholdZone('UTC');
 const calendarDayFormat = new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeZone:'UTC'});
 function formatCount(value) {return countFormat.format(value);}
 function plural(count, one, many) {return `${formatCount(count)} ${count === 1 ? one : many}`;}
@@ -327,10 +347,21 @@ async function refresh() {
     if (!researchBusy) byId('background-research-enabled').checked = !!status.profile_research_enabled;
     const waitingDrafts = status.profile_drafts_waiting || 0;
     byId('background-research-count').textContent = waitingDrafts ? formatCount(waitingDrafts) + ' awaiting review' : '';
+    if (typeof status.time_zone === 'string' && status.time_zone !== householdZone) {
+      setHouseholdZone(status.time_zone);
+      deviceSignature = '';
+    }
+    if (Number.isInteger(status.max_ports)) {
+      maxPorts = status.max_ports;
+      byId('ports-help').textContent = `Up to ${maxPorts} ports, used both to find devices and to watch them. Each extra port adds time to Find devices.`;
+    }
     advisoriesAvailable = !!status.advisories_available;
+    advisoriesConfigured = !!status.advisories_configured;
     byId('research-search-status').textContent = advisoriesAvailable
       ? 'Advisory search sends only this public model name to NVD. Review it before searching.'
-      : 'Enable the collector’s NVD lookup to search here. You can still review product clues and edit a profile.';
+      : advisoriesConfigured
+        ? 'Searching here needs device profiles, which are off on this collector. Automatic lookups still appear under What we know.'
+        : 'No advisory source is configured on this collector, so advisories cannot be searched. You can still review product clues and edit a profile.';
     if (!researchDevice) byId('research-search').disabled = !advisoriesAvailable;
     issuesAvailable = !!status.issues_available;
     assessmentsAvailable = !!status.device_assessments_available;
@@ -389,7 +420,7 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['attention-items','health-connections','health-deployment','background-usage']) byId(id).replaceChildren();
   byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
   setSignalFilter('all');
-  selectedDevice = null;
+  selectedDevice = null; deviceSupplemental = null; setHouseholdZone('UTC');
   for (const id of deviceParts) byId(id).replaceChildren();
   syncPane();
   byId('fixture-banner').hidden = true; byId('mode').classList.toggle('synthetic', false);
@@ -416,9 +447,11 @@ byId('scan').addEventListener('click', async () => {
 });
 
 
+// The collector reports its port bound; finding devices and monitoring share it.
+let maxPorts = 16;
 function portSelection() {
   const ports = byId('ports').value.split(',').map(value => value.trim()).filter(Boolean).map(Number);
-  if (ports.length > 8 || ports.some(port => !Number.isInteger(port) || port < 1 || port > 65535) || new Set(ports).size !== ports.length) throw new Error('Enter up to eight unique TCP ports between 1 and 65535.');
+  if (ports.length > maxPorts || ports.some(port => !Number.isInteger(port) || port < 1 || port > 65535) || new Set(ports).size !== ports.length) throw new Error(`Enter up to ${maxPorts} unique TCP ports between 1 and 65535.`);
   return ports;
 }
 function renderDevices(report) {
@@ -667,6 +700,14 @@ setInterval(() => {
   if ((bearer || authenticated) && (!document.hidden || overview?.preferences.browser_notifications) && !settingsPending) refresh().catch(error => condition(error.message, true));
 }, 5000);
 
+// The full scan and quick checks are separate observations. Say which one
+// answered, so a silent full scan never reads as contradicting a later answer.
+function fullScanText(device) {
+  if (!device.last_seen) return 'Awaiting first full scan';
+  const responded = device.services.some(item => item.status === 'open' || item.status === 'closed');
+  const answeredLater = !responded && device.last_response_at && Date.parse(device.last_response_at) > Date.parse(device.last_seen);
+  return `${formatWhen(device.last_seen)} · ${responded ? 'answered on the checked ports' : answeredLater ? 'no answer then; a later check got one' : 'no answer on the checked ports'}`;
+}
 function renderDeviceDetection(detection) {
   const panel = element('div', undefined, 'detection');
   panel.append(element('h4', detection.confidence === 'unknown' ? 'Device type unknown'
@@ -676,8 +717,9 @@ function renderDeviceDetection(detection) {
     clues.append(...detection.clues.map(clue => element('li', clue)));
     panel.append(clues);
   }
-  if (detection.confidence === 'corroborated') {
-    panel.append(element('p', 'The observed name and port agree.', 'hint'));
+  // Only a name clue and a port clue together corroborate a type.
+  if (detection.confidence === 'corroborated' && detection.clues.length > 1) {
+    panel.append(element('p', 'The observed name and an open port point to the same type.', 'hint'));
   }
   return panel;
 }
@@ -1015,10 +1057,9 @@ function renderDeviceView(device) {
   const ports = paneSection('Open ports and exposures', 'Ports');
   const sweep = element('dl', undefined, 'facts');
   fact(sweep, 'Checked ports', device.services.length ? device.services.map(item => `${item.port}: ${item.status}`).join(' · ') : 'No checked ports recorded.', device.services.length ? 'data' : undefined);
-  const responded = device.services.some(item => item.status === 'open' || item.status === 'closed');
-  fact(sweep, 'Full scan', device.last_seen ? `Last checked ${formatWhen(device.last_seen)} · ${responded ? 'TCP response' : 'No TCP response'}` : 'Awaiting first full scan');
+  fact(sweep, 'Last full scan', fullScanText(device));
   if (device.last_response_at) {
-    fact(sweep, 'TCP responses', `First ${formatWhen(device.first_response_at)} · Last ${formatWhen(device.last_response_at)}`);
+    fact(sweep, 'TCP answers', `First ${formatWhen(device.first_response_at)} · Latest ${formatWhen(device.last_response_at)}`);
   }
   ports.append(sweep);
   if (device.detection) ports.append(...renderExposures(device.detection));
@@ -1044,9 +1085,12 @@ const mitigationLabels = [['proposed','Proposed'],['accepted','Accepted'],['appl
 // nothing is removed. A record's JSON block folds alone; the other sections
 // fold up to the next heading of the same or a higher level.
 const foldedSections = new Set(['Record metadata', 'Evidence', 'Privacy issues and mitigation decisions']);
-function foldDetails(article) {
+// In the device pane the report's supplemental section repeats "What we know",
+// which shows the same retained facts live; it folds there with a pointer.
+const paneFolded = new Map([['Supplemental information', 'Details · supplemental information, also under What we know']]);
+function foldDetails(article, extra = new Map()) {
   if (!article?.children) return article;
-  const headings = [...article.children].filter(node => /^H[1-6]$/.test(node.tagName) && foldedSections.has(node.textContent.trim()));
+  const headings = [...article.children].filter(node => /^H[1-6]$/.test(node.tagName) && (foldedSections.has(node.textContent.trim()) || extra.has(node.textContent.trim())));
   for (const heading of headings) {
     const title = heading.textContent.trim();
     const members = [];
@@ -1061,7 +1105,7 @@ function foldDetails(article) {
     }
     if (!members.length) continue;
     const fold = element('details', undefined, 'record-details');
-    fold.append(element('summary', `Details · ${title[0].toLowerCase()}${title.slice(1)}`));
+    fold.append(element('summary', extra.get(title) || `Details · ${title[0].toLowerCase()}${title.slice(1)}`));
     heading.replaceWith(fold);
     fold.append(...members);
   }
@@ -1081,8 +1125,6 @@ async function loadDeviceAnalysis(device) {
   const known = paneSection('What we know about this device', 'Known');
   const assessment = paneSection('Agent assessment', 'Assessment');
   const product = paneSection('Product and advisories', 'Advisories');
-  product.append(element('p', 'Confirm the product with UniFi, then search the public NVD advisory database by model name. No agent is involved.', 'hint'),
-    actionButton('Look up product and advisories', 'secondary', () => openDeviceResearch(device)));
   const waitingAssessment = paneSection('Agent assessment', 'Assessment');
   waitingAssessment.append(element('p', 'Reading the assessment…', 'hint'));
   const waiting = paneSection('Your notes and expectations', 'Notes');
@@ -1137,7 +1179,9 @@ async function loadDeviceAnalysis(device) {
   }
   try {
     if (mac && device.identity?.device_id) {
-      known.append(...renderSupplemental(await api(`/api/devices/${encodeURIComponent(device.identity.device_id)}/supplemental`)));
+      const body = await api(`/api/devices/${encodeURIComponent(device.identity.device_id)}/supplemental`);
+      if (!stale()) deviceSupplemental = {device_id:device.identity.device_id, section:body.supplemental};
+      known.append(...renderSupplemental(body));
     } else {
       known.append(element('p', 'Not available: this device is known by its address only. Device descriptions need a confirmed MAC address.', 'hint unmeasured'));
     }
@@ -1165,6 +1209,8 @@ async function loadDeviceAnalysis(device) {
     assessment.append(element('p', error.message, 'notice error'));
   }
   if (stale()) return;
+  product.append(element('p', productHint(device), 'hint'),
+    actionButton('Look up product and advisories', 'secondary', () => openDeviceResearch(device)));
   byId('device-assessment').replaceChildren(assessment);
   panel.replaceChildren(known, notes, product);
   renderPaneNav();
@@ -1324,7 +1370,7 @@ function renderAssessment(view, report) {
   // once it is final, so the sections below stay within reach.
   if (report && (view.state === 'review' || view.state === 'accepted')) {
     const reader = element('div', undefined, 'document-reader');
-    reader.append(foldDetails(PrivacyMarkdown.render(report)));
+    reader.append(foldDetails(PrivacyMarkdown.render(report), paneFolded));
     const fold = element('details');
     fold.open = view.state === 'review';
     fold.append(element('summary', 'Details · the assessment report'), reader);
@@ -1659,6 +1705,7 @@ function renderSystem(system, health) {
   fact(deployment, 'Relay topics', `Requests on ${plan.request_topic}, results on ${plan.result_topic}`);
   fact(deployment, 'Relay group', plan.group, 'data');
   fact(deployment, 'Outgoing peer', plan.outgoing_peer || 'None');
+  fact(deployment, 'Time zone', plan.time_zone ? `${plan.time_zone}, for every date shown and the daily limits` : 'UTC: timeZone is not set in collector.json', plan.time_zone ? 'data' : undefined);
   fact(deployment, 'Port checks', `${plural(plan.probe_timeout_seconds, 'second', 'seconds')} timeout, ${formatCount(plan.probe_concurrency)} at a time`);
   for (const item of plan.credentials) credentialFact(deployment, item.purpose, item);
   const problem = !health.connected || health.recovery.length > 0 || missingCredentials(system).length > 0;
@@ -1695,7 +1742,7 @@ function renderOverview(value) {
   renderSchedule(health.schedule);
   byId('deployment-state').textContent = value.pending_deployment ? `Deployment ${value.pending_deployment} needs reconciliation. Enter the administrator password and choose Check retained deployment.` : 'No unsettled schedule deployment.';
   const grid = byId('health'); grid.replaceChildren();
-  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? formatWhen(health.last_contact) : 'Awaiting contact'], ['Last completed scan', health.last_scan ? formatWhen(health.last_scan) : 'None yet'], ['Schedule', health.schedule ? scheduleLabel(health.schedule.cron) + ' · ' + health.schedule.zone : 'Not found or unavailable'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at ? 'Next scan ' + formatWhen(health.schedule.next_at) : 'Awaiting next scan') : 'Not found or unavailable'], ['Project agents', health.agents ? `${health.agents.served.length} of 3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length} of 6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at ? formatWhen(health.credential_expires_at) : 'Not supplied']];
+  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? formatWhen(health.last_contact) : 'Awaiting contact'], ['Last completed scan', health.last_scan ? formatWhen(health.last_scan) : 'None yet'], ['Schedule', health.schedule ? scheduleLabel(health.schedule.cron) + ' · ' + health.schedule.zone : 'Not found or unavailable'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at ? 'Next scan ' + formatWhen(health.schedule.next_at) : 'Awaiting next scan') : 'Not found or unavailable'], ['Project agents', health.agents ? `${health.agents.served.length} of ${health.agents.served.length + health.agents.unavailable.length} available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? toolVisibility(health.agents) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at ? formatWhen(health.credential_expires_at) : 'Not supplied']];
   for (const [name, detail] of checks) fact(grid, name, detail);
   renderSystem(value.system, health);
   byId('health-detail').textContent = `Checked ${formatWhen(health.checked_at)}. ${health.detail}`;
@@ -1858,7 +1905,22 @@ function renderScheduleControl(schedule, control, pendingDeployment) {
   byId('pause-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !available || schedule.paused;
   byId('resume-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !available || !schedule.paused;
   byId('check-schedule').disabled = scheduleControlBusy || !control || !control.available;
-  if (pending) byId('schedule-control-detail').textContent = 'A schedule change is unconfirmed. Check schedule state before another change; checking never resends the control.';
+  // When neither Pause nor Resume can be used, say why; the outcome of the
+  // operator's last action stays in place otherwise.
+  const blocked = scheduleBlocked(schedule, control, pending, pendingDeployment);
+  if (blocked) byId('schedule-control-detail').textContent = blocked;
+}
+function scheduleBlocked(schedule, control, pending, pendingDeployment) {
+  if (pending) return 'A schedule change is unconfirmed. Check schedule state before another change; checking never resends the control.';
+  if (!control || !control.available) return 'Pause and Resume are unavailable: this collector was started without schedule control.';
+  if (!schedule) return 'Pause and Resume are unavailable: the project schedule could not be read. Check the Plowshare connection under System health.';
+  if (pendingDeployment) return 'Pause and Resume wait until the unsettled schedule deployment is checked. Use Check retained deployment under Settings › Change schedule frequency.';
+  return null;
+}
+function toolVisibility(agents) {
+  if (agents.tool_visibility === 'awaiting_context') return 'Awaiting first project conversation';
+  const total = agents.tools.length + agents.missing_tools.length;
+  return `${agents.tools.length} of ${total} visible` + (agents.missing_tools.length ? ' · missing: ' + agents.missing_tools.join(', ') : '');
 }
 
 async function controlSchedule(paused) {
@@ -2063,9 +2125,29 @@ function clearDeviceResearch() {
   byId('research-unifi-result').textContent = '';
   byId('research-results').replaceChildren();
 }
+function supplementalFor(device) {
+  return deviceSupplemental && deviceSupplemental.device_id === device.identity?.device_id ? deviceSupplemental.section : null;
+}
+// The model to search for: the one the last automatic lookup used, else what
+// the device reported about itself. Still the operator's to confirm.
+function reportedModel(device) {
+  const section = supplementalFor(device);
+  if (!section) return '';
+  if (section.advisories?.model) return section.advisories.model;
+  const described = section.descriptions.find(item => item.model_name);
+  return described ? [described.manufacturer, described.model_name].filter(Boolean).join(' ') : '';
+}
+function productHint(device) {
+  const lookup = supplementalFor(device)?.advisories;
+  if (lookup?.status === 'searched' && lookup.model) {
+    return `Advisories for ${lookup.model} were looked up ${formatDay(lookup.checked_at)} and are shown under What we know. Search here to check a different model, or confirm the product with UniFi.`;
+  }
+  return 'Confirm the product with UniFi, then search the public NVD advisory database by model name. No agent is involved.';
+}
 function openDeviceResearch(device) {
   clearDeviceResearch();
   researchDevice = device;
+  byId('research-model').value = reportedModel(device);
   byId('research-title').textContent = 'Product and advisories';
   const identity = device.identity?.source === 'configured' ? null : device.identity;
   const known = identity || device.last_known_identity;

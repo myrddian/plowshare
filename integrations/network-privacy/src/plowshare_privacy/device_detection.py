@@ -117,7 +117,7 @@ def detect_device(
         else None
     )
     words = set(re.findall(r"[a-z]+", (hostname or "").lower()))
-    matches: list[tuple[str, tuple[str, ...]]] = []
+    matches: list[tuple[str, tuple[str, ...], bool, bool]] = []
     for rule in _TYPE_RULES:
         matched_ports = sorted(rule.ports & opened)
         matched_name = bool(rule.name_words & words)
@@ -132,7 +132,9 @@ def detect_device(
         # File sharing and streaming alone do not distinguish a NAS or camera
         # from a general-purpose host running the same service.
         if matched_name or (rule.device_type == "Printer" and matched_ports):
-            matches.append((rule.device_type, tuple(clues)))
+            matches.append(
+                (rule.device_type, tuple(clues), matched_name, bool(matched_ports))
+            )
     exposures = tuple(
         ServiceExposure(tuple(port for port in ports if port in opened), service, check)
         for ports, service, check in _SERVICE_RULES
@@ -142,13 +144,15 @@ def detect_device(
         return DeviceDetection(
             "Unknown",
             "unknown",
-            tuple(clue for _, clues in matches for clue in clues),
+            tuple(clue for _, clues, _, _ in matches for clue in clues),
             exposures,
         )
-    device_type, matched_clues = matches[0]
+    device_type, matched_clues, by_name, by_port = matches[0]
+    # Corroboration means two independent observations agree: the device's
+    # own name and a conventional open port. One clue alone stays tentative.
     return DeviceDetection(
         device_type,
-        "corroborated" if len(matched_clues) > 1 else "tentative",
+        "corroborated" if by_name and by_port else "tentative",
         matched_clues,
         exposures,
     )
