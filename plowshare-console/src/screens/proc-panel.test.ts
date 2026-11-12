@@ -105,7 +105,27 @@ const button = (root: HTMLElement, label: string) => {
   if (!found) throw new Error(`Missing button: ${label}`);
   return found;
 };
-afterEach(() => vi.useRealTimers());
+const fact = (root: HTMLElement, key: string) =>
+  root.querySelector(`[data-proc-fact="${key}"] dd`)?.textContent;
+const control = (root: HTMLElement, label: string) => {
+  const found = root.querySelector<HTMLSelectElement>(
+    `select[aria-label="${label}"]`,
+  );
+  if (!found) throw new Error(`Missing control: ${label}`);
+  return found;
+};
+const second: ProcConversation = {
+  ...conversation,
+  id: 'cnv_second',
+  agent: 'document_pipeline',
+  state: 'RUNNING',
+  ending: null,
+  cause: 'second-cause',
+};
+afterEach(() => {
+  vi.useRealTimers();
+  document.body.replaceChildren();
+});
 describe('PROC audit panel', () => {
   it('waits after a slow periodic read instead of immediately catching up missed ticks', async () => {
     vi.useFakeTimers();
@@ -162,7 +182,7 @@ describe('PROC audit panel', () => {
     complete();
     await tick();
     await tick();
-    expect(root.textContent).toContain('Recorded cause: call-source');
+    expect(fact(root, 'cause')).toBe('call-source');
     button(root, 'information_tagger').click();
     await tick();
     expect(asked.filter((type) => type === 'proc.inspect')).toHaveLength(2);
@@ -239,7 +259,7 @@ describe('PROC audit panel', () => {
     await tick();
     await tick();
     expect(root.textContent).toContain('Fleet permission denied');
-    expect(root.textContent).not.toContain('Recorded cause: call-source');
+    expect(root.textContent).not.toContain('call-source');
     panel.destroy();
   });
 
@@ -312,15 +332,23 @@ describe('PROC audit panel', () => {
     const root = document.createElement('div');
     const panel = mountProcPanel(root, reader);
     await panel.refresh();
-    expect(root.textContent).toContain(
-      'information_tagger · COMPLETED / ANSWERED',
+    const listed = root.querySelector('[data-conversation="cnv_fixture"]');
+    expect(listed?.querySelector('strong')?.textContent).toBe(
+      'information_tagger',
     );
-    expect(root.textContent).toContain('alice');
-    expect(root.textContent).toContain('Runs as SYSTEM');
-    expect(asked[0]?.query).toEqual({ visibility: 'mine', limit: 50 });
+    expect(listed?.querySelector('.proc-badge')?.textContent).toBe(
+      'COMPLETED / ANSWERED',
+    );
+    expect(listed?.textContent).toContain('alice');
+    expect(asked[0]?.query).toEqual({
+      visibility: 'mine',
+      limit: 50,
+      order: 'newest',
+    });
     button(root, 'information_tagger').click();
     await tick();
-    expect(root.textContent).toContain('Recorded cause: call-source');
+    expect(fact(root, 'principal')).toBe('SYSTEM');
+    expect(fact(root, 'cause')).toBe('call-source');
     expect(root.textContent).toContain('not a loop verdict');
     button(root, 'Trace causal chain').click();
     await tick();
@@ -363,7 +391,7 @@ describe('PROC audit panel', () => {
     resolve();
     await loading;
     await tick();
-    expect(root.textContent).not.toContain('information_tagger · COMPLETED');
+    expect(root.textContent).not.toContain('information_tagger');
     expect(asked).toEqual(['mine', 'server']);
     panel.destroy();
     await vi.advanceTimersByTimeAsync(20000);
@@ -385,6 +413,146 @@ describe('PROC audit panel', () => {
     expect(root.textContent).toContain('Stale / unavailable');
     expect(root.textContent).toContain('current activity unknown');
     expect(root.textContent).toContain('information_tagger');
+    panel.destroy();
+  });
+
+  it('inspects the selected row beside the list and keeps the list in place', async () => {
+    const twoReplies: ProcReplies = {
+      ...replies,
+      'proc.list': {
+        ...conversations,
+        conversations: [conversation, second],
+        total: 2,
+      },
+    };
+    const reader: ProcReader = {
+      async read(type, query) {
+        if (type !== 'proc.inspect') return twoReplies[type];
+        const chosen = query.conversation === second.id ? second : conversation;
+        const inspected: ProcReplies['proc.inspect'] = {
+          ...inspection,
+          conversations: { ...conversations, conversations: [chosen] },
+        };
+        return inspected as ProcReplies[typeof type];
+      },
+    };
+    const root = document.createElement('div');
+    document.body.append(root);
+    const panel = mountProcPanel(root, reader);
+    await panel.refresh();
+    const workspace = root.querySelector('.proc-workspace');
+    const list = root.querySelector('.proc-results');
+    const detail = root.querySelector('.proc-detail');
+    if (!workspace || !list || !detail) throw new Error('Missing panes');
+    expect([...workspace.children]).toEqual([list.parentElement, detail]);
+    expect(detail.textContent).toContain('Select a row');
+    const rows = [
+      ...list.querySelectorAll<HTMLButtonElement>('button.proc-row'),
+    ];
+    const [first, other] = rows;
+    if (!first || !other) throw new Error('Missing rows');
+    first.focus();
+    first.click();
+    await tick();
+    expect(list.querySelectorAll('button.proc-row')).toHaveLength(2);
+    expect(first.isConnected).toBe(true);
+    expect(first.getAttribute('aria-current')).toBe('true');
+    expect(detail.querySelector('.proc-id')?.textContent).toBe('cnv_fixture');
+    expect(detail.querySelector('.proc-callout')?.textContent).toContain(
+      'not a loop verdict',
+    );
+    expect(
+      [...detail.querySelectorAll('details.proc-section > summary')].map(
+        (summary) => summary.firstChild?.textContent,
+      ),
+    ).toEqual([
+      'Conversations and descendants',
+      'Queues and iteration progress',
+      'Model calls and attempts',
+      'Text record',
+      'Tool receipts',
+    ]);
+    // Arrow keys move the selection; the inspection follows without leaving the list.
+    first.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+    );
+    await tick();
+    expect(document.activeElement).toBe(other);
+    expect(other.getAttribute('aria-current')).toBe('true');
+    expect(first.hasAttribute('aria-current')).toBe(false);
+    expect(fact(root, 'cause')).toBe('second-cause');
+    // A poll replaces both panes but keeps the selection, focus and inspection.
+    await panel.refresh();
+    await tick();
+    const focusedRow = document.activeElement;
+    expect(focusedRow?.getAttribute('data-conversation')).toBe('cnv_second');
+    expect(focusedRow?.getAttribute('aria-current')).toBe('true');
+    expect(fact(root, 'cause')).toBe('second-cause');
+    button(root, 'Close').click();
+    expect(root.querySelector('[aria-current]')).toBeNull();
+    expect(detail.textContent).toContain('Select a row');
+    panel.destroy();
+  });
+
+  it('lists newest first by default and restarts paging when the order changes', async () => {
+    const asked: { type: string; query: ProcQuery }[] = [];
+    const paged: ProcReplies = {
+      ...replies,
+      'proc.list': { ...conversations, cursor: 'cursor-fixture' },
+    };
+    const reader: ProcReader = {
+      read: async (type, query) => {
+        asked.push({ type, query });
+        return paged[type];
+      },
+    };
+    const root = document.createElement('div');
+    const panel = mountProcPanel(root, reader);
+    await panel.refresh();
+    const order = control(root, 'Audit order');
+    expect(order.value).toBe('newest');
+    expect(button(root, 'First page').disabled).toBe(true);
+    button(root, 'Next page').click();
+    await tick();
+    expect(asked.at(-1)?.query).toEqual({
+      visibility: 'mine',
+      after: 'cursor-fixture',
+      limit: 50,
+      order: 'newest',
+    });
+    expect(button(root, 'First page').disabled).toBe(false);
+    order.value = 'oldest';
+    order.dispatchEvent(new Event('change'));
+    await tick();
+    expect(asked.at(-1)?.query).toEqual({
+      visibility: 'mine',
+      limit: 50,
+      order: 'oldest',
+    });
+    // Inspections and the other views have their own orderings and never carry this one.
+    button(root, 'information_tagger').click();
+    await tick();
+    const view = control(root, 'Audit view');
+    view.value = 'proc.calls';
+    view.dispatchEvent(new Event('change'));
+    await tick();
+    expect(order.disabled).toBe(true);
+    expect(
+      asked
+        .filter((a) => a.type !== 'proc.list')
+        .every((a) => a.query.order === undefined),
+    ).toBe(true);
+    expect(asked.at(-1)?.type).toBe('proc.calls');
+    panel.destroy();
+  });
+
+  it('hides server visibility from accounts that are not server administrators', () => {
+    const reader: ProcReader = { read: async (type) => replies[type] };
+    const root = document.createElement('div');
+    const panel = mountProcPanel(root, reader, { serverAdmin: false });
+    expect(
+      [...control(root, 'Audit visibility').options].map((o) => o.value),
+    ).toEqual(['mine']);
     panel.destroy();
   });
 });

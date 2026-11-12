@@ -11,7 +11,16 @@ export interface ProcQuery {
   readonly active?: boolean;
   readonly after?: string;
   readonly limit?: number;
+  /**
+   * Conversation-listing direction. `oldest` (the server default) pages by
+   * ascending id; `newest` pages by descending id so current work comes first.
+   * A cursor continues the direction that produced it, so send the same order
+   * with it. Honoured by `proc.list` and the conversation section of
+   * `proc.inspect`; queues, calls and tools keep their own orderings.
+   */
+  readonly order?: ProcOrder;
 }
+export type ProcOrder = 'newest' | 'oldest';
 export interface ProcConversation {
   readonly id: string;
   readonly root: string;
@@ -52,6 +61,8 @@ export interface ProcSelection {
   readonly active: boolean | null;
   readonly after: string | null;
   readonly limit: number;
+  /** Echoed listing direction; absent only from servers that predate ordering (oldest). */
+  readonly order?: ProcOrder;
 }
 export interface ProcConversations {
   readonly snapshotAt: string;
@@ -211,6 +222,12 @@ export function procProblem(
     value['visibility'] !== 'server'
   )
     return 'Invalid PROC visibility';
+  if (
+    value['order'] !== undefined &&
+    value['order'] !== 'newest' &&
+    value['order'] !== 'oldest'
+  )
+    return 'PROC order must be newest or oldest';
   for (const key of ['project', 'conversation', 'root', 'causation', 'after']) {
     const field = value[key];
     if (

@@ -1,20 +1,131 @@
-body { margin:0; height:100vh; overflow:auto; background:var(--bg); color:var(--ink); }
-.proc-screen { max-width:1400px; margin:auto; padding:24px; }
-.proc-panel { font-size:13px; line-height:1.6; padding:12px 0; }
-.proc-panel h2 { font-size:23px; margin-bottom:8px; }
-.proc-panel h3 { font-size:15px; margin:16px 0 8px; }
-.proc-controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
-.proc-controls input,.proc-controls select { color:inherit; background:var(--panel); border:1px solid var(--line); border-radius:5px; padding:7px; max-width:100%; }
-.proc-controls label { display:flex; align-items:center; gap:5px; }
-.proc-panel button { color:var(--accent); border:1px solid var(--line); border-radius:5px; padding:6px 10px; background:var(--panel); }
-.proc-panel button:disabled { opacity:.5; }
-.proc-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.7 var(--mono); margin:10px 0; }
-.proc-panel code { overflow-wrap:anywhere; display:block; }
-.proc-conversation,.proc-detail { padding:14px 0; border-top:1px solid var(--line); }
-.proc-conversation-facts,.proc-status { color:var(--muted); }
-.proc-panel table { width:100%; border-collapse:collapse; text-align:left; }
-.proc-panel th,.proc-panel td { padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
-.proc-results { overflow-x:auto; }
-.proc-totals { display:flex; flex-wrap:wrap; gap:12px; }
-.proc-totals>div { border:1px solid var(--line); border-radius:6px; padding:12px; }
-@media(max-width:620px) { .proc-screen {padding:12px;} .proc-panel th,.proc-panel td {padding:7px 4px;} }
+/*
+ * Processes page. The page is a fixed frame: connection line, title, status
+ * and toolbar stay put while the list and the inspection scroll in their own
+ * panes. The panel rules below mirror plowshare-console/src/screens/
+ * proc-panel.css (the Console build of the same shared panel); change both
+ * together. Only the tokens and this page frame are Desktop-specific.
+ */
+body { margin:0; height:100vh; overflow:hidden; background:var(--bg); color:var(--ink); }
+.proc-screen { display:flex; flex-direction:column; gap:8px; height:100vh; min-height:0; padding:16px clamp(14px,2.4vw,28px) 14px; }
+#proc-connection { flex-shrink:0; font:10px/1.4 var(--mono); color:var(--muted); overflow-wrap:anywhere; }
+#proc-panel { flex:1; min-height:0; display:flex; flex-direction:column; }
+.proc-panel { --proc-ink:var(--ink); --proc-muted:var(--muted); --proc-line:var(--line); --proc-panel:var(--panel); --proc-hover:#ffffff08; --proc-tint:var(--tint); --proc-accent:var(--accent); --proc-warn:#e2a26c; --proc-mono:var(--mono); flex:1; }
+.proc-panel { container-type:inline-size; display:flex; flex-direction:column; gap:10px; min-height:0; font-size:13px; line-height:1.5; color:var(--proc-ink); }
+.proc-panel *,.proc-panel *::before { box-sizing:border-box; }
+.proc-panel h2,.proc-panel h3,.proc-panel p,.proc-panel dl,.proc-panel dd,.proc-panel ul,.proc-panel pre { margin:0; }
+.proc-panel code,.proc-panel pre,.proc-panel .proc-badge,.proc-panel .proc-eyebrow,.proc-panel .proc-label { font-family:var(--proc-mono); }
+.proc-panel code { font-size:11px; overflow-wrap:anywhere; }
+.proc-panel :focus-visible { outline:2px solid var(--proc-accent); outline-offset:1px; }
+
+/* Fixed frame: title, status and toolbar never scroll away. */
+.proc-header { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:4px 16px; flex-shrink:0; }
+.proc-title { display:flex; flex-direction:column; gap:2px; }
+.proc-eyebrow { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--proc-muted); }
+.proc-title h2 { font-size:18px; font-weight:500; line-height:1.3; }
+.proc-status { font-size:11px; color:var(--proc-muted); text-align:right; overflow-wrap:anywhere; }
+.proc-status[data-state=stale] { color:var(--proc-warn); }
+.proc-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
+.proc-controls select,.proc-controls input:not([type=checkbox]) { height:30px; max-width:100%; padding:0 9px; font:inherit; font-size:12px; color:inherit; background:var(--proc-panel); border:1px solid var(--proc-line); border-radius:8px; }
+.proc-controls input:not([type=checkbox]) { flex:1 1 150px; min-width:120px; max-width:260px; }
+.proc-controls select:disabled { opacity:.45; }
+.proc-panel option { color:CanvasText; background:Canvas; }
+.proc-toggle { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 10px; font-size:12px; border:1px solid var(--proc-line); border-radius:8px; cursor:pointer; white-space:nowrap; }
+.proc-toggle:has(:checked) { border-color:var(--proc-accent); color:var(--proc-accent); background:var(--proc-tint); }
+.proc-toggle input { margin:0; accent-color:var(--proc-accent); }
+.proc-paging { display:flex; gap:6px; margin-left:auto; }
+.proc-button { display:inline-flex; align-items:center; justify-content:center; min-height:28px; padding:3px 10px; font:inherit; font-size:12px; color:inherit; background:transparent; border:1px solid var(--proc-line); border-radius:8px; cursor:pointer; white-space:nowrap; }
+.proc-button:hover:not(:disabled) { border-color:var(--proc-accent); color:var(--proc-accent); }
+.proc-button:disabled { opacity:.4; cursor:default; }
+.proc-icon-button { width:30px; padding:0; font-size:15px; line-height:1; }
+.proc-primary { color:var(--proc-accent); border-color:var(--proc-accent); background:var(--proc-tint); }
+.proc-quiet { min-height:22px; padding:1px 8px; font-size:11px; color:var(--proc-muted); border-color:transparent; }
+
+/* Two panes that scroll on their own; the page itself does not. */
+.proc-workspace { flex:1; min-height:0; display:grid; grid-template-columns:minmax(260px,34%) minmax(0,1fr); border:1px solid var(--proc-line); border-radius:12px; overflow:hidden; background:var(--proc-panel); }
+.proc-panel[data-view=page] .proc-workspace { grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); }
+.proc-panel[data-view=page][data-detail=empty] .proc-workspace { grid-template-columns:minmax(0,1fr); }
+.proc-panel[data-view=page][data-detail=empty] .proc-detail { display:none; }
+.proc-list-pane { display:flex; flex-direction:column; min-width:0; min-height:0; border-right:1px solid var(--proc-line); }
+.proc-panel[data-view=page][data-detail=empty] .proc-list-pane { border-right:0; }
+.proc-selection { flex-shrink:0; display:flex; flex-wrap:wrap; align-items:center; gap:4px; min-height:36px; padding:5px 12px; font-size:11px; color:var(--proc-muted); border-bottom:1px solid var(--proc-line); }
+.proc-results { flex:1; min-height:0; overflow:auto; padding:6px; }
+.proc-detail { min-width:0; min-height:0; overflow:auto; padding:16px 18px 20px; display:flex; flex-direction:column; gap:14px; }
+.proc-detail>* { flex-shrink:0; }
+.proc-empty { padding:14px 8px; font-size:12px; color:var(--proc-muted); }
+
+/* Dense rows. Running work carries an accent rail and a filled dot. */
+.proc-row { display:flex; flex-direction:column; gap:2px; width:100%; margin:0 0 2px; padding:7px 10px; font:inherit; color:inherit; text-align:left; background:transparent; border:0; border-left:2px solid transparent; border-radius:8px; }
+button.proc-row { cursor:pointer; }
+button.proc-row:hover { background:var(--proc-hover); }
+.proc-row[aria-current=true] { background:var(--proc-tint); }
+.proc-row[data-tone=live] { border-left-color:var(--proc-accent); }
+.proc-row[data-tone=warn] { border-left-color:var(--proc-warn); }
+.proc-row>span { display:flex; align-items:center; gap:8px; min-width:0; }
+.proc-row-head strong { flex:1; min-width:0; font-size:12.5px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.proc-row-meta,.proc-row-foot { padding-left:15px; font-size:11px; color:var(--proc-muted); }
+.proc-row-meta>span,.proc-row-foot>code { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.proc-row-meta>time,.proc-row-foot>span,.proc-row-foot>time { margin-left:auto; flex-shrink:0; white-space:nowrap; }
+.proc-row-meta>span+span::before { content:"· "; }
+.proc-row-foot>code { font-size:10px; }
+.proc-dot { flex:0 0 7px; width:7px; height:7px; border-radius:50%; border:1px solid var(--proc-muted); }
+[data-tone=live]>.proc-row-head .proc-dot { background:var(--proc-accent); border-color:var(--proc-accent); }
+[data-tone=warn]>.proc-row-head .proc-dot { background:var(--proc-warn); border-color:var(--proc-warn); }
+[data-tone=done]>.proc-row-head .proc-dot { background:var(--proc-muted); }
+.proc-badge { display:inline-block; flex-shrink:0; padding:0 6px; font-size:9.5px; line-height:16px; letter-spacing:.04em; color:var(--proc-muted); border:1px solid var(--proc-line); border-radius:4px; white-space:nowrap; }
+.proc-badge[data-tone=live] { color:var(--proc-accent); border-color:var(--proc-accent); }
+.proc-badge[data-tone=warn],.proc-badge[data-tone=unknown] { color:var(--proc-warn); border-color:var(--proc-warn); }
+
+/* Inspection. */
+.proc-detail-header { display:flex; flex-direction:column; gap:4px; padding-bottom:12px; border-bottom:1px solid var(--proc-line); }
+.proc-detail-name { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.proc-detail-name h3 { font-size:16px; font-weight:500; overflow-wrap:anywhere; }
+.proc-detail-name .proc-quiet { margin-left:auto; }
+.proc-id { color:var(--proc-muted); user-select:all; }
+.proc-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.proc-facts { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px 18px; }
+.proc-facts>div { min-width:0; }
+.proc-facts dt,.proc-label { font-size:10px; font-weight:400; letter-spacing:.08em; text-transform:uppercase; color:var(--proc-muted); }
+.proc-facts dt { font-family:var(--proc-mono); }
+.proc-facts dd { font-size:12px; overflow-wrap:anywhere; }
+.proc-facts dd code { user-select:all; }
+.proc-facts [data-proc-fact=activity],.proc-facts [data-proc-fact=evidence],.proc-facts [data-proc-fact=cause] { grid-column:1/-1; }
+.proc-callout { padding:10px 12px; font-size:12px; border:1px solid var(--proc-warn); border-radius:8px; }
+.proc-callout strong { display:block; font-size:11px; font-weight:500; color:var(--proc-warn); }
+.proc-callout ul { padding-left:16px; margin-top:4px; }
+.proc-section { border:1px solid var(--proc-line); border-radius:8px; }
+.proc-section>summary { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px; cursor:pointer; }
+.proc-section>summary small { margin-left:auto; font:10px var(--proc-mono); color:var(--proc-muted); }
+.proc-section[open]>summary { border-bottom:1px solid var(--proc-line); }
+.proc-section>.proc-button { margin:0 10px 10px; }
+.proc-section>.proc-section { margin:0 10px 10px; }
+.proc-scroll { max-height:300px; overflow:auto; margin:0 0 8px; }
+.proc-scroll>pre { padding:8px 10px; }
+.proc-tree { max-height:260px; overflow:auto; padding:6px; }
+.proc-panel pre { font-size:11px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+.proc-panel table { width:100%; border-collapse:collapse; text-align:left; font-size:12px; }
+.proc-panel th { position:sticky; top:0; padding:6px 10px; font:400 10px var(--proc-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--proc-muted); background:var(--proc-panel); border-bottom:1px solid var(--proc-line); }
+.proc-panel td { padding:6px 10px; vertical-align:top; overflow-wrap:anywhere; border-bottom:1px solid var(--proc-line); }
+.proc-panel tr:last-child>td { border-bottom:0; }
+.proc-queues { display:flex; flex-direction:column; gap:10px; padding:8px; }
+.proc-queues td p { font-size:11px; color:var(--proc-muted); }
+.proc-queues td .proc-button { margin-top:4px; }
+.proc-totals { display:flex; flex-wrap:wrap; gap:8px; }
+.proc-totals>div { min-width:150px; padding:8px 12px; border:1px solid var(--proc-line); border-radius:8px; }
+.proc-totals p { font-size:11px; color:var(--proc-muted); }
+.proc-results>.proc-section { margin:8px 4px 4px; }
+
+/* Footer evidence stays out of the way until asked for. */
+.proc-coverage { flex-shrink:0; font-size:11px; color:var(--proc-muted); }
+.proc-coverage>summary { cursor:pointer; width:max-content; }
+.proc-coverage>pre { max-height:140px; overflow:auto; margin-top:6px; padding:8px 10px; border:1px solid var(--proc-line); border-radius:8px; }
+
+/* The host may be a narrow embedded slot, so stack on the panel's own width. */
+@container (max-width:720px) {
+  .proc-workspace,.proc-panel[data-view=page] .proc-workspace { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(120px,42%) minmax(0,1fr); }
+  .proc-panel[data-detail=empty] .proc-workspace { grid-template-rows:minmax(0,1fr) auto; }
+  .proc-panel[data-view=page][data-detail=empty] .proc-workspace { grid-template-rows:minmax(0,1fr); }
+  .proc-list-pane { border-right:0; border-bottom:1px solid var(--proc-line); }
+  .proc-status { text-align:left; }
+  .proc-paging { margin-left:0; }
+  .proc-detail { padding:12px; }
+}
