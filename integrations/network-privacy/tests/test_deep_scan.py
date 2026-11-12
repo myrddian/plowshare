@@ -733,6 +733,17 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(saved.running)
         self.assertEqual(["failed"], [r.state for r in saved.results])
 
+    async def test_the_view_explains_ports_only_the_deep_scan_found(self) -> None:
+        self.probe = Probe({23, 80})
+        self.scanner = self.build()
+        self.assertEqual((), self.scanner.view(LAMP).latest_exposures)
+        self.scanner.request(LAMP)
+        await self.scanner.poll()
+        exposures = self.scanner.view(LAMP).latest_exposures
+        telnet = next(e for e in exposures if e.possible_service == "Telnet")
+        self.assertEqual((23,), telnet.ports)
+        self.assertIn("Check whether it can be disabled", telnet.risk_check)
+
     async def test_views_cover_queued_running_and_scanned_devices(self) -> None:
         self.scanner.request(LAMP)
         await self.scanner.poll()

@@ -53,6 +53,7 @@ from plowshare_privacy.device_assessments import (
     UnknownDevice,
     summary,
 )
+from plowshare_privacy.device_detection import ServiceExposure, exposures_for
 from plowshare_privacy.device_dossier import parse_device_id
 from plowshare_privacy.device_profiles import (
     DeviceProfiles,
@@ -118,6 +119,10 @@ def sample_overview(total: int | None = None) -> Middleware:
         return web.json_response(body, status=response.status)
 
     return middleware
+
+
+def _exposures(complete: DeepScanResult | None) -> tuple[ServiceExposure, ...]:
+    return exposures_for(set(complete.open_ports)) if complete is not None else ()
 
 
 class PreviewDeepScans:
@@ -209,6 +214,7 @@ class PreviewDeepScans:
                     device_id, True, "running", "operator", checked, self.TOTAL,
                     (443,) if checked > 20000 else (), finish.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     latest, self._complete.get(device_id), None,
+                    _exposures(self._complete.get(device_id)),
                 )  # fmt: skip
         return DeepScanView(
             device_id,
@@ -222,6 +228,7 @@ class PreviewDeepScans:
             latest,
             self._complete.get(device_id),
             None,
+            _exposures(self._complete.get(device_id)),
         )
 
     def views(self) -> tuple[DeepScanView, ...]:

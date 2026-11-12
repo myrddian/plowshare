@@ -359,3 +359,14 @@ test('an unreadable journal is shown as needing attention, not as not enabled', 
   assert.equal(node('deep-scan-group').hidden, false);
   assert.equal(node('deep-scan-detail').className, 'hint');
 });
+
+test('a port found only by the deep scan carries its exposure wording', () => {
+  const {run} = dashboard();
+  const telnet = {ports:[23], possible_service:'Telnet', risk_check:'If this is Telnet, credentials and session traffic may be readable on the network. Check whether it can be disabled.'};
+  const value = overview([view(TV, {latest:result(TV, {open_ports:[23, 443]}), latest_exposures:[telnet]})]);
+  load(run, value);
+  const block = {tag:'div', children:[], textContent:'', append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.children = children;}};
+  run('selectedDevice = value.devices[0].address; renderDeepScan(value.devices[0], block)', {value, block});
+  assert.ok(texts(block).includes(`TCP 23 · Possible Telnet. ${telnet.risk_check} · outside the usual checks`), texts(block).join('\n'));
+  assert.ok(texts(block).includes('TCP 443'));
+});

@@ -1647,7 +1647,9 @@ function deepScanNodes(device, view, scans) {
     if (complete.open_ports.length) {
       const list = element('ul');
       for (const port of complete.open_ports) {
-        const exposure = (device.detection?.exposures || []).find(item => item.ports.includes(port));
+        // The scan's own exposures cover ports only it found; the regular
+        // detection's remain a fallback for an older view without them.
+        const exposure = [...(view.latest_exposures || []), ...(device.detection?.exposures || [])].find(item => item.ports.includes(port));
         const note = exposure ? ` · Possible ${exposure.possible_service}. ${exposure.risk_check}` : '';
         list.append(element('li', `TCP ${port}${note}${usual.has(port) ? '' : ' · outside the usual checks'}`));
       }
@@ -1683,7 +1685,7 @@ function showDeepScan() {
 }
 function deepScanIdle(deviceId) {
   return {device_id:deviceId, available:Boolean(overview?.deep_scans?.available), state:'idle', trigger:null, checked:0, total:65535,
-    open_so_far:[], estimated_finish:null, latest:null, latest_complete:null, detail:overview?.deep_scans?.detail ?? null};
+    open_so_far:[], estimated_finish:null, latest:null, latest_complete:null, detail:overview?.deep_scans?.detail ?? null, latest_exposures:[]};
 }
 function renderDeepScan(device, block) {
   const deviceId = device.identity?.mac ? device.identity.device_id : null;

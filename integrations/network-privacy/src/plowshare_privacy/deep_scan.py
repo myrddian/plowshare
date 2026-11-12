@@ -42,6 +42,7 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .device_detection import ServiceExposure, exposures_for
 from .device_dossier import parse_device_id
 from .device_inventory import DeviceInventory
 from .identity_source import DeviceIdentitySource, IdentitySample
@@ -402,6 +403,9 @@ class DeepScanView:
     # so a later cancelled or failed attempt does not hide them.
     latest_complete: DeepScanResult | None
     detail: str | None
+    # The service wording for every open port of ``latest_complete``, so ports
+    # only the deep scan found are explained as the regular scan's are.
+    latest_exposures: tuple[ServiceExposure, ...]
 
 
 @dataclass(frozen=True)
@@ -665,6 +669,11 @@ class DeepScanner:
             (r for r in reversed(ledger.results) if r.device_id == device_id), None
         )
         latest_complete = self.latest(device_id)
+        exposures = (
+            exposures_for(set(latest_complete.open_ports))
+            if latest_complete is not None
+            else ()
+        )
         total = len(self._ports)
         detail = None if self.available else _UNAVAILABLE
         running = ledger.running
@@ -684,6 +693,7 @@ class DeepScanner:
                 latest,
                 latest_complete,
                 detail,
+                exposures,
             )
         queued = self._queued(device_id)
         if queued is not None:
@@ -701,6 +711,7 @@ class DeepScanner:
                 latest,
                 latest_complete,
                 detail,
+                exposures,
             )
         return DeepScanView(
             device_id,
@@ -714,6 +725,7 @@ class DeepScanner:
             latest,
             latest_complete,
             detail,
+            exposures,
         )
 
     def views(self) -> tuple[DeepScanView, ...]:
