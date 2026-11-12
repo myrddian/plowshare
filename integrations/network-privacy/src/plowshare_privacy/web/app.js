@@ -494,7 +494,7 @@ byId('disconnect').addEventListener('click', async () => {
   byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
   setSignalFilter('all');
   selectedDevice = null; deviceSupplemental = null; deepScanPane = null; deepScanBusy = null; setHouseholdZone('UTC');
-  byId('deep-scan-group').hidden = true; byId('deep-scan-limit').value = ''; byId('deep-scan-limit').disabled = false; byId('deep-scan-save').disabled = false; byId('deep-scan-detail').textContent = '';
+  byId('deep-scan-group').hidden = true; byId('deep-scan-limit').value = ''; byId('deep-scan-limit').disabled = false; byId('deep-scan-save').disabled = false; byId('deep-scan-detail').textContent = ''; byId('deep-scan-detail').className = 'hint';
   byId('household-zone').hidden = true; byId('zone-input').value = '';
   for (const id of deviceParts) byId(id).replaceChildren();
   syncPane();
@@ -1304,7 +1304,7 @@ async function loadDeviceAnalysis(device) {
     actionButton('Look up product and advisories', 'secondary', () => openDeviceResearch(device)));
   // The deep scan belongs with the assessment: its result is what asks for one.
   const sections = [assessment];
-  if (overview?.deep_scans) {
+  if (deepScanSectionShown()) {
     const deep = paneSection('Deep port scan', 'Deep scan');
     const deepBlock = element('div', undefined, 'deep-scan-block');
     deep.append(deepBlock);
@@ -1568,6 +1568,14 @@ const deepScanStateText = {
   failed: 'Last deep scan failed',
 };
 const deepScanUnavailable = 'Deep port scans need UniFi or Pi-hole to confirm each device’s address.';
+// Why the collector has no scanner although deep scans are configured (an
+// unreadable journal); null when there is a scanner or none is configured.
+function deepScanFailure() {
+  return overview?.deep_scans ? null : latestStatus?.deep_scans_detail || null;
+}
+// The pane section and the Settings group show for a working scanner, and for
+// one that failed to open, so the failure is not mistaken for "not enabled".
+function deepScanSectionShown() {return Boolean(overview?.deep_scans || deepScanFailure());}
 function deepScanViewIn(device, value) {
   const id = device.identity?.mac ? device.identity.device_id : null;
   return id ? (value?.deep_scans?.views || []).find(item => item.device_id === id) || null : null;
@@ -1600,7 +1608,10 @@ function deepScanPath(deviceId, action) {
 }
 function deepScanNodes(device, view, scans) {
   const nodes = [];
-  if (!scans) return [element('p', 'Deep port scans are not enabled on this collector.', 'hint unmeasured')];
+  if (!scans) {
+    const failure = deepScanFailure();
+    return [failure ? element('p', failure, 'notice error') : element('p', 'Deep port scans are not enabled on this collector.', 'hint unmeasured')];
+  }
   if (!device.identity?.mac) return [element('p', 'Not scanned. A deep scan needs a confirmed MAC address; this device is known by its address only.', 'hint unmeasured')];
   const latest = view.latest;
   const actions = element('div', undefined, 'actions');
@@ -1713,8 +1724,25 @@ async function pollDeepScan() {
   if (deepScanPane !== pane || deepScanSignature(pane, next) === pane.signature) return;
   pane.view = next; showDeepScan();
 }
+// The Settings group: hidden without a scanner, a needs-attention notice when
+// the scanner could not open, otherwise the limit form. Never overwrites a
+// limit the operator is typing.
+function renderDeepScanGroup(value) {
+  const failure = value.deep_scans ? null : latestStatus?.deep_scans_detail || null;
+  byId('deep-scan-group').hidden = !value.deep_scans && !failure;
+  if (failure) {
+    byId('deep-scan-limit').value = '';
+    byId('deep-scan-limit').disabled = true;
+    byId('deep-scan-save').disabled = true;
+    byId('deep-scan-detail').textContent = failure;
+    byId('deep-scan-detail').className = 'notice error';
+  } else if (value.deep_scans && document.activeElement !== byId('deep-scan-limit')) {
+    renderDeepScanSettings({...value.deep_scans.usage, available:value.deep_scans.available, detail:value.deep_scans.detail});
+  }
+}
 function renderDeepScanSettings(value) {
   const field = byId('deep-scan-limit');
+  byId('deep-scan-detail').className = 'hint';
   field.value = String(value.automatic_limit);
   field.disabled = !value.available;
   byId('deep-scan-save').disabled = !value.available;
@@ -2082,9 +2110,7 @@ function renderOverview(value) {
     : 'Quick presence checks are off.';
   renderAttention(value);
   renderBackgroundUsage(value);
-  byId('deep-scan-group').hidden = !value.deep_scans;
-  // Never overwrite a limit the operator is typing.
-  if (value.deep_scans && document.activeElement !== byId('deep-scan-limit')) renderDeepScanSettings({...value.deep_scans.usage, available:value.deep_scans.available, detail:value.deep_scans.detail});
+  renderDeepScanGroup(value);
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates, value.assessments?.summaries || null]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;

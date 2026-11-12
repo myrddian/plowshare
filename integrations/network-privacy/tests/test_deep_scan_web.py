@@ -138,6 +138,10 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         state = await (await client.get("/api/deep-scans", headers=HEADERS)).json()
         self.assertFalse(state["available"])
         self.assertIn("UniFi or Pi-hole", state["detail"])
+        # Available means a scan can start, not merely that the scanner exists.
+        status = await (await client.get("/api/status", headers=HEADERS)).json()
+        self.assertFalse(status["deep_scans_available"])
+        self.assertIn("UniFi or Pi-hole", status["deep_scans_detail"])
 
     async def test_the_automatic_limit_route_validates_its_range(self) -> None:
         client = await self.client(self.scanner())

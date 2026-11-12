@@ -927,7 +927,9 @@ def application(
                 else 0,
                 "issues_available": issues is not None,
                 "device_assessments_available": assessments is not None,
-                "deep_scans_available": deep_scans is not None,
+                # True when a scan can start now: a scanner with an identity
+                # source, not merely configured deep scans.
+                "deep_scans_available": deep_scans is not None and deep_scans.available,
                 # Why deep scans are off: an unreadable journal at start-up, or
                 # the running scanner's own detail.
                 "deep_scans_detail": deep_scans.detail

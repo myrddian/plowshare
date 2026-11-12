@@ -329,3 +329,33 @@ test('a complete scan that kept only some open ports says so', () => {
   run('selectedDevice = value.devices[0].address; renderDeepScan(value.devices[0], block)', {value, block});
   assert.ok(texts(block).includes('2,000 ports were open; 1,488 more open ports were not kept. The device may answer every port.'));
 });
+
+test('an unreadable journal is shown as needing attention, not as not enabled', () => {
+  const {run, node} = dashboard();
+  const detail = 'Deep port scans need attention: their journal could not be read.';
+  const value = overview([], [], {deep_scans:null});
+  load(run, value);
+  run('latestStatus = {deep_scans_available:false, deep_scans_detail:detail}', {detail});
+  assert.equal(run('deepScanSectionShown()'), true);
+  const block = {tag:'div', children:[], textContent:'', append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.children = children;}};
+  run('selectedDevice = value.devices[0].address; renderDeepScan(value.devices[0], block)', {value, block});
+  assert.deepEqual(texts(block), [detail]);
+  assert.ok(classes(block).some(name => /error/.test(name)));
+  run('renderDeepScanGroup(value)', {value});
+  assert.equal(node('deep-scan-group').hidden, false);
+  assert.equal(node('deep-scan-limit').disabled, true);
+  assert.equal(node('deep-scan-save').disabled, true);
+  assert.equal(node('deep-scan-detail').textContent, detail);
+  assert.match(node('deep-scan-detail').className, /error/);
+  // Without a scanner or a reason, the section and the group stay hidden.
+  run('latestStatus = {deep_scans_available:false, deep_scans_detail:null}');
+  assert.equal(run('deepScanSectionShown()'), false);
+  run('renderDeepScanGroup(value)', {value});
+  assert.equal(node('deep-scan-group').hidden, true);
+  // A working scanner restores the ordinary hint style.
+  const working = overview([]);
+  load(run, working);
+  run('renderDeepScanGroup(value)', {value:working});
+  assert.equal(node('deep-scan-group').hidden, false);
+  assert.equal(node('deep-scan-detail').className, 'hint');
+});
