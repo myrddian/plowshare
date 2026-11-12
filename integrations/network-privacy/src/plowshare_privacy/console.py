@@ -274,7 +274,7 @@ class OperatorConsole:
                         item.source == "unifi" for item in latest.snapshot.devices
                     )
                     unifi = (
-                        f"{associated} selected addresses associated in the latest sweep"
+                        f"{associated} selected addresses associated in the latest collection"
                         + (". " + "; ".join(issues) if issues else "")
                     )
             recovery = []

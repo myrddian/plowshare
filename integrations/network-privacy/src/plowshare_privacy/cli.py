@@ -484,6 +484,7 @@ async def execute(args: argparse.Namespace) -> None:
                     managed_products=managed_products,
                     profile_research=research,
                     assessments=assessments,
+                    advisory_origin=advisory_origin,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
                     )

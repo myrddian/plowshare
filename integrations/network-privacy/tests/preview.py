@@ -38,8 +38,11 @@ from plowshare_privacy.device_assessments import (
     AssessmentConflict,
     AssessmentLedger,
     AssessmentReport,
+    AssessmentSummary,
+    AssessmentUsage,
     AssessmentView,
     UnknownDevice,
+    summary,
 )
 from plowshare_privacy.device_dossier import parse_device_id
 from plowshare_privacy.device_profiles import (
@@ -58,7 +61,12 @@ from plowshare_privacy.worker import Worker
 
 def sample_overview(total: int | None = None) -> Middleware:
     """Replace the overview's device list and device facts with the synthetic network."""
-    from preview_sample import sample_devices, sample_supplemental, scaled_network
+    from preview_sample import (
+        sample_devices,
+        sample_supplemental,
+        sample_system,
+        scaled_network,
+    )
 
     @web.middleware
     async def middleware(request: web.Request, handler: Handler) -> web.StreamResponse:
@@ -77,6 +85,14 @@ def sample_overview(total: int | None = None) -> Middleware:
         if request.path != "/api/overview" or not isinstance(response, web.Response):
             return response
         body = json.loads(response.text or "{}")
+        # Health agrees with the sample connections it sits beside.
+        body["system"] = sample_system()
+        body["health"]["pihole"] = (
+            "Latest collection retained; inspect its observation time and DNS window"
+        )
+        body["health"]["unifi"] = (
+            "14 selected addresses associated in the latest collection"
+        )
         if total is None:
             body["devices"] = sample_devices()
         else:
@@ -125,6 +141,16 @@ class PreviewAssessments:
                 "Choose a monitored device with a confirmed MAC address"
             )
         return self.views[device_id]
+
+    def summaries(self) -> tuple[AssessmentSummary, ...]:
+        return tuple(
+            summary(v.device_id, v.state, v.pending, v.processing, v.concerns)
+            for v in self.views.values()
+            if v.state != "idle"
+        )
+
+    def usage(self) -> AssessmentUsage:
+        return AssessmentUsage(self._ledger.background_limit, 1, 12)
 
     def _set(self, view: AssessmentView) -> AssessmentView:
         self.views[view.device_id] = view

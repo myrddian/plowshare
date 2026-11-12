@@ -268,6 +268,15 @@ class ResearchPort(Protocol):
     async def outcome(self, run_id: str) -> ResearchOutcome: ...
 
 
+def admitted_today(ledger: ResearchLedger, now: str) -> int:
+    """Admissions on ``now``'s UTC day, the window ``DAILY_LIMIT`` applies to."""
+    day = datetime.fromtimestamp(epoch(now), timezone.utc).date()
+    return sum(
+        datetime.fromtimestamp(epoch(stamp), timezone.utc).date() >= day
+        for stamp in ledger.admissions
+    )
+
+
 class ResearchReview(Protocol):
     """Dashboard projection and explicit review controls for background drafts."""
 

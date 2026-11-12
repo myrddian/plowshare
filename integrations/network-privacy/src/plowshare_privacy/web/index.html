@@ -60,6 +60,17 @@
       </div>
 
       <section id="view-overview" role="tabpanel" aria-labelledby="tab-overview">
+        <section id="attention" class="attention" aria-labelledby="attention-title" hidden>
+          <h2 id="attention-title">Needs your attention</h2>
+          <ul id="attention-items" class="attention-items"></ul>
+        </section>
+        <p id="attention-clear" class="all-clear" hidden>Nothing needs your attention. Assessments to review, failed work and connection problems appear here first.</p>
+
+        <aside id="setup-checklist" class="setup-callout" hidden>
+          <div><h2>Finish monitoring setup</h2><ul id="checklist"></ul></div>
+          <button id="open-settings" type="button" class="secondary">Open settings</button>
+        </aside>
+
         <section id="triptych" class="triptych" aria-label="What the last 24 hours show">
           <article class="leaf leaf-centre">
             <h2>Advertising, measurement and telemetry</h2>
@@ -110,11 +121,6 @@
           </div>
         </div>
 
-        <aside id="setup-checklist" class="setup-callout" hidden>
-          <div><h2>Finish monitoring setup</h2><ul id="checklist"></ul></div>
-          <button id="open-settings" type="button" class="secondary">Open settings</button>
-        </aside>
-
         <div class="overview-grid">
           <section class="panel">
             <div class="panel-heading"><h2>Monitoring schedule</h2><span id="schedule-runtime" class="tag">Checking schedule…</span></div>
@@ -138,10 +144,15 @@
         <details id="system-health" class="panel">
           <summary class="panel-heading"><h2>System health</h2><span id="health-summary">Checking connection…</span></summary>
           <div class="panel-body">
-            <p class="hint">Connection, permissions and retained work.</p>
+            <div id="recovery"></div>
+            <h3 class="facts-title">Status</h3>
             <dl id="health" class="facts"></dl>
             <p id="health-detail" class="hint"></p>
-            <div id="recovery"></div>
+            <h3 class="facts-title">Connections</h3>
+            <dl id="health-connections" class="facts"></dl>
+            <h3 class="facts-title">Deployment</h3>
+            <dl id="health-deployment" class="facts"></dl>
+            <p class="limit">Read from the collector configuration when this view loaded. Credentials are shown by where they come from and whether they are present, never by value. Change them in the collector configuration and restart the service.</p>
             <div class="actions"><button id="recover" type="button" class="secondary">Check retained work</button></div>
           </div>
         </details>
@@ -157,9 +168,10 @@
             <button id="filters-toggle" type="button" class="secondary filters-toggle" aria-expanded="false" aria-controls="device-filters">Filter and order</button>
             <div id="device-filters" class="filters">
               <div><label for="device-presence">Show</label><select id="device-presence"><option value="observed">Observed devices</option><option value="candidate">Candidate addresses</option></select></div>
-              <div><label for="device-sort">Order</label><select id="device-sort"><option value="inventory">List order</option><option value="third">Most ad, measurement and telemetry lookups</option><option value="from">Most sent from device</option><option value="to">Most sent to device</option><option value="name">Name</option></select></div>
+              <div><label for="device-sort">Order</label><select id="device-sort"><option value="attention">Needs attention first</option><option value="inventory">List order</option><option value="third">Most ad, measurement and telemetry lookups</option><option value="from">Most sent from device</option><option value="to">Most sent to device</option><option value="name">Name</option></select></div>
               <div id="device-signals" class="signal-filter" role="group" aria-label="Filter observed devices by signal">
                 <button id="signal-all" type="button" class="chip" aria-pressed="true">All observed</button>
+                <button id="signal-review" type="button" class="chip" aria-pressed="false">Needs your review</button>
                 <button id="signal-third" type="button" class="chip" aria-pressed="false">Ad, measurement and telemetry lookups</button>
                 <button id="signal-silent" type="button" class="chip chip-silent" aria-pressed="false">No DNS via Pi-hole</button>
               </div>
@@ -334,7 +346,7 @@
       </section>
 
       <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
-        <p class="view-intro">Choose devices and connections here. Saving settings does not start a scan or resume the schedule.</p>
+        <p class="view-intro">Choose devices and connections here. Saving settings does not start a scan or resume the schedule. Connections set in the collector configuration, such as UniFi, are listed under Overview, System health.</p>
         <section id="monitoring" class="panel" hidden>
           <div class="panel-heading"><h2>Choose what to monitor</h2><span id="monitor-state">Device discovery</span></div>
           <div class="panel-body">
@@ -361,6 +373,14 @@
                 <span id="settings-detail" class="hint"></span>
               </div>
             </form>
+          </div>
+        </section>
+        <section id="background-work" class="panel" hidden>
+          <div class="panel-heading"><h2>Background work</h2><span>Work the collector starts without being asked</span></div>
+          <div class="panel-body">
+            <dl id="background-usage" class="facts"></dl>
+            <p class="hint">Days are UTC days. Change these on the Devices tab, where their drafts and reports are reviewed.</p>
+            <div class="actions"><button id="open-background" type="button" class="secondary">Open background work on Devices</button></div>
           </div>
         </section>
         <details class="panel">

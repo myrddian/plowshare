@@ -30,6 +30,12 @@ let issueBlocked = false;
 let issuesAvailable = false;
 let assessmentsAvailable = false;
 let assessmentSettingsLoaded = false;
+// The latest status read; the attention band and Settings summary use it.
+let latestStatus = null;
+// Device ID to its assessment summary, from the latest overview. Only devices
+// in the current inventory are shown, so a ledger entry for a device that has
+// left monitoring never inflates a count.
+let assessmentIndex = new Map();
 const byId = (name) => document.getElementById(name);
 
 const views = {
@@ -311,6 +317,7 @@ async function refresh() {
   try {
     const [status, scans, reportResult] = await Promise.all([api('/api/status'), api('/api/scans'), api('/api/reports').then(value => ({value}), error => ({error}))]);
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
+    latestStatus = status;
     byId('mode').textContent = status.collection_enabled === false ? 'Collection disabled' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     // Sample data must never pass for the household's own network.
     byId('mode').classList.toggle('synthetic', status.mode === 'fixture');
@@ -377,7 +384,10 @@ byId('disconnect').addEventListener('click', async () => {
   bearer = ''; authenticated = false; selected = null; selectedReport = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; liveCron = null; deviceSignature = null; findingSignature = null; notified = null;
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings','q-third','q-silent','q-volume']) byId(id).replaceChildren();
   for (const id of ['q-network','q-third-coverage','device-shown','health-detail']) byId(id).textContent = '';
-  byId('device-search').value = ''; byId('device-presence').value = 'observed'; byId('device-sort').value = 'inventory';
+  byId('device-search').value = ''; byId('device-presence').value = 'observed'; byId('device-sort').value = 'attention';
+  latestStatus = null; assessmentIndex = new Map(); healthOpened = false;
+  for (const id of ['attention-items','health-connections','health-deployment','background-usage']) byId(id).replaceChildren();
+  byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
   setSignalFilter('all');
   selectedDevice = null;
   for (const id of deviceParts) byId(id).replaceChildren();
@@ -545,7 +555,7 @@ function renderDnsActivity(activity) {
 // Device rows carry their own search text and signals so filtering never
 // re-reads evidence. Candidates stay a separate mode of the same list.
 let signalFilter = 'all';
-const signalNames = {all:'All observed', third:'Ad, measurement and telemetry lookups', silent:'No DNS via Pi-hole'};
+const signalNames = {all:'All observed', review:'Needs your review', third:'Ad, measurement and telemetry lookups', silent:'No DNS via Pi-hole'};
 function setSignalFilter(name) {
   signalFilter = name;
   for (const signal of Object.keys(signalNames)) byId(`signal-${signal}`).setAttribute('aria-pressed', String(signal === name));
@@ -567,7 +577,7 @@ function filterDevices() {
   byId('device-cards').classList.toggle('showing-none', shown === 0);
   byId('device-signals').hidden = presence === 'candidate';
   byId('device-sort').disabled = presence === 'candidate';
-  const narrowed = bySignal || presence === 'candidate' || byId('device-sort').value !== 'inventory';
+  const narrowed = bySignal || presence === 'candidate' || byId('device-sort').value !== 'attention';
   byId('filters-toggle').textContent = narrowed ? 'Filter and order · in use' : 'Filter and order';
   byId('device-shown').textContent = cards.length
     ? `${formatCount(shown)} of ${formatCount(group)} ${presence === 'candidate' ? 'candidate addresses' : 'observed devices'}` : '';
@@ -795,7 +805,7 @@ function renderTriptych(value) {
     row.append(head, track, element('p', `${formatBytes(device.traffic.to_device_bytes)} to device${resets}`, 'leaf-note'));
     volume.append(row);
   }
-  if (!senders.length) volume.append(element('p', 'No UniFi byte counters yet. They need UniFi and quick presence checks.', 'empty'));
+  if (!senders.length) volume.append(element('p', trafficGap(value), 'empty'));
   leafMore(volume, senders.length - limit, 'devices with counters', () => showInventory('all', 'from'));
 
   const types = new Map(); let unknown = 0, identified = 0;
@@ -1000,7 +1010,7 @@ function renderDeviceView(device) {
 
   const sends = paneSection('How much it sends', 'Sends');
   if (device.traffic) sends.append(renderTraffic(device.traffic));
-  else sends.append(element('p', 'No UniFi byte counters for this device. Volume is unknown, not zero.', 'hint unmeasured'));
+  else sends.append(element('p', (overview ? trafficGap(overview) : 'No UniFi byte counters for this device.') + ' Volume is unknown, not zero.', 'hint unmeasured'));
 
   const ports = paneSection('Open ports and exposures', 'Ports');
   const sweep = element('dl', undefined, 'facts');
@@ -1364,6 +1374,9 @@ async function assessmentAction(action) {
     assessmentBusy = null;
   }
   await reloadAssessment();
+  // The device list and Overview counts read the same ledger; show the change
+  // there now rather than at the next background refresh.
+  refresh().catch(error => condition(error.message, true));
 }
 async function pollAssessment() {
   const view = deviceAssessment?.view;
@@ -1374,6 +1387,8 @@ async function loadAssessmentSettings() {
   const settings = await api('/api/device-assessments');
   byId('assessment-limit').value = String(settings.background_limit);
   byId('assessment-settings-detail').textContent = settings.detail || (settings.background_limit ? `Up to ${plural(settings.background_limit, 'background assessment', 'background assessments')} a day.` : 'Background assessment is off.');
+  // The limit just read is newer than the overview's; Settings shows it too.
+  if (overview?.assessments) {overview.assessments.usage.background_limit = settings.background_limit; renderBackgroundUsage(overview);}
   assessmentSettingsLoaded = true;
 }
 byId('assessment-settings').addEventListener('submit', async event => {
@@ -1389,6 +1404,7 @@ byId('assessment-settings').addEventListener('submit', async event => {
 });
 
 const inventoryOrders = {
+  attention: (a, b) => attentionRank(a) - attentionRank(b),
   third: (a, b) => behaviouralQueries(b.dns_activity) - behaviouralQueries(a.dns_activity),
   from: (a, b) => (b.traffic?.from_device_bytes ?? -1) - (a.traffic?.from_device_bytes ?? -1),
   to: (a, b) => (b.traffic?.to_device_bytes ?? -1) - (a.traffic?.to_device_bytes ?? -1),
@@ -1406,7 +1422,7 @@ function renderInventory(value) {
   const order = inventoryOrders[byId('device-sort').value];
   const devices = order ? [...value.devices].sort(order) : value.devices;
   const most = Math.max(1, ...value.devices.map(device => behaviouralQueries(device.dns_activity)));
-  let thirdCount = 0, silentCount = 0;
+  let thirdCount = 0, silentCount = 0, reviewCount = 0;
   for (const device of devices) {
     const card = element('article', undefined, 'device-card');
     const {known} = knownIdentity(device);
@@ -1417,10 +1433,13 @@ function renderInventory(value) {
     const signals = [];
     if (device.dns_activity?.pihole_silent) {signals.push('silent'); silentCount += 1;}
     if (tracking) {signals.push('third'); thirdCount += 1;}
+    const assessment = assessmentOf(device);
+    if (needsReview(assessment)) {signals.push('review'); reviewCount += 1;}
     card.dataset.presence = 'observed';
     card.dataset.address = device.address;
     card.dataset.signals = signals.join(' ');
-    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor, device.detection?.device_type, ...flags].filter(Boolean).join(' ').toLowerCase();
+    const assessmentLabels = assessmentTags(assessment);
+    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor, device.detection?.device_type, ...flags, ...assessmentLabels.map(tag => tag.textContent)].filter(Boolean).join(' ').toLowerCase();
 
     const summary = element('button', undefined, 'device-summary');
     summary.type = 'button';
@@ -1431,6 +1450,7 @@ function renderInventory(value) {
     if (about.length) name.append(element('span', about.join(' · '), 'device-type'));
     const address = cell('Address', 'c-address'); address.append(element('span', device.address, 'data'));
     const signalCell = cell('Signals', 'c-signals');
+    signalCell.append(...assessmentLabels);
     if (device.dns_activity?.pihole_silent) signalCell.append(element('span', 'No DNS via Pi-hole', 'tag tag-silent'));
     if (signalCell.children.length === 1) signalCell.append(element('span', 'None', 'nil'));
     const third = cell('Ad, measurement and telemetry lookups', 'c-third');
@@ -1458,6 +1478,8 @@ function renderInventory(value) {
     cards.append(card);
   }
   byId('signal-all').textContent = `${signalNames.all} · ${formatCount(value.devices.length)}`;
+  byId('signal-review').textContent = `${signalNames.review} · ${formatCount(reviewCount)}`;
+  byId('signal-review').hidden = !assessmentsAvailable;
   byId('signal-third').textContent = `${signalNames.third} · ${formatCount(thirdCount)}`;
   byId('signal-silent').textContent = `${signalNames.silent} · ${formatCount(silentCount)}`;
   for (const candidate of value.candidates) {
@@ -1503,19 +1525,179 @@ function renderSchedule(schedule) {
   byId('frequency').value = preset ? preset[0] : 'current';
 }
 
+// Assessment state as the device list shows it. A breach count is shown only
+// for a report awaiting review or accepted; the collector counts concerns the
+// second agent did not refute.
+function assessmentOf(device) {
+  return device.identity?.mac ? assessmentIndex.get(device.identity.device_id) || null : null;
+}
+function needsReview(summary) {return Boolean(summary) && (summary.state === 'review' || summary.state === 'failed');}
+function attentionRank(device) {
+  const summary = assessmentOf(device);
+  if (!summary) return 5;
+  if (summary.state === 'review') return summary.potential_breaches ? 0 : 1;
+  if (summary.state === 'failed') return 2;
+  if (summary.potential_breaches) return 3;
+  return summary.state === 'running' ? 4 : 5;
+}
+function assessmentTags(summary) {
+  if (!summary) return [];
+  const tags = [];
+  if (summary.potential_breaches) tags.push(element('span', plural(summary.potential_breaches, 'potential breach', 'potential breaches'), 'tag tag-breach'));
+  if (summary.state === 'review') tags.push(element('span', summary.pending === 'accept' ? 'Accept unconfirmed' : 'Awaiting your review', 'tag tag-review'));
+  else if (summary.state === 'running') tags.push(element('span', summary.pending === 'admission' ? 'Assessment starting' : 'Assessment running', 'tag'));
+  else if (summary.state === 'failed') tags.push(element('span', 'Assessment failed', 'tag tag-failed'));
+  else if (summary.state === 'accepted' && !summary.potential_breaches) tags.push(element('span', 'Assessed', 'tag'));
+  return tags;
+}
+function missingCredentials(system) {
+  return (system?.deployment.credentials || []).filter(item => !item.present);
+}
+// Why a device or the Overview has no byte counters, from the configuration
+// rather than a guess: no UniFi, no trafficSite, or quick checks off.
+function trafficGap(value) {
+  const unifi = value.system?.unifi;
+  if (value.system && !unifi) return 'No byte counters: UniFi is not connected to this collector.';
+  if (unifi && !unifi.traffic_site) return 'No byte counters: they are off because the UniFi connection has no trafficSite in the collector configuration.';
+  if (!value.quick_presence?.enabled) return 'No byte counters: they are read during quick presence checks, which are off.';
+  return 'No UniFi byte counters yet. They arrive with the next quick presence checks.';
+}
+function deviceNames(devices) {
+  const shown = devices.slice(0, 2).map(device => device.name);
+  return devices.length > 2 ? `${shown.join(', ')} and ${plural(devices.length - 2, 'other', 'others')}` : shown.join(' and ');
+}
+function openSystemHealth() {
+  showView('overview');
+  const panel = byId('system-health');
+  panel.open = true;
+  panel.scrollIntoView?.({block:'start'});
+  panel.querySelector('summary')?.focus?.();
+}
+// One row of the attention band: a figure, what it is, and the one action
+// that deals with it. The band lists only what needs the operator; it is
+// rebuilt from each refresh, so a settled item leaves it on its own.
+function attentionItem(figure, title, detail, label, action) {
+  const item = element('li', undefined, 'attention-item');
+  item.append(element('span', figure, 'attention-figure'));
+  const text = element('div', undefined, 'attention-text');
+  text.append(element('h3', title), element('p', detail, 'hint'));
+  const button = element('button', label, 'secondary');
+  button.type = 'button';
+  button.addEventListener('click', action);
+  item.append(text, button);
+  return item;
+}
+function reviewAction(devices) {
+  if (devices.length === 1) return ['Open ' + devices[0].name, () => focusDevice(devices[0].address)];
+  return ['Show them in the device list', () => {showInventory('review', 'attention'); showView('devices', true);}];
+}
+function renderAttention(value) {
+  const items = [];
+  const observed = value.devices.filter(device => assessmentOf(device));
+  const breached = observed.filter(device => assessmentOf(device).potential_breaches > 0);
+  const waiting = observed.filter(device => assessmentOf(device).state === 'review');
+  const failed = observed.filter(device => assessmentOf(device).state === 'failed');
+  if (breached.length) {
+    const total = breached.reduce((sum, device) => sum + assessmentOf(device).potential_breaches, 0);
+    items.push(attentionItem(formatCount(total), total === 1 ? 'Potential breach' : 'Potential breaches',
+      `Reported for ${deviceNames(breached)}. A second agent checked each against the same data; read the report before acting on it.`, ...reviewAction(breached)));
+  }
+  if (waiting.length) items.push(attentionItem(formatCount(waiting.length), waiting.length === 1 ? 'Assessment awaiting your review' : 'Assessments awaiting your review',
+    `${deviceNames(waiting)}. Accept makes a report final; Dismiss leaves it as a draft.`, ...reviewAction(waiting)));
+  if (failed.length) items.push(attentionItem(formatCount(failed.length), failed.length === 1 ? 'Assessment failed' : 'Assessments failed',
+    `${deviceNames(failed)}. The device shows why and offers a retry.`, ...reviewAction(failed)));
+  const drafts = latestStatus?.profile_drafts_waiting || 0;
+  if (drafts) items.push(attentionItem(formatCount(drafts), drafts === 1 ? 'Profile draft awaiting review' : 'Profile drafts awaiting review',
+    'Background research drafted device profiles. Review each before it is saved.', 'Open drafts', () => {
+      showView('devices');
+      byId('background-research').scrollIntoView?.({block:'start'});
+      loadBackgroundResearch().catch(error => notice(error.message, true));
+    }));
+  const health = value.health;
+  if (!health.connected) items.push(attentionItem('!', 'Plowshare connection', health.detail, 'Open System health', openSystemHealth));
+  if (health.recovery.length) items.push(attentionItem(formatCount(health.recovery.length), 'Retained work needs a check', health.recovery[0], 'Open System health', openSystemHealth));
+  const missing = missingCredentials(value.system);
+  if (missing.length) items.push(attentionItem(formatCount(missing.length), missing.length === 1 ? 'Credential missing' : 'Credentials missing',
+    missing.map(item => item.purpose).join(', ') + '. The collector cannot use a connection without it.', 'Open System health', openSystemHealth));
+  byId('attention-items').replaceChildren(...items);
+  byId('attention').hidden = items.length === 0;
+  byId('attention-clear').hidden = items.length > 0;
+}
+const trustNames = {ca_file:'Private certificate authority file', pinned:'Pinned certificate fingerprint', system:'System trust store'};
+function credentialText(item) {
+  const where = item.source === 'file' ? 'Private file' : 'Environment variable ' + item.variable;
+  return `${where} · ${item.present ? 'present' : 'missing'}`;
+}
+function credentialFact(list, term, item) {
+  fact(list, term, credentialText(item), item.present ? undefined : 'missing');
+}
+// System health in three fact lists: whether it works, where it connects, and
+// how it is deployed. Opens itself once when something there needs attention.
+let healthOpened = false;
+function renderSystem(system, health) {
+  const connections = byId('health-connections'); connections.replaceChildren();
+  const deployment = byId('health-deployment'); deployment.replaceChildren();
+  if (!system) return;
+  if (system.pihole) {
+    fact(connections, 'Pi-hole', system.pihole.origin, 'data');
+    credentialFact(connections, 'Pi-hole password', system.pihole.password);
+    fact(connections, 'Pi-hole status', health.pihole);
+  } else fact(connections, 'Pi-hole', 'Not connected. Connect it under Settings for device names and DNS lookups.');
+  if (system.unifi) {
+    fact(connections, 'UniFi controller', system.unifi.controller, 'data');
+    fact(connections, 'UniFi site', system.unifi.site, 'data');
+    fact(connections, 'Certificate trust', trustNames[system.unifi.trust]);
+    credentialFact(connections, 'UniFi API key', system.unifi.api_key);
+    fact(connections, 'Byte counters', system.unifi.traffic_site ? 'On, from site ' + system.unifi.traffic_site : 'Off. Set trafficSite in the UniFi connection to count bytes to and from each device.');
+    fact(connections, 'UniFi status', health.unifi);
+  } else fact(connections, 'UniFi', 'Not connected. Set it in the collector configuration for device identity and byte counters.');
+  fact(connections, 'Advisory source', system.advisory_origin ? 'National Vulnerability Database (NVD), ' + system.advisory_origin : 'Off. Set PLOWSHARE_PRIVACY_NVD_ORIGIN for the collector to look up public advisories.');
+  const plan = system.deployment;
+  fact(deployment, 'Plowshare server', plan.server_origin, 'data');
+  fact(deployment, 'Project', plan.project, 'data');
+  fact(deployment, 'Collector', plan.collector, 'data');
+  fact(deployment, 'Relay topics', `Requests on ${plan.request_topic}, results on ${plan.result_topic}`);
+  fact(deployment, 'Relay group', plan.group, 'data');
+  fact(deployment, 'Outgoing peer', plan.outgoing_peer || 'None');
+  fact(deployment, 'Port checks', `${plural(plan.probe_timeout_seconds, 'second', 'seconds')} timeout, ${formatCount(plan.probe_concurrency)} at a time`);
+  for (const item of plan.credentials) credentialFact(deployment, item.purpose, item);
+  const problem = !health.connected || health.recovery.length > 0 || missingCredentials(system).length > 0;
+  if (problem && !healthOpened) {byId('system-health').open = true; healthOpened = true;}
+}
+// Settings repeats the background limits and today's use, read-only; the
+// controls stay with the drafts and reports they produce on the Devices tab.
+function renderBackgroundUsage(value) {
+  const list = byId('background-usage'); list.replaceChildren();
+  const research = latestStatus?.profile_research_available;
+  const usage = value.assessments?.usage;
+  byId('background-work').hidden = !research && !usage;
+  if (research) {
+    fact(list, 'Profile research', latestStatus.profile_research_enabled ? 'On' : 'Off');
+    fact(list, 'Research used today', `${formatCount(latestStatus.profile_research_used_today)} of ${formatCount(latestStatus.profile_research_daily_limit)}`);
+    fact(list, 'Drafts to review', formatCount(latestStatus.profile_drafts_waiting || 0));
+  }
+  if (usage) {
+    fact(list, 'Background assessments', usage.background_limit ? `Up to ${formatCount(usage.background_limit)} a day` : 'Off');
+    fact(list, 'Assessments used today', `${formatCount(usage.used_today)} of ${formatCount(usage.daily_ceiling)}, including those you started`);
+  }
+}
+
 function renderOverview(value) {
   const health = value.health;
+  assessmentIndex = new Map((value.assessments?.summaries || []).map(item => [item.device_id, item]));
   byId('device-count').textContent = formatCount(value.devices.length);
   byId('candidate-count').textContent = formatCount(value.candidates.length);
-  byId('health-summary').textContent = !health.connected ? 'Connection needs attention' : health.recovery.length ? 'Retained work needs attention' : 'Connected to Plowshare';
+  const missing = missingCredentials(value.system);
+  byId('health-summary').textContent = !health.connected ? 'Connection needs attention' : health.recovery.length ? 'Retained work needs attention' : missing.length ? plural(missing.length, 'credential is missing', 'credentials are missing') : 'Connected to Plowshare';
+  byId('system-health').classList.toggle('attention-needed', !health.connected || health.recovery.length > 0 || missing.length > 0);
   byId('setup-checklist').hidden = health.checklist.length === 0;
   renderScheduleControl(health.schedule, value.schedule_control, value.pending_deployment);
   renderSchedule(health.schedule);
   byId('deployment-state').textContent = value.pending_deployment ? `Deployment ${value.pending_deployment} needs reconciliation. Enter the administrator password and choose Check retained deployment.` : 'No unsettled schedule deployment.';
   const grid = byId('health'); grid.replaceChildren();
-  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? formatWhen(health.last_contact) : 'Awaiting contact'], ['Last completed scan', health.last_scan ? formatWhen(health.last_scan) : 'None yet'], ['Schedule', health.schedule ? scheduleLabel(health.schedule.cron) + ' · ' + health.schedule.zone : 'Not found or unavailable'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at ? 'Next scan ' + formatWhen(health.schedule.next_at) : 'Awaiting next scan') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length} of 3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length} of 6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at ? formatWhen(health.credential_expires_at) : 'Not supplied']];
+  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? formatWhen(health.last_contact) : 'Awaiting contact'], ['Last completed scan', health.last_scan ? formatWhen(health.last_scan) : 'None yet'], ['Schedule', health.schedule ? scheduleLabel(health.schedule.cron) + ' · ' + health.schedule.zone : 'Not found or unavailable'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at ? 'Next scan ' + formatWhen(health.schedule.next_at) : 'Awaiting next scan') : 'Not found or unavailable'], ['Project agents', health.agents ? `${health.agents.served.length} of 3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length} of 6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at ? formatWhen(health.credential_expires_at) : 'Not supplied']];
   for (const [name, detail] of checks) fact(grid, name, detail);
-  if (health.unifi) fact(grid, 'UniFi', health.unifi);
+  renderSystem(value.system, health);
   byId('health-detail').textContent = `Checked ${formatWhen(health.checked_at)}. ${health.detail}`;
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
@@ -1534,7 +1716,9 @@ function renderOverview(value) {
     ? (presenceStatus.last_checked ? 'Last quick check ' + formatWhen(presenceStatus.last_checked) + '.' : 'Waiting for the first quick check.')
       + (presenceStatus.issues.length ? ' ' + presenceStatus.issues.join(' ') : '')
     : 'Quick presence checks are off.';
-  const nextDeviceSignature = JSON.stringify([value.devices, value.candidates]);
+  renderAttention(value);
+  renderBackgroundUsage(value);
+  const nextDeviceSignature = JSON.stringify([value.devices, value.candidates, value.assessments?.summaries || null]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
   renderInventory(value);
@@ -1576,6 +1760,11 @@ function renderOverview(value) {
   if (latest && notified !== null && notified !== latest.scan_id && value.preferences.browser_notifications && globalThis.Notification?.permission === 'granted') new Notification('Network Privacy Watch', {body:'New observations are ready for review in your private dashboard.'});
   if (latest) notified = latest.scan_id;
 }
+byId('open-background').addEventListener('click', () => {
+  showView('devices');
+  const target = byId('background-assessments').hidden ? byId('background-research') : byId('background-assessments');
+  target.scrollIntoView?.({block:'start'});
+});
 byId('preferences-form').addEventListener('submit', async event => {
   event.preventDefault();
   try {

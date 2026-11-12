@@ -34,6 +34,7 @@ from plowshare_privacy.assessment_request import (
     CALLER,
     DEFINITION,
     AssessmentRequest,
+    ConcernOutcome,
     report_name,
 )
 from plowshare_privacy.device_assessments import (
@@ -41,8 +42,10 @@ from plowshare_privacy.device_assessments import (
     AssessmentConflict,
     AssessmentJournal,
     AssessmentLedger,
+    AssessmentUsage,
     DeviceAssessments,
     UnknownDevice,
+    summary,
 )
 from plowshare_privacy.device_dossier import DeviceDossier
 from plowshare_privacy.device_facts import DeviceFacts
@@ -407,6 +410,48 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         settled = await self.restart().check(TV)
         self.assertEqual(settled.state, "accepted")
         self.assertEqual(self.runs.calls.count("finalise"), 1)
+
+    async def test_summaries_list_each_device_and_count_live_concerns(self) -> None:
+        self.assertEqual(self.service.summaries(), ())
+        await self.service.assess(TV)
+        running = self.service.summaries()
+        self.assertEqual(
+            [(s.device_id, s.state, s.potential_breaches) for s in running],
+            [(TV, "running", 0)],
+        )
+        revision = self.runs.finish(self.runs.starts[-1][1], level="potential_breach")
+        self.runs.processing.add(revision)
+        await self.service.poll()
+        (waiting,) = self.service.summaries()
+        self.assertEqual((waiting.state, waiting.processing), ("review", True))
+        self.assertEqual((waiting.potential_breaches, waiting.worth_checking), (1, 0))
+        # A dismissed report no longer counts toward breaches.
+        self.service.dismiss(TV)
+        (dismissed,) = self.service.summaries()
+        self.assertEqual(
+            (dismissed.state, dismissed.potential_breaches), ("dismissed", 0)
+        )
+        self.assertEqual(self.runs.calls.count("read_report"), 0)
+
+    def test_summary_ignores_refuted_concerns_and_settled_failures(self) -> None:
+        concerns = (
+            ConcernOutcome("c1", "potential_breach", "refuted"),
+            ConcernOutcome("c2", "potential_breach", "weakened"),
+            ConcernOutcome("c3", "worth_checking", "holds"),
+            ConcernOutcome("c4", "expected", "holds"),
+        )
+        accepted = summary(TV, "accepted", None, False, concerns)
+        self.assertEqual((accepted.potential_breaches, accepted.worth_checking), (1, 1))
+        failed = summary(TV, "failed", None, False, concerns)
+        self.assertEqual((failed.potential_breaches, failed.worth_checking), (0, 0))
+
+    async def test_usage_counts_todays_admissions_against_both_limits(self) -> None:
+        self.service.set_background_limit(3)
+        self.assertEqual(self.service.usage(), AssessmentUsage(3, 0, 12))
+        await self.finished()
+        self.assertEqual(self.service.usage().used_today, 1)
+        self.now = "2026-11-12T00:00:01Z"
+        self.assertEqual(self.service.usage().used_today, 0)
 
     async def test_accept_waits_until_plowshare_has_processed_the_report(
         self,
