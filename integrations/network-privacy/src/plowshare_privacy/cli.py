@@ -179,79 +179,8 @@ async def execute(args: argparse.Namespace) -> None:
                 operator_store,
                 PresenceWatch(PresenceHistory(config.state_directory)),
             )
-            peer = (
-                IntegrationPeer(
-                    config,
-                    SdkOutgoingPort(client, config),
-                    WorkerTools(worker),
-                    FilePeerReceipts(config, receipts),
-                )
-                if config.outgoing_peer is not None
-                else None
-            )
-            external: ExternalRequests | None = peer
-            native: ToolProvider | None = None
-            native_journal: SqliteToolJournal | None = None
-            if args.tool_provider is not None:
-                if peer is not None:
-                    raise ValueError(
-                        "Choose either native tools or the outgoing compatibility peer"
-                    )
-                native_journal = stores.enter_context(
-                    open_tool_journal(
-                        config.state_directory / "relay-tools",
-                        config.project,
-                        args.tool_provider,
-                        args.tool_account,
-                    )
-                )
-                native = ToolProvider(
-                    client,
-                    project=config.project,
-                    provider=args.tool_provider,
-                    account=args.tool_account,
-                    tools=registered(WorkerTools(worker)),
-                    journal=native_journal,
-                )
-                external = CataloguedProvider(
-                    native, config.state_directory, args.tool_catalog_renew_seconds
-                )
-            if args.command == "once":
-                if external is not None:
-                    await external.poll()
-                await worker.poll()
-                print(json.dumps([asdict(item) for item in receipts.all()]))
-                return
-            if args.command == "reconcile":
-                await worker.reconcile()
-                if peer is not None:
-                    await peer.reconcile()
-                if native is not None:
-                    await native.reconcile()
-                print("Retained evidence reconciled; no mutation was replayed.")
-                return
-            active_requests = ActiveRequests(external) if external is not None else None
-            stop = asyncio.Event()
-            loop = asyncio.get_running_loop()
-            for name in (signal.SIGINT, signal.SIGTERM):
-                try:
-                    loop.add_signal_handler(name, stop.set)
-                except NotImplementedError:
-                    pass  # Windows retains asyncio.run's normal Ctrl-C cancellation.
-            instance = str(uuid4())
-            handoff = Path(args.config).parent / "dashboard-runtime.json"
-            owns_handoff = False
-            settings = (
-                FileMonitorSettings(Path(args.config), worker, receipts)
-                if operator_store
-                else None
-            )
-            discovery = (
-                LocalDeviceDiscovery(Path(args.config).parent)
-                if operator_store
-                else None
-            )
-
+            # The record and request services are composed before the tool
+            # provider, whose assistant tools use them (see assistant_tools).
             issues = (
                 PrivacyIssues(
                     SdkIssuePort(client, config, worker.port),
@@ -317,6 +246,93 @@ async def execute(args: argparse.Namespace) -> None:
                 else None
             )
 
+            def assistant_tools() -> WorkerTools:
+                """The native provider's tools, with the assistant's services.
+
+                The peer keeps the read and scan tools only; only the native
+                provider serves the assistant's request and record tools.
+                """
+                return WorkerTools(
+                    worker,
+                    deep_scans=deep_scans,
+                    assessments=assessments,
+                    profiles=profiles,
+                    issues=issues,
+                )
+
+            peer = (
+                IntegrationPeer(
+                    config,
+                    SdkOutgoingPort(client, config),
+                    WorkerTools(worker),
+                    FilePeerReceipts(config, receipts),
+                )
+                if config.outgoing_peer is not None
+                else None
+            )
+            external: ExternalRequests | None = peer
+            native: ToolProvider | None = None
+            native_journal: SqliteToolJournal | None = None
+            if args.tool_provider is not None:
+                if peer is not None:
+                    raise ValueError(
+                        "Choose either native tools or the outgoing compatibility peer"
+                    )
+                native_journal = stores.enter_context(
+                    open_tool_journal(
+                        config.state_directory / "relay-tools",
+                        config.project,
+                        args.tool_provider,
+                        args.tool_account,
+                    )
+                )
+                native = ToolProvider(
+                    client,
+                    project=config.project,
+                    provider=args.tool_provider,
+                    account=args.tool_account,
+                    tools=registered(assistant_tools()),
+                    journal=native_journal,
+                )
+                external = CataloguedProvider(
+                    native, config.state_directory, args.tool_catalog_renew_seconds
+                )
+            if args.command == "once":
+                if external is not None:
+                    await external.poll()
+                await worker.poll()
+                print(json.dumps([asdict(item) for item in receipts.all()]))
+                return
+            if args.command == "reconcile":
+                await worker.reconcile()
+                if peer is not None:
+                    await peer.reconcile()
+                if native is not None:
+                    await native.reconcile()
+                print("Retained evidence reconciled; no mutation was replayed.")
+                return
+            active_requests = ActiveRequests(external) if external is not None else None
+            stop = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            for name in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(name, stop.set)
+                except NotImplementedError:
+                    pass  # Windows retains asyncio.run's normal Ctrl-C cancellation.
+            instance = str(uuid4())
+            handoff = Path(args.config).parent / "dashboard-runtime.json"
+            owns_handoff = False
+            settings = (
+                FileMonitorSettings(Path(args.config), worker, receipts)
+                if operator_store
+                else None
+            )
+            discovery = (
+                LocalDeviceDiscovery(Path(args.config).parent)
+                if operator_store
+                else None
+            )
+
             async def recover(reconcile_manual: Callable[[], Awaitable[None]]) -> None:
                 nonlocal client, native
                 async with worker.request_lock:
@@ -376,7 +392,7 @@ async def execute(args: argparse.Namespace) -> None:
                                 project=worker.config.project,
                                 provider=args.tool_provider,
                                 account=args.tool_account,
-                                tools=registered(WorkerTools(worker)),
+                                tools=registered(assistant_tools()),
                                 journal=native_journal,
                             )
                             if active_requests is None:
