@@ -555,6 +555,49 @@ test('the assessment block renders each state with plain actions', async () => {
   assert.match(corrected.text, /Checked by a second agent: passed after one round of corrections/);
 });
 
+test('Accept waits, disabled, while Plowshare processes the report and returns by polling', async () => {
+  const {context} = await dashboard();
+  assessmentDom(context);
+  const report = '22222222-2222-4222-8222-222222222222';
+  let view = {...assessmentBase, state:'review', report, review:'accepted', can_accept:false, can_dismiss:true, processing:true};
+  const requests = [];
+  context.fetch = async url => {
+    requests.push(url);
+    if (url.endsWith('/report')) return {ok:true, json:async () => ({revision:report, text:'# Report'})};
+    return {ok:true, json:async () => view};
+  };
+  context.block = context.document.createElement('div');
+  vm.runInContext("selectedDevice = '192.0.2.10'; deviceAssessment = {address:'192.0.2.10', deviceId:'mac:02:00:00:00:00:0a', block, view:null, report:null};", context);
+  await vm.runInContext('reloadAssessment()', context);
+  const shown = () => {
+    const nodes = context.block.children;
+    return {text: nodes.flatMap(assessmentTexts).join(' | '),
+      buttons: Array.from(assessmentButtons(nodes), button => [button.textContent, Boolean(button.disabled)])};
+  };
+  let rendered = shown();
+  assert.match(rendered.text, /Report is being processed…/);
+  assert.deepEqual(rendered.buttons, [['Accept and make final', true], ['Dismiss without finalising', false]]);
+  // The refresh keeps reading the state while processing.
+  const before = requests.length;
+  view = {...view, processing:false, can_accept:true};
+  await vm.runInContext('pollAssessment()', context);
+  assert.ok(requests.length > before);
+  rendered = shown();
+  assert.doesNotMatch(rendered.text, /being processed/);
+  assert.deepEqual(rendered.buttons, [['Accept and make final', false], ['Dismiss without finalising', false]]);
+  const count = requests.length;
+  await vm.runInContext('pollAssessment()', context);
+  assert.equal(requests.length, count);
+
+  // A finalise refused while processing is a short notice, not an error.
+  view = {...view, processing:true, can_accept:false,
+    detail:'Plowshare is still processing this report, so it was not made final. Accept returns when processing is done; try again shortly.'};
+  await vm.runInContext('reloadAssessment()', context);
+  const notices = [];
+  (function walk(node) { if (node.tag === 'p' && /still processing/.test(node.textContent || '')) notices.push(node.className); (node.children || []).forEach(walk); })({children:context.block.children});
+  assert.deepEqual(notices, ['hint']);
+});
+
 test('assessment actions post once, reread the view and poll only while running', async () => {
   const {context} = await dashboard();
   assessmentDom(context);

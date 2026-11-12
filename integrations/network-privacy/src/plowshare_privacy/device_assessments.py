@@ -14,7 +14,11 @@ Lifecycle of one device's entry (``phase``; the dashboard ``state`` in brackets)
   the account-owned receipt for that UUID; it is never resubmitted.
 * ``running`` [running]: the run ID is known; ``poll`` reads its state.
 * ``review`` [review]: the run finished, its result was validated against the
-  request, and the draft report revision is recorded.
+  request, and the draft report revision is recorded. Plowshare then processes
+  the revision and refuses to finalise it until that is done, so Accept is
+  offered only once a status read (``poll`` or Check status) shows it
+  processed. That knowledge is held in memory: after a restart Accept waits
+  for the next read.
 * ``accepting`` [review]: the finalise intent, with its own request UUID, is
   flushed before ``information.finalise``. A lost reply stays here until a
   status read shows the report final; it is never resent.
@@ -50,7 +54,7 @@ from uuid import uuid4
 
 from plowshare import Delivery, Refusal, TransportError
 
-from .assessment_port import AssessmentPort, ReportStatus
+from .assessment_port import AssessmentPort
 from .assessment_request import (
     AssessmentRequest,
     AssessmentResult,
@@ -110,10 +114,15 @@ _SIGNALS = frozenset(SIGNAL_ORDER)
 
 _FINALISE_GUIDANCE = (
     " The assessment is still awaiting your review and nothing was resent."
-    " If the report is still processing, choose Accept again when it finishes."
     " If the collector's service account is not allowed to finalise reports"
     " its runs produced, finalise the report in Plowshare's Reports collection"
     " instead, then choose Check status here."
+)
+# Plowshare's refusal to finalise a report it has not finished processing.
+_STILL_PROCESSING = "must complete processing first"
+_PROCESSING_DETAIL = (
+    "Plowshare is still processing this report, so it was not made final."
+    " Accept returns when processing is done; try again shortly."
 )
 
 
@@ -319,6 +328,9 @@ class AssessmentView:
     can_dismiss: bool
     # Why Assess is unavailable when the device's own state would allow it.
     assess_note: str | None
+    # Awaiting review, but Plowshare has not been seen to finish processing the
+    # report; Accept waits for it. Dismiss is still allowed.
+    processing: bool = False
 
 
 @dataclass(frozen=True)
@@ -368,6 +380,9 @@ class DeviceAssessments:
         # Devices whose dossier cannot be built are skipped by the background
         # queue until restart, rather than retried on every poll.
         self._unbuildable: set[str] = set()
+        # Report revisions a status read showed processed. Not journalled: it
+        # is Plowshare's state, and is read again after a restart.
+        self._processed: set[str] = set()
         self._journal_available = True
         try:
             self._ledger = journal.read()
@@ -443,6 +458,11 @@ class DeviceAssessments:
         # Assess is offered from idle or a settled state; note says what else blocks it.
         open_to_assess = phase is None or phase in _SETTLED
         deciding = phase == "review" and self._journal_available
+        processing = (
+            phase == "review"
+            and entry is not None
+            and entry.report not in self._processed
+        )
         return AssessmentView(
             device_id=device_id,
             state="idle" if phase is None else _STATE[phase],
@@ -460,9 +480,10 @@ class DeviceAssessments:
             concerns=entry.concerns if entry else (),
             detail=entry.detail if entry else None,
             can_assess=open_to_assess and note is None,
-            can_accept=deciding,
+            can_accept=deciding and not processing,
             can_dismiss=deciding,
             assess_note=note if open_to_assess else None,
+            processing=processing,
         )
 
     async def assess(self, device_id: str) -> AssessmentView:
@@ -479,6 +500,10 @@ class DeviceAssessments:
                 raise AssessmentConflict(
                     "Only an assessment awaiting review can be accepted"
                 )
+            if entry.report not in self._processed:
+                raise AssessmentConflict(
+                    "The report is still being processed by Plowshare. Accept it when processing is done."
+                )
             accepting = replace(
                 entry, phase="accepting", finalise_id=self.new_id(), detail=None
             )
@@ -486,8 +511,14 @@ class DeviceAssessments:
             try:
                 await self.port.finalise(accepting.finalise_id or "", entry.report)
             except Refusal as error:
-                detail = refusal_detail(error, "finalising this assessment report")
-                self._put(replace(entry, detail=detail + _FINALISE_GUIDANCE))
+                if _STILL_PROCESSING in (error.said or ""):
+                    # Processing went back (or our read was early): wait for
+                    # the next status read rather than show the long guidance.
+                    self._processed.discard(entry.report)
+                    self._put(replace(entry, detail=_PROCESSING_DETAIL))
+                else:
+                    detail = refusal_detail(error, "finalising this assessment report")
+                    self._put(replace(entry, detail=detail + _FINALISE_GUIDANCE))
             except TransportError as error:
                 if error.delivery == Delivery.NOT_SUBMITTED:
                     self._put(
@@ -684,10 +715,12 @@ class DeviceAssessments:
     async def _settle_finalise(self, entry: AssessmentEntry) -> None:
         if entry.report is None:
             raise ValueError("Assessment decision is missing its report")
-        status: ReportStatus = await self.port.report_status(
-            entry.device_id, entry.report
-        )
-        if status in {"final", "superseded"}:
+        state = await self.port.report_state(entry.device_id, entry.report)
+        if state.processed:
+            self._processed.add(entry.report)
+        else:
+            self._processed.discard(entry.report)
+        if state.status in {"final", "superseded"}:
             self._put(
                 replace(entry, phase="accepted", decided_at=self.clock(), detail=None)
             )
@@ -698,6 +731,8 @@ class DeviceAssessments:
                     detail="Plowshare still shows this report as a draft. The Accept was not resent; Check status again later.",
                 )
             )
+        elif entry.detail == _PROCESSING_DETAIL and state.processed:
+            self._put(replace(entry, detail=None))
 
     async def poll(self) -> None:
         async with self.lock:
@@ -705,7 +740,11 @@ class DeviceAssessments:
             if active is not None:
                 await self._settle(active)
             for entry in self.ledger.entries:
-                if entry.phase == "accepting":
+                # A report awaiting review is read until it shows processed,
+                # so Accept appears without the operator asking.
+                if entry.phase == "accepting" or (
+                    entry.phase == "review" and entry.report not in self._processed
+                ):
                     await self._settle_finalise(entry)
             if active is not None or self._active() is not None:
                 return

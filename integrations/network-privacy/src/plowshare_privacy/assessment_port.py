@@ -10,9 +10,12 @@ Delivery rules, which the service relies on:
   A ``Refusal`` means the server decided; a ``TransportError`` whose delivery
   is not ``NOT_SUBMITTED`` means the outcome is unknown. Neither is retried
   here, and the service never resends after an unknown outcome.
-* ``receipt`` and ``report_status`` are reads that settle those unknowns: the
+* ``receipt`` and ``report_state`` are reads that settle those unknowns: the
   account-owned orchestration receipt for a start (GAPS.md, "Project-scoped
   orchestration start receipts") and the report's status for a finalise.
+* ``report_state`` also says whether Plowshare has finished processing the
+  revision. Plowshare refuses to finalise a report before that, so Accept
+  waits for it rather than spending a refused request.
 * ``newest_report`` reads the project catalogue, the record of which report
   revisions exist, so a reassessment always names the newest one as feedback.
 """
@@ -43,9 +46,23 @@ from .profile_port import RetainedSourceReader
 
 ReportStatus = Literal["draft", "final", "superseded"]
 _STATUSES = frozenset({"draft", "final", "superseded"})
+# The stages Plowshare's finalise requires to be ready in the revision's current
+# generation. Tagging (autoTag, tagGroups) is not among them.
+_CONTENT_STAGES = frozenset(
+    {"extract", "derive", "embed", "summarise", "summary_embed"}
+)
 # Each reassessment adds one revision; 1,000 is far beyond normal history.
 MAX_PAGES = 10
 PAGE = 100
+
+
+@dataclass(frozen=True)
+class ReportState:
+    """A report revision's status and whether Plowshare can finalise it yet."""
+
+    status: ReportStatus
+    # False while the revision's content stages are still being processed.
+    processed: bool
 
 
 @dataclass(frozen=True)
@@ -75,7 +92,7 @@ class AssessmentPort(Protocol):
         """Make the draft report revision final; refusals propagate unchanged."""
         ...
 
-    async def report_status(self, device_id: str, revision: str) -> ReportStatus: ...
+    async def report_state(self, device_id: str, revision: str) -> ReportState: ...
 
     async def read_report(self, device_id: str, revision: str) -> str: ...
 
@@ -200,7 +217,7 @@ class SdkAssessmentPort:
         if result.finalised is not True:
             raise ValueError("Finalise reply did not confirm the report")
 
-    async def report_status(self, device_id: str, revision: str) -> ReportStatus:
+    async def report_state(self, device_id: str, revision: str) -> ReportState:
         status = (
             await self.client().request(
                 InformationStatusRequest(scope=self.scope, revision=uuid(revision)),
@@ -215,11 +232,36 @@ class SdkAssessmentPort:
             or status.report_status not in _STATUSES
         ):
             raise ValueError("Assessment report status is foreign or incomplete")
-        return status.report_status
+        return ReportState(status.report_status, _processed(status))
 
     async def read_report(self, device_id: str, revision: str) -> str:
         parse_device_id(device_id)
         return await self.reader().read_source(uuid(revision))
+
+
+def _processed(status: InformationRevisionDto) -> bool:
+    """Whether every content stage of the current generation is ready.
+
+    The current generation is the revision's own, or the newest among its
+    steps when the status omits it. A status without steps cannot show that
+    processing is pending; finalise then decides, and a refusal while
+    processing is reported as such by the service.
+    """
+    steps = status.steps
+    if not isinstance(steps, tuple):
+        return True
+    generation: float | None = (
+        status.generation
+        if isinstance(status.generation, (int, float))
+        and not isinstance(status.generation, bool)
+        else max((step.generation for step in steps), default=None)
+    )
+    ready = {
+        step.stage
+        for step in steps
+        if step.generation == generation and step.state == "ready"
+    }
+    return _CONTENT_STAGES <= ready
 
 
 def _ordinal(row: InformationRevisionDto) -> int:

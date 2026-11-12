@@ -109,7 +109,9 @@ report written by its own `assess_network_device` run on a live server, using
 written was refused with "a final report must complete processing first";
 that is a processing wait, not an authority refusal, and the dashboard kept
 the report in review without resending. Accepting again after processing
-finished succeeded.
+finished succeeded. The dashboard now reads the revision's processing steps
+through `information.status` and offers Accept only once all five content
+stages of its current generation are ready.
 
 ## Finding reports about one device
 
