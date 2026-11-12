@@ -123,28 +123,32 @@ test('a question is sent once, kept on refusal and cleared on success', async ()
   assert.equal(sent.length, 0);
 });
 
-test('the side column lists waiting and done work', async () => {
+test('the side column lists waiting and done work in household words', () => {
   const {run, node} = dashboard();
-  run('showReport = async revision => {opened.push(revision);}', {opened:[]});
   show(run, askView({
-    waiting:[{kind:'message', target:'security-specialist', about:'Check the Driveway camera firmware', since:WHEN}],
+    waiting:[
+      {kind:'message', target:'privacy_analyst', about:'Check the Driveway camera firmware', since:WHEN},
+      {kind:'message', target:'privacy_reviewer', about:'Second look', since:''},
+      {kind:'message', target:'privacy_coordinator', about:'Plan', since:WHEN},
+      {kind:'message', target:'new_safety_helper', about:'Odd one', since:WHEN},
+    ],
     done:[
-      {kind:'orchestration', target:'investigate_network', about:'Look at the TV lookups', since:WHEN, revision:'rev-1'},
-      {kind:'orchestration', target:'investigate_network', about:'Older look', since:WHEN},
-      {kind:'message', target:'security-specialist', about:'Earlier question', since:WHEN, revision:'rev-2'},
+      {kind:'orchestration', target:'investigate_network', about:'Look at the TV lookups', since:WHEN},
+      {kind:'orchestration', target:'orchestrate_deep_dive', about:'Older look', since:WHEN},
     ],
   }));
   const waiting = node('ask-waiting'), done = node('ask-done');
   const when = run('formatWhen(when)', {when:WHEN});
-  for (const line of ['security-specialist', 'Check the Driveway camera firmware']) assert.ok(texts(waiting).includes(line), line);
+  const heads = find(waiting, item => item.tag === 'h4').map(item => item.textContent);
+  assert.deepEqual([...heads], ['The analyst', 'The reviewer', 'The coordinator', 'New safety helper']);
+  assert.deepEqual(find(done, item => item.tag === 'h4').map(item => item.textContent), ['Network investigation', 'Deep dive']);
+  for (const area of [waiting, done]) assert.ok(!texts(area).some(line => line.includes('_')));
+  assert.ok(texts(waiting).includes('Check the Driveway camera firmware'));
   assert.ok(texts(waiting).some(line => line.includes(when)));
+  assert.ok(texts(waiting).includes('Since: not recorded'));
   assert.ok(texts(done).includes('Look at the TV lookups'));
-  assert.ok(texts(done).includes('Older look'));
-  // Only a finished investigation with a report to open gets a link.
-  assert.deepEqual(buttons(done).map(button => button.textContent), ['Read the report']);
-  buttons(done)[0].listeners.click();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual([...run('opened')], ['rev-1']);
+  // No report link: the report arrives in the conversation and under Findings.
+  assert.equal(buttons(done).length, 0);
   show(run, askView());
   assert.deepEqual(texts(node('ask-waiting')), ['Nothing is waiting on anyone.']);
   assert.deepEqual(texts(node('ask-done')), ['Nothing has finished yet.']);
@@ -269,4 +273,49 @@ test('disconnect clears Ask state', async () => {
   assert.equal(node('ask-pause').hidden, true);
   assert.equal(node('ask-group').hidden, true);
   assert.ok(!texts(node('ask-conversation')).some(line => line.includes('Private question')));
+});
+
+test('fenced or prefixed specialist JSON folds and specialists are named', () => {
+  const {run, node} = dashboard();
+  const fenced = '```json\n{"verdict":"fine"}\n```';
+  const prefixed = 'Result: {"verdict":"fine"}';
+  const words = 'The camera looks normal.';
+  show(run, askView({turn_state:'answered', entries:[
+    entry(0, 'agent', fenced, 'message', {sender:'privacy_analyst'}),
+    entry(1, 'agent', prefixed, 'message', {sender:'privacy_reviewer'}),
+    entry(2, 'agent', words, 'message', {sender:'privacy_coordinator'}),
+  ]}));
+  const log = node('ask-conversation');
+  const folds = find(log, item => item.tag === 'details');
+  assert.equal(folds.length, 2);
+  for (const fold of folds) assert.equal(texts(fold)[0], 'Details · specialist reply');
+  const rendered = find(log, item => item.tag === 'markdown').map(item => item.source);
+  assert.deepEqual([...rendered], [words]);
+  const heads = texts(log);
+  for (const line of ['The analyst replied', 'The reviewer replied', 'The coordinator replied']) assert.ok(heads.includes(line), line);
+  assert.ok(!heads.some(line => line.includes('privacy_')));
+});
+
+test('a running turn shows the reading error instead of still working', () => {
+  const {run, node} = dashboard();
+  const detail = 'The Ask conversation could not be read (TransportError). Your questions were kept.';
+  show(run, askView({turn_state:'running', detail}));
+  assert.equal(node('ask-hint').textContent, detail);
+  show(run, askView({turn_state:'running', detail:null}));
+  assert.match(node('ask-hint').textContent, /still working/);
+});
+
+test('an unavailable Ask explains itself instead of reading', () => {
+  const {run, node} = dashboard();
+  run('latestStatus = {ask_available:false, ask_detail:"Ask needs the operator store."}; askConversation = null; renderAsk()');
+  assert.deepEqual(texts(node('ask-conversation')), ['Ask needs the operator store.']);
+  run('latestStatus = {ask_available:true}; askConversation = null; renderAsk()');
+  assert.deepEqual(texts(node('ask-conversation')), ['Reading the conversation…']);
+});
+
+test('the step setting is labelled Steps per request', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../src/plowshare_privacy/web/index.html'), 'utf8');
+  assert.match(html, /<label>Steps per request<input id="ask-max-turns"/);
+  assert.ok(!html.includes('<label>Turns<'));
+  assert.match(html, /runaway guard/);
 });

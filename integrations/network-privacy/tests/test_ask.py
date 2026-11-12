@@ -32,6 +32,7 @@ from plowshare.contracts import (
 from support import configuration
 
 from plowshare_privacy.ask import (
+    MAX_JOB_FAILURES,
     MAX_TURNS,
     AskCall,
     AskConflict,
@@ -382,6 +383,48 @@ class AskServiceTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.port.states["job-gone"] = "lost"
         await self.service.poll()
+        self.assertEqual(self.service.view().turn_state, "answered")
+
+    async def test_a_job_plowshare_will_not_report_settles_and_frees_the_conversation(
+        self,
+    ) -> None:
+        await self.service.ask("Hello")
+        self.port.states["job-1"] = "unreadable"
+        await self.service.poll()
+        view = self.service.view()
+        self.assertEqual((view.turn_state, view.paused), ("failed", False))
+        self.assertIn("would not report how", view.detail or "")
+        self.assertEqual(AskJournal(self.root).read().turns[-1].ending, "unreadable")
+        before = list(self.port.runs)
+        self.assertEqual((await self.service.ask("Again")).turn_state, "running")
+        # The first question was never resent.
+        self.assertEqual([r[2] for r in self.port.runs[len(before) :]], ["Again"])
+
+    async def test_repeated_status_failures_settle_the_turn(self) -> None:
+        await self.service.ask("Hello")
+        self.port.job_state = AsyncMock(  # type: ignore[method-assign]
+            side_effect=ValueError("Foreign Ask job status")
+        )
+        for _ in range(MAX_JOB_FAILURES - 1):
+            with self.assertRaises(ValueError):
+                await self.service.poll()
+            self.assertEqual(self.service.view().turn_state, "running")
+        await self.service.poll()
+        view = self.service.view()
+        self.assertEqual(view.turn_state, "failed")
+        self.assertIn("would not report how", view.detail or "")
+        self.assertEqual(len(self.port.runs), 1)
+
+    async def test_a_chat_that_will_not_read_does_not_stop_the_job_settling(
+        self,
+    ) -> None:
+        await self.service.ask("Hello")
+        self.port.entries = AsyncMock(  # type: ignore[method-assign]
+            side_effect=TransportError(Delivery.UNKNOWN, "down")
+        )
+        self.port.states["job-1"] = "answered"
+        with self.assertRaises(TransportError):
+            await self.service.poll()
         self.assertEqual(self.service.view().turn_state, "answered")
 
     async def test_a_summary_fold_resyncs_without_losing_or_reflagging_entries(
@@ -793,7 +836,13 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
             "NOT_FOUND", "no job called 'job-1'; this process knows []", None
         )
         self.assertEqual(await self.port.job_state("job-1"), "lost")
-        self.client.request.return_value = Reply("BAD_REQUEST", "bad id", None)
+        # A refusal that will not heal by waiting settles as unreadable.
+        for code in ("BAD_REQUEST", "FORBIDDEN", "UNAUTHENTICATED"):
+            with self.subTest(code=code):
+                self.client.request.return_value = Reply(code, "no", None)
+                self.assertEqual(await self.port.job_state("job-1"), "unreadable")
+        # A passing fault is retried by the next poll.
+        self.client.request.return_value = Reply("CAPACITY_EXHAUSTED", "busy", None)
         with self.assertRaises(Refusal):
             await self.port.job_state("job-1")
 

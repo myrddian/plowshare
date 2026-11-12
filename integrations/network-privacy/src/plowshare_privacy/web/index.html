@@ -316,11 +316,11 @@
               <h3>Privacy Watch conversation</h3>
               <form id="ask-settings" class="form-grid">
                 <label>Model calls<input id="ask-max-calls" type="number" min="1" max="200" step="1" inputmode="numeric" required></label>
-                <label>Turns<input id="ask-max-turns" type="number" min="1" max="200" step="1" inputmode="numeric" required></label>
+                <label>Steps per request<input id="ask-max-turns" type="number" min="1" max="200" step="1" inputmode="numeric" required></label>
                 <label>Top-up size<input id="ask-top-up" type="number" min="1" max="200" step="1" inputmode="numeric" required></label>
                 <div class="actions"><button id="ask-settings-save" type="submit">Save limits</button></div>
               </form>
-              <p class="hint">These limit how much one conversation can spend. Top up adds the top-up size when you choose.</p>
+              <p class="hint">These limit how much one conversation can spend. Steps per request is a runaway guard: one request that needs more steps stops and asks you to ask again. Top up adds the top-up size when you choose.</p>
               <p id="ask-settings-detail" role="status" class="hint"></p>
             </div>
           </div>

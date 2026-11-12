@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -32,6 +33,7 @@ from support import configuration
 
 from plowshare_privacy.console_port import SdkConsolePort
 from plowshare_privacy.journal import Receipt
+from plowshare_privacy.native_tools import ASSISTANT_TOOLS
 
 
 class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
@@ -217,7 +219,8 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(requests[1].measure, False)
         self.assertEqual(self.client.request.await_count, 2)
         self.assertEqual(result.tools, ("network_evidence",))
-        self.assertIn("network_scan", result.missing_tools)
+        self.assertIn("network_devices", result.missing_tools)
+        self.assertNotIn("network_scan", result.missing_tools)
         self.assertEqual(result.tool_visibility, "projected")
         self.assertEqual(result.served, ("privacy_assistant", "privacy_coordinator"))
         self.assertIn("privacy_reviewer", result.unavailable)
@@ -225,6 +228,38 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
         # Only tool names survive; no message content is carried out.
         self.assertFalse(hasattr(result, "messages"))
         self.assertNotIn("user", repr(result))
+
+    async def test_a_healthy_assistant_reports_nothing_missing(self) -> None:
+        assistant = replace(self.coordinator, name="privacy_assistant")
+        full = replace(
+            self.assistant_snapshot(),
+            tools=tuple(
+                ContextSnapshotDtoToolsItemDto(
+                    name=name, description="fixture", parameters={}
+                )
+                for name in sorted(ASSISTANT_TOOLS)
+            ),
+        )
+        self.client.request.side_effect = [
+            Reply("OK", None, (assistant,)),
+            Reply("OK", None, full),
+        ]
+        result = await self.assistant_port().agents()
+        self.assertEqual(result.missing_tools, ())
+        self.assertEqual(len(result.tools), 10)
+
+    def test_the_expected_tools_are_the_assistant_scope_grants(self) -> None:
+        manifest = json.loads(
+            (
+                Path(__file__).parent.parent / "network-privacy-watch/plowshare.json"
+            ).read_text()
+        )
+        grants = next(
+            scope["grants"]
+            for scope in manifest["toolScopes"]
+            if scope["scope"] == "network_assistant"
+        )
+        self.assertEqual(set(grants), ASSISTANT_TOOLS)
 
     async def test_unserved_assistant_is_listed_missing(self) -> None:
         self.client.request.side_effect = [Reply("OK", None, (self.coordinator,))]

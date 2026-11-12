@@ -1803,12 +1803,29 @@ byId('deep-scan-settings').addEventListener('submit', async event => {
 // scroll position and a pending Top up confirmation across the refresh.
 const askActive = state => state === 'sending' || state === 'running';
 const askHeads = {question:'You', answer:'Privacy Watch', refusal:'Privacy Watch', orchestration:'Report', harness:'Update'};
-function looksLikeJson(text) {
-  const trimmed = text.trim();
-  return (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+// Household words for the names the platform uses. An unknown name is made
+// readable, never shown with underscores.
+const askNames = {
+  privacy_analyst:'The analyst', privacy_reviewer:'The reviewer', privacy_coordinator:'The coordinator',
+  privacy_assistant:'Privacy Watch', investigate_network:'Network investigation',
+};
+function askName(name) {
+  if (typeof name !== 'string' || !name.trim()) return 'Unknown recipient';
+  if (Object.hasOwn(askNames, name)) return askNames[name];
+  const words = name.replace(/^orchestrate_/, '').replace(/[_\-\s]+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : 'Unknown recipient';
 }
-function prettyJson(text) {
-  try {return JSON.stringify(JSON.parse(text), null, 2);} catch (error) {return text.trim();}
+// The JSON a reply carries, or null when it is words: a bare object or list,
+// one in a Markdown fence, or one after a short lead-in.
+function jsonOf(text) {
+  const trimmed = text.trim();
+  const fenced = /^```[a-z]*\s*\n([\s\S]*?)\n?```$/i.exec(trimmed);
+  const body = fenced ? fenced[1].trim() : trimmed;
+  const start = body.search(/[{[]/);
+  if (start < 0 || start > 80 || body.slice(0, start).includes('\n')) return null;
+  const close = body[start] === '{' ? '}' : ']';
+  if (!body.endsWith(close)) return null;
+  try {return JSON.stringify(JSON.parse(body.slice(start)), null, 2);} catch (error) {return null;}
 }
 // Tool results are working, not answers, and an answer that only called tools
 // has no words: neither is shown. Reply text never becomes HTML; it goes
@@ -1818,28 +1835,24 @@ function askEntryNode(entry) {
   const mine = entry.author === 'user';
   const node = element('article', undefined, mine ? 'ask-entry ask-question' : 'ask-entry ask-answer');
   const head = element('p', undefined, 'ask-entry-head');
-  const who = mine ? 'You' : entry.kind === 'message' ? (entry.sender ? `${entry.sender} replied` : 'A specialist replied') : askHeads[entry.kind] || 'Privacy Watch';
+  const specialist = entry.kind === 'message';
+  const who = mine ? 'You' : specialist ? (entry.sender ? `${askName(entry.sender)} replied` : 'A specialist replied') : askHeads[entry.kind] || 'Privacy Watch';
   head.append(element('span', who, 'status-line'));
   if (entry.at) head.append(element('small', formatWhen(entry.at)));
   node.append(head);
   if (mine) node.append(element('p', entry.text, 'ask-text'));
-  else if (looksLikeJson(entry.text)) {
+  else if (jsonOf(entry.text) !== null) {
     const fold = element('details', undefined, 'record-details');
-    fold.append(element('summary', 'Details · structured reply'), element('pre', prettyJson(entry.text)));
+    fold.append(element('summary', specialist ? 'Details · specialist reply' : 'Details · structured reply'), element('pre', jsonOf(entry.text)));
     node.append(fold);
   } else node.append(PrivacyMarkdown.render(entry.text));
   return node;
 }
 function askWorkNode(item) {
   const node = element('div', undefined, 'record');
-  node.append(element('h4', item.target || 'Unknown recipient'));
+  node.append(element('h4', askName(item.target)));
   if (item.about) node.append(element('p', item.about, 'hint'));
-  node.append(element('small', `Since ${formatWhen(item.since)}`));
-  // A report opens only when the work names its revision; the hand-off does not
-  // always carry one, and then it is listed without a link.
-  if (item.target === 'investigate_network' && typeof item.revision === 'string') {
-    node.append(actionButton('Read the report', 'secondary', () => showReport(item.revision)));
-  }
+  node.append(element('small', item.since ? `Since ${formatWhen(item.since)}` : 'Since: not recorded'));
   return node;
 }
 function askWorkList(container, items, empty) {
@@ -1868,9 +1881,9 @@ function applyAskForm() {
   byId('ask-send').disabled = blocked;
   markBusy(byId('ask-send'), askSending);
   const hint = byId('ask-hint');
-  hint.className = state === 'failed' ? 'notice error' : 'hint';
+  hint.className = state === 'failed' || (askActive(state) && view?.detail) ? 'notice error' : 'hint';
   hint.textContent = unavailable ? view?.detail || latestStatus?.ask_detail || 'Ask is not enabled on this collector.'
-    : askActive(state) ? 'Privacy Watch is still working on your last question'
+    : askActive(state) ? view?.detail || 'Privacy Watch is still working on your last question'
     : state === 'unconfirmed' ? 'Not confirmed as sent. Ask again if you still need it.'
     : view?.detail || '';
 }
@@ -1878,7 +1891,9 @@ function renderAsk() {
   applyAskForm();
   const view = askConversation;
   if (!view) {
-    byId('ask-conversation').replaceChildren(element('p', 'Reading the conversation…', 'empty'));
+    // Ask unavailable has nothing to read: say why instead of waiting.
+    const unavailable = latestStatus && !latestStatus.ask_available;
+    byId('ask-conversation').replaceChildren(element('p', unavailable ? latestStatus.ask_detail || 'Ask is not enabled on this collector.' : 'Reading the conversation…', 'empty'));
     askSignature = null;
     return;
   }

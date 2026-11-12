@@ -122,18 +122,22 @@ ViewState = Literal[
 ]
 # A job as the port reads it. ``lost``: Plowshare no longer has the job (it
 # keeps jobs in memory, so a server restart forgets a running one).
-JobState = Literal["running", "answered", "call_budget", "turn_cap", "failed", "lost"]
+# ``unreadable``: Plowshare answers, but will not say how the job ended (a
+# refusal that is not a passing fault), or the status kept failing to read.
+JobState = Literal[
+    "running", "answered", "call_budget", "turn_cap", "failed", "lost", "unreadable"
+]
 # Why a turn stopped short, kept with it: only ``call_budget`` can be topped up.
-Ending = Literal["call_budget", "turn_cap", "lost"]
+Ending = Literal["call_budget", "turn_cap", "lost", "unreadable"]
 Author = Literal["user", "agent", "tool", "system"]
 _TURN_STATES = frozenset(
     {"sending", "running", "answered", "capped", "failed", "unconfirmed"}
 )
 _ACTIVE = frozenset({"sending", "running"})
 _JOB_STATES = frozenset(
-    {"running", "answered", "call_budget", "turn_cap", "failed", "lost"}
+    {"running", "answered", "call_budget", "turn_cap", "failed", "lost", "unreadable"}
 )
-_ENDINGS = frozenset({"call_budget", "turn_cap", "lost"})
+_ENDINGS = frozenset({"call_budget", "turn_cap", "lost", "unreadable"})
 # The turn state and ending each final job state settles a turn to.
 _SETTLED: dict[str, tuple[TurnState, Ending | None]] = {
     "answered": ("answered", None),
@@ -141,7 +145,22 @@ _SETTLED: dict[str, tuple[TurnState, Ending | None]] = {
     "turn_cap": ("capped", "turn_cap"),
     "failed": ("failed", None),
     "lost": ("failed", "lost"),
+    "unreadable": ("failed", "unreadable"),
 }
+# Consecutive failed status reads of one job (about a minute of polling)
+# after which the turn is settled as unreadable instead of staying running.
+MAX_JOB_FAILURES = 12
+# Refusal codes that pass: the job status may read next time. Any other
+# refusal (a changed role, credential or shape) will not heal by waiting.
+_PASSING_CODES = frozenset(
+    {
+        "CAPACITY_EXHAUSTED",
+        "MODEL_UNAVAILABLE",
+        "CONFIG_UNAVAILABLE",
+        "ARCHIVE_UNAVAILABLE",
+        "INTERNAL_ERROR",
+    }
+)
 # Outcome.Ending names (plowshare-server agents/Outcome.java). AWAITING ends a
 # turn that is waiting for an answer from outside, which is not a failure.
 _ANSWERED_ENDINGS = frozenset({"ANSWERED", "AWAITING"})
@@ -164,8 +183,13 @@ _ENDING_DETAIL: dict[str, str] = {
     "call_budget": "The assistant has used its allowance for now. Top up to let it continue.",
     "turn_cap": "This request took too many steps and stopped. Ask again, more narrowly.",
     "lost": (
-        "Plowshare no longer has this run (it may have restarted), so its"
-        " outcome could not be read. Ask again if you still need an answer."
+        "Plowshare no longer has this run, or no longer lets the collector"
+        " read it, so its outcome could not be read. Ask again if you still"
+        " need an answer."
+    ),
+    "unreadable": (
+        "Plowshare would not report how this request ended. Ask again if you"
+        " still need an answer."
     ),
 }
 
@@ -262,7 +286,7 @@ class AskTurn:
         )
         if state == "running" and turn.job is None:
             raise ValueError("A running Ask turn needs its job")
-        if ending is not None and (state, ending == "lost") not in (
+        if ending is not None and (state, ending in ("lost", "unreadable")) not in (
             ("capped", False),
             ("failed", True),
         ):
@@ -561,7 +585,9 @@ class SdkAskPort:
         except Refusal as error:
             if error.code == _UNKNOWN_JOB:
                 return "lost"
-            raise
+            if error.code in _PASSING_CODES:
+                raise
+            return "unreadable"
         if not isinstance(view, ObservedJobDto) or view.id != job:
             raise ValueError("Foreign Ask job status")
         if view.state == "RUNNING":
@@ -860,6 +886,9 @@ class AskService:
         self._entries: tuple[AskEntry, ...] = ()
         self._cursor: int | None = None
         self._woken: _Woken | None = None
+        # Consecutive failed status reads per job; memory only, since a
+        # restart starts counting afresh.
+        self._job_failures: dict[str, int] = {}
 
     # Ledger access. Writes happen between awaits only, so each is atomic with
     # respect to the event loop; a write after an await starts from the
@@ -1161,19 +1190,51 @@ class AskService:
             conversation = self._ledger.conversation
             if conversation is None or not self._available:
                 return False
-            await self._read(conversation)
+            # The job is checked in its own step, so a chat that will not
+            # read cannot keep a finished (or unreadable) job from settling.
+            failure: Exception | None = None
+            try:
+                await self._read(conversation)
+            except Exception as error:
+                failure = error
             last = self._ledger.turns[-1] if self._ledger.turns else None
-            if last is not None and last.state == "running" and last.job is not None:
-                state = _job_state(await self.port.job_state(last.job))
-                if state != "running":
-                    settled, ending = _SETTLED[state]
-                    self._set_turn(last.request_id, state=settled, ending=ending)
-            woken = self._woken
-            if woken is not None and woken.state == "running":
-                state = _job_state(await self.port.job_state(woken.job))
-                if state != "running":
-                    woken.state, woken.ending = _SETTLED[state]
+            try:
+                if (
+                    last is not None
+                    and last.state == "running"
+                    and last.job is not None
+                ):
+                    state = await self._job_state(last.job)
+                    if state != "running":
+                        settled, ending = _SETTLED[state]
+                        self._set_turn(last.request_id, state=settled, ending=ending)
+                woken = self._woken
+                if woken is not None and woken.state == "running":
+                    state = await self._job_state(woken.job)
+                    if state != "running":
+                        woken.state, woken.ending = _SETTLED[state]
+            except Exception as error:
+                failure = failure or error
+            if failure is not None:
+                raise failure
             return True
+
+    async def _job_state(self, job: str) -> JobState:
+        """The job's state; ``unreadable`` once its status failed too often.
+
+        Nothing is resent: settling frees the conversation, and a new question
+        is the user's own act, which Plowshare accepts or refuses.
+        """
+        try:
+            state = _job_state(await self.port.job_state(job))
+        except Exception:
+            failures = self._job_failures.get(job, 0) + 1
+            if failures < MAX_JOB_FAILURES:
+                self._job_failures[job] = failures
+                raise
+            state = "unreadable"
+        self._job_failures.pop(job, None)
+        return state
 
     async def _read(self, conversation: str) -> None:
         """Page the chat reading forward from the cursor, bounded per poll.

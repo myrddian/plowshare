@@ -551,7 +551,7 @@ settings, Pi-hole, UniFi, the schedule, the time zone, limits or credentials,
 and it never changes the network: mitigation means suggesting a step and
 tracking it.
 
-The conversation has its own allowance of model calls and turns, set in
+The conversation has its own allowance of model calls and steps per request (a runaway guard), set in
 Settings, under "Privacy Watch conversation". **Top up** appears only when the
 allowance runs out. It raises the cap by the configured top-up size after you confirm. A
 request that stops at the step limit asks you to ask again, more narrowly.

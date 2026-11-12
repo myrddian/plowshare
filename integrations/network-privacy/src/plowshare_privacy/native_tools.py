@@ -129,6 +129,15 @@ DECLARATIONS = tuple(
     for definition in DEFINITIONS
 )
 
+# The tools the ``network_assistant`` scope grants ``privacy_assistant``: every
+# declaration except the scans, which only the coordinator may start. A
+# snapshot is measured against this set (a test pins it to plowshare.json).
+ASSISTANT_TOOLS = frozenset(
+    declaration.name
+    for declaration in DECLARATIONS
+    if declaration.name not in ("network_scan", "network_scan_status")
+)
+
 
 def registered(tools: PrivacyTools) -> tuple[RegisteredTool, ...]:
     async def handle(call: ToolCall) -> ToolResult:

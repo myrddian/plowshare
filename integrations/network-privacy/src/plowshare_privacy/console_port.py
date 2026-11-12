@@ -100,7 +100,7 @@ class SdkConsolePort:
         return ScheduleView(row.name, row.cron, row.zone, row.paused, row.next_fire_at)
 
     async def agents(self) -> AgentHealth:
-        from .native_tools import DECLARATIONS
+        from .native_tools import ASSISTANT_TOOLS
 
         agents = (
             await self.client.request(AgentListRequest(project=self.config.project))
@@ -117,7 +117,7 @@ class SdkConsolePort:
         served = {value.name for value in relevant if value.served}
         if sum(value.name == "privacy_assistant" for value in relevant) > 1:
             raise ValueError("Ambiguous project assistant")
-        names = {item.name for item in DECLARATIONS}
+        names = ASSISTANT_TOOLS
         visible: set[str] = set()
         visibility = "awaiting_context"
         conversation = self.assistant()

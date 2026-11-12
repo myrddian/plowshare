@@ -290,7 +290,8 @@ class AssistantToolVisibilityTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("projected", result.tool_visibility)
         self.assertEqual(("network_evidence",), result.tools)
-        self.assertIn("network_scan", result.missing_tools)
+        self.assertIn("network_devices", result.missing_tools)
+        self.assertNotIn("network_scan", result.missing_tools)
 
     async def test_a_foreign_projection_is_refused(self) -> None:
         self.conversation = "conv-1"
