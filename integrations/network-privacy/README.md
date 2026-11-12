@@ -529,6 +529,44 @@ For headless operation, `once` performs one intake/collection pass. An operator
 process supervisor can run/restart the collector; Plowshare remains the scheduler
 and durable investigation runtime.
 
+### Ask Privacy Watch
+
+The **Ask** tab is a conversation with the privacy assistant, an agent for
+questions about network security: which devices are on the network, what they
+talk to, what is exposed and what to do about it. The tab appears once the
+collector can reach the assistant.
+
+The assistant answers from reads of the collector's retained evidence, device
+dossiers, profiles and issues. Bigger work it hands to the analyst, reviewer or
+coordinator with `send_message`; the conversation stays usable while they work,
+and their answers arrive later in the same conversation. It can start the
+network investigation, request a deep scan or an assessment of a device (the
+collector's usual rules apply, and the answer says the work is queued, not
+done), add an attributed note to a device profile, and link an existing privacy
+issue to a device and record mitigation progress.
+
+It cannot create new issues; record those on the dashboard. It cannot request
+profile research, which is a background queue. It cannot change monitoring
+settings, Pi-hole, UniFi, the schedule, the time zone, limits or credentials,
+and it never changes the network: mitigation means suggesting a step and
+tracking it.
+
+The conversation has its own allowance of model calls and turns, set under
+Settings under "Privacy Watch conversation". **Top up** appears only when the allowance runs
+out. It raises the cap by the configured top-up size after you confirm. A
+request that stops at the step limit asks you to ask again, more narrowly.
+
+Sending is blocked while a turn runs. If the collector cannot confirm that a
+message was delivered, it shows "not confirmed" and never resends it; ask again
+if you still need an answer. A new answer raises a mild attention item on
+Overview and a badge on the tab.
+
+The assistant runs under the collector's own Plowshare service account, so the
+people who use the web interface need no Plowshare account, and Plowshare
+sign-in is not part of this interface. In System health, "Dynamic tool
+visibility" measures the Ask conversation and "Project agents" counts
+`privacy_assistant`.
+
 ## Python scanning and named tools
 
 For an immediate diagnostic scan on the collector host:
