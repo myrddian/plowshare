@@ -464,6 +464,7 @@ async function refresh() {
     else if (reportResult.error) condition(reportResult.error.message, true);
     else condition(status.state === 'attention_required' ? status.detail : '', status.state === 'attention_required');
     await pollAssessment().catch(error => notice(error.message, true));
+    await pollDeepScan().catch(error => notice(error.message, true));
   } finally {refreshPending = false; setBusy(byId('refresh'), false);}
 }
 byId('connect').addEventListener('submit', event => {
@@ -492,7 +493,7 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['attention-items','health-connections','health-deployment','background-usage']) byId(id).replaceChildren();
   byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
   setSignalFilter('all');
-  selectedDevice = null; deviceSupplemental = null; setHouseholdZone('UTC');
+  selectedDevice = null; deviceSupplemental = null; deepScanPane = null; deepScanBusy = null; setHouseholdZone('UTC');
   byId('household-zone').hidden = true; byId('zone-input').value = '';
   for (const id of deviceParts) byId(id).replaceChildren();
   syncPane();
@@ -1300,7 +1301,16 @@ async function loadDeviceAnalysis(device) {
   if (stale()) return;
   product.append(element('p', productHint(device), 'hint'),
     actionButton('Look up product and advisories', 'secondary', () => openDeviceResearch(device)));
-  byId('device-assessment').replaceChildren(assessment);
+  // The deep scan belongs with the assessment: its result is what asks for one.
+  const sections = [assessment];
+  if (overview?.deep_scans) {
+    const deep = paneSection('Deep port scan', 'Deep scan');
+    const deepBlock = element('div', undefined, 'deep-scan-block');
+    deep.append(deepBlock);
+    renderDeepScan(device, deepBlock);
+    sections.push(deep);
+  }
+  byId('device-assessment').replaceChildren(...sections);
   panel.replaceChildren(known, notes, product);
   renderPaneNav();
 }
@@ -1538,6 +1548,179 @@ byId('assessment-settings').addEventListener('submit', async event => {
   }
 });
 
+// ---- Deep port scans ----
+// A scan probes all 65,535 TCP ports of one device the collector has confirmed
+// by MAC. The overview carries every scanned device's view; the open device's
+// view is re-read through the existing five-second refresh only while it is
+// queued or running, and only the deep-scan block is rebuilt, so the sections
+// the operator has open and the focus stay where they are. This file is large
+// (about 2,700 lines); this block is kept whole so it can move to its own
+// script when the dashboard is next split.
+let deepScanPane = null;
+let deepScanBusy = null;
+const deepScanStateText = {
+  cancelled: 'Last deep scan was cancelled',
+  interrupted: 'Last deep scan was interrupted',
+  unreliable: 'Last deep scan could not be trusted',
+  address_changed: 'Not scanned: the device’s address changed',
+  failed: 'Last deep scan failed',
+};
+const deepScanUnavailable = 'Deep port scans need UniFi or Pi-hole to confirm each device’s address.';
+function deepScanViewIn(device, value) {
+  const id = device.identity?.mac ? device.identity.device_id : null;
+  return id ? (value?.deep_scans?.views || []).find(item => item.device_id === id) || null : null;
+}
+function deepScanOf(device) {return deepScanViewIn(device, overview);}
+// Open ports from a complete scan that the usual checks do not cover. Other
+// states carry no meaningful ports.
+function newOpenPorts(view, configuredPorts) {
+  if (!view?.latest || view.latest.state !== 'complete') return [];
+  const usual = new Set(configuredPorts || []);
+  return view.latest.open_ports.filter(port => !usual.has(port));
+}
+// True while a scan found ports the usual checks miss and no assessment has
+// been requested since it finished.
+function deepScanNeedsReview(device, value) {
+  const view = deepScanViewIn(device, value);
+  if (!newOpenPorts(view, value?.deep_scans?.configured_ports).length) return false;
+  const id = device.identity.device_id;
+  const requested = (value.assessments?.summaries || []).find(item => item.device_id === id)?.requested_at
+    ?? assessmentOf(device)?.requested_at ?? null;
+  return requested === null || Date.parse(requested) < Date.parse(view.latest.finished_at);
+}
+function timeLeftText(stamp) {
+  if (!stamp) return '';
+  const minutes = Math.ceil((Date.parse(stamp) - Date.now()) / 60000);
+  return minutes <= 1 ? 'less than a minute left' : `about ${plural(minutes, 'minute', 'minutes')} left`;
+}
+function deepScanPath(deviceId, action) {
+  return `/api/devices/${encodeURIComponent(deviceId)}/deep-scan${action}`;
+}
+function deepScanNodes(device, view, scans) {
+  const nodes = [];
+  if (!scans) return [element('p', 'Deep port scans are not enabled on this collector.', 'hint unmeasured')];
+  if (!device.identity?.mac) return [element('p', 'Not scanned. A deep scan needs a confirmed MAC address; this device is known by its address only.', 'hint unmeasured')];
+  const latest = view.latest;
+  const actions = element('div', undefined, 'actions');
+  const act = (label, className, action) => {
+    const control = actionButton(label, className, () => deepScanAction(action));
+    control.disabled = Boolean(deepScanBusy);
+    return control;
+  };
+  if (view.state === 'running') {
+    nodes.push(element('p', [`${formatCount(view.checked)} of ${formatCount(view.total)} ports checked`, `${plural(view.open_so_far.length, 'open port', 'open ports')} so far`, timeLeftText(view.estimated_finish)].filter(Boolean).join(' · '), 'status-line'));
+    actions.append(act('Cancel', 'quiet', 'cancel'));
+  } else if (view.state === 'queued') {
+    nodes.push(element('p', 'Waiting for its turn', 'status-line'));
+    actions.append(act('Cancel', 'quiet', 'cancel'));
+  } else {
+    const start = act('Deep-scan this device', 'secondary', 'request');
+    start.disabled = start.disabled || !view.available;
+    actions.append(start);
+  }
+  if (view.state === 'idle' && !latest) {
+    nodes.push(element('p', 'Not deep-scanned. This checks every TCP port of the device, not only the usual ones, and takes several minutes.', 'hint'));
+  }
+  if (latest) {
+    const when = formatWhen(latest.finished_at);
+    if (latest.state === 'complete') {
+      nodes.push(element('p', `Last deep scan finished ${when}`, 'status-line'));
+      const usual = new Set(scans.configured_ports);
+      if (latest.open_ports.length) {
+        const list = element('ul');
+        for (const port of latest.open_ports) {
+          const exposure = (device.detection?.exposures || []).find(item => item.ports.includes(port));
+          const note = exposure ? ` · Possible ${exposure.possible_service}. ${exposure.risk_check}` : '';
+          list.append(element('li', `TCP ${port}${note}${usual.has(port) ? '' : ' · outside the usual checks'}`));
+        }
+        nodes.push(list);
+      } else {
+        nodes.push(element('p', 'No open ports.', 'hint'));
+      }
+      nodes.push(element('p', `${plural(latest.unanswered, 'port', 'ports')} did not answer`, 'hint'));
+    } else {
+      nodes.push(element('p', `${deepScanStateText[latest.state] || 'Last deep scan did not complete'} · ${when}`, 'status-line'));
+      if (latest.detail) nodes.push(element('p', latest.detail, latest.state === 'failed' ? 'notice error' : 'hint'));
+    }
+  }
+  // The collector's reason scanning cannot start or is waiting is plain text.
+  if (view.detail) nodes.push(element('p', view.detail, 'hint'));
+  if (deepScanNeedsReview(device, overview) && assessmentsAvailable) {
+    nodes.push(element('p', 'This scan found open ports that the agent assessment has not seen.', 'hint'));
+    actions.append(confirmedAction('Assess again', 'secondary', 'Confirm assessment',
+      'This starts one agent assessment of this device. It uses model calls and counts toward today’s assessment limit.',
+      () => assessmentAction('assess'), Boolean(assessmentBusy)));
+  }
+  nodes.push(actions);
+  return nodes;
+}
+function showDeepScan() {
+  const pane = deepScanPane;
+  if (!pane || pane.address !== selectedDevice) return;
+  pane.block.replaceChildren(...deepScanNodes(pane.device, pane.view || deepScanIdle(pane.deviceId), overview?.deep_scans));
+}
+function deepScanIdle(deviceId) {
+  return {device_id:deviceId, available:Boolean(overview?.deep_scans?.available), state:'idle', trigger:null, checked:0, total:65535,
+    open_so_far:[], estimated_finish:null, latest:null, detail:overview?.deep_scans?.detail ?? null};
+}
+function renderDeepScan(device, block) {
+  const deviceId = device.identity?.mac ? device.identity.device_id : null;
+  deepScanPane = deviceId ? {address:device.address, deviceId, device, block, view:deepScanOf(device)} : null;
+  if (deepScanPane) {showDeepScan(); return;}
+  block.replaceChildren(...deepScanNodes(device, null, overview?.deep_scans));
+}
+async function deepScanAction(action) {
+  const pane = deepScanPane;
+  if (!pane || deepScanBusy) return;
+  deepScanBusy = action; showDeepScan();
+  try {
+    const next = await api(deepScanPath(pane.deviceId, '/' + action), {method:'POST', body:'{}'});
+    if (deepScanPane === pane) pane.view = next;
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    deepScanBusy = null;
+  }
+  showDeepScan();
+  // The attention band and device list read the same views.
+  refresh().catch(error => condition(error.message, true));
+}
+// Runs after each refresh: re-read the open device's view while a scan is
+// queued or running, otherwise take the overview's, and rebuild only this
+// block when it changed.
+async function pollDeepScan() {
+  const pane = deepScanPane;
+  if (!pane || pane.address !== selectedDevice || deepScanBusy || !overview?.deep_scans) return;
+  const active = item => item?.state === 'running' || item?.state === 'queued';
+  const fromOverview = deepScanOf(pane.device);
+  const next = active(pane.view) || active(fromOverview)
+    ? await api(deepScanPath(pane.deviceId, ''))
+    : fromOverview;
+  if (deepScanPane !== pane || JSON.stringify(next) === JSON.stringify(pane.view)) return;
+  pane.view = next; showDeepScan();
+}
+function renderDeepScanSettings(value) {
+  const field = byId('deep-scan-limit');
+  field.value = String(value.automatic_limit);
+  field.disabled = !value.available;
+  byId('deep-scan-save').disabled = !value.available;
+  byId('deep-scan-detail').textContent = !value.available ? deepScanUnavailable
+    : value.detail || (value.automatic_limit ? `Up to ${plural(value.automatic_limit, 'automatic deep scan', 'automatic deep scans')} a day.` : 'Automatic deep scans are off.');
+}
+byId('deep-scan-settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  try {
+    const limit = Number(byId('deep-scan-limit').value);
+    if (!Number.isInteger(limit)) throw new Error('Choose a whole number of deep scans a day.');
+    const saved = await api('/api/deep-scans', {method:'POST', body:JSON.stringify({automatic_limit:limit})});
+    renderDeepScanSettings(saved);
+    if (overview?.deep_scans) {overview.deep_scans.usage = {automatic_limit:saved.automatic_limit, used_today:saved.used_today}; renderBackgroundUsage(overview);}
+  } catch (error) {
+    byId('deep-scan-detail').textContent = error.message;
+  }
+});
+// ---- end Deep port scans ----
+
 const inventoryOrders = {
   attention: (a, b) => attentionRank(a) - attentionRank(b),
   third: (a, b) => behaviouralQueries(b.dns_activity) - behaviouralQueries(a.dns_activity),
@@ -1767,6 +1950,9 @@ function renderAttention(value) {
     `${deviceNames(waiting)}. Accept makes a report final; Dismiss leaves it as a draft.`, ...reviewAction(waiting)));
   if (failed.length) items.push(attentionItem(formatCount(failed.length), failed.length === 1 ? 'Assessment failed' : 'Assessments failed',
     `${deviceNames(failed)}. The device shows why and offers a retry.`, ...reviewAction(failed)));
+  const unseen = value.devices.filter(device => deepScanNeedsReview(device, value));
+  if (unseen.length) items.push(attentionItem(formatCount(unseen.length), 'New open ports',
+    `${deviceNames(unseen)} answered on ports outside the usual checks.`, ...reviewAction(unseen)));
   const drafts = latestStatus?.profile_drafts_waiting || 0;
   if (drafts) items.push(attentionItem(formatCount(drafts), drafts === 1 ? 'Profile draft awaiting review' : 'Profile drafts awaiting review',
     'Background research drafted device profiles. Review each before it is saved.', 'Open drafts', () => {
@@ -1832,7 +2018,8 @@ function renderBackgroundUsage(value) {
   const list = byId('background-usage'); list.replaceChildren();
   const research = latestStatus?.profile_research_available;
   const usage = value.assessments?.usage;
-  byId('background-work').hidden = !research && !usage;
+  const deep = value.deep_scans?.usage;
+  byId('background-work').hidden = !research && !usage && !deep;
   if (research) {
     fact(list, 'Profile research', latestStatus.profile_research_enabled ? 'On' : 'Off');
     fact(list, 'Research used today', `${formatCount(latestStatus.profile_research_used_today)} of ${formatCount(latestStatus.profile_research_daily_limit)}`);
@@ -1842,6 +2029,7 @@ function renderBackgroundUsage(value) {
     fact(list, 'Background assessments', usage.background_limit ? `Up to ${formatCount(usage.background_limit)} a day` : 'Off');
     fact(list, 'Assessments used today', `${formatCount(usage.used_today)} of ${formatCount(usage.daily_ceiling)}, including those you started`);
   }
+  if (deep) fact(list, 'Automatic deep scans used today', deep.automatic_limit ? `${formatCount(deep.used_today)} of ${formatCount(deep.automatic_limit)}` : 'Off');
 }
 
 function renderOverview(value) {
@@ -1880,6 +2068,9 @@ function renderOverview(value) {
     : 'Quick presence checks are off.';
   renderAttention(value);
   renderBackgroundUsage(value);
+  byId('deep-scan-group').hidden = !value.deep_scans;
+  // Never overwrite a limit the operator is typing.
+  if (value.deep_scans && document.activeElement !== byId('deep-scan-limit')) renderDeepScanSettings({...value.deep_scans.usage, available:value.deep_scans.available, detail:value.deep_scans.detail});
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates, value.assessments?.summaries || null]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
