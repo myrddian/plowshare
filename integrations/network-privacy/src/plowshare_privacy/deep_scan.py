@@ -509,6 +509,11 @@ class DeepScanner:
     def available(self) -> bool:
         return self._identities is not None
 
+    @property
+    def detail(self) -> str | None:
+        """Why scanning is not working now: a failed poll, else missing identities."""
+        return self.error or (None if self.available else _UNAVAILABLE)
+
     def usage(self) -> DeepScanUsage:
         zone = self._zone()
         today = household_day(self._clock(), zone)
@@ -927,3 +932,27 @@ class DeepScanner:
             running_address=address_now,
             results=_keep(ledger.results + (result,)),
         )
+
+
+JOURNAL_UNREADABLE = "Deep port scans need attention: their journal could not be read."
+
+
+def open_scanner(
+    root: Path,
+    inventory: Callable[[], DeviceInventory],
+    identities: DeviceIdentitySource | None,
+    *,
+    zone: Callable[[], str] = lambda: "UTC",
+) -> tuple[DeepScanner | None, str | None]:
+    """Open the scanner over its journal, or report why it cannot be opened.
+
+    An unreadable, linked, non-private or invalid journal disables deep scans
+    only: the caller keeps collecting and shows the returned detail. Nothing is
+    deleted or rewritten, so the operator can inspect the file.
+    """
+    try:
+        return DeepScanner(
+            DeepScanJournal(root), inventory, identities, zone=zone
+        ), None
+    except (OSError, ValueError):
+        return None, JOURNAL_UNREADABLE
