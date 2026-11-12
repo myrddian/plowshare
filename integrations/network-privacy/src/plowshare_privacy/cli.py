@@ -299,7 +299,7 @@ async def execute(args: argparse.Namespace) -> None:
                     profile=partial(profile_for, profiles)
                     if profiles is not None
                     else None,
-                    zone=config.zone,
+                    zone=lambda: worker.config.zone,
                 )
                 if dossiers is not None
                 else None
@@ -448,7 +448,7 @@ async def execute(args: argparse.Namespace) -> None:
                     receipts,
                     managed_products,
                     advisories,
-                    zone=config.zone,
+                    zone=lambda: worker.config.zone,
                 )
                 if operator_store is not None and config.collection.mode == "tcp"
                 else None

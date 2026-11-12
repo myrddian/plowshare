@@ -111,3 +111,24 @@ test('the device pane folds the report section that repeats What we know', () =>
   assert.equal(replaced.length, 1);
   assert.equal(replaced[0].children[0].textContent, 'Details · supplemental information, also under What we know');
 });
+
+test('the household zone is set from Settings and applies to every date at once', async () => {
+  const {run, node} = dashboard();
+  const sent = [];
+  run('api = async (path, options) => {sent.push([path, JSON.parse(options.body)]); return {time_zone:"Australia/Sydney", time_zone_configured:true};}; refresh = async () => {};', {sent});
+  run('renderZoneSetting({settings_available:true, time_zone:"UTC", time_zone_configured:false})');
+  assert.equal(node('household-zone').hidden, false);
+  assert.equal(node('zone-state').textContent, 'Not set · UTC in use');
+  assert.equal(node('zone-clear').hidden, true);
+  await run('saveZone("Australia/Sydney")');
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['/api/time-zone', {timeZone:'Australia/Sydney'}]]);
+  assert.equal(run('householdZone'), 'Australia/Sydney');
+  assert.match(node('notice').textContent, /Time zone set to Australia\/Sydney/);
+  // A name the browser does not know is refused before anything is sent.
+  await run('saveZone("Mars/Olympus")');
+  assert.equal(sent.length, 1);
+  assert.match(node('notice').textContent, /not a time zone this browser knows/);
+  // Without dashboard settings the panel stays hidden.
+  run('renderZoneSetting({settings_available:false, time_zone:"UTC"})');
+  assert.equal(node('household-zone').hidden, true);
+});

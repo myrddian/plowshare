@@ -415,9 +415,11 @@ class DeviceAssessments:
         profile: Callable[[DeviceCard], Awaitable[ProfileMatch]] | None = None,
         clock: Callable[[], str] = utc_now,
         new_id: Callable[[], str] = lambda: str(uuid4()),
-        zone: str = "UTC",
+        zone: Callable[[], str] = lambda: "UTC",
     ):
-        # The daily ceiling counts the household's day (configuration timeZone).
+        # The household zone (configuration timeZone), read when used: the
+        # dashboard can change it while the collector runs. The daily ceiling
+        # counts its day; each run keeps the zone it was admitted with.
         self.zone = zone
         # ``profile`` reads the operator's saved profiles when an assessment
         # starts; None means this collector keeps no profiles.
@@ -472,10 +474,9 @@ class DeviceAssessments:
         )
 
     def _today(self) -> tuple[str, ...]:
-        day = household_day(self.clock(), self.zone)
-        return tuple(
-            a for a in self.ledger.admissions if household_day(a, self.zone) == day
-        )
+        zone = self.zone()
+        day = household_day(self.clock(), zone)
+        return tuple(a for a in self.ledger.admissions if household_day(a, zone) == day)
 
     def _card(self, device_id: str) -> DeviceCard:
         device = parse_device_id(device_id)
@@ -500,7 +501,7 @@ class DeviceAssessments:
         if len(self._today()) >= DAILY_CEILING:
             return (
                 f"The daily limit of {DAILY_CEILING} assessments is reached."
-                f" Try again after midnight ({self.zone})."
+                f" Try again after midnight ({self.zone()})."
             )
         return None
 
@@ -688,7 +689,8 @@ class DeviceAssessments:
             facts=self.facts(device),
             profile_note=match.note if match is not None else None,
         )
-        retained = await self.dossiers.retain(dossier, self.zone)
+        zone = self.zone()
+        retained = await self.dossiers.retain(dossier, zone)
         previous = await self.port.newest_report(device)
         known = entry.latest_report if entry is not None else None
         if known is not None and previous is None:
@@ -708,7 +710,7 @@ class DeviceAssessments:
             tuple(signal.code for signal in dossier.signals),
             "pending",
             latest_report=previous,
-            time_zone=self.zone,
+            time_zone=zone,
         )
         pending.request()
         # Flushed before transport: the request UUID is the only way to settle it.
