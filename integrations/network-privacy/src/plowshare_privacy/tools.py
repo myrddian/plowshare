@@ -152,6 +152,15 @@ DEFINITIONS = (
     ),
 )
 
+# The assistant's request and record tools. They are served to the agent through
+# the native provider only, which supplies the harness invocation identity and
+# the services; the dashboard's HTTP tool boundary does not offer them.
+AGENT_ONLY = frozenset(
+    definition.name
+    for definition in DEFINITIONS
+    if definition.effect in ("request", "write")
+)
+
 # Assistant note bounds. A link's note keeps room for its attribution, whose
 # date is always ten characters.
 NOTE_LIMIT = 1024

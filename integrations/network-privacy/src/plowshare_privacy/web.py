@@ -56,6 +56,7 @@ from .profile_research import ResearchReview, admitted_today
 from .schedule_editor import ScheduleManagement
 from .system_view import describe
 from .tools import (
+    AGENT_ONLY,
     DEFINITIONS,
     PrivacyTools,
     WorkerTools,
@@ -825,6 +826,8 @@ def application(
         # Schemas describe this HTTP boundary; raw dictionaries do not enter the provider.
         result: list[dict[str, object]] = []
         for definition in DEFINITIONS:
+            if definition.name in AGENT_ONLY:
+                continue
             properties: dict[str, object] = {}
             if definition.parameter == "device_id":
                 properties["device_id"] = {
@@ -869,6 +872,12 @@ def application(
         return web.json_response(result)
 
     async def call_tool(request: web.Request) -> web.Response:
+        if request.match_info["name"] in AGENT_ONLY:
+            # They need the harness invocation identity and services this
+            # boundary does not have; the dashboard has its own controls.
+            raise web.HTTPNotFound(
+                text="This tool is offered to the assistant agent only; use the dashboard's own controls."
+            )
         call = decode_call(request.match_info["name"], parse_json(await request.read()))
         result = await provider.execute(call)
         status = 200
