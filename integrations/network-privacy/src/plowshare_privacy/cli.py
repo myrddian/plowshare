@@ -35,7 +35,7 @@ from .console import FileManualInvestigations, OperatorConsole
 from .console_port import SdkConsolePort
 from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
-from .deep_scan import DeepScanner, open_scanner
+from .deep_scan import compose_scanner
 from .device_assessments import AssessmentJournal, DeviceAssessments
 from .device_describer import LocalDeviceDescriber
 from .device_facts import DeviceFactsJournal, DeviceFactsService
@@ -292,17 +292,9 @@ async def execute(args: argparse.Namespace) -> None:
             )
             # Deep port scans probe from this host with the collector's identity
             # source. An unreadable journal disables them only; collection starts.
-            deep_scans: DeepScanner | None = None
-            deep_scans_detail: str | None = None
-            if operator_store and config.collection.mode == "tcp":
-                deep_scans, deep_scans_detail = open_scanner(
-                    config.state_directory,
-                    worker.device_inventory,
-                    worker.collector.identity_source
-                    if isinstance(worker.collector, NetworkCollector)
-                    else None,
-                    zone=lambda: worker.config.zone,
-                )
+            deep_scans, deep_scans_detail = compose_scanner(
+                worker, config.state_directory, operator_store is not None
+            )
             assessments = (
                 DeviceAssessments(
                     AssessmentJournal(config.state_directory),

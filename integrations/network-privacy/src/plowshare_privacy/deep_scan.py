@@ -25,9 +25,10 @@ import json
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Iterator, Literal, Sequence
+from typing import TYPE_CHECKING, Awaitable, Callable, Iterator, Literal, Sequence
 from uuid import uuid4
 
+from .collection import NetworkCollector
 from .contracts import (
     household_day,
     integer,
@@ -46,6 +47,9 @@ from .device_inventory import DeviceInventory
 from .identity_source import DeviceIdentitySource
 from .private_files import replace_private
 from .tools import monitored_devices
+
+if TYPE_CHECKING:
+    from .worker import Worker
 
 Trigger = Literal["automatic", "operator"]
 ScanState = Literal[
@@ -466,7 +470,7 @@ class DeepScanner:
         self,
         journal: DeepScanJournal,
         inventory: Callable[[], DeviceInventory],
-        identities: DeviceIdentitySource | None,
+        identities: Callable[[], DeviceIdentitySource | None],
         *,
         probe: Callable[[str, int, float], Awaitable[str]] = probe_port,
         ports: Sequence[int] = PORTS,
@@ -507,7 +511,7 @@ class DeepScanner:
 
     @property
     def available(self) -> bool:
-        return self._identities is not None
+        return self._identities() is not None
 
     @property
     def detail(self) -> str | None:
@@ -672,13 +676,12 @@ class DeepScanner:
     async def poll(self) -> None:
         """Run at most one queued scan to completion."""
         async with self._lock:
-            identities = self._identities
-            if identities is None:
+            if not self.available:
                 return
             self._expire()
             chosen = self._next()
             if chosen is not None:
-                await self._scan(identities, *chosen)
+                await self._scan(*chosen)
 
     async def run(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -752,9 +755,7 @@ class DeepScanner:
                 return entry, card.address
         return None
 
-    async def _scan(
-        self, identities: DeviceIdentitySource, entry: DeepScanRequest, address: str
-    ) -> None:
+    async def _scan(self, entry: DeepScanRequest, address: str) -> None:
         if not private_ipv4(address):
             detail = f"Deep port scans only probe private IPv4 addresses; {address} is not one."
             self._commit(
@@ -762,7 +763,7 @@ class DeepScanner:
             )
             return
         checked_at = self._clock()
-        problem = await self._confirm(identities, entry.device_id, address)
+        problem = await self._confirm(entry.device_id, address)
         # A cancel, an upgrade or a newer report may have landed during the read.
         current = self._queued(entry.device_id)
         if current is None or current.request_id != entry.request_id:
@@ -792,7 +793,7 @@ class DeepScanner:
         progress = _Progress(running.request_id, started)
         self._progress = progress
         try:
-            outcome = await self._sweep(identities, running, address, progress)
+            outcome = await self._sweep(running, address, progress)
         except Exception as error:
             # Every worker has stopped (the task group cancelled and awaited
             # them). Record the failure so the scan does not stay running, then
@@ -819,7 +820,6 @@ class DeepScanner:
 
     async def _sweep(
         self,
-        identities: DeviceIdentitySource,
         running: DeepScanRequest,
         address: str,
         progress: _Progress,
@@ -872,7 +872,7 @@ class DeepScanner:
         )
         if running.request_id in self._cancelled:
             return cancelled
-        problem = await self._confirm(identities, running.device_id, address)
+        problem = await self._confirm(running.device_id, address)
         if running.request_id in self._cancelled:
             return cancelled
         if problem is not None:
@@ -880,10 +880,16 @@ class DeepScanner:
             return "unreliable", f"After the sweep: {why} No ports are reported."
         return "complete", None
 
-    async def _confirm(
-        self, identities: DeviceIdentitySource, device_id: str, address: str
-    ) -> _Outcome | None:
-        """None when the device's MAC is the only identity at ``address``."""
+    async def _confirm(self, device_id: str, address: str) -> _Outcome | None:
+        """None when the device's MAC is the only identity at ``address``.
+
+        The source is resolved on every call, so a collector replaced by new
+        settings is used at once; one removed mid-scan leaves the identity
+        unconfirmed rather than trusting a source the operator turned off.
+        """
+        identities = self._identities()
+        if identities is None:
+            return "unreliable", _UNAVAILABLE
         sample = await identities.identify((address,), self._clock())
         if address in sample.ambiguous_addresses:
             return "unreliable", f"More than one device claimed {address}."
@@ -940,7 +946,7 @@ JOURNAL_UNREADABLE = "Deep port scans need attention: their journal could not be
 def open_scanner(
     root: Path,
     inventory: Callable[[], DeviceInventory],
-    identities: DeviceIdentitySource | None,
+    identities: Callable[[], DeviceIdentitySource | None],
     *,
     zone: Callable[[], str] = lambda: "UTC",
 ) -> tuple[DeepScanner | None, str | None]:
@@ -956,3 +962,29 @@ def open_scanner(
         ), None
     except (OSError, ValueError):
         return None, JOURNAL_UNREADABLE
+
+
+def compose_scanner(
+    worker: Worker, root: Path, operator_store: bool
+) -> tuple[DeepScanner | None, str | None]:
+    """Build the scanner the collector serves, or None with the reason.
+
+    Deep scans exist only beside the operator store and TCP collection. The
+    identity source is read from ``worker.collector`` on each use, so settings
+    that replace the collector change what confirms a device. A journal that
+    cannot be read disables deep scans only; collection is unaffected.
+    """
+    if not operator_store or worker.config.collection.mode != "tcp":
+        return None, None
+
+    def identities() -> DeviceIdentitySource | None:
+        collector = worker.collector
+        return (
+            collector.identity_source
+            if isinstance(collector, NetworkCollector)
+            else None
+        )
+
+    return open_scanner(
+        root, worker.device_inventory, identities, zone=lambda: worker.config.zone
+    )

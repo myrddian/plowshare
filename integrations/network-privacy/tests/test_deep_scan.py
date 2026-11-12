@@ -246,6 +246,8 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
             monitored(d, a) for d, a in ADDRESSES.items()
         )
         self.identities = Identities()
+        # Resolved on every use, as the collector's identity source is.
+        self.source: Callable[[], Identities | None] = lambda: self.identities
         self.probe = Probe({22, 80})
         self.scanner = self.build()
 
@@ -253,7 +255,7 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         return DeepScanner(
             self.journal,
             lambda: DeviceInventory(self.cards),
-            self.identities if identities else None,
+            lambda: self.source() if identities else None,
             probe=self.probe,
             ports=range(1, ports + 1),
             clock=lambda: self.now,
@@ -283,6 +285,45 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.scanner.ledger, self.journal.read())
         with self.assertRaises(UnknownDevice):
             self.scanner.request("mac:aa:bb:cc:dd:ee:77")
+
+    async def test_the_identity_source_is_resolved_on_every_use(self) -> None:
+        replacement = Identities()
+        self.scanner.request(LAMP)
+        self.source = lambda: replacement
+        await self.scanner.poll()
+        # The replacement confirmed both reads; the original was never asked.
+        self.assertEqual(2, len(replacement.calls))
+        self.assertEqual([], self.identities.calls)
+        self.assertEqual("complete", self.results()[0].state)
+        # A source removed after queuing: nothing is probed or trusted.
+        self.scanner.request(TV)
+        self.source = lambda: None
+        self.assertFalse(self.scanner.available)
+        probes = len(self.probe.calls)
+        await self.scanner.poll()
+        self.assertEqual(probes, len(self.probe.calls))
+        self.assertEqual("queued", self.scanner.view(TV).state)
+        with self.assertRaises(ValueError):
+            self.scanner.request(FAN)
+        # A source added later makes the same scanner available again.
+        self.source = lambda: replacement
+        self.assertTrue(self.scanner.available)
+        await self.scanner.poll()
+        self.assertEqual("complete", self.results(TV)[0].state)
+
+    async def test_a_source_removed_mid_scan_leaves_the_result_unreliable(
+        self,
+    ) -> None:
+        self.scanner.request(LAMP)
+
+        def remove(count: int) -> None:
+            if count == 1:
+                self.source = lambda: None
+
+        self.probe.after = remove
+        await self.scanner.poll()
+        [done] = self.results()
+        self.assertEqual(("unreliable", ()), (done.state, done.open_ports))
 
     async def test_automatic_triggers_need_a_limit_and_respect_it(self) -> None:
         self.scanner.flagged(LAMP, str(uuid4()))

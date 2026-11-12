@@ -506,7 +506,7 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         scanner = DeepScanner(
             DeepScanJournal(self.root),
             lambda: DeviceInventory(self.cards),
-            identities,
+            lambda: identities,
         )
         self.service = DeviceAssessments(
             AssessmentJournal(self.root),

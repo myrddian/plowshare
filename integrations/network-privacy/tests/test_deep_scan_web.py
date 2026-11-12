@@ -4,20 +4,23 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Awaitable, Callable
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from support import CountingCollector, FixturePort, MemoryReceipts, configuration
+from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
 from test_deep_scan import ADDRESSES, LAMP, Identities, Probe, monitored
 from test_operator_console import ConsoleFixture, Settings
 
+from plowshare_privacy.collection import NetworkCollector
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
 from plowshare_privacy.deep_scan import (
     JOURNAL_UNREADABLE,
     DeepScanJournal,
     DeepScanner,
+    compose_scanner,
     open_scanner,
 )
 from plowshare_privacy.device_inventory import DeviceInventory
@@ -62,7 +65,7 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         return DeepScanner(
             DeepScanJournal(self.root),
             lambda: DeviceInventory(self.cards),
-            self.identities if identities else None,
+            lambda: self.identities if identities else None,
             probe=Probe({22}),
             ports=range(1, 11),
         )
@@ -184,7 +187,7 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         (self.root / "deep-scans.json").write_text("{not json", encoding="utf-8")
         (self.root / "deep-scans.json").chmod(0o600)
         scanner, detail = open_scanner(
-            self.root, lambda: DeviceInventory(self.cards), self.identities
+            self.root, lambda: DeviceInventory(self.cards), lambda: self.identities
         )
         self.assertIsNone(scanner)
         self.assertEqual(JOURNAL_UNREADABLE, detail)
@@ -193,6 +196,60 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(status["deep_scans_available"])
         self.assertEqual(JOURNAL_UNREADABLE, status["deep_scans_detail"])
         self.assertEqual("ready", self.worker.state)
+
+    def tcp_worker(self) -> Worker:
+        plan = replace(
+            self.config.collection, mode="tcp", targets=(), ports=(), enabled=True
+        )
+        config = replace(self.config, collection=plan)
+        return Worker(
+            config,
+            FixturePort(config),
+            MemoryReceipts(),
+            NetworkCollector(config.collector, plan),
+            self.store,
+        )
+
+    async def test_an_unreadable_journal_still_lets_collection_run(self) -> None:
+        worker = self.tcp_worker()
+        journal = self.root / "deep-scans.json"
+        journal.write_text("{not json", encoding="utf-8")
+        journal.chmod(0o600)
+        scanner, detail = compose_scanner(worker, self.root, True)
+        self.assertIsNone(scanner)
+        self.assertEqual(JOURNAL_UNREADABLE, detail)
+        worker.port.events["schedule.due"] = [event()]  # type: ignore[attr-defined]
+        await worker.poll()
+        [receipt] = worker.receipts.all()
+        self.assertEqual("done", receipt.phase)
+        self.assertEqual("ready", worker.state)
+
+    async def test_deep_scans_exist_only_for_tcp_collection_with_the_store(
+        self,
+    ) -> None:
+        tcp = self.tcp_worker()
+        self.assertEqual((None, None), compose_scanner(tcp, self.root, False))
+        self.assertEqual((None, None), compose_scanner(self.worker, self.root, True))
+        scanner, detail = compose_scanner(tcp, self.root, True)
+        self.assertIsNone(detail)
+        assert scanner is not None
+        # Plain TCP collection has no identity source, so scanning is unavailable.
+        self.assertFalse(scanner.available)
+        self.assertIn("UniFi or Pi-hole", scanner.detail or "")
+
+    async def test_scans_follow_the_collector_the_settings_install(self) -> None:
+        worker = self.tcp_worker()
+        scanner, _ = compose_scanner(worker, self.root, True)
+        assert scanner is not None
+        plan = worker.config.collection
+        self.assertFalse(scanner.available)
+        worker.collector = NetworkCollector(
+            worker.config.collector, plan, identity_source=self.identities
+        )
+        self.assertTrue(scanner.available)
+        worker.collector = NetworkCollector(worker.config.collector, plan)
+        self.assertFalse(scanner.available)
+        self.assertIn("UniFi or Pi-hole", scanner.detail or "")
 
 
 async def _recover(callback: Callable[[], Awaitable[None]]) -> None:
