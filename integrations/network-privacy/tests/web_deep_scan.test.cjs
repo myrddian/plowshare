@@ -37,8 +37,10 @@ function result(deviceId, overrides = {}) {
     finished_at:FINISHED, state:'complete', open_ports:[443, 8008, 9000], unanswered:3, detail:null, ...overrides};
 }
 function view(deviceId, overrides = {}) {
+  const latest = overrides.latest ?? null;
+  // The newest complete result; a test sets it itself when a later attempt did not complete.
   return {device_id:deviceId, available:true, state:'idle', trigger:null, checked:0, total:65535, open_so_far:[], estimated_finish:null,
-    latest:null, detail:null, ...overrides};
+    latest, latest_complete:latest?.state === 'complete' ? latest : null, detail:null, ...overrides};
 }
 function summary(deviceId, requested_at) {
   return {device_id:deviceId, state:'accepted', pending:null, processing:false, potential_breaches:0, worth_checking:0, requested_at};
@@ -62,6 +64,9 @@ test('newOpenPorts ignores configured ports', () => {
   assert.deepEqual(ports(result(TV), [443, 8008, 9000]), []);
   // Only a complete scan has meaningful ports.
   assert.deepEqual(ports(result(TV, {state:'failed'}), []), []);
+  // A later attempt that did not complete does not hide the complete scan's ports.
+  const earlier = result(TV, {finished_at:'2026-11-12T08:00:00Z'});
+  assert.deepEqual([...run('newOpenPorts(v, [443, 8008])', {v:view(TV, {latest:result(TV, {state:'cancelled', open_ports:[]}), latest_complete:earlier})})], [9000]);
   assert.deepEqual(ports(null, []), []);
   assert.deepEqual([...run('newOpenPorts(null, [])')], []);
 });
@@ -186,4 +191,132 @@ test('background work summarises automatic deep scans', () => {
   shown = lines(overview([], [], {deep_scans:null, assessments:null}));
   assert.deepEqual(shown, []);
   assert.equal(node('background-work').hidden, true);
+});
+
+// A pane is opened on the Living room TV and the overview is then replaced, as
+// each five-second refresh does.
+function open(run, value, fetches) {
+  load(run, value);
+  const block = {tag:'div', children:[], textContent:'', rebuilt:0, append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.rebuilt++; this.children = children;}};
+  run(`api = async (path, options) => {gets.push([path, options?.method || 'GET']); return next();};
+    selectedDevice = value.devices[0].address; assessmentsAvailable = true; renderDeepScan(value.devices[0], block);`,
+    {value, block, gets:fetches.gets, next:() => fetches.reply});
+  return block;
+}
+function refreshed(run, value) {load(run, value);}
+
+test('the attention item survives a later cancelled scan and the listing keeps its ports', () => {
+  const {run, node} = dashboard();
+  const cancelled = result(TV, {state:'cancelled', open_ports:[], detail:'You cancelled it.', finished_at:'2026-11-12T11:00:00Z'});
+  const value = overview([view(TV, {latest:cancelled, latest_complete:result(TV)})]);
+  load(run, value);
+  run('renderAttention(value)', {value});
+  assert.match(texts(node('attention-items').children[0]).join(' | '), /New open ports \| Living room TV answered/);
+  const fetches = {gets:[], reply:null};
+  const block = open(run, value, fetches);
+  const lines = texts(block);
+  assert.ok(lines.some(line => /Last deep scan was cancelled/.test(line)));
+  assert.ok(lines.includes('You cancelled it.'));
+  assert.ok(lines.includes('TCP 9000 · outside the usual checks'));
+  assert.ok(lines.some(line => /^Last complete deep scan finished/.test(line)));
+});
+
+test('polling re-reads only while a scan is active and rebuilds only the block on a change', async () => {
+  const {run} = dashboard();
+  const fetches = {gets:[], reply:null};
+  // Idle and unchanged: nothing is read and nothing is rebuilt.
+  let value = overview([view(TV, {latest:result(TV)})]);
+  const block = open(run, value, fetches);
+  assert.equal(block.rebuilt, 1);
+  await run('pollDeepScan()');
+  assert.equal(fetches.gets.length, 0);
+  assert.equal(block.rebuilt, 1);
+  // The overview now says it is running: the device's view is read once, and the block rebuilt.
+  value = overview([view(TV, {state:'running', trigger:'operator', checked:100, latest:result(TV)})]);
+  refreshed(run, value);
+  fetches.reply = view(TV, {state:'running', trigger:'operator', checked:200, latest:result(TV)});
+  await run('pollDeepScan()');
+  assert.deepEqual(JSON.parse(JSON.stringify(fetches.gets)), [[`/api/devices/${encodeURIComponent(TV)}/deep-scan`, 'GET']]);
+  assert.equal(block.rebuilt, 2);
+  assert.ok(texts(block).some(line => /^200 of 65,535 ports checked/.test(line)));
+  // Still running with the same answer: read again, but no rebuild.
+  await run('pollDeepScan()');
+  assert.equal(fetches.gets.length, 2);
+  assert.equal(block.rebuilt, 2);
+  // It finishes: the read gives a settled view and the block rebuilds into the result.
+  fetches.reply = view(TV, {latest:result(TV, {open_ports:[443, 9000]})});
+  refreshed(run, overview([fetches.reply]));
+  await run('pollDeepScan()');
+  assert.equal(block.rebuilt, 3);
+  assert.ok(buttons(block).some(item => item.textContent === 'Deep-scan this device'));
+  // Settled again: no further reads.
+  await run('pollDeepScan()');
+  assert.equal(fetches.gets.length, 3);
+  assert.equal(block.rebuilt, 3);
+  // A change visible only in the overview rebuilds without a read.
+  refreshed(run, overview([view(TV, {latest:result(TV, {open_ports:[443, 9000, 9100]})})]));
+  await run('pollDeepScan()');
+  assert.equal(fetches.gets.length, 3);
+  assert.equal(block.rebuilt, 4);
+});
+
+test('polling does nothing once another device or no device is open', async () => {
+  const {run} = dashboard();
+  const fetches = {gets:[], reply:view(TV, {state:'running'})};
+  const block = open(run, overview([view(TV, {state:'running'})]), fetches);
+  run("selectedDevice = '192.0.2.11'");
+  await run('pollDeepScan()');
+  assert.equal(fetches.gets.length, 0);
+  assert.equal(block.rebuilt, 1);
+  run('selectedDevice = null');
+  await run('pollDeepScan()');
+  assert.equal(fetches.gets.length, 0);
+});
+
+test('Assess again goes when the assessment is requested, though the scan view is unchanged', async () => {
+  const {run} = dashboard();
+  const fetches = {gets:[], reply:null};
+  const scan = view(TV, {latest:result(TV)});
+  const block = open(run, overview([scan]), fetches);
+  assert.ok(buttons(block).some(item => item.textContent === 'Assess again'));
+  assert.ok(texts(block).some(line => /has not seen/.test(line)));
+  // The operator assesses: the summary's requested_at moves past the scan; the scan view is the same.
+  refreshed(run, overview([scan], [summary(TV, '2026-11-12T10:30:00Z')]));
+  await run('pollDeepScan()');
+  assert.equal(fetches.gets.length, 0);
+  assert.equal(block.rebuilt, 2);
+  assert.deepEqual(buttons(block).map(item => item.textContent), ['Deep-scan this device']);
+  assert.ok(!texts(block).some(line => /has not seen/.test(line)));
+});
+
+test('disconnect clears the deep-scan state and the Settings group', async () => {
+  const {run, node} = dashboard();
+  const fetches = {gets:[], reply:null};
+  open(run, overview([view(TV, {latest:result(TV)})]), fetches);
+  run('deepScanBusy = "request"');
+  run('renderDeepScanSettings(value)', {value:{automatic_limit:3, used_today:0, available:false, detail:null}});
+  node('deep-scan-group').hidden = false;
+  assert.equal(run('deepScanPane !== null'), true);
+  run('api = async () => ({})');
+  await node('disconnect').listeners.click();
+  assert.equal(run('deepScanPane'), null);
+  assert.equal(run('deepScanBusy'), null);
+  assert.equal(node('deep-scan-group').hidden, true);
+  assert.equal(node('deep-scan-limit').value, '');
+  assert.equal(node('deep-scan-limit').disabled, false);
+  assert.equal(node('deep-scan-detail').textContent, '');
+});
+
+test('a request that completes after disconnect neither redraws nor refreshes', async () => {
+  const {run, node} = dashboard();
+  const fetches = {gets:[], reply:null};
+  const block = open(run, overview([]), fetches);
+  let release;
+  run('api = () => new Promise(resolve => {release = resolve;}); refresh = async () => {refreshes++;}; refreshes = 0;', {release:null});
+  const pending = run('deepScanAction("request")');
+  run('deepScanPane = null');
+  run('release({})') ;
+  await pending;
+  assert.equal(run('refreshes'), 0);
+  assert.equal(block.rebuilt, 2);
 });

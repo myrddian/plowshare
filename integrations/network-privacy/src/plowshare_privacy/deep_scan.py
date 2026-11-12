@@ -388,6 +388,9 @@ class DeepScanView:
     estimated_finish: str | None
     # The newest result in any state, so a failed or cancelled scan stays visible.
     latest: DeepScanResult | None
+    # The newest ``complete`` result: the only one that vouches for open ports,
+    # so a later cancelled or failed attempt does not hide them.
+    latest_complete: DeepScanResult | None
     detail: str | None
 
 
@@ -626,6 +629,7 @@ class DeepScanner:
         latest = next(
             (r for r in reversed(ledger.results) if r.device_id == device_id), None
         )
+        latest_complete = self.latest(device_id)
         total = len(self._ports)
         detail = None if self.available else _UNAVAILABLE
         running = ledger.running
@@ -643,6 +647,7 @@ class DeepScanner:
                 tuple(sorted(progress.open_ports)),
                 self._estimate(progress, total),
                 latest,
+                latest_complete,
                 detail,
             )
         queued = self._queued(device_id)
@@ -659,10 +664,21 @@ class DeepScanner:
                 (),
                 None,
                 latest,
+                latest_complete,
                 detail,
             )
         return DeepScanView(
-            device_id, self.available, "idle", None, 0, total, (), None, latest, detail
+            device_id,
+            self.available,
+            "idle",
+            None,
+            0,
+            total,
+            (),
+            None,
+            latest,
+            latest_complete,
+            detail,
         )
 
     def views(self) -> tuple[DeepScanView, ...]:

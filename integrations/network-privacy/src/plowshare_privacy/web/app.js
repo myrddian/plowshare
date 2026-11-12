@@ -494,6 +494,7 @@ byId('disconnect').addEventListener('click', async () => {
   byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
   setSignalFilter('all');
   selectedDevice = null; deviceSupplemental = null; deepScanPane = null; deepScanBusy = null; setHouseholdZone('UTC');
+  byId('deep-scan-group').hidden = true; byId('deep-scan-limit').value = ''; byId('deep-scan-limit').disabled = false; byId('deep-scan-save').disabled = false; byId('deep-scan-detail').textContent = '';
   byId('household-zone').hidden = true; byId('zone-input').value = '';
   for (const id of deviceParts) byId(id).replaceChildren();
   syncPane();
@@ -1510,7 +1511,7 @@ async function openAssessment(device, block) {
 async function assessmentAction(action) {
   const current = deviceAssessment;
   if (!current || assessmentBusy) return;
-  assessmentBusy = action; showAssessment();
+  assessmentBusy = action; showAssessment(); showDeepScan();
   try {
     await api(assessmentPath(current.deviceId, '/' + action), {method:'POST', body:'{}'});
   } catch (error) {
@@ -1519,6 +1520,7 @@ async function assessmentAction(action) {
     assessmentBusy = null;
   }
   await reloadAssessment();
+  showDeepScan();
   // The device list and Overview counts read the same ledger; show the change
   // there now rather than at the next background refresh.
   refresh().catch(error => condition(error.message, true));
@@ -1571,12 +1573,12 @@ function deepScanViewIn(device, value) {
   return id ? (value?.deep_scans?.views || []).find(item => item.device_id === id) || null : null;
 }
 function deepScanOf(device) {return deepScanViewIn(device, overview);}
-// Open ports from a complete scan that the usual checks do not cover. Other
-// states carry no meaningful ports.
+// Open ports from the newest complete scan that the usual checks do not cover.
+// A later cancelled or failed attempt does not hide them.
 function newOpenPorts(view, configuredPorts) {
-  if (!view?.latest || view.latest.state !== 'complete') return [];
+  if (!view?.latest_complete) return [];
   const usual = new Set(configuredPorts || []);
-  return view.latest.open_ports.filter(port => !usual.has(port));
+  return view.latest_complete.open_ports.filter(port => !usual.has(port));
 }
 // True while a scan found ports the usual checks miss and no assessment has
 // been requested since it finished.
@@ -1586,7 +1588,7 @@ function deepScanNeedsReview(device, value) {
   const id = device.identity.device_id;
   const requested = (value.assessments?.summaries || []).find(item => item.device_id === id)?.requested_at
     ?? assessmentOf(device)?.requested_at ?? null;
-  return requested === null || Date.parse(requested) < Date.parse(view.latest.finished_at);
+  return requested === null || Date.parse(requested) < Date.parse(view.latest_complete.finished_at);
 }
 function timeLeftText(stamp) {
   if (!stamp) return '';
@@ -1618,30 +1620,31 @@ function deepScanNodes(device, view, scans) {
     start.disabled = start.disabled || !view.available;
     actions.append(start);
   }
-  if (view.state === 'idle' && !latest) {
+  if (view.state === 'idle' && !latest && !view.latest_complete) {
     nodes.push(element('p', 'Not deep-scanned. This checks every TCP port of the device, not only the usual ones, and takes several minutes.', 'hint'));
   }
-  if (latest) {
-    const when = formatWhen(latest.finished_at);
-    if (latest.state === 'complete') {
-      nodes.push(element('p', `Last deep scan finished ${when}`, 'status-line'));
-      const usual = new Set(scans.configured_ports);
-      if (latest.open_ports.length) {
-        const list = element('ul');
-        for (const port of latest.open_ports) {
-          const exposure = (device.detection?.exposures || []).find(item => item.ports.includes(port));
-          const note = exposure ? ` · Possible ${exposure.possible_service}. ${exposure.risk_check}` : '';
-          list.append(element('li', `TCP ${port}${note}${usual.has(port) ? '' : ' · outside the usual checks'}`));
-        }
-        nodes.push(list);
-      } else {
-        nodes.push(element('p', 'No open ports.', 'hint'));
+  // The last attempt's state and detail, when it did not complete.
+  if (latest && latest.state !== 'complete') {
+    nodes.push(element('p', `${deepScanStateText[latest.state] || 'Last deep scan did not complete'} · ${formatWhen(latest.finished_at)}`, 'status-line'));
+    if (latest.detail) nodes.push(element('p', latest.detail, latest.state === 'failed' ? 'notice error' : 'hint'));
+  }
+  // Ports come only from the newest complete scan.
+  const complete = view.latest_complete;
+  if (complete) {
+    nodes.push(element('p', `${latest === complete ? 'Last' : 'Last complete'} deep scan finished ${formatWhen(complete.finished_at)}`, 'status-line'));
+    const usual = new Set(scans.configured_ports);
+    if (complete.open_ports.length) {
+      const list = element('ul');
+      for (const port of complete.open_ports) {
+        const exposure = (device.detection?.exposures || []).find(item => item.ports.includes(port));
+        const note = exposure ? ` · Possible ${exposure.possible_service}. ${exposure.risk_check}` : '';
+        list.append(element('li', `TCP ${port}${note}${usual.has(port) ? '' : ' · outside the usual checks'}`));
       }
-      nodes.push(element('p', `${plural(latest.unanswered, 'port', 'ports')} did not answer`, 'hint'));
+      nodes.push(list);
     } else {
-      nodes.push(element('p', `${deepScanStateText[latest.state] || 'Last deep scan did not complete'} · ${when}`, 'status-line'));
-      if (latest.detail) nodes.push(element('p', latest.detail, latest.state === 'failed' ? 'notice error' : 'hint'));
+      nodes.push(element('p', 'No open ports.', 'hint'));
     }
+    nodes.push(element('p', `${plural(complete.unanswered, 'port', 'ports')} did not answer`, 'hint'));
   }
   // The collector's reason scanning cannot start or is waiting is plain text.
   if (view.detail) nodes.push(element('p', view.detail, 'hint'));
@@ -1654,14 +1657,20 @@ function deepScanNodes(device, view, scans) {
   nodes.push(actions);
   return nodes;
 }
+// What the block shows beyond the scan view: whether Assess again is offered
+// and whether an assessment is in flight. A change in either rebuilds it.
+function deepScanSignature(pane, view) {
+  return JSON.stringify([view, deepScanNeedsReview(pane.device, overview), Boolean(assessmentBusy)]);
+}
 function showDeepScan() {
   const pane = deepScanPane;
   if (!pane || pane.address !== selectedDevice) return;
+  pane.signature = deepScanSignature(pane, pane.view);
   pane.block.replaceChildren(...deepScanNodes(pane.device, pane.view || deepScanIdle(pane.deviceId), overview?.deep_scans));
 }
 function deepScanIdle(deviceId) {
   return {device_id:deviceId, available:Boolean(overview?.deep_scans?.available), state:'idle', trigger:null, checked:0, total:65535,
-    open_so_far:[], estimated_finish:null, latest:null, detail:overview?.deep_scans?.detail ?? null};
+    open_so_far:[], estimated_finish:null, latest:null, latest_complete:null, detail:overview?.deep_scans?.detail ?? null};
 }
 function renderDeepScan(device, block) {
   const deviceId = device.identity?.mac ? device.identity.device_id : null;
@@ -1681,6 +1690,9 @@ async function deepScanAction(action) {
   } finally {
     deepScanBusy = null;
   }
+  // Disconnecting or opening another device while this was in flight left it
+  // with nothing to update or refresh.
+  if (deepScanPane !== pane) return;
   showDeepScan();
   // The attention band and device list read the same views.
   refresh().catch(error => condition(error.message, true));
@@ -1696,7 +1708,7 @@ async function pollDeepScan() {
   const next = active(pane.view) || active(fromOverview)
     ? await api(deepScanPath(pane.deviceId, ''))
     : fromOverview;
-  if (deepScanPane !== pane || JSON.stringify(next) === JSON.stringify(pane.view)) return;
+  if (deepScanPane !== pane || deepScanSignature(pane, next) === pane.signature) return;
   pane.view = next; showDeepScan();
 }
 function renderDeepScanSettings(value) {

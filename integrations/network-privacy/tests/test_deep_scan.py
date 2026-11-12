@@ -444,6 +444,30 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(len(self.probe.calls), 100)
         self.assertIsNone(self.journal.read().running)
 
+    async def test_a_later_cancelled_scan_does_not_hide_the_complete_ports(
+        self,
+    ) -> None:
+        self.scanner.request(LAMP)
+        await self.scanner.poll()
+        [complete] = self.results()
+        self.assertEqual("complete", complete.state)
+
+        first = len(self.probe.calls)
+
+        # The probe count is cumulative, so cancel ten probes into the second scan.
+        def cancel_soon(count: int) -> None:
+            if count == first + 10:
+                self.scanner.cancel(LAMP)
+
+        self.probe.after = cancel_soon
+        self.scanner.request(LAMP)
+        await self.scanner.poll()
+        view = self.scanner.view(LAMP)
+        assert view.latest is not None
+        self.assertEqual("cancelled", view.latest.state)
+        self.assertEqual(complete, view.latest_complete)
+        self.assertEqual(complete, self.scanner.latest(LAMP))
+
     async def test_progress_estimates_the_finish_from_the_pace_so_far(self) -> None:
         views = []
 

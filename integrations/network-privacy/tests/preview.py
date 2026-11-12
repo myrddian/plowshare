@@ -141,12 +141,14 @@ class PreviewDeepScans:
         self._limit = 2
         self._addresses = addresses
         self._results: dict[str, DeepScanResult] = {}
+        # The newest complete result, kept when a later attempt is cancelled.
+        self._complete: dict[str, DeepScanResult] = {}
         self._running: dict[str, int] = {}
         # Finished after the TV's sample assessment was requested, so the
         # attention band asks for a fresh assessment of the extra ports.
         from preview_sample import NOW
 
-        self._results[tv_id] = self._result(
+        self._results[tv_id] = self._complete[tv_id] = self._result(
             tv_id,
             "complete",
             started=NOW - timedelta(minutes=25),
@@ -199,16 +201,27 @@ class PreviewDeepScans:
                 self._results[device_id] = latest = self._result(
                     device_id, "complete", ports=(22, 443, 8080), unanswered=5
                 )
+                self._complete[device_id] = latest
             else:
                 left = (self.TOTAL - checked) / self.STEP * 5
                 finish = datetime.now(timezone.utc) + timedelta(seconds=left)
                 return DeepScanView(
                     device_id, True, "running", "operator", checked, self.TOTAL,
                     (443,) if checked > 20000 else (), finish.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    latest, None,
+                    latest, self._complete.get(device_id), None,
                 )  # fmt: skip
         return DeepScanView(
-            device_id, True, "idle", None, 0, self.TOTAL, (), None, latest, None
+            device_id,
+            True,
+            "idle",
+            None,
+            0,
+            self.TOTAL,
+            (),
+            None,
+            latest,
+            self._complete.get(device_id),
+            None,
         )
 
     def views(self) -> tuple[DeepScanView, ...]:
