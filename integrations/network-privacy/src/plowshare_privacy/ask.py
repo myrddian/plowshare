@@ -902,6 +902,15 @@ class AskService:
         waited = (_parse(timestamp(self.clock())) - _parse(resumed_at)).total_seconds()
         return waited < RECONCILE_SECONDS
 
+    @property
+    def settings(self) -> AskSettings:
+        return self._ledger.settings
+
+    @property
+    def conversation(self) -> str | None:
+        """The journalled conversation ID, or None before one has opened."""
+        return self._ledger.conversation
+
     def view(self) -> AskView:
         tools = {c.id: c.tool for e in self._entries for c in e.calls}
         entries = tuple(
@@ -1308,3 +1317,31 @@ def _job_state(value: object) -> JobState:
     if value not in _JOB_STATES:
         raise ValueError("Unsupported Ask job state")
     return value  # type: ignore[return-value]
+
+
+JOURNAL_UNREADABLE = (
+    "The Ask journal needs inspection. Ask is off; its retained data was preserved."
+)
+
+
+def compose_ask(
+    root: Path,
+    client: Callable[[], Client],
+    config: Configuration,
+    operator_store: bool,
+) -> tuple[AskService | None, str | None]:
+    """Build the service the collector serves, or None with the reason.
+
+    Ask exists only beside the operator store. A journal that cannot be read
+    (unreadable, linked, not private, invalid or another user's) disables Ask
+    only: nothing is deleted or rewritten and collection still starts.
+    """
+    if not operator_store:
+        return None, None
+    try:
+        service = AskService(AskJournal(root), SdkAskPort(client, config))
+    except (OSError, ValueError):
+        return None, JOURNAL_UNREADABLE
+    if not service.view().available:
+        return None, JOURNAL_UNREADABLE
+    return service, None

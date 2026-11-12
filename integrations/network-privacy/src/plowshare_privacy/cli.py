@@ -28,6 +28,7 @@ from plowshare.tool_journal import SqliteToolJournal
 from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
 from .advisories import NvdAdvisories
+from .ask import compose_ask
 from .assessment_port import SdkAssessmentPort
 from .collection import NetworkCollector
 from .collector_factory import configured_collector
@@ -224,6 +225,18 @@ async def execute(args: argparse.Namespace) -> None:
             deep_scans, deep_scans_detail = compose_scanner(
                 worker, config.state_directory, operator_store is not None
             )
+            # The household's Ask conversation. An unreadable journal disables it
+            # only; collection starts and /api/status says why.
+            ask, ask_detail = compose_ask(
+                config.state_directory,
+                lambda: client,
+                config,
+                operator_store is not None,
+            )
+
+            def assistant_conversation() -> str | None:
+                return ask.conversation if ask is not None else None
+
             assessments = (
                 DeviceAssessments(
                     AssessmentJournal(config.state_directory),
@@ -379,7 +392,9 @@ async def execute(args: argparse.Namespace) -> None:
                                 replacement, worker.config, worker.port
                             )
                         if console is not None:
-                            console.port = SdkConsolePort(replacement, worker.config)
+                            console.port = SdkConsolePort(
+                                replacement, worker.config, assistant_conversation
+                            )
                         if dossiers is not None:
                             dossiers.port = SdkDossierPort(
                                 replacement, worker.config, worker.port
@@ -428,7 +443,7 @@ async def execute(args: argparse.Namespace) -> None:
                 OperatorConsole(
                     Path(args.config).parent,
                     worker,
-                    SdkConsolePort(client, config),
+                    SdkConsolePort(client, config, assistant_conversation),
                     settings,
                     discovery,
                     operator_store,
@@ -520,6 +535,8 @@ async def execute(args: argparse.Namespace) -> None:
                     assessments=assessments,
                     deep_scans=deep_scans,
                     deep_scans_detail=deep_scans_detail,
+                    ask=ask,
+                    ask_detail=ask_detail,
                     advisory_origin=advisory_origin,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
@@ -534,6 +551,7 @@ async def execute(args: argparse.Namespace) -> None:
             research_task: asyncio.Task[None] | None = None
             assessment_task: asyncio.Task[None] | None = None
             deep_scan_task: asyncio.Task[None] | None = None
+            ask_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
                 await site.start()
@@ -582,13 +600,27 @@ async def execute(args: argparse.Namespace) -> None:
                     assessment_task = asyncio.create_task(assessments.run(stop))
                 if deep_scans is not None:
                     deep_scan_task = asyncio.create_task(deep_scans.run(stop))
+                if ask is not None:
+                    ask_task = asyncio.create_task(ask.run(stop))
                 await stop.wait()
             finally:
                 stop.set()
-                for running in (deep_scan_task, assessment_task, research_task, task):
+                for running in (
+                    ask_task,
+                    deep_scan_task,
+                    assessment_task,
+                    research_task,
+                    task,
+                ):
                     if running is not None:
                         running.cancel()
-                for running in (deep_scan_task, assessment_task, research_task, task):
+                for running in (
+                    ask_task,
+                    deep_scan_task,
+                    assessment_task,
+                    research_task,
+                    task,
+                ):
                     if running is not None:
                         try:
                             await running

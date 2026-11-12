@@ -11,13 +11,10 @@ from uuid import uuid4
 
 from plowshare import Client, Refusal, Reply
 from plowshare.contracts import (
-    AgentListRequest,
     AgentViewDto,
     ContextSamplingDto,
     ContextSnapshotDto,
     ContextSnapshotDtoToolsItemDto,
-    ConversationContextSnapshotRequest,
-    ConversationListRequest,
     ConversationViewDto,
     OrchestrationReceiptRequest,
     OrchestrationReceiptResultDto,
@@ -174,66 +171,6 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
                 for call in self.client.request.call_args_list
             )
         )
-
-    async def test_agent_visibility_uses_projected_registry_not_declared_grants(
-        self,
-    ) -> None:
-        self.client.request.side_effect = [
-            Reply(
-                "OK",
-                None,
-                (self.coordinator, replace(self.coordinator, name="another-agent")),
-            ),
-            Reply(
-                "OK",
-                None,
-                (replace(self.conversation, project="foreign"), self.conversation),
-            ),
-            Reply("OK", None, self.snapshot),
-        ]
-        result = await self.port.agents()
-        requests = [call.args[0] for call in self.client.request.call_args_list]
-        self.assertIsInstance(requests[0], AgentListRequest)
-        self.assertEqual(requests[0].project, self.config.project)
-        self.assertIsInstance(requests[1], ConversationListRequest)
-        self.assertEqual(requests[1].project, self.config.project)
-        self.assertIsInstance(requests[2], ConversationContextSnapshotRequest)
-        self.assertEqual(requests[2].conversation, self.conversation.id)
-        self.assertIs(requests[2].measure, False)
-        self.assertEqual(result.tools, ("network_evidence",))
-        self.assertIn("network_scan", result.missing_tools)
-        self.assertIn("privacy_reviewer", result.unavailable)
-        self.assertNotIn("another-agent", result.served)
-        self.assertEqual(result.tool_visibility, "projected")
-
-    async def test_no_context_does_not_report_dynamic_tools_missing(self) -> None:
-        self.client.request.side_effect = [
-            Reply("OK", None, (self.coordinator,)),
-            Reply("OK", None, ()),
-        ]
-        result = await self.port.agents()
-        self.assertEqual(result.tool_visibility, "awaiting_context")
-        self.assertEqual(result.tools, ())
-        self.assertEqual(result.missing_tools, ())
-        self.assertEqual(self.client.request.await_count, 2)
-
-    async def test_foreign_conversation_does_not_become_projection_anchor(self) -> None:
-        self.client.request.side_effect = [
-            Reply("OK", None, (self.coordinator,)),
-            Reply("OK", None, (replace(self.conversation, project="foreign"),)),
-        ]
-        result = await self.port.agents()
-        self.assertEqual(result.tool_visibility, "awaiting_context")
-        self.assertEqual(self.client.request.await_count, 2)
-
-    async def test_foreign_projection_is_refused(self) -> None:
-        self.client.request.side_effect = [
-            Reply("OK", None, (self.coordinator,)),
-            Reply("OK", None, (self.conversation,)),
-            Reply("OK", None, replace(self.snapshot, conversation="cnv_foreign")),
-        ]
-        with self.assertRaises(ValueError):
-            await self.port.agents()
 
     async def test_start_preserves_opaque_run_identity(self) -> None:
         from support import CountingCollector

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 from plowshare import Client
 from plowshare.contracts import (
     AgentListRequest,
     ConversationContextSnapshotRequest,
-    ConversationListRequest,
     OrchestrationListRequest,
     OrchestrationReceiptRequest,
     OrchestrationStartRequest,
@@ -62,8 +61,16 @@ class ConsolePort(Protocol):
 
 
 class SdkConsolePort:
-    def __init__(self, client: Client, config: Configuration):
+    def __init__(
+        self,
+        client: Client,
+        config: Configuration,
+        assistant: Callable[[], str | None] = lambda: None,
+    ):
+        """``assistant`` yields the Ask conversation ID the assistant's tools
+        are measured on, or None before one exists."""
         self.client, self.config = client, config
+        self.assistant = assistant
 
     async def schedule(self) -> ScheduleView | None:
         source = [
@@ -111,41 +118,31 @@ class SdkConsolePort:
         names = {item.name for item in DECLARATIONS}
         visible: set[str] = set()
         visibility = "awaiting_context"
-        if coordinators:
+        conversation = self.assistant()
+        if conversation is not None and "privacy_assistant" in {
+            value.name for value in agents if value.served
+        }:
             # Agent listings describe definition grants, not the live dynamic
-            # registry. Project an existing project conversation without counting
-            # tokens or opening/running a conversation. The server resolves current
-            # tools for this account and coordinator; discard all message content.
-            conversations = (
+            # registry. Project the assistant's own Ask conversation without
+            # counting tokens or opening/running a conversation. The server
+            # resolves current tools for this account and agent; discard all
+            # message content.
+            snapshot = (
                 await self.client.request(
-                    ConversationListRequest(project=self.config.project)
+                    ConversationContextSnapshotRequest(
+                        conversation=conversation,
+                        agent="privacy_assistant",
+                        measure=False,
+                    )
                 )
             ).require_payload()
-            selected = next(
-                (
-                    value
-                    for value in conversations
-                    if value.project == self.config.project
-                ),
-                None,
-            )
-            if selected is not None:
-                snapshot = (
-                    await self.client.request(
-                        ConversationContextSnapshotRequest(
-                            conversation=selected.id,
-                            agent="privacy_coordinator",
-                            measure=False,
-                        )
-                    )
-                ).require_payload()
-                if (
-                    snapshot.conversation != selected.id
-                    or snapshot.agent != "privacy_coordinator"
-                ):
-                    raise ValueError("Foreign tool visibility projection")
-                visible = {item.name for item in snapshot.tools}
-                visibility = "projected"
+            if (
+                snapshot.conversation != conversation
+                or snapshot.agent != "privacy_assistant"
+            ):
+                raise ValueError("Foreign tool visibility projection")
+            visible = {item.name for item in snapshot.tools}
+            visibility = "projected"
         return AgentHealth(
             tuple(sorted(served)),
             tuple(sorted(expected - served)),

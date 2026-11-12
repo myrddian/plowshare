@@ -66,7 +66,7 @@ test('tool and agent counts come from the collector, and every missing tool is n
   assert.equal(tools({tool_visibility:'projected', tools:[], missing_tools:['network_scan', 'network_scope', 'network_device']}),
     '0 of 3 visible · missing: network_scan, network_scope, network_device');
   assert.equal(tools({tool_visibility:'projected', tools:['a', 'b'], missing_tools:[]}), '2 of 2 visible');
-  assert.equal(tools({tool_visibility:'awaiting_context', tools:[], missing_tools:[]}), 'Awaiting first project conversation');
+  assert.equal(tools({tool_visibility:'awaiting_context', tools:[], missing_tools:[]}), 'Awaiting the first Ask conversation');
 });
 
 test('disabled Pause and Resume always say why', () => {
