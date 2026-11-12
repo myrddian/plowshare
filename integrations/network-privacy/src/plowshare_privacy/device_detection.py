@@ -112,6 +112,17 @@ def _phrase(device_type: str) -> str:
     return device_type if first.isupper() else device_type[0].lower() + device_type[1:]
 
 
+def exposures_for(open_ports: set[int]) -> tuple[ServiceExposure, ...]:
+    """Services whose conventional ports are among ``open_ports``, in rule order."""
+    return tuple(
+        ServiceExposure(
+            tuple(port for port in ports if port in open_ports), service, check
+        )
+        for ports, service, check in _SERVICE_RULES
+        if open_ports.intersection(ports)
+    )
+
+
 def detect_device(
     identity: DeviceIdentity | None, services: tuple[TcpObservation, ...]
 ) -> DeviceDetection:
@@ -141,11 +152,7 @@ def detect_device(
             matches.append(
                 (rule.device_type, tuple(clues), matched_name, bool(matched_ports))
             )
-    exposures = tuple(
-        ServiceExposure(tuple(port for port in ports if port in opened), service, check)
-        for ports, service, check in _SERVICE_RULES
-        if opened.intersection(ports)
-    )
+    exposures = exposures_for(opened)
     if len(matches) != 1:
         return DeviceDetection(
             "Unknown",

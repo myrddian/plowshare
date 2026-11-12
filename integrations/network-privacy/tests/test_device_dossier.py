@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from plowshare_privacy.advisories import Advisory, AdvisoryPage
 from plowshare_privacy.contracts import DeviceIdentity, TcpObservation
+from plowshare_privacy.deep_scan import DeepScanResult
 from plowshare_privacy.device_detection import _SERVICE_RULES, detect_device
 from plowshare_privacy.device_dossier import (
     ADMIN_SERVICES,
@@ -512,6 +513,59 @@ class SupplementalTest(unittest.TestCase):
     def test_facts_for_another_device_are_refused(self) -> None:
         with self.assertRaisesRegex(ValueError, "another device"):
             build_dossier(card(), facts=facts(device_id="mac:02:00:00:00:00:02"))
+
+
+def deep(device: str = "mac:" + MAC, **changes: object) -> DeepScanResult:
+    base = DeepScanResult(
+        device,
+        ADDRESS,
+        str(uuid4()),
+        "operator",
+        None,
+        "2026-11-11T09:00:00Z",
+        "2026-11-11T09:30:00Z",
+        "complete",
+        (22, 8008),
+        0,
+        None,
+    )
+    return replace(base, **changes)  # type: ignore[arg-type]
+
+
+class DeepScanDossierTest(unittest.TestCase):
+    def test_a_deep_scan_adds_its_coverage_and_the_exposures_it_found(self) -> None:
+        dossier = build_dossier(card(ports=((443, "open"),)), deep_scan=deep())
+        line = "A full TCP scan on 2026-11-11 found 2 open ports: 22, 8008; 0 did not answer."
+        self.assertIn(line, dossier.coverage)
+        names = [e.possible_service for e in dossier.detection.exposures]
+        self.assertEqual(names, ["HTTPS", "SSH"])
+
+    def test_one_open_port_and_none_are_worded_exactly(self) -> None:
+        one = build_dossier(card(), deep_scan=deep(open_ports=(22,), unanswered=3))
+        self.assertIn(
+            "A full TCP scan on 2026-11-11 found 1 open port: 22; 3 did not answer.",
+            one.coverage,
+        )
+        none = build_dossier(card(), deep_scan=deep(open_ports=()))
+        self.assertIn(
+            "A full TCP scan on 2026-11-11 found no open ports; 0 did not answer.",
+            none.coverage,
+        )
+
+    def test_exposures_already_present_are_not_repeated(self) -> None:
+        dossier = build_dossier(
+            card(ports=((22, "open"),)), deep_scan=deep(open_ports=(22,))
+        )
+        names = [e.possible_service for e in dossier.detection.exposures]
+        self.assertEqual(names, ["SSH"])
+
+    def test_a_deep_scan_for_another_device_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "another device"):
+            build_dossier(card(), deep_scan=deep("mac:02:00:00:00:00:02"))
+
+    def test_only_a_complete_deep_scan_is_used(self) -> None:
+        with self.assertRaisesRegex(ValueError, "complete"):
+            build_dossier(card(), deep_scan=deep(state="interrupted", open_ports=()))
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ from plowshare_privacy.assessment_request import (
     ConcernOutcome,
     report_name,
 )
+from plowshare_privacy.deep_scan import DeepScanJournal, DeepScanner, DeepScanResult
 from plowshare_privacy.device_assessments import (
     DAILY_CEILING,
     AssessmentConflict,
@@ -51,6 +52,7 @@ from plowshare_privacy.device_dossier import DeviceDossier
 from plowshare_privacy.device_facts import DeviceFacts
 from plowshare_privacy.device_inventory import DeviceCard, DeviceInventory
 from plowshare_privacy.dossier_port import RetainedDossier
+from plowshare_privacy.identity_source import IdentitySample
 
 TV = "mac:02:00:00:00:00:01"
 LAMP = "mac:02:00:00:00:00:02"
@@ -218,7 +220,15 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         self.cards: tuple[DeviceCard, ...] = (tv(), lamp())
         self.facts: dict[str, DeviceFacts] = {}
         self.now = NOW
+        self.flags: list[tuple[str, str]] = []
+        self.flag_error: Exception | None = None
+        self.deep: dict[str, DeepScanResult] = {}
         self.service = self.restart()
+
+    def flag(self, device: str, report: str) -> None:
+        self.flags.append((device, report))
+        if self.flag_error is not None:
+            raise self.flag_error
 
     def restart(self) -> DeviceAssessments:
         return DeviceAssessments(
@@ -228,6 +238,8 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
             lambda: DeviceInventory(self.cards),
             facts=self.facts.get,
             clock=lambda: self.now,
+            flagged=self.flag,
+            deep_scan=self.deep.get,
         )
 
     def learn(self, device: str, updated_at: str, *, described: bool = True) -> None:
@@ -444,10 +456,92 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
             ConcernOutcome("c3", "worth_checking", "holds"),
             ConcernOutcome("c4", "expected", "holds"),
         )
-        accepted = summary(TV, "accepted", None, False, concerns)
+        accepted = summary(TV, "accepted", None, False, concerns, NOW)
         self.assertEqual((accepted.potential_breaches, accepted.worth_checking), (1, 1))
-        failed = summary(TV, "failed", None, False, concerns)
+        failed = summary(TV, "failed", None, False, concerns, NOW)
         self.assertEqual((failed.potential_breaches, failed.worth_checking), (0, 0))
+
+    async def test_summaries_carry_the_assessment_request_time(self) -> None:
+        await self.finished()
+        [item] = self.service.summaries()
+        self.assertEqual(item.requested_at, NOW)
+
+    async def test_a_report_reaching_review_with_a_flagged_concern_calls_flagged_once(
+        self,
+    ) -> None:
+        revision = await self.finished()
+        self.assertEqual(self.flags, [(TV, revision)])
+        await self.service.poll()
+        await self.service.poll()
+        self.assertEqual(self.flags, [(TV, revision)])
+        self.assertIsNone(self.service.error)
+
+    async def test_only_expected_concerns_never_call_flagged(self) -> None:
+        await self.finished(level="expected")
+        self.assertEqual(self.flags, [])
+
+    async def test_a_refuted_concern_never_calls_flagged(self) -> None:
+        await self.service.assess(TV)
+        request = self.runs.starts[-1][1]
+        self.runs.finish(request, level="potential_breach")
+        run = self.runs.admitted[self.runs.starts[-1][0]]
+        outcome = self.runs.states[run].result
+        assert outcome is not None
+        self.runs.states[run] = AssessmentRun(
+            "finished", outcome.replace('"holds"', '"refuted"')
+        )
+        await self.service.poll()
+        self.assertEqual(self.flags, [])
+
+    async def test_a_failing_flagged_callback_is_reported_not_fatal(self) -> None:
+        self.flag_error = RuntimeError("journal full")
+        await self.finished()
+        [item] = self.service.summaries()
+        self.assertEqual(item.state, "review")
+        self.assertIsNotNone(self.service.error)
+
+    async def test_raising_the_limit_starts_no_backlog(self) -> None:
+        identities = Mock()
+        identities.identify = AsyncMock(return_value=IdentitySample())
+        scanner = DeepScanner(
+            DeepScanJournal(self.root),
+            lambda: DeviceInventory(self.cards),
+            identities,
+        )
+        self.service = DeviceAssessments(
+            AssessmentJournal(self.root),
+            self.runs,
+            self.dossiers,
+            lambda: DeviceInventory(self.cards),
+            clock=lambda: self.now,
+            flagged=scanner.flagged,
+        )
+        await self.finished()
+        await self.service.poll()
+        scanner.set_automatic_limit(4)
+        self.assertEqual(scanner.ledger.queue, ())
+
+    async def test_the_latest_deep_scan_reaches_the_dossier(self) -> None:
+        self.deep[TV] = DeepScanResult(
+            TV,
+            "10.1.2.10",
+            str(uuid4()),
+            "operator",
+            None,
+            "2026-11-11T09:00:00Z",
+            "2026-11-11T09:30:00Z",
+            "complete",
+            (22, 8008),
+            0,
+            None,
+        )
+        await self.service.assess(TV)
+        dossier = self.dossiers.retained[-1]
+        self.assertIn(
+            "A full TCP scan on 2026-11-11 found 2 open ports: 22, 8008; 0 did not answer.",
+            dossier.coverage,
+        )
+        self.assertIn("SSH", [e.possible_service for e in dossier.detection.exposures])
 
     async def test_usage_counts_todays_admissions_against_both_limits(self) -> None:
         self.service.set_background_limit(3)

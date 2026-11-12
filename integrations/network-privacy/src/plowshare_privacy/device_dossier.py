@@ -26,11 +26,11 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, replace
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .advisories import Advisory
 from .contracts import mac_address, uuid
-from .device_detection import ServiceExposure
+from .device_detection import ServiceExposure, exposures_for
 from .device_facts import AdvisoryStatus, DeviceDescription, DeviceFacts, ModelSource
 from .device_inventory import DeviceCard
 from .dns_activity import (
@@ -45,6 +45,10 @@ from .limits import TOOL_REPLY_BYTES
 from .presence import PresenceCount, epoch
 from .traffic import TrafficVolume
 from .vendor_notes import VendorNote, vendor_notes
+
+if TYPE_CHECKING:
+    # deep_scan imports tools, which imports this module; type-only to avoid a cycle.
+    from .deep_scan import DeepScanResult
 
 SignalCode = Literal[
     "measurement_dns",
@@ -585,6 +589,7 @@ def _coverage(
     section: DossierSupplemental,
     trimmed_advisories: int = 0,
     profile_note: ProfileNote | None = None,
+    deep_scan: DeepScanResult | None = None,
 ) -> tuple[str, ...]:
     lines: list[str] = []
     if card.revision is None:
@@ -594,6 +599,18 @@ def _coverage(
     else:
         lines.append(
             "The port scan covers only the configured TCP ports; other services are unknown."
+        )
+    if deep_scan is not None:
+        count = len(deep_scan.open_ports)
+        found = (
+            f"{count} open {'port' if count == 1 else 'ports'}: "
+            + ", ".join(map(str, deep_scan.open_ports))
+            if count
+            else "no open ports"
+        )
+        lines.append(
+            f"A full TCP scan on {deep_scan.finished_at[:10]} found {found}; "
+            f"{deep_scan.unanswered} did not answer."
         )
     if card.presence is None:
         lines.append("No quick presence checks in the last 24 hours.")
@@ -704,6 +721,20 @@ def _size(dossier: DeviceDossier) -> int:
     return len(encode_dossier(dossier).encode())
 
 
+def _exposures(
+    seen: tuple[ServiceExposure, ...], deep_scan: DeepScanResult | None
+) -> tuple[ServiceExposure, ...]:
+    """The detection's exposures plus any a deep scan found that it had not."""
+    if deep_scan is None:
+        return seen
+    known = {e.possible_service for e in seen}
+    return seen + tuple(
+        e
+        for e in exposures_for(set(deep_scan.open_ports))
+        if e.possible_service not in known
+    )
+
+
 def build_dossier(
     card: DeviceCard,
     profile: OperatorProfile | None = None,
@@ -711,14 +742,17 @@ def build_dossier(
     facts: DeviceFacts | None = None,
     budget: int = TOOL_REPLY_BYTES,
     profile_note: ProfileNote | None = None,
+    deep_scan: DeepScanResult | None = None,
 ) -> DeviceDossier:
     """Build the dossier and fit it to ``budget`` bytes.
 
     Listed advisories are trimmed first, least severe first, then the
     lowest-ranked DNS destinations; counts record what was left out. Signals
     are computed before trimming from complete group totals, so the budget
-    never changes them. Raises ValueError without a confirmed MAC, for facts
-    about another device, or when even the record without any advisories or
+    never changes them. A ``deep_scan`` adds a coverage line and the service
+    exposures its open ports imply. Raises ValueError without a confirmed MAC,
+    for facts or a deep scan about another device, for a deep scan that is not
+    ``complete``, or when even the record without any advisories or
     destinations exceeds the budget.
     """
     device_id = confirmed_device_id(card)
@@ -727,6 +761,10 @@ def build_dossier(
         raise ValueError("A device dossier needs a confirmed MAC identity")
     if facts is not None and facts.device_id != device_id:
         raise ValueError("Device facts belong to another device")
+    if deep_scan is not None and deep_scan.device_id != device_id:
+        raise ValueError("Deep scan belongs to another device")
+    if deep_scan is not None and deep_scan.state != "complete":
+        raise ValueError("Only a complete deep scan can enter a dossier")
     ProfileMatch(profile, profile_note)
     section = card_supplemental(card, facts)
     dns = card.dns_activity
@@ -746,7 +784,7 @@ def build_dossier(
             card.detection.device_type,
             card.detection.confidence,
             card.detection.clues,
-            card.detection.exposures,
+            _exposures(card.detection.exposures, deep_scan),
         ),
         card.presence,
         DossierServices(
@@ -773,7 +811,7 @@ def build_dossier(
         card.traffic,
         profile,
         section,
-        _coverage(card, profile, 0, section, 0, profile_note),
+        _coverage(card, profile, 0, section, 0, profile_note, deep_scan),
         device_signals(card),
     )
     # Advisories go first: each is about the model rather than this device's
@@ -792,7 +830,7 @@ def build_dossier(
             dossier,
             supplemental=section,
             coverage=_coverage(
-                card, profile, 0, section, trimmed_advisories, profile_note
+                card, profile, 0, section, trimmed_advisories, profile_note, deep_scan
             ),
         )
     dns_section = dossier.dns
@@ -814,7 +852,13 @@ def build_dossier(
             dossier,
             dns=dns_section,
             coverage=_coverage(
-                card, profile, trimmed, section, trimmed_advisories, profile_note
+                card,
+                profile,
+                trimmed,
+                section,
+                trimmed_advisories,
+                profile_note,
+                deep_scan,
             ),
             trimmed_destinations=trimmed,
         )

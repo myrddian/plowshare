@@ -48,7 +48,7 @@ import asyncio
 import json
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Awaitable, Callable, Literal, Protocol
+from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Protocol
 from uuid import uuid4
 
 from plowshare import Delivery, Refusal, TransportError
@@ -88,6 +88,10 @@ from .presence import epoch
 from .private_files import replace_private
 from .tools import monitored_devices
 from .worker import ReconciliationRequired
+
+if TYPE_CHECKING:
+    # deep_scan imports tools, which imports device_dossier; type-only avoids a cycle.
+    from .deep_scan import DeepScanResult
 
 MAX_ENTRIES = 256
 MAX_LEDGER_BYTES = 2 * 1024 * 1024
@@ -370,6 +374,8 @@ class AssessmentSummary:
     processing: bool
     potential_breaches: int
     worth_checking: int
+    # When the current assessment was requested; None when never assessed.
+    requested_at: str | None
 
 
 @dataclass(frozen=True)
@@ -416,11 +422,17 @@ class DeviceAssessments:
         clock: Callable[[], str] = utc_now,
         new_id: Callable[[], str] = lambda: str(uuid4()),
         zone: Callable[[], str] = lambda: "UTC",
+        flagged: Callable[[str, str], None] = lambda device, report: None,
+        deep_scan: Callable[[str], DeepScanResult | None] = lambda _: None,
     ):
         # The household zone (configuration timeZone), read when used: the
         # dashboard can change it while the collector runs. The daily ceiling
         # counts its day; each run keeps the zone it was admitted with.
         self.zone = zone
+        # ``flagged(device_id, report_revision)`` runs once when a report with a
+        # live potential-breach or worth-checking concern reaches review.
+        # ``deep_scan(device_id)`` is the device's latest complete deep scan.
+        self.flagged, self.deep_scan = flagged, deep_scan
         # ``profile`` reads the operator's saved profiles when an assessment
         # starts; None means this collector keeps no profiles.
         self.profile = profile
@@ -555,6 +567,7 @@ class DeviceAssessments:
                 else None,
                 entry.phase == "review" and entry.report not in self._processed,
                 entry.concerns,
+                entry.requested_at,
             )
             for entry in self.ledger.entries
         )
@@ -688,6 +701,7 @@ class DeviceAssessments:
             match.profile if match is not None else None,
             facts=self.facts(device),
             profile_note=match.note if match is not None else None,
+            deep_scan=self.deep_scan(device),
         )
         zone = self.zone()
         retained = await self.dossiers.retain(dossier, zone)
@@ -789,6 +803,7 @@ class DeviceAssessments:
                     detail=None,
                 )
             )
+            self._flag(entry.device_id, result.report_revision, result.concerns)
         elif outcome.state in {"failed", "cancelled", "capped"}:
             reason = {
                 "failed": "The run failed.",
@@ -799,6 +814,28 @@ class DeviceAssessments:
                 replace(
                     entry, phase="failed", detail=reason + " No report was written."
                 )
+            )
+
+    def _flag(
+        self, device_id: str, report: str, concerns: tuple[ConcernOutcome, ...]
+    ) -> None:
+        """Tell the deep scanner a report needs a closer look, once, on entering review.
+
+        Called only from the transition into review, after the entry is saved, so
+        polling a report already in review (or one restored at startup) never
+        triggers it. A failing callback must not undo the transition.
+        """
+        if not any(
+            c.verdict != "refuted" and c.level in {"potential_breach", "worth_checking"}
+            for c in concerns
+        ):
+            return
+        try:
+            self.flagged(device_id, report)
+        except Exception as error:  # noqa: BLE001 - the transition is already saved
+            self.error = (
+                "A deep port scan could not be queued for this report: "
+                f"{error or type(error).__name__}."
             )
 
     async def _settle_finalise(self, entry: AssessmentEntry) -> None:
@@ -918,6 +955,7 @@ def summary(
     pending: Literal["admission", "accept"] | None,
     processing: bool,
     concerns: tuple[ConcernOutcome, ...],
+    requested_at: str | None,
 ) -> AssessmentSummary:
     """Count the concerns a reader still has to weigh in a live report."""
     live = (
@@ -932,4 +970,5 @@ def summary(
         processing,
         sum(c.level == "potential_breach" for c in live),
         sum(c.level == "worth_checking" for c in live),
+        requested_at,
     )

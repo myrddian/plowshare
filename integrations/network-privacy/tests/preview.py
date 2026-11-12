@@ -153,7 +153,14 @@ class PreviewAssessments:
 
     def summaries(self) -> tuple[AssessmentSummary, ...]:
         return tuple(
-            summary(v.device_id, v.state, v.pending, v.processing, v.concerns)
+            summary(
+                v.device_id,
+                v.state,
+                v.pending,
+                v.processing,
+                v.concerns,
+                v.requested_at,
+            )
             for v in self.views.values()
             if v.state != "idle"
         )
