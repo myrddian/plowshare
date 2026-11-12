@@ -13,12 +13,25 @@ Lifecycle of one question (``AskTurn.state``):
   this state cannot tell whether it reached Plowshare, so it is read back as
   ``unconfirmed``.
 * ``running``: Plowshare admitted the run; ``poll`` reads its job.
-* ``answered``, ``capped`` or ``failed``: how the run ended. ``capped`` means
-  the conversation's model-call or turn cap stopped it; the view is then
-  ``paused`` until the user tops up or asks again.
-* ``unconfirmed``: the send's outcome is unknown. It is never resent. It
-  becomes ``running`` if the conversation later shows the question with its
-  job; otherwise the user may ask again.
+* ``answered``, ``capped`` or ``failed``: how the run ended, with
+  ``AskTurn.ending`` saying why a run stopped short. ``capped`` with
+  ``call_budget`` (the conversation's model-call allowance) is ``paused``
+  until the user tops up or asks again; ``capped`` with ``turn_cap`` (the
+  per-run step guard) is not, since more calls would not help. ``failed``
+  with ``lost`` is a job Plowshare no longer has: it keeps jobs in memory, so
+  a server restart forgets a running one and ``job.status`` answers
+  ``NOT_FOUND`` for good.
+* ``unconfirmed``: the send's outcome is unknown. It is never resent. A
+  question becomes ``running`` if the conversation later shows it with its
+  job; otherwise the user may ask again. An unconfirmed top-up keeps the old
+  job: it holds the conversation until an entry on a new job shows the
+  resumed run, or until RECONCILE_SECONDS pass.
+
+Reading. The chat reading is the folded projection, so a summary fold
+shortens it. Each forward read repeats the last entry held as an anchor; a
+missing anchor or a reading shorter than the cursor means a fold, and the
+tail is read again. ``seen_entries`` is the highest ordinal read, which a
+fold cannot move back, so nothing already read is flagged unread again.
 
 Delivery rules (AGENTS.md: never replay a mutation after uncertain delivery):
 ``agent.run`` and ``conversation.resume`` are each sent once. A ``Refusal``
@@ -40,6 +53,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import unicodedata
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -79,6 +93,8 @@ from .contracts import (
 from .diagnostics import refusal_detail
 from .private_files import replace_private
 
+_log = logging.getLogger(__name__)
+
 MAX_TURNS = 50
 MAX_QUESTION = 4000
 MAX_LEDGER_BYTES = 2 * 1024 * 1024
@@ -91,25 +107,48 @@ MAX_SEEN = 1_000_000_000
 MAX_VIEW_ENTRIES = 200
 MAX_WORK = 20
 MAX_ABOUT = 500
+# Below conversation.chat's page cap (RequestedWindow.MOST_ENTRIES_A_PAGE, 100)
+# with room for the one anchor entry each forward read repeats.
 PAGE = 50
 MAX_PAGES = 10
 _POLL_SECONDS = 5
+# How long an unconfirmed top-up holds the conversation while the collector
+# looks for the resumed run's entries; after it, the user may ask again.
+RECONCILE_SECONDS = 300
 
 TurnState = Literal["sending", "running", "answered", "capped", "failed", "unconfirmed"]
 ViewState = Literal[
     "idle", "sending", "running", "answered", "capped", "failed", "unconfirmed"
 ]
-JobState = Literal["running", "answered", "capped", "failed"]
+# A job as the port reads it. ``lost``: Plowshare no longer has the job (it
+# keeps jobs in memory, so a server restart forgets a running one).
+JobState = Literal["running", "answered", "call_budget", "turn_cap", "failed", "lost"]
+# Why a turn stopped short, kept with it: only ``call_budget`` can be topped up.
+Ending = Literal["call_budget", "turn_cap", "lost"]
 Author = Literal["user", "agent", "tool", "system"]
 _TURN_STATES = frozenset(
     {"sending", "running", "answered", "capped", "failed", "unconfirmed"}
 )
 _ACTIVE = frozenset({"sending", "running"})
-_JOB_STATES = frozenset({"running", "answered", "capped", "failed"})
+_JOB_STATES = frozenset(
+    {"running", "answered", "call_budget", "turn_cap", "failed", "lost"}
+)
+_ENDINGS = frozenset({"call_budget", "turn_cap", "lost"})
+# The turn state and ending each final job state settles a turn to.
+_SETTLED: dict[str, tuple[TurnState, Ending | None]] = {
+    "answered": ("answered", None),
+    "call_budget": ("capped", "call_budget"),
+    "turn_cap": ("capped", "turn_cap"),
+    "failed": ("failed", None),
+    "lost": ("failed", "lost"),
+}
 # Outcome.Ending names (plowshare-server agents/Outcome.java). AWAITING ends a
 # turn that is waiting for an answer from outside, which is not a failure.
 _ANSWERED_ENDINGS = frozenset({"ANSWERED", "AWAITING"})
-_CAPPED_ENDINGS = frozenset({"TURN_CAP", "CALL_BUDGET"})
+# A refusal job.status gives for a job id this server process never
+# registered: JobStore.get throws NotFoundFault, which Faults maps to
+# Code.NOT_FOUND ("no job called '<id>'; this process knows ...").
+_UNKNOWN_JOB = "NOT_FOUND"
 # The tool that sends a message, and the prefix of each orchestration start
 # tool (CallerOrchestrationTools: "orchestrate_" + definition name).
 SEND_MESSAGE = "send_message"
@@ -121,6 +160,14 @@ _NOT_CONFIRMED = (
     "Your question is not confirmed: Plowshare did not acknowledge it. It was"
     " not resent; it shows here once the conversation does, or you can ask again."
 )
+_ENDING_DETAIL: dict[str, str] = {
+    "call_budget": "The assistant has used its allowance for now. Top up to let it continue.",
+    "turn_cap": "This request took too many steps and stopped. Ask again, more narrowly.",
+    "lost": (
+        "Plowshare no longer has this run (it may have restarted), so its"
+        " outcome could not be read. Ask again if you still need an answer."
+    ),
+}
 
 
 class AskConflict(Exception):
@@ -180,14 +227,29 @@ class AskTurn:
     # The run's job; None until admitted. A top-up replaces it with the resumed job.
     job: str | None
     state: TurnState
+    # Why a ``capped`` or ``failed`` turn stopped short, when that is known.
+    ending: Ending | None = None
+    # When a top-up of this turn was journalled. Kept while that top-up is
+    # unconfirmed (state ``unconfirmed`` with the old job) until the resumed
+    # run is found or RECONCILE_SECONDS pass.
+    resumed_at: str | None = None
 
     @classmethod
     def decode(cls, value: object) -> AskTurn:
         row = object_fields(
-            value, {"request_id", "question", "asked_at", "job", "state"}
+            value,
+            {
+                "request_id",
+                "question",
+                "asked_at",
+                "job",
+                "state",
+                "ending",
+                "resumed_at",
+            },
         )
-        state = row["state"]
-        if state not in _TURN_STATES:
+        state, ending = row["state"], row["ending"]
+        if state not in _TURN_STATES or (ending is not None and ending not in _ENDINGS):
             raise ValueError("Invalid Ask turn state")
         turn = cls(
             uuid(row["request_id"]),
@@ -195,9 +257,20 @@ class AskTurn:
             timestamp(row["asked_at"]),
             identifier(row["job"]) if row["job"] is not None else None,
             state,  # type: ignore[arg-type]
+            ending,  # type: ignore[arg-type]
+            timestamp(row["resumed_at"]) if row["resumed_at"] is not None else None,
         )
         if state == "running" and turn.job is None:
             raise ValueError("A running Ask turn needs its job")
+        if ending is not None and (state, ending == "lost") not in (
+            ("capped", False),
+            ("failed", True),
+        ):
+            raise ValueError("An Ask turn's ending does not match its state")
+        if (state == "unconfirmed" and turn.job is not None) != (
+            state == "unconfirmed" and turn.resumed_at is not None
+        ):
+            raise ValueError("An unconfirmed Ask top-up needs its time")
         return turn
 
 
@@ -206,7 +279,8 @@ class AskLedger:
     conversation: str | None = None
     settings: AskSettings = AskSettings()
     turns: tuple[AskTurn, ...] = ()
-    # Conversation entries read so far; later ones are new to the user.
+    # The highest entry ordinal read so far; entries above it are new to the
+    # user. Ordinals are never reused, so a summary fold cannot move it back.
     seen_entries: int = 0
     unread: bool = False
     # The conversation's current (max_model_calls, max_turns). Before the
@@ -214,6 +288,9 @@ class AskLedger:
     totals: tuple[int, int] = (40, 30)
     # The application user this conversation belongs to; one per collector today.
     user: str = "operator"
+    # When an open was sent whose reply was lost. conversation.open has no
+    # request ID, so this records the uncertainty rather than settling it.
+    opening: str | None = None
     version: int = 1
 
     @classmethod
@@ -229,6 +306,7 @@ class AskLedger:
                 "seen_entries",
                 "unread",
                 "totals",
+                "opening",
             },
         )
         if type(row["version"]) is not int or row["version"] != 1:
@@ -265,6 +343,7 @@ class AskLedger:
             unread,
             (totals[0], _setting(totals[1])),
             identifier(row["user"]),
+            timestamp(row["opening"]) if row["opening"] is not None else None,
         )
 
 
@@ -364,8 +443,30 @@ class AskView:
     detail: str | None
 
 
+@dataclass(frozen=True)
+class AskConversation:
+    """A conversation and its caps; a cap is None when Plowshare reports none."""
+
+    id: str
+    max_model_calls: int | None
+    max_turns: int | None
+
+
+@dataclass(frozen=True)
+class AskPage:
+    """One page of the chat reading, with the reading's size.
+
+    ``total`` is how many entries the reading holds now. The reading is the
+    folded projection, so a summary fold can make it shorter than what the
+    collector has already read; the service resyncs from ``total`` then.
+    """
+
+    entries: tuple[AskEntry, ...]
+    total: int
+
+
 class AskPort(Protocol):
-    async def latest(self, agent: str) -> str | None:
+    async def latest(self, agent: str) -> AskConversation | None:
         """The agent's newest active conversation in the project, or None."""
         ...
 
@@ -377,11 +478,11 @@ class AskPort(Protocol):
         """Speak ``task`` into the conversation as a new turn; returns the job ID."""
         ...
 
-    async def job_state(self, job: str) -> JobState: ...
+    async def job_state(self, job: str) -> JobState:
+        """The job's state; ``lost`` when Plowshare no longer has the job."""
+        ...
 
-    async def entries(
-        self, conversation: str, offset: int, limit: int
-    ) -> tuple[AskEntry, ...]:
+    async def entries(self, conversation: str, offset: int, limit: int) -> AskPage:
         """One page of the conversation's chat reading, one ``AskEntry`` per entry."""
         ...
 
@@ -409,7 +510,7 @@ class SdkAskPort:
     def __init__(self, client: Callable[[], Client], config: Configuration):
         self.client, self.project = client, config.project
 
-    async def latest(self, agent: str) -> str | None:
+    async def latest(self, agent: str) -> AskConversation | None:
         view = (
             await self.client().request(
                 ConversationLatestRequest(agent=agent, project=self.project),
@@ -420,7 +521,11 @@ class SdkAskPort:
             return None
         if not isinstance(view, ConversationViewDto):
             raise ValueError("Unexpected latest conversation reply")
-        return identifier(view.id)
+        return AskConversation(
+            identifier(view.id),
+            _cap(view.max_model_calls, MAX_TOTAL_CALLS),
+            _cap(view.max_turns, MAX_SETTING),
+        )
 
     async def open(self, agent: str, max_model_calls: int, max_turns: int) -> str:
         view = (
@@ -433,6 +538,8 @@ class SdkAskPort:
                 timeout=15,
             )
         ).require_payload()
+        if not isinstance(view, ConversationViewDto):
+            raise ValueError("Unexpected opened conversation reply")
         return identifier(view.id)
 
     async def run(self, agent: str, conversation: str, task: str) -> str:
@@ -447,9 +554,14 @@ class SdkAskPort:
         return _started(started, agent, conversation)
 
     async def job_state(self, job: str) -> JobState:
-        view = (
-            await self.client().request(JobStatusRequest(job=job), timeout=15)
-        ).require_payload()
+        try:
+            view = (
+                await self.client().request(JobStatusRequest(job=job), timeout=15)
+            ).require_payload()
+        except Refusal as error:
+            if error.code == _UNKNOWN_JOB:
+                return "lost"
+            raise
         if not isinstance(view, ObservedJobDto) or view.id != job:
             raise ValueError("Foreign Ask job status")
         if view.state == "RUNNING":
@@ -461,13 +573,13 @@ class SdkAskPort:
             return "failed"
         if outcome.ending in _ANSWERED_ENDINGS:
             return "answered"
-        if outcome.ending in _CAPPED_ENDINGS:
-            return "capped"
+        if outcome.ending == "CALL_BUDGET":
+            return "call_budget"
+        if outcome.ending == "TURN_CAP":
+            return "turn_cap"
         return "failed"
 
-    async def entries(
-        self, conversation: str, offset: int, limit: int
-    ) -> tuple[AskEntry, ...]:
+    async def entries(self, conversation: str, offset: int, limit: int) -> AskPage:
         page = (
             await self.client().request(
                 ConversationChatRequest(
@@ -478,7 +590,10 @@ class SdkAskPort:
         ).require_payload()
         if not isinstance(page, EntryPageViewDto):
             raise ValueError("Unexpected conversation page")
-        return tuple(decode_entry(e) for e in page.entries)
+        total = page.total
+        if isinstance(total, bool) or total % 1 or not 0 <= total <= MAX_SEEN:
+            raise ValueError("Conversation page total must be a whole number")
+        return AskPage(tuple(decode_entry(e) for e in page.entries), int(total))
 
     async def resume(
         self, conversation: str, agent: str, max_model_calls: int, max_turns: int
@@ -495,6 +610,15 @@ class SdkAskPort:
             )
         ).require_payload()
         return _started(started, agent, conversation)
+
+
+def _cap(value: object, maximum: int) -> int | None:
+    """A reported cap as a whole number, or None when absent or out of range."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value % 1 or not MIN_SETTING <= value <= maximum:
+        return None
+    return int(value)
 
 
 def _started(started: ObservedStartedJobDto, agent: str, conversation: str) -> str:
@@ -685,8 +809,11 @@ class _Woken:
 
     job: str
     state: ViewState = "running"
-    # Whether this turn's entries have been seen since its waking utterance.
+    ending: Ending | None = None
+    # Earlier jobs of this woken turn, which a top-up continued from.
     resumed_from: set[str] = field(default_factory=set)
+    # When an unconfirmed top-up of this turn was sent.
+    resumed_at: str | None = None
 
 
 class AskService:
@@ -728,9 +855,10 @@ class AskService:
             last = replace(ledger.turns[-1], state="unconfirmed")
             ledger = replace(ledger, turns=(*ledger.turns[:-1], last))
         self._ledger = ledger
+        # The tail of the chat reading, and the reading offset just past it.
+        # None until the first read, which resyncs from the reading's size.
         self._entries: tuple[AskEntry, ...] = ()
-        # Reload the tail after a restart; those entries are not new.
-        self._cursor = max(0, ledger.seen_entries - MAX_VIEW_ENTRIES)
+        self._cursor: int | None = None
         self._woken: _Woken | None = None
 
     # Ledger access. Writes happen between awaits only, so each is atomic with
@@ -750,11 +878,29 @@ class AskService:
         )
         self._store(replace(self._ledger, turns=turns))
 
-    def _state(self) -> ViewState:
+    def _current(self) -> tuple[ViewState, Ending | None, str | None]:
+        """The state the conversation is in: (state, ending, unconfirmed top-up time)."""
         woken = self._woken
         if woken is not None and woken.state in ("running", "capped", "unconfirmed"):
-            return woken.state
-        return self._ledger.turns[-1].state if self._ledger.turns else "idle"
+            return woken.state, woken.ending, woken.resumed_at
+        if not self._ledger.turns:
+            return "idle", None, None
+        last = self._ledger.turns[-1]
+        return last.state, last.ending, last.resumed_at
+
+    def _busy(self) -> bool:
+        """Whether a run may be working: refuse-while-running holds for it.
+
+        An unconfirmed top-up may have resumed the run, so it holds the
+        conversation until the resumed run is found or RECONCILE_SECONDS pass.
+        """
+        state, _, resumed_at = self._current()
+        if state in _ACTIVE:
+            return True
+        if state != "unconfirmed" or resumed_at is None:
+            return False
+        waited = (_parse(timestamp(self.clock())) - _parse(resumed_at)).total_seconds()
+        return waited < RECONCILE_SECONDS
 
     def view(self) -> AskView:
         tools = {c.id: c.tool for e in self._entries for c in e.calls}
@@ -763,17 +909,20 @@ class AskService:
             for e in self._entries
         )
         waiting, done = _work(entries)
-        state = self._state()
+        state, ending, _ = self._current()
+        settled = _ENDING_DETAIL.get(ending) if ending is not None else None
+        # An unconfirmed top-up that may have resumed the run reads as running,
+        # since sending is refused while it holds the conversation.
         return AskView(
             self._available,
             self._ledger.conversation,
-            state,
+            "running" if self._busy() and state == "unconfirmed" else state,
             entries,
             waiting,
             done,
-            state == "capped",
+            state == "capped" and ending == "call_budget",
             self._ledger.unread,
-            self.error or self._detail,
+            self.error or self._detail or settled,
         )
 
     def set_settings(self, settings: AskSettings) -> None:
@@ -800,7 +949,7 @@ class AskService:
         async with self.lock:
             if not self._available:
                 raise AskConflict("The Ask journal needs inspection")
-            if self._state() in _ACTIVE:
+            if self._busy():
                 raise AskConflict(
                     "The assistant is still working. Ask again when it has finished."
                 )
@@ -828,8 +977,15 @@ class AskService:
                 else:
                     self._detail = _NOT_CONFIRMED
                     self._set_turn(turn.request_id, state="unconfirmed")
-            except Exception:
-                # Sent, but the reply could not be read: the outcome is unknown.
+            except Exception as error:
+                # Sent, but the reply could not be read: the outcome is unknown,
+                # so it stays unconfirmed. Logged so a programming error is not
+                # hidden; the question text is redacted from the message.
+                _log.warning(
+                    "Ask run reply could not be read: %s: %s",
+                    type(error).__name__,
+                    str(error).replace(question, "[question]")[:300],
+                )
                 self._detail = _NOT_CONFIRMED
                 self._set_turn(turn.request_id, state="unconfirmed")
             else:
@@ -840,41 +996,73 @@ class AskService:
         """The journalled conversation, else the agent's latest, else a new one.
 
         Recovery reads ``latest`` first so a lost journal never opens a second
-        conversation. A failure is shown and nothing else is sent.
+        conversation, and takes that conversation's own caps as the totals.
+        ``conversation.open`` carries no request ID, so an open whose reply
+        was lost cannot be settled: the intent is journalled in ``opening``,
+        the next ask looks with ``latest`` first, and only an explicit ask
+        opens again. A failure is shown and no question is sent.
         """
         if self._ledger.conversation is not None:
             return self._ledger.conversation
         try:
             found = await self.port.latest(self.agent)
-            if found is None:
-                calls, turns = self._ledger.totals
-                found = await self.port.open(self.agent, calls, turns)
-            conversation = identifier(found)
         except Refusal as error:
-            self._detail = refusal_detail(error, "opening the Ask conversation")
+            self._detail = refusal_detail(error, "finding the Ask conversation")
             return None
         except TransportError:
-            self._detail = "The Ask conversation could not be opened. Nothing was asked; try again."
+            self._detail = "The Ask conversation could not be found. Your question was not sent; try again."
             return None
-        self._store(replace(self._ledger, conversation=conversation))
+        if found is not None:
+            calls, turns = self._ledger.totals
+            totals = (found.max_model_calls or calls, found.max_turns or turns)
+            self._store(
+                replace(
+                    self._ledger,
+                    conversation=identifier(found.id),
+                    totals=totals,
+                    opening=None,
+                )
+            )
+            return found.id
+        calls, turns = self._ledger.totals
+        self._store(replace(self._ledger, opening=timestamp(self.clock())))
+        try:
+            conversation = identifier(await self.port.open(self.agent, calls, turns))
+        except Refusal as error:
+            self._detail = refusal_detail(error, "opening the Ask conversation")
+            self._store(replace(self._ledger, opening=None))
+            return None
+        except TransportError as error:
+            if error.delivery == Delivery.NOT_SUBMITTED:
+                self._detail = "The Ask conversation was not opened. Your question was not sent; try again."
+                self._store(replace(self._ledger, opening=None))
+            else:
+                self._detail = (
+                    "Plowshare did not confirm opening the Ask conversation. Your"
+                    " question was not sent. Asking again looks for that conversation first."
+                )
+            return None
+        self._store(replace(self._ledger, conversation=conversation, opening=None))
         return conversation
 
     async def top_up(self) -> AskView:
         """Raise the model-call total by the top-up size and resume the capped run.
 
-        Only from an explicit request. The raised totals and a ``sending``
-        turn are journalled before ``conversation.resume``; it is sent once.
+        Only from an explicit request, and only for a run that used its
+        model-call allowance (``CALL_BUDGET``): a run that hit the per-run
+        step guard (``TURN_CAP``) is not helped by more calls. The raised
+        totals and a ``sending`` turn are journalled before
+        ``conversation.resume``; it is sent once.
         """
         async with self.lock:
             if not self._available:
                 raise AskConflict("The Ask journal needs inspection")
-            if self._state() != "capped":
+            state, ending, _ = self._current()
+            conversation = self._ledger.conversation
+            if state != "capped" or ending != "call_budget" or conversation is None:
                 raise AskConflict(
                     "Top up is available only when the assistant has used its allowance."
                 )
-            conversation = self._ledger.conversation
-            if conversation is None:
-                raise AskConflict("There is no Ask conversation to top up")
             before = self._ledger.totals
             calls, turns = before
             raised = calls + self._ledger.settings.top_up_calls
@@ -885,11 +1073,19 @@ class AskService:
             woken = (
                 self._woken if self._woken and self._woken.state == "capped" else None
             )
-            last = self._ledger.turns[-1]
+            # The run to resume: the capped woken turn, else the latest question.
+            turn = None
+            if woken is None:
+                if not self._ledger.turns:
+                    raise AskConflict("There is no capped request to top up")
+                turn = self._ledger.turns[-1]
+            now = timestamp(self.clock())
             self._detail = None
             self._store(replace(self._ledger, totals=(raised, turns)))
-            if woken is None:
-                self._set_turn(last.request_id, state="sending")
+            if turn is not None:
+                self._set_turn(
+                    turn.request_id, state="sending", ending=None, resumed_at=now
+                )
             try:
                 job = identifier(
                     await self.port.resume(conversation, self.agent, raised, turns)
@@ -904,26 +1100,48 @@ class AskService:
                         else "The top-up was not sent to Plowshare. Try again when the connection is back."
                     )
                     self._store(replace(self._ledger, totals=before))
-                    if woken is None:
-                        self._set_turn(last.request_id, state="capped")
+                    if turn is not None:
+                        self._set_turn(
+                            turn.request_id,
+                            state="capped",
+                            ending="call_budget",
+                            resumed_at=None,
+                        )
                 else:
-                    self._unconfirmed_top_up(woken, last)
-            except Exception:
-                self._unconfirmed_top_up(woken, last)
+                    self._unconfirmed_top_up(woken, turn, now)
+            except Exception as error:
+                _log.warning(
+                    "Ask top-up reply could not be read: %s: %s",
+                    type(error).__name__,
+                    str(error)[:300],
+                )
+                self._unconfirmed_top_up(woken, turn, now)
             else:
-                if woken is None:
-                    self._set_turn(last.request_id, state="running", job=job)
-                else:
-                    self._woken = _Woken(job, "running", {woken.job})
+                if turn is not None:
+                    self._set_turn(
+                        turn.request_id,
+                        state="running",
+                        job=job,
+                        ending=None,
+                        resumed_at=None,
+                    )
+                elif woken is not None:
+                    self._woken = _Woken(job, "running", None, {woken.job})
         return self.view()
 
-    def _unconfirmed_top_up(self, woken: _Woken | None, last: AskTurn) -> None:
-        # The raised totals stay: Plowshare may have applied them.
-        self._detail = "Plowshare did not confirm the top-up. It was not resent; ask again to continue."
-        if woken is None:
-            self._set_turn(last.request_id, state="unconfirmed")
-        else:
-            woken.state = "unconfirmed"
+    def _unconfirmed_top_up(
+        self, woken: _Woken | None, turn: AskTurn | None, at: str
+    ) -> None:
+        # The raised totals stay: Plowshare may have applied them. The turn
+        # keeps its old job and the top-up time until the resumed run is seen.
+        self._detail = (
+            "Plowshare did not confirm the top-up. It was not resent; if the"
+            " assistant does not continue within a few minutes, ask again."
+        )
+        if turn is not None:
+            self._set_turn(turn.request_id, state="unconfirmed", ending=None)
+        elif woken is not None:
+            woken.state, woken.ending, woken.resumed_at = "unconfirmed", None, at
 
     async def poll(self) -> None:
         await self._poll()
@@ -937,47 +1155,97 @@ class AskService:
             await self._read(conversation)
             last = self._ledger.turns[-1] if self._ledger.turns else None
             if last is not None and last.state == "running" and last.job is not None:
-                state = await self.port.job_state(last.job)
-                if state not in _JOB_STATES:
-                    raise ValueError("Unsupported Ask job state")
+                state = _job_state(await self.port.job_state(last.job))
                 if state != "running":
-                    self._set_turn(last.request_id, state=state)
+                    settled, ending = _SETTLED[state]
+                    self._set_turn(last.request_id, state=settled, ending=ending)
             woken = self._woken
             if woken is not None and woken.state == "running":
-                state = await self.port.job_state(woken.job)
-                if state not in _JOB_STATES:
-                    raise ValueError("Unsupported Ask job state")
-                woken.state = state
+                state = _job_state(await self.port.job_state(woken.job))
+                if state != "running":
+                    woken.state, woken.ending = _SETTLED[state]
             return True
 
     async def _read(self, conversation: str) -> None:
         """Page the chat reading forward from the cursor, bounded per poll.
 
+        Each forward read starts one entry early, at the last entry already
+        held. If that entry is no longer there, or the reading is shorter
+        than the cursor, a summary fold has rewritten what lies behind the
+        cursor, and the tail is read again from the reading's size.
+        """
+        if self._cursor is None:
+            await self._resync(conversation)
+            return
+        for _ in range(MAX_PAGES):
+            anchor = self._entries[-1].index if self._entries else None
+            start = self._cursor - 1 if anchor is not None else self._cursor
+            page = await self.port.entries(
+                conversation, start, PAGE + 1 if anchor is not None else PAGE
+            )
+            listed = page.entries
+            if page.total < self._cursor or (
+                anchor is not None and (not listed or listed[0].index != anchor)
+            ):
+                await self._resync(conversation)
+                return
+            if anchor is not None:
+                listed = listed[1:]
+            self._accept(listed)
+            if len(listed) < PAGE:
+                return
+
+    async def _resync(self, conversation: str) -> None:
+        """Read the last MAX_VIEW_ENTRIES entries again, from the reading's size.
+
+        Which run is current is re-derived from them; ``seen_entries`` keeps
+        entries already read from being flagged unread a second time.
+        """
+        first = await self.port.entries(conversation, 0, PAGE)
+        start = max(0, first.total - MAX_VIEW_ENTRIES)
+        self._entries, self._cursor, self._woken = (), start, None
+        if start == 0:
+            self._accept(first.entries)
+            if len(first.entries) < PAGE:
+                return
+        for _ in range(MAX_PAGES):
+            page = await self.port.entries(conversation, self._cursor, PAGE)
+            self._accept(page.entries)
+            if len(page.entries) < PAGE:
+                return
+
+    def _accept(self, listed: tuple[AskEntry, ...]) -> None:
+        """Take one page in order; journal the highest ordinal and any unread answer.
+
         Each page is journalled as soon as it is taken, so a failure on a
         later page cannot lose an earlier page's unread answer.
         """
-        for _ in range(MAX_PAGES):
-            page = await self.port.entries(conversation, self._cursor, PAGE)
-            seen, unread = self._ledger.seen_entries, False
-            for offset, entry in enumerate(page, start=self._cursor):
-                self._take(entry)
-                if offset >= seen and entry.author == "agent" and entry.text.strip():
+        seen = self._ledger.seen_entries
+        highest, unread = seen, False
+        for entry in listed:
+            self._take(entry)
+            if entry.index > seen:
+                highest = max(highest, entry.index)
+                if entry.author == "agent" and entry.text.strip():
                     unread = True
-            self._cursor += len(page)
-            self._entries = (*self._entries, *page)[-MAX_VIEW_ENTRIES:]
-            if self._cursor > seen:
-                self._store(
-                    replace(
-                        self._ledger,
-                        seen_entries=self._cursor,
-                        unread=self._ledger.unread or unread,
-                    )
+        self._entries = (*self._entries, *listed)[-MAX_VIEW_ENTRIES:]
+        self._cursor = (self._cursor or 0) + len(listed)
+        if highest > seen:
+            self._store(
+                replace(
+                    self._ledger,
+                    seen_entries=highest,
+                    unread=self._ledger.unread or unread,
                 )
-            if len(page) < PAGE:
-                break
+            )
 
     def _take(self, entry: AskEntry) -> None:
-        """Follow which run the conversation is on, one entry at a time."""
+        """Follow which run the conversation is on, one entry at a time.
+
+        Person utterances carry their run's job: JobRuntime records the
+        opening utterance inside the run, through a transcript that appends
+        every entry with that job (Compaction's transcript ``record``).
+        """
         turns = self._ledger.turns
         last = turns[-1] if turns else None
         if entry.author == "user":
@@ -998,15 +1266,22 @@ class AskService:
             return
         if entry.kind in _WAKING:
             self._woken = _Woken(job)
-        elif (
-            self._woken is not None
-            and job != self._woken.job
-            and job not in self._woken.resumed_from
-        ):
+            return
+        woken = self._woken
+        if woken is None:
+            if (
+                last is not None
+                and last.state == "unconfirmed"
+                and last.resumed_at is not None
+                and _later_or_same(entry.at, last.resumed_at)
+            ):
+                # The unconfirmed top-up resumed the run on this job.
+                self._set_turn(
+                    last.request_id, state="running", job=job, resumed_at=None
+                )
+        elif job != woken.job and job not in woken.resumed_from:
             # A woken turn continued on a new job, as a top-up resumes it.
-            self._woken = _Woken(
-                job, "running", {*self._woken.resumed_from, self._woken.job}
-            )
+            self._woken = _Woken(job, "running", None, {*woken.resumed_from, woken.job})
 
     async def run(self, stop: asyncio.Event) -> None:
         """Poll every _POLL_SECONDS until ``stop``.
@@ -1027,3 +1302,9 @@ class AskService:
                 await asyncio.wait_for(stop.wait(), _POLL_SECONDS)
             except TimeoutError:
                 continue
+
+
+def _job_state(value: object) -> JobState:
+    if value not in _JOB_STATES:
+        raise ValueError("Unsupported Ask job state")
+    return value  # type: ignore[return-value]

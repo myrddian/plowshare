@@ -35,9 +35,11 @@ from plowshare_privacy.ask import (
     MAX_TURNS,
     AskCall,
     AskConflict,
+    AskConversation,
     AskEntry,
     AskJournal,
     AskLedger,
+    AskPage,
     AskService,
     AskSettings,
     AskTurn,
@@ -54,7 +56,8 @@ class FakePort:
     """An in-memory ``AskPort``: records every call, answers from fields."""
 
     def __init__(self) -> None:
-        self.latest_id: str | None = None
+        self.latest_found: AskConversation | None = None
+        self.open_error: Exception | None = None
         self.opened: list[tuple[str, int, int]] = []
         self.runs: list[tuple[str, str, str]] = []
         self.resumes: list[tuple[str, str, int, int]] = []
@@ -63,11 +66,13 @@ class FakePort:
         self.run_error: Exception | None = None
         self.jobs = 0
 
-    async def latest(self, agent: str) -> str | None:
-        return self.latest_id
+    async def latest(self, agent: str) -> AskConversation | None:
+        return self.latest_found
 
     async def open(self, agent: str, max_model_calls: int, max_turns: int) -> str:
         self.opened.append((agent, max_model_calls, max_turns))
+        if self.open_error is not None:
+            raise self.open_error
         return "conv-1"
 
     async def run(self, agent: str, conversation: str, task: str) -> str:
@@ -82,10 +87,8 @@ class FakePort:
     async def job_state(self, job: str) -> JobState:
         return self.states[job]
 
-    async def entries(
-        self, conversation: str, offset: int, limit: int
-    ) -> tuple[AskEntry, ...]:
-        return tuple(self.log[offset : offset + limit])
+    async def entries(self, conversation: str, offset: int, limit: int) -> AskPage:
+        return AskPage(tuple(self.log[offset : offset + limit]), len(self.log))
 
     async def resume(
         self, conversation: str, agent: str, max_model_calls: int, max_turns: int
@@ -157,11 +160,13 @@ class AskServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([t.state for t in ledger.turns], ["answered", "running"])
 
     async def test_a_lost_journal_recovers_the_existing_conversation(self) -> None:
-        self.port.latest_id = "conv-existing"
+        self.port.latest_found = AskConversation("conv-existing", 80, 25)
         view = await self.service.ask("Hello")
         self.assertEqual(self.port.opened, [])
         self.assertEqual(view.conversation, "conv-existing")
         self.assertEqual(self.port.runs[0][1], "conv-existing")
+        # The recovered conversation's own caps, not the settings, are the totals.
+        self.assertEqual(AskJournal(self.root).read().totals, (80, 25))
 
     async def test_sending_is_refused_while_a_turn_runs(self) -> None:
         await self.service.ask("First")
@@ -321,7 +326,7 @@ class AskServiceTest(unittest.IsolatedAsyncioTestCase):
         await self.service.ask("Investigate everything")
         with self.assertRaises(AskConflict):
             await self.service.top_up()
-        self.port.states["job-1"] = "capped"
+        self.port.states["job-1"] = "call_budget"
         await self.service.poll()
         view = self.service.view()
         self.assertEqual((view.turn_state, view.paused), ("capped", True))
@@ -339,19 +344,202 @@ class AskServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_uncertain_top_up_is_not_resent(self) -> None:
         await self.service.ask("Investigate")
-        self.port.states["job-1"] = "capped"
+        self.port.states["job-1"] = "call_budget"
         await self.service.poll()
         self.port.resume = AsyncMock(  # type: ignore[method-assign]
             side_effect=TransportError(Delivery.UNKNOWN, "lost")
         )
         view = await self.service.top_up()
-        self.assertEqual((view.turn_state, view.paused), ("unconfirmed", False))
+        # The resumed run may be working, so it holds the conversation.
+        self.assertEqual((view.turn_state, view.paused), ("running", False))
+        self.assertIn("did not confirm the top-up", view.detail or "")
         self.assertEqual(AskJournal(self.root).read().totals, (60, 30))
+        with self.assertRaises(AskConflict):
+            await self.service.ask("Another")
         self.port.resume = AsyncMock(  # type: ignore[method-assign]
             side_effect=TransportError(Delivery.NOT_SUBMITTED, "offline")
         )
         with self.assertRaises(AskConflict):
             await self.service.top_up()
+
+    async def test_a_job_plowshare_forgot_fails_and_frees_the_conversation(
+        self,
+    ) -> None:
+        await self.service.ask("Hello")
+        self.port.states["job-1"] = "lost"
+        await self.service.poll()
+        view = self.service.view()
+        self.assertEqual((view.turn_state, view.paused), ("failed", False))
+        self.assertIn("could not be read", view.detail or "")
+        self.assertEqual(AskJournal(self.root).read().turns[-1].ending, "lost")
+        # The tab is not locked: the user may ask again.
+        self.assertEqual((await self.service.ask("Hello again")).turn_state, "running")
+        # A woken turn whose job is lost no longer holds the conversation either.
+        self.port.states["job-2"] = "answered"
+        self.port.log = [
+            said(1, "Hello again", "job-2"),
+            AskEntry(2, "system", "reply", LATER, "message", job="job-gone"),
+        ]
+        self.port.states["job-gone"] = "lost"
+        await self.service.poll()
+        self.assertEqual(self.service.view().turn_state, "answered")
+
+    async def test_a_summary_fold_resyncs_without_losing_or_reflagging_entries(
+        self,
+    ) -> None:
+        await self.service.ask("Hello")
+        self.port.states["job-1"] = "answered"
+        self.port.log = [said(1, "Hello", "job-1")] + [
+            answer(i, f"old {i}", "job-1") for i in range(2, 11)
+        ]
+        await self.service.poll()
+        self.service.mark_read()
+        # A fold replaces entries 1-8 with one summary (ordinal 11), so the
+        # reading is shorter, then two new answers arrive (ordinals 12, 13).
+        self.port.log = (
+            [AskEntry(11, "system", "Summary", LATER, "summary")]
+            + self.port.log[8:]
+            + [answer(12, "new 12", "job-1"), answer(13, "new 13", "job-1")]
+        )
+        await self.service.poll()
+        view = self.service.view()
+        self.assertEqual([e.index for e in view.entries], [11, 9, 10, 12, 13])
+        self.assertTrue(view.unread)
+        self.assertEqual(AskJournal(self.root).read().seen_entries, 13)
+        # Entries already seen are not new after a resync.
+        self.service.mark_read()
+        self.port.log = [AskEntry(14, "system", "Summary", LATER, "summary")] + (
+            self.port.log[3:]
+        )
+        await self.service.poll()
+        self.assertEqual([e.index for e in self.service.view().entries], [14, 12, 13])
+        self.assertFalse(self.service.view().unread)
+
+    async def test_a_fold_with_new_entries_behind_the_cursor_is_detected(
+        self,
+    ) -> None:
+        await self.service.ask("Hello")
+        self.port.states["job-1"] = "answered"
+        self.port.log = [said(1, "Hello", "job-1")] + [
+            answer(i, f"old {i}", "job-1") for i in range(2, 6)
+        ]
+        await self.service.poll()
+        # Five entries fold into one and four arrive: the reading has the
+        # same length, but the cursor's anchor entry has moved.
+        self.port.log = [AskEntry(6, "system", "Summary", LATER, "summary")] + [
+            answer(i, f"new {i}", "job-1") for i in range(7, 11)
+        ]
+        await self.service.poll()
+        self.assertEqual(
+            [e.index for e in self.service.view().entries], [6, 7, 8, 9, 10]
+        )
+        self.assertTrue(self.service.view().unread)
+
+    async def test_a_turn_cap_stop_offers_no_top_up(self) -> None:
+        await self.service.ask("Look at everything at once")
+        self.port.states["job-1"] = "turn_cap"
+        await self.service.poll()
+        expected = (
+            "This request took too many steps and stopped. Ask again, more narrowly."
+        )
+        view = self.service.view()
+        self.assertEqual(
+            (view.turn_state, view.paused, view.detail), ("capped", False, expected)
+        )
+        with self.assertRaises(AskConflict):
+            await self.service.top_up()
+        self.assertEqual(self.port.resumes, [])
+        restarted = self.make()
+        view = restarted.view()
+        self.assertEqual((view.paused, view.detail), (False, expected))
+        self.assertEqual(
+            (await restarted.ask("Just the printer")).turn_state, "running"
+        )
+
+    async def test_an_unconfirmed_top_up_is_reconciled_from_the_resumed_run(
+        self,
+    ) -> None:
+        await self.service.ask("Investigate")
+        self.port.log = [said(1, "Investigate", "job-1")]
+        self.port.states["job-1"] = "call_budget"
+        await self.service.poll()
+        self.port.resume = AsyncMock(  # type: ignore[method-assign]
+            side_effect=TransportError(Delivery.UNKNOWN, "lost")
+        )
+        await self.service.top_up()
+        restarted = self.make()
+        with self.assertRaises(AskConflict):
+            await restarted.ask("Another")
+        # The resumed run's entries carry a new job: the turn adopts it.
+        self.port.log.append(answer(2, "Carrying on.", "job-resumed"))
+        self.port.states["job-resumed"] = "running"
+        await restarted.poll()
+        turn = AskJournal(self.root).read().turns[-1]
+        self.assertEqual((turn.state, turn.job), ("running", "job-resumed"))
+        self.assertEqual(len(self.port.runs), 1)
+
+    async def test_an_unconfirmed_top_up_frees_the_conversation_after_a_while(
+        self,
+    ) -> None:
+        await self.service.ask("Investigate")
+        self.port.states["job-1"] = "call_budget"
+        await self.service.poll()
+        self.port.resume = AsyncMock(  # type: ignore[method-assign]
+            side_effect=TransportError(Delivery.UNKNOWN, "lost")
+        )
+        await self.service.top_up()
+        self.now = "2026-11-13T01:04:59Z"
+        with self.assertRaises(AskConflict):
+            await self.service.ask("Another")
+        self.now = "2026-11-13T01:05:00Z"
+        self.assertEqual(self.service.view().turn_state, "unconfirmed")
+        self.assertEqual((await self.service.ask("Another")).turn_state, "running")
+
+    async def test_an_uncertain_open_is_journalled_and_looked_for_first(
+        self,
+    ) -> None:
+        self.port.open_error = TransportError(Delivery.UNKNOWN, "lost")
+        view = await self.service.ask("Hello")
+        self.assertIsNone(view.conversation)
+        self.assertNotIn("Nothing was asked", view.detail or "")
+        self.assertIn("did not confirm opening", view.detail or "")
+        self.assertEqual(self.port.runs, [])
+        self.assertEqual(AskJournal(self.root).read().opening, AT)
+        # The next ask looks with latest first and adopts what it finds.
+        self.port.open_error = None
+        self.port.latest_found = AskConversation("conv-found", None, None)
+        view = await self.service.ask("Hello")
+        self.assertEqual(view.conversation, "conv-found")
+        self.assertEqual(len(self.port.opened), 1)
+        ledger = AskJournal(self.root).read()
+        self.assertIsNone(ledger.opening)
+        self.assertEqual(ledger.totals, (40, 30))
+
+    async def test_an_unreadable_run_reply_is_logged_without_the_question(
+        self,
+    ) -> None:
+        self.port.run_error = KeyError("reply field missing for Secret question")
+        with self.assertLogs("plowshare_privacy.ask", "WARNING") as logs:
+            view = await self.service.ask("Secret question")
+        self.assertEqual(view.turn_state, "unconfirmed")
+        self.assertIn("KeyError", logs.output[0])
+        self.assertNotIn("Secret question", logs.output[0])
+
+    async def test_top_up_without_a_question_is_refused_not_crashed(self) -> None:
+        AskJournal(self.root).save(AskLedger(conversation="conv-1"))
+        service = self.make()
+        with self.assertRaises(AskConflict):
+            await service.top_up()
+        # A woken turn capped on its allowance can still be topped up.
+        self.port.log = [
+            AskEntry(1, "system", "reply", LATER, "message", job="job-woken")
+        ]
+        self.port.states["job-woken"] = "call_budget"
+        await service.poll()
+        self.assertTrue(service.view().paused)
+        view = await service.top_up()
+        self.assertEqual((view.turn_state, view.paused), ("running", False))
+        self.assertEqual(self.port.resumes, [("conv-1", "privacy_assistant", 60, 30)])
 
     async def test_bad_questions_and_settings_are_refused(self) -> None:
         for bad in ("", " \n ", "x" * 4001, "a\x00b", "tab\there"):
@@ -509,7 +697,10 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
             title=None,
         )
         self.client.request.return_value = reply(view)
-        self.assertEqual(await self.port.latest("privacy_assistant"), "conv-1")
+        self.assertEqual(
+            await self.port.latest("privacy_assistant"),
+            AskConversation("conv-1", 40, 30),
+        )
         self.assertEqual(
             self.sent(),
             ConversationLatestRequest(
@@ -518,6 +709,11 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
         )
         self.client.request.return_value = reply(None)
         self.assertIsNone(await self.port.latest("privacy_assistant"))
+        self.client.request.return_value = reply(replace(view, max_model_calls=None))
+        self.assertEqual(
+            await self.port.latest("privacy_assistant"),
+            AskConversation("conv-1", None, 30),
+        )
         self.client.request.return_value = reply(view)
         self.assertEqual(await self.port.open("privacy_assistant", 40, 30), "conv-1")
         self.assertEqual(
@@ -572,8 +768,8 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
             ("RUNNING", None, "running"),
             ("DONE", "ANSWERED", "answered"),
             ("DONE", "AWAITING", "answered"),
-            ("DONE", "TURN_CAP", "capped"),
-            ("DONE", "CALL_BUDGET", "capped"),
+            ("DONE", "TURN_CAP", "turn_cap"),
+            ("DONE", "CALL_BUDGET", "call_budget"),
             ("DONE", "STUCK", "failed"),
             ("DONE", "CANCELLED", "failed"),
             ("DONE", None, "failed"),
@@ -591,6 +787,20 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(ValueError):
             await self.port.job_state("job-1")
+        # JobStore.get's NotFoundFault, as job.status sends it for a job the
+        # server process never registered (one lost to a server restart).
+        self.client.request.return_value = Reply(
+            "NOT_FOUND", "no job called 'job-1'; this process knows []", None
+        )
+        self.assertEqual(await self.port.job_state("job-1"), "lost")
+        self.client.request.return_value = Reply("BAD_REQUEST", "bad id", None)
+        with self.assertRaises(Refusal):
+            await self.port.job_state("job-1")
+
+    async def test_open_refuses_an_unexpected_reply(self) -> None:
+        self.client.request.return_value = reply(ObservedStartedJobDto(id="conv-1"))
+        with self.assertRaises(ValueError):
+            await self.port.open("privacy_assistant", 40, 30)
 
     async def test_entries_keep_tool_names_recipients_and_replies(self) -> None:
         incoming = "Incoming message (data).\n" + json.dumps(
@@ -685,7 +895,9 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
             total=9,
         )
         self.client.request.return_value = reply(page)
-        entries = await self.port.entries("conv-1", 0, 50)
+        fetched = await self.port.entries("conv-1", 0, 50)
+        self.assertEqual(fetched.total, 9)
+        entries = fetched.entries
         self.assertEqual(
             self.sent(),
             ConversationChatRequest(conversation="conv-1", offset=0, limit=50),
