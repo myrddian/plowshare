@@ -359,7 +359,7 @@ public final class JdbcProcRepository implements ProcRepository {
     return """
         SELECT r.id,r.resource_id,r.generation,r.processing_log,r.processing_policy,r.availability,r.excluded,
           r.auto_tag,r.auto_tag_generated,r.tag_groups_generated,r.tag_groups_input_tags,
-          r.allowance_total,r.allowance_spent,
+          r.allowance_total,r.allowance_spent,r.created_at,
           q.tags,q.tag_groups_manual,q.source_name,q.owner_handle,q.project_id,p.name AS project,
           t.id AS audit_conversation
         FROM information_revision_allowances r JOIN information_resources q ON q.id=r.resource_id
@@ -382,8 +382,22 @@ public final class JdbcProcRepository implements ProcRepository {
    * Produce summary and cursor page from one materialized counter set. The summary covers the
    * entire authorized selection, including when the cursor page is empty. Both eligibility branches
    * share one statement-local worker authority set, rather than inlining it per revision.
+   *
+   * <p>Summaries come first, ordered by their own id and independent of the cursor and direction.
+   * Page rows are keyed by {@code (revision_created_at, id)}: the owning revision's creation time
+   * orders them chronologically, and the row id (revision UUID plus unit suffix) keeps each
+   * revision's rows together and unique. {@code newest} reverses both keys and the cursor
+   * comparison. No enqueue timestamp exists for every stage, so revision creation is the
+   * chronological fact available; it is not reported as queue age. The page filter runs over the
+   * already materialized selection, so neither direction changes counter work. The cursor binds
+   * {@code :afterAt} (timestamptz) and {@code :afterKey} (text), parsed by {@link
+   * ProcCursor#queue(String)}; its predicate is a fixed fragment chosen by {@code continued}.
    */
   static String queueSql(boolean activeOnly) {
+    return queueSql(activeOnly, false, false);
+  }
+
+  static String queueSql(boolean activeOnly, boolean newest, boolean continued) {
     String counters =
         TREE
             + ", "
@@ -416,31 +430,34 @@ public final class JdbcProcRepository implements ProcRepository {
             count(*) FILTER(WHERE s.state='skipped') AS skipped,
             NULL::timestamptz AS oldest,
             max(s.lease_until) FILTER(WHERE s.state='running') AS lease_until,
-            'Current generation; pending includes expired leases awaiting recovery; failed includes cancelled.' AS coverage
+            'Current generation; pending includes expired leases awaiting recovery; failed includes cancelled.' AS coverage,
+            r.created_at AS revision_created_at
           FROM revisions r JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation
-          GROUP BY r.id,r.source_name,r.project,r.owner_handle,r.processing_log
+          GROUP BY r.id,r.created_at,r.source_name,r.project,r.owner_handle,r.processing_log
           UNION ALL
           SELECT r.id::text||':paragraphs','paragraphs','summarise',r.project,r.owner_handle,
             r.processing_log,r.id::text,r.source_name,count(*),count(*) FILTER(WHERE p.summary IS NOT NULL),
             count(*) FILTER(WHERE p.summary IS NULL),NULL::bigint,0,0,0,
             NULL::timestamptz,NULL::timestamptz,
-            'Committed paragraph checkpoints; pending includes an item in flight. Later hierarchy work is additional.'
+            'Committed paragraph checkpoints; pending includes an item in flight. Later hierarchy work is additional.',
+            r.created_at
           FROM revisions r JOIN paragraphs p ON p.document_id=r.id
-          GROUP BY r.id,r.source_name,r.project,r.owner_handle,r.processing_log
+          GROUP BY r.id,r.created_at,r.source_name,r.project,r.owner_handle,r.processing_log
           UNION ALL
           SELECT r.id::text||':chunks','chunks','embed',r.project,r.owner_handle,r.processing_log,
             r.id::text,r.source_name,count(*),count(*) FILTER(WHERE ch.embedding IS NOT NULL),
             count(*) FILTER(WHERE ch.embedding IS NULL),NULL::bigint,0,0,0,
             NULL::timestamptz,NULL::timestamptz,
-            'Legacy chunk-vector checkpoints; pending includes an item in flight.'
+            'Legacy chunk-vector checkpoints; pending includes an item in flight.',r.created_at
           FROM revisions r JOIN paragraphs p ON p.document_id=r.id JOIN chunks ch ON ch.paragraph_id=p.id
           WHERE NOT EXISTS(SELECT 1 FROM embedding_slots WHERE target_space_id IS NOT NULL)
-          GROUP BY r.id,r.source_name,r.project,r.owner_handle,r.processing_log
+          GROUP BY r.id,r.created_at,r.source_name,r.project,r.owner_handle,r.processing_log
           UNION ALL
           SELECT r.id::text||':chunks:'||target.slot,'chunks','embed:'||target.slot,r.project,
             r.owner_handle,r.processing_log,r.id::text,r.source_name,count(*),count(*) FILTER(WHERE ready.value),
             count(*) FILTER(WHERE NOT ready.value),NULL::bigint,0,0,0,NULL::timestamptz,NULL::timestamptz,
-            'Current configured slot target and source revision, including staged vectors. Pending includes work in flight.'
+            'Current configured slot target and source revision, including staged vectors. Pending includes work in flight.',
+            r.created_at
           FROM revisions r JOIN paragraphs p ON p.document_id=r.id JOIN chunks ch ON ch.paragraph_id=p.id
           CROSS JOIN embedding_slots target
           CROSS JOIN LATERAL(SELECT COALESCE(CASE target.slot WHEN 'code'
@@ -452,7 +469,7 @@ public final class JdbcProcRepository implements ProcRepository {
               AND staged.slot=target.slot AND staged.space_id=target.target_space_id
               AND staged.source_revision=ch.embedding_source_revision) AS value) ready
           WHERE target.target_space_id IS NOT NULL
-          GROUP BY r.id,r.source_name,r.project,r.owner_handle,r.processing_log,target.slot
+          GROUP BY r.id,r.created_at,r.source_name,r.project,r.owner_handle,r.processing_log,target.slot
           UNION ALL
           """
             + eligible(
@@ -461,6 +478,7 @@ public final class JdbcProcRepository implements ProcRepository {
             + eligible(
                 "tagGroups", io.aeyer.plowshare.server.information.InformationQueueSql.grouping())
             + ") ";
+    String direction = newest ? " DESC" : "";
     return counters
         + ", selected AS MATERIALIZED (SELECT * FROM counters"
         + (activeOnly ? " WHERE pending>0 OR running>0 OR blocked>0" : "")
@@ -471,38 +489,61 @@ public final class JdbcProcRepository implements ProcRepository {
             sum(total)::bigint AS total,sum(completed)::bigint AS completed,sum(pending)::bigint AS pending,
             sum(running)::bigint AS running,sum(blocked)::bigint AS blocked,sum(failed)::bigint AS failed,sum(skipped)::bigint AS skipped,
             min(oldest) AS oldest,max(lease_until) AS lease_until,
-            'Entire authorized selection; independent of page cursor. Unknown per-item running counts remain null.' AS coverage
+            'Entire authorized selection; independent of page cursor. Unknown per-item running counts remain null.' AS coverage,
+            NULL::timestamptz AS revision_created_at
           FROM selected GROUP BY unit,stage
           UNION ALL
-          (SELECT false AS summary,* FROM selected
-           WHERE CAST(:after AS text) IS NULL OR id>:after ORDER BY id LIMIT :limit)
-          ) result ORDER BY summary DESC,id
-          """;
+          (SELECT false AS summary,* FROM selected"""
+        + (continued
+            ? " WHERE (revision_created_at,id)"
+                + (newest ? "<" : ">")
+                + "(CAST(:afterAt AS timestamptz),CAST(:afterKey AS text))"
+            : "")
+        + " ORDER BY revision_created_at"
+        + direction
+        + ",id"
+        + direction
+        + " LIMIT :limit)\n  ) result ORDER BY summary DESC,CASE WHEN summary THEN id END,revision_created_at"
+        + direction
+        + ",id"
+        + direction
+        + "\n";
   }
 
-  private record QueueRow(boolean summary, ProcViews.Queue value) {}
+  /** The revision creation time is the page key only; it is not part of the public row. */
+  private record QueueRow(boolean summary, ProcViews.Queue value, Instant revisionCreatedAt) {}
 
   @Override
   public ProcViews.Queues queues(String account, ProcQuery q) {
+    // Parse before any database work so a malformed cursor costs no authority or counter read.
+    var after = q.after() == null ? null : ProcCursor.queue(q.after());
     return read(
         () -> {
           var args = parameters(account, q);
+          if (after != null)
+            args.addValue("afterAt", after.time()).addValue("afterKey", after.key());
           var result =
               jdbc.query(
-                  queueSql(Boolean.TRUE.equals(q.active())),
+                  queueSql(Boolean.TRUE.equals(q.active()), q.newest(), after != null),
                   args,
-                  (r, n) -> new QueueRow(r.getBoolean("summary"), queue(r)));
+                  (r, n) ->
+                      new QueueRow(
+                          r.getBoolean("summary"), queue(r), instant(r, "revision_created_at")));
           var summaries = result.stream().filter(QueueRow::summary).map(QueueRow::value).toList();
-          var rows = result.stream().filter(row -> !row.summary()).map(QueueRow::value).toList();
+          var rows = result.stream().filter(row -> !row.summary()).toList();
           boolean more = rows.size() > q.limit();
-          var page = rows.stream().limit(q.limit()).toList();
+          var selected = rows.stream().limit(q.limit()).toList();
+          var page = selected.stream().map(QueueRow::value).toList();
           return new ProcViews.Queues(
               Instant.now(),
               q,
               page,
               summaries,
               List.of(),
-              more ? page.getLast().id() : null,
+              more
+                  ? ProcCursor.timed(
+                      selected.getLast().revisionCreatedAt(), selected.getLast().value().id())
+                  : null,
               List.of(
                   "Persisted current-generation processing stages and committed iteration checkpoints.",
                   "Stage counts, item counts and provider attempts are different units; do not add them.",
@@ -523,39 +564,64 @@ public final class JdbcProcRepository implements ProcRepository {
    * exhausted cursors and terminal calls cannot invoke that work only to discard its result. The
    * ancestor path preserves subtree/root/archive selectors, including hidden parents;
    * caller-supplied or accounting-recorded roots never authorize a call. Both branch limits are
-   * safe because any row after a branch's first limit rows cannot enter the merged first limit
-   * rows.
+   * safe because each branch, the merged page and the final projection are ordered by the same
+   * unique key in the same direction, so any row after a branch's first limit rows cannot enter the
+   * merged first limit rows.
+   *
+   * <p>The key is {@code (created_at, call_id)}: creation time orders calls chronologically and the
+   * call id breaks ties between calls captured in the same microsecond. {@code newest} reverses
+   * every ordering and the cursor comparison. The inventory walk reads {@code
+   * inference_calls_created_call} (V237) forwards or backwards, so it stays ordered and bounded,
+   * and a {@code continued} page seeks that index with a row-value comparison instead of skipping
+   * earlier rows. Cursor-bearing inventory pages therefore keep the inventory plan; only explicit
+   * root/subtree selectors use the indexed subtree. The cursor predicate is a fixed fragment chosen
+   * by {@code continued} rather than a nullable parameter, so a generic prepared plan never has to
+   * reconcile "no cursor" with an index condition. The cursor binds {@code :afterAt} (timestamptz)
+   * and {@code :afterCall} (uuid), parsed by {@link ProcCursor#call(String)}.
    */
   static String callsPageSql(boolean active) {
-    return callsPageSql(active, false);
+    return callsPageSql(active, false, false, false);
   }
 
   static String callsPageSql(boolean active, boolean selectedTree) {
+    return callsPageSql(active, selectedTree, false, false);
+  }
+
+  static String callsPageSql(
+      boolean active, boolean selectedTree, boolean newest, boolean continued) {
+    String direction = newest ? " DESC" : "";
+    String ordered = "created_at" + direction + ",call_id" + direction;
     String cursor =
-        " AND (CAST(:after AS text) IS NULL OR ic.call_id::text>:after)"
+        (continued
+                ? " AND (ic.created_at,ic.call_id)"
+                    + (newest ? "<" : ">")
+                    + "(CAST(:afterAt AS timestamptz),CAST(:afterCall AS uuid))"
+                : "")
             + (active ? " AND ic.ended_at IS NULL" : "");
+    String page =
+        ")), page AS MATERIALIZED (SELECT * FROM matched ORDER BY "
+            + ordered
+            + " LIMIT :limit)"
+            + callPageProjection(ordered);
     if (selectedTree) {
-      // Explicit roots/subtrees provide a narrow indexed selection. Cursor-bearing reads also use
-      // this path: an arbitrary text cursor cannot seek the UUID primary key, so an ordered call
-      // walk could revisit the entire call corpus just to discard off-cursor rows. Select current
-      // conversation facts once and seek their direct call index instead. Keep the disjoint orphan
-      // branch for inventory cursors; bound selectors make it unavailable without probing rows.
+      // Explicit roots/subtrees provide a narrow indexed selection: select current conversation
+      // facts once and seek their direct call index, then order that bounded subtree's calls.
+      // Bound selectors make the disjoint orphan branch unavailable without probing rows.
       return TREE
           + ", selected AS MATERIALIZED (SELECT c.id"
           + JOIN
           + " WHERE "
           + WHERE
-          + "), matched AS (SELECT ic.call_id FROM selected s"
+          + "), matched AS (SELECT ic.call_id,ic.created_at FROM selected s"
           + " JOIN inference_calls ic ON ic.conversation_id=s.id WHERE true"
           + cursor
           + " UNION ALL ("
           + orphanCallIds(cursor)
-          + ")), page AS MATERIALIZED (SELECT * FROM matched ORDER BY call_id LIMIT :limit)"
-          + callPageProjection();
+          + page;
     }
     return """
         WITH RECURSIVE matched AS (
-          (SELECT ic.call_id FROM inference_calls ic
+          (SELECT ic.call_id,ic.created_at FROM inference_calls ic
           CROSS JOIN LATERAL (SELECT 1 FROM conversations c
           LEFT JOIN projects p ON p.id=c.project_id
           WHERE c.id=ic.conversation_id AND (:fleet OR (c.owner_handle=:account AND (c.project_id IS NULL OR EXISTS(
@@ -578,19 +644,19 @@ public final class JdbcProcRepository implements ProcRepository {
           ELSE false END LIMIT 1) permitted WHERE ic.conversation_id IS NOT NULL
         """
         + cursor
-        + """
-          ORDER BY ic.call_id LIMIT :limit)
-          UNION ALL (
-        """
+        + "\n  ORDER BY ic."
+        + ordered.replace(",call_id", ",ic.call_id")
+        + " LIMIT :limit)\n  UNION ALL (\n"
         + orphanCallIds(cursor)
-        + " ORDER BY ic.call_id LIMIT :limit"
-        + ")), page AS MATERIALIZED (SELECT * FROM matched ORDER BY call_id LIMIT :limit)"
-        + callPageProjection();
+        + " ORDER BY ic."
+        + ordered.replace(",call_id", ",ic.call_id")
+        + " LIMIT :limit"
+        + page;
   }
 
   private static String orphanCallIds(String cursor) {
     return """
-        SELECT ic.call_id FROM inference_calls ic LEFT JOIN projects p ON p.id::text=ic.project_id
+        SELECT ic.call_id,ic.created_at FROM inference_calls ic LEFT JOIN projects p ON p.id::text=ic.project_id
         WHERE ic.conversation_id IS NULL AND CAST(:conversation AS text) IS NULL
           AND CAST(:root AS text) IS NULL AND CAST(:causation AS text) IS NULL
           AND (:fleet OR (ic.account_handle=:account AND (ic.project_id IS NULL OR EXISTS(
@@ -600,7 +666,7 @@ public final class JdbcProcRepository implements ProcRepository {
         + cursor;
   }
 
-  private static String callPageProjection() {
+  private static String callPageProjection(String ordered) {
     return """
         SELECT ic.call_id,ic.conversation_id,ic.root_conversation_id,ic.run_id,ic.attribution_status,
           ic.account_handle,ic.agent_name,ic.operation,ic.pool,ic.wire_model,ic.lane,ic.billing_route,
@@ -608,19 +674,27 @@ public final class JdbcProcRepository implements ProcRepository {
           p.name AS project,c.owner_handle AS owner FROM page selected
           JOIN inference_calls ic ON ic.call_id=selected.call_id
           LEFT JOIN conversations c ON c.id=ic.conversation_id
-          LEFT JOIN projects p ON p.id::text=ic.project_id ORDER BY ic.call_id
-        """;
+          LEFT JOIN projects p ON p.id::text=ic.project_id ORDER BY ic."""
+        + ordered.replace(",call_id", ",ic.call_id")
+        + "\n";
   }
 
   @Override
   public ProcViews.Calls calls(String account, ProcQuery q) {
+    // Parse before any database work so a malformed cursor costs no authority or call read.
+    var after = q.after() == null ? null : ProcCursor.call(q.after());
     return read(
         () -> {
           var args = parameters(account, q);
+          if (after != null)
+            args.addValue("afterAt", after.time())
+                .addValue("afterCall", UUID.fromString(after.key()));
           String sql =
               callsPageSql(
                   Boolean.TRUE.equals(q.active()),
-                  q.conversation() != null || q.root() != null || q.after() != null);
+                  q.conversation() != null || q.root() != null,
+                  q.newest(),
+                  after != null);
           var rows =
               jdbc.query(
                   sql,
@@ -682,7 +756,7 @@ public final class JdbcProcRepository implements ProcRepository {
               Instant.now(),
               q,
               page,
-              more ? page.getLast().id() : null,
+              more ? ProcCursor.timed(page.getLast().createdAt(), page.getLast().id()) : null,
               List.of(
                   "Durable accounting projection; recorded QUEUED/RUNNING is not an independent runtime heartbeat.",
                   "Each call includes its first 100 attempts; compare attempts with observations length for truncation.",
@@ -733,28 +807,60 @@ public final class JdbcProcRepository implements ProcRepository {
     return found;
   }
 
-  @Override
-  public List<ProcViews.Tool> tools(String account, ProcQuery q) {
-    return read(
-        () -> {
-          var args = parameters(account, q);
-          return jdbc.query(
-              TREE
-                  + """
+  /**
+   * Page transcript tool receipts by {@code (conversation_id, ordinal, tool id)}, with the entry
+   * ordinal compared as a number so ordinal 10 follows 9. Conversation ids are minted in creation
+   * order ({@code MemoryIds.mint}), so {@code newest} — every key descending — lists the most
+   * recent conversations' receipts first, latest entry first; {@code oldest} is the reverse. The
+   * receipt id {@code conversation:ordinal:toolId} remains the cursor; {@link
+   * ProcCursor#tool(String)} splits it into the bound row value {@code :afterConversation}, {@code
+   * :afterOrdinal}, {@code :afterTool}. The cursor predicate and directions are fixed fragments
+   * chosen by booleans, never caller text. The statement returns at most {@code :limit} rows, which
+   * the caller sets to the page size plus one continuation row.
+   */
+  static String toolsSql(boolean active, boolean newest, boolean continued) {
+    String direction = newest ? " DESC" : "";
+    return TREE
+        + """
           SELECT e.conversation_id||':'||e.ordinal::text||':'||(tool->>'id') AS id,e.conversation_id,e.job_id,
             tool->>'name' AS name,e.recorded_at,
             CASE WHEN EXISTS(SELECT 1 FROM entries result WHERE result.conversation_id=e.conversation_id
               AND result.tool_call_id=tool->>'id') THEN 'RESULT_RECORDED' ELSE 'UNKNOWN' END AS state
           """
-                  + JOIN
-                  + " JOIN entries e ON e.conversation_id=c.id CROSS JOIN LATERAL "
-                  + "jsonb_array_elements(COALESCE(e.tool_calls,'[]'::jsonb)) tool WHERE "
-                  + WHERE
-                  + (Boolean.TRUE.equals(q.active())
-                      ? " AND NOT EXISTS(SELECT 1 FROM entries result WHERE result.conversation_id=e.conversation_id AND result.tool_call_id=tool->>'id')"
-                      : "")
-                  + " AND (CAST(:after AS text) IS NULL OR e.conversation_id||':'||e.ordinal::text||':'||(tool->>'id')>:after)"
-                  + " ORDER BY id LIMIT :limit",
+        + JOIN
+        + " JOIN entries e ON e.conversation_id=c.id CROSS JOIN LATERAL "
+        + "jsonb_array_elements(COALESCE(e.tool_calls,'[]'::jsonb)) tool WHERE "
+        + WHERE
+        + (active
+            ? " AND NOT EXISTS(SELECT 1 FROM entries result WHERE result.conversation_id=e.conversation_id AND result.tool_call_id=tool->>'id')"
+            : "")
+        + (continued
+            ? " AND (e.conversation_id,e.ordinal,tool->>'id')"
+                + (newest ? "<" : ">")
+                + "(CAST(:afterConversation AS text),CAST(:afterOrdinal AS integer),CAST(:afterTool AS text))"
+            : "")
+        + " ORDER BY e.conversation_id"
+        + direction
+        + ",e.ordinal"
+        + direction
+        + ",tool->>'id'"
+        + direction
+        + " LIMIT :limit";
+  }
+
+  @Override
+  public List<ProcViews.Tool> tools(String account, ProcQuery q) {
+    // Parse before any database work so a malformed cursor costs no authority or transcript read.
+    var after = q.after() == null ? null : ProcCursor.tool(q.after());
+    return read(
+        () -> {
+          var args = parameters(account, q);
+          if (after != null)
+            args.addValue("afterConversation", after.conversation())
+                .addValue("afterOrdinal", after.ordinal())
+                .addValue("afterTool", after.tool());
+          return jdbc.query(
+              toolsSql(Boolean.TRUE.equals(q.active()), q.newest(), after != null),
               args,
               (r, n) ->
                   new ProcViews.Tool(
@@ -781,7 +887,7 @@ public final class JdbcProcRepository implements ProcRepository {
         + stage
         + ":eligible-not-enqueued',"
         + "r.project,r.owner_handle,r.processing_log,r.id::text,r.source_name,1,0,1,NULL::bigint,0,0,0,NULL::timestamptz,NULL::timestamptz,"
-        + "'Eligible under the owning sweep predicate; not yet enqueued. The next sweep batch does not bound this count.' "
+        + "'Eligible under the owning sweep predicate; not yet enqueued. The next sweep batch does not bound this count.',r.created_at "
         + "FROM eligibility_candidates r WHERE r.candidate_stage='"
         + stage
         + "' AND "

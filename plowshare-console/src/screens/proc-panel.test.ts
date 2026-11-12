@@ -288,7 +288,26 @@ describe('PROC audit panel', () => {
       ...replies,
       'proc.queues': {
         ...queues,
-        queues: [checkpoint],
+        queues: [
+          checkpoint,
+          {
+            ...checkpoint,
+            id: 'revision:unbound',
+            conversation: null,
+            resource: 'Scan.pdf',
+            running: 0,
+            failed: 1,
+          },
+        ],
+        pools: [
+          {
+            name: 'local-gpu',
+            lane: 'interactive',
+            queued: 3,
+            running: 1,
+            capacity: 2,
+          },
+        ],
         summaries: [
           {
             ...checkpoint,
@@ -308,17 +327,206 @@ describe('PROC audit panel', () => {
     };
     const root = document.createElement('div');
     const panel = mountProcPanel(root, reader);
-    const view = root.querySelector<HTMLSelectElement>(
-      '[aria-label="Audit view"]',
-    );
-    if (!view) throw new Error('Audit view missing');
+    const view = control(root, 'Audit view');
     view.value = 'proc.queues';
     view.dispatchEvent(new Event('change'));
     await tick();
-    expect(root.textContent).toContain('100 / 105 paragraphs');
-    expect(root.textContent).toContain('5 pending · Unknown running');
-    expect(root.querySelector('table')?.textContent).toContain('1 / 2');
+    // Whole-selection totals sit in their own strip, outside the paged rows.
+    const totals = root.querySelector('[aria-label="Full-selection totals"]');
+    const page = root.querySelector('.proc-results');
+    if (!totals || !page) throw new Error('Missing totals or page');
+    expect(page.contains(totals)).toBe(false);
+    expect(totals.textContent).toContain('100 / 105 paragraphs');
+    expect(
+      [...totals.querySelectorAll('.proc-tally')].map((t) => t.textContent),
+    ).toEqual(['5 pending', 'Unknown running']);
+    const total = totals.querySelector('progress');
+    expect([total?.value, total?.max]).toEqual([100, 105]);
+    // Checkpoints are rows: a meter, the counters, and the owning conversation to open.
+    const row = page.querySelector<HTMLElement>(
+      'button.proc-row[data-conversation="cnv_fixture"]',
+    );
+    if (!row) throw new Error('Missing checkpoint row');
+    expect(row.querySelector('strong')?.textContent).toBe('Notes.md');
+    expect(row.querySelector('.proc-badge')?.textContent).toBe('1 PENDING');
+    expect(row.textContent).toContain('1 / 2 paragraphs');
+    expect(row.querySelector('progress')?.getAttribute('aria-label')).toBe(
+      'Notes.md completed',
+    );
+    expect(row.querySelector('.proc-trace')?.textContent).toBe('Trace');
+    // A checkpoint with no conversation has nothing to open, and failures lead its badge.
+    const unbound = [...page.querySelectorAll('.proc-row')].find((r) =>
+      r.textContent?.includes('Scan.pdf'),
+    );
+    expect(unbound?.tagName).toBe('DIV');
+    expect(unbound?.getAttribute('data-tone')).toBe('warn');
+    expect(unbound?.querySelector('.proc-badge')?.textContent).toBe('1 FAILED');
+    expect(unbound?.textContent).toContain('No conversation');
+    expect(root.querySelector('table')).toBeNull();
+    const pools = root.querySelector('[aria-label="Local model pools"]');
+    expect(pools?.textContent).toContain('local-gpu');
+    expect(pools?.textContent).toContain('1 / 2 running');
+    expect(pools?.textContent).toContain('3 queued');
     expect(button(root, 'Next page').disabled).toBe(false);
+    // Tracing opens the conversation beside the list; the page stays where it was.
+    row.click();
+    await tick();
+    expect(page.contains(row)).toBe(true);
+    expect(row.getAttribute('aria-current')).toBe('true');
+    expect(root.querySelector('.proc-detail .proc-id')?.textContent).toBe(
+      'cnv_fixture',
+    );
+    // The strips belong to the queue view only.
+    view.value = 'proc.list';
+    view.dispatchEvent(new Event('change'));
+    await tick();
+    expect(totals.hasAttribute('hidden')).toBe(true);
+    expect(pools?.hasAttribute('hidden')).toBe(true);
+    expect(totals.textContent).toBe('');
+    panel.destroy();
+  });
+
+  it('lists model calls and tool receipts as rows that open their conversation beside the list', async () => {
+    const call: ProcReplies['proc.calls']['calls'][number] = {
+      id: 'call_fixture',
+      conversation: 'cnv_fixture',
+      root: 'cnv_root',
+      run: null,
+      owner: 'alice',
+      principal: 'SYSTEM',
+      project: 'research',
+      agent: 'information_tagger',
+      operation: 'chat.completion',
+      pool: 'local',
+      model: 'fixture-model',
+      lane: 'interactive',
+      route: 'local',
+      runtime: 'fixture',
+      state: 'FAILED',
+      createdAt: '2026-10-19T00:59:00Z',
+      endedAt: '2026-10-19T00:59:02.500Z',
+      attempts: 2,
+      observations: [],
+    };
+    const rowReplies: ProcReplies = {
+      ...replies,
+      'proc.calls': {
+        ...calls,
+        calls: [
+          call,
+          { ...call, id: 'call_unbound', conversation: null, agent: null },
+        ],
+      },
+      'proc.tools': {
+        ...replies['proc.tools'],
+        tools: [
+          {
+            id: 'tool_fixture',
+            conversation: 'cnv_fixture',
+            job: 'job_fixture',
+            name: 'file_read',
+            state: 'RESULT_RECORDED',
+            recordedAt: null,
+          },
+        ],
+      },
+    };
+    const reader: ProcReader = { read: async (type) => rowReplies[type] };
+    const root = document.createElement('div');
+    document.body.append(root);
+    const panel = mountProcPanel(root, reader);
+    const view = control(root, 'Audit view');
+    view.value = 'proc.calls';
+    view.dispatchEvent(new Event('change'));
+    await tick();
+    expect(root.querySelector('[role="status"]')?.textContent).toContain(
+      '2 model calls on this page',
+    );
+    const [bound, unbound] = root.querySelectorAll<HTMLElement>(
+      '.proc-results .proc-row',
+    );
+    if (!bound || !unbound) throw new Error('Missing call rows');
+    expect(bound.dataset.tone).toBe('warn');
+    expect(bound.querySelector('strong')?.textContent).toBe(
+      'information_tagger',
+    );
+    expect(bound.querySelector('.proc-badge')?.textContent).toBe('FAILED');
+    for (const text of [
+      'chat.completion',
+      'local / fixture-model',
+      '1m ago',
+      '2 attempts',
+      '2.5s',
+      'cnv_fixture',
+      'Trace',
+    ])
+      expect(bound.textContent).toContain(text);
+    expect(unbound.tagName).toBe('DIV');
+    expect(unbound.querySelector('strong')?.textContent).toBe(
+      'chat.completion',
+    );
+    expect(unbound.textContent).toContain('Unbound call');
+    expect(unbound.querySelector('.proc-trace')).toBeNull();
+    // Selecting keeps the page and survives a poll with focus on the same call.
+    bound.focus();
+    bound.click();
+    await tick();
+    expect(bound.isConnected).toBe(true);
+    expect(fact(root, 'cause')).toBe('call-source');
+    await panel.refresh();
+    await tick();
+    expect(document.activeElement?.getAttribute('data-proc-focus')).toBe(
+      'call_fixture',
+    );
+    expect(document.activeElement?.getAttribute('aria-current')).toBe('true');
+
+    view.value = 'proc.tools';
+    view.dispatchEvent(new Event('change'));
+    await tick();
+    expect(root.querySelector('[role="status"]')?.textContent).toContain(
+      '1 tool receipt on this page',
+    );
+    const receipt = root.querySelector<HTMLElement>(
+      '.proc-results button.proc-row',
+    );
+    if (!receipt) throw new Error('Missing tool row');
+    expect(receipt.dataset.tone).toBe('done');
+    for (const text of [
+      'file_read',
+      'RESULT_RECORDED',
+      'Job job_fixture',
+      'Time not recorded',
+      'cnv_fixture',
+      'Trace',
+    ])
+      expect(receipt.textContent).toContain(text);
+    receipt.click();
+    await tick();
+    expect(receipt.getAttribute('aria-current')).toBe('true');
+    expect(root.querySelector('.proc-detail .proc-id')?.textContent).toBe(
+      'cnv_fixture',
+    );
+    panel.destroy();
+  });
+
+  it('names the empty state of every view', async () => {
+    const reader: ProcReader = { read: async (type) => replies[type] };
+    const root = document.createElement('div');
+    const panel = mountProcPanel(root, reader);
+    const view = control(root, 'Audit view');
+    for (const [type, text] of [
+      ['proc.queues', 'No retained checkpoints in this selection.'],
+      ['proc.calls', 'No retained model calls in this selection.'],
+      ['proc.tools', 'No retained tool receipts in this selection.'],
+    ] as const) {
+      view.value = type;
+      view.dispatchEvent(new Event('change'));
+      await tick();
+      expect(root.querySelector('.proc-results')?.textContent).toContain(text);
+      expect(root.querySelector('.proc-detail')?.textContent).toContain(
+        'Select a row',
+      );
+    }
     panel.destroy();
   });
   it('shows completed internal conversations without a date cutoff and traces recorded causes', async () => {
@@ -529,20 +737,65 @@ describe('PROC audit panel', () => {
       limit: 50,
       order: 'oldest',
     });
-    // Inspections and the other views have their own orderings and never carry this one.
+    // Inspections carry the same order, so the detail starts from the same end as the list.
     button(root, 'information_tagger').click();
     await tick();
+    expect(asked.at(-1)?.type).toBe('proc.inspect');
+    expect(asked.at(-1)?.query.order).toBe('oldest');
+    panel.destroy();
+  });
+
+  it('sorts every view: the order stays enabled, travels with each page and restarts paging', async () => {
+    const asked: { type: string; query: ProcQuery }[] = [];
+    const paged: ProcReplies = {
+      'proc.list': { ...conversations, cursor: 'cursor-fixture' },
+      'proc.inspect': inspection,
+      'proc.queues': { ...queues, cursor: 'cursor-fixture' },
+      'proc.calls': { ...calls, cursor: 'cursor-fixture' },
+      'proc.tools': { ...replies['proc.tools'], cursor: 'cursor-fixture' },
+    };
+    const reader: ProcReader = {
+      read: async (type, query) => {
+        asked.push({ type, query });
+        return paged[type];
+      },
+    };
+    const root = document.createElement('div');
+    const panel = mountProcPanel(root, reader);
     const view = control(root, 'Audit view');
-    view.value = 'proc.calls';
-    view.dispatchEvent(new Event('change'));
-    await tick();
-    expect(order.disabled).toBe(true);
-    expect(
-      asked
-        .filter((a) => a.type !== 'proc.list')
-        .every((a) => a.query.order === undefined),
-    ).toBe(true);
-    expect(asked.at(-1)?.type).toBe('proc.calls');
+    const order = control(root, 'Audit order');
+    expect(order.disabled).toBe(false);
+    for (const type of ['proc.queues', 'proc.calls', 'proc.tools'] as const) {
+      order.value = 'newest';
+      view.value = type;
+      view.dispatchEvent(new Event('change'));
+      await tick();
+      expect(order.disabled).toBe(false);
+      expect(asked.at(-1)).toEqual({
+        type,
+        query: { visibility: 'mine', limit: 50, order: 'newest' },
+      });
+      button(root, 'Next page').click();
+      await tick();
+      expect(asked.at(-1)).toEqual({
+        type,
+        query: {
+          visibility: 'mine',
+          after: 'cursor-fixture',
+          limit: 50,
+          order: 'newest',
+        },
+      });
+      // A cursor belongs to the direction that produced it, so a new order starts over.
+      order.value = 'oldest';
+      order.dispatchEvent(new Event('change'));
+      await tick();
+      expect(asked.at(-1)).toEqual({
+        type,
+        query: { visibility: 'mine', limit: 50, order: 'oldest' },
+      });
+      expect(button(root, 'First page').disabled).toBe(true);
+    }
     panel.destroy();
   });
 

@@ -56,9 +56,9 @@ corpus-wide enrichment.
 Call inventory pages do not need a full conversation count. They use ordered call
 candidates with current owner/membership and cycle-safe parent checks, then merge
 bounded attributed and orphan branches. Explicit root/subtree selectors use the
-indexed subtree instead. Cursor-bearing call pages select authorized conversations
-once and seek their direct call index, preserving arbitrary text cursor semantics
-without walking the entire UUID call index past off-cursor rows. Recorded accounting roots never authorize a call; the
+indexed subtree instead. Inventory pages, including cursor-bearing ones, walk the
+`(created_at, call_id)` index forwards or backwards and seek the cursor with a
+row-value comparison, so they never skip past off-cursor rows. Recorded accounting roots never authorize a call; the
 current conversation root controls archive visibility. Attempts are hydrated only
 for the authorized page and keep their independent per-call cap.
 
@@ -126,7 +126,19 @@ subtree), `root`, `causation`, `active`, `after` and `limit` (1–100; default 5
 unfinished request is running. Each page returns its resolved selection, snapshot
 time, coverage and continuation cursor. Conversation, call and queue pages also
 report accounting capture/projection health. Supply `cursor` as `after` with the
-same selection. Ordering is by stable identifier; it is not execution/causal order.
+same selection, operation and `order`.
+
+`order` is `oldest` (default) or `newest`; `newest` reverses every key so
+current work comes first. Conversations page by id, which is minted in creation
+order. Calls page by `(created_at, call id)`, with the cursor
+`<createdMicros>:<callId>`. Tool receipts page by conversation, numeric entry
+ordinal (10 follows 9) and tool id; the cursor is the last receipt id. Queue
+rows page by their revision's creation time and row id, with the cursor
+`<revisionCreatedMicros>:<rowId>`; summaries stay first and ignore the cursor.
+Revision creation time is a page key, not an enqueue time. Treat cursors as
+opaque: a malformed cursor, or a call/queue cursor from a server that ordered
+by bare identifiers, is rejected; restart without `after`. Chronological order
+is retained-record order, not execution or causal order.
 
 `proc.inspect` returns independently bounded conversation, queue, call and tool
 sections. Follow each section's continuation through its matching list operation.

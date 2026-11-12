@@ -42,11 +42,9 @@ body { margin:0; height:100vh; overflow:hidden; background:var(--bg); color:var(
 
 /* Two panes that scroll on their own; the page itself does not. */
 .proc-workspace { flex:1; min-height:0; display:grid; grid-template-columns:minmax(260px,34%) minmax(0,1fr); border:1px solid var(--proc-line); border-radius:12px; overflow:hidden; background:var(--proc-panel); }
-.proc-panel[data-view=page] .proc-workspace { grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); }
-.proc-panel[data-view=page][data-detail=empty] .proc-workspace { grid-template-columns:minmax(0,1fr); }
-.proc-panel[data-view=page][data-detail=empty] .proc-detail { display:none; }
+/* Checkpoint rows carry a meter and five counters, so that list gets a wider column. */
+.proc-panel[data-view=queues] .proc-workspace { grid-template-columns:minmax(300px,44%) minmax(0,1fr); }
 .proc-list-pane { display:flex; flex-direction:column; min-width:0; min-height:0; border-right:1px solid var(--proc-line); }
-.proc-panel[data-view=page][data-detail=empty] .proc-list-pane { border-right:0; }
 .proc-selection { flex-shrink:0; display:flex; flex-wrap:wrap; align-items:center; gap:4px; min-height:36px; padding:5px 12px; font-size:11px; color:var(--proc-muted); border-bottom:1px solid var(--proc-line); }
 .proc-results { flex:1; min-height:0; overflow:auto; padding:6px; }
 .proc-detail { min-width:0; min-height:0; overflow:auto; padding:16px 18px 20px; display:flex; flex-direction:column; gap:14px; }
@@ -74,6 +72,37 @@ button.proc-row:hover { background:var(--proc-hover); }
 .proc-badge { display:inline-block; flex-shrink:0; padding:0 6px; font-size:9.5px; line-height:16px; letter-spacing:.04em; color:var(--proc-muted); border:1px solid var(--proc-line); border-radius:4px; white-space:nowrap; }
 .proc-badge[data-tone=live] { color:var(--proc-accent); border-color:var(--proc-accent); }
 .proc-badge[data-tone=warn],.proc-badge[data-tone=unknown] { color:var(--proc-warn); border-color:var(--proc-warn); }
+.proc-row-meta>.proc-aside { margin-left:auto; flex-shrink:0; }
+.proc-row-meta>.proc-aside::before { content:none; }
+.proc-row-foot>.proc-unbound { margin-left:0; }
+.proc-trace { margin-left:auto; flex-shrink:0; font:10px var(--proc-mono); letter-spacing:.06em; text-transform:uppercase; opacity:.7; }
+.proc-trace::after { content:" \2192"; }
+button.proc-row:hover .proc-trace,.proc-row[aria-current=true] .proc-trace { color:var(--proc-accent); opacity:1; }
+
+/* Progress: completed over total as a slim meter, then every reported counter. */
+.proc-progress,.proc-tallies,.proc-total-name { display:flex; align-items:center; gap:8px; min-width:0; }
+.proc-row>.proc-progress,.proc-row>.proc-tallies { padding-left:15px; }
+.proc-progress { font-size:11px; font-variant-numeric:tabular-nums; }
+.proc-progress>span { flex-shrink:0; white-space:nowrap; }
+.proc-meter { flex:1 1 60px; min-width:40px; height:4px; appearance:none; -webkit-appearance:none; border:0; border-radius:2px; overflow:hidden; color:var(--proc-accent); background:var(--proc-line); }
+.proc-meter::-webkit-progress-bar { background:transparent; }
+.proc-meter::-webkit-progress-value { background:var(--proc-accent); border-radius:2px; }
+.proc-meter::-moz-progress-bar { background:var(--proc-accent); border-radius:2px; }
+[data-tone=done] .proc-meter::-webkit-progress-value { background:var(--proc-muted); }
+[data-tone=done] .proc-meter::-moz-progress-bar { background:var(--proc-muted); }
+.proc-tallies { flex-wrap:wrap; gap:0 10px; font-size:11px; font-variant-numeric:tabular-nums; color:var(--proc-ink); }
+.proc-tally { white-space:nowrap; }
+.proc-tally[data-zero] { color:var(--proc-muted); opacity:.75; }
+.proc-tally[data-tone=warn] { color:var(--proc-warn); }
+
+/* Whole-selection totals above the page and pool occupancy below it; neither scrolls with the rows. */
+.proc-strip { flex-shrink:0; display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:8px 16px; max-height:34%; overflow:auto; padding:8px 12px 10px; border-bottom:1px solid var(--proc-line); }
+.proc-strip[hidden] { display:none; }
+.proc-strip>.proc-label { grid-column:1/-1; }
+.proc-pools { border-top:1px solid var(--proc-line); border-bottom:0; max-height:26%; }
+.proc-total,.proc-pool { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.proc-total-name { font-size:11px; color:var(--proc-muted); }
+.proc-total-name strong { min-width:0; font-size:12px; font-weight:500; color:var(--proc-ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* Inspection. */
 .proc-detail-header { display:flex; flex-direction:column; gap:4px; padding-bottom:12px; border-bottom:1px solid var(--proc-line); }
@@ -106,12 +135,6 @@ button.proc-row:hover { background:var(--proc-hover); }
 .proc-panel th { position:sticky; top:0; padding:6px 10px; font:400 10px var(--proc-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--proc-muted); background:var(--proc-panel); border-bottom:1px solid var(--proc-line); }
 .proc-panel td { padding:6px 10px; vertical-align:top; overflow-wrap:anywhere; border-bottom:1px solid var(--proc-line); }
 .proc-panel tr:last-child>td { border-bottom:0; }
-.proc-queues { display:flex; flex-direction:column; gap:10px; padding:8px; }
-.proc-queues td p { font-size:11px; color:var(--proc-muted); }
-.proc-queues td .proc-button { margin-top:4px; }
-.proc-totals { display:flex; flex-wrap:wrap; gap:8px; }
-.proc-totals>div { min-width:150px; padding:8px 12px; border:1px solid var(--proc-line); border-radius:8px; }
-.proc-totals p { font-size:11px; color:var(--proc-muted); }
 .proc-results>.proc-section { margin:8px 4px 4px; }
 
 /* Footer evidence stays out of the way until asked for. */
@@ -121,9 +144,12 @@ button.proc-row:hover { background:var(--proc-hover); }
 
 /* The host may be a narrow embedded slot, so stack on the panel's own width. */
 @container (max-width:720px) {
-  .proc-workspace,.proc-panel[data-view=page] .proc-workspace { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(120px,42%) minmax(0,1fr); }
+  .proc-workspace,.proc-panel[data-view=queues] .proc-workspace { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(120px,42%) minmax(0,1fr); }
   .proc-panel[data-detail=empty] .proc-workspace { grid-template-rows:minmax(0,1fr) auto; }
-  .proc-panel[data-view=page][data-detail=empty] .proc-workspace { grid-template-rows:minmax(0,1fr); }
+  /* Too short for fixed strips: totals, rows and pools scroll together as one list. */
+  .proc-panel[data-view=queues] .proc-list-pane { overflow:auto; }
+  .proc-panel[data-view=queues] .proc-results { flex:none; overflow:visible; }
+  .proc-panel[data-view=queues] .proc-strip { max-height:none; overflow:visible; }
   .proc-list-pane { border-right:0; border-bottom:1px solid var(--proc-line); }
   .proc-status { text-align:left; }
   .proc-paging { margin-left:0; }

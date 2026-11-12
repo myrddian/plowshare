@@ -71,6 +71,10 @@ class JdbcProcRepositoryTest {
     repository = new JdbcProcRepository(jdbc, new DataSourceTransactionManager(data));
   }
 
+  /** A well-formed call cursor after every fixture call. */
+  private static final String EXHAUSTED_CALL =
+      ProcCursor.timed(Instant.parse("2999-01-01T00:00:00Z"), UUID.randomUUID().toString());
+
   private ProcQuery query(String visibility, String conversation, String after, int limit) {
     return new ProcQuery(visibility, null, conversation, null, null, null, after, limit, null);
   }
@@ -424,7 +428,15 @@ class JdbcProcRepositoryTest {
     var page = repository.queues("alice", query("mine", null, null, 2));
     assertEquals(2, page.queues().size());
     assertNotNull(page.cursor());
-    var exhausted = repository.queues("alice", query("mine", null, "zzzz", 2));
+    var exhausted =
+        repository.queues(
+            "alice",
+            query(
+                "mine",
+                null,
+                ProcCursor.timed(
+                    Instant.parse("2999-01-01T00:00:00Z"), UUID.randomUUID() + ":stages"),
+                2));
     assertTrue(exhausted.queues().isEmpty());
     assertEquals(
         page.summaries(), exhausted.summaries(), "Totals must survive an empty cursor page");
@@ -656,12 +668,14 @@ class JdbcProcRepositoryTest {
     assertTrue(checkBoundedCallParents(plan) > 0, "calls must check their actual current roots");
     checkCallScans(plan);
     var named = new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc);
-    args.addValue("after", "zzzz");
+    args.addValue("afterAt", java.time.OffsetDateTime.parse("2999-01-01T00:00:00Z"))
+        .addValue("afterCall", UUID.randomUUID());
     var exhaustedPlan =
         new com.fasterxml.jackson.databind.ObjectMapper()
             .readTree(
                 named.queryForObject(
-                    "EXPLAIN (ANALYZE,FORMAT JSON) " + JdbcProcRepository.callsPageSql(false),
+                    "EXPLAIN (ANALYZE,FORMAT JSON) "
+                        + JdbcProcRepository.callsPageSql(false, false, false, true),
                     args,
                     String.class));
     assertEquals(
@@ -784,7 +798,8 @@ class JdbcProcRepositoryTest {
     var next = repository.calls("alice", query("mine", null, first.cursor(), 1));
     assertEquals(orphan.toString(), next.calls().getFirst().id());
     assertNull(next.cursor());
-    assertTrue(repository.calls("alice", query("mine", null, "zzzz", 100)).calls().isEmpty());
+    assertTrue(
+        repository.calls("alice", query("mine", null, EXHAUSTED_CALL, 100)).calls().isEmpty());
     assertEquals(1, repository.calls("alice", query("mine", root, null, 100)).calls().size());
     assertEquals(1, repository.calls("alice", query("mine", child, null, 100)).calls().size());
     assertTrue(repository.calls("alice", query("mine", foreign, null, 100)).calls().isEmpty());
@@ -1039,6 +1054,217 @@ class JdbcProcRepositoryTest {
       assertEquals(100, call.observations().getLast().number());
     }
     assertTrue(repository.calls("bob", query("mine", root, null, 100)).calls().isEmpty());
+  }
+
+  private ProcQuery ordered(String root, String after, int limit, String order) {
+    return new ProcQuery("mine", null, null, root, null, null, after, limit, order);
+  }
+
+  @Test
+  void callPagesFollowCreationTimeInBothDirectionsAcrossBranchesAndCursors() throws Exception {
+    UUID instance = callInstance();
+    // UUID order deliberately disagrees with time order; two calls share one timestamp.
+    UUID early = UUID.fromString("ffffffff-0000-0000-0000-000000000001");
+    UUID orphan = UUID.fromString("00000000-0000-0000-0000-0000000000aa");
+    UUID tiedLow = UUID.fromString("10000000-0000-0000-0000-000000000000");
+    UUID tiedHigh = UUID.fromString("e0000000-0000-0000-0000-000000000000");
+    UUID late = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    addTimedCall(instance, early, child, null, "2026-01-01T00:00:00.000001Z");
+    addTimedCall(instance, orphan, null, "alice", "2026-01-02T00:00:00Z");
+    addTimedCall(instance, tiedHigh, child, null, "2026-01-03T00:00:00.123456Z");
+    addTimedCall(instance, tiedLow, child, null, "2026-01-03T00:00:00.123456Z");
+    addTimedCall(instance, late, child, null, "2026-01-04T00:00:00Z");
+    var ascending =
+        List.of(early, orphan, tiedLow, tiedHigh, late).stream().map(UUID::toString).toList();
+    for (String order : new String[] {"oldest", "newest"}) {
+      var expected = order.equals("oldest") ? ascending : ascending.reversed();
+      assertEquals(
+          expected, callIds(repository.calls("alice", ordered(null, null, 100, order))), order);
+      // Every page size continues exactly where the previous page stopped, in its direction.
+      for (int limit = 1; limit <= 3; limit++) {
+        var seen = new java.util.ArrayList<String>();
+        String cursor = null;
+        do {
+          var page = repository.calls("alice", ordered(null, cursor, limit, order));
+          assertTrue(page.calls().size() <= limit);
+          assertEquals(order, page.selection().order());
+          seen.addAll(callIds(page));
+          cursor = page.cursor();
+        } while (cursor != null);
+        assertEquals(expected, seen, order + " limit " + limit);
+      }
+      // The subtree path (no orphan branch) uses the same key and direction.
+      var subtree = expected.stream().filter(id -> !id.equals(orphan.toString())).toList();
+      var first = repository.calls("alice", ordered(root, null, 2, order));
+      assertEquals(subtree.subList(0, 2), callIds(first));
+      var rest = repository.calls("alice", ordered(root, first.cursor(), 100, order));
+      assertEquals(subtree.subList(2, 4), callIds(rest));
+      assertNull(rest.cursor());
+    }
+    var newestFirst = repository.calls("alice", ordered(null, null, 1, "newest"));
+    assertEquals(
+        ProcCursor.timed(Instant.parse("2026-01-04T00:00:00Z"), late.toString()),
+        newestFirst.cursor());
+    // A continued inventory page seeks the chronological index instead of building the tree.
+    var args =
+        new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+            .addValue("account", "alice")
+            .addValue("fleet", false)
+            .addValue("project", null)
+            .addValue("conversation", null)
+            .addValue("root", null)
+            .addValue("causation", null)
+            .addValue("limit", 2)
+            .addValue("afterAt", ProcCursor.call(newestFirst.cursor()).time())
+            .addValue("afterCall", late);
+    var plan =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(
+                new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+                    .queryForObject(
+                        "EXPLAIN (ANALYZE,FORMAT JSON) "
+                            + JdbcProcRepository.callsPageSql(false, false, true, true),
+                        args,
+                        String.class));
+    checkBoundedCallParents(plan);
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM pg_indexes WHERE indexname='inference_calls_created_call'"
+                + " AND indexdef LIKE '%(created_at, call_id)%'",
+            Integer.class));
+    // Pre-chronology cursors (bare call ids) are refused rather than reinterpreted.
+    assertThrows(
+        CallerFault.class,
+        () -> repository.calls("alice", ordered(null, early.toString(), 1, "newest")));
+  }
+
+  private static List<String> callIds(ProcViews.Calls page) {
+    return page.calls().stream().map(ProcViews.Call::id).toList();
+  }
+
+  private void addTimedCall(
+      UUID instance, UUID call, String conversation, String account, String createdAt) {
+    jdbc.update(
+        """
+        INSERT INTO inference_calls(call_id,instance_id,attribution,project_id,scope,conversation_id,
+          root_conversation_id,ancestor_conversation_ids,ancestor_run_ids,ancestor_orchestration_ids,
+          account_handle,agent_name,operation,attribution_status,specifier,pool,wire_model,billing_route,lane,
+          created_at,last_event_at,ended_at,lifecycle,attempt_count,last_call_sequence)
+        SELECT ?,?,'{}',p.id::text,'PROJECT',?,?,ARRAY[]::text[],ARRAY[]::text[],ARRAY[]::text[],
+          ?,'fixture','DOCUMENT_SUMMARY',?,'fast','fixture-pool','fixture-model','fixture-pool','CHAT',
+          CAST(? AS timestamptz),now(),now(),'SUCCEEDED',0,1
+        FROM projects p WHERE name='research'
+        """,
+        call,
+        instance,
+        conversation,
+        conversation == null ? null : root,
+        account,
+        account == null ? "SYSTEM" : "ATTRIBUTED",
+        createdAt);
+  }
+
+  @Test
+  void toolPagesOrderOrdinalsNumericallyAndContinueInBothDirections() {
+    // Twelve entries put ordinals 10–12 after 9, which text comparison would misplace.
+    for (int ordinal = 1; ordinal <= 12; ordinal++)
+      jdbc.update(
+          "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content,tool_calls)"
+              + " VALUES (?,?,1,'answer','assistant','fixture',CAST(? AS jsonb))",
+          child,
+          ordinal,
+          ordinal == 10
+              ? "[{\"id\":\"b:2\",\"name\":\"fetch\"},{\"id\":\"a:1\",\"name\":\"fetch\"}]"
+              : "[{\"id\":\"t" + ordinal + "\",\"name\":\"fetch\"}]");
+    jdbc.update(
+        "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content,tool_calls)"
+            + " VALUES (?,1,1,'answer','assistant','fixture','[{\"id\":\"r1\",\"name\":\"fetch\"}]')",
+        root);
+    var childIds = new java.util.ArrayList<String>();
+    for (int ordinal = 1; ordinal <= 12; ordinal++)
+      if (ordinal == 10) {
+        childIds.add(child + ":10:a:1");
+        childIds.add(child + ":10:b:2");
+      } else childIds.add(child + ":" + ordinal + ":t" + ordinal);
+    // Conversation ids are creation ordered; compare them as PostgreSQL does.
+    boolean rootFirst =
+        jdbc.queryForObject("SELECT CAST(? AS text) < CAST(? AS text)", Boolean.class, root, child);
+    var ascending = new java.util.ArrayList<String>(childIds);
+    if (rootFirst) ascending.addFirst(root + ":1:r1");
+    else ascending.addLast(root + ":1:r1");
+    var audit = new ProcAudit(repository, () -> live());
+    for (String order : new String[] {"oldest", "newest"}) {
+      var expected = order.equals("oldest") ? ascending : ascending.reversed();
+      assertEquals(
+          expected,
+          audit.tools("alice", ordered(root, null, 100, order)).tools().stream()
+              .map(ProcViews.Tool::id)
+              .toList());
+      var seen = new java.util.ArrayList<String>();
+      String cursor = null;
+      do {
+        var page = audit.tools("alice", ordered(root, cursor, 4, order));
+        page.tools().forEach(tool -> seen.add(tool.id()));
+        cursor = page.cursor();
+      } while (cursor != null);
+      assertEquals(expected, seen, order);
+      var inspected = audit.inspect("alice", ordered(root, null, 3, order));
+      assertEquals(
+          expected.subList(0, 3), inspected.tools().stream().map(ProcViews.Tool::id).toList());
+      assertTrue(inspected.toolsTruncated());
+    }
+    assertThrows(
+        CallerFault.class,
+        () -> audit.tools("alice", ordered(root, child + ":ten:t10", 4, "oldest")));
+  }
+
+  @Test
+  void queuePagesOrderByRevisionCreationAndKeepSummariesFixed() {
+    UUID older = UUID.fromString("ffffffff-0000-0000-0000-000000000001");
+    UUID middle = UUID.fromString("80000000-0000-0000-0000-000000000001");
+    UUID newer = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    for (var revision : List.of(newer, older, middle)) {
+      // One resource per revision keeps each revision independently active.
+      UUID resource = UUID.randomUUID();
+      jdbc.update(
+          "INSERT INTO information_resources(id,namespace,source_name,owner_handle,project_id,kind) SELECT ?,'proc-order',?,'alice',id,'source' FROM projects WHERE name='research'",
+          resource,
+          revision + ".md");
+      jdbc.update(
+          "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size,processing_log,created_at) VALUES (?,?,1,'Order','text/plain','fixture',1,?,CAST(? AS timestamptz))",
+          revision,
+          resource,
+          root,
+          revision.equals(older)
+              ? "2026-01-01T00:00:00Z"
+              : revision.equals(middle) ? "2026-02-01T00:00:00Z" : "2026-03-01T00:00:00Z");
+      jdbc.update(
+          "INSERT INTO information_steps(revision_id,generation,stage,state) VALUES (?,1,'extract','pending')",
+          revision);
+    }
+    var ascending =
+        List.of(older, middle, newer).stream().map(revision -> revision + ":stages").toList();
+    var full = repository.queues("alice", ordered(root, null, 100, "oldest"));
+    for (String order : new String[] {"oldest", "newest"}) {
+      var expected = order.equals("oldest") ? ascending : ascending.reversed();
+      var seen = new java.util.ArrayList<String>();
+      String cursor = null;
+      do {
+        var page = repository.queues("alice", ordered(root, cursor, 1, order));
+        assertEquals(full.summaries(), page.summaries(), "summaries ignore cursor and order");
+        page.queues().forEach(queue -> seen.add(queue.id()));
+        cursor = page.cursor();
+      } while (cursor != null);
+      assertEquals(expected, seen, order);
+    }
+    assertEquals(ascending, full.queues().stream().map(ProcViews.Queue::id).toList());
+    assertEquals(
+        ProcCursor.timed(Instant.parse("2026-03-01T00:00:00Z"), newer + ":stages"),
+        repository.queues("alice", ordered(root, null, 1, "newest")).cursor());
+    assertThrows(
+        CallerFault.class,
+        () -> repository.queues("alice", ordered(root, newer + ":stages", 1, "newest")));
   }
 
   /** Synthetic PostgreSQL evidence consumed by SDK and browser acceptance, without source text. */
