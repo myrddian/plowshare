@@ -223,6 +223,7 @@ in `style.css`; a one-off value is a defect.
 | Card | `.card` | One boxed record inside a section: a linked issue, an advisory, a vendor note, a citation. |
 | Tag, badge, chip | `.tag`, `.badge` / `.status-line`, `button.chip` | A tag is a framed fact (mode, schedule state, the cyan signal). A badge or status line is a state word in gilt, always sentence case through `statusLabel`. A chip is a filter toggle with `aria-pressed`. |
 | Attention band | `section.attention` > `ul.attention-items` > `li.attention-item`, built by `attentionItem(figure, title, detail, label, action)`; `p.all-clear` when empty | First on Overview. One row per kind of item that needs the operator: a count in the display face, what it is, and the one `.secondary` action that deals with it. Rebuilt from each refresh, so a settled item leaves on its own. Counts only devices in the current inventory. |
+| Deep port scan | `section.pane-section` titled "Deep port scan", its body `.deep-scan-block` rebuilt in place by `showDeepScan`; Settings field `#deep-scan-limit` | Sits after the assessment in the device pane. Shows state, progress while queued or running, and the ports of the latest complete scan as a fact list; "Deep-scan this device" is `.secondary`. A device with no confirmed MAC, or a collector without identity sources, gets a `p.hint.unmeasured` saying why, never an empty state. |
 
 ### Copy
 
@@ -266,3 +267,7 @@ in `style.css`; a one-off value is a defect.
 - **System health has three fact lists**: Status, Connections (Pi-hole, UniFi,
   advisory source) and Deployment. Credentials appear as where they come from
   and whether they are present, never as values.
+- **New open ports are attention.** A port open in the latest complete deep
+  scan, and not among the device's configured ports, raises a "New open ports"
+  item in the attention band. It clears when the device is assessed again or a
+  later complete scan finds none of those ports open.
