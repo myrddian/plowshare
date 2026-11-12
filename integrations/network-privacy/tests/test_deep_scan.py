@@ -328,13 +328,13 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("unreliable", ()), (done.state, done.open_ports))
 
     async def test_automatic_triggers_need_a_limit_and_respect_it(self) -> None:
-        self.scanner.flagged(LAMP, str(uuid4()))
+        self.scanner.flagged(LAMP, str(uuid4()), NOW)
         self.assertEqual((), self.scanner.ledger.queue)
         self.zone = "Australia/Sydney"
         self.scanner.set_automatic_limit(1)
-        self.scanner.flagged(LAMP, str(uuid4()))
+        self.scanner.flagged(LAMP, str(uuid4()), NOW)
         self.now = "2026-11-12T10:00:01Z"
-        self.scanner.flagged(TV, str(uuid4()))
+        self.scanner.flagged(TV, str(uuid4()), NOW)
         await self.scanner.poll()
         await self.scanner.poll()
         self.assertEqual(1, len(self.results(LAMP)))
@@ -354,7 +354,7 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_operator_requests_are_not_limited_per_day(self) -> None:
         self.scanner.set_automatic_limit(1)
-        self.scanner.flagged(FAN, str(uuid4()))
+        self.scanner.flagged(FAN, str(uuid4()), NOW)
         await self.scanner.poll()
         self.assertEqual(1, self.scanner.usage().used_today)
         for device in (LAMP, TV, FAN):
@@ -373,23 +373,46 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         self.scanner.set_automatic_limit(4)
         first, second = str(uuid4()), str(uuid4())
-        self.scanner.flagged(LAMP, first)
-        self.scanner.flagged(LAMP, first)
+        self.scanner.flagged(LAMP, first, NOW)
+        self.scanner.flagged(LAMP, first, NOW)
         [queued] = self.scanner.ledger.queue
         self.assertEqual(first, queued.report)
-        self.scanner.flagged(LAMP, second)
+        self.scanner.flagged(LAMP, second, NOW)
         [replaced] = self.scanner.ledger.queue
         self.assertEqual(second, replaced.report)
         await self.scanner.poll()
         # A scanned report does not trigger again.
-        self.scanner.flagged(LAMP, second)
+        self.scanner.flagged(LAMP, second, NOW)
         self.assertEqual((), self.scanner.ledger.queue)
         self.assertEqual([second], [r.report for r in self.results()])
         # An operator request is not downgraded by a later automatic trigger.
         self.scanner.request(TV)
-        self.scanner.flagged(TV, str(uuid4()))
+        self.scanner.flagged(TV, str(uuid4()), NOW)
         [operator] = self.scanner.ledger.queue
         self.assertEqual(("operator", None), (operator.trigger, operator.report))
+
+    async def test_a_report_assessed_with_the_latest_scan_does_not_rescan(
+        self,
+    ) -> None:
+        self.scanner.set_automatic_limit(4)
+        # No complete scan yet: the report triggers.
+        self.scanner.flagged(LAMP, str(uuid4()), NOW)
+        await self.scanner.poll()
+        [done] = self.results()
+        self.assertEqual(("complete", NOW), (done.state, done.finished_at))
+        # Requested after that scan finished: its dossier carried the scan, so
+        # the report is remembered and nothing is queued.
+        covered = str(uuid4())
+        self.scanner.flagged(LAMP, covered, "2026-11-12T10:05:00Z")
+        self.assertEqual((), self.scanner.ledger.queue)
+        self.assertIn(HandledReport(LAMP, covered), self.scanner.ledger.handled)
+        # Requested before that scan finished: the dossier had not seen it.
+        older = str(uuid4())
+        self.scanner.flagged(LAMP, older, "2026-11-12T09:55:00Z")
+        [queued] = self.scanner.ledger.queue
+        self.assertEqual(older, queued.report)
+        with self.assertRaises(ValueError):
+            self.scanner.flagged(TV, str(uuid4()), "yesterday")
 
     async def test_an_address_that_changes_during_the_scan_is_unreliable(self) -> None:
         self.identities.script = [LAMP.removeprefix("mac:"), OTHER]
@@ -518,38 +541,38 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.scanner.set_automatic_limit(4)
         report = str(uuid4())
         # Cancelled by the operator.
-        self.scanner.flagged(LAMP, report)
+        self.scanner.flagged(LAMP, report, NOW)
         self.scanner.cancel(LAMP)
-        self.scanner.flagged(LAMP, report)
+        self.scanner.flagged(LAMP, report, NOW)
         self.assertEqual((), self.scanner.ledger.queue)
         # Expired after seven days.
         report = str(uuid4())
-        self.scanner.flagged(LAMP, report)
+        self.scanner.flagged(LAMP, report, NOW)
         self.now = "2026-11-19T10:00:01Z"
         await self.scanner.poll()
         self.assertEqual([], self.results())
-        self.scanner.flagged(LAMP, report)
+        self.scanner.flagged(LAMP, report, NOW)
         self.assertEqual((), self.scanner.ledger.queue)
         # Discarded by a limit of 0, then the limit is raised again.
         report = str(uuid4())
-        self.scanner.flagged(LAMP, report)
+        self.scanner.flagged(LAMP, report, NOW)
         self.scanner.set_automatic_limit(0)
         self.scanner.set_automatic_limit(4)
-        self.scanner.flagged(LAMP, report)
+        self.scanner.flagged(LAMP, report, NOW)
         self.assertEqual((), self.scanner.ledger.queue)
         # Upgraded to an operator request: the report is kept and not rescanned.
         report = str(uuid4())
-        self.scanner.flagged(TV, report)
+        self.scanner.flagged(TV, report, NOW)
         self.scanner.request(TV)
         [upgraded] = self.scanner.ledger.queue
         self.assertEqual(("operator", report), (upgraded.trigger, upgraded.report))
         await self.scanner.poll()
-        self.scanner.flagged(TV, report)
+        self.scanner.flagged(TV, report, NOW)
         self.assertEqual((), self.scanner.ledger.queue)
         self.assertEqual([report], [r.report for r in self.results(TV)])
         # The memory survives a restart and stays bounded per device.
         self.scanner = self.build()
-        self.scanner.flagged(TV, report)
+        self.scanner.flagged(TV, report, NOW)
         self.assertEqual((), self.scanner.ledger.queue)
         lamp = [h for h in self.journal.read().handled if h.device_id == LAMP]
         self.assertEqual(3, len(lamp))
@@ -604,7 +627,7 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         self.scanner.set_automatic_limit(2)
-        self.scanner.flagged(LAMP, str(uuid4()))
+        self.scanner.flagged(LAMP, str(uuid4()), NOW)
         self.scanner.request(TV)
         self.scanner.set_automatic_limit(0)
         self.assertEqual([TV], [r.device_id for r in self.journal.read().queue])
@@ -616,7 +639,7 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.scanner.set_automatic_limit(1)
         self.scanner.request(LAMP)
         self.now = "2026-11-12T11:00:00Z"
-        self.scanner.flagged(TV, str(uuid4()))
+        self.scanner.flagged(TV, str(uuid4()), NOW)
         self.now = "2026-11-19T10:00:00Z"
         self.scanner = self.build()  # The queue survives a restart.
         self.assertEqual(2, len(self.scanner.ledger.queue))

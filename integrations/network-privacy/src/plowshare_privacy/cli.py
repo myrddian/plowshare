@@ -308,7 +308,7 @@ async def execute(args: argparse.Namespace) -> None:
                     zone=lambda: worker.config.zone,
                     flagged=deep_scans.flagged
                     if deep_scans is not None
-                    else lambda device, report: None,
+                    else lambda device, report, requested_at: None,
                     deep_scan=deep_scans.latest
                     if deep_scans is not None
                     else lambda device: None,

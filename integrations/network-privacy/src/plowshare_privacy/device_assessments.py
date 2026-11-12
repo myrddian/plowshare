@@ -422,15 +422,17 @@ class DeviceAssessments:
         clock: Callable[[], str] = utc_now,
         new_id: Callable[[], str] = lambda: str(uuid4()),
         zone: Callable[[], str] = lambda: "UTC",
-        flagged: Callable[[str, str], None] = lambda device, report: None,
+        flagged: Callable[[str, str, str], None] = lambda device, report, at: None,
         deep_scan: Callable[[str], DeepScanResult | None] = lambda _: None,
     ):
         # The household zone (configuration timeZone), read when used: the
         # dashboard can change it while the collector runs. The daily ceiling
         # counts its day; each run keeps the zone it was admitted with.
         self.zone = zone
-        # ``flagged(device_id, report_revision)`` runs once when a report with a
-        # live potential-breach or worth-checking concern reaches review.
+        # ``flagged(device_id, report_revision, requested_at)`` runs once when a
+        # report with a live potential-breach or worth-checking concern reaches
+        # review; ``requested_at`` is when its assessment was requested, so the
+        # scanner can tell whether that dossier already carried its latest scan.
         # ``deep_scan(device_id)`` is the device's latest complete deep scan.
         self.flagged, self.deep_scan = flagged, deep_scan
         # ``profile`` reads the operator's saved profiles when an assessment
@@ -803,7 +805,12 @@ class DeviceAssessments:
                     detail=None,
                 )
             )
-            self._flag(entry.device_id, result.report_revision, result.concerns)
+            self._flag(
+                entry.device_id,
+                result.report_revision,
+                entry.requested_at,
+                result.concerns,
+            )
         elif outcome.state in {"failed", "cancelled", "capped"}:
             reason = {
                 "failed": "The run failed.",
@@ -817,7 +824,11 @@ class DeviceAssessments:
             )
 
     def _flag(
-        self, device_id: str, report: str, concerns: tuple[ConcernOutcome, ...]
+        self,
+        device_id: str,
+        report: str,
+        requested_at: str,
+        concerns: tuple[ConcernOutcome, ...],
     ) -> None:
         """Tell the deep scanner a report needs a closer look, once, on entering review.
 
@@ -831,7 +842,7 @@ class DeviceAssessments:
         ):
             return
         try:
-            self.flagged(device_id, report)
+            self.flagged(device_id, report, requested_at)
         except Exception as error:  # noqa: BLE001 - the transition is already saved
             self.error = (
                 "A deep port scan could not be queued for this report: "

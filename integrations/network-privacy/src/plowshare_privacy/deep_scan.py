@@ -568,19 +568,25 @@ class DeepScanner:
         )
         return DeepScanUsage(self._ledger.automatic_limit, used)
 
-    def flagged(self, device_id: str, report: str) -> None:
+    def flagged(self, device_id: str, report: str, requested_at: str) -> None:
         """Queue an automatic scan for an assessment report's concerns, once.
+
+        ``requested_at`` is when the report's assessment was requested. If the
+        device's latest complete scan had finished by then, that assessment's
+        dossier already carried the scan, so the report is covered and nothing
+        is queued; scanning again would only ask for another assessment.
 
         Idempotence: an accepted ``(device_id, report)`` is remembered in the
         ledger (the last KEEP_REPORTS per device), so it never queues again,
         whatever later happens to its entry: a cancel, expiry, a limit of 0 or an
         upgrade to an operator request. A queued automatic entry for an older
-        report is replaced; a queued operator request or a running scan of the
-        device covers the report without queueing. Nothing is queued or
-        remembered while automatic scans are off (limit 0) or no identity source
-        can confirm the device.
+        report is replaced; a queued operator request, a running scan of the
+        device or a complete scan the assessment already saw covers the report
+        without queueing. Nothing is queued or remembered while automatic scans
+        are off (limit 0) or no identity source can confirm the device.
         """
         handled = HandledReport(parse_device_id(device_id), uuid(report))
+        requested = _instant(timestamp(requested_at))
         ledger = self._ledger
         if not self.available or ledger.automatic_limit == 0:
             return
@@ -589,7 +595,9 @@ class DeepScanner:
         remembered = _remember(ledger.handled, handled)
         queued = self._queued(device_id)
         running = ledger.running is not None and ledger.running.device_id == device_id
-        if running or (queued is not None and queued.trigger == "operator"):
+        complete = self.latest(device_id)
+        seen = complete is not None and _instant(complete.finished_at) <= requested
+        if running or seen or (queued is not None and queued.trigger == "operator"):
             self._commit(replace(ledger, handled=remembered))
             return
         entry = DeepScanRequest(

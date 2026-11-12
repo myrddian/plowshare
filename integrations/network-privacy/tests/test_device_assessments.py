@@ -221,12 +221,15 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         self.facts: dict[str, DeviceFacts] = {}
         self.now = NOW
         self.flags: list[tuple[str, str]] = []
+        # The assessment request time passed with each flag.
+        self.flag_requested: list[str] = []
         self.flag_error: Exception | None = None
         self.deep: dict[str, DeepScanResult] = {}
         self.service = self.restart()
 
-    def flag(self, device: str, report: str) -> None:
+    def flag(self, device: str, report: str, requested_at: str) -> None:
         self.flags.append((device, report))
+        self.flag_requested.append(requested_at)
         if self.flag_error is not None:
             raise self.flag_error
 
@@ -471,6 +474,8 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         revision = await self.finished()
         self.assertEqual(self.flags, [(TV, revision)])
+        [item] = self.service.summaries()
+        self.assertEqual(self.flag_requested, [item.requested_at])
         await self.service.poll()
         await self.service.poll()
         self.assertEqual(self.flags, [(TV, revision)])
