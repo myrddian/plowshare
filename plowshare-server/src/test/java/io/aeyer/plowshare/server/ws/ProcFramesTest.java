@@ -21,7 +21,7 @@ class ProcFramesTest {
         new io.aeyer.plowshare.server.proc.ProcRepository.Live(java.time.Instant.now(), List.of());
     var query =
         new io.aeyer.plowshare.server.proc.ProcQuery(
-            "server", "personal:bob", null, null, null, null, null, null);
+            "server", "personal:bob", null, null, null, null, null, null, null);
     when(repository.conversations("alice", query, live))
         .thenReturn(
             new io.aeyer.plowshare.server.proc.ProcViews.Conversations(
@@ -56,6 +56,23 @@ class ProcFramesTest {
   }
 
   @Test
+  void explicitOrderReachesTheAuditAndAbsentOrderStaysOldest() {
+    var audit = mock(ProcAudit.class);
+    var frame = new ProcFrames(audit).frames().get(FrameTypes.PROC_LIST);
+    var newest =
+        new io.aeyer.plowshare.server.proc.ProcQuery(
+            "mine", null, null, null, null, null, null, null, "newest");
+    var oldest =
+        new io.aeyer.plowshare.server.proc.ProcQuery(
+            "mine", null, null, null, null, null, null, null, null);
+    assertEquals("oldest", oldest.order());
+    frame.handle(Map.of("order", "newest"), new Asking("session", "alice"));
+    frame.handle(Map.of(), new Asking("session", "alice"));
+    verify(audit).list("alice", newest);
+    verify(audit).list("alice", oldest);
+  }
+
+  @Test
   void malformedOrUnauthenticatedRequestsNeverReachAuditReads() {
     var audit = mock(ProcAudit.class);
     var frame = new ProcFrames(audit).frames().get(FrameTypes.PROC_LIST);
@@ -65,7 +82,9 @@ class ProcFramesTest {
             Map.<String, Object>of("limit", 1.5),
             Map.<String, Object>of("project", 5),
             Map.<String, Object>of("account", "bob"),
-            Map.<String, Object>of("visibility", "admin")))
+            Map.<String, Object>of("visibility", "admin"),
+            Map.<String, Object>of("order", "latest"),
+            Map.<String, Object>of("order", 1)))
       assertThrows(CallerFault.class, () -> frame.handle(input, new Asking("session", "alice")));
     assertThrows(CallerFault.class, () -> frame.handle(Map.of(), new Asking("session")));
     verifyNoInteractions(audit);

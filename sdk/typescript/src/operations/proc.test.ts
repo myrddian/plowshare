@@ -36,6 +36,8 @@ describe('PROC boundary', () => {
       { active: 'true' },
       { after: null },
       { limit: 1.5 },
+      { order: 'latest' },
+      { order: null },
     ])
       expect(() => decodePayload('proc.list', value)).toThrow();
   });
@@ -48,6 +50,15 @@ describe('PROC boundary', () => {
       }),
     ).toEqual({ visibility: 'server', causation: 'chain-1', limit: 100 });
     expect(decodeReply('proc.list', page).total).toBe(0);
+    expect(decodePayload('proc.list', { order: 'newest', limit: 100 })).toEqual(
+      { order: 'newest', limit: 100 },
+    );
+    expect(
+      decodeReply('proc.list', {
+        ...page,
+        selection: { ...selection, order: 'newest' },
+      }).selection.order,
+    ).toBe('newest');
   });
   it('refuses malformed measurements and omits unknown response fields', () => {
     expect(() => decodeReply('proc.list', { ...page, total: -1 })).toThrow();

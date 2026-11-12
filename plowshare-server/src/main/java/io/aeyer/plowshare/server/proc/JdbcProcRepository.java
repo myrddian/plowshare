@@ -172,12 +172,24 @@ public final class JdbcProcRepository implements ProcRepository {
    * retain a count-only row when the cursor is beyond its end, without enriching off-page rows.
    * Source metadata and processing states share one narrow revision selection for distinct page
    * roots/IDs; neither may rescan every revision once per page row.
+   *
+   * <p>{@code newest} chooses the keyset direction: descending ids with the cursor as an exclusive
+   * upper bound, otherwise ascending ids with the cursor as an exclusive lower bound. Both
+   * selections, the bounded page and the final row order use the same direction, so the last
+   * returned id is a cursor that continues it. The direction is a fixed SQL fragment chosen from
+   * this boolean, never caller text; totals do not depend on it.
    */
   static String conversationPageSql(boolean active) {
-    return conversationPageSql(active, false);
+    return conversationPageSql(active, false, false);
   }
 
   static String conversationPageSql(boolean active, boolean targeted) {
+    return conversationPageSql(active, targeted, false);
+  }
+
+  static String conversationPageSql(boolean active, boolean targeted, boolean newest) {
+    String continues = newest ? "id<:after" : "id>:after";
+    String direction = newest ? "id DESC" : "id";
     String filter = (targeted ? WHERE : INVENTORY_WHERE) + (active ? " AND " + ACTIVE : "");
     return (targeted ? TREE : INVENTORY_TREE)
         + ", authorized AS MATERIALIZED (SELECT c.id,t.root AS audit_root,t.lifecycle AS audit_lifecycle,p.name AS audit_project"
@@ -189,9 +201,15 @@ public final class JdbcProcRepository implements ProcRepository {
         // validated maximum before its dynamic limit so enrichment never plans a corpus-sized
         // page. The final limit/order retains the exact requested page and cursor semantics.
         + ", page_selection AS MATERIALIZED (SELECT * FROM (SELECT * FROM authorized"
-        + " WHERE CAST(:after AS text) IS NULL OR id>:after ORDER BY id LIMIT "
+        + " WHERE CAST(:after AS text) IS NULL OR "
+        + continues
+        + " ORDER BY "
+        + direction
+        + " LIMIT "
         + (ProcQuery.MAX_LIMIT + 1)
-        + ") bounded ORDER BY id LIMIT :limit)"
+        + ") bounded ORDER BY "
+        + direction
+        + " LIMIT :limit)"
         + ", page AS MATERIALIZED (SELECT c.*,a.audit_root,a.audit_lifecycle,a.audit_project"
         + " FROM page_selection a JOIN conversations c ON c.id=a.id)"
         + """
@@ -264,8 +282,9 @@ public final class JdbcProcRepository implements ProcRepository {
           LEFT JOIN call_totals ic ON ic.conversation_id=c.id
           LEFT JOIN call_repetitions repetition ON repetition.conversation_id=c.id
           ) SELECT totals.audit_total,enriched.* FROM totals LEFT JOIN enriched ON true
-          ORDER BY enriched.id
-          """;
+          ORDER BY enriched."""
+        + direction
+        + "\n";
   }
 
   @Override
@@ -281,7 +300,9 @@ public final class JdbcProcRepository implements ProcRepository {
                           : live.runningConversations());
           String sql =
               conversationPageSql(
-                  Boolean.TRUE.equals(q.active()), q.conversation() != null || q.root() != null);
+                  Boolean.TRUE.equals(q.active()),
+                  q.conversation() != null || q.root() != null,
+                  q.newest());
           return jdbc.query(
               sql,
               args,

@@ -73,7 +73,7 @@ export class ApplicationActivityClient {
       try {
         const answer = await this.send({
           type: 'proc.list',
-          payload: { project, visibility, limit: 100 },
+          payload: { project, visibility, limit: 100, order: 'newest' },
         });
         if (answer.code !== 'OK')
           throw new Error(answer.said ?? 'PROC audit unavailable');

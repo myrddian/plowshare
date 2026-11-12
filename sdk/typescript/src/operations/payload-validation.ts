@@ -255,6 +255,7 @@ export const SHAPES: Record<
       'active',
       'after',
       'limit',
+      'order',
     ],
   ],
   'proc.list': [
@@ -268,6 +269,7 @@ export const SHAPES: Record<
       'active',
       'after',
       'limit',
+      'order',
     ],
   ],
   'proc.inspect': [
@@ -281,6 +283,7 @@ export const SHAPES: Record<
       'active',
       'after',
       'limit',
+      'order',
     ],
   ],
   'proc.calls': [
@@ -294,6 +297,7 @@ export const SHAPES: Record<
       'active',
       'after',
       'limit',
+      'order',
     ],
   ],
   'proc.queues': [
@@ -307,6 +311,7 @@ export const SHAPES: Record<
       'active',
       'after',
       'limit',
+      'order',
     ],
   ],
   'tool.scope.host.save': [

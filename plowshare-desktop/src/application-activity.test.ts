@@ -71,6 +71,7 @@ await test('ApplicationActivityClient lists with project and server visibility f
       project: 'network-privacy-watch',
       visibility: 'server',
       limit: 100,
+      order: 'newest',
     });
     return {
       code: 'OK',
@@ -85,6 +86,7 @@ await test('ApplicationActivityClient lists with project and server visibility f
           active: null,
           after: null,
           limit: 100,
+          order: 'newest',
         },
         conversations: [
           {

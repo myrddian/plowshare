@@ -72,7 +72,7 @@ class JdbcProcRepositoryTest {
   }
 
   private ProcQuery query(String visibility, String conversation, String after, int limit) {
-    return new ProcQuery(visibility, null, conversation, null, null, null, after, limit);
+    return new ProcQuery(visibility, null, conversation, null, null, null, after, limit, null);
   }
 
   private ProcRepository.Live live(String... ids) {
@@ -120,7 +120,7 @@ class JdbcProcRepositoryTest {
             .state());
     var active =
         repository.conversations(
-            "alice", new ProcQuery("mine", null, null, null, null, true, null, 1), live());
+            "alice", new ProcQuery("mine", null, null, null, null, true, null, 1, null), live());
     assertEquals(1, active.total());
     assertEquals(child, active.conversations().getFirst().id());
     assertNull(active.cursor());
@@ -132,6 +132,48 @@ class JdbcProcRepositoryTest {
     assertEquals(
         0,
         repository.conversations("alice", query("mine", null, first.cursor(), 1), live()).total());
+  }
+
+  @Test
+  void newestOrderPagesDescendingAndItsCursorContinuesDownward() {
+    var third = conversations.open(Home.of("research"), Budget.of(20), TurnCap.none(), "alice");
+    var ids =
+        jdbc.queryForList(
+            "SELECT id FROM conversations WHERE id IN (?,?,?) ORDER BY id DESC",
+            String.class,
+            root,
+            child,
+            third.id());
+    var seen = new java.util.ArrayList<String>();
+    String cursor = null;
+    do {
+      var page =
+          repository.conversations(
+              "alice",
+              new ProcQuery("mine", null, null, null, null, null, cursor, 1, "newest"),
+              live());
+      assertEquals(3, page.total());
+      page.conversations().forEach(c -> seen.add(c.id()));
+      cursor = page.cursor();
+    } while (cursor != null);
+    assertEquals(ids, seen);
+    var two =
+        repository.conversations(
+            "alice",
+            new ProcQuery("mine", null, null, null, null, null, null, 2, "newest"),
+            live());
+    assertEquals(ids.subList(0, 2), two.conversations().stream().map(c -> c.id()).toList());
+    assertEquals(ids.get(1), two.cursor());
+    var oldest = repository.conversations("alice", query("mine", null, null, 3), live());
+    assertEquals(ids.reversed(), oldest.conversations().stream().map(c -> c.id()).toList());
+    var exhausted =
+        repository.conversations(
+            "alice",
+            new ProcQuery("mine", null, null, null, null, null, ids.getLast(), 1, "newest"),
+            live());
+    assertEquals(3, exhausted.total());
+    assertTrue(exhausted.conversations().isEmpty());
+    assertNull(exhausted.cursor());
   }
 
   @Test
@@ -749,12 +791,13 @@ class JdbcProcRepositoryTest {
     assertEquals(
         1,
         repository
-            .calls("alice", new ProcQuery("mine", "research", null, root, null, true, null, 100))
+            .calls(
+                "alice", new ProcQuery("mine", "research", null, root, null, true, null, 100, null))
             .calls()
             .size());
     assertTrue(
         repository
-            .calls("alice", new ProcQuery("mine", "other", null, null, null, null, null, 100))
+            .calls("alice", new ProcQuery("mine", "other", null, null, null, null, null, 100, null))
             .calls()
             .isEmpty());
     jdbc.update(
@@ -764,7 +807,8 @@ class JdbcProcRepositoryTest {
         1,
         repository
             .calls(
-                "alice", new ProcQuery("mine", null, null, null, "fixture-cause", null, null, 100))
+                "alice",
+                new ProcQuery("mine", null, null, null, "fixture-cause", null, null, 100, null))
             .calls()
             .size());
     jdbc.update("UPDATE conversations SET lifecycle='archived' WHERE id=?", root);

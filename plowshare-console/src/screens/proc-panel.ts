@@ -19,19 +19,117 @@ export interface ProcPanel {
   destroy(): void;
 }
 
+type ProcScope = Pick<ProcQuery, 'conversation' | 'root' | 'causation'>;
+type ProcView = Exclude<ProcOperation, 'proc.inspect'>;
+type ProcTone = 'live' | 'warn' | 'unknown' | 'done' | 'idle';
+
 function node<K extends keyof HTMLElementTagNameMap>(
   kind: K,
   text?: string,
+  className?: string,
 ): HTMLElementTagNameMap[K] {
   const result = document.createElement(kind);
   if (text !== undefined) result.textContent = text;
+  if (className !== undefined) result.className = className;
   return result;
+}
+
+/**
+ * Presentation only: the server's state word stays visible beside the colour. Unrecognised
+ * states are shown neutrally instead of being guessed into "running" or "finished".
+ */
+function tone(state: string): ProcTone {
+  switch (state) {
+    case 'RUNNING':
+    case 'PROCESSING':
+    case 'QUEUED':
+    case 'RECORDED_ACTIVE':
+      return 'live';
+    case 'BLOCKED':
+    case 'FAILED':
+    case 'CANCELLED':
+      return 'warn';
+    case 'UNKNOWN':
+      return 'unknown';
+    case 'COMPLETED':
+    case 'RESULT_RECORDED':
+      return 'done';
+    default:
+      return 'idle';
+  }
+}
+
+function badge(state: string, ending?: string | null): HTMLElement {
+  const result = node(
+    'span',
+    ending ? `${state} / ${ending}` : state,
+    'proc-badge',
+  );
+  result.dataset.tone = tone(state);
+  return result;
+}
+
+/**
+ * A short age measured against the server snapshot, so a skewed local clock cannot make
+ * retained work look recent. The exact local time stays available as the element's title.
+ */
+function age(at: string, snapshotAt: string): HTMLTimeElement {
+  const then = Date.parse(at);
+  const minutes = Math.floor((Date.parse(snapshotAt) - then) / 60000);
+  const text = !Number.isFinite(minutes)
+    ? at
+    : minutes < 1
+      ? 'now'
+      : minutes < 60
+        ? `${minutes}m ago`
+        : minutes < 1440
+          ? `${Math.floor(minutes / 60)}h ago`
+          : minutes < 43200
+            ? `${Math.floor(minutes / 1440)}d ago`
+            : new Date(then).toLocaleDateString();
+  const result = node('time', text);
+  result.dateTime = at;
+  result.title = Number.isFinite(then) ? new Date(then).toLocaleString() : at;
+  return result;
+}
+
+function counted(count: number, unit: string): string {
+  return `${count} ${unit}${count === 1 ? '' : 's'}`;
+}
+
+function local(at: string | null): string {
+  return at === null ? 'Not recorded' : new Date(at).toLocaleString();
+}
+
+function table(label: string, columns: readonly string[]): HTMLTableElement {
+  const result = node('table');
+  result.setAttribute('aria-label', label);
+  const head = node('thead');
+  const header = node('tr');
+  for (const column of columns) header.append(node('th', column));
+  head.append(header);
+  result.append(head, node('tbody'));
+  return result;
+}
+
+function tableRow(target: HTMLTableElement, cells: readonly (string | Node)[]) {
+  const row = node('tr');
+  for (const cell of cells) {
+    const item = node('td');
+    item.append(cell);
+    row.append(item);
+  }
+  target.tBodies[0]?.append(row);
 }
 
 /**
  * The same read-only audit UI runs in Console and Desktop. Every poll replaces an authoritative
  * page; epochs discard old account/filter/detail responses. Periodic reads wait until the previous
  * refresh completes, without queuing timer catch-up work. Failures retain visibly stale evidence.
+ *
+ * Layout: a fixed header and toolbar above two independently scrolling panes. The left pane is
+ * the current page of the chosen view; the right pane inspects the selected conversation in
+ * place, so selecting never moves the operator away from the list.
  */
 export function mountProcPanel(
   root: HTMLElement,
@@ -44,99 +142,103 @@ export function mountProcPanel(
     canOpenConversation?: (row: ProcConversation) => boolean;
   } = {},
 ): ProcPanel {
-  const panel = node('section');
-  panel.className = 'proc-panel';
-  const heading = node('h2', 'Processes / PROC');
-  const intro = node(
-    'p',
-    'All non-archived conversations, including internal work and completed executions.',
+  const panel = node('section', undefined, 'proc-panel');
+  const header = node('header', undefined, 'proc-header');
+  const title = node('div', undefined, 'proc-title');
+  const status = node('p', undefined, 'proc-status');
+  status.setAttribute('role', 'status');
+  title.append(
+    node('span', 'PROC · read-only audit', 'proc-eyebrow'),
+    node('h2', 'Processes'),
   );
-  const controls = node('div');
-  controls.className = 'proc-controls';
-  const visibility = node('select');
-  visibility.setAttribute('aria-label', 'Audit visibility');
-  for (const [value, label] of [
-    ['mine', 'My work'],
-    ['server', 'Server · administrator'],
-  ]) {
-    if (value === 'server' && options.serverAdmin === false) continue;
-    const option = node('option', label);
-    option.value = value ?? '';
-    visibility.append(option);
+  header.append(title, status);
+
+  function select(
+    label: string,
+    choices: readonly (readonly [string, string])[],
+  ): HTMLSelectElement {
+    const result = node('select');
+    result.setAttribute('aria-label', label);
+    for (const [value, text] of choices) {
+      const option = node('option', text);
+      option.value = value;
+      result.append(option);
+    }
+    return result;
   }
+  const controls = node('div', undefined, 'proc-controls');
+  controls.setAttribute('role', 'toolbar');
+  controls.setAttribute('aria-label', 'Audit filters');
+  const visibility = select('Audit visibility', [
+    ['mine', 'My work'],
+    ...(options.serverAdmin === false
+      ? []
+      : [['server', 'Whole server · administrator'] as const]),
+  ]);
   const project = node('input');
   project.placeholder = 'All authorized projects';
   project.value = options.project ?? '';
   project.setAttribute('aria-label', 'Audit project');
   project.maxLength = 256;
-  const active = node('input');
-  active.type = 'checkbox';
-  const activeLabel = node('label', 'In flight / unresolved only ');
-  activeLabel.append(active);
-  const view = node('select');
-  view.setAttribute('aria-label', 'Audit view');
-  for (const [value, label] of [
+  const view = select('Audit view', [
     ['proc.list', 'Conversations'],
     ['proc.queues', 'Queues / progress'],
     ['proc.calls', 'Model calls'],
     ['proc.tools', 'Tool receipts'],
-  ]) {
-    const option = node('option', label);
-    option.value = value ?? '';
-    view.append(option);
-  }
-  const refresh = node('button', 'Refresh');
+  ]);
+  const order = select('Audit order', [
+    ['newest', 'Newest first'],
+    ['oldest', 'Oldest first'],
+  ]);
+  const active = node('input');
+  active.type = 'checkbox';
+  const activeLabel = node('label', undefined, 'proc-toggle');
+  activeLabel.title = 'Only work that is in flight or unresolved';
+  activeLabel.append(active, node('span', 'Running only'));
+  const refresh = node('button', '↻', 'proc-button proc-icon-button');
   refresh.type = 'button';
-  const previous = node('button', 'First page');
+  refresh.title = 'Refresh';
+  refresh.setAttribute('aria-label', 'Refresh');
+  const previous = node('button', 'First page', 'proc-button');
   previous.type = 'button';
-  const next = node('button', 'Next page');
+  previous.disabled = true;
+  const next = node('button', 'Next page', 'proc-button');
   next.type = 'button';
   next.disabled = true;
-  controls.append(
-    visibility,
-    project,
-    view,
-    activeLabel,
-    refresh,
-    previous,
-    next,
-  );
-  const status = node('p');
-  status.setAttribute('role', 'status');
-  status.className = 'proc-status';
-  const selectionLabel = node('p');
-  selectionLabel.className = 'proc-selection';
-  const body = node('div');
-  body.className = 'proc-results';
-  const detail = node('section');
-  detail.className = 'proc-detail';
+  const paging = node('div', undefined, 'proc-paging');
+  paging.append(refresh, previous, next);
+  controls.append(visibility, project, view, order, activeLabel, paging);
+
+  const workspace = node('div', undefined, 'proc-workspace');
+  const listPane = node('div', undefined, 'proc-list-pane');
+  const selectionLabel = node('p', undefined, 'proc-selection');
+  const body = node('div', undefined, 'proc-results');
+  body.setAttribute('role', 'group');
+  body.setAttribute('aria-label', 'Audit page');
+  listPane.append(selectionLabel, body);
+  const detail = node('section', undefined, 'proc-detail');
   detail.setAttribute('aria-label', 'Execution inspection');
-  const coverage = node('details');
+  workspace.append(listPane, detail);
+  const coverage = node('details', undefined, 'proc-coverage');
   coverage.append(node('summary', 'Coverage and evidence'));
   const coverageText = node('pre');
   coverage.append(coverageText);
-  panel.append(
-    heading,
-    intro,
-    controls,
-    status,
-    selectionLabel,
-    body,
-    detail,
-    coverage,
-  );
+  panel.append(header, controls, workspace, coverage);
   root.replaceChildren(panel);
+
   let closed = false,
     epoch = 0,
     reading = false,
     pending = false,
     cursor: string | null = null,
     after: string | undefined;
-  let scope: Pick<ProcQuery, 'conversation' | 'root' | 'causation'> = {};
+  let scope: ProcScope = {};
   let selected: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let inspectionRead:
     { key: string; result: Promise<ProcInspection> } | undefined;
+  // Collapsible evidence the operator opened stays open across polls and selections.
+  const openSections = new Set<string>(['calls']);
 
   function cancelPoll() {
     if (timer !== undefined) clearTimeout(timer);
@@ -178,6 +280,15 @@ export function mountProcPanel(
     return flight.result;
   }
 
+  function currentView(): ProcView {
+    return view.value === 'proc.queues'
+      ? 'proc.queues'
+      : view.value === 'proc.calls'
+        ? 'proc.calls'
+        : view.value === 'proc.tools'
+          ? 'proc.tools'
+          : 'proc.list';
+  }
   function query(): ProcQuery {
     return {
       visibility: visibility.value === 'server' ? 'server' : 'mine',
@@ -188,38 +299,136 @@ export function mountProcPanel(
       limit: 50,
     };
   }
+  /** Only proc.list honours an order; its cursor continues in the chosen direction. */
+  function pageQuery(type: ProcView): ProcQuery {
+    return type === 'proc.list'
+      ? { ...query(), order: order.value === 'oldest' ? 'oldest' : 'newest' }
+      : query();
+  }
+  function stale(text: string) {
+    status.textContent = text;
+    status.dataset.state = 'stale';
+  }
   function run(action: () => Promise<void>) {
     action().catch((error: unknown) => {
       if (!closed)
-        status.textContent = `Unavailable · ${error instanceof Error ? error.message : 'audit read failed'}`;
+        stale(
+          `Unavailable · ${error instanceof Error ? error.message : 'audit read failed'}`,
+        );
     });
   }
   function button(label: string, action: () => void): HTMLButtonElement {
-    const b = node('button', label);
+    const b = node('button', label, 'proc-button');
     b.type = 'button';
     b.dataset.procFocus = label;
     b.addEventListener('click', action);
     return b;
   }
+  /** A dense list entry. `key` restores focus across polls; `conversation` marks the selection. */
+  function entry(
+    key: string,
+    conversation: string | null,
+    state: string,
+  ): HTMLElement {
+    const result =
+      conversation === null
+        ? node('div', undefined, 'proc-row')
+        : node('button', undefined, 'proc-row');
+    result.dataset.tone = tone(state);
+    if (result instanceof HTMLButtonElement && conversation !== null) {
+      result.type = 'button';
+      result.dataset.procFocus = key;
+      result.dataset.conversation = conversation;
+      if (conversation === selected)
+        result.setAttribute('aria-current', 'true');
+      result.addEventListener('click', () => run(() => inspect(conversation)));
+    }
+    return result;
+  }
+  function line(className: string, parts: readonly (string | Node)[]) {
+    const result = node('span', undefined, className);
+    for (const part of parts)
+      result.append(typeof part === 'string' ? node('span', part) : part);
+    return result;
+  }
+  function markSelection() {
+    for (const row of body.querySelectorAll<HTMLElement>('[data-conversation]'))
+      if (row.dataset.conversation === selected)
+        row.setAttribute('aria-current', 'true');
+      else row.removeAttribute('aria-current');
+  }
   // Replacement polling must preserve the operator's keyboard position in the same selection.
   function focused(container: HTMLElement): string | undefined {
     const activeElement = document.activeElement;
-    return activeElement instanceof HTMLButtonElement &&
+    return activeElement instanceof HTMLElement &&
       container.contains(activeElement)
       ? activeElement.dataset.procFocus
       : undefined;
   }
   function restoreFocus(container: HTMLElement, key: string | undefined) {
     if (key === undefined) return;
-    [...container.querySelectorAll<HTMLButtonElement>('button')]
+    [...container.querySelectorAll<HTMLElement>('[data-proc-focus]')]
       .find((b) => b.dataset.procFocus === key)
       ?.focus({ preventScroll: true });
   }
+  // A poll rebuilds the detail; evidence the operator scrolled inside must not jump to the top.
+  function scrolled(container: HTMLElement): Map<string, number> {
+    const result = new Map<string, number>();
+    for (const item of container.querySelectorAll<HTMLElement>(
+      '[data-proc-scroll]',
+    ))
+      result.set(item.dataset.procScroll ?? '', item.scrollTop);
+    return result;
+  }
+  function restoreScroll(container: HTMLElement, saved: Map<string, number>) {
+    for (const item of container.querySelectorAll<HTMLElement>(
+      '[data-proc-scroll]',
+    ))
+      item.scrollTop = saved.get(item.dataset.procScroll ?? '') ?? 0;
+  }
+  function scroller(key: string, ...content: Node[]): HTMLElement {
+    const result = node('div', undefined, 'proc-scroll');
+    result.dataset.procScroll = key;
+    result.append(...content);
+    return result;
+  }
+  function section(
+    key: string,
+    label: string,
+    count: string,
+    ...content: Node[]
+  ): HTMLDetailsElement {
+    const result = node('details', undefined, 'proc-section');
+    result.open = openSections.has(key);
+    const summary = node('summary');
+    summary.dataset.procFocus = `section:${key}`;
+    summary.append(node('span', label), node('small', count));
+    result.append(summary, ...content);
+    result.addEventListener('toggle', () => {
+      if (result.open) openSections.add(key);
+      else openSections.delete(key);
+    });
+    return result;
+  }
+  function label(text: string): HTMLElement {
+    return node('h3', text, 'proc-label');
+  }
+  function showDetail(...content: Node[]) {
+    panel.dataset.detail = selected === undefined ? 'empty' : 'open';
+    detail.replaceChildren(...content);
+  }
+  function clearDetail() {
+    selected = undefined;
+    markSelection();
+    showDetail(
+      node('p', 'Select a row to inspect its conversation here.', 'proc-empty'),
+    );
+  }
+
   function queueTable(value: ProcQueues): HTMLElement {
-    const block = node('section');
-    block.append(node('h3', 'Full-selection totals'));
-    const totals = node('div');
-    totals.className = 'proc-totals';
+    const block = node('div', undefined, 'proc-queues');
+    block.append(label('Full-selection totals'));
+    const totals = node('div', undefined, 'proc-totals');
     for (const summary of value.summaries) {
       const item = node('div');
       item.append(
@@ -235,24 +444,15 @@ export function mountProcPanel(
       );
       totals.append(item);
     }
-    block.append(totals, node('h3', 'Resource checkpoints · current page'));
-    const table = node('table');
-    table.setAttribute('aria-label', 'Queue resource checkpoints');
-    const head = node('thead'),
-      header = node('tr');
-    for (const label of [
+    block.append(totals, label('Resource checkpoints · current page'));
+    const checkpoints = table('Queue resource checkpoints', [
       'Source / stage',
       'Completed / total',
       'Pending / running',
       'Blocked / failed / skipped',
-    ])
-      header.append(node('th', label));
-    head.append(header);
-    table.append(head);
-    const rows = node('tbody');
+    ]);
     for (const queue of value.queues) {
-      const row = node('tr'),
-        source = node('td');
+      const source = node('div');
       source.append(
         node('strong', queue.resource ?? queue.id),
         node('p', `${queue.stage} · ${queue.unit}`),
@@ -263,31 +463,26 @@ export function mountProcPanel(
       );
       if (queue.conversation) {
         const conversation = queue.conversation;
-        source.append(
-          button('Trace ' + conversation, () =>
-            run(() => inspect(conversation)),
-          ),
+        const traced = button('Trace ' + conversation, () =>
+          run(() => inspect(conversation)),
         );
+        traced.dataset.procFocus = queue.id;
+        source.append(traced);
       }
-      const progress = node('td', `${queue.completed} / ${queue.total}`);
-      const pendingCell = node(
-        'td',
-        `${queue.pending} / ${queue.running ?? 'Unknown'}`,
-      );
-      row.append(
+      tableRow(checkpoints, [
         source,
-        progress,
-        pendingCell,
-        node('td', `${queue.blocked} / ${queue.failed} / ${queue.skipped}`),
-      );
-      rows.append(row);
+        `${queue.completed} / ${queue.total}`,
+        `${queue.pending} / ${queue.running ?? 'Unknown'}`,
+        `${queue.blocked} / ${queue.failed} / ${queue.skipped}`,
+      ]);
     }
-    table.append(rows);
-    block.append(table);
+    block.append(checkpoints);
     if (!value.queues.length)
-      block.append(node('p', 'No retained checkpoints in this selection.'));
+      block.append(
+        node('p', 'No retained checkpoints in this selection.', 'proc-empty'),
+      );
     if (value.pools.length) {
-      block.append(node('h3', 'Local model pools'));
+      block.append(label('Local model pools'));
       for (const pool of value.pools)
         block.append(
           node(
@@ -298,7 +493,86 @@ export function mountProcPanel(
     }
     return block;
   }
-  function trace(part: Pick<ProcQuery, 'conversation' | 'root' | 'causation'>) {
+  function conversationRows(value: ProcReplies['proc.list']): Node[] {
+    if (value.conversations.length === 0)
+      return [
+        node(
+          'p',
+          'No authorized non-archived conversations in this selection.',
+          'proc-empty',
+        ),
+      ];
+    return value.conversations.map((row) => {
+      const item = entry(row.id, row.id, row.state);
+      item.append(
+        line('proc-row-head', [
+          node('span', undefined, 'proc-dot'),
+          node('strong', row.agent ?? row.origin),
+          badge(row.state, row.ending),
+        ]),
+        line('proc-row-meta', [
+          row.project ?? 'No project',
+          row.owner ?? 'Unknown owner',
+          age(row.lastTurnAt ?? row.createdAt, value.snapshotAt),
+        ]),
+        line('proc-row-foot', [
+          node('code', row.id),
+          `${counted(row.calls, 'call')}${row.activeCalls ? ` · ${row.activeCalls} active` : ''}`,
+        ]),
+      );
+      return item;
+    });
+  }
+  function callRows(value: ProcReplies['proc.calls']): Node[] {
+    if (value.calls.length === 0)
+      return [node('p', 'No retained model calls in this page.', 'proc-empty')];
+    return value.calls.map((call) => {
+      const item = entry(call.id, call.conversation, call.state);
+      item.append(
+        line('proc-row-head', [
+          node('span', undefined, 'proc-dot'),
+          node('strong', call.agent ?? call.operation),
+          badge(call.state),
+        ]),
+        line('proc-row-meta', [
+          `${call.pool} / ${call.model}`,
+          counted(call.attempts, 'attempt'),
+          age(call.createdAt, value.snapshotAt),
+        ]),
+        line('proc-row-foot', [
+          node('code', call.conversation ?? 'Unbound call'),
+          call.project ?? 'No project',
+        ]),
+      );
+      return item;
+    });
+  }
+  function toolRows(value: ProcReplies['proc.tools']): Node[] {
+    if (value.tools.length === 0)
+      return [node('p', 'No retained tool calls in this page.', 'proc-empty')];
+    return value.tools.map((tool) => {
+      const item = entry(tool.id, tool.conversation, tool.state);
+      item.append(
+        line('proc-row-head', [
+          node('span', undefined, 'proc-dot'),
+          node('strong', tool.name),
+          badge(tool.state),
+        ]),
+        line('proc-row-foot', [
+          node('code', tool.conversation),
+          ...(tool.recordedAt
+            ? [age(tool.recordedAt, value.snapshotAt)]
+            : ['Time not recorded']),
+        ]),
+      );
+      return item;
+    });
+  }
+  function record(key: string, text: string): HTMLElement {
+    return section(key, 'Text record', '', scroller(key, node('pre', text)));
+  }
+
+  function trace(part: ProcScope) {
     scope = part;
     reset();
     run(refreshPage);
@@ -307,47 +581,80 @@ export function mountProcPanel(
     ++epoch;
     after = undefined;
     cursor = null;
-    selected = undefined;
     next.disabled = true;
+    previous.disabled = true;
+    order.disabled = currentView() !== 'proc.list';
+    panel.dataset.view = currentView() === 'proc.list' ? 'list' : 'page';
     body.replaceChildren();
-    detail.replaceChildren();
+    clearDetail();
     coverageText.textContent = '';
-    selectionLabel.replaceChildren();
     const chosen = scope.conversation ?? scope.root ?? scope.causation;
     if (chosen)
-      selectionLabel.append(
-        node('span', `Tracing ${chosen} `),
+      selectionLabel.replaceChildren(
+        node('span', 'Tracing '),
+        node('code', chosen),
+        node('span', ' · '),
         button('All non-archived conversations', () => trace({})),
+      );
+    else
+      selectionLabel.replaceChildren(
+        node('span', 'All non-archived conversations'),
       );
   }
   function facts(row: ProcConversation): HTMLElement {
-    const block = node('div');
-    block.className = 'proc-conversation-facts';
-    block.append(
-      node(
-        'p',
-        `Initiating Application: ${row.application ?? 'Not recorded'} · authenticating actor: ${row.actor ?? 'Not recorded'} · acting subject: ${row.actingSubject ?? 'Not recorded'}`,
-      ),
-      node(
-        'p',
-        `${row.project ?? 'No project'} · admission owner ${row.owner ?? 'Unknown'} · principal ${row.principal}`,
-      ),
-      node(
-        'p',
-        `Root ${row.root} · ${row.origin} · lifecycle ${row.lifecycle}`,
-      ),
-      node(
-        'p',
-        `Source ${row.resource ?? 'Unknown'} · revision ${row.revision ?? 'Unknown'}`,
-      ),
-      node(
-        'p',
-        `${row.calls} direct calls · ${row.attempts} attempts · ${row.children} children`,
-      ),
-      node('p', row.evidence),
+    const grid = node('dl', undefined, 'proc-facts');
+    const fact = (key: string, name: string, value: string, mono = false) => {
+      const item = node('div');
+      item.dataset.procFact = key;
+      const definition = node('dd');
+      definition.append(mono ? node('code', value) : value);
+      item.append(node('dt', name), definition);
+      grid.append(item);
+    };
+    fact(
+      'application',
+      'Initiating Application',
+      row.application ?? 'Not recorded',
     );
-    const links = node('div');
-    links.className = 'proc-controls';
+    fact('actor', 'Authenticating actor', row.actor ?? 'Not recorded');
+    fact('subject', 'Acting subject', row.actingSubject ?? 'Not recorded');
+    fact('project', 'Project', row.project ?? 'No project');
+    fact('owner', 'Admission owner', row.owner ?? 'Unknown');
+    fact('principal', 'Runs as', row.principal);
+    fact('root', 'Root', row.root, true);
+    fact('parent', 'Parent', row.parent ?? 'None', row.parent !== null);
+    fact('origin', 'Origin', row.origin);
+    fact('lifecycle', 'Lifecycle', row.lifecycle);
+    fact('source', 'Source', row.resource ?? 'Unknown');
+    fact(
+      'revision',
+      'Revision',
+      row.revision ?? 'Unknown',
+      row.revision !== null,
+    );
+    fact(
+      'activity',
+      'Activity',
+      `${row.calls} direct calls · ${row.attempts} attempts · ${row.children} children · ${row.activeCalls} recorded active`,
+    );
+    fact('created', 'Created', local(row.createdAt));
+    fact('last-turn', 'Last turn', local(row.lastTurnAt));
+    fact('cause', 'Recorded cause', row.cause ?? 'Unknown');
+    fact('evidence', 'Evidence', row.evidence);
+    return grid;
+  }
+  function actions(row: ProcConversation): HTMLElement {
+    const links = node('div', undefined, 'proc-actions');
+    if (
+      options.openConversation &&
+      (options.canOpenConversation?.(row) ?? true)
+    ) {
+      const open = button('Open trajectory', () =>
+        options.openConversation?.(row.id),
+      );
+      open.classList.add('proc-primary');
+      links.append(open);
+    }
     links.append(button('Trace root', () => trace({ root: row.root })));
     if (row.parent)
       links.append(
@@ -361,87 +668,164 @@ export function mountProcPanel(
           trace({ causation: row.causationRoot ?? '' }),
         ),
       );
-    if (
-      options.openConversation &&
-      (options.canOpenConversation?.(row) ?? true)
-    )
-      links.append(
-        button('Open trajectory', () => options.openConversation?.(row.id)),
-      );
-    block.append(links, node('p', `Recorded cause: ${row.cause ?? 'Unknown'}`));
-    return block;
+    return links;
   }
   function inspected(value: ProcInspection, id: string) {
     const focus = focused(detail);
-    detail.replaceChildren(node('h3', `Inspect ${id}`));
+    const positions = scrolled(detail);
     const row = value.conversations.conversations.find((c) => c.id === id);
-    if (row) detail.append(facts(row));
-    if (value.signals.length)
-      detail.append(
-        node('h3', 'Repetition signals · investigate before concluding a loop'),
-        node('pre', value.signals.join('\n')),
-      );
-    detail.append(node('h3', 'Conversations and descendants'));
-    for (const child of value.conversations.conversations)
-      detail.append(
-        button(
-          `${child.id} · ${child.agent ?? child.origin} · ${child.state}`,
-          () => run(() => inspect(child.id)),
+    const heading = node('header', undefined, 'proc-detail-header');
+    const name = node('div', undefined, 'proc-detail-name');
+    name.append(node('h3', row ? (row.agent ?? row.origin) : 'Conversation'));
+    if (row) name.append(badge(row.state, row.ending));
+    const close = button('Close', clearDetail);
+    close.classList.add('proc-quiet');
+    name.append(close);
+    const identifier = node('code', id, 'proc-id');
+    identifier.title = 'Conversation identifier';
+    heading.append(name, identifier);
+    const content: Node[] = [heading];
+    if (row) content.push(actions(row), facts(row));
+    if (value.signals.length) {
+      const callout = node('div', undefined, 'proc-callout');
+      callout.setAttribute('role', 'note');
+      callout.append(
+        node(
+          'strong',
+          'Repetition signals · investigate before concluding a loop',
         ),
       );
+      const signals = node('ul');
+      for (const signal of value.signals) signals.append(node('li', signal));
+      callout.append(signals);
+      content.push(callout);
+    }
+    const descendants = value.conversations.conversations.filter(
+      (child) => child.id !== id,
+    );
+    const tree = node('div', undefined, 'proc-tree');
+    for (const child of descendants) {
+      const item = node('button', undefined, 'proc-row');
+      item.type = 'button';
+      item.dataset.procFocus = `descendant:${child.id}`;
+      item.dataset.tone = tone(child.state);
+      item.addEventListener('click', () => run(() => inspect(child.id)));
+      item.append(
+        line('proc-row-head', [
+          node('span', undefined, 'proc-dot'),
+          node('strong', child.agent ?? child.origin),
+          badge(child.state, child.ending),
+        ]),
+        line('proc-row-foot', [
+          node('code', child.id),
+          counted(child.calls, 'call'),
+        ]),
+      );
+      tree.append(item);
+    }
+    if (!descendants.length)
+      tree.append(
+        node('p', 'No other conversations in this tree page.', 'proc-empty'),
+      );
     if (value.conversations.cursor)
-      detail.append(
+      tree.append(
         button('Continue conversation tree', () => trace({ conversation: id })),
       );
-    detail.append(
-      node('h3', 'Queues and iteration progress'),
-      node('pre', procText(value.queues)),
+    content.push(
+      section(
+        'tree',
+        'Conversations and descendants',
+        String(descendants.length),
+        tree,
+      ),
+    );
+
+    const queues = section(
+      'queues',
+      'Queues and iteration progress',
+      String(value.queues.queues.length),
+      scroller('queues', node('pre', procText(value.queues))),
     );
     if (value.queues.cursor)
-      detail.append(
+      queues.append(
         button('Browse queue pages', () => {
           view.value = 'proc.queues';
           trace({ conversation: id });
         }),
       );
-    detail.append(
-      node('h3', 'Model calls and attempts'),
-      node('pre', procText(value.calls)),
+    content.push(queues);
+
+    const callTable = table('Model calls and attempts', [
+      'Agent / operation',
+      'Model',
+      'State',
+      'Attempts',
+      'Started',
+    ]);
+    for (const call of value.calls.calls)
+      tableRow(callTable, [
+        call.agent ? `${call.agent} / ${call.operation}` : call.operation,
+        `${call.pool} / ${call.model}`,
+        badge(call.state),
+        String(call.attempts),
+        age(call.createdAt, value.calls.snapshotAt),
+      ]);
+    const calls = section(
+      'calls',
+      'Model calls and attempts',
+      String(value.calls.calls.length),
+      value.calls.calls.length
+        ? scroller('calls', callTable)
+        : node('p', 'No retained model calls in this page.', 'proc-empty'),
+      record('calls-text', procText(value.calls)),
     );
     if (value.calls.cursor)
-      detail.append(
+      calls.append(
         button('Browse call pages', () => {
           view.value = 'proc.calls';
           trace({ conversation: id });
         }),
       );
-    detail.append(
-      node('h3', 'Tool receipts'),
-      node(
-        'pre',
-        value.tools.length
-          ? value.tools
-              .map(
-                (t) =>
-                  `${t.name} · ${t.state} · ${t.conversation} · job ${t.job ?? 'Unknown'}`,
-              )
-              .join('\n')
-          : 'No retained tool calls in this page.',
-      ),
+    content.push(calls);
+
+    const toolTable = table('Tool receipts', [
+      'Tool',
+      'State',
+      'Conversation',
+      'Job',
+    ]);
+    for (const tool of value.tools)
+      tableRow(toolTable, [
+        tool.name,
+        badge(tool.state),
+        node('code', tool.conversation),
+        tool.job ?? 'Unknown',
+      ]);
+    const tools = section(
+      'tools',
+      'Tool receipts',
+      `${value.tools.length}${value.toolsTruncated ? '+' : ''}`,
+      value.tools.length
+        ? scroller('tools', toolTable)
+        : node('p', 'No retained tool calls in this page.', 'proc-empty'),
     );
     if (value.toolsTruncated)
-      detail.append(
+      tools.append(
         button('Browse tool receipt pages', () => {
           view.value = 'proc.tools';
           trace({ conversation: id });
         }),
       );
+    content.push(tools);
+    showDetail(...content);
+    restoreScroll(detail, positions);
     restoreFocus(detail, focus);
   }
   async function inspect(id: string) {
     const stamp = ++epoch;
     selected = id;
-    detail.replaceChildren(node('p', `Reading ${id}…`));
+    markSelection();
+    showDetail(node('p', `Reading ${id}…`, 'proc-empty'));
     const { after: _after, ...selection } = query();
     const value = await readInspection({
       ...selection,
@@ -463,103 +847,28 @@ export function mountProcPanel(
     const stamp = epoch;
     refresh.disabled = true;
     try {
-      const type =
-        view.value === 'proc.queues'
-          ? 'proc.queues'
-          : view.value === 'proc.calls'
-            ? 'proc.calls'
-            : view.value === 'proc.tools'
-              ? 'proc.tools'
-              : 'proc.list';
-      const value = await reader.read(type, query());
+      const type = currentView();
+      const value = await reader.read(type, pageQuery(type));
       if (closed || stamp !== epoch) return;
       const focus = focused(body);
-      body.replaceChildren();
       cursor = value.cursor;
       next.disabled = !cursor;
       status.textContent = `Snapshot ${new Date(value.snapshotAt).toLocaleString()} · ${'total' in value ? `${value.total} conversations in selection` : 'authorized audit page'}`;
+      delete status.dataset.state;
       coverageText.textContent = value.coverage.join('\n');
-      if ('conversations' in value) {
-        const table = node('table');
-        table.setAttribute('aria-label', 'Non-archived conversation audit');
-        const header = node('tr');
-        for (const name of [
-          'State / agent',
-          'Conversation / project',
-          'Admission owner / principal',
-          'Recorded activity',
-        ])
-          header.append(node('th', name));
-        const head = node('thead');
-        head.append(header);
-        table.append(head);
-        const rows = node('tbody');
-        table.append(rows);
-        for (const row of value.conversations) {
-          const item = node('tr');
-          item.dataset.conversation = row.id;
-          const state = node('td');
-          state.append(
-            button(
-              `${row.agent ?? row.origin} · ${row.state}${row.ending ? ` / ${row.ending}` : ''}`,
-              () => run(() => inspect(row.id)),
-            ),
-            node('p', row.evidence),
-          );
-          const source = node('td');
-          source.append(
-            node('code', row.id),
-            node('p', row.project ?? 'No project'),
-            node('p', `Created ${new Date(row.createdAt).toLocaleString()}`),
-          );
-          if (row.resource) source.append(node('p', row.resource));
-          const actor = node('td');
-          actor.append(
-            node('p', row.owner ?? 'Unknown'),
-            node('p', `Runs as ${row.principal}`),
-          );
-          const activity = node('td');
-          activity.append(
-            node('p', `${row.calls} calls / ${row.attempts} attempts`),
-            node(
-              'p',
-              `${row.children} children · ${row.activeCalls} recorded active calls`,
-            ),
-          );
-          item.append(state, source, actor, activity);
-          rows.append(item);
-        }
-        body.append(table);
-        if (value.conversations.length === 0)
-          body.append(
-            node(
-              'p',
-              'No authorized non-archived conversations in this selection.',
-            ),
-          );
-      } else if ('queues' in value) {
-        body.append(queueTable(value));
-      } else {
-        body.append(node('pre', procText(value)));
-        if ('calls' in value)
-          for (const call of value.calls)
-            if (call.conversation) {
-              const conversation = call.conversation;
-              body.append(
-                button(
-                  `Trace ${call.agent ?? call.operation} · ${conversation}`,
-                  () => run(() => inspect(conversation)),
-                ),
-              );
-            }
-        if ('tools' in value)
-          for (const tool of value.tools)
-            body.append(
-              button(`Trace ${tool.name} · ${tool.conversation}`, () =>
-                run(() => inspect(tool.conversation)),
-              ),
-            );
-      }
+      if ('conversations' in value)
+        body.replaceChildren(...conversationRows(value));
+      else if ('queues' in value) body.replaceChildren(queueTable(value));
+      else if ('calls' in value)
+        body.replaceChildren(
+          ...callRows(value),
+          record('page-text', procText(value)),
+        );
+      else
+        body.replaceChildren(
+          ...toolRows(value),
+          record('page-text', procText(value)),
+        );
       restoreFocus(body, focus);
       if (selected) {
         const id = selected;
@@ -575,7 +884,9 @@ export function mountProcPanel(
       }
     } catch (error: unknown) {
       if (!closed && stamp === epoch)
-        status.textContent = `Stale / unavailable · ${error instanceof Error ? error.message : 'read failed'} · current activity unknown`;
+        stale(
+          `Stale / unavailable · ${error instanceof Error ? error.message : 'read failed'} · current activity unknown`,
+        );
     } finally {
       reading = false;
       refresh.disabled = false;
@@ -594,15 +905,39 @@ export function mountProcPanel(
     if (!cursor) return;
     ++epoch;
     after = cursor;
-    selected = undefined;
-    detail.replaceChildren();
+    previous.disabled = false;
+    clearDetail();
     run(refreshPage);
   });
-  for (const control of [visibility, project, view, active])
+  for (const control of [visibility, project, view, active, order])
     control.addEventListener('change', () => {
       reset();
       run(refreshPage);
     });
+  // Arrow keys walk the list and inspect each row beside it, like any list/detail workspace.
+  body.addEventListener('keydown', (event) => {
+    const step =
+      event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+    if (step === 0 && event.key !== 'Home' && event.key !== 'End') return;
+    const rows = [
+      ...body.querySelectorAll<HTMLButtonElement>('button.proc-row'),
+    ];
+    const at = rows.findIndex((row) => row === document.activeElement);
+    if (at < 0) return;
+    event.preventDefault();
+    const target =
+      rows[
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? rows.length - 1
+            : Math.min(rows.length - 1, Math.max(0, at + step))
+      ];
+    if (!target || target === rows[at]) return;
+    target.focus();
+    target.click();
+  });
+  reset();
   schedulePoll();
   return {
     refresh: refreshPage,

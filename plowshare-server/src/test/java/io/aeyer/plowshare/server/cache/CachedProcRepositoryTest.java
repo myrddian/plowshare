@@ -46,7 +46,7 @@ class CachedProcRepositoryTest {
               return (ProjectionChangeSignals.Subscription) () -> {};
             });
     var source = mock(ProcRepository.class);
-    var query = new ProcQuery("mine", null, null, null, null, null, null, 50);
+    var query = new ProcQuery("mine", null, null, null, null, null, null, 50, null);
     var snapshot =
         new ProcViews.Queues(
             Instant.now(), query, List.of(), List.of(), List.of(), null, List.of());

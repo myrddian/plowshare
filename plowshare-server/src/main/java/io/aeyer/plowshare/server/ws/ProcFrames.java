@@ -49,7 +49,8 @@ public class ProcFrames implements FrameArea {
             "causation",
             "active",
             "after",
-            "limit");
+            "limit",
+            "order");
     for (var field : payload.entrySet()) {
       if (!allowed.contains(field.getKey()) || field.getValue() == null)
         throw new CallerFault("Unsupported PROC field");
