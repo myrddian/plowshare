@@ -350,6 +350,7 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(TOKEN, json.dumps(overview))
         self.assertIsNone(overview["assessments"])
+        self.assertIsNone(overview["deep_scans"])
         self.assertEqual(
             (await client.post("/api/session", headers=headers, json={})).status, 200
         )

@@ -124,7 +124,7 @@ source or changing labels starts a new comparison baseline while preserving sett
 receipts. New snapshots add optional `devices` and `dns_window` fields to the v1
 format. Legacy receipts keep their exact retained encoding for reconciliation.
 Retained evidence is capped at 768 KiB, independently of the 16,000-byte tool
-reply budget. Each sweep retains every selected TCP observation and device identity
+reply budget. Each collection retains every selected TCP observation and device identity
 in one document. DNS samples are capped at 4,096 rows and may be reduced further
 with an explicit coverage gap. Large investigations receive a bounded context
 projection and can page relevant evidence; omitted rows never prove absence.
@@ -475,6 +475,51 @@ the daily research and assessment limits reset at its midnight. Without
 `timeZone` all three use UTC, and System health › Deployment says it is unset.
 Changing it affects new assessments only; reports already written keep the zone
 their run recorded.
+
+### Deep port scans
+
+A deep scan checks every TCP port (1 to 65535) of one device at a time, not only
+the usual ones, and takes several minutes. It only ever probes a private IPv4
+address, even when the configuration watches other addresses. It is a plain TCP
+connect from the collector host: no UDP and no banners, and nothing is sent after
+a connection opens. A port that times out is recorded as unanswered, never as
+closed.
+
+A flagged assessment can start a scan automatically. The trigger fires once,
+when the report reaches review; accepting or dismissing the report afterwards
+does not change it. A report does not trigger a scan when its assessment was
+requested after the device's latest complete scan finished, because that
+assessment already saw the scan. Set the limit under Settings › Automatic deep
+scans per day, from 0 to 12 per household day; it is 0 by default, so nothing is
+scanned until you raise it, and the pane says automatic scans are off. Operators
+can also scan a device from its pane with **Deep-scan this device**. Operator
+scans have no daily limit and run one at a time; automatic triggers and further
+scans you start wait in the queue.
+
+Before and after each scan the collector reads the device's identity afresh from
+its current identity sources: UniFi's connected clients and adopted devices, and
+Pi-hole's network table, merged as collection merges them. Either UniFi or
+Pi-hole is enough. If the sources name different MAC addresses for the address,
+or none answers, the scan is recorded as unreliable, so a scan never lands on an
+address that has changed hands. Without those sources deep scans are
+unavailable, and the pane says so.
+
+A result keeps at most 512 open ports and says how many more were open. A device
+that accepts a connection on every port, such as some firewalls, would otherwise
+fill the record.
+
+A scan that is running when the collector restarts is recorded as interrupted and
+is never resumed. Queued triggers survive a restart and expire after 7 days.
+
+The device pane shows the ports of the latest complete scan. A port counts as new
+when it is open in that scan and is not one of the collector's configured ports
+(the usual check ports, shared by all devices). A "New open ports" item stays in
+the attention band until the device is assessed again (an assessment requested
+after the scan finished, not one that has completed), or until a later scan
+finds none of those ports open.
+
+Before raising the limit on a network with UniFi threat detection (IDS/IPS),
+check that it will not block the collector: a full scan looks like a port scan to network security tools.
 
 The dashboard and collector configuration share one bound of 16 TCP ports. The
 dashboard watches private addresses only; other addresses can be set by hand in

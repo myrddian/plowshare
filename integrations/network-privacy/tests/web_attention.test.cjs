@@ -29,7 +29,7 @@ function device(name, address, deviceId) {
   return {name, address, identity:{mac:deviceId.slice(4), device_id:deviceId}};
 }
 function summary(deviceId, state, potential_breaches = 0) {
-  return {device_id:deviceId, state, pending:null, processing:false, potential_breaches, worth_checking:0};
+  return {device_id:deviceId, state, pending:null, processing:false, potential_breaches, worth_checking:0, requested_at:null};
 }
 function credential(purpose, variable, present) {return {purpose, source:'environment', variable, present};}
 function system(overrides = {}) {

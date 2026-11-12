@@ -31,6 +31,8 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .deep_scan import MAX_AUTOMATIC, DeepScanner
+from .deep_scan import UnknownDevice as UnknownScanDevice
 from .device_assessments import (
     AssessmentConflict,
     AssessmentControl,
@@ -78,6 +80,8 @@ def application(
     managed_products: Callable[[], ManagedProductLookup | None] | None = None,
     profile_research: ResearchReview | None = None,
     assessments: AssessmentControl | None = None,
+    deep_scans: DeepScanner | None = None,
+    deep_scans_detail: str | None = None,
     advisory_origin: str | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
@@ -209,6 +213,15 @@ def application(
                     "usage": asdict(assessments.usage()),
                 }
                 if assessments is not None
+                else None,
+                "deep_scans": {
+                    "views": [asdict(item) for item in deep_scans.views()],
+                    "usage": asdict(deep_scans.usage()),
+                    "available": deep_scans.available,
+                    "detail": deep_scans.detail,
+                    "configured_ports": list(worker.config.collection.ports),
+                }
+                if deep_scans is not None
                 else None,
             }
         )
@@ -607,6 +620,74 @@ def application(
             {"background_limit": service.ledger.background_limit, "detail": None}
         )
 
+    def scanner() -> DeepScanner:
+        if deep_scans is None:
+            raise web.HTTPNotFound(text="Deep port scans are not enabled")
+        return deep_scans
+
+    def deep_scan_settings_view(service: DeepScanner) -> web.Response:
+        usage = service.usage()
+        return web.json_response(
+            {
+                "automatic_limit": usage.automatic_limit,
+                "used_today": usage.used_today,
+                "available": service.available,
+                "detail": service.detail,
+            }
+        )
+
+    # The scanner's own refusals (unavailable, unknown device) carry the text the
+    # operator needs, which the generic ValueError mapping would replace.
+    def deep_scan_error(error: Exception) -> web.Response:
+        return web.json_response(
+            {"error": str(error)},
+            status=404 if isinstance(error, UnknownScanDevice) else 400,
+        )
+
+    async def deep_scan_view(request: web.Request) -> web.Response:
+        service = scanner()
+        try:
+            view = service.view(parse_device_id(assessment_device(request)))
+        except (ValueError, UnknownScanDevice) as error:
+            return deep_scan_error(error)
+        return web.json_response(asdict(view))
+
+    async def deep_scan_request(request: web.Request) -> web.Response:
+        service = scanner()
+        object_fields(parse_json(await request.read()), set())
+        try:
+            view = service.request(assessment_device(request))
+        except (ValueError, UnknownScanDevice) as error:
+            return deep_scan_error(error)
+        return web.json_response(asdict(view))
+
+    async def deep_scan_cancel(request: web.Request) -> web.Response:
+        service = scanner()
+        object_fields(parse_json(await request.read()), set())
+        try:
+            view = service.cancel(assessment_device(request))
+        except (ValueError, UnknownScanDevice) as error:
+            return deep_scan_error(error)
+        return web.json_response(asdict(view))
+
+    async def deep_scan_settings(request: web.Request) -> web.Response:
+        return deep_scan_settings_view(scanner())
+
+    async def save_deep_scan_settings(request: web.Request) -> web.Response:
+        service = scanner()
+        row = object_fields(parse_json(await request.read()), {"automatic_limit"})
+        limit = row["automatic_limit"]
+        if type(limit) is not int or not 0 <= limit <= MAX_AUTOMATIC:
+            return web.json_response(
+                {
+                    "error": "Choose a whole number from 0 to "
+                    f"{MAX_AUTOMATIC} automatic deep scans a day"
+                },
+                status=400,
+            )
+        service.set_automatic_limit(limit)
+        return deep_scan_settings_view(service)
+
     async def profile_advisories(request: web.Request) -> web.Response:
         if advisories is None:
             raise web.HTTPNotFound(text="Advisory lookup is not configured")
@@ -846,6 +927,14 @@ def application(
                 else 0,
                 "issues_available": issues is not None,
                 "device_assessments_available": assessments is not None,
+                # True when a scan can start now: a scanner with an identity
+                # source, not merely configured deep scans.
+                "deep_scans_available": deep_scans is not None and deep_scans.available,
+                # Why deep scans are off: an unreadable journal at start-up, or
+                # the running scanner's own detail.
+                "deep_scans_detail": deep_scans.detail
+                if deep_scans is not None
+                else deep_scans_detail,
                 "state": worker.state,
                 "detail": worker.detail,
                 "requests": [
@@ -1010,6 +1099,11 @@ def application(
         app.router.add_post("/api/devices/{device_id}/assessment/" + action, handler)
     app.router.add_get("/api/device-assessments", assessment_settings)
     app.router.add_post("/api/device-assessments", save_assessment_settings)
+    app.router.add_get("/api/devices/{device_id}/deep-scan", deep_scan_view)
+    app.router.add_post("/api/devices/{device_id}/deep-scan/request", deep_scan_request)
+    app.router.add_post("/api/devices/{device_id}/deep-scan/cancel", deep_scan_cancel)
+    app.router.add_get("/api/deep-scans", deep_scan_settings)
+    app.router.add_post("/api/deep-scans", save_deep_scan_settings)
     app.router.add_get("/api/profiles", profile_list)
     app.router.add_get("/api/profiles/{identity}/{revision}", profile_source)
     app.router.add_post(

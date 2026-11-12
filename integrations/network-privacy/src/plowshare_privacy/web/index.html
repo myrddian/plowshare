@@ -301,6 +301,14 @@
             </form>
             <p class="hint">0 turns background assessment off. One assessment runs at a time, and a device awaiting your review is not assessed again. Assessments you start from a device count toward the same day, up to 12 in all.</p>
             <p id="assessment-settings-detail" role="status" class="hint"></p>
+            <div id="deep-scan-group" hidden>
+              <form id="deep-scan-settings" class="inline-form">
+                <label>Automatic deep scans per day<input id="deep-scan-limit" type="number" min="0" max="12" step="1" inputmode="numeric" required></label>
+                <button id="deep-scan-save" type="submit">Save limit</button>
+              </form>
+              <p class="hint">0 turns them off. Each scan probes all 65,535 TCP ports of one flagged device. Before raising this on a network with UniFi threat detection, check it will not block the collector. Scans you start yourself are not limited.</p>
+              <p id="deep-scan-detail" role="status" class="hint"></p>
+            </div>
           </div>
         </section>
 

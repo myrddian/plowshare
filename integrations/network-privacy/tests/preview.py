@@ -11,8 +11,9 @@ import asyncio
 import json
 import tempfile
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, cast
 from uuid import uuid4
 
 from aiohttp import web
@@ -34,6 +35,14 @@ from test_privacy_issues import fields as issue_fields
 from plowshare_privacy.assessment_request import ConcernOutcome
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
 from plowshare_privacy.contracts import Configuration, utc_now
+from plowshare_privacy.deep_scan import (
+    DeepScanner,
+    DeepScanResult,
+    DeepScanUsage,
+    DeepScanView,
+    ScanState,
+)
+from plowshare_privacy.deep_scan import UnknownDevice as UnknownScanDevice
 from plowshare_privacy.device_assessments import (
     AssessmentConflict,
     AssessmentLedger,
@@ -44,6 +53,7 @@ from plowshare_privacy.device_assessments import (
     UnknownDevice,
     summary,
 )
+from plowshare_privacy.device_detection import ServiceExposure, exposures_for
 from plowshare_privacy.device_dossier import parse_device_id
 from plowshare_privacy.device_profiles import (
     DeviceProfiles,
@@ -111,6 +121,138 @@ def sample_overview(total: int | None = None) -> Middleware:
     return middleware
 
 
+def _exposures(complete: DeepScanResult | None) -> tuple[ServiceExposure, ...]:
+    return exposures_for(set(complete.open_ports)) if complete is not None else ()
+
+
+class PreviewDeepScans:
+    """In-memory stand-in for ``DeepScanner``; nothing is probed.
+
+    The Living room TV starts with one complete result that includes ports
+    outside the preview's usual checks. Requesting a scan of another device
+    starts a running scan whose progress advances each time the dashboard reads
+    it, finishing as complete (or cancelled when cancelled), so every state can
+    be clicked through. The web routes only call the methods below, so the fake
+    is passed through ``cast`` rather than inheriting the real scanner's
+    journal and probe machinery.
+    """
+
+    TOTAL = 65535
+    STEP = 9000
+
+    def __init__(self, tv_id: str, addresses: dict[str, str]) -> None:
+        self.available = True
+        self.detail: str | None = None
+        self._limit = 2
+        self._addresses = addresses
+        self._results: dict[str, DeepScanResult] = {}
+        # The newest complete result, kept when a later attempt is cancelled.
+        self._complete: dict[str, DeepScanResult] = {}
+        self._running: dict[str, int] = {}
+        # Finished after the TV's sample assessment was requested, so the
+        # attention band asks for a fresh assessment of the extra ports.
+        from preview_sample import NOW
+
+        self._results[tv_id] = self._complete[tv_id] = self._result(
+            tv_id,
+            "complete",
+            started=NOW - timedelta(minutes=25),
+            finished=NOW - timedelta(minutes=5),
+            ports=(443, 8008, 8009, 8443, 9000),
+            unanswered=2,
+        )
+
+    def _result(
+        self,
+        device_id: str,
+        state: ScanState,
+        started: datetime | None = None,
+        finished: datetime | None = None,
+        ports: tuple[int, ...] = (),
+        unanswered: int = 0,
+    ) -> DeepScanResult:
+        end = finished or datetime.now(timezone.utc)
+        begin = started or end - timedelta(minutes=2)
+        return DeepScanResult(
+            device_id,
+            self._addresses[device_id],
+            str(uuid4()),
+            "operator",
+            None,
+            begin.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            state,
+            ports,
+            unanswered,
+            "You cancelled this scan." if state == "cancelled" else None,
+        )
+
+    def _known(self, device_id: str) -> str:
+        if parse_device_id(device_id) not in self._addresses:
+            raise UnknownScanDevice(device_id)
+        return device_id
+
+    def usage(self) -> DeepScanUsage:
+        return DeepScanUsage(self._limit, 1)
+
+    def view(self, device_id: str) -> DeepScanView:
+        self._known(device_id)
+        latest = self._results.get(device_id)
+        if device_id in self._running:
+            checked = min(self._running[device_id], self.TOTAL)
+            self._running[device_id] = checked + self.STEP
+            if checked >= self.TOTAL:
+                del self._running[device_id]
+                self._results[device_id] = latest = self._result(
+                    device_id, "complete", ports=(22, 443, 8080), unanswered=5
+                )
+                self._complete[device_id] = latest
+            else:
+                left = (self.TOTAL - checked) / self.STEP * 5
+                finish = datetime.now(timezone.utc) + timedelta(seconds=left)
+                return DeepScanView(
+                    device_id, True, "running", "operator", checked, self.TOTAL,
+                    (443,) if checked > 20000 else (), finish.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    latest, self._complete.get(device_id), None,
+                    _exposures(self._complete.get(device_id)),
+                )  # fmt: skip
+        return DeepScanView(
+            device_id,
+            True,
+            "idle",
+            None,
+            0,
+            self.TOTAL,
+            (),
+            None,
+            latest,
+            self._complete.get(device_id),
+            None,
+            _exposures(self._complete.get(device_id)),
+        )
+
+    def views(self) -> tuple[DeepScanView, ...]:
+        return tuple(
+            self.view(device_id)
+            for device_id in self._addresses
+            if device_id in self._results or device_id in self._running
+        )
+
+    def request(self, device_id: str) -> DeepScanView:
+        self._known(device_id)
+        self._running.setdefault(device_id, 0)
+        return self.view(device_id)
+
+    def cancel(self, device_id: str) -> DeepScanView:
+        self._known(device_id)
+        if self._running.pop(device_id, None) is not None:
+            self._results[device_id] = self._result(device_id, "cancelled")
+        return self.view(device_id)
+
+    def set_automatic_limit(self, limit: int) -> None:
+        self._limit = limit
+
+
 class PreviewAssessments:
     """An in-memory ``AssessmentControl`` for the sample network; nothing reaches Plowshare.
 
@@ -153,7 +295,14 @@ class PreviewAssessments:
 
     def summaries(self) -> tuple[AssessmentSummary, ...]:
         return tuple(
-            summary(v.device_id, v.state, v.pending, v.processing, v.concerns)
+            summary(
+                v.device_id,
+                v.state,
+                v.pending,
+                v.processing,
+                v.concerns,
+                v.requested_at,
+            )
             for v in self.views.values()
             if v.state != "idle"
         )
@@ -236,6 +385,17 @@ class PreviewAssessments:
         self._ledger = replace(self._ledger, background_limit=limit)
 
 
+def preview_deep_scans() -> DeepScanner:
+    from preview_sample import TV_DEVICE, sample_devices
+
+    addresses = {
+        row["identity"]["device_id"]: row["address"]
+        for row in sample_devices()
+        if row["identity"] is not None
+    }
+    return cast(DeepScanner, PreviewDeepScans(TV_DEVICE, addresses))
+
+
 async def preview(
     bind: str,
     port: int,
@@ -245,7 +405,10 @@ async def preview(
     with tempfile.TemporaryDirectory() as folder:
         config = configuration(Path(folder))
         config = replace(
-            config, collection=replace(config.collection, targets=("192.0.2.10",))
+            config,
+            collection=replace(
+                config.collection, targets=("192.0.2.10",), ports=(443, 8008, 8009)
+            ),
         )
         store = FileOperatorStore(Path(folder).resolve())
         store.set_preferences(Preferences(False, 8, 60, False))
@@ -366,6 +529,7 @@ async def preview(
             assessments=PreviewAssessments()
             if sample_network or sample_devices is not None
             else None,
+            deep_scans=preview_deep_scans() if sample_network else None,
         )
         if sample_network or sample_devices is not None:
             app.middlewares.append(sample_overview(sample_devices))

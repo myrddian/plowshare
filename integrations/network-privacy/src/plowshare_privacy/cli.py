@@ -35,6 +35,7 @@ from .console import FileManualInvestigations, OperatorConsole
 from .console_port import SdkConsolePort
 from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
+from .deep_scan import compose_scanner
 from .device_assessments import AssessmentJournal, DeviceAssessments
 from .device_describer import LocalDeviceDescriber
 from .device_facts import DeviceFactsJournal, DeviceFactsService
@@ -289,6 +290,11 @@ async def execute(args: argparse.Namespace) -> None:
                 if operator_store
                 else None
             )
+            # Deep port scans probe from this host with the collector's identity
+            # source. An unreadable journal disables them only; collection starts.
+            deep_scans, deep_scans_detail = compose_scanner(
+                worker, config.state_directory, operator_store is not None
+            )
             assessments = (
                 DeviceAssessments(
                     AssessmentJournal(config.state_directory),
@@ -300,6 +306,12 @@ async def execute(args: argparse.Namespace) -> None:
                     if profiles is not None
                     else None,
                     zone=lambda: worker.config.zone,
+                    flagged=deep_scans.flagged
+                    if deep_scans is not None
+                    else lambda device, report, requested_at: None,
+                    deep_scan=deep_scans.latest
+                    if deep_scans is not None
+                    else lambda device: None,
                 )
                 if dossiers is not None
                 else None
@@ -490,6 +502,8 @@ async def execute(args: argparse.Namespace) -> None:
                     managed_products=managed_products,
                     profile_research=research,
                     assessments=assessments,
+                    deep_scans=deep_scans,
+                    deep_scans_detail=deep_scans_detail,
                     advisory_origin=advisory_origin,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
@@ -503,6 +517,7 @@ async def execute(args: argparse.Namespace) -> None:
             task: asyncio.Task[None] | None = None
             research_task: asyncio.Task[None] | None = None
             assessment_task: asyncio.Task[None] | None = None
+            deep_scan_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
                 await site.start()
@@ -549,13 +564,15 @@ async def execute(args: argparse.Namespace) -> None:
                     research_task = asyncio.create_task(research.run(stop))
                 if assessments is not None:
                     assessment_task = asyncio.create_task(assessments.run(stop))
+                if deep_scans is not None:
+                    deep_scan_task = asyncio.create_task(deep_scans.run(stop))
                 await stop.wait()
             finally:
                 stop.set()
-                for running in (assessment_task, research_task, task):
+                for running in (deep_scan_task, assessment_task, research_task, task):
                     if running is not None:
                         running.cancel()
-                for running in (assessment_task, research_task, task):
+                for running in (deep_scan_task, assessment_task, research_task, task):
                     if running is not None:
                         try:
                             await running
