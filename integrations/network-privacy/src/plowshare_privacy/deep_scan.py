@@ -58,6 +58,8 @@ CONCURRENCY = 64
 # Automatic scans admitted per household day; the operator's own scans are unlimited.
 MAX_AUTOMATIC = 12
 KEEP_RESULTS = 3
+# Assessment reports remembered per device so a report triggers at most once.
+KEEP_REPORTS = 3
 QUEUE_TTL_SECONDS = 7 * 86400
 MAX_DEVICES = 256
 MAX_LEDGER_BYTES = 2 * 1024 * 1024
@@ -193,6 +195,23 @@ class DeepScanResult:
 
 
 @dataclass(frozen=True)
+class HandledReport:
+    """An assessment report that has already triggered (or been covered by) a scan."""
+
+    device_id: str
+    report: str
+
+    def __post_init__(self) -> None:
+        parse_device_id(self.device_id)
+        uuid(self.report)
+
+    @classmethod
+    def decode(cls, value: object) -> HandledReport:
+        row = object_fields(value, {"device_id", "report"})
+        return cls(parse_device_id(row["device_id"]), uuid(row["report"]))
+
+
+@dataclass(frozen=True)
 class DeepScanLedger:
     # Automatic scans admitted per household day; 0 turns automatic scans off.
     automatic_limit: int = 0
@@ -200,10 +219,14 @@ class DeepScanLedger:
     queue: tuple[DeepScanRequest, ...] = ()
     # ``queued_at`` of the running scan is the time it was admitted to run.
     running: DeepScanRequest | None = None
+    # The private IPv4 address the running scan probes; set exactly when running is.
+    running_address: str | None = None
     # Newest last; at most KEEP_RESULTS per device.
     results: tuple[DeepScanResult, ...] = ()
     # Automatic admission times; only the current household day's are kept.
     admissions: tuple[str, ...] = ()
+    # Newest last; unique, at most KEEP_REPORTS per device and MAX_DEVICES devices.
+    handled: tuple[HandledReport, ...] = ()
 
     def __post_init__(self) -> None:
         integer(self.automatic_limit, 0, MAX_AUTOMATIC)
@@ -217,6 +240,21 @@ class DeepScanLedger:
             devices.append(self.running.device_id)
         if len(set(devices)) != len(devices):
             raise ValueError("A device has more than one queued or running scan")
+        if (self.running is None) != (self.running_address is None):
+            raise ValueError("A running scan needs its address, and only it")
+        if self.running_address is not None and not private_ipv4(
+            text(self.running_address, 15)
+        ):
+            raise ValueError("A deep scan only probes a private IPv4 address")
+        if len(set(self.handled)) != len(self.handled):
+            raise ValueError("Duplicate handled deep scan reports")
+        reports: dict[str, int] = {}
+        for handled in self.handled:
+            reports[handled.device_id] = reports.get(handled.device_id, 0) + 1
+        if len(reports) > MAX_DEVICES or any(
+            n > KEEP_REPORTS for n in reports.values()
+        ):
+            raise ValueError("Too many handled deep scan reports")
         counts: dict[str, int] = {}
         for result in self.results:
             counts[result.device_id] = counts.get(result.device_id, 0) + 1
@@ -235,7 +273,16 @@ class DeepScanLedger:
     @classmethod
     def decode(cls, value: object) -> DeepScanLedger:
         row = object_fields(
-            value, {"automatic_limit", "queue", "running", "results", "admissions"}
+            value,
+            {
+                "automatic_limit",
+                "queue",
+                "running",
+                "running_address",
+                "results",
+                "admissions",
+                "handled",
+            },
         )
         return cls(
             integer(row["automatic_limit"], 0, MAX_AUTOMATIC),
@@ -243,11 +290,18 @@ class DeepScanLedger:
             DeepScanRequest.decode(row["running"])
             if row["running"] is not None
             else None,
+            text(row["running_address"], 15)
+            if row["running_address"] is not None
+            else None,
             tuple(
                 DeepScanResult.decode(v)
                 for v in items(row["results"], MAX_DEVICES * KEEP_RESULTS)
             ),
             tuple(timestamp(v) for v in items(row["admissions"], MAX_AUTOMATIC)),
+            tuple(
+                HandledReport.decode(v)
+                for v in items(row["handled"], MAX_DEVICES * KEEP_REPORTS)
+            ),
         )
 
 
@@ -307,8 +361,6 @@ _UNAVAILABLE = (
     " before and after the sweep."
 )
 _WAITING = "Waiting for tomorrow's automatic scan allowance."
-# Recorded for a scan interrupted by a restart when its address is no longer known.
-_UNKNOWN_ADDRESS = "0.0.0.0"
 
 ViewState = Literal["idle", "queued", "running"]
 _Outcome = tuple[ScanState, str | None]
@@ -354,6 +406,23 @@ class _Progress:
 
 def _instant(stamp: str) -> datetime:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def _remember(
+    handled: tuple[HandledReport, ...], entry: HandledReport
+) -> tuple[HandledReport, ...]:
+    """Append ``entry``; keep KEEP_REPORTS per device for the MAX_DEVICES newest."""
+    counts: dict[str, int] = {}
+    kept: list[HandledReport] = []
+    for item in reversed(handled + (entry,)):
+        if item.device_id not in counts:
+            if len(counts) >= MAX_DEVICES:
+                continue
+            counts[item.device_id] = 0
+        if counts[item.device_id] < KEEP_REPORTS:
+            counts[item.device_id] += 1
+            kept.append(item)
+    return tuple(reversed(kept))
 
 
 def _keep(results: tuple[DeepScanResult, ...]) -> tuple[DeepScanResult, ...]:
@@ -421,11 +490,12 @@ class DeepScanner:
         self._progress: _Progress | None = None
         self._ledger = journal.read()
         running = self._ledger.running
-        if running is not None:
+        address = self._ledger.running_address
+        if running is not None and address is not None:
             self._commit(
                 self._finish(
                     running,
-                    self._restart_address(running.device_id),
+                    address,
                     running.queued_at,
                     ("interrupted", _INTERRUPTED),
                 )
@@ -450,32 +520,44 @@ class DeepScanner:
     def flagged(self, device_id: str, report: str) -> None:
         """Queue an automatic scan for an assessment report's concerns, once.
 
-        A queued automatic entry for an older report is replaced; a queued
-        operator request, a running scan or an earlier result for the same report
-        already covers the trigger. Nothing is queued while automatic scans are
-        off (limit 0) or no identity source can confirm the device.
+        Idempotence: an accepted ``(device_id, report)`` is remembered in the
+        ledger (the last KEEP_REPORTS per device), so it never queues again,
+        whatever later happens to its entry: a cancel, expiry, a limit of 0 or an
+        upgrade to an operator request. A queued automatic entry for an older
+        report is replaced; a queued operator request or a running scan of the
+        device covers the report without queueing. Nothing is queued or
+        remembered while automatic scans are off (limit 0) or no identity source
+        can confirm the device.
         """
-        parse_device_id(device_id)
-        uuid(report)
+        handled = HandledReport(parse_device_id(device_id), uuid(report))
         ledger = self._ledger
         if not self.available or ledger.automatic_limit == 0:
             return
-        if ledger.running is not None and ledger.running.device_id == device_id:
+        if handled in ledger.handled:
             return
-        if any(r.device_id == device_id and r.report == report for r in ledger.results):
-            return
+        remembered = _remember(ledger.handled, handled)
         queued = self._queued(device_id)
-        if queued is not None and (
-            queued.trigger == "operator" or queued.report == report
-        ):
+        running = ledger.running is not None and ledger.running.device_id == device_id
+        if running or (queued is not None and queued.trigger == "operator"):
+            self._commit(replace(ledger, handled=remembered))
             return
         entry = DeepScanRequest(
             device_id, "automatic", report, self._new_id(), self._clock()
         )
-        self._commit(replace(ledger, queue=self._enqueue(ledger, queued, entry)))
+        self._commit(
+            replace(
+                ledger,
+                queue=self._enqueue(ledger, queued, entry),
+                handled=remembered,
+            )
+        )
 
     def request(self, device_id: str) -> DeepScanView:
-        """Queue an operator scan; an automatic entry is upgraded in place."""
+        """Queue an operator scan; an automatic entry is upgraded in place.
+
+        An upgraded entry keeps its report, so its result still names the
+        assessment that flagged the device.
+        """
         parse_device_id(device_id)
         if not self.available:
             raise ValueError(_UNAVAILABLE)
@@ -487,7 +569,7 @@ class DeepScanner:
         if running or (queued is not None and queued.trigger == "operator"):
             return self.view(device_id)
         if queued is not None:
-            upgraded = replace(queued, trigger="operator", report=None)
+            upgraded = replace(queued, trigger="operator")
             queue = tuple(upgraded if q is queued else q for q in ledger.queue)
         else:
             entry = DeepScanRequest(
@@ -598,7 +680,9 @@ class DeepScanner:
             try:
                 self.error = None
                 await self.poll()
-            except (ValueError, OSError, LookupError) as error:
+            except Exception as error:
+                # Any failure, expected or not, is shown and the loop keeps
+                # serving; the failed scan, if one was running, is recorded.
                 self.error = (
                     "Deep port scans need attention "
                     f"({type(error).__name__}). Queued requests and results were kept."
@@ -629,20 +713,6 @@ class DeepScanner:
     def _spent(self) -> bool:
         usage = self.usage()
         return usage.used_today >= usage.automatic_limit
-
-    def _restart_address(self, device_id: str) -> str:
-        """The interrupted scan's address: current card, else its last result."""
-        for d, card in monitored_devices(self._inventory()):
-            if d == device_id:
-                return card.address
-        return next(
-            (
-                r.address
-                for r in reversed(self._ledger.results)
-                if r.device_id == device_id
-            ),
-            _UNKNOWN_ADDRESS,
-        )
 
     def _estimate(self, progress: _Progress, total: int) -> str | None:
         """Finish time at the pace so far: elapsed per checked port times those left."""
@@ -710,6 +780,7 @@ class DeepScanner:
                 ledger,
                 queue=tuple(q for q in ledger.queue if q is not current),
                 running=running,
+                running_address=address,
                 admissions=admissions,
             )
         )
@@ -718,9 +789,11 @@ class DeepScanner:
         try:
             outcome = await self._sweep(identities, running, address, progress)
         except Exception as error:
-            # Record the failure so the scan does not stay running, then let
-            # run() report it. Cancellation is not caught: a shutdown leaves the
-            # scan running on disk, and the next start records it interrupted.
+            # Every worker has stopped (the task group cancelled and awaited
+            # them). Record the failure so the scan does not stay running, then
+            # let run() show it in ``error``. Cancellation is not caught: a
+            # shutdown leaves the scan running on disk, and the next start
+            # records it interrupted.
             failed: _Outcome = ("failed", f"The scan stopped: {type(error).__name__}.")
             self._commit(self._finish(running, address, started, failed))
             raise
@@ -749,9 +822,12 @@ class DeepScanner:
         """Probe every port with CONCURRENCY workers, then confirm the identity.
 
         The workers share one port iterator, so each port is probed once and at
-        most CONCURRENCY probes are outstanding. A cancel or a probe failure is
-        seen between completions: workers stop taking ports and the sweep ends
-        once the probes in flight return.
+        most CONCURRENCY probes are outstanding. A cancel or an OSError probe
+        failure is seen between completions: workers stop taking ports and the
+        sweep ends once the probes in flight return. Any other exception in a
+        worker makes the task group cancel and await the rest before it raises,
+        so no probe outlives the sweep. A cancel that arrives during the closing
+        identity read is honoured.
         """
         ports: Iterator[int] = iter(self._ports)
         failures: list[str] = []
@@ -774,14 +850,26 @@ class DeepScanner:
                     return
                 progress.checked += 1
 
-        await asyncio.gather(*(worker() for _ in range(CONCURRENCY)))
+        try:
+            async with asyncio.TaskGroup() as group:
+                for _ in range(CONCURRENCY):
+                    group.create_task(worker())
+        except ExceptionGroup as group_error:
+            # Surface the worker's own error; the rest were cancellations.
+            raise group_error.exceptions[0] from group_error
         total = len(self._ports)
         if failures:
             detail = f"The scan stopped after {progress.checked} of {total} ports; {failures[0]}."
             return "failed", detail[:MAX_DETAIL]
+        cancelled: _Outcome = (
+            "cancelled",
+            f"Cancelled after {progress.checked} of {total} ports.",
+        )
         if running.request_id in self._cancelled:
-            return "cancelled", f"Cancelled after {progress.checked} of {total} ports."
+            return cancelled
         problem = await self._confirm(identities, running.device_id, address)
+        if running.request_id in self._cancelled:
+            return cancelled
         if problem is not None:
             _, why = problem
             return "unreliable", f"After the sweep: {why} No ports are reported."
@@ -829,12 +917,13 @@ class DeepScanner:
             unanswered,
             detail,
         )
-        running = ledger.running
+        running, address_now = ledger.running, ledger.running_address
         if running is not None and running.request_id == entry.request_id:
-            running = None
+            running, address_now = None, None
         return replace(
             ledger,
             queue=tuple(q for q in ledger.queue if q.request_id != entry.request_id),
             running=running,
+            running_address=address_now,
             results=_keep(ledger.results + (result,)),
         )

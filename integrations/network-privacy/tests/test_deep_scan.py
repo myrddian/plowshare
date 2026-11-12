@@ -20,6 +20,7 @@ from plowshare_privacy.deep_scan import (
     DeepScanner,
     DeepScanRequest,
     DeepScanResult,
+    HandledReport,
     UnknownDevice,
     probe_port,
 )
@@ -31,6 +32,7 @@ TV = "mac:aa:bb:cc:dd:ee:02"
 FAN = "mac:aa:bb:cc:dd:ee:03"
 OTHER = "aa:bb:cc:dd:ee:99"
 NOW = "2026-11-12T10:00:00Z"
+NOW_REPORT = "0b6f1f5e-2d55-4a8c-9c1e-6a3c2f0f7d11"
 ADDRESSES = {LAMP: "10.1.2.11", TV: "10.1.2.12", FAN: "10.1.2.13"}
 
 
@@ -66,8 +68,10 @@ class DeepScanRecordTests(unittest.TestCase):
             automatic_limit=4,
             queue=(request(),),
             running=request(device_id=TV, trigger="automatic", report=str(uuid4())),
+            running_address="10.1.2.12",
             results=(result(), result(state="failed", open_ports=(), detail="boom")),
             admissions=(NOW,),
+            handled=(HandledReport(LAMP, str(uuid4())),),
         )
         self.assertEqual(ledger, roundtrip(ledger))
         bad: list[Callable[[], DeepScanLedger]] = [
@@ -85,6 +89,14 @@ class DeepScanRecordTests(unittest.TestCase):
             lambda: DeepScanLedger(queue=(request(report="nope"),)),
             lambda: DeepScanLedger(queue=(request(queued_at="yesterday"),)),
             lambda: DeepScanLedger(results=tuple(result() for _ in range(4))),
+            lambda: DeepScanLedger(running=request()),
+            lambda: DeepScanLedger(running_address="10.1.2.11"),
+            lambda: DeepScanLedger(running=request(), running_address="8.8.8.8"),
+            lambda: DeepScanLedger(handled=(HandledReport(LAMP, "nope"),)),
+            lambda: DeepScanLedger(handled=(HandledReport(LAMP, NOW_REPORT),) * 2),
+            lambda: DeepScanLedger(
+                handled=tuple(HandledReport(LAMP, str(uuid4())) for _ in range(4))
+            ),
         ]
         for build in bad:
             with self.subTest(build=build), self.assertRaises(ValueError):
@@ -93,18 +105,28 @@ class DeepScanRecordTests(unittest.TestCase):
     def test_the_ledger_keeps_one_queued_or_running_scan_per_device(self) -> None:
         bad: list[Callable[[], DeepScanLedger]] = [
             lambda: DeepScanLedger(queue=(request(), request())),
-            lambda: DeepScanLedger(queue=(request(),), running=request()),
+            lambda: DeepScanLedger(
+                queue=(request(),), running=request(), running_address="10.1.2.11"
+            ),
         ]
         # Each is checked at decode as well as at construction.
         for build in bad:
             with self.subTest(build=build), self.assertRaises(ValueError):
                 build()
-        valid = DeepScanLedger(queue=(request(),), running=request(device_id=TV))
-        for queue, running in (
-            ([asdict(request()), asdict(request())], None),
-            ([asdict(request())], asdict(request())),
+        valid = DeepScanLedger(
+            queue=(request(),),
+            running=request(device_id=TV),
+            running_address="10.1.2.12",
+        )
+        for queue, running, address in (
+            ([asdict(request()), asdict(request())], None, None),
+            ([asdict(request())], asdict(request()), "10.1.2.11"),
         ):
-            row = asdict(valid) | {"queue": queue, "running": running}
+            row = asdict(valid) | {
+                "queue": queue,
+                "running": running,
+                "running_address": address,
+            }
             with self.subTest(row=row), self.assertRaises(ValueError):
                 DeepScanLedger.decode(json.loads(json.dumps(row)))
 
@@ -179,6 +201,7 @@ class Identities:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
+        self.on_call: Callable[[int], None] = lambda count: None
         # Consumed one per call: a MAC, None for no answer, or "ambiguous".
         self.script: list[str | None] = []
 
@@ -186,6 +209,7 @@ class Identities:
         self, targets: tuple[str, ...], observed_at: str
     ) -> IdentitySample:
         self.calls.append(targets)
+        self.on_call(len(self.calls))
         [address] = targets
         expected = next(d for d, a in ADDRESSES.items() if a == address)
         answer = self.script.pop(0) if self.script else expected.removeprefix("mac:")
@@ -225,13 +249,13 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.probe = Probe({22, 80})
         self.scanner = self.build()
 
-    def build(self, *, identities: bool = True) -> DeepScanner:
+    def build(self, *, identities: bool = True, ports: int = 100) -> DeepScanner:
         return DeepScanner(
             self.journal,
             lambda: DeviceInventory(self.cards),
             self.identities if identities else None,
             probe=self.probe,
-            ports=range(1, 101),
+            ports=range(1, ports + 1),
             clock=lambda: self.now,
             zone=lambda: self.zone,
         )
@@ -397,7 +421,9 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_scan_running_at_restart_is_interrupted_not_resumed(self) -> None:
         running = request(device_id=LAMP)
-        self.journal.save(DeepScanLedger(running=running))
+        self.journal.save(DeepScanLedger(running=running, running_address="10.1.2.11"))
+        # The address comes from the ledger, not from a card that may be gone.
+        self.cards = ()
         self.scanner = self.build()
         [done] = self.results()
         self.assertEqual("interrupted", done.state)
@@ -409,6 +435,103 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.journal.read().running)
         await self.scanner.poll()
         self.assertEqual(0, len(self.probe.calls))
+
+    async def test_a_cancel_during_the_closing_identity_read_is_honoured(self) -> None:
+        def cancel_on_second(count: int) -> None:
+            if count == 2:
+                self.scanner.cancel(LAMP)
+
+        self.identities.on_call = cancel_on_second
+        self.scanner.request(LAMP)
+        await self.scanner.poll()
+        [done] = self.results()
+        self.assertEqual(("cancelled", ()), (done.state, done.open_ports))
+
+    async def test_a_report_triggers_once_whatever_happens_to_its_entry(self) -> None:
+        self.scanner.set_automatic_limit(4)
+        report = str(uuid4())
+        # Cancelled by the operator.
+        self.scanner.flagged(LAMP, report)
+        self.scanner.cancel(LAMP)
+        self.scanner.flagged(LAMP, report)
+        self.assertEqual((), self.scanner.ledger.queue)
+        # Expired after seven days.
+        report = str(uuid4())
+        self.scanner.flagged(LAMP, report)
+        self.now = "2026-11-19T10:00:01Z"
+        await self.scanner.poll()
+        self.assertEqual([], self.results())
+        self.scanner.flagged(LAMP, report)
+        self.assertEqual((), self.scanner.ledger.queue)
+        # Discarded by a limit of 0, then the limit is raised again.
+        report = str(uuid4())
+        self.scanner.flagged(LAMP, report)
+        self.scanner.set_automatic_limit(0)
+        self.scanner.set_automatic_limit(4)
+        self.scanner.flagged(LAMP, report)
+        self.assertEqual((), self.scanner.ledger.queue)
+        # Upgraded to an operator request: the report is kept and not rescanned.
+        report = str(uuid4())
+        self.scanner.flagged(TV, report)
+        self.scanner.request(TV)
+        [upgraded] = self.scanner.ledger.queue
+        self.assertEqual(("operator", report), (upgraded.trigger, upgraded.report))
+        await self.scanner.poll()
+        self.scanner.flagged(TV, report)
+        self.assertEqual((), self.scanner.ledger.queue)
+        self.assertEqual([report], [r.report for r in self.results(TV)])
+        # The memory survives a restart and stays bounded per device.
+        self.scanner = self.build()
+        self.scanner.flagged(TV, report)
+        self.assertEqual((), self.scanner.ledger.queue)
+        lamp = [h for h in self.journal.read().handled if h.device_id == LAMP]
+        self.assertEqual(3, len(lamp))
+
+    async def test_an_unexpected_probe_error_stops_every_worker(self) -> None:
+        calls: list[int] = []
+
+        async def explodes(address: str, port: int, timeout: float) -> str:
+            calls.append(port)
+            number = len(calls)
+            await asyncio.sleep(0)
+            if number == 5:
+                raise RuntimeError("bug")
+            await asyncio.sleep(0)
+            return "closed"
+
+        self.probe = explodes  # type: ignore[assignment]
+        # Enough ports that orphaned workers would still have work after poll.
+        self.scanner = self.build(ports=2000)
+        self.scanner.request(LAMP)
+        with self.assertRaises(RuntimeError):
+            await self.scanner.poll()
+        stopped_at = len(calls)
+        for _ in range(10):
+            await asyncio.sleep(0)
+        # No orphaned worker keeps probing after the scan is recorded failed.
+        self.assertEqual(stopped_at, len(calls))
+        [done] = self.results()
+        self.assertEqual("failed", done.state)
+        self.assertIn("RuntimeError", done.detail or "")
+        self.assertIsNone(self.journal.read().running)
+
+    async def test_run_shows_an_unexpected_error_and_keeps_serving(self) -> None:
+        async def explodes(address: str, port: int, timeout: float) -> str:
+            raise RuntimeError("bug")
+
+        self.probe = explodes  # type: ignore[assignment]
+        self.scanner = self.build()
+        self.scanner.request(LAMP)
+        stop = asyncio.Event()
+        task = asyncio.create_task(self.scanner.run(stop))
+        for _ in range(50):
+            await asyncio.sleep(0)
+            if self.scanner.error is not None:
+                break
+        self.assertIn("RuntimeError", self.scanner.error or "")
+        self.assertFalse(task.done())
+        stop.set()
+        await task
 
     async def test_limit_zero_discards_automatic_but_keeps_operator_requests(
         self,
