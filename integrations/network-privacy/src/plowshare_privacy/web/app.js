@@ -1645,6 +1645,8 @@ function deepScanNodes(device, view, scans) {
       nodes.push(element('p', 'No open ports.', 'hint'));
     }
     nodes.push(element('p', `${plural(complete.unanswered, 'port', 'ports')} did not answer`, 'hint'));
+    // A complete scan's detail says how many open ports were not kept.
+    if (complete.detail) nodes.push(element('p', complete.detail, 'hint'));
   }
   // The collector's reason scanning cannot start or is waiting is plain text.
   if (view.detail) nodes.push(element('p', view.detail, 'hint'));

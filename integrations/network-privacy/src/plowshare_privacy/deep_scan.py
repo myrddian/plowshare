@@ -66,8 +66,14 @@ KEEP_RESULTS = 3
 KEEP_REPORTS = 3
 QUEUE_TTL_SECONDS = 7 * 86400
 MAX_DEVICES = 256
-MAX_LEDGER_BYTES = 2 * 1024 * 1024
 MAX_DETAIL = 1600
+# Open ports kept per result. A device that accepts every connection (a
+# firewall or tarpit) would otherwise make each result about 448 KB.
+MAX_OPEN_PORTS = 512
+# The largest valid ledger: 768 results of MAX_OPEN_PORTS five-digit ports and
+# a MAX_DETAIL detail of four-byte characters, plus the queue and handled
+# reports, is about 8.1 MB; tests save and read that ledger.
+MAX_LEDGER_BYTES = 8 * 1024 * 1024
 
 # Name -> typed literal; a lookup narrows an external string without a cast.
 _TRIGGERS: dict[str, Trigger] = {"automatic": "automatic", "operator": "operator"}
@@ -153,6 +159,8 @@ class DeepScanResult:
         timestamp(self.started_at)
         timestamp(self.finished_at)
         _state(self.state)
+        if len(self.open_ports) > MAX_OPEN_PORTS:
+            raise ValueError("Too many open ports in a deep scan result")
         for port in self.open_ports:
             integer(port, 1, 65535)
         # Strictly increasing means sorted and unique.
@@ -192,7 +200,9 @@ class DeepScanResult:
             timestamp(row["started_at"]),
             timestamp(row["finished_at"]),
             _state(row["state"]),
-            tuple(integer(p, 1, 65535) for p in items(row["open_ports"], 65535)),
+            tuple(
+                integer(p, 1, 65535) for p in items(row["open_ports"], MAX_OPEN_PORTS)
+            ),
             integer(row["unanswered"], 0, 65535),
             text(row["detail"], MAX_DETAIL) if row["detail"] is not None else None,
         )
@@ -411,6 +421,25 @@ class _Progress:
     unanswered: int = 0
 
 
+def _plural(count: int, singular: str, plural: str) -> str:
+    """``count`` with thousands separators and the matching noun phrase."""
+    return f"{count:,} {singular if count == 1 else plural}"
+
+
+def _kept(open_ports: set[int]) -> tuple[tuple[int, ...], str | None]:
+    """The lowest MAX_OPEN_PORTS open ports, and a note when more were open."""
+    ports = tuple(sorted(open_ports))
+    if len(ports) <= MAX_OPEN_PORTS:
+        return ports, None
+    extra = len(ports) - MAX_OPEN_PORTS
+    note = (
+        f"{_plural(len(ports), 'port was', 'ports were')} open; "
+        f"{_plural(extra, 'more open port was', 'more open ports were')} not kept. "
+        "The device may answer every port."
+    )
+    return ports[:MAX_OPEN_PORTS], note
+
+
 def _instant(stamp: str) -> datetime:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
@@ -459,8 +488,11 @@ class DeepScanner:
     held: identity reads and probes run unlocked.
 
     Persistence: each ledger change is saved before memory is updated, so a
-    failed save leaves both unchanged. Sweep progress is memory only; a restart
-    turns the persisted running scan into an ``interrupted`` result.
+    failed save leaves both unchanged. The one exception is the save that ends
+    a running scan: if it fails, memory records the scan ``failed`` (with no
+    ports) so the scanner is not left running, and the next poll or ledger
+    change saves that record; until then the journal still says running, so a
+    restart records it ``interrupted``. Sweep progress is memory only.
 
     Identity: the device's MAC must be the only identity at its address both
     before the first probe and after the last. A wrong MAC before the sweep is
@@ -491,6 +523,9 @@ class DeepScanner:
         self._zone = zone
         self._new_id = new_id
         self.error: str | None = None
+        # True while memory holds a finished scan the journal does not; see
+        # Persistence above.
+        self._unsaved = False
         self._lock = asyncio.Lock()
         # Request IDs of running scans the operator asked to stop.
         self._cancelled: set[str] = set()
@@ -692,6 +727,8 @@ class DeepScanner:
     async def poll(self) -> None:
         """Run at most one queued scan to completion."""
         async with self._lock:
+            if self._unsaved:
+                self._commit(self._ledger)
             if not self.available:
                 return
             self._expire()
@@ -719,6 +756,7 @@ class DeepScanner:
     def _commit(self, ledger: DeepScanLedger) -> None:
         self._journal.save(ledger)
         self._ledger = ledger
+        self._unsaved = False
 
     def _queued(self, device_id: str) -> DeepScanRequest | None:
         return next((q for q in self._ledger.queue if q.device_id == device_id), None)
@@ -817,22 +855,54 @@ class DeepScanner:
             # shutdown leaves the scan running on disk, and the next start
             # records it interrupted.
             failed: _Outcome = ("failed", f"The scan stopped: {type(error).__name__}.")
-            self._commit(self._finish(running, address, started, failed))
+            self._settle(running, address, started, failed)
             raise
         finally:
             self._progress = None
             self._cancelled.discard(running.request_id)
-        state, _ = outcome
-        self._commit(
-            self._finish(
-                running,
-                address,
-                started,
-                outcome,
-                tuple(sorted(progress.open_ports)) if state == "complete" else (),
-                progress.unanswered if state == "complete" else 0,
-            )
+        state, why = outcome
+        if state != "complete":
+            self._settle(running, address, started, outcome)
+            return
+        ports, note = _kept(progress.open_ports)
+        self._settle(
+            running,
+            address,
+            started,
+            (state, note or why),
+            ports,
+            progress.unanswered,
         )
+
+    def _settle(
+        self,
+        running: DeepScanRequest,
+        address: str,
+        started_at: str,
+        outcome: _Outcome,
+        open_ports: tuple[int, ...] = (),
+        unanswered: int = 0,
+    ) -> None:
+        """Record the running scan's result; never leave it running in memory.
+
+        If the save fails, memory takes a ``failed`` result instead (small, so
+        an oversized result cannot wedge every later save) and the error is
+        raised for ``run`` to show; see Persistence in the class docstring.
+        """
+        try:
+            self._commit(
+                self._finish(
+                    running, address, started_at, outcome, open_ports, unanswered
+                )
+            )
+        except Exception as error:
+            unsaved: _Outcome = (
+                "failed",
+                f"The scan's result could not be saved ({type(error).__name__}).",
+            )
+            self._ledger = self._finish(running, address, started_at, unsaved)
+            self._unsaved = True
+            raise
 
     async def _sweep(
         self,

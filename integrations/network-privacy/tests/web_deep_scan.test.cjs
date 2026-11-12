@@ -320,3 +320,12 @@ test('a request that completes after disconnect neither redraws nor refreshes', 
   assert.equal(run('refreshes'), 0);
   assert.equal(block.rebuilt, 2);
 });
+
+test('a complete scan that kept only some open ports says so', () => {
+  const {run} = dashboard();
+  const value = overview([view(TV, {latest:result(TV, {detail:'2,000 ports were open; 1,488 more open ports were not kept. The device may answer every port.'})})]);
+  load(run, value);
+  const block = {tag:'div', children:[], textContent:'', append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.children = children;}};
+  run('selectedDevice = value.devices[0].address; renderDeepScan(value.devices[0], block)', {value, block});
+  assert.ok(texts(block).includes('2,000 ports were open; 1,488 more open ports were not kept. The device may answer every port.'));
+});

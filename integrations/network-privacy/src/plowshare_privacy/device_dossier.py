@@ -582,6 +582,10 @@ def _supplemental_coverage(section: DossierSupplemental, trimmed: int) -> list[s
     return lines
 
 
+# Deep-scan open ports named in the coverage line; the rest are counted.
+_LISTED_DEEP_PORTS = 64
+
+
 def _coverage(
     card: DeviceCard,
     profile: OperatorProfile | None,
@@ -602,9 +606,13 @@ def _coverage(
         )
     if deep_scan is not None:
         count = len(deep_scan.open_ports)
+        # A device answering hundreds of ports would fill the reply budget;
+        # the exposures still cover every kept port.
+        listed = ", ".join(map(str, deep_scan.open_ports[:_LISTED_DEEP_PORTS]))
+        if count > _LISTED_DEEP_PORTS:
+            listed += f" and {count - _LISTED_DEEP_PORTS} more"
         found = (
-            f"{count} open {'port' if count == 1 else 'ports'}: "
-            + ", ".join(map(str, deep_scan.open_ports))
+            f"{count} open {'port' if count == 1 else 'ports'}: {listed}"
             if count
             else "no open ports"
         )
@@ -612,6 +620,8 @@ def _coverage(
             f"A full TCP scan on {deep_scan.finished_at[:10]} found {found}; "
             f"{deep_scan.unanswered} did not answer."
         )
+        if deep_scan.detail is not None:
+            lines.append(deep_scan.detail)
     if card.presence is None:
         lines.append("No quick presence checks in the last 24 hours.")
     dns = card.dns_activity

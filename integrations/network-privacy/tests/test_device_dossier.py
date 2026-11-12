@@ -552,6 +552,21 @@ class DeepScanDossierTest(unittest.TestCase):
             none.coverage,
         )
 
+    def test_a_scan_with_many_open_ports_is_summarised_and_still_fits(
+        self,
+    ) -> None:
+        note = "600 ports were open; 88 more open ports were not kept."
+        dossier = build_dossier(
+            card(), deep_scan=deep(open_ports=tuple(range(1, 513)), detail=note)
+        )
+        listed = ", ".join(map(str, range(1, 65)))
+        self.assertIn(
+            f"A full TCP scan on 2026-11-11 found 512 open ports: {listed} "
+            "and 448 more; 0 did not answer.",
+            dossier.coverage,
+        )
+        self.assertIn(note, dossier.coverage)
+
     def test_exposures_already_present_are_not_repeated(self) -> None:
         dossier = build_dossier(
             card(ports=((22, "open"),)), deep_scan=deep(open_ports=(22,))

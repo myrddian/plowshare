@@ -15,6 +15,8 @@ from test_device_dossier import card
 
 from plowshare_privacy.contracts import DeviceIdentity
 from plowshare_privacy.deep_scan import (
+    MAX_DETAIL,
+    MAX_OPEN_PORTS,
     DeepScanJournal,
     DeepScanLedger,
     DeepScanner,
@@ -654,6 +656,82 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         [done] = self.results()
         self.assertEqual("failed", done.state)
         self.assertIsNone(self.journal.read().running)
+
+    async def test_a_device_answering_every_port_keeps_a_bounded_result(
+        self,
+    ) -> None:
+        self.probe = Probe(set(range(1, 2001)))
+        self.scanner = self.build(ports=2000)
+        self.scanner.request(LAMP)
+        await self.scanner.poll()
+        [done] = self.results()
+        self.assertEqual("complete", done.state)
+        self.assertEqual(tuple(range(1, MAX_OPEN_PORTS + 1)), done.open_ports)
+        self.assertEqual(
+            "2,000 ports were open; 1,488 more open ports were not kept. "
+            "The device may answer every port.",
+            done.detail,
+        )
+        self.assertEqual(done, self.journal.read().results[-1])
+        with self.assertRaises(ValueError):
+            result(open_ports=tuple(range(1, MAX_OPEN_PORTS + 2)))
+
+    def test_the_largest_ledger_fits_the_journal(self) -> None:
+        devices = [f"mac:aa:bb:cc:dd:{n // 256:02x}:{n % 256:02x}" for n in range(256)]
+        widest = tuple(range(65536 - MAX_OPEN_PORTS, 65536))
+        ledger = DeepScanLedger(
+            automatic_limit=12,
+            queue=tuple(
+                request(device_id=d, trigger="automatic", report=str(uuid4()))
+                for d in devices
+            ),
+            results=tuple(
+                result(
+                    device_id=d,
+                    address="192.168.100.200",
+                    open_ports=widest,
+                    unanswered=65535,
+                    detail="\U0001f600" * MAX_DETAIL,
+                )
+                for d in devices
+                for _ in range(3)
+            ),
+            admissions=(NOW,) * 12,
+            handled=tuple(
+                HandledReport(d, str(uuid4())) for d in devices for _ in "abc"
+            ),
+        )
+        self.journal.save(ledger)
+        self.assertEqual(ledger, self.journal.read())
+
+    async def test_a_failed_final_save_does_not_leave_the_scan_running(self) -> None:
+        save = self.journal.save
+
+        def full(value: DeepScanLedger) -> None:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        def fail_last_save(count: int) -> None:
+            if count == 100:
+                self.journal.save = full  # type: ignore[method-assign]
+
+        self.probe.after = fail_last_save
+        self.scanner.request(LAMP)
+        with self.assertRaises(OSError):
+            await self.scanner.poll()
+        view = self.scanner.view(LAMP)
+        self.assertEqual("idle", view.state)
+        assert view.latest is not None
+        self.assertEqual(("failed", ()), (view.latest.state, view.latest.open_ports))
+        self.assertIn("could not be saved", view.latest.detail or "")
+        # The journal still says running, so a restart would record it interrupted.
+        self.assertIsNotNone(self.journal.read().running)
+        # Cancel and a new request work again; the next poll saves the failure.
+        self.scanner.cancel(LAMP)
+        self.journal.save = save  # type: ignore[method-assign]
+        await self.scanner.poll()
+        saved = self.journal.read()
+        self.assertIsNone(saved.running)
+        self.assertEqual(["failed"], [r.state for r in saved.results])
 
     async def test_views_cover_queued_running_and_scanned_devices(self) -> None:
         self.scanner.request(LAMP)
