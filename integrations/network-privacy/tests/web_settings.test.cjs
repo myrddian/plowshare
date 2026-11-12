@@ -10,13 +10,13 @@ const vm = require('node:vm');
 async function dashboard() {
   const nodes = new Map();
   function node(id) {
-    if (!nodes.has(id)) nodes.set(id, {value:'', textContent:'', disabled:false, classList:{toggle() {}}, listeners:{}, attributes:{}, setAttribute(name,value) {this.attributes[name] = value;}, focus() {this.focused = true;}, scrollIntoView() {}, addEventListener(name,handler) {this.listeners[name] = handler;}, children:[], append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.children = children;}, querySelector() {return null;}, querySelectorAll() {return [];}, reset() {}});
+    if (!nodes.has(id)) nodes.set(id, {value:'', textContent:'', disabled:false, classList:{toggle() {}, add() {}, remove() {}}, listeners:{}, attributes:{}, setAttribute(name,value) {this.attributes[name] = value;}, focus() {this.focused = true;}, scrollIntoView() {}, addEventListener(name,handler) {this.listeners[name] = handler;}, children:[], append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.children = children;}, querySelector() {return null;}, querySelectorAll() {return [];}, reset() {}});
     return nodes.get(id);
   }
   const context = vm.createContext({
     document:{getElementById:node, createElement:tag=>({tag, append(){}})}, location:{hash:''}, URLSearchParams,
     CSS:{escape:value=>value}, PrivacyMarkdown:{render:source=>({source})},
-    setInterval() {}, fetch:async () => ({ok:false, status:401}),
+    setInterval() {}, setTimeout() {}, fetch:async () => ({ok:false, status:401}),
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/plowshare_privacy/web/app.js'), 'utf8'), context);
   await new Promise(resolve => setImmediate(resolve));
@@ -165,6 +165,58 @@ test('unknown save outcome does not claim the password was saved', async () => {
 function scheduleFixture(context) {
   vm.runInContext("overview = {health:{schedule:{paused:false, owner:'installer'}}, schedule_control:{available:true,pending:false}, pending_deployment:null}; refresh = async () => {}; renderScheduleControl(overview.health.schedule, overview.schedule_control, null);", context);
 }
+
+test('the live schedule is written in words and preselected without changing it', async () => {
+  const {context, node} = await dashboard();
+  const run = source => vm.runInContext(source, context);
+  assert.equal(run("scheduleLabel('0 */15 * * * *')"), 'Every 15 minutes');
+  assert.equal(run("scheduleLabel('0 0 * * * *')"), 'Hourly');
+  assert.equal(run("scheduleLabel('0 0 9 * * *')"), 'Daily at 09:00');
+  assert.equal(run("scheduleLabel('0 5 */2 * * *')"), 'Custom: 0 5 */2 * * *');
+  context.document.createElement = tag => ({tag, children:[], classList:{toggle() {}}, setAttribute() {}, addEventListener() {},
+    append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.children = children;}});
+  const texts = list => list.children.map(item => item.textContent);
+  const overviewWith = schedule => ({
+    health:{connected:true, recovery:[], checklist:[], runs:[], schedule, pihole:'Optional: not configured', agents:null,
+      checked_at:'2026-11-12T08:00:00Z', detail:'', last_contact:null, last_scan:null, credential_expires_at:null},
+    devices:[], candidates:[], findings:[], quick_presence:null, schedule_control:{available:true, pending:false}, pending_deployment:null,
+    preferences:{automatic_investigations:false, daily_limit:3, cooldown_minutes:60, browser_notifications:false},
+  });
+  const schedule = {name:'network_scan', cron:'0 0 * * * *', zone:'Europe/London', paused:false, next_at:null};
+  context.value = overviewWith(schedule);
+  run('overview = value; renderOverview(value)');
+  // System health, the Overview schedule panel and Settings agree.
+  const health = texts(node('health'));
+  assert.equal(health[health.indexOf('Schedule') + 1], 'Hourly · Europe/London');
+  assert.deepEqual(texts(node('schedule-facts')), ['Frequency', 'Hourly', 'Time zone', 'Europe/London']);
+  assert.equal(node('frequency').value, 'hourly');
+  assert.equal(node('frequency-current').hidden, true);
+  assert.equal(node('frequency-current').disabled, true);
+
+  // A draft choice survives a refresh while the live schedule is unchanged.
+  node('frequency').value = 'daily';
+  run('renderOverview(value)');
+  assert.equal(node('frequency').value, 'daily');
+
+  // A schedule that is not a preset keeps its own value: saving unchanged
+  // reviews the live cron, not "Every 15 minutes".
+  context.value = overviewWith({...schedule, cron:'0 5 */2 * * *'});
+  run('overview = value; renderOverview(value)');
+  assert.equal(node('frequency').value, 'current');
+  assert.equal(node('frequency-current').hidden, false);
+  assert.equal(node('frequency-current').disabled, false);
+  assert.equal(node('frequency-current').textContent, 'Custom (current): 0 5 */2 * * *');
+  assert.deepEqual(texts(node('schedule-facts')), ['Frequency', 'Custom: 0 5 */2 * * *', 'Time zone', 'Europe/London']);
+  const requests = [];
+  node('administrator-password').value = 'fixture-admin';
+  context.fetch = async (url, options) => {requests.push({url, body:JSON.parse(options.body)}); throw new Error('fixture stop');};
+  await node('schedule-form').listeners.submit({preventDefault() {}});
+  assert.deepEqual(requests.map(item => [item.url, item.body.preset]), [['/api/schedule/review', 'current']]);
+
+  context.value = overviewWith(null);
+  run('overview = value; renderOverview(value)');
+  assert.deepEqual(texts(node('schedule-facts')), ['Frequency', 'Unavailable']);
+});
 
 test('pause sends one service control without a password or redeployment', async () => {
   const {context, node} = await dashboard();

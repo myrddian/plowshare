@@ -119,7 +119,8 @@
           <section class="panel">
             <div class="panel-heading"><h2>Monitoring schedule</h2><span id="schedule-runtime" class="tag">Checking schedule…</span></div>
             <div class="panel-body">
-              <p class="hint">Pause or resume future scans.</p>
+              <dl id="schedule-facts" class="facts"></dl>
+              <p class="hint">Pause or resume future scans. Change the frequency under Settings.</p>
               <div class="actions">
                 <button id="pause-schedule" type="button" disabled>Pause monitoring</button>
                 <button id="resume-schedule" type="button" disabled>Resume monitoring</button>
@@ -391,7 +392,7 @@
         <details class="panel">
           <summary class="panel-heading"><h2>Change schedule frequency</h2><span>Changes deploy an Application revision</span></summary>
           <form id="schedule-form" class="panel-body form-grid">
-            <label>Frequency<select id="frequency"><option value="15m">Every 15 minutes</option><option value="hourly">Hourly</option><option value="daily">Daily at 09:00</option></select></label>
+            <label>Frequency<select id="frequency"><option value="15m">Every 15 minutes</option><option value="hourly">Hourly</option><option value="daily">Daily at 09:00</option><option id="frequency-current" value="current" hidden disabled>Custom (current)</option></select></label>
             <label>Time zone<input id="zone" placeholder="IANA time zone" required></label>
             <label class="check"><input id="schedule-paused" type="checkbox">Start this revision paused</label>
             <label>Deployment administrator password<input id="administrator-password" type="password" autocomplete="off" required></label>

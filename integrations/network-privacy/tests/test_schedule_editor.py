@@ -253,6 +253,37 @@ class ScheduleEditorTest(unittest.IsolatedAsyncioTestCase):
                 "fixture-administrator-secret-not-in-source-73002",
             )
 
+    async def test_current_frequency_keeps_a_custom_schedule_unchanged(
+        self,
+    ) -> None:
+        source = self.setup.output / "application/schedules/network_scan.json"
+        row = json.loads(source.read_text())
+        row["cron"] = "0 5 */2 * * *"
+        source.write_text(json.dumps(row, indent=2) + "\n")
+        # Changing only the zone or pause state must not replace a custom cron
+        # with one of the presets.
+        review = await self.editor.review(
+            "current", "Europe/London", True, "review-password"
+        )
+        self.assertEqual(review.cron, "0 5 */2 * * *")
+        selected = next(
+            item
+            for item in review.sources
+            if item.path == "schedules/network_scan.json"
+        )
+        self.assertEqual(
+            json.loads(selected.text) | {"zone": row["zone"], "paused": row["paused"]},
+            row,
+        )
+        self.assertEqual(json.loads(selected.text)["zone"], "Europe/London")
+        await self.editor.deploy(review.id, "allowed", "deploy-password")
+        deployed = next(
+            item
+            for item in self.sent[0].files
+            if item.path == "schedules/network_scan.json"
+        )
+        self.assertEqual(json.loads(deployed.text)["cron"], "0 5 */2 * * *")
+
     async def test_unknown_preset_is_refused_before_login(self) -> None:
         with self.assertRaises(ValueError):
             await self.editor.review(
