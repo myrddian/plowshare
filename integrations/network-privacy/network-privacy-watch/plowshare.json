@@ -44,6 +44,22 @@
         "network_devices",
         "network_device"
       ]
+    },
+    {
+      "scope": "network_assistant",
+      "provider": "privacy-scanner",
+      "grants": [
+        "network_scope",
+        "network_scan_list",
+        "network_evidence",
+        "network_destinations",
+        "network_devices",
+        "network_device",
+        "network_request_deep_scan",
+        "network_request_assessment",
+        "network_note_profile",
+        "network_record_issue"
+      ]
     }
   ],
   "toolGrants": [
@@ -58,6 +74,10 @@
     {
       "toolScope": "network_evidence_read",
       "agent": "privacy_reviewer"
+    },
+    {
+      "toolScope": "network_assistant",
+      "agent": "privacy_assistant"
     }
   ]
 }
