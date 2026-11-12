@@ -117,7 +117,7 @@ Collection is bounded to operator-configured targets and ports. Agents cannot
 choose arbitrary targets, execute a shell, change devices or modify a firewall.
 TCP probes observe selected service responses; they do not provide complete
 device discovery or vulnerability detection. DNS observations need an external
-exporter and do not reveal encrypted payloads or prove malicious behavior.
+exporter and do not reveal encrypted payloads or prove malicious behaviour.
 
 Missing and stale sources remain visible as evidence gaps. Reports are drafts
 for operator review. The collector records uncertain uploads and publications

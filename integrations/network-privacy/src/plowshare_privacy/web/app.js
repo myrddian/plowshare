@@ -56,13 +56,34 @@ let currentView = 'overview';
 let restoring = false;
 // The fragment carries the open view and device so reload and Back restore
 // them. It is never sent to the server and holds no credential.
-function recordLocation() {
+// The fragment keeps the tab and, on Devices only, the open device and the
+// list's filter and order, so reload, Back and a shared link restore them.
+// Filter changes replace the entry rather than adding one per click.
+function recordLocation(replace = false) {
   if (restoring || !globalThis.history?.pushState) return;
   const parts = [];
   if (currentView !== 'overview') parts.push('tab=' + currentView);
-  if (selectedDevice) parts.push('device=' + encodeURIComponent(selectedDevice));
+  if (currentView === 'devices') {
+    if (selectedDevice) parts.push('device=' + encodeURIComponent(selectedDevice));
+    parts.push(...listParams());
+  }
   const target = parts.length ? '#' + parts.join('&') : '';
-  if (location.hash !== target) history.pushState(null, '', location.pathname + target);
+  if (location.hash !== target) history[replace ? 'replaceState' : 'pushState'](null, '', location.pathname + target);
+}
+// Only defaults are left out; anything else is an allowlisted value.
+function listParams() {
+  const parts = [];
+  if (signalFilter !== 'all') parts.push('show=' + signalFilter);
+  if (byId('device-presence').value === 'candidate') parts.push('presence=candidate');
+  if (byId('device-sort').value !== 'attention') parts.push('order=' + byId('device-sort').value);
+  return parts;
+}
+function applyListParams(params) {
+  const show = params.get('show'), order = params.get('order');
+  setSignalFilter(Object.hasOwn(signalNames, show || '') ? show : 'all');
+  byId('device-presence').value = params.get('presence') === 'candidate' ? 'candidate' : 'observed';
+  const sort = Object.hasOwn(inventoryOrders, order || '') ? order : 'attention';
+  if (byId('device-sort').value !== sort) {byId('device-sort').value = sort; if (overview) renderInventory(overview);}
 }
 function showView(name, focusHeading = false) {
   if (!Object.hasOwn(views, name)) throw new Error('Unknown dashboard view.');
@@ -423,7 +444,8 @@ async function refresh() {
     byId('detail').textContent = status.state !== 'attention_required' && status.collection_enabled === false ? 'Enable collection in Settings when you are ready.' : status.detail;
     byId('change-count').textContent = scans.length ? formatCount(scans[0].change_count ?? scans[0].changes.filter(change => !change.startsWith('Baseline')).length) : '—';
     byId('report-count').textContent = reportResult.error ? 'Unavailable' : formatCount(reportResult.value.length);
-    byId('scan').disabled = status.state === 'attention_required' || status.collection_enabled === false;
+    scanState.blocked = status.state === 'attention_required' || status.collection_enabled === false;
+    applyScanState();
     renderCollections(scans);
     if (reportResult.error) byId('reports').replaceChildren(element('p', 'Retained agent reports are temporarily unavailable. Local evidence remains readable.', 'empty'));
     else if (Array.isArray(reportResult.value)) renderReports(reportResult.value);
@@ -465,6 +487,7 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings','q-third','q-silent','q-volume']) byId(id).replaceChildren();
   for (const id of ['q-network','q-third-coverage','device-shown','health-detail']) byId(id).textContent = '';
   byId('device-search').value = ''; byId('device-presence').value = 'observed'; byId('device-sort').value = 'attention';
+  Object.assign(scanState, {blocked:false, pending:false, busy:false}); paneSignature = null;
   latestStatus = null; assessmentIndex = new Map(); healthOpened = false;
   for (const id of ['attention-items','health-connections','health-deployment','background-usage']) byId(id).replaceChildren();
   byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
@@ -484,8 +507,17 @@ byId('disconnect').addEventListener('click', async () => {
   byId('collections').replaceChildren(); byId('reports').replaceChildren(); byId('evidence').replaceChildren(); byId('report-content').replaceChildren(); byId('report-selection').textContent = 'Select a report';
   byId('mode').textContent = 'Not connected'; condition('Connect to view this collector’s private evidence.'); notice('Disconnected. Private evidence has been cleared from view.');
 });
+// Request a scan is off while the collector cannot collect, while saved
+// settings wait to apply, and while a request is in flight. Every path that
+// changes one of these goes through applyScanState, so none re-enables it.
+const scanState = {blocked:false, pending:false, busy:false};
+function applyScanState() {
+  byId('scan').disabled = scanState.blocked || scanState.pending || scanState.busy;
+  markBusy(byId('scan'), scanState.busy);
+}
 byId('scan').addEventListener('click', async () => {
-  setBusy(byId('scan'), true);
+  if (scanState.busy) return;
+  scanState.busy = true; applyScanState();
   try {
     if (!globalThis.crypto?.randomUUID) throw new Error('Scan requests need a secure browser context: use HTTPS or a loopback development listener.');
     const requestId = crypto.randomUUID();
@@ -493,7 +525,7 @@ byId('scan').addEventListener('click', async () => {
     notice('Scan requested. Its evidence appears under Evidence when the scan finishes.');
     await refresh();
   } catch (error) {notice(error.message, true);}
-  finally {setBusy(byId('scan'), false);}
+  finally {scanState.busy = false; applyScanState();}
 });
 
 
@@ -676,10 +708,10 @@ byId('filters-toggle').addEventListener('click', () => {
   byId('filters-toggle').setAttribute('aria-expanded', String(open));
   byId('device-filters').classList.toggle('open', open);
 });
-for (const signal of Object.keys(signalNames)) byId(`signal-${signal}`).addEventListener('click', () => {setSignalFilter(signal); filterDevices();});
-byId('device-sort').addEventListener('change', () => {if (overview) {renderInventory(overview); filterDevices();}});
+for (const signal of Object.keys(signalNames)) byId(`signal-${signal}`).addEventListener('click', () => {setSignalFilter(signal); filterDevices(); recordLocation(true);});
+byId('device-sort').addEventListener('change', () => {if (overview) {renderInventory(overview); filterDevices();} recordLocation(true);});
 byId('device-search').addEventListener('input', filterDevices);
-byId('device-presence').addEventListener('change', filterDevices);
+byId('device-presence').addEventListener('change', () => {filterDevices(); recordLocation(true);});
 byId('discover-form').addEventListener('submit', async event => {
   event.preventDefault();
   setBusy(byId('discover'), true);
@@ -720,8 +752,12 @@ const fragment = new URLSearchParams(location.hash.slice(1));
 const handoff = fragment.get('token');
 let pendingDevice = fragment.get('device');
 let pendingTab = Object.hasOwn(views, fragment.get('tab') || '') ? fragment.get('tab') : pendingDevice ? 'devices' : null;
+// The list's filter and order apply once the first overview arrives; values
+// are checked against the allowlists then.
+let pendingList = pendingTab === 'devices' ? fragment : null;
 if (location.hash) {
-  const kept = [pendingTab && 'tab=' + pendingTab, pendingDevice && 'device=' + encodeURIComponent(pendingDevice)].filter(Boolean);
+  const listed = ['show', 'presence', 'order'].filter(key => /^[a-z]{1,16}$/.test(fragment.get(key) || '')).map(key => key + '=' + fragment.get(key));
+  const kept = [pendingTab && 'tab=' + pendingTab, ...(pendingTab === 'devices' ? [pendingDevice && 'device=' + encodeURIComponent(pendingDevice), ...listed] : [])].filter(Boolean);
   history.replaceState(null, '', location.pathname + (kept.length ? '#' + kept.join('&') : ''));
 }
 async function connectLocal() {
@@ -1047,6 +1083,7 @@ globalThis.addEventListener?.('popstate', () => {
   try {
     const view = Object.hasOwn(views, tab || '') ? tab : address ? 'devices' : 'overview';
     if (view !== currentView) showView(view);
+    applyListParams(params); filterDevices();
     if (address && overview?.devices.some(item => item.address === address)) openDevice(address, false);
     else if (selectedDevice) closePane(false);
   } finally {restoring = false;}
@@ -1057,7 +1094,9 @@ globalThis.addEventListener?.('popstate', () => {
 // keeps the source and the limits of its own numbers. The agent assessment
 // sits between identity and the observations, so its state and decisions are
 // near the top of a long pane.
+let paneSignature = null;
 function renderDeviceView(device) {
+  paneSignature = JSON.stringify(device);
   const {current, known} = knownIdentity(device);
   const identity = paneSection('What it is', 'What it is');
   const facts = element('dl', undefined, 'facts');
@@ -1589,10 +1628,36 @@ function renderInventory(value) {
     cards.append(card);
   }
   // Keep an open device view on fresh observations; drop it if the device left.
+  // A refresh rebuilds the pane only when this device's own record changed, and
+  // then keeps what the operator had open, scrolled to and focused.
   if (selectedDevice) {
     const device = value.devices.find(item => item.address === selectedDevice);
-    if (device) {renderDeviceView(device); markSelectedRow(); syncPane();} else closePane();
+    if (!device) closePane();
+    else {
+      if (JSON.stringify(device) !== paneSignature) keepingPaneState(() => renderDeviceView(device));
+      markSelectedRow(); syncPane();
+    }
   }
+}
+// The observed parts of the pane, rebuilt by renderDeviceView. The analysis and
+// assessment parts are read once per device and are not touched here.
+const observedParts = ['device-identity', 'device-facts', 'device-history'];
+function keepingPaneState(render) {
+  const parts = observedParts.map(byId);
+  const label = node => node?.querySelector?.('summary')?.textContent ?? node?.textContent ?? '';
+  const opened = new Set(parts.flatMap(part => [...(part.querySelectorAll?.('details[open]') || [])].map(label)));
+  const active = document.activeElement;
+  const focused = parts.some(part => part.contains?.(active)) ? {tag:active.tagName, text:active.textContent} : null;
+  const pane = byId('pane-body'), scroll = pane.scrollTop;
+  render();
+  for (const part of parts) {
+    for (const details of part.querySelectorAll?.('details') || []) if (opened.has(label(details))) details.open = true;
+  }
+  if (focused) {
+    const match = parts.flatMap(part => [...(part.querySelectorAll?.(focused.tag) || [])]).find(node => node.textContent === focused.text);
+    match?.focus?.({preventScroll:true});
+  }
+  pane.scrollTop = scroll;
 }
 
 // The schedule presets the collector offers, by the cron each deploys
@@ -1822,9 +1887,10 @@ function renderOverview(value) {
   renderTriptych(value);
   }
   if (pendingTab || pendingDevice) {
-    const tab = pendingTab, address = pendingDevice; pendingTab = null; pendingDevice = null;
+    const tab = pendingTab, address = pendingDevice, list = pendingList; pendingTab = null; pendingDevice = null; pendingList = null;
     restoring = true;
     try {
+      if (list) applyListParams(list);
       if (tab) showView(tab);
       if (address && value.devices.some(device => device.address === address)) openDevice(address, false);
     } finally {restoring = false;}
@@ -1909,7 +1975,8 @@ function renderMonitorSettings(settings) {
   renderPiHoleSaved(piholeSaved, settings.pending);
   byId('pihole-save').disabled = !monitorEditable || piholePending;
   byId('pihole-blocker').textContent = settings.pending || !monitorEditable ? settings.detail : '';
-  if (settings.pending) byId('scan').disabled = true;
+  scanState.pending = !!settings.pending;
+  applyScanState();
 }
 async function piholeConnection(save) {
   if (piholePending) return;

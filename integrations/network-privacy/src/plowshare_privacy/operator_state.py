@@ -104,7 +104,7 @@ def findings(receipt: Receipt, expected: frozenset[str]) -> tuple[Finding, ...]:
                 kind, address, domain_key = "dns", query.device, query.domain
                 identity = identities.get(address)
                 device_id = identity.device_id if identity else "ip:" + address
-                explanation = "The observation source recorded this DNS name in the sample. It does not establish a connection, payload content or malicious behavior."
+                explanation = "The observation source recorded this DNS name in the sample. It does not establish a connection, payload content or malicious behaviour."
                 break
         if change.startswith("TCP "):
             kind = "service"

@@ -62,6 +62,7 @@ from plowshare_privacy.worker import Worker
 def sample_overview(total: int | None = None) -> Middleware:
     """Replace the overview's device list and device facts with the synthetic network."""
     from preview_sample import (
+        sample_checked_at,
         sample_devices,
         sample_supplemental,
         sample_system,
@@ -95,6 +96,12 @@ def sample_overview(total: int | None = None) -> Middleware:
         body["health"]["unifi"] = (
             "14 selected addresses associated in the latest collection"
         )
+        # Every sample device has quick sightings, so quick checks are on.
+        body["quick_presence"] = {
+            "enabled": True,
+            "last_checked": sample_checked_at(),
+            "issues": [],
+        }
         if total is None:
             body["devices"] = sample_devices()
         else:
@@ -289,12 +296,19 @@ async def preview(
 
         class PreviewSettings(Settings):
             def view(self) -> MonitorView:
+                # The sample household uses Pi-hole, UniFi, quick checks, DNS
+                # profiles and descriptions, so Settings says so too.
                 return MonitorView(
                     True,
                     config.collection.targets,
                     (443,),
                     True,
                     "Synthetic fixture settings",
+                    pihole_configured=True,
+                    unifi_configured=True,
+                    quick_scan=True,
+                    dns_profiles=True,
+                    device_descriptions=True,
                 )
 
             async def save_time_zone(self, zone: str | None) -> Configuration:

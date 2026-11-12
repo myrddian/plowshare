@@ -67,7 +67,7 @@ attribution remain its responsibility; the collector does not parse Pi-hole or
 router-specific files. Alternatively, connect the documented Pi-hole v6 API as
 described below. A missing or stale export is an explicit evidence gap.
 Malformed exports refuse collection before network probes. A DNS query is not
-proof of a connection, encrypted payload content or malicious behavior.
+proof of a connection, encrypted payload content or malicious behaviour.
 
 `fixture` reads the same contract without probing a network. Configure only
 `mode: "fixture"` and `observationsFile`; omit TCP settings. Synthetic mode is

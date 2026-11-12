@@ -11,20 +11,29 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
 from plowshare_privacy.advisories import Advisory, AdvisoryPage
+from plowshare_privacy.contracts import DeviceIdentity, TcpObservation
+from plowshare_privacy.device_detection import detect_device
 from plowshare_privacy.device_dossier import supplemental_section
 from plowshare_privacy.device_facts import AdvisoryFacts, DeviceDescription, DeviceFacts
 
 # Rows mirror the dashboard JSON exactly; they never enter application code.
 Row = dict[str, Any]
+Probe = Literal["open", "closed", "timeout", "unreachable"]
 
 NOW = datetime(2026, 11, 11, 21, 40, tzinfo=timezone.utc)
 
 
 def _at(minutes_ago: float) -> str:
     return (NOW - timedelta(minutes=minutes_ago)).isoformat()
+
+
+def sample_checked_at() -> str:
+    """When the sample's latest quick check ran, matching its device sightings."""
+    return _at(2).replace("+00:00", "Z")
 
 
 def _identity(address: str, name: str, mac: str, source: str = "unifi") -> Row:
@@ -83,14 +92,20 @@ def _device(
     name: str,
     device_type: str,
     *,
-    ports: tuple[tuple[int, str], ...] = (),
+    ports: tuple[tuple[int, Probe], ...] = (),
     dns: Row | None = None,
     traffic: Row | None = None,
     seen: int = 410,
+    hostname: str | None = None,
 ) -> Row:
     address = f"192.0.2.{index}"
     mac = f"02:00:00:00:00:{index:02x}"
-    identity = _identity(address, name, mac)
+    identity = _identity(address, hostname or name, mac)
+    services = tuple(TcpObservation(address, port, status) for port, status in ports)
+    # The real detector, so a sample type never claims more than its clues.
+    detection = detect_device(
+        DeviceIdentity(**{**identity, "observed_at": NOW.isoformat()}), services
+    )
     return {
         "address": address,
         "name": name,
@@ -106,14 +121,7 @@ def _device(
         "first_response_at": _at(3 * 24 * 60),
         "last_response_at": _at(9),
         "last_known_identity": None,
-        "detection": {
-            "device_type": device_type,
-            "confidence": "corroborated" if device_type != "Unknown" else "unknown",
-            "clues": [f"Name contains '{name.split()[0].lower()}'"]
-            if device_type != "Unknown"
-            else [],
-            "exposures": [],
-        },
+        "detection": asdict(detection),
         "presence": {
             "seen": seen,
             "checked": 410,
@@ -135,6 +143,7 @@ def sample_devices() -> list[Row]:
             "Router",
             ports=((53, "open"), (443, "open")),
             traffic=None,
+            hostname="unifi-gateway",
         ),
         _device(
             10,
@@ -167,6 +176,7 @@ def sample_devices() -> list[Row]:
                 ),
             ),
             traffic=_traffic(18_400_000_000, 412_000_000, resets=1),
+            hostname="living-room-smarttv",
         ),
         _device(
             11,
@@ -177,6 +187,7 @@ def sample_devices() -> list[Row]:
                 _group("connectivity", ("clients3.google.com", "Google", 288, 0)),
             ),
             traffic=_traffic(2_100_000_000, 246_000_000),
+            hostname="kitchen-display",
         ),
         _device(
             12,
@@ -200,6 +211,7 @@ def sample_devices() -> list[Row]:
             ports=((80, "open"), (443, "open"), (554, "open")),
             dns=_dns(windows=402, silent=True),
             traffic=_traffic(310_000_000, 41_700_000_000),
+            hostname="driveway-camera",
         ),
         _device(
             21,
@@ -213,6 +225,7 @@ def sample_devices() -> list[Row]:
                 ),
             ),
             traffic=_traffic(41_000_000, 3_300_000_000),
+            hostname="front-doorbell",
         ),
         _device(
             22,
@@ -244,6 +257,7 @@ def sample_devices() -> list[Row]:
                 _group("local", ("14.2.0.192.in-addr.arpa", "Reverse lookup", 420, 0)),
             ),
             traffic=_traffic(6_200_000_000, 1_100_000_000),
+            hostname="office-pc",
         ),
         _device(
             31,
@@ -268,6 +282,7 @@ def sample_devices() -> list[Row]:
             ),
             traffic=_traffic(9_800_000_000, 640_000_000, resets=3),
             seen=260,
+            hostname="pixel-8",
         ),
         _device(
             40,
@@ -320,6 +335,7 @@ def sample_devices() -> list[Row]:
                 _group("connectivity", ("pool.ntp.org", "NTP Pool", 96, 0)),
             ),
             traffic=_traffic(52_000_000_000, 44_100_000_000),
+            hostname="diskstation",
         ),
         _device(
             61,
@@ -328,6 +344,7 @@ def sample_devices() -> list[Row]:
             dns=None,
             traffic=_traffic(31_000_000_000, 900_000_000),
             seen=90,
+            hostname="game-console",
         ),
         _device(
             62,
@@ -369,132 +386,19 @@ def scaled_network(total: int) -> tuple[list[Row], list[Row]]:
     return devices, candidates
 
 
-# Assessments for the sample network. Run IDs and revisions are fake and the
-# report text is hand-written in the shape the assess_network_device script
-# renders; no Plowshare server or model produced it.
+# Assessments for the sample network. Run IDs and revisions are fake. The TV's
+# report is the real assess_network_device renderer's output for a run built
+# from this sample data (preview_report.py); a Java test pins it, so the
+# preview never shows a report the renderer would not write.
 TV_DEVICE = "mac:02:00:00:00:00:0a"
 CAMERA_DEVICE = "mac:02:00:00:00:00:14"
 TV_REPORT_REVISION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
 
-TV_REPORT = """# Living room TV: privacy assessment
-
-Assessed 11 November 2026. Reviewer verdict: accepted.
-
-## In short
-
-The TV looked up Samba TV's content-recognition service 96 times in a day. That is consistent with the TV identifying what is on screen and reporting it. It also looked up OzTAM, an audience-measurement company, 412 times, and an advertising service that Pi-hole blocked every time.
-
-## What it is
-
-An Android-based smart TV used for streaming and broadcast catch-up.
-
-Confidence: medium. This rests on:
-
-- The device name says it is a TV.
-- Ports 8008 and 8009 answer, which is how Google Cast receivers are reached.
-- Most named lookups are for ABC iview, Netflix and Google services.
-
-## Who it talks to
-
-- Samba TV (content recognition): Looked up 96 times; 40 were blocked. Samba TV matches what is on screen against known programmes and adverts.
-- OzTAM (audience measurement): Looked up 412 times; none were blocked. OzTAM measures Australian TV audiences for broadcasters.
-- Google Ads (advertising): Looked up 58 times; all 58 were blocked.
-- ABC iview and Netflix (streaming): Looked up 360 times. Ordinary streaming use.
-
-## What it sends
-
-About 412 MB left the TV and 18.4 GB reached it over 24 hours. One counter reset was skipped, so both are lower bounds.
-
-Where the outgoing bytes went, and what they contained, cannot be told from this data.
-
-DNS lookups show that a name was looked up, not that data was sent. Byte totals show volume only; they include local traffic and do not name a destination.
-
-## What is concerning
-
-### 1. Viewing recognised by Samba TV
-
-Worth checking. Confidence: high.
-
-- Fact: The TV looked up a Samba TV content-recognition name 96 times, and 56 of those lookups were answered.
-- Inference: The TV's built-in viewing-data feature is probably on and reporting what is watched, including from connected devices.
-
-### 2. Viewing measurement by OzTAM
-
-Worth checking. Confidence: medium.
-
-- Fact: The TV looked up an OzTAM measurement name 412 times; none were blocked.
-- Inference: A broadcaster app on the TV is probably reporting what is watched to OzTAM.
-
-### 3. Advertising lookups
-
-Expected. Confidence: high.
-
-- Fact: All 58 lookups for Google's advertising service were blocked by Pi-hole.
-- Inference: Apps on the TV request adverts; the block is working.
-
-## What you can do
-
-### 1. Viewing recognised by Samba TV
-
-- Mitigation: Turn off viewing information or content recognition in the TV's privacy settings, then block samba.tv in Pi-hole.
-- How to verify: Check that the Pi-hole query log shows no further answered Samba TV lookups after a day of normal use.
-
-### 2. Viewing measurement by OzTAM
-
-- Mitigation: Block oztam.com.au in Pi-hole. Some catch-up apps may refuse to play.
-- How to verify: Check that the Pi-hole query log shows the OzTAM lookups as blocked.
-
-### 3. Advertising lookups
-
-- Mitigation: None needed; the existing Pi-hole block covers it.
-- How to verify: Keep an eye on the blocked count staying equal to the total.
-
-## Open questions
-
-- Was viewing information turned on during the TV's first setup?
-- Which catch-up apps are used on the TV?
-
-## Supplemental information
-
-The device describes itself as Sony BRAVIA KD-55X85K, firmware 6.6.0 (reported over the local network via UPnP, 2026-11-11).
-
-It advertises over UPnP: screen casting (DIAL), media rendering (DLNA), remote control (Sony IRCC).
-
-These are the device's own claims, not confirmed identity.
-
-Public advisories for this model (NVD, checked 2026-11-11, model BRAVIA KD-55X85K from the device's own description): 2 found.
-
-- CVE-2099-0002 (high, published 2099-01-02, known exploited): Synthetic preview advisory; not a real vulnerability.
-- CVE-2099-0001 (medium, published 2099-01-01): Synthetic preview advisory; not a real vulnerability.
-
-An advisory is about the model, not proof that this device is affected; check whether the firmware it names matches.
-
-Worth checking: Samba Interactive TV (some BRAVIA TV models) — Sony describes it as third-party content recognition that uses viewing history for recommendations and adverts; Sony says it does not recognise content inside installed apps such as Netflix. To turn it off: System Preferences → Samba Interactive TV → Disable (older Android TV: Home → Settings → Preferences → Setup → Network → Samba Interactive TV). Menus may vary by model year. Source: Sony support article (https://www.sony.com.au/electronics/support/articles/00182856); Sony BRAVIA Help Guide (https://helpguide.sony.net/tv/gmxl4/v1/en/060nhm-06-01-06.html).
-
-Vendor notes are features this manufacturer ships, not observations of this device.
-
-## Evidence
-
-- Device: `mac:02:00:00:00:00:0a` at 192.0.2.10
-- Dossier revision: `dddddddd-dddd-4ddd-8ddd-ddddddddddd1`
-- Port scan revision: `00000000-0000-5000-8000-000000000010`
-- Operator profile revision: not used; see Coverage
-- Previous assessment revision: none
-- DNS window: 24 hours, 288 windows, 3 partial
-- Traffic window: 24 hours, 412 MB from the device and 18.4 GB to it; 1 counter reset
-- Review: accepted; concerns 3 held, 0 weakened, 0 refuted and removed
-
-Signals:
-
-- `measurement_dns`: 508 lookups to measurement destinations (OzTAM, Samba TV); 40 blocked
-- `advertising_dns`: 58 lookups to advertising destinations (Google Ads); 58 blocked
-
-Coverage:
-
-- The port scan covers only the configured TCP ports; other services are unknown.
-- DNS lookups show names resolved, not data sent.
-- Byte totals include local traffic and say nothing about destinations.
-"""
+TV_REPORT = (
+    Path(__file__).resolve().parents[1]
+    / "src/test/resources/io/aeyer/plowshare/integrations/privacy"
+    / "preview-tv-assessment.md"
+).read_text(encoding="utf-8")
 
 
 def sample_system() -> Row:

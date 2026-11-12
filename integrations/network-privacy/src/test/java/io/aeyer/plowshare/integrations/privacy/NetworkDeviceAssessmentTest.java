@@ -510,6 +510,28 @@ class NetworkDeviceAssessmentTest {
     }
   }
 
+  /**
+   * The dashboard preview serves preview-tv-assessment.md as its sample report. It must be this
+   * script's output for the run tests/preview_report.py builds from the preview's own sample data,
+   * so neither can drift. To regenerate after an intended change, copy the file this test writes to
+   * build/preview-tv-assessment.md over the resource.
+   */
+  @Test
+  void the_preview_sample_report_is_this_renderers_output() throws Exception {
+    var run = JSON.readTree(resource("preview-tv-run.json"));
+    var host = Host.of(PREVIOUS, run.path("dossier").asText());
+    host.setRequest(
+        JSON.convertValue(
+            run.path("request"),
+            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+    host.assessor.add(run.path("assessor").toString());
+    host.reviewer.add(run.path("reviewer").toString());
+    host.finish();
+    String text = host.report.path("text").asText();
+    Files.writeString(Path.of("build", "preview-tv-assessment.md"), text);
+    assertEquals(resource("preview-tv-assessment.md"), text);
+  }
+
   @Test
   void supplemental_information_lists_ranked_advisories_and_sanitises_device_text()
       throws Exception {
