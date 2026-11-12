@@ -106,6 +106,12 @@ _SERVICE_RULES = (
 )
 
 
+def _phrase(device_type: str) -> str:
+    """The type mid-sentence: lowercase first letter, but an acronym keeps its case."""
+    first = device_type.split()[0]
+    return device_type if first.isupper() else device_type[0].lower() + device_type[1:]
+
+
 def detect_device(
     identity: DeviceIdentity | None, services: tuple[TcpObservation, ...]
 ) -> DeviceDetection:
@@ -123,11 +129,11 @@ def detect_device(
         matched_name = bool(rule.name_words & words)
         clues = []
         if matched_name:
-            clues.append(f"Observed device name suggests {rule.device_type.lower()}")
+            clues.append(f"Observed device name suggests {_phrase(rule.device_type)}")
         if matched_ports:
             ports = ", ".join(map(str, matched_ports))
             clues.append(
-                f"Open TCP {ports} is consistent with {rule.device_type.lower()}"
+                f"Open TCP {ports} is consistent with {_phrase(rule.device_type)}"
             )
         # File sharing and streaming alone do not distinguish a NAS or camera
         # from a general-purpose host running the same service.

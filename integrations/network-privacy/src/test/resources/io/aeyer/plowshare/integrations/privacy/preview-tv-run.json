@@ -1,0 +1,120 @@
+{
+  "request": {
+    "version": 2,
+    "device_id": "mac:02:00:00:00:00:0a",
+    "dossier": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "previous": null,
+    "requested_at": "2026-11-11T21:00:00Z",
+    "time_zone": "Australia/Sydney",
+    "requested_local": "2026-11-12 08:00 AEDT"
+  },
+  "dossier": "{\"version\":3,\"write_id\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"device_id\":\"mac:02:00:00:00:00:0a\",\"clock\":{\"zone\":\"Australia/Sydney\",\"times\":{\"2026-11-10T21:40:00Z\":\"2026-11-11 08:40 AEDT\",\"2026-11-11T21:38:00Z\":\"2026-11-12 08:38 AEDT\",\"2026-11-11T21:10:00Z\":\"2026-11-12 08:10 AEDT\"}},\"dossier\":{\"identity\":{\"device_id\":\"mac:02:00:00:00:00:0a\",\"name\":\"Living room TV\",\"address\":\"192.0.2.10\",\"mac\":\"02:00:00:00:00:0a\",\"hostname\":\"living-room-smarttv\",\"vendor\":null,\"source\":\"unifi\",\"observed_at\":\"2026-11-11T21:38:00Z\"},\"detection\":{\"device_type\":\"TV or streaming player\",\"confidence\":\"tentative\",\"clues\":[\"Observed device name suggests TV or streaming player\"],\"exposures\":[]},\"presence\":{\"seen\":410,\"checked\":410,\"last_seen\":\"2026-11-11T21:38:00Z\",\"address_only\":false,\"checked_at\":\"2026-11-11T21:38:00Z\"},\"services\":{\"revision\":\"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\",\"checked_at\":\"2026-11-11T21:31:00Z\",\"open_ports\":[8008,8009]},\"dns\":{\"from_at\":\"2026-11-10T21:40:00Z\",\"until_at\":\"2026-11-11T21:38:00Z\",\"windows\":288,\"partial_windows\":3,\"queries_read\":1601,\"queries_available\":1601,\"groups\":[{\"kind\":\"measurement\",\"queries\":508,\"distinct\":2,\"omitted\":0,\"destinations\":[{\"domain\":\"deliver.oztam.com.au\",\"provider\":\"OzTAM\",\"queries\":412,\"blocked\":0},{\"domain\":\"acr-eu-prd.samba.tv\",\"provider\":\"Samba TV\",\"queries\":96,\"blocked\":40}]},{\"kind\":\"advertising\",\"queries\":58,\"distinct\":1,\"omitted\":0,\"destinations\":[{\"domain\":\"pubads.g.doubleclick.net\",\"provider\":\"Google Ads\",\"queries\":58,\"blocked\":58}]},{\"kind\":\"streaming\",\"queries\":360,\"distinct\":2,\"omitted\":0,\"destinations\":[{\"domain\":\"cdn.iview.abc.net.au\",\"provider\":\"ABC iview\",\"queries\":220,\"blocked\":0},{\"domain\":\"nrdp.prod.ftl.netflix.com\",\"provider\":\"Netflix\",\"queries\":140,\"blocked\":0}]},{\"kind\":\"unclassified\",\"queries\":387,\"distinct\":2,\"omitted\":0,\"destinations\":[{\"domain\":\"clients4.google.com\",\"provider\":null,\"queries\":310,\"blocked\":0},{\"domain\":\"android.googleapis.com\",\"provider\":null,\"queries\":77,\"blocked\":0}]},{\"kind\":\"connectivity\",\"queries\":288,\"distinct\":1,\"omitted\":0,\"destinations\":[{\"domain\":\"connectivitycheck.gstatic.com\",\"provider\":\"Android\",\"queries\":288,\"blocked\":0}]}]},\"pihole_silent\":null,\"traffic\":{\"from_at\":\"2026-11-10T21:40:00Z\",\"until_at\":\"2026-11-11T21:38:00Z\",\"samples\":410,\"to_device_bytes\":18400000000,\"from_device_bytes\":412000000,\"resets\":1},\"profile\":null,\"supplemental\":{\"described_at\":\"2026-11-11T21:10:00Z\",\"updated_at\":\"2026-11-11T21:10:00Z\",\"descriptions\":[{\"source\":\"upnp\",\"observed_at\":\"2026-11-11T21:10:00Z\",\"manufacturer\":\"Sony\",\"model_name\":\"BRAVIA KD-55X85K\",\"model_number\":null,\"firmware\":\"6.6.0\",\"services\":[\"screen casting (DIAL)\",\"media rendering (DLNA)\",\"remote control (Sony IRCC)\"]}],\"advisories\":{\"status\":\"searched\",\"checked_at\":\"2026-11-11T21:10:00Z\",\"model\":\"BRAVIA KD-55X85K\",\"model_source\":\"device\",\"total\":2,\"advisories\":[{\"cve\":\"CVE-2099-0002\",\"severity\":\"HIGH\",\"published_on\":\"2099-01-02\",\"known_exploited\":true,\"description\":\"Synthetic preview advisory; not a real vulnerability.\"},{\"cve\":\"CVE-2099-0001\",\"severity\":\"MEDIUM\",\"published_on\":\"2099-01-01\",\"known_exploited\":false,\"description\":\"Synthetic preview advisory; not a real vulnerability.\"}],\"omitted\":0,\"unavailable\":null},\"vendor_notes\":[{\"manufacturer\":\"Sony\",\"feature\":\"Samba Interactive TV\",\"applies_to\":\"some BRAVIA TV models\",\"collects\":\"Sony describes it as third-party content recognition that uses viewing history for recommendations and adverts; Sony says it does not recognise content inside installed apps such as Netflix.\",\"turn_off\":\"System Preferences \\u2192 Samba Interactive TV \\u2192 Disable (older Android TV: Home \\u2192 Settings \\u2192 Preferences \\u2192 Setup \\u2192 Network \\u2192 Samba Interactive TV).\",\"confidence\":\"high\",\"sources\":[{\"title\":\"Sony support article\",\"url\":\"https://www.sony.com.au/electronics/support/articles/00182856\"},{\"title\":\"Sony BRAVIA Help Guide\",\"url\":\"https://helpguide.sony.net/tv/gmxl4/v1/en/060nhm-06-01-06.html\"}]}]},\"coverage\":[\"The port scan covers only the configured TCP ports; other services are unknown.\",\"DNS profile partial in 3 of 288 windows; lookups in those windows may be missing.\",\"DNS lookups show names resolved, not data sent.\",\"Byte totals include local traffic and say nothing about destinations.\",\"1 counter reset dropped intervals; byte totals are a lower bound.\",\"No operator profile supplied; expected behaviour is unknown.\",\"The manufacturer, model and firmware under supplemental are the device's own claims over the local network, not confirmed identity.\",\"Advisories match the model name, not this device's firmware or settings; a listed advisory may not apply to it.\",\"Vendor notes are features worth checking for this manufacturer, not observations of this device.\"],\"signals\":[{\"code\":\"measurement_dns\",\"basis\":\"508 lookups to measurement destinations (OzTAM, Samba TV); 40 blocked\"},{\"code\":\"advertising_dns\",\"basis\":\"58 lookups to advertising destinations (Google Ads); 58 blocked\"}],\"trimmed_destinations\":0}}",
+  "assessor": {
+    "in_short": "The TV looked up Samba TV's content-recognition service 96 times in a day. That is consistent with the TV identifying what is on screen and reporting it. It also looked up OzTAM, an audience-measurement company, 412 times, and an advertising service that Pi-hole blocked every time.",
+    "what_it_is": {
+      "text": "A smart TV used for streaming and broadcast catch-up.",
+      "confidence": "medium",
+      "basis": [
+        "The device name says it is a TV.",
+        "It describes itself as a Sony BRAVIA over UPnP.",
+        "Most named lookups are for ABC iview and Netflix."
+      ]
+    },
+    "who_it_talks_to": [
+      {
+        "party": "Samba TV",
+        "purpose": "measurement",
+        "observation": "Looked up 96 times; 40 were blocked.",
+        "meaning": "Samba TV matches what is on screen against known programmes and adverts."
+      },
+      {
+        "party": "OzTAM",
+        "purpose": "measurement",
+        "observation": "Looked up 412 times; none were blocked.",
+        "meaning": "OzTAM measures Australian TV audiences for broadcasters."
+      },
+      {
+        "party": "Google Ads",
+        "purpose": "advertising",
+        "observation": "Looked up 58 times; all 58 were blocked.",
+        "meaning": "Apps on the TV request adverts."
+      },
+      {
+        "party": "ABC iview and Netflix",
+        "purpose": "streaming",
+        "observation": "Looked up 360 times.",
+        "meaning": "Ordinary streaming use."
+      }
+    ],
+    "what_it_sends": {
+      "observed": "Most of the volume went to the TV, which is consistent with streaming video.",
+      "unknown": "Where the outgoing bytes went, and what they contained, cannot be told from this data."
+    },
+    "concerns": [
+      {
+        "id": "c1",
+        "title": "Viewing recognised by Samba TV",
+        "level": "worth_checking",
+        "fact": "The TV looked up a Samba TV content-recognition name 96 times, and 56 of those lookups were answered.",
+        "inference": "The TV's built-in viewing-data feature is probably on and reporting what is watched.",
+        "confidence": "high",
+        "signals": [
+          "measurement_dns"
+        ],
+        "mitigation": "Turn off viewing information or content recognition in the TV's privacy settings, then block samba.tv in Pi-hole.",
+        "verify": "Check that the Pi-hole query log shows no further answered Samba TV lookups after a day of normal use."
+      },
+      {
+        "id": "c2",
+        "title": "Viewing measurement by OzTAM",
+        "level": "worth_checking",
+        "fact": "The TV looked up an OzTAM measurement name 412 times; none were blocked.",
+        "inference": "A broadcaster app on the TV is probably reporting what is watched to OzTAM.",
+        "confidence": "medium",
+        "signals": [
+          "measurement_dns"
+        ],
+        "mitigation": "Block oztam.com.au in Pi-hole. Some catch-up apps may refuse to play.",
+        "verify": "Check that the Pi-hole query log shows the OzTAM lookups as blocked."
+      },
+      {
+        "id": "c3",
+        "title": "Advertising lookups",
+        "level": "expected",
+        "fact": "All 58 lookups for Google's advertising service were blocked by Pi-hole.",
+        "inference": "Apps on the TV request adverts; the block is working.",
+        "confidence": "high",
+        "signals": [
+          "advertising_dns"
+        ],
+        "mitigation": "None needed; the existing Pi-hole block covers it.",
+        "verify": "Keep an eye on the blocked count staying equal to the total."
+      }
+    ],
+    "questions": [
+      "Was viewing information turned on during the TV's first setup?",
+      "Which catch-up apps are used on the TV?"
+    ]
+  },
+  "reviewer": {
+    "verdict": "accepted",
+    "concerns": [
+      {
+        "id": "c1",
+        "verdict": "holds",
+        "note": "Matches the measurement signal."
+      },
+      {
+        "id": "c2",
+        "verdict": "holds",
+        "note": "Matches the measurement signal."
+      },
+      {
+        "id": "c3",
+        "verdict": "holds",
+        "note": "Matches the advertising signal."
+      }
+    ],
+    "notes": "Supported by the dossier; coverage gaps are stated."
+  }
+}

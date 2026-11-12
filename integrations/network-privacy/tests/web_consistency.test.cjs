@@ -132,3 +132,42 @@ test('the household zone is set from Settings and applies to every date at once'
   run('renderZoneSetting({settings_available:false, time_zone:"UTC"})');
   assert.equal(node('household-zone').hidden, true);
 });
+
+test('Request a scan stays off while settings wait, even after a request finishes', async () => {
+  const {run, node} = dashboard();
+  run('api = async () => ({}); refresh = async () => {}; globalThis.crypto = {randomUUID: () => "id"};');
+  run('scanState.pending = true; applyScanState()');
+  assert.equal(node('scan').disabled, true);
+  run('scanState.pending = false; applyScanState()');
+  assert.equal(node('scan').disabled, false);
+  run('scanState.blocked = true; applyScanState()');
+  await node('scan').listeners.click();
+  // The click did nothing while blocked; the finally of a real request never re-enables it either.
+  assert.equal(node('scan').disabled, true);
+  run('scanState.blocked = false; applyScanState()');
+  const pending = node('scan').listeners.click();
+  assert.equal(node('scan').disabled, true);
+  run('scanState.pending = true');
+  await pending;
+  assert.equal(node('scan').disabled, true);
+});
+
+test('the list filter and order travel in the URL, and device= only on Devices', () => {
+  const {run, node} = dashboard();
+  const pushed = [];
+  run('location.pathname = "/"; history = {pushState(a, b, url) {pushed.push(["push", url]); location.hash = url.slice(1);}, replaceState(a, b, url) {pushed.push(["replace", url]); location.hash = url.slice(1);}};', {pushed});
+  node('device-presence').value = 'observed'; node('device-sort').value = 'attention';
+  run('currentView = "devices"; selectedDevice = "192.0.2.10"; setSignalFilter("review"); recordLocation(true)');
+  assert.deepEqual([...pushed.at(-1)], ['replace', '/#tab=devices&device=192.0.2.10&show=review']);
+  node('device-sort').value = 'name';
+  run('recordLocation(true)');
+  assert.equal(pushed.at(-1)[1], '/#tab=devices&device=192.0.2.10&show=review&order=name');
+  // On another tab the open device and list state are not in the URL.
+  run('currentView = "findings"; recordLocation()');
+  assert.deepEqual([...pushed.at(-1)], ['push', '/#tab=findings']);
+  // Restoring checks every value against its allowlist.
+  run('applyListParams(new URLSearchParams("show=silent&order=bogus&presence=candidate"))');
+  assert.equal(run('signalFilter'), 'silent');
+  assert.equal(node('device-sort').value, 'attention');
+  assert.equal(node('device-presence').value, 'candidate');
+});

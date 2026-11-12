@@ -633,8 +633,9 @@ def _coverage(
         )
         if traffic.resets:
             lines.append(
-                f"{traffic.resets} counter resets dropped intervals; "
-                "byte totals are a lower bound."
+                f"{traffic.resets} counter "
+                + ("reset" if traffic.resets == 1 else "resets")
+                + " dropped intervals; byte totals are a lower bound."
             )
     if profile is None and profile_note == "address_only":
         lines.append(
