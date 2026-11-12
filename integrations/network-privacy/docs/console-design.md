@@ -268,6 +268,7 @@ in `style.css`; a one-off value is a defect.
   advisory source) and Deployment. Credentials appear as where they come from
   and whether they are present, never as values.
 - **New open ports are attention.** A port open in the latest complete deep
-  scan, and not among the device's configured ports, raises a "New open ports"
-  item in the attention band. It clears when the device is assessed again or a
+  scan, and not among the collector's configured ports, raises a "New open ports"
+  item in the attention band. It clears when the device is assessed again (an
+  assessment requested after the scan finished) or a
   later complete scan finds none of those ports open.
