@@ -34,9 +34,17 @@ attention", and the next assessment of that device includes them.
     Accept; whether Accept or Dismiss changes this is for the builder to decide
     and document.
 - **One device at a time:**
-  - At most one deep scan runs at once; others queue in trigger order.
-  - A daily limit applies per household day. The household day is the
-    configured `timeZone`, the same as the other daily limits.
+  - At most one deep scan runs at once, whether automatic or requested by the
+    operator; others queue in order.
+- **Automatic scans have a configurable daily limit.** Settings has "Automatic
+  deep scans per day", a whole number from 0 to 12.
+  - 0 turns automatic scans off, and is the default.
+  - The day is the household day of the configured `timeZone`, the same as the
+    other daily limits.
+  - This replaces a separate on/off switch, as the background assessment limit
+    does.
+- **Scans the operator requests have no daily limit.** They still run one at a
+  time.
 - **Cancellable** from the device pane.
 - **Progress** in the device pane: ports checked of 65535, open ports found so
   far, and roughly when it will finish.
@@ -45,9 +53,8 @@ attention", and the next assessment of that device includes them.
     took and how many ports did not answer.
   - The device's next assessment dossier includes it.
   - Open ports the regular collection never saw become an attention item.
-- **One switch:** Settings › "Deep-scan flagged devices". It is **off** by
-  default, and stays off on PROD until the owner turns it on (see
-  Constraints).
+- **One setting:** the automatic limit above. It is 0 (off) by default, and
+  stays 0 on PROD until the owner raises it (see Constraints).
 - **Request shape ready for later:** the scan request is a typed request
   (device, reason, request id). A later change can then accept the same
   request from a Relay topic or an agent tool without redesigning it. That
@@ -104,7 +111,7 @@ attention", and the next assessment of that device includes them.
     version 4 and update `assess_network_device.js` in the same change. The
     script must keep accepting versions 1–3.
   - The deploy then needs the script installed first, as for version 3.
-- **Before the PROD switch is turned on:** the owner checks that UniFi's threat
+- **Before the PROD limit is raised above 0:** the owner checks that UniFi's threat
   detection (IDS/IPS) will not block or quarantine the collector's address
   during a full sweep. This is an operational step, not code, and the Settings
   hint says so.
@@ -120,21 +127,21 @@ attention", and the next assessment of that device includes them.
   trip adds nothing today.
 - It is advisory: it never changes the network.
 
-- **Turning the switch on starts no backlog.** Only reports that reach review
-  afterwards trigger a scan. Devices flagged earlier are not scanned
+- **Raising the limit above 0 starts no backlog.** Only reports that reach
+  review afterwards trigger a scan. Devices flagged earlier are not scanned
   automatically. The operator can request a deep scan of any device at any time
   from its pane, including one flagged before, and re-request one after an
-  earlier scan, all within the daily limit.
+  earlier scan. Those requests are not limited per day.
 
 ## Calls made in the design (check these)
 
-- The switch defaults to off, including on new installs.
+- The automatic limit defaults to 0 (off), including on new installs.
+- The automatic limit ranges from 0 to 12 a day.
 - "Flagged" means at least one non-refuted concern at potential breach or worth
   checking. An expected-only report does not trigger a scan.
 - The scan does not re-assess automatically; the pane offers "Assess again".
-- The daily limit is 4 deep scans per household day.
-- A "Deep-scan this device" button in the pane runs one by hand, within the same
-  limits, even with the automatic switch off. It's cheap, and useful for
+- A "Deep-scan this device" button in the pane runs one by hand, even with
+  automatic scans off and without a daily limit. It's cheap, and useful for
   checking a device the assessment didn't flag.
 
 ## Rules settled after review
@@ -150,9 +157,9 @@ attention", and the next assessment of that device includes them.
 - **Triggers that cannot run straight away** are kept, not dropped. They live in
   a small, bounded queue in the journal: one pending trigger per device, the
   newest report revision wins, oldest first.
-  - **Daily limit used up:** the trigger waits for the next household day.
-  - **Switch turned off:** queued triggers are discarded, and the pane says the
-    switch is off.
+  - **Automatic limit used up:** the trigger waits for the next household day.
+  - **Limit set to 0:** queued automatic triggers are discarded, and the pane
+    says automatic scans are off. Queued operator requests stay.
   - **Restart:** queued triggers survive a restart, because nothing was sent,
     so nothing can be resent. A scan that was running is recorded as
     interrupted and is not resumed.
@@ -168,7 +175,7 @@ attention", and the next assessment of that device includes them.
     source disagrees, or none answers, the result is unreliable. Before the
     scan, that means the scan does not run.
   - A collector with no identity source configured (no UniFi or Pi-hole)
-    cannot deep-scan. The Settings switch says why.
+    cannot deep-scan. The Settings field says why.
   - The reads must not hold the worker's collection locks.
 
 ## Left to the builder
