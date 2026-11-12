@@ -485,17 +485,28 @@ connect from the collector host: no UDP and no banners, and nothing is sent afte
 a connection opens. A port that times out is recorded as unanswered, never as
 closed.
 
-A flagged assessment can start a scan automatically. Set the limit under
-Settings › Automatic deep scans per day, from 0 to 12 per household day; it is 0
-by default, so nothing is scanned until you raise it. Operators can also scan a
-device from its pane with **Deep-scan this device**. Operator scans have no daily
-limit and run one at a time; automatic triggers and further scans you start
-wait in the queue.
+A flagged assessment can start a scan automatically. The trigger fires once,
+when the report reaches review; accepting or dismissing the report afterwards
+does not change it. A report does not trigger a scan when its assessment was
+requested after the device's latest complete scan finished, because that
+assessment already saw the scan. Set the limit under Settings › Automatic deep
+scans per day, from 0 to 12 per household day; it is 0 by default, so nothing is
+scanned until you raise it, and the pane says automatic scans are off. Operators
+can also scan a device from its pane with **Deep-scan this device**. Operator
+scans have no daily limit and run one at a time; automatic triggers and further
+scans you start wait in the queue.
 
 Before and after each scan the collector reads the device's identity afresh from
-its current identity sources (UniFi or Pi-hole), so a scan never lands on an
+its current identity sources: UniFi's connected clients and adopted devices, and
+Pi-hole's network table, merged as collection merges them. Either UniFi or
+Pi-hole is enough. If the sources name different MAC addresses for the address,
+or none answers, the scan is recorded as unreliable, so a scan never lands on an
 address that has changed hands. Without those sources deep scans are
 unavailable, and the pane says so.
+
+A result keeps at most 512 open ports and says how many more were open. A device
+that accepts a connection on every port, such as some firewalls, would otherwise
+fill the record.
 
 A scan that is running when the collector restarts is recorded as interrupted and
 is never resumed. Queued triggers survive a restart and expire after 7 days.

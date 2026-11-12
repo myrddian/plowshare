@@ -744,23 +744,36 @@ class DeepScanner:
         devices += [r.device_id for r in reversed(ledger.results)]
         return tuple(self.view(d) for d in dict.fromkeys(devices))
 
-    async def poll(self) -> None:
-        """Run at most one queued scan to completion."""
+    async def poll(self) -> bool:
+        """Run at most one queued scan to completion; True when it did any work.
+
+        Work is saving an unsaved result, expiring queued entries or taking a
+        queued entry (even one whose identity check then stops it).
+        """
         async with self._lock:
+            worked = self._unsaved
             if self._unsaved:
                 self._commit(self._ledger)
             if not self.available:
-                return
-            self._expire()
+                return worked
+            worked = self._expire() or worked
             chosen = self._next()
             if chosen is not None:
                 await self._scan(*chosen)
+                worked = True
+            return worked
 
     async def run(self, stop: asyncio.Event) -> None:
+        """Poll every _POLL_SECONDS until ``stop``.
+
+        ``error`` is kept until a poll that did work succeeds, so a failure
+        stays visible between the idle polls instead of clearing within
+        seconds.
+        """
         while not stop.is_set():
             try:
-                self.error = None
-                await self.poll()
+                if await self.poll():
+                    self.error = None
             except Exception as error:
                 # Any failure, expected or not, is shown and the loop keeps
                 # serving; the failed scan, if one was running, is recorded.
@@ -806,12 +819,15 @@ class DeepScanner:
         finish = (now + left).astimezone(timezone.utc).replace(microsecond=0)
         return finish.isoformat().replace("+00:00", "Z")
 
-    def _expire(self) -> None:
+    def _expire(self) -> bool:
+        """Drop queued entries older than QUEUE_TTL_SECONDS; True if any went."""
         ledger = self._ledger
         cutoff = _instant(self._clock()) - timedelta(seconds=QUEUE_TTL_SECONDS)
         queue = tuple(q for q in ledger.queue if _instant(q.queued_at) >= cutoff)
-        if queue != ledger.queue:
-            self._commit(replace(ledger, queue=queue))
+        if queue == ledger.queue:
+            return False
+        self._commit(replace(ledger, queue=queue))
+        return True
 
     def _next(self) -> tuple[DeepScanRequest, str] | None:
         """The oldest admissible entry whose device has a confirmed current address.
@@ -1004,8 +1020,12 @@ class DeepScanner:
             return "unreliable", f"Nothing confirmed which device holds {address}."
         if len(found) > 1:
             return "unreliable", f"More than one device claimed {address}."
+        if found[0].mac is None:
+            # An address-only record names no device, so it cannot show the
+            # address changed hands either.
+            return "unreliable", f"Nothing confirmed which device holds {address}."
         expected = device_id.removeprefix("mac:").lower()
-        if (found[0].mac or "").lower() != expected:
+        if found[0].mac.lower() != expected:
             return "address_changed", f"{address} now belongs to a different device."
         return None
 

@@ -204,7 +204,8 @@ class Identities:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
         self.on_call: Callable[[int], None] = lambda count: None
-        # Consumed one per call: a MAC, None for no answer, or "ambiguous".
+        # Consumed one per call: a MAC, None for no answer, "ambiguous", or
+        # "no-mac" for an address-only identity.
         self.script: list[str | None] = []
 
     async def identify(
@@ -217,6 +218,10 @@ class Identities:
         answer = self.script.pop(0) if self.script else expected.removeprefix("mac:")
         if answer is None:
             return IdentitySample()
+        if answer == "no-mac":
+            return IdentitySample(
+                (replace(sighting(address, "x"), device_id="ip:" + address, mac=None),)
+            )
         if answer == "ambiguous":
             return IdentitySample(
                 (sighting(address, expected.removeprefix("mac:")),),
@@ -430,7 +435,7 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(0, len(self.probe.calls))
         self.assertEqual(["address_changed"], [r.state for r in self.results()])
         self.assertEqual((), self.scanner.ledger.queue)
-        for answer in (None, "ambiguous"):
+        for answer in (None, "ambiguous", "no-mac"):
             with self.subTest(answer=answer):
                 self.identities.script = [answer]
                 self.scanner.request(TV)
@@ -622,6 +627,50 @@ class DeepScannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(task.done())
         stop.set()
         await task
+
+    async def test_run_keeps_its_error_until_a_poll_does_work(self) -> None:
+        failing = True
+
+        async def flaky(address: str, port: int, timeout: float) -> str:
+            if failing:
+                raise RuntimeError("bug")
+            return "closed"
+
+        self.probe = flaky  # type: ignore[assignment]
+        self.scanner = self.build()
+        self.scanner.request(LAMP)
+        stop = asyncio.Event()
+        polls = 0
+        poll = self.scanner.poll
+
+        async def counted() -> bool:
+            nonlocal polls
+            polls += 1
+            return await poll()
+
+        self.scanner.poll = counted  # type: ignore[method-assign]
+        with patch("plowshare_privacy.deep_scan._POLL_SECONDS", 0):
+            task = asyncio.create_task(self.scanner.run(stop))
+
+            async def until(condition: Callable[[], bool]) -> None:
+                for _ in range(200):
+                    await asyncio.sleep(0)
+                    if condition():
+                        return
+                self.fail("condition not reached")
+
+            await until(lambda: self.scanner.error is not None)
+            # Idle polls that do nothing leave the error showing.
+            seen = polls
+            await until(lambda: polls >= seen + 3)
+            self.assertIn("RuntimeError", self.scanner.error or "")
+            # A poll that runs a scan successfully clears it.
+            failing = False
+            self.scanner.request(LAMP)
+            await until(lambda: self.scanner.error is None)
+            self.assertEqual("complete", self.results()[-1].state)
+            stop.set()
+            await task
 
     async def test_limit_zero_discards_automatic_but_keeps_operator_requests(
         self,

@@ -370,3 +370,24 @@ test('a port found only by the deep scan carries its exposure wording', () => {
   assert.ok(texts(block).includes(`TCP 23 · Possible Telnet. ${telnet.risk_check} · outside the usual checks`), texts(block).join('\n'));
   assert.ok(texts(block).includes('TCP 443'));
 });
+
+test('with automatic scans off, the idle pane says so and still offers a scan', () => {
+  const {run} = dashboard();
+  const render = value => {
+    load(run, value);
+    const block = {tag:'div', children:[], textContent:'', append(...children) {this.children.push(...children);}, replaceChildren(...children) {this.children = children;}};
+    run('selectedDevice = value.devices[0].address; renderDeepScan(value.devices[0], block)', {value, block});
+    return block;
+  };
+  const off = overview([]);
+  off.deep_scans.usage.automatic_limit = 0;
+  let block = render(off);
+  assert.ok(texts(block).includes('Automatic deep scans are off. You can still start one here.'));
+  assert.deepEqual(buttons(block).map(item => item.textContent), ['Deep-scan this device']);
+  // A queued operator scan is not idle, so the note goes.
+  const queued = overview([view(TV, {state:'queued', trigger:'operator'})]);
+  queued.deep_scans.usage.automatic_limit = 0;
+  assert.ok(!texts(render(queued)).some(line => /Automatic deep scans are off/.test(line)));
+  // With a limit, the note is absent.
+  assert.ok(!texts(render(overview([]))).some(line => /Automatic deep scans are off/.test(line)));
+});

@@ -505,6 +505,11 @@ class AssessmentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item.state, "review")
         self.assertIsNotNone(self.service.error)
 
+    async def test_a_flag_error_without_a_message_names_its_type(self) -> None:
+        self.flag_error = RuntimeError()
+        await self.finished()
+        self.assertIn("RuntimeError", self.service.error or "")
+
     async def test_raising_the_limit_starts_no_backlog(self) -> None:
         identities = Mock()
         identities.identify = AsyncMock(return_value=IdentitySample())

@@ -846,7 +846,7 @@ class DeviceAssessments:
         except Exception as error:  # noqa: BLE001 - the transition is already saved
             self.error = (
                 "A deep port scan could not be queued for this report: "
-                f"{error or type(error).__name__}."
+                f"{str(error) or type(error).__name__}."
             )
 
     async def _settle_finalise(self, entry: AssessmentEntry) -> None:

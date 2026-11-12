@@ -1634,6 +1634,10 @@ function deepScanNodes(device, view, scans) {
   if (view.state === 'idle' && !latest && !view.latest_complete) {
     nodes.push(element('p', 'Not deep-scanned. This checks every TCP port of the device, not only the usual ones, and takes several minutes.', 'hint'));
   }
+  // With the limit at 0 nothing is scanned automatically; the button still works.
+  if (view.state === 'idle' && view.available && scans.usage?.automatic_limit === 0) {
+    nodes.push(element('p', 'Automatic deep scans are off. You can still start one here.', 'hint'));
+  }
   // The last attempt's state and detail, when it did not complete.
   if (latest && latest.state !== 'complete') {
     nodes.push(element('p', `${deepScanStateText[latest.state] || 'Last deep scan did not complete'} · ${formatWhen(latest.finished_at)}`, 'status-line'));
