@@ -6,7 +6,7 @@ import asyncio
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from .collector_factory import configured_collector
 from .contracts import (
@@ -89,6 +89,34 @@ class MonitorChoice:
 
 
 @dataclass(frozen=True)
+class PiHoleView:
+    """The saved Pi-hole tuning and where its password comes from.
+
+    It never carries the password, and names the environment variable rather
+    than a file path: the operator needs to know which secret is used, not
+    where the collector keeps a private file.
+    """
+
+    password_source: Literal["file", "environment"]
+    password_environment: str | None
+    lookback_seconds: int
+    query_limit: int
+    max_identity_age_seconds: int
+    timeout_seconds: float
+
+    @classmethod
+    def of(cls, plan: PiHolePlan) -> PiHoleView:
+        return cls(
+            "environment" if plan.password_environment is not None else "file",
+            plan.password_environment,
+            plan.lookback_seconds,
+            plan.query_limit,
+            plan.max_identity_age,
+            plan.timeout,
+        )
+
+
+@dataclass(frozen=True)
 class MonitorView:
     enabled: bool
     targets: tuple[str, ...]
@@ -102,6 +130,7 @@ class MonitorView:
     quick_scan: bool = False
     dns_profiles: bool = False
     device_descriptions: bool = False
+    pihole: PiHoleView | None = None
 
 
 class MonitorSettings(Protocol):
@@ -114,7 +143,14 @@ class MonitorSettings(Protocol):
 
     def view(self) -> MonitorView: ...
     async def save(self, choice: MonitorChoice) -> MonitorView: ...
-    async def save_pihole(self, plan: PiHolePlan) -> MonitorView: ...
+    async def save_pihole(self, origin: str, password_file: Path) -> MonitorView:
+        """Replace the Pi-hole connection: its origin and its password file.
+
+        The saved tuning (lookback, lookup limit, identity age and timeout) is
+        kept; a first connection takes the defaults. A password previously
+        read from an environment variable is replaced by ``password_file``.
+        """
+        ...
 
 
 class FileMonitorSettings:
@@ -168,6 +204,7 @@ class FileMonitorSettings:
             plan.quick_scan,
             plan.dns_profiles,
             plan.device_descriptions,
+            PiHoleView.of(plan.pihole) if plan.pihole is not None else None,
         )
 
     def _blocked_detail(self, *, include_locks: bool = True) -> str | None:
@@ -203,11 +240,11 @@ class FileMonitorSettings:
     async def save(self, choice: MonitorChoice) -> MonitorView:
         return await self._save(choice, None)
 
-    async def save_pihole(self, plan: PiHolePlan) -> MonitorView:
-        return await self._save(None, plan)
+    async def save_pihole(self, origin: str, password_file: Path) -> MonitorView:
+        return await self._save(None, (origin, password_file))
 
     async def _save(
-        self, choice: MonitorChoice | None, pihole: PiHolePlan | None
+        self, choice: MonitorChoice | None, pihole: tuple[str, Path] | None
     ) -> MonitorView:
         async with self.save_lock:
             if not self.view().editable:
@@ -277,14 +314,23 @@ class FileMonitorSettings:
             if labels or "deviceLabels" in plan:
                 plan["deviceLabels"] = {label.address: label.label for label in labels}
             if pihole is not None:
-                plan["pihole"] = {
-                    "origin": pihole.origin,
-                    "passwordFile": str(pihole.password_file),
-                    "queryLimit": pihole.query_limit,
-                    "lookbackSeconds": pihole.lookback_seconds,
-                    "maxIdentityAgeSeconds": pihole.max_identity_age,
-                    "timeoutSeconds": pihole.timeout,
+                origin, password_file = pihole
+                connection: dict[str, object] = {
+                    "origin": origin,
+                    "passwordFile": str(password_file),
                 }
+                # The dashboard edits only the connection. Tuning comes from
+                # the saved plan (pending if any), so a re-save cannot reset it;
+                # Configuration.decode applies the defaults to a first one.
+                tuning = saved.collection.pihole
+                if tuning is not None:
+                    connection.update(
+                        lookbackSeconds=tuning.lookback_seconds,
+                        queryLimit=tuning.query_limit,
+                        maxIdentityAgeSeconds=tuning.max_identity_age,
+                        timeoutSeconds=tuning.timeout,
+                    )
+                plan["pihole"] = connection
             row["collection"] = plan
             config = Configuration.decode(row, self.path)
             # Decode fully before the durable save. Activation and connectivity are

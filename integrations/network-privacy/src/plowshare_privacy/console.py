@@ -415,7 +415,7 @@ class OperatorConsole:
             replace_private(path, text(password, 4096) + "\n")
             # Do not remove this secret after an uncertain filesystem failure:
             # an atomically saved pending configuration may already refer to it.
-            view = await self.settings.save_pihole(plan)
+            view = await self.settings.save_pihole(plan.origin, path)
             self.cache_until = 0
             return PiHoleCheck(None, True, (), view.pending)
         async with self.lock:
