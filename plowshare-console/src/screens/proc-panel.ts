@@ -5,6 +5,7 @@ import type {
   ProcReplies,
   ProcConversation,
   ProcInspection,
+  ProcQueue,
   ProcQueues,
 } from '../../../sdk/typescript/src/operations/proc.ts';
 
@@ -59,14 +60,53 @@ function tone(state: string): ProcTone {
   }
 }
 
-function badge(state: string, ending?: string | null): HTMLElement {
-  const result = node(
-    'span',
-    ending ? `${state} / ${ending}` : state,
-    'proc-badge',
-  );
-  result.dataset.tone = tone(state);
+function chip(text: string, kind: ProcTone): HTMLElement {
+  const result = node('span', text, 'proc-badge');
+  result.dataset.tone = kind;
   return result;
+}
+
+function badge(state: string, ending?: string | null): HTMLElement {
+  return chip(ending ? `${state} / ${ending}` : state, tone(state));
+}
+
+/**
+ * A checkpoint carries counters, not a state word. Its badge names the counter that most needs
+ * the operator, in the order failed, blocked, running, pending; nothing is inferred beyond the
+ * numbers the server reported, and unknown occupancy never reads as running.
+ */
+function queueStanding(queue: ProcQueue): { text: string; tone: ProcTone } {
+  if (queue.failed > 0) return { text: `${queue.failed} FAILED`, tone: 'warn' };
+  if (queue.blocked > 0)
+    return { text: `${queue.blocked} BLOCKED`, tone: 'warn' };
+  if (queue.running !== null && queue.running > 0)
+    return { text: `${queue.running} RUNNING`, tone: 'live' };
+  if (queue.pending > 0)
+    return { text: `${queue.pending} PENDING`, tone: 'live' };
+  if (queue.total > 0 && queue.completed + queue.skipped >= queue.total)
+    return { text: 'COMPLETE', tone: 'done' };
+  return { text: 'NO WORK', tone: 'idle' };
+}
+
+/** A slim native meter: no inline style (Desktop's CSP forbids it) and a spoken value. */
+function meter(label: string, value: number, max: number): HTMLProgressElement {
+  const result = node('progress', undefined, 'proc-meter');
+  result.max = Math.max(1, max);
+  result.value = Math.min(Math.max(0, value), result.max);
+  result.setAttribute('aria-label', label);
+  return result;
+}
+
+/** Elapsed wall time between two recorded instants, or undefined when either is unusable. */
+function elapsed(from: string, to: string | null): string | undefined {
+  if (to === null) return undefined;
+  const span = Date.parse(to) - Date.parse(from);
+  if (!Number.isFinite(span) || span < 0) return undefined;
+  if (span < 1000) return `${span}ms`;
+  if (span < 60000) return `${(span / 1000).toFixed(1)}s`;
+  if (span < 3600000)
+    return `${Math.floor(span / 60000)}m ${Math.floor((span % 60000) / 1000)}s`;
+  return `${Math.floor(span / 3600000)}h ${Math.floor((span % 3600000) / 60000)}m`;
 }
 
 /**
@@ -129,7 +169,9 @@ function tableRow(target: HTMLTableElement, cells: readonly (string | Node)[]) {
  *
  * Layout: a fixed header and toolbar above two independently scrolling panes. The left pane is
  * the current page of the chosen view; the right pane inspects the selected conversation in
- * place, so selecting never moves the operator away from the list.
+ * place, so selecting never moves the operator away from the list. Every view shares that frame:
+ * conversations, checkpoints, model calls and tool receipts are all dense rows, and a row bound
+ * to a conversation opens that conversation beside the list.
  */
 export function mountProcPanel(
   root: HTMLElement,
@@ -212,10 +254,19 @@ export function mountProcPanel(
   const workspace = node('div', undefined, 'proc-workspace');
   const listPane = node('div', undefined, 'proc-list-pane');
   const selectionLabel = node('p', undefined, 'proc-selection');
+  // Whole-selection totals and pool occupancy frame the paged rows without scrolling with them.
+  const totals = node('div', undefined, 'proc-strip');
+  totals.setAttribute('role', 'group');
+  totals.setAttribute('aria-label', 'Full-selection totals');
+  totals.hidden = true;
   const body = node('div', undefined, 'proc-results');
   body.setAttribute('role', 'group');
   body.setAttribute('aria-label', 'Audit page');
-  listPane.append(selectionLabel, body);
+  const pools = node('div', undefined, 'proc-strip proc-pools');
+  pools.setAttribute('role', 'group');
+  pools.setAttribute('aria-label', 'Local model pools');
+  pools.hidden = true;
+  listPane.append(selectionLabel, totals, body, pools);
   const detail = node('section', undefined, 'proc-detail');
   detail.setAttribute('aria-label', 'Execution inspection');
   workspace.append(listPane, detail);
@@ -264,6 +315,7 @@ export function mountProcPanel(
       selection.active,
       selection.after,
       selection.limit,
+      selection.order,
     ]);
     if (inspectionRead?.key === key) return inspectionRead.result;
     cancelPoll();
@@ -299,11 +351,16 @@ export function mountProcPanel(
       limit: 50,
     };
   }
-  /** Only proc.list honours an order; its cursor continues in the chosen direction. */
-  function pageQuery(type: ProcView): ProcQuery {
-    return type === 'proc.list'
-      ? { ...query(), order: order.value === 'oldest' ? 'oldest' : 'newest' }
-      : query();
+  /**
+   * Every page view honours the chosen order and its cursor continues in that direction, so the
+   * order travels with each page read. Inspections send it too, so the detail pane's
+   * conversation, call, queue and tool sections start from the same end as the list.
+   */
+  function pageQuery(): ProcQuery {
+    return {
+      ...query(),
+      order: order.value === 'oldest' ? 'oldest' : 'newest',
+    };
   }
   function stale(text: string) {
     status.textContent = text;
@@ -324,17 +381,20 @@ export function mountProcPanel(
     b.addEventListener('click', action);
     return b;
   }
-  /** A dense list entry. `key` restores focus across polls; `conversation` marks the selection. */
+  /**
+   * A dense list entry. `key` restores focus across polls; `conversation` marks the selection.
+   * An entry without a conversation has nothing to inspect, so it is not a control.
+   */
   function entry(
     key: string,
     conversation: string | null,
-    state: string,
+    kind: ProcTone,
   ): HTMLElement {
     const result =
       conversation === null
         ? node('div', undefined, 'proc-row')
         : node('button', undefined, 'proc-row');
-    result.dataset.tone = tone(state);
+    result.dataset.tone = kind;
     if (result instanceof HTMLButtonElement && conversation !== null) {
       result.type = 'button';
       result.dataset.procFocus = key;
@@ -425,73 +485,106 @@ export function mountProcPanel(
     );
   }
 
-  function queueTable(value: ProcQueues): HTMLElement {
-    const block = node('div', undefined, 'proc-queues');
-    block.append(label('Full-selection totals'));
-    const totals = node('div', undefined, 'proc-totals');
-    for (const summary of value.summaries) {
-      const item = node('div');
-      item.append(
-        node(
-          'strong',
-          `${summary.completed} / ${summary.total} ${summary.unit}`,
-        ),
-        node('p', summary.stage),
-        node(
-          'p',
-          `${summary.pending} pending · ${summary.running ?? 'Unknown'} running · ${summary.blocked} blocked`,
-        ),
-      );
-      totals.append(item);
-    }
-    block.append(totals, label('Resource checkpoints · current page'));
-    const checkpoints = table('Queue resource checkpoints', [
-      'Source / stage',
-      'Completed / total',
-      'Pending / running',
-      'Blocked / failed / skipped',
-    ]);
-    for (const queue of value.queues) {
-      const source = node('div');
-      source.append(
-        node('strong', queue.resource ?? queue.id),
-        node('p', `${queue.stage} · ${queue.unit}`),
-        node(
-          'p',
-          `${queue.project ?? 'No project'} · ${queue.owner ?? 'Unknown owner'}`,
-        ),
-      );
-      if (queue.conversation) {
-        const conversation = queue.conversation;
-        const traced = button('Trace ' + conversation, () =>
-          run(() => inspect(conversation)),
-        );
-        traced.dataset.procFocus = queue.id;
-        source.append(traced);
-      }
-      tableRow(checkpoints, [
-        source,
-        `${queue.completed} / ${queue.total}`,
-        `${queue.pending} / ${queue.running ?? 'Unknown'}`,
-        `${queue.blocked} / ${queue.failed} / ${queue.skipped}`,
-      ]);
-    }
-    block.append(checkpoints);
-    if (!value.queues.length)
-      block.append(
+  /** The owning conversation of a checkpoint, call or receipt, and the cue that it opens here. */
+  function owner(conversation: string | null, missing: string): Node[] {
+    return conversation === null
+      ? [node('span', missing, 'proc-unbound')]
+      : [node('code', conversation), node('span', 'Trace', 'proc-trace')];
+  }
+  function tally(count: number | null, word: string, warns = false) {
+    const result = node('span', `${count ?? 'Unknown'} ${word}`, 'proc-tally');
+    if (count === 0) result.dataset.zero = 'true';
+    else if (warns || count === null) result.dataset.tone = 'warn';
+    return result;
+  }
+  /**
+   * Completed over total as a bar and a figure, then the counters. Pending and running are always
+   * stated (running may be unknown); blocked, failed and skipped appear only when they are not
+   * zero, so a healthy checkpoint stays quiet and an exception stands out.
+   */
+  function progress(queue: ProcQueue, subject: string): HTMLElement[] {
+    return [
+      line('proc-progress', [
+        meter(`${subject} completed`, queue.completed, queue.total),
+        node('span', `${queue.completed} / ${queue.total} ${queue.unit}`),
+      ]),
+      line('proc-tallies', [
+        tally(queue.pending, 'pending'),
+        tally(queue.running, 'running'),
+        ...(queue.blocked ? [tally(queue.blocked, 'blocked', true)] : []),
+        ...(queue.failed ? [tally(queue.failed, 'failed', true)] : []),
+        ...(queue.skipped ? [tally(queue.skipped, 'skipped')] : []),
+      ]),
+    ];
+  }
+  function queueRows(value: ProcQueues): Node[] {
+    if (value.queues.length === 0)
+      return [
         node('p', 'No retained checkpoints in this selection.', 'proc-empty'),
+      ];
+    return value.queues.map((queue) => {
+      const standing = queueStanding(queue);
+      const name = queue.resource ?? queue.id;
+      const item = entry(queue.id, queue.conversation, standing.tone);
+      const waiting = node('span', 'oldest pending ', 'proc-aside');
+      if (queue.oldestPendingAt)
+        waiting.append(age(queue.oldestPendingAt, value.snapshotAt));
+      item.append(
+        line('proc-row-head', [
+          node('span', undefined, 'proc-dot'),
+          node('strong', name),
+          chip(standing.text, standing.tone),
+        ]),
+        ...progress(queue, name),
+        line('proc-row-meta', [
+          queue.stage,
+          queue.project ?? 'No project',
+          queue.owner ?? 'Unknown owner',
+          ...(queue.oldestPendingAt ? [waiting] : []),
+        ]),
+        line('proc-row-foot', owner(queue.conversation, 'No conversation')),
       );
-    if (value.pools.length) {
-      block.append(label('Local model pools'));
-      for (const pool of value.pools)
-        block.append(
-          node(
-            'p',
-            `${pool.name} · ${pool.lane} · ${pool.queued} queued · ${pool.running} running / ${pool.capacity} capacity`,
-          ),
+      return item;
+    });
+  }
+  /** Totals cover the whole selection; they are not the sum of the checkpoint page beneath. */
+  function showTotals(value: ProcQueues) {
+    totals.hidden = value.summaries.length === 0;
+    totals.replaceChildren(
+      label('Full-selection totals'),
+      ...value.summaries.map((summary) => {
+        const item = node('div', undefined, 'proc-total');
+        item.append(
+          line('proc-total-name', [node('strong', summary.stage)]),
+          ...progress(summary, `${summary.stage} ${summary.unit}`),
         );
-    }
-    return block;
+        return item;
+      }),
+    );
+  }
+  function showPools(value: ProcQueues) {
+    pools.hidden = value.pools.length === 0;
+    pools.replaceChildren(
+      label('Local model pools'),
+      ...value.pools.map((pool) => {
+        const item = node('div', undefined, 'proc-pool');
+        item.append(
+          line('proc-total-name', [node('strong', pool.name), pool.lane]),
+          line('proc-progress', [
+            meter(`${pool.name} occupancy`, pool.running, pool.capacity),
+            node('span', `${pool.running} / ${pool.capacity} running`),
+            tally(pool.queued, 'queued'),
+          ]),
+        );
+        return item;
+      }),
+    );
+  }
+  function hideStrips() {
+    totals.hidden = true;
+    totals.replaceChildren();
+    pools.hidden = true;
+    pools.replaceChildren();
   }
   function conversationRows(value: ProcReplies['proc.list']): Node[] {
     if (value.conversations.length === 0)
@@ -503,7 +596,7 @@ export function mountProcPanel(
         ),
       ];
     return value.conversations.map((row) => {
-      const item = entry(row.id, row.id, row.state);
+      const item = entry(row.id, row.id, tone(row.state));
       item.append(
         line('proc-row-head', [
           node('span', undefined, 'proc-dot'),
@@ -525,9 +618,12 @@ export function mountProcPanel(
   }
   function callRows(value: ProcReplies['proc.calls']): Node[] {
     if (value.calls.length === 0)
-      return [node('p', 'No retained model calls in this page.', 'proc-empty')];
+      return [
+        node('p', 'No retained model calls in this selection.', 'proc-empty'),
+      ];
     return value.calls.map((call) => {
-      const item = entry(call.id, call.conversation, call.state);
+      const item = entry(call.id, call.conversation, tone(call.state));
+      const took = elapsed(call.createdAt, call.endedAt);
       item.append(
         line('proc-row-head', [
           node('span', undefined, 'proc-dot'),
@@ -535,35 +631,41 @@ export function mountProcPanel(
           badge(call.state),
         ]),
         line('proc-row-meta', [
+          ...(call.agent ? [call.operation] : []),
           `${call.pool} / ${call.model}`,
-          counted(call.attempts, 'attempt'),
           age(call.createdAt, value.snapshotAt),
         ]),
-        line('proc-row-foot', [
-          node('code', call.conversation ?? 'Unbound call'),
+        line('proc-row-meta', [
           call.project ?? 'No project',
+          call.owner ?? 'Unknown owner',
+          counted(call.attempts, 'attempt'),
+          ...(took === undefined ? [] : [took]),
         ]),
+        line('proc-row-foot', owner(call.conversation, 'Unbound call')),
       );
       return item;
     });
   }
   function toolRows(value: ProcReplies['proc.tools']): Node[] {
     if (value.tools.length === 0)
-      return [node('p', 'No retained tool calls in this page.', 'proc-empty')];
+      return [
+        node('p', 'No retained tool receipts in this selection.', 'proc-empty'),
+      ];
     return value.tools.map((tool) => {
-      const item = entry(tool.id, tool.conversation, tool.state);
+      const item = entry(tool.id, tool.conversation, tone(tool.state));
       item.append(
         line('proc-row-head', [
           node('span', undefined, 'proc-dot'),
           node('strong', tool.name),
           badge(tool.state),
         ]),
-        line('proc-row-foot', [
-          node('code', tool.conversation),
+        line('proc-row-meta', [
+          tool.job === null ? 'No job recorded' : `Job ${tool.job}`,
           ...(tool.recordedAt
             ? [age(tool.recordedAt, value.snapshotAt)]
             : ['Time not recorded']),
         ]),
+        line('proc-row-foot', owner(tool.conversation, 'No conversation')),
       );
       return item;
     });
@@ -583,9 +685,9 @@ export function mountProcPanel(
     cursor = null;
     next.disabled = true;
     previous.disabled = true;
-    order.disabled = currentView() !== 'proc.list';
-    panel.dataset.view = currentView() === 'proc.list' ? 'list' : 'page';
+    panel.dataset.view = currentView().slice('proc.'.length);
     body.replaceChildren();
+    hideStrips();
     clearDetail();
     coverageText.textContent = '';
     const chosen = scope.conversation ?? scope.root ?? scope.causation;
@@ -826,7 +928,7 @@ export function mountProcPanel(
     selected = id;
     markSelection();
     showDetail(node('p', `Reading ${id}…`, 'proc-empty'));
-    const { after: _after, ...selection } = query();
+    const { after: _after, ...selection } = pageQuery();
     const value = await readInspection({
       ...selection,
       active: false,
@@ -848,18 +950,32 @@ export function mountProcPanel(
     refresh.disabled = true;
     try {
       const type = currentView();
-      const value = await reader.read(type, pageQuery(type));
+      const value = await reader.read(type, pageQuery());
       if (closed || stamp !== epoch) return;
       const focus = focused(body);
       cursor = value.cursor;
       next.disabled = !cursor;
-      status.textContent = `Snapshot ${new Date(value.snapshotAt).toLocaleString()} · ${'total' in value ? `${value.total} conversations in selection` : 'authorized audit page'}`;
+      status.textContent = `Snapshot ${new Date(value.snapshotAt).toLocaleString()} · ${
+        'conversations' in value
+          ? `${counted(value.total, 'conversation')} in selection`
+          : 'queues' in value
+            ? `${counted(value.queues.length, 'checkpoint')} on this page`
+            : 'calls' in value
+              ? `${counted(value.calls.length, 'model call')} on this page`
+              : `${counted(value.tools.length, 'tool receipt')} on this page`
+      }`;
       delete status.dataset.state;
       coverageText.textContent = value.coverage.join('\n');
       if ('conversations' in value)
         body.replaceChildren(...conversationRows(value));
-      else if ('queues' in value) body.replaceChildren(queueTable(value));
-      else if ('calls' in value)
+      else if ('queues' in value) {
+        showTotals(value);
+        showPools(value);
+        body.replaceChildren(
+          ...queueRows(value),
+          record('page-text', procText(value)),
+        );
+      } else if ('calls' in value)
         body.replaceChildren(
           ...callRows(value),
           record('page-text', procText(value)),
@@ -872,7 +988,7 @@ export function mountProcPanel(
       restoreFocus(body, focus);
       if (selected) {
         const id = selected;
-        const { after: _after, ...detailQuery } = query();
+        const { after: _after, ...detailQuery } = pageQuery();
         const inspectedValue = await readInspection({
           ...detailQuery,
           active: false,

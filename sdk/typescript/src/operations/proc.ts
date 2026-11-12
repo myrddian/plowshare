@@ -12,11 +12,14 @@ export interface ProcQuery {
   readonly after?: string;
   readonly limit?: number;
   /**
-   * Conversation-listing direction. `oldest` (the server default) pages by
-   * ascending id; `newest` pages by descending id so current work comes first.
-   * A cursor continues the direction that produced it, so send the same order
-   * with it. Honoured by `proc.list` and the conversation section of
-   * `proc.inspect`; queues, calls and tools keep their own orderings.
+   * Listing direction for every PROC page. `oldest` (the server default) pages
+   * forwards; `newest` reverses every key so current work comes first. Keys:
+   * conversations by id (minted in creation order); calls by creation time then
+   * call id; tools by conversation, numeric entry ordinal, then tool id; queue
+   * rows by their revision's creation time then row id (summaries stay first
+   * and ignore the cursor). A cursor is opaque and continues the direction and
+   * operation that produced it, so send the same order with it. Call and queue
+   * cursors from servers that ordered by bare identifiers are rejected.
    */
   readonly order?: ProcOrder;
 }

@@ -6,15 +6,28 @@ import java.util.Set;
 /**
  * Bounded audit selection. Visibility is explicit and never supplies an execution identity.
  *
- * <p>{@code order} selects the keyset direction of the conversation listing only: {@code "oldest"}
- * (the default, and the only behaviour before the field existed) pages by ascending conversation id
- * with {@code after} as an exclusive lower bound; {@code "newest"} pages by descending id with
- * {@code after} as an exclusive upper bound. Conversation ids increase over time, so {@code newest}
- * returns current work first. A returned cursor continues in the direction that produced it; a
- * caller must send the same {@code order} with that cursor. It is honoured by {@code proc.list} and
- * by the conversation section of {@code proc.inspect}; {@code proc.queues}, {@code proc.calls},
- * {@code proc.tools} and the other inspection sections keep their own fixed orderings and ignore
- * it, although every reply echoes it in its selection.
+ * <p>{@code order} selects the keyset direction of every paged PROC listing: {@code "oldest"} (the
+ * default, and the only behaviour before the field existed) pages forwards with {@code after} as an
+ * exclusive lower bound; {@code "newest"} reverses every key with {@code after} as an exclusive
+ * upper bound, so current work comes first. A returned cursor continues in the direction that
+ * produced it; a caller must send the same {@code order} and operation with that cursor. Each
+ * operation has its own key and cursor shape (see {@code ProcCursor}):
+ *
+ * <ul>
+ *   <li>{@code proc.list} and the conversation section of {@code proc.inspect}: conversation id,
+ *       which is minted in creation order. The cursor is the last id.
+ *   <li>{@code proc.calls}: {@code (created_at, call_id)}. The cursor is {@code
+ *       <createdMicros>:<callId>}.
+ *   <li>{@code proc.tools}: {@code (conversation, numeric entry ordinal, tool id)}. The cursor is
+ *       the last receipt id {@code <conversation>:<ordinal>:<toolId>}.
+ *   <li>{@code proc.queues}: page rows by {@code (revision created_at, row id)}; summaries stay
+ *       first and independent of the cursor and direction. The cursor is {@code
+ *       <revisionCreatedMicros>:<rowId>}.
+ * </ul>
+ *
+ * <p>The queue, call and tool sections of {@code proc.inspect} use the same direction from their
+ * first page. A call or queue cursor issued before these chronological keys existed is rejected
+ * rather than reinterpreted.
  */
 @com.fasterxml.jackson.annotation.JsonInclude(
     com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
@@ -53,7 +66,7 @@ public record ProcQuery(
     return visibility.equals("server");
   }
 
-  /** True when the conversation listing pages by descending id. */
+  /** True when listings page by their descending keys. */
   public boolean newest() {
     return order.equals("newest");
   }
