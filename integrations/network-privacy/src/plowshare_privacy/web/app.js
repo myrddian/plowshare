@@ -40,6 +40,16 @@ let latestStatus = null;
 // in the current inventory are shown, so a ledger entry for a device that has
 // left monitoring never inflates a count.
 let assessmentIndex = new Map();
+// The Ask tab: the last reading of the conversation, a signature that stops an
+// unchanged reading being rebuilt, and the guards for in-flight work. The epoch
+// changes on disconnect so a reply that lands afterwards is dropped.
+let askConversation = null;
+let askSignature = null;
+let askReading = false;
+let askSending = false;
+let askSettingsLoaded = false;
+let askTopUpCalls = null;
+let askEpoch = 0;
 const byId = (name) => document.getElementById(name);
 
 const views = {
@@ -47,6 +57,7 @@ const views = {
   devices: ['Your devices', 'Device observations, profiles and linked privacy issues.'],
   findings: ['Findings and investigations', 'Review observed changes and read investigation reports.'],
   evidence: ['Collection evidence', 'Retained observations, comparisons and coverage gaps.'],
+  ask: ['Ask Privacy Watch', 'Ask about your network and follow the work it hands off.'],
   settings: ['Monitoring settings', 'Devices, connections and investigation preferences.'],
 };
 
@@ -99,12 +110,14 @@ function showView(name, focusHeading = false) {
   byId('page-title').scrollIntoView({block:'start'});
   if (focusHeading) byId('page-title').focus({preventScroll:true});
   recordLocation();
+  // Reading the conversation marks it read, so it is read only while it is shown.
+  if (name === 'ask') {renderAsk(); readAsk().catch(error => notice(error.message, true));}
 }
 for (const name of Object.keys(views)) {
   const tab = byId(`tab-${name}`);
   tab.addEventListener('click', () => showView(name));
   tab.addEventListener('keydown', event => {
-    const names = Object.keys(views);
+    const names = Object.keys(views).filter(item => item === name || !byId(`tab-${item}`).hidden);
     const index = names.indexOf(name);
     const next = {ArrowRight:(index + 1) % names.length, ArrowLeft:(index + names.length - 1) % names.length, Home:0, End:names.length - 1}[event.key];
     if (next === undefined) return;
@@ -435,8 +448,13 @@ async function refresh() {
     if (!researchDevice) byId('research-search').disabled = !advisoriesAvailable;
     issuesAvailable = !!status.issues_available;
     assessmentsAvailable = !!status.device_assessments_available;
-    byId('background-assessments').hidden = !assessmentsAvailable;
+    // Ask is shown when the collector has it, or says why it has not.
+    byId('tab-ask').hidden = !(status.ask_available || status.ask_detail);
+    byId('ask-group').hidden = !status.ask_available;
+    byId('assessment-group').hidden = !assessmentsAvailable;
+    byId('background-assessments').hidden = !(assessmentsAvailable || status.ask_available);
     if (assessmentsAvailable && !assessmentSettingsLoaded) await loadAssessmentSettings();
+    if (status.ask_available && !askSettingsLoaded) await loadAskSettings().catch(error => {byId('ask-settings-detail').textContent = error.message;});
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
     byId('collector').textContent = status.collector;
@@ -465,6 +483,7 @@ async function refresh() {
     else condition(status.state === 'attention_required' ? status.detail : '', status.state === 'attention_required');
     await pollAssessment().catch(error => notice(error.message, true));
     await pollDeepScan().catch(error => notice(error.message, true));
+    await readAsk().catch(error => notice(error.message, true));
   } finally {refreshPending = false; setBusy(byId('refresh'), false);}
 }
 byId('connect').addEventListener('submit', event => {
@@ -494,6 +513,11 @@ byId('disconnect').addEventListener('click', async () => {
   byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
   setSignalFilter('all');
   selectedDevice = null; deviceSupplemental = null; deepScanPane = null; deepScanBusy = null; setHouseholdZone('UTC');
+  askConversation = null; askSignature = null; askReading = false; askSending = false; askSettingsLoaded = false; askTopUpCalls = null; askEpoch++;
+  for (const id of ['ask-conversation','ask-waiting','ask-done','ask-pause']) byId(id).replaceChildren();
+  for (const id of ['ask-input','ask-max-calls','ask-max-turns','ask-top-up']) byId(id).value = '';
+  for (const id of ['ask-hint','ask-settings-detail']) byId(id).textContent = '';
+  for (const id of ['ask-badge','tab-ask','ask-pause','ask-group']) byId(id).hidden = true;
   byId('deep-scan-group').hidden = true; byId('deep-scan-limit').value = ''; byId('deep-scan-limit').disabled = false; byId('deep-scan-save').disabled = false; byId('deep-scan-detail').textContent = ''; byId('deep-scan-detail').className = 'hint';
   byId('household-zone').hidden = true; byId('zone-input').value = '';
   for (const id of deviceParts) byId(id).replaceChildren();
@@ -1769,6 +1793,180 @@ byId('deep-scan-settings').addEventListener('submit', async event => {
 });
 // ---- end Deep port scans ----
 
+// ---- Ask ----
+// One conversation with the privacy assistant. The collector owns the turn and
+// its state; this block only shows the reading it is given. The conversation
+// is read through GET /api/ask, which marks it read, so it is read only while
+// the tab is open. With the tab hidden the overview's small `ask` summary
+// drives the badge and the attention band. The reading is rebuilt only when
+// it differs from the one on screen, which keeps an open Details fold, the
+// scroll position and a pending Top up confirmation across the refresh.
+const askActive = state => state === 'sending' || state === 'running';
+const askHeads = {question:'You', answer:'Privacy Watch', refusal:'Privacy Watch', orchestration:'Report', harness:'Update'};
+function looksLikeJson(text) {
+  const trimmed = text.trim();
+  return (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+}
+function prettyJson(text) {
+  try {return JSON.stringify(JSON.parse(text), null, 2);} catch (error) {return text.trim();}
+}
+// Tool results are working, not answers, and an answer that only called tools
+// has no words: neither is shown. Reply text never becomes HTML; it goes
+// through the Markdown renderer, which builds elements itself.
+function askEntryNode(entry) {
+  if (entry.author === 'tool' || entry.kind === 'tool_result' || !entry.text.trim()) return null;
+  const mine = entry.author === 'user';
+  const node = element('article', undefined, mine ? 'ask-entry ask-question' : 'ask-entry ask-answer');
+  const head = element('p', undefined, 'ask-entry-head');
+  const who = mine ? 'You' : entry.kind === 'message' ? (entry.sender ? `${entry.sender} replied` : 'A specialist replied') : askHeads[entry.kind] || 'Privacy Watch';
+  head.append(element('span', who, 'status-line'));
+  if (entry.at) head.append(element('small', formatWhen(entry.at)));
+  node.append(head);
+  if (mine) node.append(element('p', entry.text, 'ask-text'));
+  else if (looksLikeJson(entry.text)) {
+    const fold = element('details', undefined, 'record-details');
+    fold.append(element('summary', 'Details · structured reply'), element('pre', prettyJson(entry.text)));
+    node.append(fold);
+  } else node.append(PrivacyMarkdown.render(entry.text));
+  return node;
+}
+function askWorkNode(item) {
+  const node = element('div', undefined, 'record');
+  node.append(element('h4', item.target || 'Unknown recipient'));
+  if (item.about) node.append(element('p', item.about, 'hint'));
+  node.append(element('small', `Since ${formatWhen(item.since)}`));
+  // A report opens only when the work names its revision; the hand-off does not
+  // always carry one, and then it is listed without a link.
+  if (item.target === 'investigate_network' && typeof item.revision === 'string') {
+    node.append(actionButton('Read the report', 'secondary', () => showReport(item.revision)));
+  }
+  return node;
+}
+function askWorkList(container, items, empty) {
+  container.replaceChildren(...(items.length ? items.map(askWorkNode) : [element('p', empty, 'empty')]));
+}
+async function topUpAsk() {
+  const mine = askEpoch;
+  const view = await api('/api/ask/top-up', {method:'POST', body:'{}'});
+  if (mine === askEpoch) acceptAsk(view);
+}
+function renderAskPause(view) {
+  const pause = byId('ask-pause');
+  pause.hidden = !view.paused;
+  if (!view.paused) {pause.replaceChildren(); return;}
+  const body = element('div', undefined, 'panel-body');
+  const cost = askTopUpCalls ? `Top up adds ${plural(askTopUpCalls, 'model call', 'model calls')} to this conversation.` : 'Top up adds more model calls to this conversation.';
+  body.append(element('p', 'Paused: allowance used', 'status-line'), confirmedAction('Top up', '', 'Top up and continue', cost, topUpAsk));
+  pause.replaceChildren(body);
+}
+function applyAskForm() {
+  const view = askConversation;
+  const state = view?.turn_state ?? 'idle';
+  const unavailable = view ? !view.available : latestStatus ? !latestStatus.ask_available : false;
+  const blocked = unavailable || askActive(state) || askSending;
+  byId('ask-input').disabled = blocked;
+  byId('ask-send').disabled = blocked;
+  markBusy(byId('ask-send'), askSending);
+  const hint = byId('ask-hint');
+  hint.className = state === 'failed' ? 'notice error' : 'hint';
+  hint.textContent = unavailable ? view?.detail || latestStatus?.ask_detail || 'Ask is not enabled on this collector.'
+    : askActive(state) ? 'Privacy Watch is still working on your last question'
+    : state === 'unconfirmed' ? 'Not confirmed as sent. Ask again if you still need it.'
+    : view?.detail || '';
+}
+function renderAsk() {
+  applyAskForm();
+  const view = askConversation;
+  if (!view) {
+    byId('ask-conversation').replaceChildren(element('p', 'Reading the conversation…', 'empty'));
+    askSignature = null;
+    return;
+  }
+  const signature = JSON.stringify(view);
+  if (signature === askSignature) return;
+  askSignature = signature;
+  const log = byId('ask-conversation');
+  const atEnd = !(log.scrollHeight > log.clientHeight) || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+  const nodes = view.entries.map(askEntryNode).filter(Boolean);
+  log.replaceChildren(...(nodes.length ? nodes : [element('p', 'No conversation yet. Ask what Privacy Watch has seen on your network, or what it would look at next.', 'empty')]));
+  if (atEnd) log.scrollTop = log.scrollHeight;
+  askWorkList(byId('ask-waiting'), view.waiting, 'Nothing is waiting on anyone.');
+  askWorkList(byId('ask-done'), view.done, 'Nothing has finished yet.');
+  renderAskPause(view);
+}
+function renderAskBadge(ask) {
+  byId('ask-badge').hidden = !ask?.unread;
+}
+// A reading, or the reply to a question or top-up, is the newest account of
+// the conversation: it also brings the overview's summary up to date, so the
+// badge and the attention band do not wait for the next refresh.
+function acceptAsk(view) {
+  askConversation = view;
+  if (overview?.ask) {
+    overview.ask = {unread:view.unread, paused:view.paused, turn_state:view.turn_state, detail:view.detail};
+    renderAskBadge(overview.ask);
+    renderAttention(overview);
+  }
+  renderAsk();
+}
+async function readAsk() {
+  if (currentView !== 'ask' || askReading) return;
+  if (!overview?.ask) {renderAsk(); return;}
+  const mine = askEpoch;
+  askReading = true;
+  try {
+    const view = await api('/api/ask');
+    if (mine === askEpoch) acceptAsk(view);
+  } finally {if (mine === askEpoch) askReading = false;}
+}
+byId('ask-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const question = byId('ask-input').value;
+  if (!question.trim() || askSending || byId('ask-input').disabled) return;
+  const mine = askEpoch;
+  askSending = true; applyAskForm();
+  try {
+    // Sent once. If the outcome is unknown the draft stays, and the next
+    // reading says whether the collector has the question.
+    const view = await api('/api/ask', {method:'POST', body:JSON.stringify({question})});
+    if (mine !== askEpoch) return;
+    byId('ask-input').value = '';
+    acceptAsk(view);
+  } catch (error) {
+    if (mine === askEpoch) notice(error.message, true);
+  } finally {
+    if (mine === askEpoch) {askSending = false; applyAskForm();}
+  }
+});
+function renderAskSettings(settings) {
+  byId('ask-max-calls').value = String(settings.max_model_calls);
+  byId('ask-max-turns').value = String(settings.max_turns);
+  byId('ask-top-up').value = String(settings.top_up_calls);
+  askTopUpCalls = settings.top_up_calls;
+}
+async function loadAskSettings() {
+  const mine = askEpoch;
+  const settings = await api('/api/ask/settings');
+  if (mine !== askEpoch) return;
+  renderAskSettings(settings);
+  askSettingsLoaded = true;
+}
+byId('ask-settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  const mine = askEpoch;
+  try {
+    const [max_model_calls, max_turns, top_up_calls] = ['ask-max-calls', 'ask-max-turns', 'ask-top-up'].map(id => Number(byId(id).value));
+    if (![max_model_calls, max_turns, top_up_calls].every(value => Number.isInteger(value) && value >= 1 && value <= 200)) throw new Error('Choose whole numbers from 1 to 200.');
+    const saved = await api('/api/ask/settings', {method:'POST', body:JSON.stringify({max_model_calls, max_turns, top_up_calls})});
+    if (mine !== askEpoch) return;
+    renderAskSettings(saved);
+    byId('ask-settings-detail').textContent = 'Saved. A conversation that is already open keeps its allowance; later top-ups use the new size.';
+  } catch (error) {
+    if (mine === askEpoch) byId('ask-settings-detail').textContent = error.message;
+  }
+});
+// ---- end Ask ----
+
 const inventoryOrders = {
   attention: (a, b) => attentionRank(a) - attentionRank(b),
   third: (a, b) => behaviouralQueries(b.dns_activity) - behaviouralQueries(a.dns_activity),
@@ -2008,6 +2206,9 @@ function renderAttention(value) {
       byId('background-research').scrollIntoView?.({block:'start'});
       loadBackgroundResearch().catch(error => notice(error.message, true));
     }));
+  const ask = value.ask;
+  if (ask?.unread) items.push(attentionItem('•', 'Privacy Watch has an answer', 'Read it in the Ask tab.', 'Open Ask', () => showView('ask', true)));
+  if (ask?.paused) items.push(attentionItem('!', 'Privacy Watch is paused', ask.detail || 'Its allowance is used. Top up to let it continue.', 'Open Ask', () => showView('ask', true)));
   const health = value.health;
   if (!health.connected) items.push(attentionItem('!', 'Plowshare connection', health.detail, 'Open System health', openSystemHealth));
   if (health.recovery.length) items.push(attentionItem(formatCount(health.recovery.length), 'Retained work needs a check', health.recovery[0], 'Open System health', openSystemHealth));
@@ -2114,6 +2315,7 @@ function renderOverview(value) {
     ? (presenceStatus.last_checked ? 'Last quick check ' + formatWhen(presenceStatus.last_checked) + '.' : 'Waiting for the first quick check.')
       + (presenceStatus.issues.length ? ' ' + presenceStatus.issues.join(' ') : '')
     : 'Quick presence checks are off.';
+  renderAskBadge(value.ask);
   renderAttention(value);
   renderBackgroundUsage(value);
   renderDeepScanGroup(value);
