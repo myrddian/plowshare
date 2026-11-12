@@ -22,22 +22,30 @@ import asyncio
 import errno
 import ipaddress
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Awaitable, Callable, Iterator, Literal, Sequence
+from uuid import uuid4
 
 from .contracts import (
+    household_day,
     integer,
     items,
     load_json,
     object_fields,
     parse_json,
+    private_ipv4,
     text,
     timestamp,
+    utc_now,
     uuid,
 )
 from .device_dossier import parse_device_id
+from .device_inventory import DeviceInventory
+from .identity_source import DeviceIdentitySource
 from .private_files import replace_private
+from .tools import monitored_devices
 
 Trigger = Literal["automatic", "operator"]
 ScanState = Literal[
@@ -55,16 +63,28 @@ MAX_DEVICES = 256
 MAX_LEDGER_BYTES = 2 * 1024 * 1024
 MAX_DETAIL = 1600
 
-_TRIGGERS = frozenset({"automatic", "operator"})
-_STATES = frozenset(
-    {"complete", "cancelled", "interrupted", "unreliable", "address_changed", "failed"}
-)
+# Name -> typed literal; a lookup narrows an external string without a cast.
+_TRIGGERS: dict[str, Trigger] = {"automatic": "automatic", "operator": "operator"}
+_STATES: dict[str, ScanState] = {
+    "complete": "complete",
+    "cancelled": "cancelled",
+    "interrupted": "interrupted",
+    "unreliable": "unreliable",
+    "address_changed": "address_changed",
+    "failed": "failed",
+}
 
 
 def _trigger(value: object) -> Trigger:
-    if value not in _TRIGGERS:
+    if not isinstance(value, str) or value not in _TRIGGERS:
         raise ValueError("Invalid deep scan trigger")
-    return value  # type: ignore[return-value]
+    return _TRIGGERS[value]
+
+
+def _state(value: object) -> ScanState:
+    if not isinstance(value, str) or value not in _STATES:
+        raise ValueError("Invalid deep scan state")
+    return _STATES[value]
 
 
 @dataclass(frozen=True)
@@ -126,8 +146,7 @@ class DeepScanResult:
             uuid(self.report)
         timestamp(self.started_at)
         timestamp(self.finished_at)
-        if self.state not in _STATES:
-            raise ValueError("Invalid deep scan state")
+        _state(self.state)
         for port in self.open_ports:
             integer(port, 1, 65535)
         # Strictly increasing means sorted and unique.
@@ -166,7 +185,7 @@ class DeepScanResult:
             uuid(row["report"]) if row["report"] is not None else None,
             timestamp(row["started_at"]),
             timestamp(row["finished_at"]),
-            row["state"],  # type: ignore[arg-type]
+            _state(row["state"]),
             tuple(integer(p, 1, 65535) for p in items(row["open_ports"], 65535)),
             integer(row["unanswered"], 0, 65535),
             text(row["detail"], MAX_DETAIL) if row["detail"] is not None else None,
@@ -177,7 +196,9 @@ class DeepScanResult:
 class DeepScanLedger:
     # Automatic scans admitted per household day; 0 turns automatic scans off.
     automatic_limit: int = 0
+    # At most one entry per device, and never the device that is running.
     queue: tuple[DeepScanRequest, ...] = ()
+    # ``queued_at`` of the running scan is the time it was admitted to run.
     running: DeepScanRequest | None = None
     # Newest last; at most KEEP_RESULTS per device.
     results: tuple[DeepScanResult, ...] = ()
@@ -191,6 +212,11 @@ class DeepScanLedger:
             or len(self.results) > MAX_DEVICES * KEEP_RESULTS
         ):
             raise ValueError("Too many deep scan records")
+        devices = [r.device_id for r in self.queue]
+        if self.running is not None:
+            devices.append(self.running.device_id)
+        if len(set(devices)) != len(devices):
+            raise ValueError("A device has more than one queued or running scan")
         counts: dict[str, int] = {}
         for result in self.results:
             counts[result.device_id] = counts.get(result.device_id, 0) + 1
@@ -272,3 +298,543 @@ async def probe_port(
     except (TimeoutError, ConnectionError):
         pass
     return "open"
+
+
+_POLL_SECONDS = 5
+_INTERRUPTED = "The collector restarted during this scan; it was not resumed."
+_UNAVAILABLE = (
+    "A deep port scan needs UniFi or Pi-hole to confirm the device's MAC address"
+    " before and after the sweep."
+)
+_WAITING = "Waiting for tomorrow's automatic scan allowance."
+# Recorded for a scan interrupted by a restart when its address is no longer known.
+_UNKNOWN_ADDRESS = "0.0.0.0"
+
+ViewState = Literal["idle", "queued", "running"]
+_Outcome = tuple[ScanState, str | None]
+
+
+class UnknownDevice(LookupError):
+    """The device ID is valid but not a monitored device with a confirmed MAC."""
+
+
+@dataclass(frozen=True)
+class DeepScanView:
+    """One device's scan state for the dashboard; progress is in memory only."""
+
+    device_id: str
+    available: bool
+    state: ViewState
+    trigger: Trigger | None
+    checked: int
+    total: int
+    open_so_far: tuple[int, ...]
+    estimated_finish: str | None
+    # The newest result in any state, so a failed or cancelled scan stays visible.
+    latest: DeepScanResult | None
+    detail: str | None
+
+
+@dataclass(frozen=True)
+class DeepScanUsage:
+    automatic_limit: int
+    used_today: int
+
+
+@dataclass
+class _Progress:
+    """The running scan's sweep so far; never persisted."""
+
+    request_id: str
+    started_at: str
+    checked: int = 0
+    open_ports: set[int] = field(default_factory=set)
+    unanswered: int = 0
+
+
+def _instant(stamp: str) -> datetime:
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def _keep(results: tuple[DeepScanResult, ...]) -> tuple[DeepScanResult, ...]:
+    """Keep the newest KEEP_RESULTS per device for the MAX_DEVICES newest devices."""
+    counts: dict[str, int] = {}
+    kept: list[DeepScanResult] = []
+    for result in reversed(results):
+        if result.device_id not in counts:
+            if len(counts) >= MAX_DEVICES:
+                continue
+            counts[result.device_id] = 0
+        if counts[result.device_id] < KEEP_RESULTS:
+            counts[result.device_id] += 1
+            kept.append(result)
+    return tuple(reversed(kept))
+
+
+class DeepScanner:
+    """Runs queued deep port scans one device at a time.
+
+    Concurrency: every state change happens on the event loop. The synchronous
+    entry points (``flagged``, ``request``, ``cancel``, ``set_automatic_limit``)
+    never await, so each applies atomically to the current ledger. ``poll``
+    re-reads the ledger after every await rather than trusting a snapshot, so a
+    cancel or replacement made during an identity read wins; its own lock keeps
+    a second ``poll`` from starting another scan. No worker or collection lock is
+    held: identity reads and probes run unlocked.
+
+    Persistence: each ledger change is saved before memory is updated, so a
+    failed save leaves both unchanged. Sweep progress is memory only; a restart
+    turns the persisted running scan into an ``interrupted`` result.
+
+    Identity: the device's MAC must be the only identity at its address both
+    before the first probe and after the last. A wrong MAC before the sweep is
+    ``address_changed`` and nothing is probed; any doubt after the sweep makes
+    the whole result ``unreliable`` with no ports, since the answers may belong
+    to another device.
+    """
+
+    def __init__(
+        self,
+        journal: DeepScanJournal,
+        inventory: Callable[[], DeviceInventory],
+        identities: DeviceIdentitySource | None,
+        *,
+        probe: Callable[[str, int, float], Awaitable[str]] = probe_port,
+        ports: Sequence[int] = PORTS,
+        clock: Callable[[], str] = utc_now,
+        zone: Callable[[], str] = lambda: "UTC",
+        new_id: Callable[[], str] = lambda: str(uuid4()),
+    ):
+        self._journal = journal
+        self._inventory = inventory
+        self._identities = identities
+        self._probe = probe
+        self._ports = ports
+        self._clock = clock
+        # Read when used: the household zone can change at runtime.
+        self._zone = zone
+        self._new_id = new_id
+        self.error: str | None = None
+        self._lock = asyncio.Lock()
+        # Request IDs of running scans the operator asked to stop.
+        self._cancelled: set[str] = set()
+        self._progress: _Progress | None = None
+        self._ledger = journal.read()
+        running = self._ledger.running
+        if running is not None:
+            self._commit(
+                self._finish(
+                    running,
+                    self._restart_address(running.device_id),
+                    running.queued_at,
+                    ("interrupted", _INTERRUPTED),
+                )
+            )
+
+    @property
+    def ledger(self) -> DeepScanLedger:
+        return self._ledger
+
+    @property
+    def available(self) -> bool:
+        return self._identities is not None
+
+    def usage(self) -> DeepScanUsage:
+        zone = self._zone()
+        today = household_day(self._clock(), zone)
+        used = sum(
+            1 for a in self._ledger.admissions if household_day(a, zone) == today
+        )
+        return DeepScanUsage(self._ledger.automatic_limit, used)
+
+    def flagged(self, device_id: str, report: str) -> None:
+        """Queue an automatic scan for an assessment report's concerns, once.
+
+        A queued automatic entry for an older report is replaced; a queued
+        operator request, a running scan or an earlier result for the same report
+        already covers the trigger. Nothing is queued while automatic scans are
+        off (limit 0) or no identity source can confirm the device.
+        """
+        parse_device_id(device_id)
+        uuid(report)
+        ledger = self._ledger
+        if not self.available or ledger.automatic_limit == 0:
+            return
+        if ledger.running is not None and ledger.running.device_id == device_id:
+            return
+        if any(r.device_id == device_id and r.report == report for r in ledger.results):
+            return
+        queued = self._queued(device_id)
+        if queued is not None and (
+            queued.trigger == "operator" or queued.report == report
+        ):
+            return
+        entry = DeepScanRequest(
+            device_id, "automatic", report, self._new_id(), self._clock()
+        )
+        self._commit(replace(ledger, queue=self._enqueue(ledger, queued, entry)))
+
+    def request(self, device_id: str) -> DeepScanView:
+        """Queue an operator scan; an automatic entry is upgraded in place."""
+        parse_device_id(device_id)
+        if not self.available:
+            raise ValueError(_UNAVAILABLE)
+        if all(d != device_id for d, _ in monitored_devices(self._inventory())):
+            raise UnknownDevice(device_id)
+        ledger = self._ledger
+        queued = self._queued(device_id)
+        running = ledger.running is not None and ledger.running.device_id == device_id
+        if running or (queued is not None and queued.trigger == "operator"):
+            return self.view(device_id)
+        if queued is not None:
+            upgraded = replace(queued, trigger="operator", report=None)
+            queue = tuple(upgraded if q is queued else q for q in ledger.queue)
+        else:
+            entry = DeepScanRequest(
+                device_id, "operator", None, self._new_id(), self._clock()
+            )
+            queue = self._enqueue(ledger, None, entry)
+        self._commit(replace(ledger, queue=queue))
+        return self.view(device_id)
+
+    def cancel(self, device_id: str) -> DeepScanView:
+        """Drop a queued request, or stop the running sweep after current probes."""
+        parse_device_id(device_id)
+        ledger = self._ledger
+        queued = self._queued(device_id)
+        if queued is not None:
+            self._commit(
+                replace(ledger, queue=tuple(q for q in ledger.queue if q is not queued))
+            )
+        elif ledger.running is not None and ledger.running.device_id == device_id:
+            self._cancelled.add(ledger.running.request_id)
+        return self.view(device_id)
+
+    def set_automatic_limit(self, limit: int) -> None:
+        """Set the automatic scans per household day; 0 discards queued ones."""
+        integer(limit, 0, MAX_AUTOMATIC)
+        ledger = self._ledger
+        queue = ledger.queue
+        if limit == 0:
+            queue = tuple(q for q in queue if q.trigger == "operator")
+        self._commit(replace(ledger, automatic_limit=limit, queue=queue))
+
+    def latest(self, device_id: str) -> DeepScanResult | None:
+        """The newest ``complete`` result: the only kind that vouches for ports."""
+        return next(
+            (
+                r
+                for r in reversed(self._ledger.results)
+                if r.device_id == device_id and r.state == "complete"
+            ),
+            None,
+        )
+
+    def view(self, device_id: str) -> DeepScanView:
+        ledger = self._ledger
+        latest = next(
+            (r for r in reversed(ledger.results) if r.device_id == device_id), None
+        )
+        total = len(self._ports)
+        detail = None if self.available else _UNAVAILABLE
+        running = ledger.running
+        if running is not None and running.device_id == device_id:
+            progress = self._progress
+            if progress is None or progress.request_id != running.request_id:
+                progress = _Progress(running.request_id, running.queued_at)
+            return DeepScanView(
+                device_id,
+                self.available,
+                "running",
+                running.trigger,
+                progress.checked,
+                total,
+                tuple(sorted(progress.open_ports)),
+                self._estimate(progress, total),
+                latest,
+                detail,
+            )
+        queued = self._queued(device_id)
+        if queued is not None:
+            if detail is None and queued.trigger == "automatic" and self._spent():
+                detail = _WAITING
+            return DeepScanView(
+                device_id,
+                self.available,
+                "queued",
+                queued.trigger,
+                0,
+                total,
+                (),
+                None,
+                latest,
+                detail,
+            )
+        return DeepScanView(
+            device_id, self.available, "idle", None, 0, total, (), None, latest, detail
+        )
+
+    def views(self) -> tuple[DeepScanView, ...]:
+        """Running first, then the queue in order, then scanned devices newest first."""
+        ledger = self._ledger
+        devices = [ledger.running.device_id] if ledger.running is not None else []
+        devices += [q.device_id for q in ledger.queue]
+        devices += [r.device_id for r in reversed(ledger.results)]
+        return tuple(self.view(d) for d in dict.fromkeys(devices))
+
+    async def poll(self) -> None:
+        """Run at most one queued scan to completion."""
+        async with self._lock:
+            identities = self._identities
+            if identities is None:
+                return
+            self._expire()
+            chosen = self._next()
+            if chosen is not None:
+                await self._scan(identities, *chosen)
+
+    async def run(self, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            try:
+                self.error = None
+                await self.poll()
+            except (ValueError, OSError, LookupError) as error:
+                self.error = (
+                    "Deep port scans need attention "
+                    f"({type(error).__name__}). Queued requests and results were kept."
+                )
+            try:
+                await asyncio.wait_for(stop.wait(), _POLL_SECONDS)
+            except TimeoutError:
+                continue
+
+    def _commit(self, ledger: DeepScanLedger) -> None:
+        self._journal.save(ledger)
+        self._ledger = ledger
+
+    def _queued(self, device_id: str) -> DeepScanRequest | None:
+        return next((q for q in self._ledger.queue if q.device_id == device_id), None)
+
+    def _enqueue(
+        self,
+        ledger: DeepScanLedger,
+        replacing: DeepScanRequest | None,
+        entry: DeepScanRequest,
+    ) -> tuple[DeepScanRequest, ...]:
+        queue = tuple(q for q in ledger.queue if q is not replacing)
+        if len(queue) >= MAX_DEVICES:
+            raise ValueError("The deep scan queue is full")
+        return queue + (entry,)
+
+    def _spent(self) -> bool:
+        usage = self.usage()
+        return usage.used_today >= usage.automatic_limit
+
+    def _restart_address(self, device_id: str) -> str:
+        """The interrupted scan's address: current card, else its last result."""
+        for d, card in monitored_devices(self._inventory()):
+            if d == device_id:
+                return card.address
+        return next(
+            (
+                r.address
+                for r in reversed(self._ledger.results)
+                if r.device_id == device_id
+            ),
+            _UNKNOWN_ADDRESS,
+        )
+
+    def _estimate(self, progress: _Progress, total: int) -> str | None:
+        """Finish time at the pace so far: elapsed per checked port times those left."""
+        if progress.checked == 0:
+            return None
+        now = _instant(self._clock())
+        elapsed = now - _instant(progress.started_at)
+        left = elapsed / progress.checked * (total - progress.checked)
+        finish = (now + left).astimezone(timezone.utc).replace(microsecond=0)
+        return finish.isoformat().replace("+00:00", "Z")
+
+    def _expire(self) -> None:
+        ledger = self._ledger
+        cutoff = _instant(self._clock()) - timedelta(seconds=QUEUE_TTL_SECONDS)
+        queue = tuple(q for q in ledger.queue if _instant(q.queued_at) >= cutoff)
+        if queue != ledger.queue:
+            self._commit(replace(ledger, queue=queue))
+
+    def _next(self) -> tuple[DeepScanRequest, str] | None:
+        """The oldest admissible entry whose device has a confirmed current address.
+
+        An entry whose device is not currently monitored stays queued until it
+        returns or expires.
+        """
+        spent = self._spent()
+        addresses = dict(monitored_devices(self._inventory()))
+        for entry in sorted(self._ledger.queue, key=lambda q: _instant(q.queued_at)):
+            if entry.trigger == "automatic" and spent:
+                continue
+            card = addresses.get(entry.device_id)
+            if card is not None:
+                return entry, card.address
+        return None
+
+    async def _scan(
+        self, identities: DeviceIdentitySource, entry: DeepScanRequest, address: str
+    ) -> None:
+        if not private_ipv4(address):
+            detail = f"Deep port scans only probe private IPv4 addresses; {address} is not one."
+            self._commit(
+                self._finish(entry, address, self._clock(), ("failed", detail))
+            )
+            return
+        checked_at = self._clock()
+        problem = await self._confirm(identities, entry.device_id, address)
+        # A cancel, an upgrade or a newer report may have landed during the read.
+        current = self._queued(entry.device_id)
+        if current is None or current.request_id != entry.request_id:
+            return
+        if problem is not None:
+            self._commit(self._finish(current, address, checked_at, problem))
+            return
+        started = self._clock()
+        running = replace(current, queued_at=started)
+        ledger = self._ledger
+        admissions = ledger.admissions
+        if running.trigger == "automatic":
+            zone = self._zone()
+            today = household_day(started, zone)
+            admissions = tuple(
+                a for a in admissions if household_day(a, zone) == today
+            ) + (started,)
+        self._commit(
+            replace(
+                ledger,
+                queue=tuple(q for q in ledger.queue if q is not current),
+                running=running,
+                admissions=admissions,
+            )
+        )
+        progress = _Progress(running.request_id, started)
+        self._progress = progress
+        try:
+            outcome = await self._sweep(identities, running, address, progress)
+        except Exception as error:
+            # Record the failure so the scan does not stay running, then let
+            # run() report it. Cancellation is not caught: a shutdown leaves the
+            # scan running on disk, and the next start records it interrupted.
+            failed: _Outcome = ("failed", f"The scan stopped: {type(error).__name__}.")
+            self._commit(self._finish(running, address, started, failed))
+            raise
+        finally:
+            self._progress = None
+            self._cancelled.discard(running.request_id)
+        state, _ = outcome
+        self._commit(
+            self._finish(
+                running,
+                address,
+                started,
+                outcome,
+                tuple(sorted(progress.open_ports)) if state == "complete" else (),
+                progress.unanswered if state == "complete" else 0,
+            )
+        )
+
+    async def _sweep(
+        self,
+        identities: DeviceIdentitySource,
+        running: DeepScanRequest,
+        address: str,
+        progress: _Progress,
+    ) -> _Outcome:
+        """Probe every port with CONCURRENCY workers, then confirm the identity.
+
+        The workers share one port iterator, so each port is probed once and at
+        most CONCURRENCY probes are outstanding. A cancel or a probe failure is
+        seen between completions: workers stop taking ports and the sweep ends
+        once the probes in flight return.
+        """
+        ports: Iterator[int] = iter(self._ports)
+        failures: list[str] = []
+
+        async def worker() -> None:
+            for port in ports:
+                if failures or running.request_id in self._cancelled:
+                    return
+                try:
+                    answer = await self._probe(address, port, PROBE_TIMEOUT)
+                except OSError as error:
+                    failures.append(f"probing port {port} failed: {error}")
+                    return
+                if answer == "open":
+                    progress.open_ports.add(port)
+                elif answer == "timeout":
+                    progress.unanswered += 1
+                elif answer != "closed":
+                    failures.append(f"port {port} gave an unknown answer")
+                    return
+                progress.checked += 1
+
+        await asyncio.gather(*(worker() for _ in range(CONCURRENCY)))
+        total = len(self._ports)
+        if failures:
+            detail = f"The scan stopped after {progress.checked} of {total} ports; {failures[0]}."
+            return "failed", detail[:MAX_DETAIL]
+        if running.request_id in self._cancelled:
+            return "cancelled", f"Cancelled after {progress.checked} of {total} ports."
+        problem = await self._confirm(identities, running.device_id, address)
+        if problem is not None:
+            _, why = problem
+            return "unreliable", f"After the sweep: {why} No ports are reported."
+        return "complete", None
+
+    async def _confirm(
+        self, identities: DeviceIdentitySource, device_id: str, address: str
+    ) -> _Outcome | None:
+        """None when the device's MAC is the only identity at ``address``."""
+        sample = await identities.identify((address,), self._clock())
+        if address in sample.ambiguous_addresses:
+            return "unreliable", f"More than one device claimed {address}."
+        found = [d for d in sample.devices if d.address == address]
+        if not found:
+            return "unreliable", f"Nothing confirmed which device holds {address}."
+        if len(found) > 1:
+            return "unreliable", f"More than one device claimed {address}."
+        expected = device_id.removeprefix("mac:").lower()
+        if (found[0].mac or "").lower() != expected:
+            return "address_changed", f"{address} now belongs to a different device."
+        return None
+
+    def _finish(
+        self,
+        entry: DeepScanRequest,
+        address: str,
+        started_at: str,
+        outcome: _Outcome,
+        open_ports: tuple[int, ...] = (),
+        unanswered: int = 0,
+    ) -> DeepScanLedger:
+        """The ledger with ``entry`` removed from the queue or running, and its result."""
+        ledger = self._ledger
+        state, detail = outcome
+        result = DeepScanResult(
+            entry.device_id,
+            address,
+            entry.request_id,
+            entry.trigger,
+            entry.report,
+            started_at,
+            self._clock(),
+            state,
+            open_ports,
+            unanswered,
+            detail,
+        )
+        running = ledger.running
+        if running is not None and running.request_id == entry.request_id:
+            running = None
+        return replace(
+            ledger,
+            queue=tuple(q for q in ledger.queue if q.request_id != entry.request_id),
+            running=running,
+            results=_keep(ledger.results + (result,)),
+        )
