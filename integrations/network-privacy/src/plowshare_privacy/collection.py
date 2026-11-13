@@ -11,14 +11,13 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Mapping, Protocol
 
+from .connectors import REGISTRY
 from .contracts import (
     CollectionPlan,
     DeviceIdentity,
     DnsObservation,
     DnsWindow,
     Evidence,
-    PiHolePlan,
-    ServicePlan,
     Snapshot,
     TcpObservation,
     legacy_capabilities,
@@ -46,25 +45,6 @@ class Collector(Protocol):
     ) -> Evidence: ...
 
 
-def _scope_settings(service: ServicePlan) -> dict[str, object]:
-    """The settings of ``service`` that define what a collection covers."""
-    settings = service.settings
-    values = asdict(settings)
-    if isinstance(settings, PiHolePlan):
-        values["password_file"] = (
-            str(settings.password_file) if settings.password_file else None
-        )
-        return values
-    values["ca_file"] = str(settings.ca_file) if settings.ca_file else None
-    if settings.certificate_sha256 is None:
-        values.pop("certificate_sha256")
-    # A controller alias enriches identity evidence without changing probe scope.
-    values.pop("gateway")
-    # Byte counters are local presence data and never change scope.
-    values.pop("traffic_site")
-    return values
-
-
 def scope_fingerprint(plan: CollectionPlan) -> str:
     values = asdict(plan)
     # Local presence sampling does not change full collection evidence or receipts.
@@ -88,7 +68,7 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
         # read keep those keys, so an untouched configuration keeps its
         # fingerprint and journal identity.
         for s, _ in scoped:
-            values[s.kind] = _scope_settings(s)
+            values[s.kind] = REGISTRY[s.kind].scope_settings(s.settings)
     else:
         # Ids are labels; only what is read, and from where, defines scope.
         values["sources"] = sorted(
@@ -96,7 +76,7 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
                 {
                     "kind": s.kind,
                     "capabilities": sorted(caps),
-                    "settings": _scope_settings(s),
+                    "settings": REGISTRY[s.kind].scope_settings(s.settings),
                 }
                 for s, caps in scoped
             ),

@@ -58,7 +58,9 @@ SECRET = "fixture-pihole-app-password"
 SID = "fixture-session-identifier"
 
 
-class PiHoleTest(unittest.IsolatedAsyncioTestCase):
+class PiHoleServerCase(unittest.IsolatedAsyncioTestCase):
+    """A local fake Pi-hole v6 API; it holds no tests so other modules reuse it."""
+
     async def asyncSetUp(self) -> None:
         self.now = datetime.now(timezone.utc).timestamp()
         self.mode = "normal"
@@ -80,71 +82,6 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         self.environment = patch.dict(os.environ, {"PIHOLE_TEST_PASSWORD": SECRET})
         self.environment.start()
         self.addCleanup(self.environment.stop)
-
-    async def test_identity_check_reads_no_dns_and_uses_ephemeral_password(
-        self,
-    ) -> None:
-        with patch.dict(os.environ, {"PIHOLE_TEST_PASSWORD": "unused"}):
-            result = await PiHoleV6(self.plan, application_password=SECRET).identify(
-                (ADDRESS,), utc_now()
-            )
-        self.assertEqual(result.devices[0].mac, MAC)
-        self.assertEqual(result.dns, ())
-        self.assertIsNone(result.window)
-        self.assertEqual(self.query_clients, [])
-        self.assertEqual(self.calls[-1], ("DELETE", "/api/auth"))
-
-    async def test_presence_reads_one_table_and_keeps_valid_rows_in_partial_response(
-        self,
-    ) -> None:
-        self.mode = "partial_identity"
-        targets = (ADDRESS, *(f"192.0.2.{n}" for n in range(30, 90)))
-        result = await PiHoleV6(self.plan).presence(targets, utc_now())
-        self.assertEqual(
-            [(device.address, device.mac) for device in result.devices],
-            [(ADDRESS, MAC)],
-        )
-        self.assertTrue(
-            any(issue.startswith("identity_partial:") for issue in result.issues)
-        )
-        self.assertEqual(
-            self.calls,
-            [
-                ("POST", "/api/auth"),
-                ("GET", "/api/network/devices"),
-                ("DELETE", "/api/auth"),
-            ],
-        )
-        self.assertEqual(self.query_clients, [])
-
-    async def test_presence_exposes_conflicting_addresses_without_guessing_mac(
-        self,
-    ) -> None:
-        self.mode = "ambiguous"
-        result = await PiHoleV6(self.plan).presence((ADDRESS,), utc_now())
-        self.assertEqual(result.devices, ())
-        self.assertEqual(result.ambiguous_addresses, frozenset({ADDRESS}))
-        self.assertEqual(self.query_clients, [])
-
-    async def test_activity_uses_half_open_query_window_and_records_blocked_status(
-        self,
-    ) -> None:
-        self.mode = "activity"
-        since = datetime.fromtimestamp(self.now - 120, timezone.utc).isoformat()
-        samples, issues = await PiHoleV6(self.plan).activity(
-            (ADDRESS,), since, utc_now()
-        )
-        self.assertEqual(issues, ())
-        self.assertEqual(len(samples), 1)
-        self.assertEqual(
-            [(item.domain, item.queries) for item in samples[0].dns],
-            [("ad.doubleclick.net", 1), ("www.youtube.com", 1)],
-        )
-        self.assertEqual(samples[0].blocked, {"ad.doubleclick.net": 1})
-        self.assertEqual(
-            self.calls,
-            [("POST", "/api/auth"), ("GET", "/api/queries"), ("DELETE", "/api/auth")],
-        )
 
     async def stolen_request(self, request: web.Request) -> web.Response:
         self.stolen = True
@@ -278,6 +215,73 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
                 "earliest_timestamp_disk": self.now - 7200,
                 "took": 0.01,
             }
+        )
+
+
+class PiHoleTest(PiHoleServerCase):
+    async def test_identity_check_reads_no_dns_and_uses_ephemeral_password(
+        self,
+    ) -> None:
+        with patch.dict(os.environ, {"PIHOLE_TEST_PASSWORD": "unused"}):
+            result = await PiHoleV6(self.plan, application_password=SECRET).identify(
+                (ADDRESS,), utc_now()
+            )
+        self.assertEqual(result.devices[0].mac, MAC)
+        self.assertEqual(result.dns, ())
+        self.assertIsNone(result.window)
+        self.assertEqual(self.query_clients, [])
+        self.assertEqual(self.calls[-1], ("DELETE", "/api/auth"))
+
+    async def test_presence_reads_one_table_and_keeps_valid_rows_in_partial_response(
+        self,
+    ) -> None:
+        self.mode = "partial_identity"
+        targets = (ADDRESS, *(f"192.0.2.{n}" for n in range(30, 90)))
+        result = await PiHoleV6(self.plan).presence(targets, utc_now())
+        self.assertEqual(
+            [(device.address, device.mac) for device in result.devices],
+            [(ADDRESS, MAC)],
+        )
+        self.assertTrue(
+            any(issue.startswith("identity_partial:") for issue in result.issues)
+        )
+        self.assertEqual(
+            self.calls,
+            [
+                ("POST", "/api/auth"),
+                ("GET", "/api/network/devices"),
+                ("DELETE", "/api/auth"),
+            ],
+        )
+        self.assertEqual(self.query_clients, [])
+
+    async def test_presence_exposes_conflicting_addresses_without_guessing_mac(
+        self,
+    ) -> None:
+        self.mode = "ambiguous"
+        result = await PiHoleV6(self.plan).presence((ADDRESS,), utc_now())
+        self.assertEqual(result.devices, ())
+        self.assertEqual(result.ambiguous_addresses, frozenset({ADDRESS}))
+        self.assertEqual(self.query_clients, [])
+
+    async def test_activity_uses_half_open_query_window_and_records_blocked_status(
+        self,
+    ) -> None:
+        self.mode = "activity"
+        since = datetime.fromtimestamp(self.now - 120, timezone.utc).isoformat()
+        samples, issues = await PiHoleV6(self.plan).activity(
+            (ADDRESS,), since, utc_now()
+        )
+        self.assertEqual(issues, ())
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(
+            [(item.domain, item.queries) for item in samples[0].dns],
+            [("ad.doubleclick.net", 1), ("www.youtube.com", 1)],
+        )
+        self.assertEqual(samples[0].blocked, {"ad.doubleclick.net": 1})
+        self.assertEqual(
+            self.calls,
+            [("POST", "/api/auth"), ("GET", "/api/queries"), ("DELETE", "/api/auth")],
         )
 
     async def test_selected_device_and_query_sample_use_one_private_session(

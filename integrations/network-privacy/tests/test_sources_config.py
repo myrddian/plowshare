@@ -13,6 +13,7 @@ from plowshare_privacy.contracts import (
     PiHolePlan,
     ServicePlan,
     UniFiPlan,
+    legacy_capabilities,
 )
 
 PATH = Path("/var/lib/privacy-fixture/collector.json")
@@ -121,9 +122,11 @@ class SourcesConfigurationTest(unittest.TestCase):
         )
         self.assertFalse(pihole.legacy)
         self.assertEqual(plan.pihole, PiHolePlan.decode(PIHOLE))
-        # Omitted capabilities enable what the kind offers, except the opt-ins.
+        # Omitted capabilities enable what the kind offers, except the opt-ins
+        # and, without a legacy site name, traffic counters.
         self.assertEqual(
-            unifi.capabilities, KIND_CAPABILITIES["unifi"] - OPT_IN_CAPABILITIES
+            unifi.capabilities,
+            KIND_CAPABILITIES["unifi"] - OPT_IN_CAPABILITIES - {"traffic_counters"},
         )
         self.assertFalse(unifi.legacy)
         self.assertEqual(plan.unifi, UniFiPlan.decode(UNIFI))
@@ -174,6 +177,12 @@ class SourcesConfigurationTest(unittest.TestCase):
             "unifi dhcp without traffic site": (
                 row(sources=[service("unifi", UNIFI, capabilities=["dhcp_scope"])]),
                 "require trafficSite",
+            ),
+            "unifi traffic without traffic site": (
+                row(
+                    sources=[service("unifi", UNIFI, capabilities=["traffic_counters"])]
+                ),
+                "UniFi traffic counters require a legacy site name",
             ),
             "duplicate id": (
                 row(
@@ -243,6 +252,26 @@ class SourcesConfigurationTest(unittest.TestCase):
             PATH,
         ).collection
         self.assertEqual(plan.sources[0].capabilities, frozenset({"network_table"}))
+
+    def test_omitted_capabilities_read_traffic_only_with_a_site(self) -> None:
+        # Equal to legacy behaviour: byte counters need the legacy site name.
+        for settings, expected in (
+            (UNIFI, legacy_capabilities("unifi", UniFiPlan.decode(UNIFI))),
+            (
+                {**UNIFI, "trafficSite": "default"},
+                frozenset(
+                    {"controller_clients", "managed_inventory", "traffic_counters"}
+                ),
+            ),
+        ):
+            with self.subTest(settings=settings):
+                (unifi,) = Configuration.decode(
+                    row(sources=[service("unifi", settings)]), PATH
+                ).collection.sources
+                self.assertEqual(unifi.capabilities, expected)
+        self.assertNotIn(
+            "traffic_counters", legacy_capabilities("unifi", UniFiPlan.decode(UNIFI))
+        )
 
     def test_dns_profiles_require_dns_queries(self) -> None:
         enabled = Configuration.decode(

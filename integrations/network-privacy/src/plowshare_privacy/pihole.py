@@ -21,6 +21,7 @@ from typing import Protocol
 import aiohttp
 
 from .contracts import (
+    Capability,
     DeviceIdentity,
     DnsObservation,
     DnsWindow,
@@ -118,9 +119,31 @@ _BLOCKED_STATUSES = frozenset(
 )
 
 
+# What a ``collection.pihole`` key has always read; direct callers keep it.
+_DEFAULT_CAPABILITIES: frozenset[Capability] = frozenset(
+    {"network_table", "dns_queries"}
+)
+
+
 class PiHoleV6:
-    def __init__(self, plan: PiHolePlan, *, application_password: str | None = None):
+    """One Pi-hole service, reading only its enabled capabilities.
+
+    Without ``network_table`` no ``network/devices`` request is made, and
+    without ``dns_queries`` no ``queries`` request is made; a read that needs
+    neither opens no session. ``service`` names the configured service.
+    """
+
+    def __init__(
+        self,
+        plan: PiHolePlan,
+        *,
+        capabilities: frozenset[Capability] = _DEFAULT_CAPABILITIES,
+        service: str = "pihole",
+        application_password: str | None = None,
+    ):
         self.plan = plan
+        self.capabilities = capabilities
+        self.service = service
         # Configuration errors fail at startup, rather than silently dropping a source.
         self._password = (
             password(plan)
@@ -393,12 +416,18 @@ class PiHoleV6:
         )
         if start >= end:
             raise ValueError("Pi-hole query window must advance")
+        # A disabled capability is not offered: it is never requested and
+        # never reported as a gap.
+        table = since is None and "network_table" in self.capabilities
+        queries = queries and "dns_queries" in self.capabilities
         samples: tuple[QuerySample, ...] = ()
         identity = IdentitySample()
         dns: tuple[DnsObservation, ...] = ()
         window: DnsWindow | None = None
         issues: set[str] = set()
         sid: str | None = None
+        if not table and not queries:
+            return DeviceData((), (), None, ()), frozenset(), ()
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.plan.timeout),
             cookie_jar=aiohttp.DummyCookieJar(),
@@ -418,7 +447,7 @@ class PiHoleV6:
                         "authentication refused; use a Pi-hole application password"
                     )
                 sid = text(accepted["sid"], 256)
-                if since is None:
+                if table:
                     try:
                         identity = self._devices(
                             await self._request(
@@ -510,9 +539,12 @@ class PiHoleV6:
                             not any(issue.startswith("dns_") for issue in issues),
                         )
             except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
-                issues.add(
-                    "identity_unavailable: Pi-hole authentication or connection failed"
-                )
+                # Unchanged for the default capabilities, including activity
+                # reads, which have always reported both gaps.
+                if "network_table" in self.capabilities:
+                    issues.add(
+                        "identity_unavailable: Pi-hole authentication or connection failed"
+                    )
                 if queries:
                     issues.add(
                         "dns_unavailable: Pi-hole authentication or connection failed"

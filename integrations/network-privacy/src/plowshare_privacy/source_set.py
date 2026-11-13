@@ -1,0 +1,83 @@
+"""Typed readers bound from the configured services' enabled capabilities.
+
+A `SourceSet` is what the connector registry (`connectors.bind`) hands the
+collector: each field holds only readers whose capability the operator enabled,
+so a disabled capability has no reader and is never read. Readers return frozen
+dataclasses; raw JSON never crosses this boundary.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Generic, Protocol, TypeVar
+
+from .contracts import ConnectorKind
+from .dns_activity import QuerySample
+from .identity_source import (
+    DeviceIdentitySource,
+    IdentitySample,
+    ManagedInventory,
+    ManagedProductLookup,
+)
+from .pihole import DeviceDataSource
+from .traffic import TrafficCounter
+
+
+class PresenceReader(Protocol):
+    """Fresh address associations for a watched scope, without DNS history."""
+
+    async def presence(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample: ...
+
+
+class DnsActivityReader(Protocol):
+    """Query samples in the half-open window ``[since, observed_at)``."""
+
+    async def activity(
+        self, targets: tuple[str, ...], since: str, observed_at: str
+    ) -> tuple[tuple[QuerySample, ...], tuple[str, ...]]: ...
+
+
+class TrafficReader(Protocol):
+    """Cumulative byte counters for clients at ``targets``; failures are issues."""
+
+    async def traffic(
+        self, targets: tuple[str, ...]
+    ) -> tuple[tuple[TrafficCounter, ...], tuple[str, ...]]: ...
+
+
+R = TypeVar("R", covariant=True)
+
+
+@dataclass(frozen=True)
+class Bound(Generic[R]):
+    """A reader together with the configured service it reads."""
+
+    service: str
+    kind: ConnectorKind
+    reader: R
+
+
+@dataclass(frozen=True)
+class SourceSet:
+    # One session per full collection, returning identity and/or DNS.
+    device_reads: tuple[Bound[DeviceDataSource], ...] = ()
+    # Already merged per service (e.g. UniFi clients with adopted inventory).
+    identity: tuple[Bound[DeviceIdentitySource], ...] = ()
+    presence: tuple[Bound[PresenceReader], ...] = ()
+    dns_activity: Bound[DnsActivityReader] | None = None
+    traffic: Bound[TrafficReader] | None = None
+    product: ManagedProductLookup | None = None
+    # Adopted inventories, consulted by ``recently_managed``.
+    managed: tuple[ManagedInventory, ...] = ()
+
+    @property
+    def confirms_identity(self) -> bool:
+        """Whether any enabled capability can tie an address to a MAC.
+
+        Identity bindings do. A presence binding exists only where a network
+        table is read, and that same service's ``device_reads`` returns the
+        table's associations; a DNS-only device read cannot confirm identity.
+        """
+        return bool(self.identity or self.presence)

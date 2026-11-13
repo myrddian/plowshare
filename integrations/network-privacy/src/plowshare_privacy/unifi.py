@@ -6,7 +6,7 @@ import os
 import ssl
 import time
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import urlsplit
 
 from aiohttp import (
@@ -18,6 +18,7 @@ from aiohttp import (
 )
 
 from .contracts import (
+    Capability,
     DeviceIdentity,
     UniFiPlan,
     integer,
@@ -28,6 +29,7 @@ from .contracts import (
     text,
     uuid,
 )
+from .identity_merge import merge_identities
 from .identity_source import IdentitySample, ManagedProduct, ManagedProductUnavailable
 from .traffic import MAX_COUNTER, TrafficCounter
 
@@ -37,6 +39,13 @@ _MAX_BYTES = 524288
 # stat/sta returns every connected client in one response with many fields.
 _MAX_TRAFFIC_BYTES = 4 * 1024 * 1024
 _MAX_TRAFFIC_CLIENTS = 2048
+# What a ``collection.unifi`` key has always read; traffic also needs a site.
+_DEFAULT_CAPABILITIES: frozenset[Capability] = frozenset(
+    {"controller_clients", "managed_inventory", "traffic_counters"}
+)
+_INVENTORY_DISAGREES = (
+    "unifi_ambiguous: connected and adopted inventory disagree on a watched address"
+)
 
 
 @dataclass(frozen=True)
@@ -82,9 +91,20 @@ def _product(row: dict[str, object]) -> ManagedProduct:
 
 
 class UniFiNetwork:
-    """Read one bounded site snapshot, retaining only selected client addresses."""
+    """Read one bounded site snapshot, retaining only selected client addresses.
 
-    def __init__(self, plan: UniFiPlan):
+    ``capabilities`` selects what the bound readers use: ``controller_identity``
+    merges adopted inventory only with ``managed_inventory``, and traffic is
+    read only with ``traffic_counters`` and a configured legacy site name.
+    """
+
+    def __init__(
+        self,
+        plan: UniFiPlan,
+        *,
+        capabilities: frozenset[Capability] = _DEFAULT_CAPABILITIES,
+    ):
+        self.capabilities = capabilities
         key = os.environ.get(plan.api_key_environment)
         if (
             key is None
@@ -97,7 +117,11 @@ class UniFiNetwork:
         self._clients = site + "/clients"
         self._devices = site + "/devices"
         self._networks = site + "/networks"
-        self._traffic = _traffic_url(plan.api_base, plan.traffic_site)
+        self._traffic = (
+            _traffic_url(plan.api_base, plan.traffic_site)
+            if "traffic_counters" in capabilities
+            else None
+        )
         self._gateway = plan.gateway
         self._controller_host = urlsplit(plan.api_base).hostname
         self._managed_keys: frozenset[str] = frozenset()
@@ -189,12 +213,46 @@ class UniFiNetwork:
             )
         )
 
+    async def controller_identity(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        """Connected clients merged with adopted inventory, as collection uses them.
+
+        Without ``managed_inventory`` this is the connected-client sample. With
+        it, the adopted record replaces the client record where their MACs
+        agree; where they disagree the address is ambiguous and has no
+        identity. Issue order is clients, inventory, then the disagreement.
+        Samples outside ``targets`` raise ``ValueError``, as the collector did.
+        """
+        clients = await self.identify(targets, observed_at)
+        if "managed_inventory" not in self.capabilities:
+            return clients
+        managed = await self.managed_sightings(targets, observed_at, clients.devices)
+        # Adopted records carry no evidence kind, so retained evidence text is
+        # unchanged; they are tagged only to rank above clients in the merge.
+        tagged = {
+            replace(device, evidence="managed_device"): device
+            for device in managed.devices
+        }
+        merge = merge_identities(
+            (clients, IdentitySample(tuple(tagged), managed.ambiguous_addresses)),
+            frozenset(targets),
+        )
+        issues = [*clients.issues, *managed.issues]
+        if merge.conflicts:
+            issues.append(_INVENTORY_DISAGREES)
+        return IdentitySample(
+            tuple(tagged.get(device, device) for device in merge.devices),
+            merge.ambiguous | merge.conflicts,
+            tuple(dict.fromkeys(issues)),
+        )
+
     @property
     def reads_traffic(self) -> bool:
         return self._traffic is not None
 
     async def traffic(
-        self, scope: tuple[str, ...]
+        self, targets: tuple[str, ...]
     ) -> tuple[tuple[TrafficCounter, ...], tuple[str, ...]]:
         """Read cumulative byte counters for connected clients at scope addresses.
 
@@ -222,7 +280,7 @@ class UniFiNetwork:
                                 raise ValueError("UniFi traffic exceeded the limit")
             return _decode_traffic(
                 parse_json(bytes(body), maximum_bytes=_MAX_TRAFFIC_BYTES),
-                frozenset(scope),
+                frozenset(targets),
             ), ()
         except ServerFingerprintMismatch:
             return (), (

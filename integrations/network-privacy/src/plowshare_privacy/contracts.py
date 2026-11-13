@@ -682,6 +682,14 @@ class ServicePlan:
             and self.capabilities & _UNIFI_SITE_CAPABILITIES
         ):
             raise ValueError("UniFi DHCP capabilities require trafficSite")
+        if (
+            isinstance(self.settings, UniFiPlan)
+            and self.settings.traffic_site is None
+            and "traffic_counters" in self.capabilities
+        ):
+            # Byte counters come from the legacy stat/sta endpoint, addressed
+            # by the short site name; without it there is nothing to read.
+            raise ValueError("UniFi traffic counters require a legacy site name")
 
     @classmethod
     def legacy_service(
@@ -702,6 +710,9 @@ class ServicePlan:
         )
         if "capabilities" not in row:
             capabilities = KIND_CAPABILITIES[kind] - OPT_IN_CAPABILITIES
+            if isinstance(settings, UniFiPlan) and settings.traffic_site is None:
+                # As the legacy key: traffic counters only with a site name.
+                capabilities -= {"traffic_counters"}
         else:
             names = items(row["capabilities"], len(_CAPABILITIES))
             enabled = [
