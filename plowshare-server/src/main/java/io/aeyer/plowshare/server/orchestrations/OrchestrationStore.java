@@ -39,6 +39,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.SqlArrayValue;
 
 /**
  * The orchestrations this server is running, and the questions each has asked — {@code
@@ -113,6 +114,12 @@ public class OrchestrationStore {
    * <p>{@code MAX} over a possibly empty join still returns one row, so this always answers with a
    * row; the row's one column is {@code NULL} when the tree holds no entries yet, which {@link
    * #quietSince} reads as "nothing to go on" rather than as a time.
+   *
+   * <p><b>One index probe per conversation in the tree, not one row per entry.</b> The newest entry
+   * of each conversation is a backward step on V239's {@code (conversation_id, recorded_at)}; the
+   * outer {@code MAX} folds those. A single aggregate over the joined entries read every entry of
+   * every live tree, every minute, from the stall sweep. {@link #activity} and {@link #markStalled}
+   * use the same shape.
    */
   private static final String QUIET_SINCE =
       """
@@ -121,7 +128,9 @@ public class OrchestrationStore {
               UNION ALL
                 SELECT c.id FROM conversations c JOIN tree t ON c.parent_id = t.id
             )
-            SELECT MAX(e.recorded_at) FROM entries e WHERE e.conversation_id IN (SELECT id FROM tree)""";
+            SELECT MAX(last.recorded_at) FROM tree t CROSS JOIN LATERAL (
+                SELECT max(e.recorded_at) AS recorded_at FROM entries e WHERE e.conversation_id = t.id
+            ) last""";
 
   private final JdbcTemplate jdbc;
   private final Supplier<Instant> clock;
@@ -1086,7 +1095,11 @@ public class OrchestrationStore {
    */
   public List<OrchestrationRecord> running() {
     return jdbc.query(
-        SELECT_ORCHESTRATIONS + " WHERE state = ?",
+        // ended_at IS NULL restates what orchestrations_ended_iff_terminal already guarantees for a
+        // running run; the planner does not use CHECKs to match partial indexes, and without it
+        // this twice-a-minute sweep read scanned every run ever retained instead of
+        // orchestrations_live.
+        SELECT_ORCHESTRATIONS + " WHERE state = ? AND ended_at IS NULL",
         ORCHESTRATION_ROW_MAPPER,
         OrchestrationState.RUNNING.wire());
   }
@@ -1125,8 +1138,9 @@ public class OrchestrationStore {
                   + String.join(",", Collections.nCopies(part.size(), "(?::text,?::text)"))
                   + "), tree(run,id) AS (SELECT run,conversation FROM roots UNION SELECT t.run,c.id"
                   + " FROM conversations c JOIN tree t ON c.parent_id=t.id)"
-                  + " SELECT root.run,MAX(e.recorded_at) AS latest FROM roots root LEFT JOIN tree t ON t.run=root.run"
-                  + " LEFT JOIN entries e ON e.conversation_id=t.id GROUP BY root.run",
+                  + " SELECT root.run,MAX(last.recorded_at) AS latest FROM roots root LEFT JOIN tree t ON t.run=root.run"
+                  + " LEFT JOIN LATERAL (SELECT max(e.recorded_at) AS recorded_at FROM entries e"
+                  + " WHERE e.conversation_id=t.id) last ON true GROUP BY root.run",
               (row, index) ->
                   new QuietActivity(row.getString(1), row.getObject(2, OffsetDateTime.class)),
               arguments.toArray());
@@ -1198,8 +1212,9 @@ public class OrchestrationStore {
                 + " AND coalesce((WITH RECURSIVE tree(id) AS ("
                 + " SELECT current.conductor_conversation"
                 + " UNION SELECT c.id FROM conversations c JOIN tree t ON c.parent_id = t.id)"
-                + " SELECT max(e.recorded_at) FROM entries e JOIN tree t"
-                + " ON e.conversation_id = t.id), current.created_at) <= ?"
+                + " SELECT max(last.recorded_at) FROM tree t CROSS JOIN LATERAL"
+                + " (SELECT max(e.recorded_at) AS recorded_at FROM entries e"
+                + " WHERE e.conversation_id = t.id) last), current.created_at) <= ?"
                 + " AND NOT EXISTS (SELECT 1 FROM orchestrations child"
                 + " WHERE child.parent = current.id AND child.ended_at IS NULL"
                 + " AND (child.state <> ? OR child.pending_cap IN ("
@@ -1234,6 +1249,46 @@ public class OrchestrationStore {
             (rs, n) -> instant(rs, "stalled_since"),
             id);
     return found.isEmpty() ? Optional.empty() : Optional.ofNullable(found.get(0));
+  }
+
+  /**
+   * {@link #stalledSince(String)} for a page of runs in one statement, so a listing does not read
+   * each row's mark back individually. Only runs with a mark appear in the result; an unknown id
+   * answers the same as a run with none.
+   *
+   * @param ids the runs to look up, at most 200 (the largest {@link #byCaller} page)
+   * @return each marked run's id with the time the sweep marked it
+   * @throws IllegalArgumentException if {@code ids} holds a null or more than 200 entries
+   */
+  public Map<String, Instant> stalledSince(List<String> ids) {
+    Objects.requireNonNull(ids, "ids");
+    if (ids.size() > 200) {
+      throw new IllegalArgumentException("at most 200 ids, was " + ids.size());
+    }
+    if (ids.stream().anyMatch(Objects::isNull)) {
+      throw new IllegalArgumentException("ids must not contain null");
+    }
+    if (ids.isEmpty()) return Map.of();
+    Map<String, Instant> marked = new HashMap<>();
+    jdbc.query(
+        "SELECT id, stalled_since FROM orchestrations"
+            + " WHERE id = ANY(?) AND stalled_since IS NOT NULL",
+        rs -> {
+          marked.put(rs.getString("id"), instant(rs, "stalled_since"));
+        },
+        new SqlArrayValue("text", ids.toArray()));
+    return Map.copyOf(marked);
+  }
+
+  /**
+   * Whether {@link #byCaller} already applies the current log-readability predicate in its own
+   * statement. When it does, a caller must not re-check each returned run with the targeted
+   * predicate ({@code information_log_readable}): the collection predicate ({@code
+   * information_unreadable_logs}, V235) makes the same decision over the same ancestry, and the
+   * targeted one walks the whole ancestry graph once per row.
+   */
+  public boolean filtersReadableLogs() {
+    return informationProtected;
   }
 
   /**

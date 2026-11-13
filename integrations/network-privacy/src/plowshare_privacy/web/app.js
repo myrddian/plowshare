@@ -40,6 +40,22 @@ let latestStatus = null;
 // in the current inventory are shown, so a ledger entry for a device that has
 // left monitoring never inflates a count.
 let assessmentIndex = new Map();
+// The Ask tab: the last reading of the conversation, a signature that stops an
+// unchanged reading being rebuilt, and the guards for in-flight work. The epoch
+// changes on disconnect so a reply that lands afterwards is dropped.
+let askConversation = null;
+let askSignature = null;
+let askReading = false;
+let askSending = false;
+let askSettingsLoaded = false;
+let askTopUpCalls = null;
+let askEpoch = 0;
+// The question on its way to the collector, shown at once so pressing Ask is
+// never silent; when the last reading was taken; and when the turn on screen
+// was first seen working, for its timer when the reading has no question time.
+let askPending = null;
+let askReadAt = 0;
+let askWorkingSince = null;
 const byId = (name) => document.getElementById(name);
 
 const views = {
@@ -47,6 +63,7 @@ const views = {
   devices: ['Your devices', 'Device observations, profiles and linked privacy issues.'],
   findings: ['Findings and investigations', 'Review observed changes and read investigation reports.'],
   evidence: ['Collection evidence', 'Retained observations, comparisons and coverage gaps.'],
+  ask: ['Ask Privacy Watch', 'Ask about your network and follow the work it hands off.'],
   settings: ['Monitoring settings', 'Devices, connections and investigation preferences.'],
 };
 
@@ -99,12 +116,15 @@ function showView(name, focusHeading = false) {
   byId('page-title').scrollIntoView({block:'start'});
   if (focusHeading) byId('page-title').focus({preventScroll:true});
   recordLocation();
+  // Reading the conversation marks it read, so it is read only while it is shown.
+  if (name === 'settings') {followReferences(overview); followRequests(overview, true);}
+  if (name === 'ask') {renderAsk(); readAsk().catch(error => notice(error.message, true));}
 }
 for (const name of Object.keys(views)) {
   const tab = byId(`tab-${name}`);
   tab.addEventListener('click', () => showView(name));
   tab.addEventListener('keydown', event => {
-    const names = Object.keys(views);
+    const names = Object.keys(views).filter(item => item === name || !byId(`tab-${item}`).hidden);
     const index = names.indexOf(name);
     const next = {ArrowRight:(index + 1) % names.length, ArrowLeft:(index + names.length - 1) % names.length, Home:0, End:names.length - 1}[event.key];
     if (next === undefined) return;
@@ -435,8 +455,13 @@ async function refresh() {
     if (!researchDevice) byId('research-search').disabled = !advisoriesAvailable;
     issuesAvailable = !!status.issues_available;
     assessmentsAvailable = !!status.device_assessments_available;
-    byId('background-assessments').hidden = !assessmentsAvailable;
+    // Ask is shown when the collector has it, or says why it has not.
+    byId('tab-ask').hidden = !(status.ask_available || status.ask_detail);
+    byId('ask-group').hidden = !status.ask_available;
+    byId('assessment-group').hidden = !assessmentsAvailable;
+    byId('background-assessments').hidden = !(assessmentsAvailable || status.ask_available);
     if (assessmentsAvailable && !assessmentSettingsLoaded) await loadAssessmentSettings();
+    if (status.ask_available && !askSettingsLoaded) await loadAskSettings().catch(error => {byId('ask-settings-detail').textContent = error.message;});
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
     byId('collector').textContent = status.collector;
@@ -465,6 +490,7 @@ async function refresh() {
     else condition(status.state === 'attention_required' ? status.detail : '', status.state === 'attention_required');
     await pollAssessment().catch(error => notice(error.message, true));
     await pollDeepScan().catch(error => notice(error.message, true));
+    await readAsk().catch(error => notice(error.message, true));
   } finally {refreshPending = false; setBusy(byId('refresh'), false);}
 }
 byId('connect').addEventListener('submit', event => {
@@ -494,6 +520,13 @@ byId('disconnect').addEventListener('click', async () => {
   byId('attention').hidden = true; byId('attention-clear').hidden = true; byId('background-work').hidden = true;
   setSignalFilter('all');
   selectedDevice = null; deviceSupplemental = null; deepScanPane = null; deepScanBusy = null; setHouseholdZone('UTC');
+  askConversation = null; askSignature = null; askReading = false; askSending = false; askSettingsLoaded = false; askTopUpCalls = null; askEpoch++;
+  askPending = null; askReadAt = 0; askWorkingSince = null;
+  for (const id of ['ask-conversation','ask-waiting','ask-done','ask-pause']) byId(id).replaceChildren();
+  setAskDrawer(false); renderAskHanded(null);
+  for (const id of ['ask-input','ask-max-calls','ask-max-turns','ask-top-up']) byId(id).value = '';
+  for (const id of ['ask-hint','ask-settings-detail']) byId(id).textContent = '';
+  for (const id of ['ask-badge','tab-ask','ask-pause','ask-group','ask-working','ask-jump']) byId(id).hidden = true;
   byId('deep-scan-group').hidden = true; byId('deep-scan-limit').value = ''; byId('deep-scan-limit').disabled = false; byId('deep-scan-save').disabled = false; byId('deep-scan-detail').textContent = ''; byId('deep-scan-detail').className = 'hint';
   byId('household-zone').hidden = true; byId('zone-input').value = '';
   for (const id of deviceParts) byId(id).replaceChildren();
@@ -1769,6 +1802,448 @@ byId('deep-scan-settings').addEventListener('submit', async event => {
 });
 // ---- end Deep port scans ----
 
+// ---- Reference library ----
+// The collector's vendor documentation acquisitions. Only the Retry button
+// re-sends anything; document and server text is shown with textContent.
+function renderReferences(value) {
+  byId('reference-library').hidden = false;
+  byId('reference-list').replaceChildren(...value.references.map(item => {
+    const row = element('div', undefined, 'record');
+    const line = element('div', undefined, 'entry-line');
+    line.append(element('span', item.label, 'badge'), element('strong', item.title));
+    row.append(line, element('p', item.product + (item.retired ? ' · Retired from the shipped list' : ''), 'hint'));
+    if (item.error) row.append(element('p', item.error, 'notice error'));
+    if (item.untag_failed) row.append(element('p', 'Removing it from search failed.', 'notice error'));
+    // A ``submitted`` row with an error is an uncertain acquire whose ticket was
+    // never found; Retry replays it with the same request id. One without an
+    // error is still in flight and is left alone.
+    if (item.phase === 'failed' || item.phase === 'blocked' || item.untag_failed || (item.phase === 'submitted' && item.error)) {
+      row.append(actionButton('Retry', 'secondary', () => retryReference(item.url)));
+    }
+    return row;
+  }));
+  byId('reference-detail').textContent = value.error || '';
+  renderReferenceSettings(value);
+}
+// The interval arrives with the rows; a field being edited is left alone.
+function renderReferenceSettings(value) {
+  const field = byId('reference-refresh-days');
+  if (Number.isInteger(value.refresh_days) && document.activeElement !== field) field.value = String(value.refresh_days);
+}
+byId('reference-settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  const detail = byId('reference-settings-detail');
+  try {
+    const days = Number(byId('reference-refresh-days').value);
+    if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error('Choose a whole number of days from 1 to 365.');
+    const saved = await api('/api/references/settings', {method:'POST', body:JSON.stringify({refresh_days:days})});
+    byId('reference-refresh-days').value = String(saved.refresh_days);
+    detail.textContent = `Pages are fetched again every ${plural(saved.refresh_days, 'day', 'days')}.`;
+  } catch (error) {
+    detail.textContent = error.message;
+  }
+});
+// The list is read only while Settings is open (and by Retry, which returns
+// the rows); the overview's counts are all the other tabs need.
+function followReferences(value) {
+  byId('reference-library').hidden = !value?.references;
+  if (value?.references && currentView === 'settings') loadReferences().catch(error => {byId('reference-detail').textContent = error.message;});
+}
+async function loadReferences() {
+  renderReferences(await api('/api/references'));
+}
+async function retryReference(url) {
+  renderReferences(await api('/api/references/retry', {method:'POST', body:JSON.stringify({url})}));
+}
+// ---- end Reference library ----
+
+// ---- Documentation requests ----
+// The Ask agent's asks for product documentation. The owner supplies the links
+// (one per line, up to five) or dismisses; approving only queues the pages for
+// the library. Product and question are agent text and are shown as text only.
+const MAX_REQUEST_LINKS = 5;
+let requestsSeen = null;
+function requestsSignature(products) {
+  return `${products.length}:${products.join(',')}`;
+}
+function renderRequests(value) {
+  byId('reference-requests').hidden = value.requests.length === 0;
+  requestsSeen = requestsSignature(value.requests.map(item => item.product));
+  byId('reference-request-list').replaceChildren(...value.requests.map(item => {
+    const row = element('div', undefined, 'record');
+    const area = element('textarea');
+    area.rows = 3;
+    area.placeholder = 'https://…';
+    const label = element('label', 'Documentation links, one per line (up to 5, https only)');
+    label.append(area);
+    row.append(element('strong', item.product), element('p', item.question), label);
+    const actions = element('div', undefined, 'actions');
+    actions.append(
+      actionButton('Approve', undefined, () => approveRequest(item.id, area.value)),
+      actionButton('Dismiss', 'secondary', () => dismissRequest(item.id)));
+    row.append(actions);
+    return row;
+  }));
+}
+// Called with every overview, but it only reads the list when Settings is shown
+// and the waiting requests changed, so typed links are not redrawn away.
+function followRequests(value, force = false) {
+  const waiting = value?.reference_requests;
+  byId('reference-requests').hidden = !waiting?.pending;
+  // Nothing waits: forget what was drawn so a later request always reloads.
+  if (!waiting?.pending) requestsSeen = null;
+  if (!waiting?.pending || currentView !== 'settings') return;
+  if (!force && requestsSeen === requestsSignature(waiting.products)) return;
+  loadRequests().catch(error => notice(error.message, true));
+}
+async function loadRequests() {
+  renderRequests(await api('/api/reference-requests'));
+}
+async function approveRequest(id, text) {
+  const urls = text.split('\n').map(line => line.trim()).filter(Boolean);
+  if (!urls.length) throw new Error('Add at least one documentation link, or dismiss the request.');
+  if (urls.length > MAX_REQUEST_LINKS) throw new Error(`Add at most ${MAX_REQUEST_LINKS} links.`);
+  renderRequests(await api(`/api/reference-requests/${encodeURIComponent(id)}/approve`, {method:'POST', body:JSON.stringify({urls})}));
+  notice('Queued. The collector will fetch the pages shortly.');
+}
+async function dismissRequest(id) {
+  renderRequests(await api(`/api/reference-requests/${encodeURIComponent(id)}/dismiss`, {method:'POST', body:'{}'}));
+}
+// ---- end Documentation requests ----
+
+// ---- Ask ----
+// One conversation with the privacy assistant. The collector owns the turn and
+// its state; this block only shows the reading it is given. The conversation
+// is read through GET /api/ask, which marks it read, so it is read only while
+// the tab is open. With the tab hidden the overview's small `ask` summary
+// drives the badge and the attention band. The reading is rebuilt only when
+// it differs from the one on screen, which keeps an open Details fold, the
+// scroll position and a pending Top up confirmation across the refresh.
+const askActive = state => state === 'sending' || state === 'running';
+const askHeads = {question:'You', answer:'Privacy Watch', refusal:'Privacy Watch', orchestration:'Report', harness:'Update'};
+// Household words for the names the platform uses. An unknown name is made
+// readable, never shown with underscores.
+const askNames = {
+  privacy_analyst:'The analyst', privacy_reviewer:'The reviewer', privacy_coordinator:'The coordinator',
+  privacy_assistant:'Privacy Watch', investigate_network:'Network investigation',
+};
+function askName(name) {
+  if (typeof name !== 'string' || !name.trim()) return 'Unknown recipient';
+  if (Object.hasOwn(askNames, name)) return askNames[name];
+  const words = name.replace(/^orchestrate_/, '').replace(/[_\-\s]+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : 'Unknown recipient';
+}
+// The JSON a reply carries, or null when it is words: a bare object or list,
+// one in a Markdown fence, or one after a short lead-in.
+function jsonOf(text) {
+  const trimmed = text.trim();
+  const fenced = /^```[a-z]*\s*\n([\s\S]*?)\n?```$/i.exec(trimmed);
+  const body = fenced ? fenced[1].trim() : trimmed;
+  const start = body.search(/[{[]/);
+  if (start < 0 || start > 80 || body.slice(0, start).includes('\n')) return null;
+  const close = body[start] === '{' ? '}' : ']';
+  if (!body.endsWith(close)) return null;
+  try {return JSON.stringify(JSON.parse(body.slice(start)), null, 2);} catch (error) {return null;}
+}
+// Tool results are working, not answers, and an answer that only called tools
+// has no words: neither is shown. Reply text never becomes HTML; it goes
+// through the Markdown renderer, which builds elements itself.
+function askEntryNode(entry) {
+  if (entry.author === 'tool' || entry.kind === 'tool_result' || !entry.text.trim()) return null;
+  const mine = entry.author === 'user';
+  const node = element('article', undefined, mine ? 'ask-entry ask-question' : 'ask-entry ask-answer');
+  const head = element('p', undefined, 'ask-entry-head');
+  const specialist = entry.kind === 'message';
+  const who = mine ? 'You' : specialist ? (entry.sender ? `${askName(entry.sender)} replied` : 'A specialist replied') : askHeads[entry.kind] || 'Privacy Watch';
+  head.append(element('span', who, 'status-line'));
+  if (entry.at) head.append(element('small', formatWhen(entry.at)));
+  node.append(head);
+  if (mine) node.append(element('p', entry.text, 'ask-text'));
+  else if (jsonOf(entry.text) !== null) {
+    const fold = element('details', undefined, 'record-details');
+    fold.append(element('summary', specialist ? 'Details · specialist reply' : 'Details · structured reply'), element('pre', jsonOf(entry.text)));
+    node.append(fold);
+  } else node.append(PrivacyMarkdown.render(entry.text));
+  return node;
+}
+function askWorkNode(item, waiting) {
+  const node = element('div', undefined, waiting ? 'record ask-handed' : 'record');
+  node.append(element('h4', askName(item.target)));
+  if (item.about) node.append(element('p', item.about, 'hint'));
+  node.append(element('small', item.since ? `Since ${formatWhen(item.since)}` : 'Since: not recorded'));
+  return node;
+}
+function askWorkList(container, items, empty, waiting = false) {
+  container.replaceChildren(...(items.length ? items.map(item => askWorkNode(item, waiting)) : [element('p', empty, 'empty')]));
+}
+async function topUpAsk() {
+  const mine = askEpoch;
+  const view = await api('/api/ask/top-up', {method:'POST', body:'{}'});
+  if (mine === askEpoch) acceptAsk(view);
+}
+function renderAskPause(view) {
+  const pause = byId('ask-pause');
+  pause.hidden = !view.paused;
+  if (!view.paused) {pause.replaceChildren(); return;}
+  const body = element('div', undefined, 'panel-body');
+  const cost = askTopUpCalls ? `Top up adds ${plural(askTopUpCalls, 'model call', 'model calls')} to this conversation.` : 'Top up adds more model calls to this conversation.';
+  body.append(element('p', 'Paused: allowance used', 'status-line'), confirmedAction('Top up', '', 'Top up and continue', cost, topUpAsk));
+  pause.replaceChildren(body);
+}
+function applyAskForm() {
+  const view = askConversation;
+  const state = view?.turn_state ?? 'idle';
+  const unavailable = view ? !view.available : latestStatus ? !latestStatus.ask_available : false;
+  const working = askActive(state) || askSending;
+  // The box stays open while a turn runs so the next question can be drafted;
+  // only sending waits for the turn to finish.
+  byId('ask-input').disabled = unavailable;
+  byId('ask-send').disabled = unavailable || working;
+  markBusy(byId('ask-send'), askSending);
+  const label = byId('ask-state');
+  label.textContent = unavailable ? 'Unavailable' : askSending || state === 'sending' ? 'Sending' : askActive(state) ? 'Working'
+    : view?.paused ? 'Paused' : state === 'failed' ? 'Stopped' : state === 'unconfirmed' ? 'Not confirmed' : 'Ready';
+  label.className = `ask-state${working ? ' working' : state === 'failed' ? ' failed' : ''}`;
+  const hint = byId('ask-hint');
+  // While it works, the working row says so; the hint carries only a problem.
+  hint.className = state === 'failed' || (askActive(state) && view?.detail) ? 'notice error' : 'hint';
+  hint.textContent = unavailable ? view?.detail || latestStatus?.ask_detail || 'Ask is not enabled on this collector.'
+    : askActive(state) ? view?.detail || ''
+    : state === 'unconfirmed' ? 'Not confirmed as sent. Ask again if you still need it.'
+    : view?.detail || '';
+  renderAskWorking();
+}
+// What the assistant is doing now, in household words, read from the tool
+// calls the reading already carries. The newest call without a result is the
+// step in hand; a result after it means the assistant is weighing it.
+const askSteps = {
+  network_devices:'Reading the device list', network_device:'Looking at a device',
+  network_evidence:'Reading scan evidence', network_destinations:'Reading DNS destinations',
+  network_scope:'Checking what the collector watches', network_scan_list:'Checking recent scans',
+  network_scan_status:'Checking a scan', network_scan:'Requesting a scan',
+  network_request_deep_scan:'Asking for a deep scan', network_request_assessment:'Asking for an assessment',
+  network_request_reference:'Asked the owner for product documentation',
+  network_note_profile:'Noting what a device is', network_record_issue:'Recording a finding',
+};
+function askStep(call) {
+  if (call.tool === 'send_message') return call.target ? `Asking ${askName(call.target).replace(/^The /, 'the ')}` : 'Sending a message';
+  if (call.tool.startsWith('orchestrate_')) return `Starting ${askName(call.target || call.tool).toLowerCase()}`;
+  if (Object.hasOwn(askSteps, call.tool)) return askSteps[call.tool];
+  const words = call.tool.replace(/[_\-.\s]+/g, ' ').trim();
+  return words ? `Using ${words}` : 'Working';
+}
+function askDoing(view) {
+  if (askSending || view?.turn_state === 'sending') return 'Sending your question';
+  const entries = view?.entries || [];
+  let start = entries.length;
+  while (start > 0 && entries[start - 1].author !== 'user') start--;
+  const turn = entries.slice(start);
+  const answered = new Set(turn.filter(entry => entry.answers).map(entry => entry.answers));
+  for (let index = turn.length - 1; index >= 0; index--) {
+    const entry = turn[index];
+    if (entry.author === 'tool') return 'Weighing what it found';
+    if (entry.calls?.length) {
+      const open = entry.calls.filter(call => !answered.has(call.id));
+      return askStep((open.length ? open : entry.calls).at(-1));
+    }
+  }
+  return 'Thinking';
+}
+// The question the working turn answers started the clock; a reading without
+// its time falls back to when this page first saw the turn working.
+function askStartedAt(view) {
+  if (askPending) return askPending.at;
+  const question = [...(view?.entries || [])].reverse().find(entry => entry.author === 'user');
+  const at = question?.at ? Date.parse(question.at) : NaN;
+  return Number.isNaN(at) ? askWorkingSince : at;
+}
+function askElapsed(ms) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+function renderAskWorking() {
+  const view = askConversation;
+  const working = askSending || askActive(view?.turn_state ?? 'idle');
+  if (!working) askWorkingSince = null;
+  else if (askWorkingSince === null) askWorkingSince = Date.now();
+  const row = byId('ask-working');
+  row.hidden = !working;
+  if (!working) return;
+  byId('ask-working-text').textContent = askDoing(view);
+  const started = askStartedAt(view);
+  byId('ask-working-time').textContent = started ? askElapsed(Date.now() - started) : '';
+}
+// A question the collector has not yet confirmed: the user's words, marked as
+// on their way. It is never part of the reading and goes when the reply lands.
+function askPendingNode(pending) {
+  const node = element('article', undefined, 'ask-entry ask-question ask-pending');
+  const head = element('p', undefined, 'ask-entry-head');
+  head.append(element('span', 'You', 'status-line'), element('small', 'Sending…'));
+  node.append(head, element('p', pending.text, 'ask-text'));
+  return node;
+}
+function renderAsk() {
+  applyAskForm();
+  const view = askConversation;
+  const log = byId('ask-conversation');
+  if (!view) {
+    // Ask unavailable has nothing to read: say why instead of waiting.
+    const unavailable = latestStatus && !latestStatus.ask_available;
+    const nodes = askPending ? [askPendingNode(askPending)] : [element('p', unavailable ? latestStatus.ask_detail || 'Ask is not enabled on this collector.' : 'Reading the conversation…', 'empty')];
+    log.replaceChildren(...nodes);
+    askSignature = null;
+    return;
+  }
+  const signature = JSON.stringify([view, askPending]);
+  if (signature === askSignature) return;
+  const before = log.children?.length ?? 0;
+  askSignature = signature;
+  const atEnd = !(log.scrollHeight > log.clientHeight) || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+  const nodes = view.entries.map(askEntryNode).filter(Boolean);
+  if (askPending) nodes.push(askPendingNode(askPending));
+  log.replaceChildren(...(nodes.length ? nodes : [element('p', 'No conversation yet. Ask what Privacy Watch has seen on your network, or what it would look at next.', 'empty')]));
+  // Follow the conversation when the reader is at its end; otherwise say a
+  // reply arrived instead of pulling them away from what they are reading.
+  if (atEnd) {log.scrollTop = log.scrollHeight; byId('ask-jump').hidden = true;}
+  else if (nodes.length > before) byId('ask-jump').hidden = false;
+  askWorkList(byId('ask-waiting'), view.waiting, 'Nothing is waiting on anyone.', true);
+  askWorkList(byId('ask-done'), view.done, 'Nothing has finished yet.');
+  renderAskHanded(view);
+  renderAskPause(view);
+}
+function renderAskBadge(ask) {
+  byId('ask-badge').hidden = !ask?.unread;
+}
+// A reading, or the reply to a question or top-up, is the newest account of
+// the conversation: it also brings the overview's summary up to date, so the
+// badge and the attention band do not wait for the next refresh.
+function acceptAsk(view) {
+  askConversation = view;
+  if (overview?.ask) {
+    overview.ask = {unread:view.unread, paused:view.paused, turn_state:view.turn_state, detail:view.detail};
+    renderAskBadge(overview.ask);
+    renderAttention(overview);
+  }
+  renderAsk();
+}
+async function readAsk() {
+  if (currentView !== 'ask' || askReading) return;
+  if (!overview?.ask) {renderAsk(); return;}
+  const mine = askEpoch;
+  askReading = true;
+  askReadAt = Date.now();
+  try {
+    const view = await api('/api/ask');
+    if (mine === askEpoch) acceptAsk(view);
+  } finally {if (mine === askEpoch) askReading = false;}
+}
+// One second tick for the open Ask tab: it moves the working timer and, while
+// a turn runs, reads the conversation every ASK_FOLLOW_MS instead of waiting
+// for the dashboard's five-second refresh. It reads nothing when the tab is
+// hidden, closed or idle, so it adds no load outside a running turn.
+const ASK_FOLLOW_MS = 1500;
+function followAsk() {
+  if (currentView !== 'ask' || document.hidden || !(bearer || authenticated)) return;
+  renderAskWorking();
+  if (!askActive(askConversation?.turn_state ?? 'idle') || askReading) return;
+  if (Date.now() - askReadAt >= ASK_FOLLOW_MS) readAsk().catch(error => notice(error.message, true));
+}
+setInterval(followAsk, 1000);
+byId('ask-conversation').addEventListener('scroll', () => {
+  const log = byId('ask-conversation');
+  if (log.scrollHeight - log.scrollTop - log.clientHeight < 48) byId('ask-jump').hidden = true;
+});
+// Waiting on and Done live in a drawer beside the conversation. Its button
+// counts the work still waiting and carries the waiting marker while any is.
+function renderAskHanded(view) {
+  const waiting = view?.waiting?.length ?? 0;
+  const button = byId('ask-handed');
+  button.textContent = waiting ? `Handed off · ${waiting}` : 'Handed off';
+  button.className = waiting ? 'quiet ask-handed-toggle waiting' : 'quiet ask-handed-toggle';
+}
+// Opening moves focus into the drawer so Escape reaches it; closing from the
+// keyboard or the Close button returns focus to the button that opened it.
+function setAskDrawer(open, returnFocus = false) {
+  byId('ask-drawer').hidden = !open;
+  byId('ask-handed').setAttribute('aria-expanded', String(open));
+  if (open) byId('ask-drawer').focus();
+  else if (returnFocus) byId('ask-handed').focus();
+}
+setAskDrawer(false);
+byId('ask-handed').addEventListener('click', () => setAskDrawer(byId('ask-drawer').hidden));
+byId('ask-drawer-close').addEventListener('click', () => setAskDrawer(false, true));
+byId('ask-drawer').addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  setAskDrawer(false, true);
+});
+byId('ask-jump').addEventListener('click', () => {
+  const log = byId('ask-conversation');
+  log.scrollTop = log.scrollHeight;
+  byId('ask-jump').hidden = true;
+});
+// Enter sends and Shift+Enter starts a new line. Text being composed through
+// an input method is never sent mid-word.
+byId('ask-input').addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  if (!byId('ask-send').disabled) byId('ask-form').requestSubmit?.();
+});
+byId('ask-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const question = byId('ask-input').value;
+  if (!question.trim() || askSending || byId('ask-send').disabled) return;
+  const mine = askEpoch;
+  // The question shows at once and leaves the box, so the next one can be
+  // drafted. Sent once: if the outcome is unknown the words go back in the
+  // box (unless a new draft is there), and the next reading says whether the
+  // collector has the question.
+  askSending = true; askPending = {text:question, at:Date.now()};
+  byId('ask-input').value = '';
+  renderAsk();
+  try {
+    const view = await api('/api/ask', {method:'POST', body:JSON.stringify({question})});
+    if (mine !== askEpoch) return;
+    askPending = null;
+    acceptAsk(view);
+  } catch (error) {
+    if (mine !== askEpoch) return;
+    askPending = null;
+    if (!byId('ask-input').value.trim()) byId('ask-input').value = question;
+    notice(error.message, true);
+  } finally {
+    if (mine === askEpoch) {askSending = false; renderAsk();}
+  }
+});
+function renderAskSettings(settings) {
+  byId('ask-max-calls').value = String(settings.max_model_calls);
+  byId('ask-max-turns').value = String(settings.max_turns);
+  byId('ask-top-up').value = String(settings.top_up_calls);
+  askTopUpCalls = settings.top_up_calls;
+}
+async function loadAskSettings() {
+  const mine = askEpoch;
+  const settings = await api('/api/ask/settings');
+  if (mine !== askEpoch) return;
+  renderAskSettings(settings);
+  askSettingsLoaded = true;
+}
+byId('ask-settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  const mine = askEpoch;
+  try {
+    const [max_model_calls, max_turns, top_up_calls] = ['ask-max-calls', 'ask-max-turns', 'ask-top-up'].map(id => Number(byId(id).value));
+    if (![max_model_calls, max_turns, top_up_calls].every(value => Number.isInteger(value) && value >= 1 && value <= 200)) throw new Error('Choose whole numbers from 1 to 200.');
+    const saved = await api('/api/ask/settings', {method:'POST', body:JSON.stringify({max_model_calls, max_turns, top_up_calls})});
+    if (mine !== askEpoch) return;
+    renderAskSettings(saved);
+    byId('ask-settings-detail').textContent = 'Saved. A conversation that is already open keeps its allowance; later top-ups use the new size.';
+  } catch (error) {
+    if (mine === askEpoch) byId('ask-settings-detail').textContent = error.message;
+  }
+});
+// ---- end Ask ----
+
 const inventoryOrders = {
   attention: (a, b) => attentionRank(a) - attentionRank(b),
   third: (a, b) => behaviouralQueries(b.dns_activity) - behaviouralQueries(a.dns_activity),
@@ -2001,6 +2476,20 @@ function renderAttention(value) {
   const unseen = value.devices.filter(device => deepScanNeedsReview(device, value));
   if (unseen.length) items.push(attentionItem(formatCount(unseen.length), 'New open ports',
     `${deviceNames(unseen)} answered on ports outside the usual checks.`, ...reviewAction(unseen)));
+  const asked = value.reference_requests;
+  if (asked?.detail) items.push(attentionItem('!', 'Docs requests unavailable', asked.detail, 'Open Settings', () => showView('settings', true)));
+  if (asked?.pending) items.push(attentionItem(formatCount(asked.pending), 'Docs requested',
+    `Privacy Watch could not answer about ${asked.products.join(', ')}. Add a documentation link or dismiss.`, 'Review', () => {
+      showView('settings', true);
+      byId('reference-requests').scrollIntoView?.({block:'start'});
+    }));
+  // An unusable reference journal: reported by the overview while running, or
+  // by /api/status when it could not be opened at startup.
+  const referenceProblem = value.references?.detail || (!value.references && latestStatus?.references_detail) || null;
+  if (referenceProblem) items.push(attentionItem('!', 'Reference docs unavailable', referenceProblem, 'Open Settings', () => showView('settings', true)));
+  const stuck = (value.references?.failed || 0) + (value.references?.blocked || 0) + (value.references?.unresolved || 0);
+  if (stuck) items.push(attentionItem(formatCount(stuck), 'Reference docs need a check',
+    'Some vendor documentation could not be fetched or is held. Retry it from the Reference library.', 'Open Settings', () => showView('settings', true)));
   const drafts = latestStatus?.profile_drafts_waiting || 0;
   if (drafts) items.push(attentionItem(formatCount(drafts), drafts === 1 ? 'Profile draft awaiting review' : 'Profile drafts awaiting review',
     'Background research drafted device profiles. Review each before it is saved.', 'Open drafts', () => {
@@ -2008,6 +2497,9 @@ function renderAttention(value) {
       byId('background-research').scrollIntoView?.({block:'start'});
       loadBackgroundResearch().catch(error => notice(error.message, true));
     }));
+  const ask = value.ask;
+  if (ask?.unread) items.push(attentionItem('•', 'Privacy Watch has an answer', 'Read it in the Ask tab.', 'Open Ask', () => showView('ask', true)));
+  if (ask?.paused) items.push(attentionItem('!', 'Privacy Watch is paused', ask.detail || 'Its allowance is used. Top up to let it continue.', 'Open Ask', () => showView('ask', true)));
   const health = value.health;
   if (!health.connected) items.push(attentionItem('!', 'Plowshare connection', health.detail, 'Open System health', openSystemHealth));
   if (health.recovery.length) items.push(attentionItem(formatCount(health.recovery.length), 'Retained work needs a check', health.recovery[0], 'Open System health', openSystemHealth));
@@ -2099,7 +2591,8 @@ function renderOverview(value) {
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
   const runs = byId('recent-runs'); runs.replaceChildren();
-  if (!health.runs.length) runs.append(element('p', 'No project investigations yet.', 'empty'));
+  if (health.runs_detail) runs.append(element('p', health.runs_detail, health.runs.length ? 'hint' : 'empty'));
+  else if (!health.runs.length) runs.append(element('p', 'No project investigations yet.', 'empty'));
   for (const run of health.runs) {
     const row = element('div', undefined, 'record');
     const line = element('div', undefined, 'entry-line');
@@ -2113,9 +2606,12 @@ function renderOverview(value) {
     ? (presenceStatus.last_checked ? 'Last quick check ' + formatWhen(presenceStatus.last_checked) + '.' : 'Waiting for the first quick check.')
       + (presenceStatus.issues.length ? ' ' + presenceStatus.issues.join(' ') : '')
     : 'Quick presence checks are off.';
+  renderAskBadge(value.ask);
   renderAttention(value);
   renderBackgroundUsage(value);
   renderDeepScanGroup(value);
+  followReferences(value);
+  followRequests(value);
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates, value.assessments?.summaries || null]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
@@ -2271,7 +2767,8 @@ function scheduleBlocked(schedule, control, pending, pendingDeployment) {
   return null;
 }
 function toolVisibility(agents) {
-  if (agents.tool_visibility === 'awaiting_context') return 'Awaiting first project conversation';
+  if (agents.tool_visibility === 'awaiting_context') return 'Awaiting the first Ask conversation';
+  if (agents.tool_visibility === 'assistant_unserved') return 'Unavailable: the privacy assistant is not served';
   const total = agents.tools.length + agents.missing_tools.length;
   return `${agents.tools.length} of ${total} visible` + (agents.missing_tools.length ? ' · missing: ' + agents.missing_tools.join(', ') : '');
 }

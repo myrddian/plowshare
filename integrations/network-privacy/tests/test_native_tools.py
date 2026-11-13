@@ -166,7 +166,7 @@ class NativeToolsTest(unittest.IsolatedAsyncioTestCase):
                 tool.declaration.validate({"targets": "192.0.2.1"})
             with self.assertRaises(ValueError):
                 tool.declaration.validate({"request_id": str(uuid4())})
-            self.assertEqual(8, len(DECLARATIONS))
+            self.assertEqual(13, len(DECLARATIONS))
             self.assertEqual(
                 {
                     "network_scope",
@@ -177,6 +177,11 @@ class NativeToolsTest(unittest.IsolatedAsyncioTestCase):
                     "network_destinations",
                     "network_devices",
                     "network_device",
+                    "network_request_deep_scan",
+                    "network_request_assessment",
+                    "network_note_profile",
+                    "network_record_issue",
+                    "network_request_reference",
                 },
                 {tool.name for tool in DECLARATIONS},
             )
@@ -315,6 +320,28 @@ class DeviceToolsTest(unittest.IsolatedAsyncioTestCase):
         for value in ("ip:10.1.4.3", "10.1.4.3", "mac:02:00:00:00:01:0A", 7):
             with self.assertRaises(ValueError):
                 decode_call("network.device", {"device_id": value})
+
+    def test_reference_request_declares_product_question_and_optional_device(
+        self,
+    ) -> None:
+        declaration = next(
+            item for item in DECLARATIONS if item.name == "network_request_reference"
+        )
+        self.assertEqual(
+            [(p.name, p.type, p.required) for p in declaration.parameters],
+            [
+                ("product", "STRING", True),
+                ("question", "STRING", True),
+                ("device_id", "STRING", False),
+            ],
+        )
+        self.assertIsNone(declaration.input_schema)
+        self.assertEqual(declaration.timeout_seconds, 30)
+        with self.assertRaises(ValueError):
+            declaration.validate(
+                {"product": "acme-cam", "question": "Q?", "url": "https://x.example"}
+            )
+        declaration.validate({"product": "acme-cam", "question": "Q?"})
 
     def test_extra_and_missing_parameters_are_rejected(self) -> None:
         for name, arguments in (

@@ -40,6 +40,8 @@ from .worker import ReconciliationRequired
 
 PREFIX = "network-privacy-device/"
 MAX_TEXT = 8192
+# The operator notes field's character limit.
+NOTES_LIMIT = 2048
 
 
 def field(value: object, limit: int, *, required: bool = False) -> str:
@@ -73,7 +75,7 @@ class ProfileFields:
             (self.model, 128),
             (self.purpose, 512),
             (self.expected_services, 1024),
-            (self.notes, 2048),
+            (self.notes, NOTES_LIMIT),
         ):
             field(value, limit)
         field(self.name, 128, required=True)
@@ -121,7 +123,7 @@ class ProfileFields:
             field(row["model"], 128),
             field(row["purpose"], 512),
             field(row["expected_services"], 1024),
-            field(row["notes"], 2048),
+            field(row["notes"], NOTES_LIMIT),
             addresses,
             tuple(IssueLink.decode(v) for v in items(row.get("issues", []), 4)),
             mac_address(row["device_mac"])

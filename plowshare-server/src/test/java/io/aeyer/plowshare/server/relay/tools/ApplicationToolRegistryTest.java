@@ -268,6 +268,27 @@ class ApplicationToolRegistryTest {
   }
 
   @Test
+  void lease_renewal_of_an_unchanged_catalogue_keeps_the_definition_revision() {
+    String bootstrap = registry.revision(1L);
+    catalogue(DECLARATION);
+    String published = registry.revision(1L);
+    assertNotEquals(bootstrap, published);
+    // A provider renews its lease by republishing the same catalogue. Definition caches stamp
+    // with this revision, so a renewal alone must not rebuild every project agent registry.
+    clock.set(clock.get().plusSeconds(20));
+    catalogue(DECLARATION);
+    assertEquals(published, registry.revision(1L));
+    catalogue(DECLARATION.replace("Scope", "Changed"));
+    String changed = registry.revision(1L);
+    assertNotEquals(published, changed);
+    catalogue("");
+    String withdrawn = registry.revision(1L);
+    assertNotEquals(changed, withdrawn);
+    head.set(new RelayLogRepository.Head(head.get().position(), Optional.empty()));
+    assertNotEquals(withdrawn, registry.revision(1L));
+  }
+
+  @Test
   void unknown_invocations_expose_the_receipt_and_never_submit_a_replacement() {
     catalogue(DECLARATION);
     UUID id = UUID.randomUUID();

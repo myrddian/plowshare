@@ -43,8 +43,8 @@ publisher attribution, durable receipts/outbox and project-authorized
 **Slice 3 completed, 13 November 2026.**
 [0061](decisions/0061-relay-agent-inboxes-and-messaging-cutover.md) records
 messaging-owned records and allowances, one Relay inbox per account/project/definition,
-atomic publication and leased native-wake admission. V239 transfers retained threads,
-queued work and paid evidence without replay; V240 reserves shared-conversation turn
+atomic publication and leased native-wake admission. V243 transfers retained threads,
+queued work and paid evidence without replay; V244 reserves shared-conversation turn
 ordinals before execution. Existing `message.*` and SDK contracts remain unchanged.
 Logical drained-inbox retirement is included; physical cleanup is recorded in Slice 4 below.
 Google formatting, `formatCheck check`, generated contract audits, targeted PostgreSQL
@@ -55,7 +55,7 @@ classes. No live model inference was required.
 **Slice 4 completed, 13 November 2026.**
 [0062](decisions/0062-relay-topic-and-group-retirement.md) records owner-requested
 physical retirement, generation-fenced `relay.group.delete`, exact read-only
-`relay.group.inspect` and V241's indexed
+`relay.group.inspect` and V245's indexed
 retention deadlines. Existing operator removal guards, retained input and paid
 execution records remain protected. `formatCheck check sdkCheck`, generated contract
 audits, and targeted PostgreSQL migration, locking, retirement and WebSocket tests passed.
@@ -65,7 +65,7 @@ The default/SDK gate did not enable database tests. The A2A rewrite remains Slic
 [0063](decisions/0063-granted-execution-relay-publishing.md) records the ordinary
 `relay_publish` tool and its journaled script command form. Exact operator-installed
 project/definition/topic grants supplement current definition tool grants and
-project authority. V242 retains atomic publication receipts beyond broker retention;
+project authority. V246 retains atomic publication receipts beyond broker retention;
 execution identity and causation come from the harness. Existing feature tools,
 Relay envelopes and SDK operations retain their contracts. Remaining priority:
 Slice 7, then Slice 8, then the deferred A2A rewrite in Slice 5.
@@ -76,14 +76,14 @@ inventory checks passed. No live model inference was required.
 
 **Slice 7 completed, 13 November 2026.**
 [0064](decisions/0064-relay-child-completion-and-turn-eligibility.md) records the
-single leased completion group, all-terminal capture and V243's durable recovery
+single leased completion group, all-terminal capture and V247's durable recovery
 rotation. Callback and boot/free drains cannot deliver child terminal results.
 The shared eligibility decision includes pending-report holds so a nudge or
 plain-text auto-finish cannot overtake the report. Questions, wait legality,
 depth/cancellation policy and existing APIs retain their owners. Remaining work:
 Slice 8, then the deferred A2A rewrite in Slice 5.
 Google formatting and `formatCheck check` passed. Targeted `-PfullDb` checks
-passed for V243 upgrade/backfill, terminal capture rollback, scoped distributed
+passed for V247 upgrade/backfill, terminal capture rollback, scoped distributed
 leases, retention recovery, fixed-cycle rotation, wait/wake policy, delivery
 fallback and parent nudge/auto-finish fencing. Default checks did not enable
 database tests; no live model inference was required.
@@ -431,7 +431,7 @@ for the later cutover and is not wired into the board-backed sender.
 ### Slice 2 — The Relay → Board bridge (**completed**)
 
 Implemented through `BoardBridge`, `BoardClosing`, `BoardRelayReceiver` and the
-V238 reply outbox. [0060](decisions/0060-relay-board-bridge-and-authorized-close.md)
+V242 reply outbox. [0060](decisions/0060-relay-board-bridge-and-authorized-close.md)
 defines the versioned request/reply payloads, explicit reply-topic requirement,
 source-project opening constraint and exact transitive-thread disclosure rule.
 
@@ -544,7 +544,7 @@ SDK changes. The swap happens behind the existing seam (`agents/SendMessageTool.
 Owning systems can request physical retirement after normal publication retention
 and their subscriptions/work drain. Operator `REMOVE_TOPIC` keeps its existing
 empty-topic guard. [0062](decisions/0062-relay-topic-and-group-retirement.md) records
-generation-fenced SDK group deletion, bounded owner cleanup and V241's indexed
+generation-fenced SDK group deletion, bounded owner cleanup and V245's indexed
 retention discovery. Messaging history and paid evidence survive; this no longer
 gates Slice 3.
 
@@ -609,7 +609,7 @@ Agents keep feature tools such as `send_message` and may explicitly grant
 `relay_publish`; scripts use that same tool through the existing command journal.
 [0063](decisions/0063-granted-execution-relay-publishing.md) defines exact topic
 grants, current definition/project checks, inherited effect budgets, deterministic
-call identities and V242's retention-independent receipts. Neither models nor
+call identities and V246's retention-independent receipts. Neither models nor
 scripts choose an envelope, account, project or fresh causation root. See
 [Relay publishing](relay.md#agent-and-orchestration-publishing) for configuration.
 
@@ -618,7 +618,7 @@ scripts choose an envelope, account, project or fresh causation root. See
 Implemented through the built-in `builtin.orchestrations.children` group and the
 shared `TurnEligibility` decision. [0064](decisions/0064-relay-child-completion-and-turn-eligibility.md)
 defines trusted notice selection, retained terminal-attempt recovery, distributed
-ownership, callback-path removal and the parent scheduling hold. V243 captures
+ownership, callback-path removal and the parent scheduling hold. V247 captures
 finished, failed, capped and cancelled children without replaying delivered
 history. Detailed configuration and failure behavior are in [Relay](relay.md#child-orchestration-completion).
 

@@ -62,7 +62,7 @@ they make no model calls.
 
 An event UUID is derived from the authenticated execution coordinates and harness
 call ID. Topic and exact text are fingerprinted separately, so changing work under
-the same call cannot acquire a fresh identity. V242 introduces a receipt ledger
+the same call cannot acquire a fresh identity. V246 introduces a receipt ledger
 independent of broker retention. In one local database transaction the repository
 inserts the intent, registers the topic, publishes through Relay and saves the
 position and publication timestamp. Same-call contenders serialize at the ledger

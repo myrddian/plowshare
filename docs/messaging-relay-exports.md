@@ -92,6 +92,6 @@ cannot reset the request's effect budget. The resulting paid turn uses its own
 retained turn ancestry; another definition sharing its conversation cannot replace
 that root.
 
-V248 adds export/return bindings and receipts without rewriting older migrations.
+V252 adds export/return bindings and receipts without rewriting older migrations.
 References follow native message retention and authorized project deletion. No
 production data rehearsal or deployment is implied by this capability's tests.

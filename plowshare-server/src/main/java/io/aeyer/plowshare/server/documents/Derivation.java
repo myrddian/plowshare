@@ -56,10 +56,9 @@ public final class Derivation {
   /**
    * The same derivation over text and an outline that are not travelling together.
    *
-   * <p><b>Text with no provenance is text whose blank lines are the author's, so this overload
-   * never joins blocks.</b> {@link Extracted#paragraphsWereInferred()} is the question {@link
-   * #joined} turns on, and a bare string cannot answer it; assuming the boundaries are a guess
-   * would let this method delete paragraphs somebody typed.
+   * <p>Author-written blank lines do not need PDF geometry repair. Both authored and inferred
+   * blocks are packed into processing paragraphs of at least 80 words within each section; the
+   * retained extraction remains unchanged and is still the evidence coordinate system.
    *
    * @param text the extracted document, line endings already normalised by {@link TextExtraction}
    * @param outlineTopLevel the document's own top-level outline entries, or empty for a format that
@@ -102,7 +101,8 @@ public final class Derivation {
           SectionDetector.detect(lines, chapter.bodyStartLine(), chapter.endLine())) {
         List<DerivedParagraph> paragraphs = new ArrayList<>();
         List<String> blocks = split(lines, section.bodyStartLine(), section.endLine());
-        for (String paragraph : paragraphsWereInferred ? joined(blocks) : blocks) {
+        List<String> repaired = paragraphsWereInferred ? joined(blocks) : blocks;
+        for (String paragraph : ParagraphPacking.pack(repaired)) {
           DerivedParagraph derived = ordinals.next(paragraph, chunking);
           if (derived != null) {
             paragraphs.add(derived);

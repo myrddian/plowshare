@@ -283,7 +283,94 @@ footer { display: flex; justify-content: space-between; gap: var(--s3); padding-
 @keyframes wing-right { from { transform: perspective(1400px) rotateY(62deg); opacity: .15; } }
 .triptych.unveil .leaf-left { transform-origin: right center; animation: wing-left .8s cubic-bezier(.2, .7, .2, 1) both; }
 .triptych.unveil .leaf-right { transform-origin: left center; animation: wing-right .8s cubic-bezier(.2, .7, .2, 1) both; }
-@media (prefers-reduced-motion: reduce) { .triptych.unveil .leaf { animation: none; } }
+/* Ask is a full-window chat. While it is shown the page becomes one window-
+   high column: the masthead, toolbar and tabs keep their size and the
+   conversation takes the rest, scrolling on its own. Messages read in a centred
+   column; answer tables may widen past it. The question box sits in flow at the
+   bottom, so it never covers the last message, and a fade over the
+   conversation makes it read as floating. The user's words sit right in a
+   framed bubble; Privacy Watch answers on the left behind a brass rule. The
+   working row is the one place outside the altarpiece that moves, because it
+   stands for work in progress; reduced motion stills it and its words still
+   say what is happening. Handed-off work lives in a drawer on the right. */
+body:has(#view-ask:not([hidden])) { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
+body:has(#view-ask:not([hidden])) > main { flex: 1; min-height: 0; display: flex; flex-direction: column; max-width: none; width: 100%; box-sizing: border-box; padding-bottom: var(--s3); }
+body:has(#view-ask:not([hidden])) > main > :not(#dashboard) { flex: none; }
+body:has(#view-ask:not([hidden])) #dashboard { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+body:has(#view-ask:not([hidden])) :is(.masthead, footer) { width: 100%; box-sizing: border-box; }
+body:has(#view-ask:not([hidden])) footer { display: none; }
+/* The heading stays for focus and the page title; it is only hidden from view. */
+body:has(#view-ask:not([hidden])) .view-heading { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; padding: 0; }
+.ask-view { --ask-column: 760px; position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: var(--s3); }
+.ask-view[hidden] { display: none; }
+.ask-conversation { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s5) 0 var(--s6); }
+.ask-conversation > * { box-sizing: border-box; max-width: var(--ask-column); margin-left: auto; margin-right: auto; }
+.ask-conversation > .empty { padding-top: 12vh; text-align: center; color: var(--tallow); }
+.ask-state { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--text-xs); color: var(--tallow); white-space: nowrap; }
+.ask-state::before { content: ''; width: 7px; height: 7px; background: var(--gilt-deep); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.ask-state.working { color: var(--gilt); }
+.ask-state.working::before { background: var(--gilt); animation: ask-beat 1.4s ease-in-out infinite; }
+.ask-state.failed { color: var(--cinnabar); }
+.ask-state.failed::before { background: var(--cinnabar); }
+.ask-entry { padding: var(--s3) 0; }
+.ask-entry + .ask-entry { margin-top: var(--s2); }
+.ask-entry-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s3); margin: 0; }
+.ask-entry-head small { color: var(--tallow); font-size: var(--text-xs); }
+.ask-entry .markdown-body, .ask-entry .ask-text { margin: var(--s1) 0 0; font-size: var(--text-md); }
+.ask-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-question { display: flex; flex-direction: column; align-items: flex-end; padding: var(--s2) 0; }
+.ask-question .ask-entry-head { flex-direction: row-reverse; }
+.ask-question .ask-text { position: relative; max-width: min(78%, 560px); margin-top: var(--s1); padding: var(--s2) var(--s3); color: var(--parchment); background: var(--soot); border: var(--rule); clip-path: polygon(0 0, calc(100% - var(--chamfer)) 0, 100% var(--chamfer), 100% 100%, 0 100%); }
+.ask-pending .ask-text { color: var(--tallow); border-style: dashed; }
+.ask-answer { border-left: 2px solid var(--brass); padding: var(--s1) 0 var(--s1) var(--s4); }
+.ask-answer .status-line { color: var(--gilt); }
+/* A table may be wider than the reading column: it is centred on the answer
+   and bounded by the window, and scrolls inside its own wrapper past that. */
+.ask-answer .markdown-table { position: relative; left: 50%; transform: translateX(-50%); width: max-content; min-width: 100%; max-width: min(1240px, calc(100vw - 2 * var(--gutter))); z-index: 1; box-sizing: border-box; padding: var(--s2) var(--s3); background: var(--bitumen); border: var(--rule); }
+.ask-dock { position: relative; flex: none; display: grid; gap: var(--s2); width: 100%; max-width: var(--ask-column); margin: 0 auto; }
+.ask-dock::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: var(--s6); background: linear-gradient(to bottom, transparent, var(--obsidian)); pointer-events: none; }
+.ask-jump { position: absolute; left: 50%; bottom: calc(100% + var(--s2)); transform: translateX(-50%); z-index: 2; font-size: var(--text-sm); padding: var(--s1) var(--s3); }
+.ask-pause { margin: 0; }
+.ask-pause[hidden] { display: none; }
+.ask-working { display: flex; align-items: center; gap: var(--s3); padding: 0 var(--s2); color: var(--gilt); font-size: var(--text-sm); }
+.ask-working[hidden] { display: none; }
+.ask-working-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ask-working-time { font: 500 var(--text-xs) var(--data); color: var(--tallow); }
+.ask-dots { display: inline-flex; gap: 5px; }
+.ask-dots i { width: 6px; height: 6px; background: var(--gilt); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); animation: ask-beat 1.2s ease-in-out infinite; }
+.ask-dots i:nth-child(2) { animation-delay: .2s; }
+.ask-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes ask-beat { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }
+/* The question box is the gilt-edged frame; the text area inside is bare. */
+.ask-form { --line: var(--brass); --cut: 12px; display: grid; gap: var(--s1); max-width: none; margin: 0; padding: var(--s3) var(--s4) var(--s2); }
+.ask-form:focus-within { --line: var(--gilt); }
+.ask-form textarea { width: 100%; min-height: 48px; max-height: 30vh; padding: 0; border: 0; background: transparent; resize: none; font-size: var(--text-md); box-shadow: none; outline: none; }
+.ask-form .hint:empty { display: none; }
+.ask-form .notice { margin: 0; }
+.ask-composer-foot { display: flex; align-items: center; gap: var(--s3); }
+.ask-composer-foot .hint { flex: 1; min-width: 0; margin: 0; font-size: var(--text-xs); }
+.ask-composer-foot button { padding-top: 6px; padding-bottom: 6px; }
+.ask-handed-toggle { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--text-sm); white-space: nowrap; }
+.ask-handed-toggle.waiting { color: var(--gilt); }
+.ask-handed-toggle.waiting::before { content: ''; flex: none; width: 7px; height: 7px; background: var(--gilt); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); animation: ask-beat 1.6s ease-in-out infinite; }
+.ask-badge { margin-left: var(--s1); color: var(--gilt); }
+.ask-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; width: min(400px, 100%); margin: 0; overflow-y: auto; --line: var(--brass); }
+.ask-drawer[hidden] { display: none; }
+.ask-drawer:focus { outline: none; }
+.ask-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s3) var(--inset); border-bottom: var(--rule); }
+.ask-drawer-head h2 { margin: 0; font: 400 var(--display-2)/1.2 var(--display); }
+.ask-drawer-group h3 { margin: 0; padding: var(--s3) var(--inset) var(--s1); font-size: var(--text-name); color: var(--gilt); }
+.ask-drawer .entries > .record { padding-left: var(--inset); padding-right: var(--inset); }
+.ask-drawer .entries > .empty { padding: var(--s2) var(--inset) var(--s3); }
+.ask-drawer .record h4 { overflow-wrap: anywhere; }
+.ask-handed h4 { display: flex; align-items: center; gap: var(--s2); }
+.ask-handed h4::before { content: ''; flex: none; width: 7px; height: 7px; background: var(--gilt); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); animation: ask-beat 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: no-preference) { .ask-conversation { scroll-behavior: smooth; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .triptych.unveil .leaf { animation: none; }
+  .ask-dots i, .ask-state.working::before, .ask-handed h4::before, .ask-handed-toggle.waiting::before { animation: none; opacity: 1; }
+}
 
 .register { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 0 var(--s6); margin-bottom: var(--s6); }
 .register-cell { padding: 2px 0 2px var(--s4); border-left: var(--rule-frame); min-width: 0; }
@@ -553,6 +640,10 @@ details > .hint { display: flex; flex-wrap: wrap; justify-content: space-between
   .view-nav button { font-size: var(--text-name); }
   .view-heading { padding: var(--s5) 0 var(--s4); }
   .triptych, .register, .overview-grid, .workspace, .discover-form, #profile-form, #issue-form .mitigation { grid-template-columns: minmax(0, 1fr); }
+  .ask-drawer { width: 100%; }
+  .ask-composer-foot #ask-keys { display: none; }
+  .ask-composer-foot { justify-content: flex-end; }
+  .ask-composer-foot .ask-state { margin-right: auto; }
   .panel-body > .facts { grid-template-columns: 124px minmax(0, 1fr); }
   .leaf-centre, .leaf-left, .leaf-right, .leaf-base { grid-column: 1; grid-row: auto; }
   .leaf { padding: var(--s5) var(--inset) var(--s4); --cut: 18px; }

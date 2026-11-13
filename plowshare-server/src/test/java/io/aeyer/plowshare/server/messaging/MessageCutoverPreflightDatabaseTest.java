@@ -24,7 +24,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Requires actual pre-V239 schema, SQL corruption fixtures and Flyway callback rollback behavior.
+ * Requires actual pre-V243 schema, SQL corruption fixtures and Flyway callback rollback behavior.
  */
 @Tag("full-db")
 @Testcontainers
@@ -38,7 +38,7 @@ class MessageCutoverPreflightDatabaseTest {
     var fixture = fixture("orphan");
     fixture.jdbc().update("UPDATE board_message_instances SET project='missing-project'");
     var failed = assertThrows(FlywayException.class, () -> migrate(fixture.source()));
-    assertTrue(messageChain(failed).contains("V239 messaging preflight refused"));
+    assertTrue(messageChain(failed).contains("V243 messaging preflight refused"));
     unchanged(fixture.jdbc());
   }
 
@@ -51,7 +51,7 @@ class MessageCutoverPreflightDatabaseTest {
     fixture.jdbc().update("UPDATE board_topics SET allowance_id=NULL");
     fixture.jdbc().execute("ALTER TABLE board_topics ENABLE TRIGGER USER");
     var failed = assertThrows(FlywayException.class, () -> migrate(fixture.source()));
-    assertTrue(messageChain(failed).contains("V239 messaging preflight refused"));
+    assertTrue(messageChain(failed).contains("V243 messaging preflight refused"));
     unchanged(fixture.jdbc());
   }
 
@@ -86,7 +86,7 @@ class MessageCutoverPreflightDatabaseTest {
     String url =
         POSTGRES.getJdbcUrl().replace("/" + POSTGRES.getDatabaseName(), "/preflight_" + suffix);
     var source = new DriverManagerDataSource(url, POSTGRES.getUsername(), POSTGRES.getPassword());
-    Flyway.configure().dataSource(source).target("238").load().migrate();
+    Flyway.configure().dataSource(source).target("242").load().migrate();
     var jdbc = new JdbcTemplate(source);
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('owner','fixture')");
     jdbc.update("INSERT INTO projects(name,workspace) VALUES('project','fixture')");

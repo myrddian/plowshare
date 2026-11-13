@@ -16,6 +16,29 @@ from .contracts import integer, items, object_fields, parse_json, text, timestam
 
 PREFIX = "network-privacy-issue/"
 MAX_TEXT = 16384
+# A device link's applicability and operator-reported mitigation progress.
+APPLICABILITY = frozenset(
+    {
+        "potentially_affected",
+        "confirmed_affected",
+        "not_affected",
+        "mitigated",
+        "unresolved",
+    }
+)
+MITIGATION_STATUSES = frozenset(
+    {"proposed", "accepted", "applied", "verified", "reverted"}
+)
+LINK_NOTES_LIMIT = 512
+
+
+def needs_explanation(applicability: str, mitigation_status: str) -> bool:
+    """Whether a link's notes must explain a confirmation or a performed action."""
+    return applicability == "confirmed_affected" or mitigation_status in {
+        "applied",
+        "verified",
+        "reverted",
+    }
 
 
 class IssueValidation(ValueError):
@@ -284,21 +307,9 @@ class IssueLink:
     def __post_init__(self) -> None:
         uuid(self.issue_id)
         uuid(self.revision)
-        choice(
-            self.applicability,
-            {
-                "potentially_affected",
-                "confirmed_affected",
-                "not_affected",
-                "mitigated",
-                "unresolved",
-            },
-        )
-        choice(
-            self.mitigation_status,
-            {"proposed", "accepted", "applied", "verified", "reverted"},
-        )
-        narrative(self.notes, 512, required=False)
+        choice(self.applicability, set(APPLICABILITY))
+        choice(self.mitigation_status, set(MITIGATION_STATUSES))
+        narrative(self.notes, LINK_NOTES_LIMIT, required=False)
         if len(self.evidence) > 4 or len(set(self.evidence)) != len(self.evidence):
             raise IssueValidation(
                 "Choose at most four distinct retained evidence revisions"
@@ -306,9 +317,9 @@ class IssueLink:
         for revision in self.evidence:
             uuid(revision)
         if (
-            self.applicability == "confirmed_affected"
-            or self.mitigation_status in {"applied", "verified", "reverted"}
-        ) and not self.notes.strip():
+            needs_explanation(self.applicability, self.mitigation_status)
+            and not self.notes.strip()
+        ):
             raise IssueValidation(
                 "Confirmation and performed actions need an operator explanation"
             )
@@ -335,7 +346,7 @@ class IssueLink:
             uuid(row["revision"]),
             text(row["applicability"], 64),
             text(row["mitigation_status"], 64),
-            narrative(row["notes"], 512, required=False),
+            narrative(row["notes"], LINK_NOTES_LIMIT, required=False),
             tuple(uuid(v) for v in items(row["evidence"], 4)),
         )
 

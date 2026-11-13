@@ -430,6 +430,7 @@ class DocumentCascadeLoggingTest {
   // --- fixtures -------------------------------------------------------------
 
   private UUID corpus(String sourceName, String text) {
+    text = DocumentFixtures.modelParagraphs(sourceName, text);
     Extracted extracted = TextExtraction.extract(sourceName, text.getBytes(StandardCharsets.UTF_8));
     return store
         .write(

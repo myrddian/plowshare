@@ -10,7 +10,7 @@ the A2A rewrite remains deferred.
 Child terminal results have one transport: the built-in consumer group
 `builtin.orchestrations.children` on `orchestration.child.completed`, independently
 leased in each project or server/global scope. The transactional lifecycle outbox
-already owns notice publication. V243 extends that notice to failed, capped and
+already owns notice publication. V247 extends that notice to failed, capped and
 cancelled children as well as finished children. It backfills only undelivered
 terminal attempts on upgrade; delivered history never becomes new work.
 
@@ -33,7 +33,7 @@ composing from retained records. Delayed notices cannot settle a resumed attempt
 
 The Relay cursor acknowledges availability, never successful report delivery.
 Undelivered terminal rows are the recovery source when a parent is busy or asking,
-a publication expires, notifications are lost, or a process restarts. V243 adds
+a publication expires, notifications are lost, or a process restarts. V247 adds
 a separate, lease-fenced reconciliation keyset cursor, atomically advanced with
 each bounded owning-row scan. It is not a wait, delivery receipt or authorization
 lease. Persistent rotation prevents a busy first page from starving later reports
@@ -92,13 +92,13 @@ continues to answer arrival questions and does not park conversations.
 Default tests use mocked repositories and voices for lease exclusion, lost
 ownership, bounded recovery, gap acknowledgement, expiry-independent discovery,
 input isolation and shared eligibility decisions. PostgreSQL tests are selected
-only for V243, transactional lifecycle capture/backfill, lease contention and
+only for V247, transactional lifecycle capture/backfill, lease contention and
 fencing, durable reconciliation rotation and retained terminal-attempt guards.
 Owning delivery regressions verify busy parents, refusal, hooks, caller/person
 fallback and stale attempt settlement without live model inference.
 
 Validation completed: Google formatting and `formatCheck check` passed in default
-mode. Selected PostgreSQL tests passed for the V243 upgrade/backfill, transaction
+mode. Selected PostgreSQL tests passed for the V247 upgrade/backfill, transaction
 rollback, project/global scope isolation, same-group contention, lease fencing,
 retention recovery, fixed-cycle pagination under new arrivals and the owning
 delivery/wait/nudge regressions. Mocked tests passed for the consumer and shared

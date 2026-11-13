@@ -219,7 +219,11 @@ inconsistent values fail startup.
 | `notification-poll` | `1s` | Version-notification poll cadence, at most 30s. |
 | `reconnect-delay` | `1s` | Delay before reconnecting a lost notification session, at most 1m. |
 | `max-pending-transactions` | `128` | Pending transactions tracked (1..4096). |
-| `max-projections` | `20` | Distinct projections (1..64). |
+| `max-projections` | `24` | Distinct projections (1..64). |
+| `notified.enabled` | `true` | Delivery probes, and notification-trusted hits for caches that opt in. |
+| `notified.staleness` | `2s` | Most a trusted hit may lag a committed permission change (at most 1m). |
+| `notified.heartbeat` | `500ms` | Probe interval; must be shorter than `staleness`. |
+| `notified.heartbeat-timeout` | `3s` | Unanswered-probe limit before the listener reconnects; also its network timeout. |
 | `version-connections` | `4` | Connections of the separate `projection-versions` pool (1..32). |
 
 ### Actuator endpoints

@@ -196,6 +196,7 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
                 {"toolScope": "network_scanning", "agent": "privacy_coordinator"},
                 {"toolScope": "network_evidence_read", "agent": "privacy_analyst"},
                 {"toolScope": "network_evidence_read", "agent": "privacy_reviewer"},
+                {"toolScope": "network_assistant", "agent": "privacy_assistant"},
             ],
         )
         for name in ("tools", "ports"):

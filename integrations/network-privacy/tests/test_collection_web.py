@@ -130,6 +130,32 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(devices["next_offset"], None)
         self.assertEqual(len(devices["devices"]), devices["total"])
 
+    async def test_assistant_tools_are_not_offered_over_http(self) -> None:
+        assistant = {
+            "network.request_deep_scan": {"device_id": "mac:02:00:00:00:01:01"},
+            "network.request_assessment": {"device_id": "mac:02:00:00:00:01:01"},
+            "network.note_profile": {
+                "device_id": "mac:02:00:00:00:01:01",
+                "note": "A note.",
+            },
+            "network.record_issue": {
+                "device_id": "mac:02:00:00:00:01:01",
+                "issue_id": str(uuid4()),
+                "applicability": "potentially_affected",
+            },
+        }
+        response = await self.client.get("/api/tools", headers=self.headers)
+        names = {item["name"] for item in json.loads(await response.text())}
+        self.assertFalse(names & set(assistant))
+        self.assertIn("network.device", names)
+        for name, arguments in assistant.items():
+            response = await self.client.post(
+                "/api/tools/" + name, headers=self.headers, json=arguments
+            )
+            self.assertEqual(response.status, 404, name)
+            self.assertIn("assistant", await response.text())
+        self.assertEqual(self.port.published, [])
+
     async def test_tools_refuse_unknown_capabilities_scope_and_identity(self) -> None:
         for name, arguments in (
             ("network.shell", {}),

@@ -2,7 +2,9 @@ package io.aeyer.plowshare.server.information;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -10,9 +12,21 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class JdbcJobInformationRepository implements JobInformationRepository {
   private final JdbcTemplate jdbc;
+  private final InformationLogVisibility visibility;
 
   public JdbcJobInformationRepository(JdbcTemplate jdbc) {
+    this(jdbc, InformationLogVisibility.direct());
+  }
+
+  /**
+   * Uses {@code visibility} for targeted log checks, so job listings and per-turn rechecks reuse
+   * the account's current deny set instead of re-walking ancestry and retained inputs per call.
+   * Component scanning constructs this class, so Spring must be told which constructor to use.
+   */
+  @Autowired
+  public JdbcJobInformationRepository(JdbcTemplate jdbc, InformationLogVisibility visibility) {
     this.jdbc = jdbc;
+    this.visibility = Objects.requireNonNull(visibility);
   }
 
   public boolean hasInputs(String log) {
@@ -77,7 +91,12 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
   }
 
   public boolean logAllowed(String log, String account) {
-    return jdbc.queryForObject("SELECT information_log_readable(?,?)", Boolean.class, log, account);
+    return visibility.readable(
+        account,
+        log,
+        () ->
+            jdbc.queryForObject(
+                "SELECT information_log_readable(?,?)", Boolean.class, log, account));
   }
 
   public List<UUID> inputsOf(String log) {

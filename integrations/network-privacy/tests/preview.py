@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import tempfile
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +33,15 @@ from test_operator_console import ConsoleFixture, Settings
 from test_privacy_issues import IssueDocuments
 from test_privacy_issues import fields as issue_fields
 
+from plowshare_privacy.ask import (
+    AskCall,
+    AskConflict,
+    AskEntry,
+    AskService,
+    AskSettings,
+    AskView,
+    AskWork,
+)
 from plowshare_privacy.assessment_request import ConcernOutcome
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
 from plowshare_privacy.contracts import Configuration, utc_now
@@ -385,6 +395,211 @@ class PreviewAssessments:
         self._ledger = replace(self._ledger, background_limit=limit)
 
 
+class PreviewAsk:
+    """An in-memory stand-in for ``AskService``; nothing reaches Plowshare.
+
+    The conversation is scripted: a plain answer, a tool result (never shown),
+    a JSON-looking reply (shown folded), one piece of work waiting and one
+    done. Asking takes ``SEND_DELAY`` seconds, appends the question, then
+    plays ``STEPS`` (a device-list call, its result and a hand-off to the
+    analyst) so the working row has something to name, and a canned answer
+    ``ANSWER_AFTER`` seconds later; the answer arrives unread. A question that mentions the allowance ends instead in a
+    paused state, and ``top_up`` clears it.
+    """
+
+    SEND_DELAY = 0.8
+    ANSWER_AFTER = 9.0
+    # (seconds after the question, author, kind, tool call or answered call id)
+    STEPS = (
+        (
+            1.5,
+            "agent",
+            "answer",
+            AskCall("preview-devices", "network_devices", None, None),
+            None,
+        ),
+        (3.5, "tool", "tool_result", None, "preview-devices"),
+        (
+            5.5,
+            "agent",
+            "answer",
+            AskCall(
+                "preview-analyst",
+                "send_message",
+                "privacy_analyst",
+                "Check the new lookups",
+            ),
+            None,
+        ),
+        (7.0, "tool", "tool_result", None, "preview-analyst"),
+    )
+
+    def __init__(self) -> None:
+        self.settings = AskSettings()
+        now = datetime.now(timezone.utc)
+
+        def stamp(minutes: int) -> str:
+            # Minutes before startup for the script; zero means the real now,
+            # so a new question's time starts the working timer correctly.
+            at = datetime.now(timezone.utc) if minutes == 0 else now
+            return (at - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        self._stamp = stamp
+        self._entries: list[AskEntry] = [
+            AskEntry(
+                0,
+                "user",
+                "What did the Living room TV talk to overnight?",
+                stamp(30),
+                "question",
+            ),
+            AskEntry(
+                1,
+                "agent",
+                "The **Living room TV** made two lookups it had not made before:\n\n"
+                "- `ads.example` (advertising)\n- `telemetry.example` (telemetry)\n\n"
+                "A lookup shows a name was asked for, not what was sent.",
+                stamp(29),
+                "answer",
+            ),
+            AskEntry(
+                2,
+                "tool",
+                '{"status": "queued"}',
+                stamp(28),
+                "tool_result",
+                answers="call-1",
+                tool="send_message",
+            ),
+            AskEntry(
+                3,
+                "agent",
+                '{"requested": "security-specialist", "about": "Driveway camera firmware"}',
+                stamp(27),
+                "answer",
+            ),
+        ]
+        self._waiting = (
+            AskWork(
+                "message",
+                "security-specialist",
+                "Check the Driveway camera firmware",
+                stamp(27),
+            ),
+        )
+        self._done = (
+            AskWork(
+                "orchestration",
+                "investigate_network",
+                "Look at the TV's overnight lookups",
+                stamp(29),
+            ),
+        )
+        self._state = "answered"
+        self._paused = False
+        self._unread = True
+        self._due: float | None = None
+        self._started: float | None = None
+        self._played = 0
+        self._outcome = "answered"
+
+    def _settle(self) -> None:
+        if self._started is not None:
+            elapsed = time.monotonic() - self._started
+            while (
+                self._played < len(self.STEPS)
+                and self.STEPS[self._played][0] <= elapsed
+            ):
+                _, author, kind, call, answers = self.STEPS[self._played]
+                self._entries.append(
+                    AskEntry(
+                        len(self._entries),
+                        author,  # type: ignore[arg-type]
+                        "" if call else '{"status": "ok"}',
+                        self._stamp(0),
+                        kind,
+                        calls=(call,) if call else (),
+                        answers=answers,
+                        tool=None if call else "network_devices",
+                    )
+                )
+                self._played += 1
+        if self._due is None or time.monotonic() < self._due:
+            return
+        self._started = None
+        self._due = None
+        if self._outcome == "paused":
+            self._state, self._paused = "capped", True
+            return
+        self._entries.append(
+            AskEntry(
+                len(self._entries),
+                "agent",
+                "Nothing new stands out since this morning. These sample devices are the ones "
+                "worth a look:\n\n"
+                "| Address | Name | Why it stands out | What to do next |\n"
+                "| --- | --- | --- | --- |\n"
+                "| 192.0.2.10 (mac:00:00:5e:00:53:10) | Living room TV | Looked up advertising "
+                "and telemetry names it had not used before | Check its privacy settings |\n"
+                "| 192.0.2.20 (mac:00:00:5e:00:53:20) | Driveway camera | Offers a management "
+                "page on the local network | Ask the security specialist to review its firmware |\n"
+                "| 192.0.2.30 (mac:00:00:5e:00:53:30) | Unnamed device | First seen today; "
+                "no name or owner recorded | Name it in Devices |",
+                self._stamp(0),
+                "answer",
+            )
+        )
+        self._state, self._unread = "answered", True
+
+    def view(self) -> AskView:
+        self._settle()
+        return AskView(
+            True,
+            "preview-conversation",
+            self._state,  # type: ignore[arg-type]
+            tuple(self._entries),
+            self._waiting,
+            self._done,
+            self._paused,
+            self._unread,
+            "The assistant has used its allowance for now. Top up to let it continue."
+            if self._paused
+            else None,
+        )
+
+    def mark_read(self) -> None:
+        self._unread = False
+
+    def set_settings(self, settings: AskSettings) -> None:
+        self.settings = settings
+
+    async def ask(self, question: str) -> AskView:
+        if self.view().turn_state in ("sending", "running"):
+            raise AskConflict(
+                "The assistant is still working. Ask again when it has finished."
+            )
+        self._paused = False
+        await asyncio.sleep(self.SEND_DELAY)
+        self._entries.append(
+            AskEntry(len(self._entries), "user", question, self._stamp(0), "question")
+        )
+        self._state = "running"
+        self._outcome = "paused" if "allowance" in question.lower() else "answered"
+        self._started, self._played = time.monotonic(), 0
+        self._due = time.monotonic() + self.ANSWER_AFTER
+        return self.view()
+
+    async def top_up(self) -> AskView:
+        if not self._paused:
+            raise AskConflict("A top-up is not offered right now.")
+        self._paused, self._state = False, "answered"
+        return self.view()
+
+
+def preview_ask() -> AskService:
+    return cast(AskService, PreviewAsk())
+
+
 def preview_deep_scans() -> DeepScanner:
     from preview_sample import TV_DEVICE, sample_devices
 
@@ -530,6 +745,7 @@ async def preview(
             if sample_network or sample_devices is not None
             else None,
             deep_scans=preview_deep_scans() if sample_network else None,
+            ask=preview_ask(),
         )
         if sample_network or sample_devices is not None:
             app.middlewares.append(sample_overview(sample_devices))

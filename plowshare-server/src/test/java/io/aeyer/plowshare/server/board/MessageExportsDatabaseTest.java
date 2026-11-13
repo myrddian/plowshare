@@ -80,7 +80,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Requires PostgreSQL source joins, V248 FK/receipt mapping and broker/native transaction rollback.
+ * Requires PostgreSQL source joins, V252 FK/receipt mapping and broker/native transaction rollback.
  */
 @Tag("full-db")
 @Testcontainers

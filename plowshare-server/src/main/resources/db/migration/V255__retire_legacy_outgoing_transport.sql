@@ -8,7 +8,7 @@ BEGIN
     SELECT 1 FROM outgoing_work
     WHERE state NOT IN ('COMPLETED', 'FAILED', 'CANCELED', 'REJECTED')
   ) THEN
-    RAISE EXCEPTION 'V251 outgoing retirement preflight refused: unresolved external work remains; retain the matching server and journals, reconcile through the owning lifecycle, and retry only after evidence-supported settlement';
+    RAISE EXCEPTION 'V255 outgoing retirement preflight refused: unresolved external work remains; retain the matching server and journals, reconcile through the owning lifecycle, and retry only after evidence-supported settlement';
   END IF;
 END $$;
 

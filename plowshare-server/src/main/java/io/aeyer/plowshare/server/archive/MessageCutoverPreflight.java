@@ -10,7 +10,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.stereotype.Component;
 
 /**
- * Database-owned V239 preflight on Flyway's transaction/connection, before its first table rename.
+ * Database-owned V243 preflight on Flyway's transaction/connection, before its first table rename.
  * Legacy corruption must stop with a content-free diagnostic instead of dropping publications or
  * failing later at a generic NOT NULL constraint. Existing shipped migrations remain unchanged.
  */
@@ -20,7 +20,7 @@ public final class MessageCutoverPreflight extends BaseCallback {
   public boolean supports(Event event, Context context) {
     return event == Event.BEFORE_EACH_MIGRATE
         && context.getMigrationInfo() != null
-        && MigrationVersion.fromVersion("239").equals(context.getMigrationInfo().getVersion());
+        && MigrationVersion.fromVersion("243").equals(context.getMigrationInfo().getVersion());
   }
 
   @Override
@@ -53,7 +53,7 @@ public final class MessageCutoverPreflight extends BaseCallback {
         || brokenInstances != 0
         || brokenRoutes != 0)
       throw new FlywayException(
-          "V239 messaging preflight refused: invalid instance/project/allowance bindings="
+          "V243 messaging preflight refused: invalid instance/project/allowance bindings="
               + brokenInstances
               + ", missing route/body bindings="
               + brokenRoutes

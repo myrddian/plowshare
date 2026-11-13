@@ -1,4 +1,4 @@
--- V239 removed every private messaging forum topic. Public forum capture must not
+-- V243 removed every private messaging forum topic. Public forum capture must not
 -- consult historical message_instances.former_topic on every write thereafter.
 CREATE OR REPLACE FUNCTION relay_capture_board_topic() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE project_key BIGINT; event_topic TEXT;

@@ -1,7 +1,10 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.server.faults.NotFoundFault;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Input dependencies are durable before execution; polling rechecks the original selection. */
@@ -50,29 +53,75 @@ public final class InformationJobs implements InformationLogAccess {
   }
 
   public boolean allowed(String job, String account) {
-    var inputs = repository.inputs(job);
-    if (inputs.isEmpty()) return repository.logAllowed(job, account);
-    // Attribution identifies who used an input. Disclosure is governed by the
-    // asking account's current authority for each retained selection instead.
-    if (account == null) return false;
-    for (var input : inputs) {
-      var selection = input.selection();
-      try {
-        var context = access.resolve(account, selection).withView(true);
-        if (catalogue != null) {
-          catalogue.requireReadable(context, input.revision());
-          continue;
-        }
-      } catch (RuntimeException denied) {
-        return false;
-      }
-      if (!repository.readable(input.revision(), account, selection)) return false;
-    }
-    return true;
+    return listing(account).allowed(job);
   }
 
   public boolean logAllowed(String log, String account) {
     return repository.logAllowed(log, account);
+  }
+
+  /**
+   * Starts one read operation that decides many jobs for one account, such as a job listing.
+   *
+   * <p>Each distinct question is asked once per operation: a retained selection is resolved once,
+   * each (selection, revision) pair is checked once and each log's readability is evaluated once.
+   * The predicates and their order are exactly those of {@link #allowed}; only repeats within the
+   * operation are reused, so every decision is still evaluated against current authority when the
+   * operation first needs it. A listing must not outlive the request that created it.
+   */
+  public Listing listing(String account) {
+    return new Listing(account);
+  }
+
+  /** Operation-scoped decisions for one account; not thread-safe and not a cache. */
+  public final class Listing {
+    private final String account;
+    private final Map<InformationContext.Selection, Optional<InformationContext>> contexts =
+        new HashMap<>();
+    private final Map<JobInformationRepository.Input, Boolean> inputs = new HashMap<>();
+    private final Map<String, Boolean> logs = new HashMap<>();
+
+    private Listing(String account) {
+      this.account = account;
+    }
+
+    public boolean allowed(String job) {
+      var retained = repository.inputs(job);
+      if (retained.isEmpty()) return logAllowed(job);
+      // Attribution identifies who used an input. Disclosure is governed by the
+      // asking account's current authority for each retained selection instead.
+      if (account == null) return false;
+      for (var input : retained) if (!inputs.computeIfAbsent(input, this::readable)) return false;
+      return true;
+    }
+
+    public boolean logAllowed(String log) {
+      return logs.computeIfAbsent(log, id -> repository.logAllowed(id, account));
+    }
+
+    private boolean readable(JobInformationRepository.Input input) {
+      var selection = input.selection();
+      var context = contexts.computeIfAbsent(selection, this::resolve);
+      if (context.isEmpty()) return false;
+      if (catalogue != null) {
+        try {
+          catalogue.requireReadable(context.get(), input.revision());
+          return true;
+        } catch (RuntimeException denied) {
+          return false;
+        }
+      }
+      return repository.readable(input.revision(), account, selection);
+    }
+
+    /** Empty when the account cannot use the selection; a denial is remembered like a grant. */
+    private Optional<InformationContext> resolve(InformationContext.Selection selection) {
+      try {
+        return Optional.of(access.resolve(account, selection).withView(true));
+      } catch (RuntimeException denied) {
+        return Optional.empty();
+      }
+    }
   }
 
   public void requireLog(String log, String account) {

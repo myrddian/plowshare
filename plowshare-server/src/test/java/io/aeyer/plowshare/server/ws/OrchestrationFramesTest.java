@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -516,7 +517,7 @@ class OrchestrationFramesTest {
     Instant since = Instant.parse("2026-09-27T09:00:00Z");
     when(store.byCaller("enzo", null, null, 50))
         .thenReturn(List.of(run("orc_1", "enzo", OrchestrationState.RUNNING)));
-    when(store.stalledSince("orc_1")).thenReturn(Optional.of(since));
+    when(store.stalledSince(List.of("orc_1"))).thenReturn(Map.of("orc_1", since));
 
     Outcome outcome = route(FrameTypes.ORCHESTRATION_LIST, "{}");
 
@@ -527,11 +528,76 @@ class OrchestrationFramesTest {
   void a_listed_run_carries_no_stalledsince_when_the_store_has_none() {
     when(store.byCaller("enzo", null, null, 50))
         .thenReturn(List.of(run("orc_1", "enzo", OrchestrationState.RUNNING)));
-    when(store.stalledSince("orc_1")).thenReturn(Optional.empty());
+    when(store.stalledSince(List.of("orc_1"))).thenReturn(Map.of());
 
     Outcome outcome = route(FrameTypes.ORCHESTRATION_LIST, "{}");
 
     assertEquals(null, ((Listed) outcome.payload()).orchestrations().get(0).stalledSince());
+  }
+
+  /**
+   * A page of runs costs a fixed number of store reads, whatever its size: the page itself and one
+   * batched read of its stall marks. Where the store already filtered the page by log readability,
+   * no row is re-checked with the per-log predicate — that per-row recursive walk is what made a
+   * 25-row listing take about 20 s.
+   */
+  @Test
+  void a_multi_row_listing_reads_the_store_a_fixed_number_of_times() {
+    var inputs = mock(InformationJobs.class);
+    var frame =
+        new OrchestrationFrames(
+            store, orchestrations, cancel, todos, providerOf(resolver), projects);
+    frame.useInformationInputs(inputs);
+    List<OrchestrationRecord> page =
+        IntStream.range(0, 25)
+            .mapToObj(i -> run("orc_" + i, "enzo", OrchestrationState.FINISHED))
+            .toList();
+    List<String> ids = page.stream().map(OrchestrationRecord::id).toList();
+    Instant since = Instant.parse("2026-09-27T09:00:00Z");
+    when(store.byCaller("enzo", "story", null, 25)).thenReturn(page);
+    when(store.filtersReadableLogs()).thenReturn(true);
+    when(store.stalledSince(ids)).thenReturn(Map.of("orc_3", since));
+
+    Outcome outcome =
+        frame.list(Map.of("project", "story", "limit", 25), new Asking("tab-1", "enzo"));
+
+    var listed = ((Listed) outcome.payload()).orchestrations();
+    assertEquals(ids, listed.stream().map(view -> view.id()).toList());
+    assertEquals(since, listed.get(3).stalledSince());
+    assertEquals(null, listed.get(4).stalledSince());
+    verify(store, times(1)).byCaller("enzo", "story", null, 25);
+    verify(store, times(1)).stalledSince(ids);
+    verify(store, never()).stalledSince(any(String.class));
+    verifyNoInteractions(inputs);
+  }
+
+  /**
+   * A store wired without information protection has not filtered the page, so the frame still
+   * applies the per-log check itself rather than disclosing runs the account may not read.
+   */
+  @Test
+  void an_unfiltered_page_is_still_checked_for_log_readability() {
+    var inputs = mock(InformationJobs.class);
+    var frame =
+        new OrchestrationFrames(
+            store, orchestrations, cancel, todos, providerOf(resolver), projects);
+    frame.useInformationInputs(inputs);
+    when(store.byCaller("enzo", null, null, 50))
+        .thenReturn(
+            List.of(
+                run("orc_open", "enzo", OrchestrationState.FINISHED),
+                run("orc_hidden", "enzo", OrchestrationState.FINISHED)));
+    when(store.filtersReadableLogs()).thenReturn(false);
+    when(inputs.logAllowed("orc_open", "enzo")).thenReturn(true);
+    when(inputs.logAllowed("orc_hidden", "enzo")).thenReturn(false);
+    when(store.stalledSince(List.of("orc_open"))).thenReturn(Map.of());
+
+    Outcome outcome = frame.list(Map.of(), new Asking("tab-1", "enzo"));
+
+    assertEquals(
+        List.of("orc_open"),
+        ((Listed) outcome.payload()).orchestrations().stream().map(view -> view.id()).toList());
+    verify(store, times(1)).stalledSince(List.of("orc_open"));
   }
 
   @Test

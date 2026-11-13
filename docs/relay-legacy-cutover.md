@@ -38,6 +38,12 @@ invent a fresh admission for an old task.
 
 ## Upgrade and history
 
+After merging main on 14 November 2026, its shipped V238–V241 remain unchanged;
+the unshipped Relay sequence is V242–V255, with retirement at V255. See the
+[version mapping](relay-review-task-graph.md#main-branch-integration-14-november-2026).
+Feature databases using the former branch-only numbers require explicit history
+reconciliation; renumbering source files does not repair an applied history.
+
 The retirement migration must acquire exclusive locks on the old outgoing tables
 before checking their state. Stop old servers and adapters during this schema
 cutover. Mixed old/new writers are unsupported.

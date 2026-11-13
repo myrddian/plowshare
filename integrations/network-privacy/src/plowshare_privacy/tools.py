@@ -4,6 +4,16 @@ The scan tool admits work through Relay. Read tools inspect adapter-owned receip
 so collection completion is never confused with publication or an agent report.
 No caller can supply an address, port, executable, filesystem path or server origin.
 Device tools select among the current monitored inventory by MAC identity only.
+
+The assistant's request and record tools queue work and write records through the
+same services the dashboard uses: ``DeepScanner.request``,
+``DeviceAssessments.assess`` and ``ProfileManagement.save``. They never reach
+monitor settings, connections, credentials, the schedule, the time zone or limits.
+
+``network.request_reference`` asks the owner for vendor documentation the library
+lacks. It records the product, the question and an optional device through a
+``ReferenceRequestService``; it accepts no link and fetches nothing, so text in
+the question, links included, is only ever read by the owner.
 """
 
 from __future__ import annotations
@@ -11,7 +21,10 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
-from typing import Callable, Literal, Protocol
+from typing import TYPE_CHECKING, Callable, Literal, Protocol
+from uuid import UUID, uuid5
+
+from plowshare import Refusal, TransportError
 
 from .collection import scope_fingerprint
 from .contracts import (
@@ -21,8 +34,10 @@ from .contracts import (
     DnsWindow,
     Evidence,
     TcpObservation,
+    household_day,
     integer,
     object_fields,
+    utc_now,
     uuid,
 )
 from .device_dossier import (
@@ -34,16 +49,40 @@ from .device_dossier import (
     parse_device_id,
 )
 from .device_inventory import DeviceCard, DeviceInventory
+from .device_profiles import (
+    NOTES_LIMIT,
+    ProfileFields,
+    ProfileIntent,
+    ProfileManagement,
+)
+from .diagnostics import refusal_detail
+from .issue_records import IssueManagement
 from .journal import Publication, Receipt, ScanOrigin
 from .limits import BATCH_SIZE, MAX_CHANGES, MAX_TARGETS, TOOL_REPLY_BYTES
-from .worker import Worker
+from .privacy_issues import (
+    APPLICABILITY,
+    LINK_NOTES_LIMIT,
+    MITIGATION_STATUSES,
+    IssueLink,
+    IssueValidation,
+    needs_explanation,
+)
+from .reference_seed import product_slug
+from .worker import ReconciliationRequired, Worker
+
+if TYPE_CHECKING:
+    # Both modules import this one for ``monitored_devices``.
+    from .deep_scan import DeepScanView
+    from .device_assessments import AssessmentView
 
 
 @dataclass(frozen=True)
 class ToolDefinition:
+    """One capability. ``request`` queues collector work; ``write`` saves a record."""
+
     name: str
     description: str
-    effect: Literal["read", "relay_submission"]
+    effect: Literal["read", "relay_submission", "request", "write"]
     parameter: Literal["request_id", "scan_id", "device_id"] | None = None
 
 
@@ -93,7 +132,62 @@ DEFINITIONS = (
         "read",
         "device_id",
     ),
+    ToolDefinition(
+        "network.request_deep_scan",
+        "Queue a deep port scan of one monitored device (a device_id from network_devices). The scan is queued, not done; the reply gives its state.",
+        "request",
+        "device_id",
+    ),
+    ToolDefinition(
+        "network.request_assessment",
+        "Ask the collector to start an assessment of one monitored device. The collector's usual rules apply (one at a time, a daily allowance); a refusal says why. Started is not finished.",
+        "request",
+        "device_id",
+    ),
+    ToolDefinition(
+        "network.note_profile",
+        "Add a note to a monitored device's profile, saved as a dated line attributed to Privacy Watch. A device without a profile gets a minimal one named after it. It only appends notes.",
+        "write",
+        "device_id",
+    ),
+    ToolDefinition(
+        "network.record_issue",
+        "Link an existing privacy issue (an issue_id from the project's issues) to a monitored device and record mitigation progress on its profile. It cannot create issues: new issues are recorded by the user on the dashboard. Recording progress changes nothing on the network.",
+        "write",
+        "device_id",
+    ),
+    ToolDefinition(
+        "network.request_reference",
+        "Ask the owner to add vendor documentation for a product when the reference library cannot answer a question. It records the product, the unanswered question and optionally the device; it takes no link and fetches nothing. The request is queued for the owner, not answered.",
+        "request",
+        None,
+    ),
 )
+
+# The assistant's request and record tools. They are served to the agent through
+# the native provider only, which supplies the harness invocation identity and
+# the services; the dashboard's HTTP tool boundary does not offer them.
+AGENT_ONLY = frozenset(
+    definition.name
+    for definition in DEFINITIONS
+    if definition.effect in ("request", "write")
+)
+
+# Assistant note bounds. A link's note keeps room for its attribution, whose
+# date is always ten characters.
+NOTE_LIMIT = 1024
+ATTRIBUTION = "Privacy Watch, {day}: "
+LINK_NOTE_LIMIT = LINK_NOTES_LIMIT - len(ATTRIBUTION.format(day="YYYY-MM-DD"))
+QUESTION_LIMIT = 512
+UNKNOWN_DEVICE = "Choose a monitored device with a confirmed MAC address (a device_id from network_devices)."
+
+
+class ToolRefusal(ValueError):
+    """A refusal written for the agent to pass on to the user.
+
+    Its text is fixed wording or a service's own explanation; it never echoes a
+    caller-supplied value.
+    """
 
 
 @dataclass(frozen=True)
@@ -182,6 +276,59 @@ class DeviceCall:
         parse_device_id(self.device_id)
 
 
+@dataclass(frozen=True)
+class DeepScanRequestCall:
+    device_id: str
+
+
+@dataclass(frozen=True)
+class AssessmentRequestCall:
+    device_id: str
+
+
+@dataclass(frozen=True)
+class NoteProfileCall:
+    """``request_id`` is the harness invocation, never a model-supplied value."""
+
+    device_id: str
+    note: str
+    request_id: str
+
+
+@dataclass(frozen=True)
+class RecordIssueCall:
+    """Link ``issue_id`` to the device's profile; ``request_id`` as for notes."""
+
+    device_id: str
+    issue_id: str
+    applicability: str
+    mitigation_status: str | None
+    note: str | None
+    request_id: str
+
+
+@dataclass(frozen=True)
+class ReferenceRequestCall:
+    """Ask the owner for documentation. ``request_id`` is the harness invocation.
+
+    ``question`` is plain text for the owner to read; nothing in it is fetched.
+    ``device_id``, when given, is a currently monitored device.
+    """
+
+    product: str
+    question: str
+    device_id: str | None
+    request_id: str
+
+
+AssistantCall = (
+    DeepScanRequestCall
+    | AssessmentRequestCall
+    | NoteProfileCall
+    | RecordIssueCall
+    | ReferenceRequestCall
+)
+
 ToolCall = (
     ScopeCall
     | ScanCall
@@ -191,11 +338,133 @@ ToolCall = (
     | DestinationsCall
     | DevicesCall
     | DeviceCall
+    | AssistantCall
 )
 
 
-def decode_call(name: str, arguments: object) -> ToolCall:
-    """Reject unknown capabilities and all parameters outside the fixed contract."""
+def _note(value: object, limit: int, field: str = "note") -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > limit
+        or any((ord(c) < 32 and c != "\n") or ord(c) == 127 for c in value)
+    ):
+        raise ToolRefusal(
+            f"The {field} must be 1-{limit} characters of text, with no control characters except new lines."
+        )
+    return value
+
+
+def _assistant_call(
+    name: str, arguments: object, request_id: str | None
+) -> AssistantCall:
+    """Decode an assistant tool call; every failure is a ``ToolRefusal``.
+
+    A missing harness invocation is a ``ValueError``: it is a caller defect,
+    not something the agent could correct.
+    """
+    if name == "network.request_reference":
+        return _reference_call(arguments, request_id)
+    optional = {
+        "network.note_profile": set(),
+        "network.record_issue": {"mitigation_status", "note"},
+    }.get(name, set())
+    required = {
+        "network.note_profile": {"device_id", "note"},
+        "network.record_issue": {"device_id", "issue_id", "applicability"},
+    }.get(name, {"device_id"})
+    try:
+        row = object_fields(arguments, required, optional)
+    except ValueError:
+        raise ToolRefusal(
+            "The arguments do not match this tool's parameters; nothing ran."
+        ) from None
+    try:
+        device = parse_device_id(row["device_id"])
+    except ValueError:
+        raise ToolRefusal(UNKNOWN_DEVICE) from None
+    if name == "network.request_deep_scan":
+        return DeepScanRequestCall(device)
+    if name == "network.request_assessment":
+        return AssessmentRequestCall(device)
+    if request_id is None:
+        raise ValueError("A write needs the harness invocation identity")
+    request = uuid(request_id)
+    if name == "network.note_profile":
+        return NoteProfileCall(device, _note(row["note"], NOTE_LIMIT), request)
+    try:
+        issue = uuid(row["issue_id"])
+    except ValueError:
+        raise ToolRefusal(
+            "The issue_id must be the canonical UUID of an existing privacy issue."
+        ) from None
+    applicability = row["applicability"]
+    if applicability not in APPLICABILITY:
+        raise ToolRefusal(
+            "The applicability must be one of: "
+            + ", ".join(sorted(APPLICABILITY))
+            + "."
+        )
+    status = row.get("mitigation_status")
+    if status is not None and status not in MITIGATION_STATUSES:
+        raise ToolRefusal(
+            "The mitigation_status must be one of: "
+            + ", ".join(sorted(MITIGATION_STATUSES))
+            + "."
+        )
+    note = row.get("note")
+    return RecordIssueCall(
+        device,
+        issue,
+        applicability,
+        status,
+        _note(note, LINK_NOTE_LIMIT) if note is not None else None,
+        request,
+    )
+
+
+def _reference_call(arguments: object, request_id: str | None) -> ReferenceRequestCall:
+    # The fixed fields are the whole contract: a ``url`` or any other key is
+    # refused, so the agent can never name a source to fetch.
+    try:
+        row = object_fields(arguments, {"product", "question"}, {"device_id"})
+    except ValueError:
+        raise ToolRefusal(
+            "The arguments do not match this tool's parameters; nothing ran."
+        ) from None
+    try:
+        product = product_slug(row["product"])
+    except ValueError as error:
+        # The slug rule's fixed wording; it does not echo the value.
+        raise ToolRefusal(str(error)) from None
+    question = _note(row["question"], QUESTION_LIMIT, "question")
+    device = None
+    if row.get("device_id") is not None:
+        try:
+            device = parse_device_id(row["device_id"])
+        except ValueError:
+            raise ToolRefusal(UNKNOWN_DEVICE) from None
+    if request_id is None:
+        raise ValueError("A reference request needs the harness invocation identity")
+    return ReferenceRequestCall(product, question, device, uuid(request_id))
+
+
+def decode_call(
+    name: str, arguments: object, *, request_id: str | None = None
+) -> ToolCall:
+    """Reject unknown capabilities and all parameters outside the fixed contract.
+
+    ``request_id`` is the harness invocation identity; only the assistant's write
+    tools and reference requests use it, as their idempotency key.
+    """
+    if name in (
+        "network.request_deep_scan",
+        "network.request_assessment",
+        "network.note_profile",
+        "network.record_issue",
+        "network.request_reference",
+    ):
+        return _assistant_call(name, arguments, request_id)
     if name in ("network.scope", "network.scan_list"):
         row = object_fields(arguments, set(), {"offset", "limit"})
         offset = integer(row.get("offset", 0), 0, 1000)
@@ -368,6 +637,30 @@ class DevicesResult:
     next_offset: int | None
 
 
+@dataclass(frozen=True)
+class WorkRequestResult:
+    """The state after a request: queued or running, not finished.
+
+    A reference request need not name a device; its ``device_id`` is then empty.
+    """
+
+    device_id: str
+    work: Literal["deep_scan", "assessment", "reference"]
+    state: str
+    detail: str | None
+
+
+@dataclass(frozen=True)
+class ProfileWriteResult:
+    """A profile write's receipt. ``pending`` is unconfirmed and never resent."""
+
+    device_id: str
+    profile_id: str
+    request_id: str
+    phase: Literal["pending", "confirmed", "refused"]
+    revision: str | None
+
+
 EvidenceRecord = TcpObservation | DnsObservation | DeviceIdentity | str
 
 
@@ -415,6 +708,8 @@ ToolResult = (
     | EvidencePageResult
     | DevicesResult
     | DeviceDossier
+    | WorkRequestResult
+    | ProfileWriteResult
 )
 
 
@@ -442,16 +737,62 @@ class PrivacyTools(Protocol):
     async def execute(self, call: ToolCall) -> ToolResult: ...
 
 
+class DeepScanRequests(Protocol):
+    """``DeepScanner.request``: queue an operator scan, idempotent per device."""
+
+    def request(self, device_id: str) -> DeepScanView: ...
+
+
+class AssessmentRequests(Protocol):
+    """``DeviceAssessments.assess``: admit an operator assessment under its rules."""
+
+    async def assess(self, device_id: str) -> AssessmentView: ...
+
+
+@dataclass(frozen=True)
+class ReferenceRequestOutcome:
+    """A reference request's recorded state and a sentence for the agent."""
+
+    state: str
+    detail: str
+
+
+class ReferenceRequestService(Protocol):
+    """Record an owner-facing request for documentation; never fetch anything.
+
+    ``request_id`` is the harness invocation and the request's idempotency key:
+    a repeat with the same identity returns the earlier outcome rather than
+    queueing twice. Refusals meant for the agent are raised as ``ToolRefusal``
+    with fixed wording.
+    """
+
+    def request(
+        self, product: str, question: str, device_id: str | None, request_id: str
+    ) -> ReferenceRequestOutcome: ...
+
+
 class WorkerTools:
     def __init__(
         self,
         worker: Worker,
         inventory: Callable[[], DeviceInventory] | None = None,
+        *,
+        deep_scans: DeepScanRequests | None = None,
+        assessments: AssessmentRequests | None = None,
+        profiles: ProfileManagement | None = None,
+        issues: IssueManagement | None = None,
+        references: ReferenceRequestService | None = None,
+        clock: Callable[[], str] = utc_now,
     ):
         self.worker = worker
         # Device tools read the worker's shared inventory projection, the same
         # one the dashboard draws, unless a caller supplies a fixed source.
         self.inventory = inventory if inventory is not None else worker.device_inventory
+        # The assistant's request and record services; None refuses the tool.
+        self.deep_scans, self.assessments = deep_scans, assessments
+        self.profiles, self.issues = profiles, issues
+        self.references = references
+        self.clock = clock
 
     def summary(self, receipt: Receipt) -> ScanSummary:
         evidence = receipt.evidence
@@ -477,6 +818,17 @@ class WorkerTools:
         return EvidenceResult(receipt.revision, receipt.evidence)
 
     async def execute(self, call: ToolCall) -> ToolResult:
+        if isinstance(
+            call,
+            (
+                DeepScanRequestCall,
+                AssessmentRequestCall,
+                NoteProfileCall,
+                RecordIssueCall,
+                ReferenceRequestCall,
+            ),
+        ):
+            return await self.assist(call)
         if isinstance(call, ScopeCall):
             plan = self.worker.config.collection
             if not 0 <= call.offset <= len(plan.targets):
@@ -608,6 +960,265 @@ class WorkerTools:
             return legacy
         return self.page(result, "dns", call.offset, call.limit)
 
+    # The assistant's request and record tools. Every refusal is a ToolRefusal.
+
+    def _card(self, device_id: str) -> DeviceCard:
+        card = next(
+            (c for d, c in monitored_devices(self.inventory()) if d == device_id),
+            None,
+        )
+        if card is None:
+            raise ToolRefusal(UNKNOWN_DEVICE)
+        return card
+
+    def _day(self) -> str:
+        return household_day(self.clock(), self.worker.config.zone).isoformat()
+
+    async def assist(self, call: AssistantCall) -> ToolResult:
+        if isinstance(call, DeepScanRequestCall):
+            if self.deep_scans is None:
+                raise ToolRefusal("Deep scans are not enabled on this collector.")
+            self._card(call.device_id)
+            try:
+                scan = self.deep_scans.request(call.device_id)
+            except LookupError:
+                raise ToolRefusal(UNKNOWN_DEVICE) from None
+            except ValueError as error:
+                # The scanner's fixed reason, such as no identity source.
+                raise ToolRefusal(str(error)) from None
+            return WorkRequestResult(
+                call.device_id, "deep_scan", scan.state, scan.detail
+            )
+        if isinstance(call, AssessmentRequestCall):
+            return await self._assess(call)
+        if isinstance(call, ReferenceRequestCall):
+            if self.references is None:
+                raise ToolRefusal(
+                    "Reference requests are not enabled on this collector."
+                )
+            if call.device_id is not None:
+                self._card(call.device_id)
+            outcome = self.references.request(
+                call.product, call.question, call.device_id, call.request_id
+            )
+            return WorkRequestResult(
+                call.device_id or "", "reference", outcome.state, outcome.detail
+            )
+        if isinstance(call, RecordIssueCall) and self.issues is None:
+            raise ToolRefusal("Privacy issues are not enabled on this collector.")
+        if self.profiles is None:
+            raise ToolRefusal("Device profiles are not enabled on this collector.")
+        if isinstance(call, NoteProfileCall):
+            card = self._card(call.device_id)
+            line = "Noted by " + ATTRIBUTION.format(day=self._day()) + call.note
+
+            def noted(base: ProfileFields) -> ProfileFields:
+                notes = base.notes
+                if notes and not notes.endswith("\n"):
+                    notes += "\n"
+                notes += line
+                if len(notes) > NOTES_LIMIT:
+                    raise ToolRefusal(
+                        f"The profile's notes would pass their {NOTES_LIMIT}-character limit. The user can tidy them on the dashboard."
+                    )
+                return replace(base, notes=notes)
+
+            prior = self._prior(self.profiles, call.device_id, call.request_id)
+            if prior is not None:
+                return prior
+            return await self._write_profile(
+                self.profiles, call.device_id, call.request_id, card, noted
+            )
+        assert self.issues is not None
+        return await self._record_issue(self.profiles, self.issues, call)
+
+    async def _assess(self, call: AssessmentRequestCall) -> WorkRequestResult:
+        # Imported here: device_assessments imports this module.
+        from .device_assessments import AssessmentConflict
+
+        if self.assessments is None:
+            raise ToolRefusal("Device assessments are not enabled on this collector.")
+        self._card(call.device_id)
+        try:
+            view = await self.assessments.assess(call.device_id)
+        except LookupError:
+            raise ToolRefusal(UNKNOWN_DEVICE) from None
+        except (AssessmentConflict, ReconciliationRequired, ValueError) as error:
+            # The service's own reason: one at a time, the daily allowance, or a
+            # journal needing inspection.
+            raise ToolRefusal(str(error)) from None
+        except Refusal as error:
+            raise ToolRefusal(
+                refusal_detail(error, "preparing this assessment")
+            ) from None
+        except TransportError:
+            raise ToolRefusal(
+                "Plowshare did not answer while preparing the assessment. Nothing was started; ask again later."
+            ) from None
+        return WorkRequestResult(
+            call.device_id, "assessment", view.state, view.detail or view.assess_note
+        )
+
+    async def _record_issue(
+        self,
+        profiles: ProfileManagement,
+        issues: IssueManagement,
+        call: RecordIssueCall,
+    ) -> ProfileWriteResult:
+        card = self._card(call.device_id)
+        prior = self._prior(profiles, call.device_id, call.request_id)
+        if prior is not None:
+            return prior
+        try:
+            listed = await issues.list()
+        except (ValueError, Refusal, TransportError):
+            raise ToolRefusal(
+                "The project's privacy issues could not be read just now; nothing was saved."
+            ) from None
+        head = next((v for v in listed if v.issue.issue_id == call.issue_id), None)
+        if head is None:
+            raise ToolRefusal(
+                "That privacy issue is not in this project's issue list. This tool cannot create issues; the user records new ones on the dashboard."
+            )
+        note = (
+            ATTRIBUTION.format(day=self._day()) + call.note
+            if call.note is not None
+            else None
+        )
+
+        def linked(base: ProfileFields) -> ProfileFields:
+            old = next((v for v in base.issues if v.issue_id == call.issue_id), None)
+            status = call.mitigation_status or (
+                old.mitigation_status if old else "proposed"
+            )
+            # A confirmation or performed action this call records must be
+            # explained now; an unchanged one keeps the explanation it has.
+            unchanged = old is not None and (
+                old.applicability,
+                old.mitigation_status,
+            ) == (
+                call.applicability,
+                status,
+            )
+            if (
+                note is None
+                and needs_explanation(call.applicability, status)
+                and not unchanged
+            ):
+                raise ToolRefusal(
+                    "A note is required: confirmed_affected, and the applied, verified and reverted statuses, need a short explanation of what was found or done."
+                )
+            link = IssueLink(
+                call.issue_id,
+                head.revision,
+                call.applicability,
+                status,
+                note if note is not None else (old.notes if old else ""),
+                old.evidence if old else (),
+            )
+            links = (
+                tuple(link if v.issue_id == call.issue_id else v for v in base.issues)
+                if old
+                else base.issues + (link,)
+            )
+            return replace(base, issues=links)
+
+        return await self._write_profile(
+            profiles, call.device_id, call.request_id, card, linked
+        )
+
+    def _prior(
+        self, profiles: ProfileManagement, device_id: str, request_id: str
+    ) -> ProfileWriteResult | None:
+        """The earlier write of a replayed invocation, returned instead of a second one.
+
+        The change is recomputed from the current profile, so a replay after the
+        first write landed would build different fields under the same request
+        identity; the receipt is the answer.
+        """
+        try:
+            prior = next(
+                (v for v in profiles.writes() if v.request_id == request_id), None
+            )
+        except ValueError:
+            raise ToolRefusal(
+                "The profile write journal needs inspection on the dashboard; nothing was saved."
+            ) from None
+        return self._receipt(device_id, prior) if prior is not None else None
+
+    @staticmethod
+    def _receipt(device_id: str, intent: ProfileIntent) -> ProfileWriteResult:
+        return ProfileWriteResult(
+            device_id,
+            intent.profile_id,
+            intent.request_id,
+            intent.phase,
+            intent.revision,
+        )
+
+    async def _write_profile(
+        self,
+        profiles: ProfileManagement,
+        device_id: str,
+        request_id: str,
+        card: DeviceCard,
+        change: Callable[[ProfileFields], ProfileFields],
+    ) -> ProfileWriteResult:
+        """Apply ``change`` to the device's confirmed-MAC profile and save it once.
+
+        The profile is chosen by the device pane's rule: the one profile confirmed
+        for the card's MAC. Several, or an address-only profile at the device's
+        address, are left to the user on the dashboard. With none, a minimal
+        profile named after the device is created and bound to its MAC;
+        ``DeviceProfiles.save`` then requires a fresh matching MAC sighting.
+        ``request_id`` is the save's idempotency key; callers check ``_prior``
+        first.
+        """
+        assert card.identity is not None and card.identity.mac is not None
+        mac = card.identity.mac
+        try:
+            views = await profiles.list()
+            confirmed = [v for v in views if v.profile.fields.device_mac == mac]
+            if len(confirmed) > 1:
+                raise ToolRefusal(
+                    "Several profiles claim this device. The user can review them on the dashboard."
+                )
+            if confirmed:
+                current = confirmed[0]
+                identity: str = current.profile.profile_id
+                expected: str | None = current.revision
+                base = current.profile.fields
+            else:
+                if any(
+                    v.profile.fields.device_mac is None
+                    and card.address in v.profile.fields.addresses
+                    for v in views
+                ):
+                    raise ToolRefusal(
+                        "This device's address has an older profile without a confirmed MAC. The user can review it on the dashboard first."
+                    )
+                identity = str(uuid5(UUID(request_id), "network-privacy-profile"))
+                expected = None
+                base = _minimal_profile(card, mac)
+            intent = await profiles.save(identity, request_id, expected, change(base))
+        except ToolRefusal:
+            raise
+        except (ReconciliationRequired, IssueValidation) as error:
+            raise ToolRefusal(str(error)) from None
+        except Refusal as error:
+            raise ToolRefusal(
+                refusal_detail(error, "saving the device profile")
+            ) from None
+        except TransportError:
+            raise ToolRefusal(
+                "Plowshare did not confirm the profile write. It will not be resent; the user can check it on the dashboard."
+            ) from None
+        except ValueError as error:
+            # DeviceProfiles' own fixed explanations, such as a stale MAC
+            # sighting, an unresolvable issue revision or a full document.
+            raise ToolRefusal(str(error)) from None
+        return self._receipt(device_id, intent)
+
     def devices(self, call: DevicesCall) -> DevicesResult:
         inventory = self.inventory()
         cards = monitored_devices(inventory)
@@ -698,3 +1309,13 @@ class WorkerTools:
         if not tool_fits(page):
             raise ValueError("Evidence record exceeds the tool page budget")
         return page
+
+
+def _minimal_profile(card: DeviceCard, mac: str) -> ProfileFields:
+    """A profile with only the device's name, address and confirmed MAC."""
+    name = card.name.strip()[:128]
+    try:
+        return ProfileFields(name, "", "", "", "", "", (card.address,), (), mac)
+    except ValueError:
+        # A device-reported name that is not valid profile text.
+        return ProfileFields(mac, "", "", "", "", "", (card.address,), (), mac)

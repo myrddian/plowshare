@@ -114,9 +114,13 @@ of framed disclosure panels.
    "Not measured" is written differently from zero ("No DNS profile" versus
    `0`).
 2. **One bold object.** The Overview altarpiece (three leaves and a base strip)
-   is the only ornate element and the only place with motion: the wings open
-   once when the dashboard first appears. Nothing else animates, and
-   `prefers-reduced-motion` removes it.
+   is the only ornate element: its wings open once when the dashboard first
+   appears. The only other motion stands for work in progress in Ask: the
+   working row's three small gilt diamonds, the conversation state marker
+   while a turn runs and the marker on each hand-off still waiting (in the
+   drawer and on its button). Each one
+   always sits next to words that say what is happening. Nothing else
+   animates, and `prefers-reduced-motion` stills all of it.
 3. **Angles are structure.** A cut corner means "this is a framed container or
    a control". A filled triangle means "a limit of the evidence" or "this
    expands". A hollow diamond marks the cyan visibility gap. No shape is
@@ -224,6 +228,7 @@ in `style.css`; a one-off value is a defect.
 | Tag, badge, chip | `.tag`, `.badge` / `.status-line`, `button.chip` | A tag is a framed fact (mode, schedule state, the cyan signal). A badge or status line is a state word in gilt, always sentence case through `statusLabel`. A chip is a filter toggle with `aria-pressed`. |
 | Attention band | `section.attention` > `ul.attention-items` > `li.attention-item`, built by `attentionItem(figure, title, detail, label, action)`; `p.all-clear` when empty | First on Overview. One row per kind of item that needs the operator: a count in the display face, what it is, and the one `.secondary` action that deals with it. Rebuilt from each refresh, so a settled item leaves on its own. Counts only devices in the current inventory. |
 | Deep port scan | `section.pane-section` titled "Deep port scan", its body `.deep-scan-block` rebuilt in place by `showDeepScan`; Settings field `#deep-scan-limit` | Sits after the assessment in the device pane. Shows state, progress while queued or running, and the ports of the latest complete scan as a fact list; "Deep-scan this device" is `.secondary`. A device with no confirmed MAC, or a collector without identity sources, gets a `p.hint.unmeasured` saying why, never an empty state. |
+| Ask tab | `#tab-ask` with `#ask-badge`, panel `#view-ask`; Settings fields `#ask-max-calls`, `#ask-max-turns` (labelled "Steps per request", a runaway guard), `#ask-top-up` | A conversation with the privacy assistant. Sending is blocked while a turn runs; an uncertain send reads "Not confirmed as sent" and is never resent. "Top up" is a `confirmedAction` shown only when the allowance is used. A new answer raises a badge and a mild attention item ("Open Ask"); a paused conversation raises "Privacy Watch is paused". |
 
 ### Copy
 
@@ -272,3 +277,15 @@ in `style.css`; a one-off value is a defect.
   item in the attention band. It clears when the device is assessed again (an
   assessment requested after the scan finished) or a
   later complete scan finds none of those ports open.
+- **Ask is a conversation, not a control panel.** The assistant answers, queues
+  work through the collector's own rules and tracks mitigation; it cannot create
+  issues or change settings, so those stay on the dashboard. Top up is offered
+  only at the moment the allowance runs out, behind a confirmation that states
+  its cost, and an unconfirmed send is reported and never repeated.
+- **Ask fills the window.** It is the one tab without the 1320px cap: the
+  conversation takes everything below the tabs and scrolls on its own, read in
+  a centred 760px column. Answer tables may widen past the column, framed, up
+  to the window width. The question box sits in flow at the bottom, so it never
+  covers the last message, with a fade that makes it read as floating; the
+  working row, the paused notice and the "New reply" chip sit just above it.
+  Handed-off work opens in a drawer on the right from the "Handed off" button.

@@ -94,7 +94,7 @@ derived expiry across tables, combined age and count pressure with an `OR`, and
 sorted the result. Short-lived topic churn therefore imposed work on later
 sweeps even when few topics were due.
 
-V241 backfills `oldest_published_at` and `prune_at` once from retained prefixes.
+V245 backfills `oldest_published_at` and `prune_at` once from retained prefixes.
 The broker maintains both under the existing topic lock:
 
 - The first append to an empty retained suffix sets its oldest publication and

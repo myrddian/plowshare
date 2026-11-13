@@ -52,6 +52,7 @@
         <button id="tab-devices" type="button" role="tab" aria-selected="false" aria-controls="view-devices" tabindex="-1">Devices</button>
         <button id="tab-findings" type="button" role="tab" aria-selected="false" aria-controls="view-findings" tabindex="-1">Findings</button>
         <button id="tab-evidence" type="button" role="tab" aria-selected="false" aria-controls="view-evidence" tabindex="-1">Evidence</button>
+        <button id="tab-ask" type="button" role="tab" aria-selected="false" aria-controls="view-ask" tabindex="-1" hidden>Ask<span id="ask-badge" class="ask-badge" role="img" aria-label="New answer" hidden>•</span></button>
         <button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="view-settings" tabindex="-1">Settings</button>
       </nav>
       <div class="view-heading">
@@ -294,13 +295,15 @@
         <section id="background-assessments" class="panel" hidden>
           <div class="panel-heading"><h2>Background device assessments</h2></div>
           <div class="panel-body">
-            <p>Assess devices with Plowshare without being asked: first devices with a signal that were never assessed, then never-assessed devices that described themselves, then devices whose signals or reported facts changed since their last assessment. Each assessment uses model calls and report-processing allowance.</p>
-            <form id="assessment-settings" class="inline-form">
-              <label>Background assessments per day<input id="assessment-limit" type="number" min="0" max="12" step="1" inputmode="numeric" required></label>
-              <button type="submit">Save limit</button>
-            </form>
-            <p class="hint">0 turns background assessment off. One assessment runs at a time, and a device awaiting your review is not assessed again. Assessments you start from a device count toward the same day, up to 12 in all.</p>
-            <p id="assessment-settings-detail" role="status" class="hint"></p>
+            <div id="assessment-group">
+              <p>Assess devices with Plowshare without being asked: first devices with a signal that were never assessed, then never-assessed devices that described themselves, then devices whose signals or reported facts changed since their last assessment. Each assessment uses model calls and report-processing allowance.</p>
+              <form id="assessment-settings" class="inline-form">
+                <label>Background assessments per day<input id="assessment-limit" type="number" min="0" max="12" step="1" inputmode="numeric" required></label>
+                <button type="submit">Save limit</button>
+              </form>
+              <p class="hint">0 turns background assessment off. One assessment runs at a time, and a device awaiting your review is not assessed again. Assessments you start from a device count toward the same day, up to 12 in all.</p>
+              <p id="assessment-settings-detail" role="status" class="hint"></p>
+            </div>
             <div id="deep-scan-group" hidden>
               <form id="deep-scan-settings" class="inline-form">
                 <label>Automatic deep scans per day<input id="deep-scan-limit" type="number" min="0" max="12" step="1" inputmode="numeric" required></label>
@@ -308,6 +311,17 @@
               </form>
               <p class="hint">0 turns them off. Each scan probes all 65,535 TCP ports of one flagged device. Before raising this on a network with UniFi threat detection, check it will not block the collector. Scans you start yourself are not limited.</p>
               <p id="deep-scan-detail" role="status" class="hint"></p>
+            </div>
+            <div id="ask-group" hidden>
+              <h3>Privacy Watch conversation</h3>
+              <form id="ask-settings" class="form-grid">
+                <label>Model calls<input id="ask-max-calls" type="number" min="1" max="200" step="1" inputmode="numeric" required></label>
+                <label>Steps per request<input id="ask-max-turns" type="number" min="1" max="200" step="1" inputmode="numeric" required></label>
+                <label>Top-up size<input id="ask-top-up" type="number" min="1" max="200" step="1" inputmode="numeric" required></label>
+                <div class="actions"><button id="ask-settings-save" type="submit">Save limits</button></div>
+              </form>
+              <p class="hint">These limit how much one conversation can spend. Steps per request is a runaway guard: one request that needs more steps stops and asks you to ask again. Top up adds the top-up size when you choose.</p>
+              <p id="ask-settings-detail" role="status" class="hint"></p>
             </div>
           </div>
         </section>
@@ -351,6 +365,36 @@
           <section id="evidence-panel" class="panel reader-panel"><div class="panel-heading"><h2>Collection evidence</h2><span id="selection">Select a collection</span><button id="close-evidence" type="button" class="quiet reader-close">Close</button></div><div id="evidence" class="evidence"><p class="empty">Each collection keeps its scope, observations, changes and gaps. Select one to inspect the evidence.</p></div></section>
         </div>
         <p class="limit footnote">An observed DNS lookup does not reveal its encrypted payload. A published collection does not mean an investigation has finished. Missing sources remain visible as gaps.</p>
+      </section>
+
+      <section id="view-ask" class="ask-view" role="tabpanel" aria-labelledby="tab-ask" hidden>
+        <h2 class="vh">Conversation</h2>
+        <div id="ask-conversation" class="ask-conversation" role="log" aria-live="polite" tabindex="0" aria-label="Conversation with Privacy Watch"></div>
+        <div class="ask-dock">
+          <button id="ask-jump" class="secondary ask-jump" type="button" hidden>New reply</button>
+          <section id="ask-pause" class="panel ask-pause" hidden></section>
+          <div id="ask-working" class="ask-working" role="status" hidden>
+            <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="ask-working-text" class="ask-working-text"></span>
+            <span id="ask-working-time" class="ask-working-time"></span>
+          </div>
+          <form id="ask-form" class="ask-form panel">
+            <label for="ask-input" class="vh">Your question</label>
+            <textarea id="ask-input" rows="2" maxlength="4000" placeholder="Ask about a device, a finding or what changed…" aria-describedby="ask-hint ask-keys"></textarea>
+            <p id="ask-hint" role="status" class="hint"></p>
+            <div class="ask-composer-foot">
+              <span id="ask-state" class="ask-state">Ready</span>
+              <span id="ask-keys" class="hint">Enter sends. Shift+Enter adds a line.</span>
+              <button id="ask-handed" class="quiet ask-handed-toggle" type="button" aria-expanded="false" aria-controls="ask-drawer">Handed off</button>
+              <button id="ask-send" type="submit">Ask</button>
+            </div>
+          </form>
+        </div>
+        <aside id="ask-drawer" class="ask-drawer panel" aria-labelledby="ask-drawer-title" tabindex="-1" hidden>
+          <div class="ask-drawer-head"><h2 id="ask-drawer-title">Handed off</h2><button id="ask-drawer-close" class="quiet" type="button">Close</button></div>
+          <section class="ask-drawer-group"><h3>Waiting on</h3><div id="ask-waiting" class="entries"></div></section>
+          <section class="ask-drawer-group"><h3>Done</h3><div id="ask-done" class="entries"></div></section>
+        </aside>
       </section>
 
       <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
@@ -400,6 +444,27 @@
             <dl id="background-usage" class="facts"></dl>
             <p class="hint">Days follow the household time zone above. Change these on the Devices tab, where their drafts and reports are reviewed.</p>
             <div class="actions"><button id="open-background" type="button" class="secondary">Open background work on Devices</button></div>
+          </div>
+        </section>
+        <section id="reference-requests" class="panel" hidden>
+          <div class="panel-heading"><h2>Documentation requests</h2><span>Asked for by the Ask assistant</span></div>
+          <div class="panel-body">
+            <p class="hint">The assistant could not answer from what it has. Add links to the product's own documentation and the collector fetches them into the Library, or dismiss the request.</p>
+            <div id="reference-request-list" class="entries"></div>
+          </div>
+        </section>
+        <section id="reference-library" class="panel" hidden>
+          <div class="panel-heading"><h2>Reference library</h2><span>Vendor documentation for the assistant</span></div>
+          <div class="panel-body">
+            <p class="hint">The collector fetches these pages into the Plowshare Library. A page that fails or is held is not retried until you choose Retry.</p>
+            <div id="reference-list" class="entries"></div>
+            <p id="reference-detail" role="status" class="hint"></p>
+            <form id="reference-settings" class="inline-form">
+              <label>Refresh each page every (days)<input id="reference-refresh-days" type="number" min="1" max="365" step="1" inputmode="numeric" required></label>
+              <button type="submit">Save interval</button>
+            </form>
+            <p class="hint">Each ready page is fetched again after this many days, as a new revision of the same Library source. 1 to 365; 90 by default.</p>
+            <p id="reference-settings-detail" role="status" class="hint"></p>
           </div>
         </section>
         <details class="panel">

@@ -110,7 +110,7 @@ class PageExtractorTest {
   void blocks_are_separated_by_a_blank_line_so_structure_survives() {
     String html = page("<article><h1>Heading</h1><p>first</p><p>second</p></article>");
     assertEquals(
-        "Heading\n\nfirst\n\nsecond", PageExtractor.extract(html, "https://e.example").text());
+        "# Heading\n\nfirst\n\nsecond", PageExtractor.extract(html, "https://e.example").text());
   }
 
   @Test
@@ -136,5 +136,60 @@ class PageExtractorTest {
   @Test
   void markup_that_is_not_a_page_yields_empty_text_rather_than_throwing() {
     assertEquals("", PageExtractor.extract("", "https://e.example").text());
+  }
+
+  @Test
+  void table_cells_keep_their_headers_rows_repeated_values_and_empty_positions() {
+    String html =
+        page(
+            """
+        <article><h2>Cash rate target</h2><table>
+          <caption>Decisions</caption>
+          <tr><th>Date</th><th>Change</th><th>Target</th><th>Release</th></tr>
+          <tr><td>November</td><td>+0.25</td><td>4.85</td><td>Statement</td></tr>
+          <tr><td>October</td><td>0.00</td><td>4.85</td><td></td></tr>
+        </table></article>
+        """);
+    assertEquals(
+        "## Cash rate target\n\nDecisions; Date | Change | Target | Release; "
+            + "Date: November | Change: +0.25 | Target: 4.85 | Release: Statement; "
+            + "Date: October | Change: 0.00 | Target: 4.85 | Release: ",
+        PageExtractor.extract(html, "https://e.example").text());
+  }
+
+  @Test
+  void nested_paragraph_tags_do_not_duplicate_list_items_or_quotations() {
+    String html =
+        page(
+            """
+        <article><ul><li><p>First item.</p><p>Its explanation.</p></li>
+        <li>Second item.</li></ul><blockquote><p>Quoted sentence.</p></blockquote></article>
+        """);
+    assertEquals(
+        "First item. Its explanation.\n\nSecond item.\n\nQuoted sentence.",
+        PageExtractor.extract(html, "https://e.example").text());
+  }
+
+  @Test
+  void spanned_tables_do_not_invent_column_associations() {
+    String html =
+        page(
+            """
+        <table><tr><th>Region</th><th>Value</th></tr>
+        <tr><td rowspan="2">North</td><td>10</td></tr>
+        <tr><td>20</td></tr><tr><td>South</td><td>30</td></tr></table>
+        """);
+    assertEquals(
+        "Region | Value; North | 10; 20; South | 30",
+        PageExtractor.extract(html, "https://e.example").text());
+  }
+
+  @Test
+  void headings_preserve_all_levels_and_repeated_section_names() {
+    String html =
+        page("<h2>Details</h2><p>First.</p><h2>Details</h2><h6>Fine print</h6><p>Second.</p>");
+    assertEquals(
+        "## Details\n\nFirst.\n\n## Details\n\n###### Fine print\n\nSecond.",
+        PageExtractor.extract(html, "https://e.example").text());
   }
 }

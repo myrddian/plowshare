@@ -817,20 +817,31 @@ public final class JdbcProcRepository implements ProcRepository {
    * :afterOrdinal}, {@code :afterTool}. The cursor predicate and directions are fixed fragments
    * chosen by booleans, never caller text. The statement returns at most {@code :limit} rows, which
    * the caller sets to the page size plus one continuation row.
+   *
+   * <p>The receipt state is a per-call probe for a matching result entry, served by the V238 {@code
+   * (conversation_id, tool_call_id)} index. It is derived only for the chosen page: a sort must see
+   * every candidate row, so a probe in the inner select list ran once per retained tool call.
+   * Before that index each probe also walked every entry of the conversation, which made a long
+   * transcript quadratic and let the unfiltered newest page reach the read timeout. The {@code
+   * active} filter must still probe before the limit, since it decides which rows are candidates.
    */
   static String toolsSql(boolean active, boolean newest, boolean continued) {
     String direction = newest ? " DESC" : "";
     return TREE
         + """
-          SELECT e.conversation_id||':'||e.ordinal::text||':'||(tool->>'id') AS id,e.conversation_id,e.job_id,
-            tool->>'name' AS name,e.recorded_at,
-            CASE WHEN EXISTS(SELECT 1 FROM entries result WHERE result.conversation_id=e.conversation_id
-              AND result.tool_call_id=tool->>'id') THEN 'RESULT_RECORDED' ELSE 'UNKNOWN' END AS state
+          SELECT page.conversation_id||':'||page.ordinal::text||':'||page.tool_id AS id,
+            page.conversation_id,page.job_id,page.name,page.recorded_at,
+            CASE WHEN EXISTS(SELECT 1 FROM entries result WHERE result.conversation_id=page.conversation_id
+              AND result.tool_call_id=page.tool_id) THEN 'RESULT_RECORDED' ELSE 'UNKNOWN' END AS state
+          FROM (SELECT e.conversation_id,e.ordinal,e.job_id,e.recorded_at,
+            tool->>'id' AS tool_id,tool->>'name' AS name
           """
         + JOIN
         + " JOIN entries e ON e.conversation_id=c.id CROSS JOIN LATERAL "
-        + "jsonb_array_elements(COALESCE(e.tool_calls,'[]'::jsonb)) tool WHERE "
+        + "jsonb_array_elements(e.tool_calls) tool WHERE "
         + WHERE
+        // Answers without calls hold NULL; skipping them avoids expanding an empty document.
+        + " AND e.tool_calls IS NOT NULL"
         + (active
             ? " AND NOT EXISTS(SELECT 1 FROM entries result WHERE result.conversation_id=e.conversation_id AND result.tool_call_id=tool->>'id')"
             : "")
@@ -845,7 +856,12 @@ public final class JdbcProcRepository implements ProcRepository {
         + direction
         + ",tool->>'id'"
         + direction
-        + " LIMIT :limit";
+        + " LIMIT :limit) page ORDER BY page.conversation_id"
+        + direction
+        + ",page.ordinal"
+        + direction
+        + ",page.tool_id"
+        + direction;
   }
 
   @Override

@@ -12,7 +12,7 @@ BEGIN
       OR source->>'messageId' ~ U&'[\0001-\001F\007F-\009F\2028\2029]'
       OR source->>'messageId'<>btrim(source->>'messageId',U&' \1680\2000\2001\2002\2003\2004\2005\2006\2008\2009\200A\205F\3000')
   )) THEN
-    RAISE EXCEPTION 'V247 native ingress preflight refused: invalid retained source identity; inspect and explicitly repair message_external_tasks.source before retrying; no records were removed or guessed';
+    RAISE EXCEPTION 'V251 native ingress preflight refused: invalid retained source identity; inspect and explicitly repair message_external_tasks.source before retrying; no records were removed or guessed';
   END IF;
 END $$;
 ALTER TABLE relay_deliveries ADD COLUMN work_reply_topic TEXT CHECK(length(work_reply_topic) BETWEEN 1 AND 1024);

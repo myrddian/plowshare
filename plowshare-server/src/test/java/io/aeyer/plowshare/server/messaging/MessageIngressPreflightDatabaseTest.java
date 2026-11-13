@@ -21,7 +21,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** Real pre-V247 data, transactional Flyway refusal and retained source/ID conservation. */
+/** Real pre-V251 data, transactional Flyway refusal and retained source/ID conservation. */
 @Tag("full-db")
 @Testcontainers
 class MessageIngressPreflightDatabaseTest {
@@ -35,7 +35,7 @@ class MessageIngressPreflightDatabaseTest {
     var source =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    Flyway.configure().dataSource(source).target("246").load().migrate();
+    Flyway.configure().dataSource(source).target("250").load().migrate();
     var jdbc = new JdbcTemplate(source);
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('owner','fixture')");
     jdbc.update("INSERT INTO projects(name,workspace) VALUES('project','fixture')");
@@ -82,11 +82,11 @@ class MessageIngressPreflightDatabaseTest {
       var failed =
           assertThrows(
               FlywayException.class,
-              () -> Flyway.configure().dataSource(source).target("247").load().migrate());
+              () -> Flyway.configure().dataSource(source).target("251").load().migrate());
       StringBuilder chain = new StringBuilder();
       for (Throwable cause = failed; cause != null; cause = cause.getCause())
         chain.append(cause.getMessage()).append('\n');
-      assertTrue(chain.toString().contains("V247 native ingress preflight refused"));
+      assertTrue(chain.toString().contains("V251 native ingress preflight refused"));
       assertFalse(chain.toString().contains("secret"));
       assertEquals(
           2, jdbc.queryForObject("SELECT count(*) FROM message_external_tasks", Integer.class));
@@ -99,7 +99,7 @@ class MessageIngressPreflightDatabaseTest {
     String evidence =
         "{\"messageId\":\"retained-message\",\"role\":\"ROLE_USER\",\"parts\":[{\"text\":\"Retained evidence\"}]}";
     jdbc.update("UPDATE message_external_tasks SET source=?::jsonb WHERE id=?", evidence, invalid);
-    Flyway.configure().dataSource(source).target("247").load().migrate();
+    Flyway.configure().dataSource(source).target("251").load().migrate();
     assertEquals(
         "retained-message",
         jdbc.queryForObject(

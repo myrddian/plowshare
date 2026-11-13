@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from uuid import uuid4
 
 from plowshare_privacy.advisories import Advisory, AdvisoryPage
@@ -18,6 +19,7 @@ from plowshare_privacy.device_dossier import (
     MIN_ADVERTISING_QUERIES,
     MIN_MEASUREMENT_QUERIES,
     MIN_TELEMETRY_QUERIES,
+    SIGNAL_ORDER,
     UPLOAD_HEAVY_BYTES,
     LinkedIssue,
     OperatorProfile,
@@ -369,6 +371,17 @@ class DeviceDossierTest(unittest.TestCase):
             codes(card(traffic=volume(UPLOAD_HEAVY_BYTES + 1, UPLOAD_HEAVY_BYTES))),
         )
         self.assertNotIn("upload_heavy", codes(card()))
+
+    def test_the_assistant_explains_every_signal_in_plain_words(self) -> None:
+        # Signal codes are internal; the assistant must describe each one
+        # instead of showing it, so a new code needs its explanation too.
+        agent = (
+            Path(__file__).resolve().parents[1]
+            / "network-privacy-watch/agents/privacy_assistant.md"
+        ).read_text(encoding="utf-8")
+        for code in SIGNAL_ORDER:
+            self.assertIn(f"\n- {code}: ", agent, code)
+        self.assertIn("never show a code", agent)
 
     def test_open_admin_service_reuses_detection_exposures(self) -> None:
         names = {service for _, service, _ in _SERVICE_RULES}

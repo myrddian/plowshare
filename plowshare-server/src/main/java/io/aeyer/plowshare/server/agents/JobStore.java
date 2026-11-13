@@ -1093,7 +1093,13 @@ public final class JobStore
     return job;
   }
 
+  /**
+   * The jobs this account may see. One listing serves the whole call, so a selection, revision or
+   * log shared by many jobs is authorized once rather than once per job and input; each decision
+   * still uses current authority.
+   */
   public List<Job> jobsFor(String account) {
+    var listing = informationJobs == null ? null : informationJobs.listing(account);
     return jobs().stream()
         .filter(
             job ->
@@ -1104,10 +1110,9 @@ public final class JobStore
                         account))
         .filter(
             job ->
-                informationJobs == null
-                    || (informationJobs.allowed(job.id(), account)
-                        && (job.conversation() == null
-                            || informationJobs.logAllowed(job.conversation(), account))))
+                listing == null
+                    || (listing.allowed(job.id())
+                        && (job.conversation() == null || listing.logAllowed(job.conversation()))))
         .toList();
   }
 

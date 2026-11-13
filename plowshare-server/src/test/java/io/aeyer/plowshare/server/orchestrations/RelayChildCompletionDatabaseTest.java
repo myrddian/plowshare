@@ -78,7 +78,7 @@ class RelayChildCompletionDatabaseTest {
     var source =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    Flyway.configure().dataSource(source).target("242").load().migrate();
+    Flyway.configure().dataSource(source).target("246").load().migrate();
     jdbc = new JdbcTemplate(source);
     var tx = new TransactionTemplate(new DataSourceTransactionManager(source));
     work =

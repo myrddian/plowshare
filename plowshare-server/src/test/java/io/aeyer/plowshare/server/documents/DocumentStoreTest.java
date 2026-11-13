@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -93,15 +94,44 @@ class DocumentStoreTest {
   private static final Instant AT = Instant.parse("2026-09-04T09:00:00Z");
 
   private DocumentStore.Written ingest(String sourceName, String text) {
-    Extracted extracted =
-        TextExtraction.extract(sourceName, text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    Extracted extracted = TextExtraction.extract(sourceName, text.getBytes(StandardCharsets.UTF_8));
     return store.write(
         sourceName,
         extracted,
         text.length(),
         "test",
         AT,
-        Derivation.derive(extracted, ShippedChunking.SHIPPED));
+        DocumentFixtures.separateBlocks(extracted, ShippedChunking.SHIPPED));
+  }
+
+  @Test
+  void packed_paragraphs_persist_once_and_keep_their_identity_and_checkpoint_on_reingest() {
+    String text = "Gemini Decision 1\n\nDeepMind\n\nBielik 11B v3.1\n\nSpeakLeash";
+    var extracted = TextExtraction.extract("models.txt", text.getBytes(StandardCharsets.UTF_8));
+    var derived = Derivation.derive(extracted, ShippedChunking.SHIPPED);
+    var first = store.write("models.txt", extracted, text.length(), "test", AT, derived);
+    var waiting = store.unsummarised(first.documentId());
+    assertEquals(1, waiting.size());
+    assertEquals(
+        "Gemini Decision 1 DeepMind Bielik 11B v3.1 SpeakLeash", waiting.getFirst().text());
+    UUID paragraph = waiting.getFirst().id();
+    DocumentSummaries stale =
+        store.fenced(
+            () -> {
+              throw new IllegalStateException("stale lease");
+            });
+    assertThrows(
+        IllegalStateException.class,
+        () -> stale.attachSummary(paragraph, waiting.getFirst().text()));
+    assertEquals(
+        1, store.unsummarised(first.documentId()).size(), "A refused checkpoint stays owed");
+    store.attachSummary(paragraph, waiting.getFirst().text());
+
+    var again = store.write("models.txt", extracted, text.length(), "test", AT, derived);
+    assertEquals(first.documentId(), again.documentId());
+    assertEquals(Map.of(1, paragraph), paragraphIds(again.documentId()));
+    assertEquals(List.of(), store.unsummarised(again.documentId()));
+    assertEquals(List.of(waiting.getFirst().text()), store.paragraphSummaries(again.documentId()));
   }
 
   /** Every paragraph of a document, ordinal to id. */
@@ -883,7 +913,7 @@ class DocumentStoreTest {
             getClass()
                 .getResourceAsStream("/db/migration/V21__chunk_text_search.sql")
                 .readAllBytes(),
-            java.nio.charset.StandardCharsets.UTF_8);
+            StandardCharsets.UTF_8);
 
     assertTrue(
         migration.contains("to_tsvector('" + DocumentStore.TEXT_SEARCH_CONFIGURATION + "', text)"),

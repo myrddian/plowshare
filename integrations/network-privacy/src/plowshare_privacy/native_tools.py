@@ -19,7 +19,16 @@ from plowshare.tools import (
 )
 
 from .journal import Publication, ScanOrigin
-from .tools import DEFINITIONS, PrivacyTools, ScanCall, decode_call
+from .tools import (
+    DEFINITIONS,
+    LINK_NOTE_LIMIT,
+    NOTE_LIMIT,
+    QUESTION_LIMIT,
+    PrivacyTools,
+    ScanCall,
+    ToolRefusal,
+    decode_call,
+)
 from .tools import ToolCall as PrivacyCall
 
 
@@ -64,6 +73,62 @@ def parameters(name: str, parameter: str | None) -> tuple[Parameter, ...]:
                 ),
             )
         )
+    if name == "network.note_profile":
+        values.append(
+            Parameter(
+                "note",
+                "STRING",
+                f"The note, up to {NOTE_LIMIT} characters; new lines allowed, no other control characters. Saved as a dated line attributed to Privacy Watch.",
+            )
+        )
+    if name == "network.record_issue":
+        values.extend(
+            (
+                Parameter(
+                    "issue_id",
+                    "STRING",
+                    "The UUID of an existing privacy issue in this project.",
+                ),
+                Parameter(
+                    "applicability",
+                    "STRING",
+                    "potentially_affected, confirmed_affected, not_affected, mitigated (needs verified) or unresolved.",
+                ),
+                Parameter(
+                    "mitigation_status",
+                    "STRING",
+                    "proposed, accepted, applied, verified or reverted. Omit to keep the current status (proposed for a new link).",
+                    required=False,
+                ),
+                Parameter(
+                    "note",
+                    "STRING",
+                    f"What was found or done, up to {LINK_NOTE_LIMIT} characters; dated and attributed to Privacy Watch, replacing the link's earlier note. Required for confirmed_affected, applied, verified and reverted.",
+                    required=False,
+                ),
+            )
+        )
+    if name == "network.request_reference":
+        values.extend(
+            (
+                Parameter(
+                    "product",
+                    "STRING",
+                    "The product slug, as in the device-reference tags: lowercase letters, digits and hyphens, at most 48 characters.",
+                ),
+                Parameter(
+                    "question",
+                    "STRING",
+                    f"What the library could not answer, up to {QUESTION_LIMIT} characters, for the owner to read. Nothing in it is fetched.",
+                ),
+                Parameter(
+                    "device_id",
+                    "STRING",
+                    "Optional: the device_id from network_devices the question is about.",
+                    required=False,
+                ),
+            )
+        )
     if name == "network.evidence":
         values.append(
             Parameter(
@@ -84,6 +149,15 @@ DECLARATIONS = tuple(
         timeout_seconds=30,
     )
     for definition in DEFINITIONS
+)
+
+# The tools the ``network_assistant`` scope grants ``privacy_assistant``: every
+# declaration except the scans, which only the coordinator may start. A
+# snapshot is measured against this set (a test pins it to plowshare.json).
+ASSISTANT_TOOLS = frozenset(
+    declaration.name
+    for declaration in DECLARATIONS
+    if declaration.name not in ("network_scan", "network_scan_status")
 )
 
 
@@ -108,9 +182,19 @@ def registered(tools: PrivacyTools) -> tuple[RegisteredTool, ...]:
                 return ToolResult(
                     "REJECTED", "Unknown network privacy capability; nothing ran."
                 )
-            decoded = decode_call(name, dict(call.arguments))
+            # Writes take the harness invocation as their idempotency key, so a
+            # replayed call returns the earlier receipt rather than writing twice.
+            try:
+                decoded = decode_call(
+                    name, dict(call.arguments), request_id=call.invocation_id
+                )
+            except ToolRefusal as error:
+                return ToolResult("REJECTED", str(error))
         try:
             result = await tools.execute(decoded)
+        except ToolRefusal as error:
+            # Written for the agent to tell the user; it echoes no input.
+            return ToolResult("REJECTED", str(error))
         except ValueError:
             return ToolResult(
                 "REJECTED", "Requested collector evidence or identity is unavailable."

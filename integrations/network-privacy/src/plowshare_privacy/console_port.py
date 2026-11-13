@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 from plowshare import Client
 from plowshare.contracts import (
     AgentListRequest,
     ConversationContextSnapshotRequest,
-    ConversationListRequest,
     OrchestrationListRequest,
     OrchestrationReceiptRequest,
     OrchestrationStartRequest,
@@ -61,9 +60,21 @@ class ConsolePort(Protocol):
     async def investigation_receipt(self, request_id: str) -> Admission: ...
 
 
+# Deadline for the recent-investigation listing (read off the health path).
+RUNS_DEADLINE_SECONDS = 90
+
+
 class SdkConsolePort:
-    def __init__(self, client: Client, config: Configuration):
+    def __init__(
+        self,
+        client: Client,
+        config: Configuration,
+        assistant: Callable[[], str | None] = lambda: None,
+    ):
+        """``assistant`` yields the Ask conversation ID the assistant's tools
+        are measured on, or None before one exists."""
         self.client, self.config = client, config
+        self.assistant = assistant
 
     async def schedule(self) -> ScheduleView | None:
         source = [
@@ -93,59 +104,51 @@ class SdkConsolePort:
         return ScheduleView(row.name, row.cron, row.zone, row.paused, row.next_fire_at)
 
     async def agents(self) -> AgentHealth:
-        from .native_tools import DECLARATIONS
+        from .native_tools import ASSISTANT_TOOLS
 
         agents = (
             await self.client.request(AgentListRequest(project=self.config.project))
         ).require_payload()
-        expected = {"privacy_coordinator", "privacy_analyst", "privacy_reviewer"}
+        # The listing is requested for this project, so every row is the
+        # project's own agent; foreign names are dropped by the allowlist.
+        expected = {
+            "privacy_coordinator",
+            "privacy_analyst",
+            "privacy_reviewer",
+            "privacy_assistant",
+        }
         relevant = [value for value in agents if value.name in expected]
         served = {value.name for value in relevant if value.served}
-        coordinators = [
-            value
-            for value in relevant
-            if value.name == "privacy_coordinator" and value.served
-        ]
-        if len(coordinators) > 1:
-            raise ValueError("Ambiguous project coordinator")
-        names = {item.name for item in DECLARATIONS}
+        if sum(value.name == "privacy_assistant" for value in relevant) > 1:
+            raise ValueError("Ambiguous project assistant")
+        names = ASSISTANT_TOOLS
         visible: set[str] = set()
         visibility = "awaiting_context"
-        if coordinators:
+        conversation = self.assistant()
+        if conversation is not None and "privacy_assistant" not in served:
+            visibility = "assistant_unserved"
+        elif conversation is not None:
             # Agent listings describe definition grants, not the live dynamic
-            # registry. Project an existing project conversation without counting
-            # tokens or opening/running a conversation. The server resolves current
-            # tools for this account and coordinator; discard all message content.
-            conversations = (
+            # registry. Project the assistant's own Ask conversation without
+            # counting tokens or opening/running a conversation. The server
+            # resolves current tools for this account and agent; discard all
+            # message content.
+            snapshot = (
                 await self.client.request(
-                    ConversationListRequest(project=self.config.project)
+                    ConversationContextSnapshotRequest(
+                        conversation=conversation,
+                        agent="privacy_assistant",
+                        measure=False,
+                    )
                 )
             ).require_payload()
-            selected = next(
-                (
-                    value
-                    for value in conversations
-                    if value.project == self.config.project
-                ),
-                None,
-            )
-            if selected is not None:
-                snapshot = (
-                    await self.client.request(
-                        ConversationContextSnapshotRequest(
-                            conversation=selected.id,
-                            agent="privacy_coordinator",
-                            measure=False,
-                        )
-                    )
-                ).require_payload()
-                if (
-                    snapshot.conversation != selected.id
-                    or snapshot.agent != "privacy_coordinator"
-                ):
-                    raise ValueError("Foreign tool visibility projection")
-                visible = {item.name for item in snapshot.tools}
-                visibility = "projected"
+            if (
+                snapshot.conversation != conversation
+                or snapshot.agent != "privacy_assistant"
+            ):
+                raise ValueError("Foreign tool visibility projection")
+            visible = {item.name for item in snapshot.tools}
+            visibility = "projected"
         return AgentHealth(
             tuple(sorted(served)),
             tuple(sorted(expected - served)),
@@ -155,9 +158,14 @@ class SdkConsolePort:
         )
 
     async def runs(self) -> tuple[RunSummary, ...]:
+        # The listing has no definition filter, so 25 rows leave room for the
+        # profiling and assessment runs between investigations. Plowshare can
+        # take tens of seconds to list them; the console reads this in the
+        # background, so a long deadline here does not delay health.
         result = (
             await self.client.request(
-                OrchestrationListRequest(project=self.config.project, limit=25)
+                OrchestrationListRequest(project=self.config.project, limit=25),
+                timeout=RUNS_DEADLINE_SECONDS,
             )
         ).require_payload()
         return tuple(

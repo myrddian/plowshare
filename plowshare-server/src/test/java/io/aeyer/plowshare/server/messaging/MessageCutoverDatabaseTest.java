@@ -54,7 +54,7 @@ class MessageCutoverDatabaseTest {
     var source =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    Flyway.configure().dataSource(source).target("238").load().migrate();
+    Flyway.configure().dataSource(source).target("242").load().migrate();
     var jdbc = new JdbcTemplate(source);
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('owner','fixture')");
     jdbc.update("INSERT INTO projects(name,workspace) VALUES('project','fixture')");

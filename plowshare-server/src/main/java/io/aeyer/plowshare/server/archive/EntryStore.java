@@ -1169,10 +1169,21 @@ public final class EntryStore {
     return copy;
   }
 
+  /**
+   * Guards transcript reads with the targeted log predicate. The account's versioned deny set
+   * answers when it is current; otherwise the predicate runs in this caller's statement.
+   */
   private void requireInformation(String log) {
     if (informationScoped
-        && !jdbc.queryForObject(
-            "SELECT information_log_readable(?,?)", Boolean.class, log, informationAccount))
+        && !visibility.readable(
+            informationAccount,
+            log,
+            () ->
+                jdbc.queryForObject(
+                    "SELECT information_log_readable(?,?)",
+                    Boolean.class,
+                    log,
+                    informationAccount)))
       throw new io.aeyer.plowshare.server.faults.NotFoundFault(
           "log inputs are unavailable to this account");
   }

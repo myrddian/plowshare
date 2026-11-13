@@ -52,14 +52,14 @@ class DerivationTreeTest {
     DerivedDocument derived = derive(PAPER);
 
     assertEquals(
-        List.of(1, 2, 3), derived.paragraphs().stream().map(DerivedParagraph::ordinal).toList());
+        List.of(1, 2), derived.paragraphs().stream().map(DerivedParagraph::ordinal).toList());
     assertEquals(
-        List.of(1, 2),
+        List.of(1),
         derived.chapters().get(0).sections().get(0).paragraphs().stream()
             .map(DerivedParagraph::ordinal)
             .toList());
     assertEquals(
-        List.of(3),
+        List.of(2),
         derived.chapters().get(0).sections().get(1).paragraphs().stream()
             .map(DerivedParagraph::ordinal)
             .toList());

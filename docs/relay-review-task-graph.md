@@ -25,6 +25,50 @@ Sources, preserved as immutable review evidence:
 - [Claims check](reviews/a2a-claims-check-61941781.md): claims 1–59, overstated notes 1–7,
   structural-change table and proposed solution 1–7.
 
+## Main-branch integration, 14 November 2026
+
+Main added shipped migrations V238–V241 after this branch diverged. Their bytes
+are preserved unchanged. The unshipped Relay sequence was renumbered without
+changing its persisted identities or SQL behavior:
+
+| Previous branch versions | Current versions | Purpose |
+| --- | --- | --- |
+| V238–V243 | V242–V247 | Board bridge, messaging cutover, turn reservation, retention, execution receipts and child completion |
+| V244–V246 | V248–V250 | Board destination identity, forum capture and inbox discovery |
+| V247–V250 | V251–V254 | Native ingress, requester returns, exact ancestry and board returns |
+| V251 | V255 | Legacy outgoing history retirement |
+
+Earlier evidence below retains the version numbers used when those tests ran.
+Current source, callback targets, migration fixtures and live guides use the new
+versions. Merging main also preserves its Privacy Watch assistant/reference
+features while retaining this branch's native-only tool provider and unresolved
+legacy-journal fence. Merge-specific verification is recorded below.
+
+- Merged main at `0ba6555c`; the feature parent is `cdb94fc5`. All main migration
+  bytes were independently compared with `origin/main`, and no duplicate Flyway
+  version remains. Only the unshipped Relay sequence and its owning callbacks,
+  upgrade-fixture targets and current documentation were renumbered.
+- `main-merge-format37` passed `format`/`formatCheck`. Final
+  `main-merge-check38` passed `check integrationBoundaryCheck sdkContractCheck`.
+  Import-only corrections preserve main's behavior while removing new qualified
+  type uses and wildcard imports from the merged additions.
+- Privacy Watch's gate passed **646 Python tests, 108 web tests**, Ruff formatting/
+  lint and strict mypy across 121 source files. The first sandboxed fixture run
+  could not bind local listeners; the permitted rerun passed without weakening
+  the tests. The merged CLI composes the assistant/reference services before the
+  native provider and still refuses unresolved legacy peer evidence before intake.
+- `main-merge-db33` passed all **23 selected PostgreSQL server tests** covering
+  cutover/preflight rollback, archive conservation, execution receipts, child
+  completion and main's authority snapshot differential checks. Six A2A cases also
+  passed; the seventh exposed a fixture observing a firing's temporary `pending`
+  job marker. The fixture now waits for the dispatcher's registered job ID, and
+  `main-merge-return35` passed that actual native later-paid-turn case. No production
+  lifecycle behavior or SQL assertion was relaxed.
+- The separately user-deferred T22B and production-data-copy rehearsal remain
+  unchanged. Feature databases using old branch-only migration numbers require
+  explicit history reconciliation; this source merge does not perform Flyway
+  repair, rewrite applied history or deploy the new schema.
+
 ## Completion protocol
 
 Each task has an implementation owner and a different reviewing owner. Implementers

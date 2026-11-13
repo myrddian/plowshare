@@ -54,7 +54,7 @@ class JdbcRelayPublishingRepositoryTest {
     var source =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    Flyway.configure().dataSource(source).target("241").load().migrate();
+    Flyway.configure().dataSource(source).target("245").load().migrate();
     Flyway.configure().dataSource(source).load().migrate();
     jdbc = new JdbcTemplate(source);
     var template = new TransactionTemplate(new DataSourceTransactionManager(source));

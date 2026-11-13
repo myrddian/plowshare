@@ -16,6 +16,7 @@ import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
 import io.aeyer.plowshare.server.orchestrations.Orchestrations;
 import io.aeyer.plowshare.server.requests.RequestedProjectId;
 import io.aeyer.plowshare.server.todos.TodoLists;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -233,11 +234,18 @@ public class OrchestrationFrames implements FrameArea {
                 + " cancelled.");
       }
     }
-    List<RunView> runs =
-        store.byCaller(handle, body.project(), state, limit).stream()
-            .filter(run -> inputs == null || inputs.logAllowed(run.id(), handle))
-            .map(this::viewOf)
-            .toList();
+    // One page read, then one batched read of the page's stall marks: a fixed number of
+    // statements whatever the limit. The store's page query already excludes runs whose logs the
+    // account may not read when information protection is wired; re-checking each row with the
+    // targeted predicate walked the whole ancestry graph per run (about 0.8 s a row on a large
+    // deployment) for the same answer, so it runs only where the store did not filter.
+    List<OrchestrationRecord> page = store.byCaller(handle, body.project(), state, limit);
+    if (inputs != null && !store.filtersReadableLogs()) {
+      page = page.stream().filter(run -> inputs.logAllowed(run.id(), handle)).toList();
+    }
+    Map<String, Instant> stalled =
+        store.stalledSince(page.stream().map(OrchestrationRecord::id).toList());
+    List<RunView> runs = page.stream().map(run -> viewOf(run, stalled.get(run.id()))).toList();
     return Outcome.ok(new Listed(runs));
   }
 
@@ -406,6 +414,10 @@ public class OrchestrationFrames implements FrameArea {
   }
 
   private RunView viewOf(OrchestrationRecord run) {
+    return viewOf(run, store.stalledSince(run.id()).orElse(null));
+  }
+
+  private static RunView viewOf(OrchestrationRecord run, Instant stalledSince) {
     return new RunView(
         run.id(),
         run.definitionName(),
@@ -427,7 +439,7 @@ public class OrchestrationFrames implements FrameArea {
         run.waitingFor(),
         run.createdAt(),
         run.endedAt(),
-        store.stalledSince(run.id()).orElse(null));
+        stalledSince);
   }
 
   private static final ObjectMapper JSON = new ObjectMapper();

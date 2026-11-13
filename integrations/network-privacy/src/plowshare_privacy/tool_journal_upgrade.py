@@ -81,11 +81,36 @@ LEGACY_DECLARATIONS = (
 # Tools added after the paged binding. Only read tools may be added this way;
 # their history starts empty, so nothing about earlier receipts changes.
 DEVICE_TOOLS = frozenset({"network_devices", "network_device"})
+# The assistant's request and record tools, added after the device binding.
+# They are the one reviewed non-read addition: new tools start with empty
+# history, and each write carries its own invocation idempotency key.
+ASSISTANT_TOOLS = frozenset(
+    {
+        "network_request_deep_scan",
+        "network_request_assessment",
+        "network_note_profile",
+        "network_record_issue",
+    }
+)
+# The assistant's reference request, added after the assistant binding. It is
+# the second reviewed non-read addition: it only records a request for the
+# owner, starts with empty history and is keyed by its invocation.
+REFERENCE_TOOLS = frozenset({"network_request_reference"})
 # The exact six-tool paged binding that deployments already hold. It is the
-# current declarations without the device tools; a test pins its digest so an
+# current declarations without the later tools; a test pins its digest so an
 # edit to an older tool cannot silently orphan existing paged journals.
 PAGED_DECLARATIONS = tuple(
-    tool for tool in DECLARATIONS if tool.name not in DEVICE_TOOLS
+    tool
+    for tool in DECLARATIONS
+    if tool.name not in DEVICE_TOOLS | ASSISTANT_TOOLS | REFERENCE_TOOLS
+)
+# The exact eight-tool device binding, pinned the same way.
+DEVICE_DECLARATIONS = tuple(
+    tool for tool in DECLARATIONS if tool.name not in ASSISTANT_TOOLS | REFERENCE_TOOLS
+)
+# The exact twelve-tool assistant binding, pinned the same way.
+ASSISTANT_DECLARATIONS = tuple(
+    tool for tool in DECLARATIONS if tool.name not in REFERENCE_TOOLS
 )
 # Optional read-page arguments reviewed for the v1 to paged transition.
 _PAGE_ADDITIONS = {
@@ -105,6 +130,7 @@ def _compatible(
     following: tuple[ToolDeclaration, ...],
     additions: dict[str, dict[str, str]],
     added_tools: frozenset[str],
+    reviewed_writes: frozenset[str] = frozenset(),
 ) -> None:
     old = {tool.name: tool for tool in previous}
     new = {tool.name: tool for tool in following}
@@ -115,7 +141,7 @@ def _compatible(
         for definition in DEFINITIONS
         if definition.effect == "read"
     }
-    if not added_tools <= reads:
+    if not added_tools <= reads | reviewed_writes:
         raise ValueError("Only read tools may be added by a journal transition")
     for name, prior in old.items():
         current = new[name]
@@ -142,9 +168,20 @@ def _compatible(
 
 
 def compatible_descriptors() -> None:
-    """Each transition step may add only reviewed optional arguments or read tools."""
+    """Each transition step may add only reviewed arguments, read tools or the
+    reviewed assistant and reference tools."""
     _compatible(LEGACY_DECLARATIONS, PAGED_DECLARATIONS, _PAGE_ADDITIONS, frozenset())
-    _compatible(PAGED_DECLARATIONS, DECLARATIONS, {}, DEVICE_TOOLS)
+    _compatible(PAGED_DECLARATIONS, DEVICE_DECLARATIONS, {}, DEVICE_TOOLS)
+    _compatible(
+        DEVICE_DECLARATIONS,
+        ASSISTANT_DECLARATIONS,
+        {},
+        ASSISTANT_TOOLS,
+        ASSISTANT_TOOLS,
+    )
+    _compatible(
+        ASSISTANT_DECLARATIONS, DECLARATIONS, {}, REFERENCE_TOOLS, REFERENCE_TOOLS
+    )
 
 
 def receipt_stages(receipt: ToolReceipt) -> tuple[ToolReceipt, ...]:
@@ -249,7 +286,9 @@ def open_tool_journal(
 
     Caller must hold the collector receipt process lock throughout this context.
     The chain is v1 ``directory`` -> ``<directory>-paged`` (six tools with read
-    pagination) -> ``<directory>-devices`` (adds the device read tools). Each
+    pagination) -> ``<directory>-devices`` (adds the device read tools) ->
+    ``<directory>-assistant`` (adds the assistant's request and record tools) ->
+    ``<directory>-references`` (adds the assistant's reference request). Each
     step copies public typed receipts before admitting the new provider. Partial
     copies are checked and resumed locally; neither handlers nor Relay mutations
     run. A durable marker fences each step once its complete copy is confirmed.
@@ -260,6 +299,8 @@ def open_tool_journal(
     compatible_descriptors()
     paged = directory.parent / (directory.name + "-paged")
     devices = directory.parent / (directory.name + "-devices")
+    assistant = directory.parent / (directory.name + "-assistant")
+    references = directory.parent / (directory.name + "-references")
     with ExitStack() as stores:
         legacy = None
         if (directory / "relay-tools.sqlite").exists():
@@ -279,9 +320,25 @@ def open_tool_journal(
                 paged,
                 deployment_config(project, provider, account, PAGED_DECLARATIONS),
             )
+        device_journal = None
+        if previous is not None or (devices / "relay-tools.sqlite").exists():
+            device_journal = _transition(
+                stores,
+                previous,
+                devices,
+                deployment_config(project, provider, account, DEVICE_DECLARATIONS),
+            )
+        assistant_journal = None
+        if device_journal is not None or (assistant / "relay-tools.sqlite").exists():
+            assistant_journal = _transition(
+                stores,
+                device_journal,
+                assistant,
+                deployment_config(project, provider, account, ASSISTANT_DECLARATIONS),
+            )
         yield _transition(
             stores,
-            previous,
-            devices,
+            assistant_journal,
+            references,
             deployment_config(project, provider, account, DECLARATIONS),
         )

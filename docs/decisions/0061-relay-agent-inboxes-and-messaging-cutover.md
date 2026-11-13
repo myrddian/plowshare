@@ -109,7 +109,7 @@ recovery and is never replayed.
 
 ## One storage cutover
 
-V239 renames messaging instance/routing tables, copies retained bodies into
+V243 renames messaging instance/routing tables, copies retained bodies into
 `message_records`, moves message foreign keys, registers existing agents' inboxes
 and publishes retained threads in their original sequence. Historical bodies use
 self-references, preserving large generated bodies without truncation. IDs,
@@ -124,7 +124,7 @@ remain as `former_topic` evidence, without foreign keys to live Board topics.
 Their seats, posts and topics are removed after the record transfer. Forum capture
 and privacy filters continue to recognize those historical identifiers.
 
-V240 initializes a conversation turn sequence from both recorded endings and
+V244 initializes a conversation turn sequence from both recorded endings and
 retained entries, then allocates future reservations atomically. Shipped
 migrations are untouched. Migration fixtures use the old schema directly before
 upgrading, rather than running current repository SQL against obsolete columns.

@@ -56,7 +56,7 @@ public final class JdbcChildCompletions implements ChildCompletions {
     return work.inTransaction(
         () -> {
           consumers.requireOwned(lease);
-          // This is orchestration recovery's persisted key, retained from V243. Derive it
+          // This is orchestration recovery's persisted key, retained from V247. Derive it
           // from the typed scope instead of depending on Relay's package-private row codec.
           String key = project == 0 ? "system" : "project:" + project;
           jdbc.update(

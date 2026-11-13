@@ -3,8 +3,10 @@ package io.aeyer.plowshare.server.access;
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectRole;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** An issuing MANAGER must still be a manager under the current deployed manifest. */
@@ -12,10 +14,22 @@ import org.springframework.stereotype.Component;
 public final class ApplicationGrantLineage implements GrantLineage {
   private final ScopedGrantRepository grants;
   private final ApplicationPolicy applications;
+  private final AuthoritySnapshots snapshots;
 
   public ApplicationGrantLineage(ScopedGrantRepository grants, ApplicationPolicy applications) {
+    this(grants, applications, AuthoritySnapshots.none());
+  }
+
+  /**
+   * Reads project lineages from the current authority snapshot when one may be used, instead of
+   * re-walking {@code authority_live_grants()} in SQL for every role check.
+   */
+  @Autowired
+  public ApplicationGrantLineage(
+      ScopedGrantRepository grants, ApplicationPolicy applications, AuthoritySnapshots snapshots) {
     this.grants = grants;
     this.applications = applications;
+    this.snapshots = Objects.requireNonNull(snapshots);
   }
 
   @Override
@@ -55,7 +69,7 @@ public final class ApplicationGrantLineage implements GrantLineage {
       String account,
       Optional<ProjectRole> ceiling,
       ApplicationPolicy.Boundary boundary) {
-    java.util.Objects.requireNonNull(boundary);
+    Objects.requireNonNull(boundary);
     if (ceiling.isEmpty() || ClientProjects.privateProject(project)) return ceiling;
     var policies = new java.util.HashMap<String, ApplicationPolicy.Boundary>();
     policies.put(project, boundary);
@@ -70,7 +84,12 @@ public final class ApplicationGrantLineage implements GrantLineage {
     Optional<ProjectRole> result = Optional.empty();
     // One current database statement supplies the live bindings and all ancestor facts. Filesystem
     // manifests are read once per project within this invocation, never retained as an allow lease.
-    for (var chain : grants.projectLineages(project, account)) {
+    var lineages =
+        snapshots
+            .current()
+            .map(snapshot -> snapshot.projectLineages(project, account))
+            .orElseGet(() -> grants.projectLineages(project, account));
+    for (var chain : lineages) {
       if (chain.isEmpty()) continue;
       var grant = chain.getFirst();
       Optional<ProjectRole> role =

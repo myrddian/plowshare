@@ -12,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Owns leases and committed checkpoints. Callers keep a fence and its write in one transaction. */
 public final class JdbcInformationProcessingRepository implements InformationProcessingRepository {
+  private final SystemProcessingAuthority system;
   private final JdbcTemplate jdbc;
   private final AllowanceRepository allowances;
   private final Clock clock;
@@ -23,6 +24,8 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   private record Authority(String owner, String project) {}
 
   private boolean authorized(Authority authority) {
+    var decided = system.scopeValid(authority.project());
+    if (decided.isPresent()) return decided.get();
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT information_system_scope_valid(?)", Boolean.class, authority.project()));
@@ -39,6 +42,21 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
   public JdbcInformationProcessingRepository(
       JdbcTemplate jdbc, Clock clock, ProjectMembers members, AllowanceRepository allowances) {
+    this(jdbc, clock, members, allowances, SystemProcessingAuthority.sql());
+  }
+
+  /**
+   * {@code system} answers the SYSTEM processing questions every poll would otherwise re-derive
+   * from live grants. Statement-local claim and lease predicates are unchanged; only the
+   * installation-wide grant test moves out of SQL, and an empty answer keeps it there.
+   */
+  public JdbcInformationProcessingRepository(
+      JdbcTemplate jdbc,
+      Clock clock,
+      ProjectMembers members,
+      AllowanceRepository allowances,
+      SystemProcessingAuthority system) {
+    this.system = Objects.requireNonNull(system);
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
     Objects.requireNonNull(members);
@@ -118,7 +136,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
       var rows =
           jdbc.query(
               "WITH "
-                  + InformationQueueSql.processingAuthority()
+                  + InformationQueueSql.processingAuthority(system.processing())
                   + " "
                   + stageQuery
                   + excluded
@@ -156,7 +174,9 @@ public final class JdbcInformationProcessingRepository implements InformationPro
       }
       var rows =
           jdbc.query(
-              (revision == null ? "WITH " + InformationQueueSql.processingAuthority() + " " : "")
+              (revision == null
+                      ? "WITH " + InformationQueueSql.processingAuthority(system.processing()) + " "
+                      : "")
                   + "SELECT s.*,r.resource_id,q.owner_handle,q.project_id,p.name AS project_name FROM information_steps s"
                   + " JOIN information_revision_allowances r ON r.id=s.revision_id JOIN information_resources q ON q.id=r.resource_id LEFT JOIN projects p ON p.id=q.project_id"
                   + " WHERE r.availability='active' AND r.generation=s.generation AND q.owner_handle IS NOT NULL"

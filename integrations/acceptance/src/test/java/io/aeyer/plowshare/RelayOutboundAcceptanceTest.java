@@ -743,9 +743,11 @@ class RelayOutboundAcceptanceTest {
       List<String> returned;
       do {
         broker.process(new RelayLog.Process(scope.project(), 32));
+        // A firing claim temporarily uses "pending" before the dispatcher records the
+        // registered paid job. Observe that later transition instead of querying a placeholder.
         returned =
             jdbc.queryForList(
-                "SELECT f.job_id FROM message_execution_returns r JOIN firings f ON f.data->>'direct_message'=r.message WHERE r.source_event=? AND f.job_id IS NOT NULL",
+                "SELECT f.job_id FROM message_execution_returns r JOIN firings f ON f.data->>'direct_message'=r.message WHERE r.source_event=? AND f.job_id IS NOT NULL AND f.job_id<>'pending'",
                 String.class,
                 model.event);
         if (!returned.isEmpty() && agents.status(returned.getFirst()).outcome() != null) break;

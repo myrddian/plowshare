@@ -206,8 +206,16 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
       if (latest.position() == 0) continue;
       // Expired broker history is unavailable authority, not permission to revive old tools.
       entries.values().removeIf(e -> e.binding().provider().equals(provider.provider()));
-      revision.append(latest.position());
-      if (latest.publication().isEmpty()) continue;
+      // The revision names what each provider currently declares, never which publication declared
+      // it. Definition caches stamp with it, and a provider renews its lease by republishing an
+      // unchanged catalogue every few seconds to minutes; keying on the Relay position or event id
+      // rebuilt and re-logged every project's agent registry on each renewal. Lease availability
+      // is deliberately absent too: it gates execution per call and never changes a tool name.
+      revision.append('\0').append(provider.provider()).append('=');
+      if (latest.publication().isEmpty()) {
+        revision.append("(history expired)");
+        continue;
+      }
       if (latest.publication().get().position() != latest.position())
         throw new CallerFault("The newest tool catalogue is unavailable");
       var publication = latest.publication().get();
@@ -231,7 +239,9 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
                           connections.connections(project, null).stream()
                               .filter(c -> c.provider().equals(provider.provider()))
                               .findFirst())));
-      revision.append(publication.event().eventId());
+      // The validated, parsed declarations: records all the way down, so equal content gives an
+      // equal string regardless of the publication's whitespace or event identity.
+      revision.append(catalogue);
     }
     return new Snapshot(entries, RelayPort.hash(revision.toString()));
   }

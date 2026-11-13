@@ -61,7 +61,7 @@ class LegacyRelayCutoverDatabaseTest {
     var source =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    migrate(source, "250");
+    migrate(source, "254");
     var fixture = new BoardFixture(source);
     var jdbc = fixture.jdbc;
     jdbc.update("UPDATE admins SET server_admin=true WHERE handle='enzo'");
@@ -127,8 +127,8 @@ class LegacyRelayCutoverDatabaseTest {
     for (String unresolved :
         List.of("QUEUED", "DISPATCHED", "WORKING", "INPUT_REQUIRED", "AUTH_REQUIRED", "UNKNOWN")) {
       jdbc.update("UPDATE outgoing_work SET state=? WHERE id=?", unresolved, guard);
-      var failure = assertThrows(FlywayException.class, () -> migrate(source, "251"));
-      assertTrue(causes(failure).contains("V251 outgoing retirement preflight refused"));
+      var failure = assertThrows(FlywayException.class, () -> migrate(source, "255"));
+      assertTrue(causes(failure).contains("V255 outgoing retirement preflight refused"));
       assertFalse(causes(failure).contains("Retained outgoing secret"));
       assertEquals(
           "outgoing_work",
@@ -159,7 +159,7 @@ class LegacyRelayCutoverDatabaseTest {
                             await(release);
                           }));
       assertTrue(entered.await(10, TimeUnit.SECONDS));
-      var upgrade = executor.submit(() -> migrate(source, "251"));
+      var upgrade = executor.submit(() -> migrate(source, "255"));
       try {
         awaitMigrationLock(jdbc);
         assertThrows(TimeoutException.class, () -> upgrade.get(200, TimeUnit.MILLISECONDS));
@@ -168,12 +168,12 @@ class LegacyRelayCutoverDatabaseTest {
       }
       writer.get(10, TimeUnit.SECONDS);
       var refused = assertThrows(ExecutionException.class, () -> upgrade.get(30, TimeUnit.SECONDS));
-      assertTrue(causes(refused).contains("V251 outgoing retirement preflight refused"));
+      assertTrue(causes(refused).contains("V255 outgoing retirement preflight refused"));
     }
     jdbc.update("UPDATE outgoing_work SET state='COMPLETED' WHERE id=?", guard);
     String outgoingBefore = rows(jdbc, "outgoing_work");
     String peersBefore = rows(jdbc, "outgoing_peers");
-    migrate(source, "251");
+    migrate(source, "255");
 
     assertEquals(outgoingBefore, archivedRows(jdbc, "retired_outgoing_work"));
     assertEquals(peersBefore, archivedRows(jdbc, "retired_outgoing_peers"));

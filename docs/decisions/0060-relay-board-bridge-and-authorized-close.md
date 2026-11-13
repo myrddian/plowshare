@@ -125,7 +125,7 @@ Reply event IDs derive deterministically from request UUID, message ID and kind.
 The request's effect causation is retained; reply publication does not mint a
 fresh effect budget.
 
-V238 adds disclosure bindings, materialized thread membership and a publication
+V242 adds disclosure bindings, materialized thread membership and a publication
 outbox. Triggers capture answers and terminal closure in the owning board
 transaction, without adding a second forum/delivery engine. A bounded worker
 locks one binding, appends its oldest pending answer and removes that outbox row
@@ -133,7 +133,7 @@ in the same database transaction. Concurrent drains cannot reorder that request.
 Failure rolls both back, retaining the debt across restart; retrying this internal
 append never repeats a forum mutation. The failed request receives a durable
 backoff using `plowshare.relay.workers.failure-backoff` (30 seconds by default),
-so an unavailable destination does not block other requests. V244 pins new reply bindings to the destination topic generation. Pending scans
+so an unavailable destination does not block other requests. V248 pins new reply bindings to the destination topic generation. Pending scans
 start directly from the `(message_seq, request_id)` outbox index with `LIMIT 1`,
 rather than sorting every outstanding request head or visiting quiet retained
 requests. Binding-wide eligibility means the first eligible row is the oldest
@@ -200,7 +200,7 @@ existing forum receipt precedence, and otherwise retains a fixed safe-code nativ
 refusal intent. Invalid or unproven bindings are not deferred. SDK/person
 preflight keeps its existing early refusal behavior.
 
-V250's dedicated refusal debt table contains no fake forum messages. The existing
+V254's dedicated refusal debt table contains no fake forum messages. The existing
 board reply worker fairly alternates forum answers and refusal outcomes; there
 is no second durable runtime. After restart it sends one native final refusal or
 records scoped `UNAVAILABLE` evidence if the requester cannot receive it.
@@ -218,7 +218,7 @@ Mocked tests cover strict codecs/routes/WS conversion, original publisher
 attribution, destination and role refusals, duplicate recovery, read-only
 inspection, exact source/reply authorization and append failures. Tests also
 cover deleted/recreated destination generations, unverified historical bindings,
-scoped terminal failure evidence and rollback of archive settlement. Targeted `full-db` tests exercise V238, typed
+scoped terminal failure evidence and rollback of archive settlement. Targeted `full-db` tests exercise V242, typed
 destination row mapping, actual read-role isolation, thread/terminal triggers,
 concurrent closes and rollback of mutation/receipt/binding and append/outbox
 transactions. Shared SDK catalogs, DTO fixtures and operation inventory include

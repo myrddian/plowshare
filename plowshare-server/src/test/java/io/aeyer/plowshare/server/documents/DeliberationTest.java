@@ -1095,7 +1095,7 @@ class DeliberationTest {
             text.length(),
             "test",
             AT,
-            Derivation.derive(extracted, ShippedChunking.SHIPPED))
+            DocumentFixtures.separateBlocks(extracted, ShippedChunking.SHIPPED))
         .documentId();
   }
 
