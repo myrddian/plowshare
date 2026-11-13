@@ -29,6 +29,7 @@ import io.aeyer.plowshare.server.todos.StageRules;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -1894,6 +1895,21 @@ class OrchestrationStoreTest {
         T0.plus(10, ChronoUnit.MINUTES),
         store.quietSince(run),
         "the delegated child's entry is newer than anything in the conductor itself");
+  }
+
+  @Test
+  void stall_marks_for_a_page_are_read_in_one_batch() {
+    String marked = store.insert(newOrchestration(conductorConversation(), 2)).id();
+    String quiet = store.insert(newOrchestration(conductorConversation(), 2)).id();
+    Instant since = T0.plus(3, ChronoUnit.MINUTES);
+    assertTrue(store.markStalled(marked, since));
+
+    assertEquals(
+        Map.of(marked, since), store.stalledSince(List.of(marked, quiet, "orc_no_such_run")));
+    assertEquals(Map.of(), store.stalledSince(List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> store.stalledSince(java.util.Collections.nCopies(201, marked)));
   }
 
   // --- stalled_since: compare-and-set ------------------------------------------------------
