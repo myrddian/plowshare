@@ -415,3 +415,60 @@ test('a reply that lands while reading earlier answers offers a jump instead of 
   assert.equal(log.scrollTop, 2000);
   assert.equal(node('ask-jump').hidden, true);
 });
+
+test('the handed-off button counts waiting work and opens the drawer', () => {
+  const {run, node} = dashboard();
+  const work = about => ({kind:'message', target:'security-specialist', about, since:WHEN});
+  // The drawer starts closed.
+  assert.equal(node('ask-drawer').hidden, true);
+  show(run, askView({waiting:[work('Driveway camera firmware'), work('Living room TV lookups')]}));
+  assert.equal(node('ask-handed').textContent, 'Handed off · 2');
+  assert.match(node('ask-handed').className, /\bwaiting\b/);
+  node('ask-handed').listeners.click();
+  assert.equal(node('ask-drawer').hidden, false);
+  node('ask-handed').listeners.click();
+  assert.equal(node('ask-drawer').hidden, true);
+  show(run, askView({done:[work('Finished review')]}));
+  assert.equal(node('ask-handed').textContent, 'Handed off');
+  assert.doesNotMatch(node('ask-handed').className, /\bwaiting\b/);
+});
+
+test('Escape and Close shut the drawer and return focus to its button', () => {
+  const {run, node} = dashboard();
+  show(run, askView());
+  let focused = 0;
+  node('ask-handed').focus = () => {focused++;};
+  node('ask-handed').listeners.click();
+  assert.equal(node('ask-drawer').hidden, false);
+  let prevented = false;
+  node('ask-drawer').listeners.keydown({key:'Escape', preventDefault() {prevented = true;}});
+  assert.equal(node('ask-drawer').hidden, true);
+  assert.ok(prevented);
+  assert.equal(focused, 1);
+  // Other keys leave it open.
+  node('ask-handed').listeners.click();
+  node('ask-drawer').listeners.keydown({key:'Tab', preventDefault() {throw new Error('Tab must not be swallowed');}});
+  assert.equal(node('ask-drawer').hidden, false);
+  node('ask-drawer-close').listeners.click();
+  assert.equal(node('ask-drawer').hidden, true);
+  assert.equal(focused, 2);
+});
+
+test('a paused conversation keeps Top up beside the box, not in the drawer', () => {
+  const {run, node} = dashboard();
+  show(run, askView({turn_state:'capped', paused:true, detail:'The assistant has used its allowance for now. Top up to let it continue.'}));
+  assert.equal(node('ask-pause').hidden, false);
+  assert.equal(node('ask-drawer').hidden, true);
+});
+
+test('disconnect closes the drawer and resets its button', async () => {
+  const {run, node} = dashboard();
+  show(run, askView({waiting:[{kind:'message', target:'x', about:'y', since:WHEN}]}));
+  node('ask-handed').listeners.click();
+  assert.equal(node('ask-drawer').hidden, false);
+  run('api = async () => ({})');
+  await node('disconnect').listeners.click();
+  assert.equal(node('ask-drawer').hidden, true);
+  assert.equal(node('ask-handed').textContent, 'Handed off');
+  assert.doesNotMatch(node('ask-handed').className, /\bwaiting\b/);
+});

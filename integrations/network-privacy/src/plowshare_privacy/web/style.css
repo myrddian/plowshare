@@ -356,6 +356,7 @@ body:has(#view-ask:not([hidden])) .view-heading { position: absolute; width: 1px
 .ask-badge { margin-left: var(--s1); color: var(--gilt); }
 .ask-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; width: min(400px, 100%); margin: 0; overflow-y: auto; --line: var(--brass); }
 .ask-drawer[hidden] { display: none; }
+.ask-drawer:focus { outline: none; }
 .ask-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s3) var(--inset); border-bottom: var(--rule); }
 .ask-drawer-head h2 { margin: 0; font: 400 var(--display-2)/1.2 var(--display); }
 .ask-drawer-group h3 { margin: 0; padding: var(--s3) var(--inset) var(--s1); font-size: var(--text-name); color: var(--gilt); }
