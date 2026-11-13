@@ -351,7 +351,7 @@ class ChapterDetectorTest {
         withoutOutline.paragraphs().size(),
         withOutline.paragraphs().size(),
         "the same bytes lost paragraphs to the document's own table of contents");
-    assertEquals(7, withOutline.paragraphs().size());
+    assertEquals(4, withOutline.paragraphs().size());
     assertEquals(
         1,
         withoutOutline.chapters().size(),

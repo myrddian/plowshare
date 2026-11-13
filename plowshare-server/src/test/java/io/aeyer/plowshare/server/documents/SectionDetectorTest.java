@@ -372,4 +372,32 @@ class SectionDetectorTest {
     assertEquals(4, found.get(1).bodyStartLine());
     assertEquals(6, found.get(1).endLine());
   }
+
+  @Test
+  void explicit_headings_do_not_depend_on_capitalisation_or_prose_heuristics() {
+    assertEquals(
+        List.of("what applies?", "Proof", "数字"),
+        titles(detect("## what applies?\nA label.\n### Proof\nSome evidence.\n###### 数字\n1 2 3")));
+  }
+
+  @Test
+  void markdown_inside_a_code_fence_is_not_a_section_boundary() {
+    assertEquals(
+        List.of("Example", "Next"),
+        titles(detect("## Example\n```python\n# code comment\nIntroduction\n```\n## Next\nBody.")));
+  }
+
+  @Test
+  void a_shorter_fence_or_another_marker_cannot_end_a_code_block() {
+    assertEquals(
+        List.of("Example", "Next"),
+        titles(detect("## Example\n````python\n```\n~~~\n## still code\n````\n## Next\nBody.")));
+  }
+
+  @Test
+  void model_labels_followed_by_version_identifiers_are_not_inferred_section_headings() {
+    var found = detect("Gemini Decision 1\n\nDeepMind\n\nBielik 11B v3.1\n\nSpeakLeash");
+    assertEquals(1, found.size());
+    assertTrue(found.getFirst().title().isSynthetic());
+  }
 }

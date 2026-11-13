@@ -16,7 +16,7 @@ public final class InformationConfiguration {
 
   public static Map<String, String> fingerprints(
       LlmProperties llm, DocumentsProperties documents, AgentRegistry agents) {
-    String summaries = "summary-cascade-v1:" + documents.getSpanSize();
+    String summaries = "summary-cascade-v2:literal-under-80-words:" + documents.getSpanSize();
     if (agents != null)
       for (String name :
           List.of(
@@ -71,10 +71,10 @@ public final class InformationConfiguration {
         "autoTag",
         hash(tags),
         "extract",
-        hash("retained-extraction-v1"),
+        hash("retained-extraction-v2:html-structure"),
         "derive",
         hash(
-            "anchor-derivation-v1:"
+            "anchor-derivation-v2:min-80-words:markdown-headings:"
                 + documents.getChunkTargetTokens()
                 + ":"
                 + llm.getEmbeddingMaxInputTokens()),

@@ -892,7 +892,7 @@ public final class InformationLifecycle implements AutoCloseable {
               new String(bytes, charset), row.sourceUri());
       String title = page.title().isBlank() ? row.sourceName() : page.title();
       return new Extracted(
-          title, row.contentHash(), page.text(), List.of(), "jsoup-readable-html-v1");
+          title, row.contentHash(), page.text(), List.of(), "jsoup-readable-html-v2");
     }
     Extracted extracted = TextExtraction.extract(row.sourceName(), bytes);
     // Report headings are presentation, while source_name remains the collision-safe resource key.

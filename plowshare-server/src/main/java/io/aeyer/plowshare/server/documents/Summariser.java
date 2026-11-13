@@ -86,10 +86,11 @@ import org.slf4j.LoggerFactory;
  *
  * <h2>The compression invariant</h2>
  *
- * <p>Raw text enters at {@link #PARAGRAPH} and nowhere else; every level above reads summaries.
- * Anchor calls this the critical invariant and enforces it by construction, and so does this — by
- * what goes into an opening message, and by the four upper agents holding no tools with which to
- * reach the corpus.
+ * <p>Text of at least 80 words enters at {@link #PARAGRAPH}; shorter text is retained verbatim as
+ * its lossless label. Every level above reads those retained labels and generated summaries. Anchor
+ * calls this the critical invariant and enforces it by construction, and so does this — by what
+ * goes into an opening message, and by the four upper agents holding no tools with which to reach
+ * the corpus.
  *
  * <p>One more thing never enters an upper prompt, and it is not text the document wrote: <b>a title
  * the parser invented</b>. A synthetic chapter or section carries a sentinel in its {@code title}
@@ -153,7 +154,7 @@ public final class Summariser implements UsageAware {
 
   private static final Logger log = LoggerFactory.getLogger(Summariser.class);
 
-  /** The only level that reads raw text. */
+  /** The level that compresses paragraphs of at least 80 words. */
   public static final String PARAGRAPH = "paragraph_summariser";
 
   /**
@@ -186,7 +187,7 @@ public final class Summariser implements UsageAware {
   private String parentLog;
   private UsageAttribution parentUsage = UsageAttribution.LEGACY;
 
-  private final DocumentStore store;
+  private final DocumentSummaries store;
   private final JobRuntime runtime;
   private DocumentStages stages = DocumentStages.NONE;
 
@@ -238,7 +239,7 @@ public final class Summariser implements UsageAware {
 
   /** Production service composition requires the bounded SYSTEM capability. */
   public Summariser(
-      DocumentStore store,
+      DocumentSummaries store,
       JobRuntime runtime,
       Supplier<AgentRegistry> agents,
       int spanSize,
@@ -269,7 +270,7 @@ public final class Summariser implements UsageAware {
   }
 
   public Summariser(
-      DocumentStore store, JobRuntime runtime, Supplier<AgentRegistry> agents, int spanSize) {
+      DocumentSummaries store, JobRuntime runtime, Supplier<AgentRegistry> agents, int spanSize) {
     this(store, runtime, agents, spanSize, null);
   }
 
@@ -282,7 +283,7 @@ public final class Summariser implements UsageAware {
    * @param logs where each run's conversation is opened
    */
   public Summariser(
-      DocumentStore store,
+      DocumentSummaries store,
       JobRuntime runtime,
       Supplier<AgentRegistry> agents,
       int spanSize,
@@ -297,7 +298,7 @@ public final class Summariser implements UsageAware {
    *     field
    */
   public Summariser(
-      DocumentStore store,
+      DocumentSummaries store,
       JobRuntime runtime,
       Supplier<AgentRegistry> agents,
       int spanSize,
@@ -347,12 +348,12 @@ public final class Summariser implements UsageAware {
    *     boundary
    */
   /** Owned pipeline logs and a generation-fenced checkpoint writer. */
-  public Summariser forRevision(DocumentStore writer, Home selectedHome, String account) {
+  public Summariser forRevision(DocumentSummaries writer, Home selectedHome, String account) {
     return forRevision(writer, selectedHome, account, null);
   }
 
   public Summariser forRevision(
-      DocumentStore writer, Home selectedHome, String account, String parent) {
+      DocumentSummaries writer, Home selectedHome, String account, String parent) {
     Summariser copy = new Summariser(writer, runtime, agents, spanSize, logs, null);
     copy.home = selectedHome;
     copy.owner = account;
@@ -519,6 +520,12 @@ public final class Summariser implements UsageAware {
     for (DocumentStore.UnsummarisedParagraph unsummarised : waiting) {
       if (cancelled.getAsBoolean()) {
         return tally.stopped(Ending.CANCELLED, "This cascade was cancelled.", "");
+      }
+      // Short text is already its most faithful label. Commit through the same fenced writer,
+      // without opening a child log or consuming a model allowance for a paraphrase.
+      if (ParagraphPacking.isShort(unsummarised.text())) {
+        store.attachSummary(unsummarised.id(), unsummarised.text());
+        continue;
       }
       Answer answered =
           ask(

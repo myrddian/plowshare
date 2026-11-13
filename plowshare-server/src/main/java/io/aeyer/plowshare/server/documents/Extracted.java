@@ -57,22 +57,10 @@ public record Extracted(
    * Whether the blank lines in {@link #text} are this server's guess at where the paragraphs are,
    * rather than the author's own paragraph marks.
    *
-   * <p><b>The distinction decides whether {@link Derivation} is allowed to overrule them.</b> In a
-   * text file a blank line is a mark the author typed; there is nothing to repair and a rule that
-   * joined two of those blocks would be deleting a paragraph somebody wrote. In a PDF there is no
-   * character meaning "new paragraph" at all — {@code PdfExtraction} asks PDFBox to infer the
-   * boundaries from glyph geometry, and hand counted on arXiv:2212.12473 that inference is wrong
-   * about <b>69%</b> of what it produces.
-   *
-   * <p>Measured on the two books that made this a rule rather than a preference: on Frankenstein
-   * the join would take {@code “Yes.”} — a line of dialogue, a paragraph by every convention of the
-   * form — into the paragraph above it, along with the dateline of every letter. Those are not
-   * extraction artefacts. They are the text.
-   *
-   * <p><b>Keyed on the converter, and only PDF answers true.</b> A DOCX carries real paragraph
-   * elements and would answer false when that format arrives; the question is not "was this
-   * converted" but "did the converter have to guess", and those are different questions for
-   * different formats.
+   * <p>Only PDF geometry needs the display-equation repair in {@link Derivation}. Text files and
+   * HTML have source block boundaries instead. This distinction does not control processing
+   * paragraph size: every prose format subsequently packs adjacent blocks to an 80-word minimum
+   * within each section. Neither repair nor packing changes this retained extraction.
    */
   public boolean paragraphsWereInferred() {
     return PdfExtraction.CONVERTER.equals(converter);
