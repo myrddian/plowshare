@@ -92,15 +92,25 @@ ASSISTANT_TOOLS = frozenset(
         "network_record_issue",
     }
 )
+# The assistant's reference request, added after the assistant binding. It is
+# the second reviewed non-read addition: it only records a request for the
+# owner, starts with empty history and is keyed by its invocation.
+REFERENCE_TOOLS = frozenset({"network_request_reference"})
 # The exact six-tool paged binding that deployments already hold. It is the
 # current declarations without the later tools; a test pins its digest so an
 # edit to an older tool cannot silently orphan existing paged journals.
 PAGED_DECLARATIONS = tuple(
-    tool for tool in DECLARATIONS if tool.name not in DEVICE_TOOLS | ASSISTANT_TOOLS
+    tool
+    for tool in DECLARATIONS
+    if tool.name not in DEVICE_TOOLS | ASSISTANT_TOOLS | REFERENCE_TOOLS
 )
 # The exact eight-tool device binding, pinned the same way.
 DEVICE_DECLARATIONS = tuple(
-    tool for tool in DECLARATIONS if tool.name not in ASSISTANT_TOOLS
+    tool for tool in DECLARATIONS if tool.name not in ASSISTANT_TOOLS | REFERENCE_TOOLS
+)
+# The exact twelve-tool assistant binding, pinned the same way.
+ASSISTANT_DECLARATIONS = tuple(
+    tool for tool in DECLARATIONS if tool.name not in REFERENCE_TOOLS
 )
 # Optional read-page arguments reviewed for the v1 to paged transition.
 _PAGE_ADDITIONS = {
@@ -159,10 +169,19 @@ def _compatible(
 
 def compatible_descriptors() -> None:
     """Each transition step may add only reviewed arguments, read tools or the
-    reviewed assistant tools."""
+    reviewed assistant and reference tools."""
     _compatible(LEGACY_DECLARATIONS, PAGED_DECLARATIONS, _PAGE_ADDITIONS, frozenset())
     _compatible(PAGED_DECLARATIONS, DEVICE_DECLARATIONS, {}, DEVICE_TOOLS)
-    _compatible(DEVICE_DECLARATIONS, DECLARATIONS, {}, ASSISTANT_TOOLS, ASSISTANT_TOOLS)
+    _compatible(
+        DEVICE_DECLARATIONS,
+        ASSISTANT_DECLARATIONS,
+        {},
+        ASSISTANT_TOOLS,
+        ASSISTANT_TOOLS,
+    )
+    _compatible(
+        ASSISTANT_DECLARATIONS, DECLARATIONS, {}, REFERENCE_TOOLS, REFERENCE_TOOLS
+    )
 
 
 def receipt_stages(receipt: ToolReceipt) -> tuple[ToolReceipt, ...]:
@@ -268,7 +287,8 @@ def open_tool_journal(
     Caller must hold the collector receipt process lock throughout this context.
     The chain is v1 ``directory`` -> ``<directory>-paged`` (six tools with read
     pagination) -> ``<directory>-devices`` (adds the device read tools) ->
-    ``<directory>-assistant`` (adds the assistant's request and record tools). Each
+    ``<directory>-assistant`` (adds the assistant's request and record tools) ->
+    ``<directory>-references`` (adds the assistant's reference request). Each
     step copies public typed receipts before admitting the new provider. Partial
     copies are checked and resumed locally; neither handlers nor Relay mutations
     run. A durable marker fences each step once its complete copy is confirmed.
@@ -280,6 +300,7 @@ def open_tool_journal(
     paged = directory.parent / (directory.name + "-paged")
     devices = directory.parent / (directory.name + "-devices")
     assistant = directory.parent / (directory.name + "-assistant")
+    references = directory.parent / (directory.name + "-references")
     with ExitStack() as stores:
         legacy = None
         if (directory / "relay-tools.sqlite").exists():
@@ -307,9 +328,17 @@ def open_tool_journal(
                 devices,
                 deployment_config(project, provider, account, DEVICE_DECLARATIONS),
             )
+        assistant_journal = None
+        if device_journal is not None or (assistant / "relay-tools.sqlite").exists():
+            assistant_journal = _transition(
+                stores,
+                device_journal,
+                assistant,
+                deployment_config(project, provider, account, ASSISTANT_DECLARATIONS),
+            )
         yield _transition(
             stores,
-            device_journal,
-            assistant,
+            assistant_journal,
+            references,
             deployment_config(project, provider, account, DECLARATIONS),
         )

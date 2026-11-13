@@ -41,8 +41,10 @@ configuration, fixes), use information_read with operation `search` and a filter
 of `tags: ["device-reference", "<product>"]`, read the passage, and name the
 source in your answer.
 
-If nothing relevant is found, say so, and label the claim as general knowledge
-that has not been checked.
+If nothing relevant is found, say so, label the claim as general knowledge that
+has not been checked, and call network_request_reference with the product and
+what you could not answer. Say the request is queued for the owner, not
+answered.
 
 For bigger work, ask a specialist with send_message: privacy_analyst for an
 interpretation of evidence, privacy_reviewer to check a claim, privacy_coordinator

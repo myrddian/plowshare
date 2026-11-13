@@ -290,7 +290,8 @@ class NetworkPrivacyWatchTest {
             "network_request_deep_scan",
             "network_request_assessment",
             "network_note_profile",
-            "network_record_issue");
+            "network_record_issue",
+            "network_request_reference");
     var scopes = new java.util.ArrayList<String>();
     manifest
         .path("toolScopes")

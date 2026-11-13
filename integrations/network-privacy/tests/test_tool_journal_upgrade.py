@@ -12,12 +12,13 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from plowshare.tool_journal import SqliteToolJournal
-from plowshare.tools import ToolReceipt, ToolResult, deployment_config
+from plowshare.tools import ToolDeclaration, ToolReceipt, ToolResult, deployment_config
 from support import configuration as collector_configuration
 
 from plowshare_privacy.journal import FileReceipts
 from plowshare_privacy.native_tools import DECLARATIONS
 from plowshare_privacy.tool_journal_upgrade import (
+    ASSISTANT_DECLARATIONS,
     DEVICE_DECLARATIONS,
     LEGACY_DECLARATIONS,
     PAGED_DECLARATIONS,
@@ -31,6 +32,14 @@ from plowshare_privacy.tool_journal_upgrade import (
 PAGED_BINDING = "c2374bb551061811a7287459a45aa0a0cdbe83002e134de0effc09bdba3c55a6"
 # The eight-tool device binding, frozen the same way.
 DEVICE_BINDING = "4f96e9bae4283288546bf98b39386e13f2043d54054cc70a5444272794f753ea"
+# The twelve-tool assistant binding, frozen the same way.
+ASSISTANT_BINDING = "28bf816e886374905526e1658ac0a8b64373da1745eb496282f8cc07c8d651ea"
+
+
+def binding(declarations: tuple[ToolDeclaration, ...]) -> str:
+    return hashlib.sha256(
+        deployment_config("fixture", "scanner", "owner", declarations).encode()
+    ).hexdigest()
 
 
 def receipt() -> ToolReceipt:
@@ -255,7 +264,8 @@ class DeviceToolTransitionTest(unittest.TestCase):
                 self.assertEqual(current.all(), ())
             self.assertFalse((directory.parent / "relay-tools-paged").exists())
             self.assertFalse((directory.parent / "relay-tools-devices").exists())
-            self.assertTrue((directory.parent / "relay-tools-assistant").is_dir())
+            self.assertFalse((directory.parent / "relay-tools-assistant").exists())
+            self.assertTrue((directory.parent / "relay-tools-references").is_dir())
 
 
 class AssistantToolTransitionTest(unittest.TestCase):
@@ -269,7 +279,7 @@ class AssistantToolTransitionTest(unittest.TestCase):
             hashlib.sha256(configuration.encode()).hexdigest(), DEVICE_BINDING
         )
         self.assertEqual(
-            {tool.name for tool in DECLARATIONS}
+            {tool.name for tool in ASSISTANT_DECLARATIONS}
             - {tool.name for tool in DEVICE_DECLARATIONS},
             {
                 "network_request_deep_scan",
@@ -314,6 +324,13 @@ class AssistantToolTransitionTest(unittest.TestCase):
                 (directory.parent / "relay-tools-assistant/transition.json").read_text()
             )
             self.assertEqual(marker["receipts"], 1)
+            # The chain continues: the assistant history moves on to the newest.
+            marker = json.loads(
+                (
+                    directory.parent / "relay-tools-references/transition.json"
+                ).read_text()
+            )
+            self.assertEqual(marker["receipts"], 1)
             self.assertFalse((directory.parent / "relay-tools-paged").exists())
             with SqliteToolJournal(
                 devices,
@@ -336,3 +353,77 @@ class AssistantToolTransitionTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Tool identity changed"):
                     with open_tool_journal(directory, "fixture", "scanner", "owner"):
                         self.fail("unreviewed tool admitted")
+
+
+class ReferenceToolTransitionTest(unittest.TestCase):
+    def test_existing_binding_digests_unchanged(self) -> None:
+        # Deployed journals hold these exact bindings; a change orphans them.
+        self.assertEqual(binding(PAGED_DECLARATIONS), PAGED_BINDING)
+        self.assertEqual(binding(DEVICE_DECLARATIONS), DEVICE_BINDING)
+        self.assertEqual(binding(ASSISTANT_DECLARATIONS), ASSISTANT_BINDING)
+        self.assertNotEqual(binding(DECLARATIONS), ASSISTANT_BINDING)
+        for frozen in (PAGED_DECLARATIONS, DEVICE_DECLARATIONS, ASSISTANT_DECLARATIONS):
+            self.assertNotIn(
+                "network_request_reference", {tool.name for tool in frozen}
+            )
+        self.assertEqual(
+            {tool.name for tool in DECLARATIONS}
+            - {tool.name for tool in ASSISTANT_DECLARATIONS},
+            {"network_request_reference"},
+        )
+
+    def test_assistant_journal_upgrades_to_references_without_losing_receipts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "relay-tools"
+            assistant = directory.parent / "relay-tools-assistant"
+            configuration = deployment_config(
+                "fixture", "scanner", "owner", ASSISTANT_DECLARATIONS
+            )
+            # A deployment whose fresh install ran the twelve-tool collector,
+            # with work in every phase, including uncertain ones.
+            with SqliteToolJournal(assistant, configuration=configuration) as store:
+                for phase in range(4):
+                    stages = receipt_stages(receipt())
+                    for stage in stages[: phase + 1]:
+                        store.save(stage)
+                retained = store.all()
+            # The marker that fresh install wrote when it opened the journal.
+            (assistant / "transition.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "source": None,
+                        "target": ASSISTANT_BINDING,
+                        "receipts": 0,
+                        "digest": hashlib.sha256(b"[]").hexdigest(),
+                    }
+                )
+            )
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(current.all(), retained)
+                item = receipt()
+                for stage in receipt_stages(item):
+                    current.save(stage)
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(set(current.all()), {*retained, item})
+            references = directory.parent / "relay-tools-references"
+            marker = json.loads((references / "transition.json").read_text())
+            self.assertEqual(marker["receipts"], len(retained))
+            self.assertEqual(marker["target"], binding(DECLARATIONS))
+            # The newest journal holds the full binding, so the SDK fence
+            # refuses to open it with the older one.
+            with self.assertRaisesRegex(ValueError, "another deployment"):
+                with SqliteToolJournal(references, configuration=configuration):
+                    self.fail("older binding admitted")
+            self.assertFalse((directory.parent / "relay-tools-devices").exists())
+            self.assertFalse((directory.parent / "relay-tools-paged").exists())
+            # The assistant history is retained unchanged for inspection; new
+            # work there means an older binary ran, and it is refused.
+            with SqliteToolJournal(assistant, configuration=configuration) as store:
+                self.assertEqual(store.all(), retained)
+                store.save(receipt_stages(receipt())[0])
+            with self.assertRaisesRegex(ValueError, "Foreign tool transition"):
+                with open_tool_journal(directory, "fixture", "scanner", "owner"):
+                    self.fail("changed assistant history admitted")
