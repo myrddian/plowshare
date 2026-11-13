@@ -89,11 +89,15 @@ class PiHoleServerCase(unittest.IsolatedAsyncioTestCase):
             },
             "took": 0.01,
         }
+        # ``GET dhcp/leases``; another status answers with an error carrying the secret.
+        self.leases_status = 200
+        self.leases: object = {"leases": [], "took": 0.01}
         app = web.Application()
         app.router.add_route("*", "/api/auth", self.auth)
         app.router.add_get("/api/network/devices", self.devices)
         app.router.add_get("/api/queries", self.queries)
         app.router.add_get("/api/config/dhcp", self.dhcp)
+        app.router.add_get("/api/dhcp/leases", self.dhcp_leases)
         app.router.add_route("*", "/stolen", self.stolen_request)
         self.server = TestServer(app)
         await self.server.start_server()
@@ -148,6 +152,16 @@ class PiHoleServerCase(unittest.IsolatedAsyncioTestCase):
                 {"error": {"message": SECRET}}, status=self.dhcp_status
             )
         return web.json_response(self.dhcp_settings)
+
+    async def dhcp_leases(self, request: web.Request) -> web.Response:
+        self.calls.append((request.method, request.path))
+        self.assertEqual(request.headers.get("X-FTL-SID"), SID)
+        self.assertEqual(dict(request.query), {})
+        if self.leases_status != 200:
+            return web.json_response(
+                {"error": {"message": SECRET}}, status=self.leases_status
+            )
+        return web.json_response(self.leases)
 
     def device(self, address: str, mac: str = MAC) -> dict[str, object]:
         return {

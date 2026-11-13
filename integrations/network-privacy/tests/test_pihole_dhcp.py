@@ -13,16 +13,23 @@ from uuid import uuid4
 from test_connectors import PIHOLE
 from test_pihole import ADDRESS, MAC, SECRET, PiHoleServerCase
 
-from plowshare_privacy.addressing import AddressingSample, DhcpScope, Reservation
+from plowshare_privacy.addressing import (
+    AddressingSample,
+    DhcpScope,
+    Lease,
+    Reservation,
+    assign_addresses,
+)
 from plowshare_privacy.collection import NetworkCollector
 from plowshare_privacy.connectors import bind
 from plowshare_privacy.contracts import (
     Capability,
     CollectionPlan,
+    DeviceIdentity,
     ServicePlan,
     utc_now,
 )
-from plowshare_privacy.pihole import PiHoleDhcp, PiHoleV6
+from plowshare_privacy.pihole import PiHoleDhcp, PiHoleV6, instant
 from plowshare_privacy.source_set import SourceSet
 
 OTHER = "192.0.2.150"
@@ -32,6 +39,31 @@ INVALID_RESERVATION = "addressing_partial: Pi-hole returned an invalid DHCP rese
 INVALID_RANGE = "addressing_partial: Pi-hole returned an invalid DHCP range"
 RESERVATION_LIMIT = "addressing_partial: Pi-hole DHCP reservation limit reached"
 DHCP_ONLY: frozenset[Capability] = frozenset({"dhcp_scope", "dhcp_reservations"})
+OTHER_MAC = "aa:bb:cc:dd:ee:01"
+LEASES: frozenset[Capability] = frozenset({"dhcp_leases"})
+TABLE_AND_LEASES: frozenset[Capability] = frozenset({"network_table", "dhcp_leases"})
+INVALID_LEASE = "addressing_partial: Pi-hole returned an invalid DHCP lease"
+LEASE_LIMIT = "addressing_partial: Pi-hole DHCP lease limit reached"
+LEASES_UNREADABLE = "addressing_partial: Pi-hole DHCP leases could not be read"
+IDENTITY_LEASE_LIMIT = "identity_partial: Pi-hole DHCP lease limit reached"
+IDENTITY_INVALID_LEASE = "identity_partial: Pi-hole returned an invalid DHCP lease"
+IDENTITY_LEASES_UNREADABLE = (
+    "identity_unavailable: Pi-hole DHCP leases could not be read or validated"
+)
+DISAGREE = (
+    "identity_ambiguous: Pi-hole DHCP lease and network table name different "
+    "devices for a selected address"
+)
+TWO_LEASES = (
+    "identity_ambiguous: Pi-hole DHCP lists multiple leases for a selected address"
+)
+LEASE_CALL = ("GET", "/api/dhcp/leases")
+
+
+def _identity(mac: str = MAC) -> DeviceIdentity:
+    return DeviceIdentity(
+        ADDRESS, "mac:" + mac, None, None, mac, None, "pihole-v6", utc_now(), None
+    )
 
 
 class PiHoleDhcpTest(PiHoleServerCase):
@@ -173,12 +205,13 @@ class PiHoleDhcpTest(PiHoleServerCase):
                         ),
                     ),
                 )
-                self.assertTrue(data.addressing.scopes[0].complete)
+                # A rejected reservation could hold any address: no static inference.
+                self.assertFalse(data.addressing.scopes[0].complete)
         self.settings()["hosts"] = None
         data = await self.source().read((ADDRESS,), utc_now())
         assert data.addressing is not None
         self.assertEqual(data.addressing.issues, (INVALID_RESERVATION,))
-        self.assertTrue(data.addressing.scopes[0].complete)
+        self.assertFalse(data.addressing.scopes[0].complete)
 
     async def test_reservation_limit_is_partial(self) -> None:
         hosts = [
@@ -195,6 +228,32 @@ class PiHoleDhcpTest(PiHoleServerCase):
         assert data.addressing is not None
         self.assertEqual(len(data.addressing.reservations), 1)
         self.assertEqual(data.addressing.issues, ())
+
+    async def test_partial_reservation_read_blocks_static_inference(self) -> None:
+        # Without reservations the scope is complete and ADDRESS is static.
+        data = await self.source().read((ADDRESS,), utc_now())
+        assert data.addressing is not None
+        self.assertTrue(data.addressing.scopes[0].complete)
+        limit = [
+            f"aa:bb:cc:dd:{n // 256:02x}:{n % 256:02x},10.0.{n // 256}.{n % 256}"
+            for n in range(1, 514)
+        ]
+        cases = {"malformed entry": ["id:client,192.0.2.12"], "limit": limit}
+        for name, hosts in cases.items():
+            with self.subTest(name):
+                self.settings()["hosts"] = hosts
+                data = await self.source().read((ADDRESS,), utc_now())
+                assert data.addressing is not None
+                self.assertFalse(data.addressing.scopes[0].complete)
+                # The scope reaches the collector, which then cannot infer static.
+                assignments, _ = assign_addresses(
+                    (data.addressing,), {ADDRESS: _identity()}, (ADDRESS,), utc_now()
+                )
+                self.assertEqual(assignments[0].mode, "unknown")
+        # Reservations off: the hosts list is not read, the scope stays complete.
+        data = await self.source(frozenset({"dhcp_scope"})).read((ADDRESS,), utc_now())
+        assert data.addressing is not None
+        self.assertTrue(data.addressing.scopes[0].complete)
 
     async def test_invalid_range_leaves_the_scope_incomplete(self) -> None:
         cases = {
@@ -339,6 +398,331 @@ class PiHoleDhcpTest(PiHoleServerCase):
         )
         self.assertEqual(assignment.services, ("dns",))
         self.assertEqual(self.dhcp_calls(), 1)
+
+
+class PiHoleLeaseTest(PiHoleServerCase):
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        # Whole seconds, so expiries and the collection instant compare exactly.
+        self.observed = instant(int(self.now))
+        self.expiry = int(self.now) + 3600
+
+    def source(
+        self, capabilities: frozenset[Capability] = LEASES, service: str = "dns"
+    ) -> PiHoleV6:
+        return PiHoleV6(self.plan, capabilities=capabilities, service=service)
+
+    def lease(
+        self,
+        address: str = ADDRESS,
+        mac: str = MAC,
+        name: object = "lease-name",
+        expires: object = None,
+    ) -> dict[str, object]:
+        return {
+            "expires": self.expiry if expires is None else expires,
+            "name": name,
+            "hwaddr": mac,
+            "ip": address,
+            "clientid": "01:" + mac,
+        }
+
+    def serve(self, *leases: object) -> None:
+        self.leases = {"leases": list(leases), "took": 0.01}
+
+    def settings(self) -> dict[str, object]:
+        config = cast(dict[str, object], self.dhcp_settings)["config"]
+        return cast(dict[str, object], cast(dict[str, object], config)["dhcp"])
+
+    def lease_identity(
+        self,
+        address: str = ADDRESS,
+        mac: str = MAC,
+        hostname: str | None = "lease-name",
+        vendor: str | None = None,
+    ) -> DeviceIdentity:
+        return DeviceIdentity(
+            address,
+            "mac:" + mac,
+            None,
+            hostname,
+            mac,
+            vendor,
+            "pihole-v6",
+            self.observed,
+            None,
+            "dhcp_lease",
+            "dns",
+        )
+
+    async def test_active_lease_identifies_and_addresses_selected_address(
+        self,
+    ) -> None:
+        self.serve(self.lease(), self.lease(OTHER, OTHER_MAC, "*"))
+        data = await self.source(frozenset({"dhcp_leases", "dhcp_scope"})).read(
+            (ADDRESS, OTHER), self.observed
+        )
+        self.assertEqual(
+            data.devices,
+            (self.lease_identity(), self.lease_identity(OTHER, OTHER_MAC, None)),
+        )
+        self.assertEqual(data.issues, ())
+        assert data.addressing is not None
+        self.assertEqual(
+            data.addressing.leases,
+            (
+                Lease(ADDRESS, MAC, "lease-name", instant(self.expiry), "dns"),
+                Lease(OTHER, OTHER_MAC, None, instant(self.expiry), "dns"),
+            ),
+        )
+        self.assertEqual(data.addressing.issues, ())
+        [scope] = data.addressing.scopes
+        self.assertEqual(scope.lease_table, "complete")
+        self.assertTrue(scope.complete)
+        self.assertEqual(
+            self.calls,
+            [
+                ("POST", "/api/auth"),
+                ("GET", "/api/config/dhcp"),
+                LEASE_CALL,
+                ("DELETE", "/api/auth"),
+            ],
+        )
+        # The collector decides dhcp_dynamic from the lease.
+        devices = {device.address: device for device in data.devices}
+        assignments, _ = assign_addresses(
+            (data.addressing,), devices, (ADDRESS, OTHER), self.observed
+        )
+        self.assertEqual(
+            [(item.mode, item.basis) for item in assignments],
+            [("dhcp_dynamic", "dhcp_lease")] * 2,
+        )
+
+    async def test_leases_only_reads_settings_then_leases(self) -> None:
+        self.serve(self.lease())
+        data = await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, (self.lease_identity(),))
+        self.assertEqual(
+            data.addressing,
+            AddressingSample(
+                (Lease(ADDRESS, MAC, "lease-name", instant(self.expiry), "dns"),)
+            ),
+        )
+        self.assertEqual(self.calls[1:3], [("GET", "/api/config/dhcp"), LEASE_CALL])
+
+    async def test_leases_skipped_when_capability_off_or_dhcp_inactive(self) -> None:
+        self.serve(self.lease())
+        data = await self.source(frozenset({"network_table", "dhcp_scope"})).read(
+            (ADDRESS,), self.observed
+        )
+        self.assertEqual([device.evidence for device in data.devices], [None])
+        assert data.addressing is not None
+        self.assertEqual(data.addressing.scopes[0].lease_table, "incomplete")
+        await self.source(frozenset({"network_table"})).identify(
+            (ADDRESS,), self.observed
+        )
+        self.assertNotIn(LEASE_CALL, self.calls)
+        self.settings()["active"] = False
+        for capabilities in (
+            LEASES,
+            frozenset[Capability]({"dhcp_leases", "dhcp_scope"}),
+        ):
+            with self.subTest(capabilities=sorted(capabilities)):
+                self.calls.clear()
+                data = await self.source(capabilities).read((ADDRESS,), self.observed)
+                self.assertEqual(data.devices, ())
+                self.assertEqual(data.issues, ())
+                self.assertEqual(data.addressing, AddressingSample())
+                self.assertEqual(self.dhcp_calls(), 1)
+                self.assertNotIn(LEASE_CALL, self.calls)
+
+    def dhcp_calls(self) -> int:
+        return self.calls.count(("GET", "/api/config/dhcp"))
+
+    async def test_expired_lease_ignored_zero_expiry_kept(self) -> None:
+        self.serve(
+            self.lease(expires=int(self.now) - 10),
+            self.lease(OTHER, OTHER_MAC, expires=0),
+        )
+        data = await self.source(frozenset({"dhcp_leases", "dhcp_scope"})).read(
+            (ADDRESS, OTHER), self.observed
+        )
+        self.assertEqual(data.devices, (self.lease_identity(OTHER, OTHER_MAC),))
+        assert data.addressing is not None
+        self.assertEqual(
+            data.addressing.leases,
+            (Lease(OTHER, OTHER_MAC, "lease-name", None, "dns"),),
+        )
+        self.assertEqual(data.addressing.issues, ())
+        self.assertEqual(data.addressing.scopes[0].lease_table, "complete")
+
+    async def test_lease_and_table_disagree_is_ambiguous(self) -> None:
+        self.serve(self.lease(mac=OTHER_MAC))
+        data = await self.source(TABLE_AND_LEASES).read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, ())
+        self.assertIn(DISAGREE, data.issues)
+        identified = await self.source(TABLE_AND_LEASES).identify(
+            (ADDRESS,), self.observed
+        )
+        self.assertEqual(identified.devices, ())
+        self.assertIn(DISAGREE, identified.issues)
+
+    async def test_two_leases_for_one_address_is_ambiguous(self) -> None:
+        self.serve(self.lease(), self.lease(mac=OTHER_MAC))
+        data = await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, ())
+        self.assertEqual(data.issues, (TWO_LEASES,))
+        # The same device listed twice is one identity, not an ambiguity.
+        self.serve(self.lease(), self.lease(expires=0))
+        data = await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, (self.lease_identity(),))
+        self.assertEqual(data.issues, ())
+
+    async def test_out_of_scope_leases_never_enter_evidence(self) -> None:
+        self.serve(
+            self.lease(OUTSIDE, OTHER_MAC, "outside-host"),
+            self.lease(OTHER, "aa:bb:cc:dd:ee:02", "other-host"),
+        )
+        data = await self.source(frozenset({"dhcp_leases", "dhcp_scope"})).read(
+            (ADDRESS,), self.observed
+        )
+        self.assertEqual(data.devices, ())
+        assert data.addressing is not None
+        self.assertEqual(data.addressing.leases, ())
+        self.assertEqual(data.addressing.scopes[0].lease_table, "complete")
+        for value in (OUTSIDE, OTHER, "outside-host", "other-host", OTHER_MAC):
+            self.assertNotIn(value, repr(data))
+
+    async def test_lease_limit_marks_partial_and_incomplete(self) -> None:
+        many = [
+            self.lease(
+                f"10.0.{n // 256}.{n % 256}",
+                f"aa:bb:cc:dd:{n // 256:02x}:{n % 256:02x}",
+            )
+            for n in range(1, 1025)
+        ]
+        capabilities = frozenset[Capability]({"dhcp_leases", "dhcp_scope"})
+        # 1024 entries: the table may have been cut off.
+        self.serve(*many[:1023], self.lease())
+        data = await self.source(capabilities).read((ADDRESS,), self.observed)
+        assert data.addressing is not None
+        self.assertEqual(data.addressing.issues, (LEASE_LIMIT,))
+        self.assertEqual(data.addressing.scopes[0].lease_table, "incomplete")
+        self.assertEqual(data.issues, (IDENTITY_LEASE_LIMIT,))
+        self.assertEqual(len(data.addressing.leases), 1)
+        # Entries past the limit are not decoded.
+        self.serve(*many, self.lease())
+        data = await self.source(capabilities).read((ADDRESS,), self.observed)
+        assert data.addressing is not None
+        self.assertEqual(data.addressing.leases, ())
+        self.assertEqual(data.addressing.issues, (LEASE_LIMIT,))
+        # One below the limit is a complete read.
+        self.serve(*many[:1022], self.lease())
+        data = await self.source(capabilities).read((ADDRESS,), self.observed)
+        assert data.addressing is not None
+        self.assertEqual(data.addressing.issues, ())
+        self.assertEqual(data.addressing.scopes[0].lease_table, "complete")
+
+    async def test_failed_lease_read_marks_incomplete(self) -> None:
+        capabilities = frozenset[Capability]({"dhcp_leases", "dhcp_scope"})
+        cases: dict[str, tuple[int, object]] = {
+            "503": (503, None),
+            "403": (403, None),
+            "not an object": (200, ["x"]),
+            "no lease list": (200, {"took": 0.01}),
+            "lease list not a list": (200, {"leases": {"ip": ADDRESS}}),
+        }
+        for name, (status, body) in cases.items():
+            with self.subTest(name):
+                self.leases_status = status
+                self.leases = {"leases": [self.lease()]} if body is None else body
+                data = await self.source(capabilities).read((ADDRESS,), self.observed)
+                self.assertEqual(data.devices, ())
+                self.assertEqual(data.issues, (IDENTITY_LEASES_UNREADABLE,))
+                assert data.addressing is not None
+                self.assertEqual(data.addressing.leases, ())
+                self.assertEqual(data.addressing.issues, (LEASES_UNREADABLE,))
+                [scope] = data.addressing.scopes
+                self.assertEqual(scope.lease_table, "incomplete")
+                for issue in (*data.issues, *data.addressing.issues):
+                    self.assertNotIn(SECRET, issue)
+                    self.assertNotIn(self.origin, issue)
+        self.leases_status = 200
+        malformed: list[object] = [
+            self.lease(expires=-1),
+            self.lease(expires=1.5),
+            self.lease(expires=True),
+            self.lease(expires="0"),
+            self.lease(expires=2**40),
+            self.lease(mac="00:00:00:00:00:00"),
+            self.lease(mac="not-a-mac"),
+            self.lease(address="192.0.2.300"),
+            self.lease(name=17),
+            self.lease(name="x" * 200),
+            {"ip": ADDRESS},
+            "lease",
+        ]
+        for entry in malformed:
+            with self.subTest(entry=entry):
+                self.serve(entry, self.lease(OTHER, OTHER_MAC))
+                data = await self.source(capabilities).read(
+                    (ADDRESS, OTHER), self.observed
+                )
+                self.assertEqual(data.devices, (self.lease_identity(OTHER, OTHER_MAC),))
+                self.assertEqual(data.issues, (IDENTITY_INVALID_LEASE,))
+                assert data.addressing is not None
+                self.assertEqual(data.addressing.issues, (INVALID_LEASE,))
+                self.assertEqual(data.addressing.scopes[0].lease_table, "incomplete")
+
+    async def test_unreadable_settings_or_session_is_an_identity_gap(self) -> None:
+        self.dhcp_status = 503
+        data = await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(data.issues, (IDENTITY_LEASES_UNREADABLE,))
+        self.assertNotIn(LEASE_CALL, self.calls)
+        self.mode = "authentication_failure"
+        data = await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(
+            data.issues,
+            ("identity_unavailable: Pi-hole authentication or connection failed",),
+        )
+
+    async def test_leases_do_not_create_presence(self) -> None:
+        self.serve(self.lease(), self.lease(OTHER, OTHER_MAC))
+        source = self.source(frozenset({"network_table", "dns_queries", "dhcp_leases"}))
+        sample = await source.presence((ADDRESS, OTHER), self.observed)
+        self.assertEqual([device.address for device in sample.devices], [ADDRESS])
+        self.assertEqual([device.evidence for device in sample.devices], [None])
+        await source.activity((ADDRESS,), instant(int(self.now) - 60), self.observed)
+        self.assertNotIn(LEASE_CALL, self.calls)
+        self.assertNotIn(("GET", "/api/config/dhcp"), self.calls)
+        # A leases-only Pi-hole has no presence read at all.
+        self.calls.clear()
+        sample = await self.source().presence((ADDRESS,), self.observed)
+        self.assertEqual(sample.devices, ())
+        self.assertEqual(self.calls, [])
+
+    async def test_lease_identity_wins_over_table_with_same_mac(self) -> None:
+        self.serve(self.lease())
+        data = await self.source(TABLE_AND_LEASES).read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, (self.lease_identity(vendor="Fixture vendor"),))
+        self.assertEqual(data.issues, ())
+
+    async def test_lease_fills_an_address_the_table_lacks(self) -> None:
+        self.serve(self.lease(OTHER, OTHER_MAC))
+        data = await self.source(TABLE_AND_LEASES).read((ADDRESS, OTHER), self.observed)
+        self.assertEqual(
+            [(device.address, device.evidence) for device in data.devices],
+            [(ADDRESS, None), (OTHER, "dhcp_lease")],
+        )
+        # Every selected address now has an association: no unavailable gap.
+        self.assertEqual(data.issues, ())
+
+    async def test_identify_reads_leases(self) -> None:
+        self.serve(self.lease())
+        data = await self.source().identify((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, (self.lease_identity(),))
+        self.assertIsNone(data.addressing)
+        self.assertEqual(self.calls[1:3], [("GET", "/api/config/dhcp"), LEASE_CALL])
 
 
 class DhcpOnlyServiceTest(unittest.TestCase):

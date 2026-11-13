@@ -6,9 +6,12 @@ No Pi-hole settings, blocking rules or DHCP leases are changed. POST/DELETE are
 used only to open/close this adapter's session, and are never replayed.
 
 DHCP settings (``GET config/dhcp``) are read once per collection session, and
-only when ``dhcp_scope`` or ``dhcp_reservations`` is enabled. They are decoded
-here into ``DhcpScope`` and ``Reservation`` facts; raw settings never leave this
-module.
+only when ``dhcp_scope``, ``dhcp_reservations`` or ``dhcp_leases`` is enabled.
+With ``dhcp_leases`` and DHCP active, the lease table (``GET dhcp/leases``) is
+read in the same session by full collections and identity checks, never by
+presence or activity reads. Both are decoded here into ``DhcpScope``,
+``Reservation``, ``Lease`` and ``DeviceIdentity`` facts; raw responses never
+leave this module.
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from typing import Protocol
 
 import aiohttp
 
-from .addressing import AddressingSample, DhcpScope, Reservation
+from .addressing import AddressingSample, DhcpScope, Lease, Reservation
 from .contracts import (
     Capability,
     DeviceIdentity,
@@ -41,6 +44,7 @@ from .contracts import (
     timestamp,
 )
 from .dns_activity import QuerySample
+from .identity_merge import merge_identities
 from .identity_source import IdentitySample
 from .limits import BATCH_SIZE, MAX_TARGETS
 
@@ -85,8 +89,34 @@ DHCP_INVALID_RANGE = "addressing_partial: Pi-hole returned an invalid DHCP range
 DHCP_RESERVATION_LIMIT = "addressing_partial: Pi-hole DHCP reservation limit reached"
 # Pi-hole returns the whole ``dhcp.hosts`` list; at most this many are decoded.
 MAX_RESERVATIONS = 512
-# The capabilities answered from ``config/dhcp``.
-_DHCP_SETTINGS: frozenset[Capability] = frozenset({"dhcp_scope", "dhcp_reservations"})
+DHCP_INVALID_LEASE = "addressing_partial: Pi-hole returned an invalid DHCP lease"
+DHCP_LEASE_LIMIT = "addressing_partial: Pi-hole DHCP lease limit reached"
+DHCP_LEASES_UNREADABLE = "addressing_partial: Pi-hole DHCP leases could not be read"
+# The identity side of the same lease-read gaps.
+_IDENTITY_INVALID_LEASE = "identity_partial: Pi-hole returned an invalid DHCP lease"
+_IDENTITY_LEASE_LIMIT = "identity_partial: Pi-hole DHCP lease limit reached"
+_IDENTITY_LEASES_UNREADABLE = (
+    "identity_unavailable: Pi-hole DHCP leases could not be read or validated"
+)
+_LEASES_DISAGREE = (
+    "identity_ambiguous: Pi-hole DHCP lease and network table name different "
+    "devices for a selected address"
+)
+_LEASES_AMBIGUOUS = (
+    "identity_ambiguous: Pi-hole DHCP lists multiple leases for a selected address"
+)
+_NO_ASSOCIATION = (
+    "identity_unavailable: some selected addresses have no fresh unambiguous "
+    "Pi-hole association"
+)
+# Pi-hole returns the whole lease table; at most this many entries are decoded,
+# and a read reaching it cannot show the table was complete.
+MAX_LEASES = 1024
+# The capabilities that need ``config/dhcp``: leases are read only while it
+# reports DHCP active.
+_DHCP_SETTINGS: frozenset[Capability] = frozenset(
+    {"dhcp_scope", "dhcp_reservations", "dhcp_leases"}
+)
 # Optional trailing ``dhcp.hosts`` fields accepted after MAC and address: a
 # hostname and a lease time ("24h", "infinite").
 _HOST_FIELD = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252}[A-Za-z0-9])?")
@@ -128,6 +158,44 @@ def _reservation(entry: object) -> tuple[str, str]:
         if not _HOST_FIELD.fullmatch(extra) or extra.lower() == "ignore":
             raise ValueError("Unsupported Pi-hole DHCP reservation")
     return address, mac
+
+
+@dataclass(frozen=True)
+class _LeaseRead:
+    """One ``dhcp/leases`` read: active in-scope leases and their identities.
+
+    ``complete`` holds only when the table was decoded fully below
+    ``MAX_LEASES``. ``identities`` has one record per address leased to a
+    single MAC; an address leased to several MACs is ambiguous instead.
+    """
+
+    leases: tuple[Lease, ...]
+    identities: IdentitySample
+    complete: bool
+    addressing_issues: tuple[str, ...]
+
+
+_UNREAD_LEASES = _LeaseRead(
+    (),
+    IdentitySample(issues=(_IDENTITY_LEASES_UNREADABLE,)),
+    False,
+    (DHCP_LEASES_UNREADABLE,),
+)
+
+
+def _lease_expiry(value: object, observed: float) -> tuple[bool, str | None]:
+    """``(active, expires_at)`` of a lease's ``expires`` epoch.
+
+    Pi-hole documents ``0`` as a lease that never expires (``None``). A lease
+    expiring at or before ``observed`` is inactive. A negative, non-integer or
+    boolean value raises ValueError.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("Invalid Pi-hole lease expiry")
+    if value == 0:
+        return True, None
+    expires = epoch(value)
+    return expires > observed, instant(expires)
 
 
 class PiHoleUnavailable(ValueError):
@@ -211,10 +279,11 @@ class PiHoleV6:
     """One Pi-hole service, reading only its enabled capabilities.
 
     Without ``network_table`` no ``network/devices`` request is made, without
-    ``dns_queries`` no ``queries`` request is made, and without ``dhcp_scope``
-    or ``dhcp_reservations`` no ``config/dhcp`` request is made; a read that
-    needs none of them opens no session. ``service`` names the configured
-    service and is recorded on its addressing facts.
+    ``dns_queries`` no ``queries`` request is made, without a DHCP capability
+    no ``config/dhcp`` request is made, and without ``dhcp_leases`` no
+    ``dhcp/leases`` request is made; a read that needs none of them opens no
+    session. ``service`` names the configured service and is recorded on its
+    addressing facts and lease identities.
     """
 
     def __init__(
@@ -353,9 +422,7 @@ class PiHoleV6:
                 continue
             devices.append(max(candidates, key=lambda device: device.last_seen or ""))
         if {d.address for d in devices} != set(targets):
-            issues.add(
-                "identity_unavailable: some selected addresses have no fresh unambiguous Pi-hole association"
-            )
+            issues.add(_NO_ASSOCIATION)
         return IdentitySample(
             tuple(devices), frozenset(ambiguous), tuple(sorted(issues))
         )
@@ -454,7 +521,7 @@ class PiHoleV6:
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
         """The full collection read; it alone carries addressing facts."""
         sample, _, _ = await self._read(
-            targets, observed_at, queries=True, addressing=True
+            targets, observed_at, queries=True, addressing=True, leases=True
         )
         return sample
 
@@ -520,9 +587,13 @@ class PiHoleV6:
         ``router``/``netmask`` and ``start``-``end``: undecodable range settings
         give no scope, and a range outside the network or reversed gives an
         incomplete one, both with ``addressing_partial``. Its lease table is
-        ``incomplete``: no lease read establishes it. Reservations are kept only
-        for ``targets``; at most ``MAX_RESERVATIONS`` entries are decoded and an
+        ``incomplete`` here; only a complete lease read in the same session
+        (``_read``) marks it ``complete``. Reservations are kept only for
+        ``targets``; at most ``MAX_RESERVATIONS`` entries are decoded and an
         entry not in the plain form is skipped with ``addressing_partial``.
+        Such a partial reservation read also leaves the scope incomplete: a
+        rejected entry could reserve a selected address, which the scope would
+        otherwise call ``static``.
         """
         try:
             raw = await self._request(session, "GET", "config/dhcp", sid=sid)
@@ -555,6 +626,7 @@ class PiHoleV6:
                 )
         reservations: list[Reservation] = []
         if "dhcp_reservations" in self.capabilities:
+            first_issue = len(issues)
             hosts = settings.get("hosts")
             if not isinstance(hosts, list):
                 issues.append(DHCP_INVALID_RESERVATION)
@@ -573,6 +645,8 @@ class PiHoleV6:
                     reservations.append(
                         Reservation(address, mac, "dhcp_reservation", self.service)
                     )
+            if scope is not None and len(issues) > first_issue:
+                scope = replace(scope, complete=False)
         return PiHoleDhcp(
             True,
             scope,
@@ -580,11 +654,101 @@ class PiHoleV6:
             tuple(dict.fromkeys(issues)),
         )
 
+    async def _leases(
+        self,
+        session: aiohttp.ClientSession,
+        sid: str,
+        targets: tuple[str, ...],
+        observed: float,
+        table: tuple[DeviceIdentity, ...],
+    ) -> _LeaseRead:
+        """One ``GET dhcp/leases``, decoded into active leases for ``targets``.
+
+        Every decoded entry is validated, in scope or not, because a malformed
+        entry could be any address: it is skipped and the read is incomplete.
+        Only the first ``MAX_LEASES`` entries are decoded. Expired leases are
+        dropped. A lease identity copies the vendor of the ``table`` record
+        with the same MAC (Pi-hole leases carry none).
+        """
+        try:
+            raw = await self._request(session, "GET", "dhcp/leases", sid=sid)
+            if not isinstance(raw, dict) or not isinstance(raw.get("leases"), list):
+                raise ValueError("Expected a Pi-hole lease table")
+        except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
+            return _UNREAD_LEASES
+        values: list[object] = raw["leases"]
+        addressing_issues: list[str] = []
+        identity_issues: list[str] = []
+        if len(values) >= MAX_LEASES:
+            addressing_issues.append(DHCP_LEASE_LIMIT)
+            identity_issues.append(_IDENTITY_LEASE_LIMIT)
+        scope = frozenset(targets)
+        vendors = {device.mac: device.vendor for device in table if device.mac}
+        leases: list[Lease] = []
+        by_address: dict[str, list[DeviceIdentity]] = {}
+        for value in values[:MAX_LEASES]:
+            try:
+                if not isinstance(value, dict):
+                    raise ValueError("Expected a Pi-hole lease")
+                mac = mac_address(value.get("hwaddr"))
+                address = str(ipaddress.ip_address(text(value.get("ip"), 64)))
+                active, expires_at = _lease_expiry(value.get("expires"), observed)
+                name = value.get("name")
+                hostname = None if name in (None, "", "*") else text(name, 128)
+                if not active or address not in scope:
+                    continue
+                identity = DeviceIdentity.decode(
+                    {
+                        "address": address,
+                        "device_id": "mac:" + mac,
+                        "label": None,
+                        "hostname": hostname,
+                        "mac": mac,
+                        "vendor": vendors.get(mac),
+                        "source": "pihole-v6",
+                        "observed_at": instant(observed),
+                        "last_seen": None,
+                        "evidence": "dhcp_lease",
+                        "service": self.service,
+                    }
+                )
+            except ValueError:
+                if DHCP_INVALID_LEASE not in addressing_issues:
+                    addressing_issues.append(DHCP_INVALID_LEASE)
+                    identity_issues.append(_IDENTITY_INVALID_LEASE)
+                continue
+            leases.append(Lease(address, mac, hostname, expires_at, self.service))
+            by_address.setdefault(address, []).append(identity)
+        devices: list[DeviceIdentity] = []
+        ambiguous: set[str] = set()
+        for address, candidates in by_address.items():
+            if len({candidate.mac for candidate in candidates}) > 1:
+                ambiguous.add(address)
+                continue
+            # The same MAC listed twice: the first entry, as addressing keeps it.
+            devices.append(candidates[0])
+        if ambiguous:
+            identity_issues.append(_LEASES_AMBIGUOUS)
+        return _LeaseRead(
+            tuple(dict.fromkeys(leases)),
+            IdentitySample(
+                tuple(devices), frozenset(ambiguous), tuple(identity_issues)
+            ),
+            not addressing_issues,
+            tuple(addressing_issues),
+        )
+
     async def identify(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
-        """Operator-only identity checks; no DNS history is fetched or retained."""
+        """Operator-only identity checks; no DNS history is fetched or retained.
+
+        With ``dhcp_leases`` enabled the lease table is identity evidence here
+        too; no addressing facts are returned.
+        """
         if len(targets) > BATCH_SIZE:
             raise ValueError("Pi-hole requires at most 32 unique selected addresses")
-        sample, _, _ = await self._read(targets, observed_at, queries=False)
+        sample, _, _ = await self._read(
+            targets, observed_at, queries=False, leases=True
+        )
         return sample
 
     async def presence(
@@ -611,7 +775,17 @@ class PiHoleV6:
         queries: bool,
         since: str | None = None,
         addressing: bool = False,
+        leases: bool = False,
     ) -> tuple[DeviceData, frozenset[str], tuple[QuerySample, ...]]:
+        """One session reading the enabled capabilities for ``targets``.
+
+        ``addressing`` returns the DHCP facts (full collections only);
+        ``leases`` reads the lease table as identity evidence when
+        ``dhcp_leases`` is enabled and ``config/dhcp`` reports DHCP active.
+        Lease identities are merged with the network table by
+        ``merge_identities``: a lease outranks a table record with the same MAC,
+        and a different MAC leaves the address ambiguous.
+        """
         limit = BATCH_SIZE if queries and since is None else MAX_TARGETS
         if len(targets) > limit or len(set(targets)) != len(targets):
             raise ValueError(
@@ -630,8 +804,12 @@ class PiHoleV6:
         # never reported as a gap.
         table = since is None and "network_table" in self.capabilities
         queries = queries and "dns_queries" in self.capabilities
-        dhcp_settings = addressing and bool(self.capabilities & _DHCP_SETTINGS)
+        lease_read = leases and since is None and "dhcp_leases" in self.capabilities
+        dhcp_settings = (
+            addressing and bool(self.capabilities & _DHCP_SETTINGS)
+        ) or lease_read
         dhcp: PiHoleDhcp | None = None
+        leased: _LeaseRead | None = None
         samples: tuple[QuerySample, ...] = ()
         identity = IdentitySample()
         dns: tuple[DnsObservation, ...] = ()
@@ -671,6 +849,10 @@ class PiHoleV6:
                         )
                 if dhcp_settings:
                     dhcp = await self._dhcp(session, sid, targets)
+                if lease_read and dhcp is not None and dhcp.active is True:
+                    leased = await self._leases(
+                        session, sid, targets, end, identity.devices
+                    )
                 if queries:
                     semaphore = asyncio.Semaphore(4)
 
@@ -739,7 +921,7 @@ class PiHoleV6:
             except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
                 # Unchanged for the default capabilities, including activity
                 # reads, which have always reported both gaps.
-                if "network_table" in self.capabilities:
+                if "network_table" in self.capabilities or lease_read:
                     issues.add(
                         "identity_unavailable: Pi-hole authentication or connection failed"
                     )
@@ -750,19 +932,39 @@ class PiHoleV6:
             finally:
                 if sid is not None and not await self._close(session, sid):
                     issues.add(_CLEANUP_FAILED)
+        devices = identity.devices
+        ambiguous = identity.ambiguous_addresses
+        if lease_read and dhcp is not None and dhcp.active is None:
+            # DHCP settings unreadable: whether leases exist is unknown.
+            issues.add(_IDENTITY_LEASES_UNREADABLE)
+        if leased is not None:
+            issues.update(leased.identities.issues)
+            merge = merge_identities((identity, leased.identities), frozenset(targets))
+            # Address order, as the network table alone returns its devices.
+            devices = tuple(sorted(merge.devices, key=lambda device: device.address))
+            ambiguous = ambiguous | merge.ambiguous | merge.conflicts
+            if merge.conflicts:
+                issues.add(_LEASES_DISAGREE)
+            if {device.address for device in devices} == set(targets):
+                issues.discard(_NO_ASSOCIATION)
         addressing_sample: AddressingSample | None = None
-        if dhcp_settings:
+        if addressing and dhcp_settings:
             # A session that failed before the settings read is a gap too.
             read = dhcp or PiHoleDhcp(None, None, (), (DHCP_UNAVAILABLE,))
+            scope = read.scope
+            if scope is not None and leased is not None and leased.complete:
+                scope = replace(scope, lease_table="complete")
             addressing_sample = AddressingSample(
+                leases=leased.leases if leased is not None else (),
                 reservations=read.reservations,
-                scopes=(read.scope,) if read.scope is not None else (),
-                issues=read.issues,
+                scopes=(scope,) if scope is not None else (),
+                issues=(
+                    *read.issues,
+                    *(leased.addressing_issues if leased is not None else ()),
+                ),
             )
         return (
-            DeviceData(
-                identity.devices, dns, window, tuple(sorted(issues)), addressing_sample
-            ),
-            identity.ambiguous_addresses,
+            DeviceData(devices, dns, window, tuple(sorted(issues)), addressing_sample),
+            ambiguous,
             samples,
         )
