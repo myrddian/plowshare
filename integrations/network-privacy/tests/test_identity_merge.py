@@ -94,6 +94,24 @@ class MergeIdentitiesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             merge_identities([IdentitySample((identity(), identity()))], SCOPE)
 
+    def test_device_listed_as_ambiguous_in_same_sample_rejected(self) -> None:
+        sample = IdentitySample((identity(),), frozenset({"192.0.2.10"}))
+        with self.assertRaises(ValueError):
+            merge_identities([sample], SCOPE)
+
+    def test_out_of_scope_ambiguous_address_rejected(self) -> None:
+        sample = IdentitySample(ambiguous_addresses=frozenset({"203.0.113.9"}))
+        with self.assertRaises(ValueError):
+            merge_identities([sample], SCOPE)
+
+    def test_configured_ranks_below_local_dns(self) -> None:
+        configured = identity(source="configured", mac=None)
+        dns = identity(source="pihole-v6", mac=None, evidence="local_dns")
+        result = merge_identities(
+            [IdentitySample((configured,)), IdentitySample((dns,))], SCOPE
+        )
+        self.assertEqual(result.devices, (dns,))
+
 
 if __name__ == "__main__":
     unittest.main()
