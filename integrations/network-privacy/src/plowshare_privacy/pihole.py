@@ -668,7 +668,10 @@ class PiHoleV6:
         entry could be any address: it is skipped and the read is incomplete.
         Only the first ``MAX_LEASES`` entries are decoded. Expired leases are
         dropped. A lease identity copies the vendor of the ``table`` record
-        with the same MAC (Pi-hole leases carry none).
+        with the same MAC (Pi-hole leases carry none). No active lease for a
+        selected address is not a coverage gap, unlike a missing table
+        association: leases describe DHCP clients only, and statically
+        addressed devices legitimately have none.
         """
         try:
             raw = await self._request(session, "GET", "dhcp/leases", sid=sid)
@@ -947,6 +950,16 @@ class PiHoleV6:
                 issues.add(_LEASES_DISAGREE)
             if {device.address for device in devices} == set(targets):
                 issues.discard(_NO_ASSOCIATION)
+            # DeviceData carries no ambiguity across services, so another
+            # service may still confirm an address Pi-hole found contradictory.
+            # Its leases there are withheld so they can never decide
+            # dhcp_dynamic, and the table is incomplete so no in-range static
+            # is inferred from a read that held a contradiction.
+            kept = tuple(
+                item for item in leased.leases if item.address not in ambiguous
+            )
+            if kept != leased.leases:
+                leased = replace(leased, leases=kept, complete=False)
         addressing_sample: AddressingSample | None = None
         if addressing and dhcp_settings:
             # A session that failed before the settings read is a gap too.

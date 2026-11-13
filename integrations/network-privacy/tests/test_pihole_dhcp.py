@@ -6,6 +6,7 @@ import asyncio
 import ipaddress
 import os
 import unittest
+from dataclasses import replace
 from typing import cast
 from unittest.mock import patch
 from uuid import uuid4
@@ -23,14 +24,17 @@ from plowshare_privacy.addressing import (
 from plowshare_privacy.collection import NetworkCollector
 from plowshare_privacy.connectors import bind
 from plowshare_privacy.contracts import (
+    AddressAssignment,
     Capability,
     CollectionPlan,
     DeviceIdentity,
+    Evidence,
     ServicePlan,
     utc_now,
 )
+from plowshare_privacy.identity_source import DeviceIdentitySource, IdentitySample
 from plowshare_privacy.pihole import PiHoleDhcp, PiHoleV6, instant
-from plowshare_privacy.source_set import SourceSet
+from plowshare_privacy.source_set import Bound, SourceSet
 
 OTHER = "192.0.2.150"
 OUTSIDE = "198.51.100.7"
@@ -58,6 +62,18 @@ TWO_LEASES = (
     "identity_ambiguous: Pi-hole DHCP lists multiple leases for a selected address"
 )
 LEASE_CALL = ("GET", "/api/dhcp/leases")
+
+
+class _Identities:
+    """A second identity service holding fixed records."""
+
+    def __init__(self, *devices: DeviceIdentity) -> None:
+        self.devices = devices
+
+    async def identify(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        return IdentitySample(tuple(d for d in self.devices if d.address in targets))
 
 
 def _identity(mac: str = MAC) -> DeviceIdentity:
@@ -716,6 +732,128 @@ class PiHoleLeaseTest(PiHoleServerCase):
         )
         # Every selected address now has an association: no unavailable gap.
         self.assertEqual(data.issues, ())
+
+    async def collect(
+        self, capabilities: frozenset[Capability], *others: DeviceIdentity
+    ) -> Evidence:
+        """A full collection of ADDRESS by this Pi-hole plus a fake identity service."""
+
+        async def accept(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            writer.close()
+            await writer.wait_closed()
+
+        listener = await asyncio.start_server(accept, "127.0.0.1", 0)
+        self.addAsyncCleanup(listener.wait_closed)
+        self.addCleanup(listener.close)
+        plan = CollectionPlan(
+            "tcp",
+            (ADDRESS,),
+            (listener.sockets[0].getsockname()[1],),
+            1,
+            1,
+            None,
+            0,
+            sources=(ServicePlan("pihole", "dns", capabilities, self.plan),),
+        )
+        sources = replace(
+            bind(plan),
+            identity=(
+                Bound[DeviceIdentitySource](
+                    "controller", "unifi", _Identities(*others)
+                ),
+            ),
+        )
+        original = asyncio.open_connection
+
+        async def connection(
+            address: str, port: int
+        ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+            return await original("127.0.0.1", port)
+
+        with patch(
+            "plowshare_privacy.collection.asyncio.open_connection",
+            side_effect=connection,
+        ):
+            return await NetworkCollector("fixture", plan, sources).collect(
+                str(uuid4()), "fixture:event", None, None
+            )
+
+    def other_record(
+        self, mac: str, hostname: str, evidence: str | None = None
+    ) -> DeviceIdentity:
+        source = "pihole-v6" if evidence == "neighbour_table" else "unifi"
+        return DeviceIdentity.decode(
+            {
+                "address": ADDRESS,
+                "device_id": "mac:" + mac,
+                "label": None,
+                "hostname": hostname,
+                "mac": mac,
+                "vendor": None,
+                "source": source,
+                "observed_at": self.observed,
+                "last_seen": self.observed,
+                "evidence": evidence,
+                "service": "controller",
+            }
+        )
+
+    async def test_contradicted_lease_never_decides_assignment(self) -> None:
+        # ADDRESS inside the range: only a lease could make it dhcp_dynamic.
+        self.settings()["start"] = "192.0.2.10"
+        self.serve(self.lease(mac=OTHER_MAC))
+        capabilities = frozenset[Capability](
+            {"network_table", "dhcp_leases", "dhcp_scope"}
+        )
+        # The other service agrees with the lease, the Pi-hole table does not.
+        evidence = await self.collect(
+            capabilities, self.other_record(OTHER_MAC, "client")
+        )
+        [device] = evidence.snapshot.devices
+        self.assertEqual((device.mac, device.hostname), (OTHER_MAC, "client"))
+        self.assertIn(DISAGREE, evidence.issues)
+        [assignment] = evidence.snapshot.addressing
+        self.assertEqual(
+            assignment, AddressAssignment(ADDRESS, OTHER_MAC, "unknown", None, (), None)
+        )
+        # Pi-hole's own read carries no contradicted lease and an incomplete table.
+        data = await self.source(capabilities).read((ADDRESS,), self.observed)
+        assert data.addressing is not None
+        self.assertEqual(data.addressing.leases, ())
+        self.assertEqual(data.addressing.scopes[0].lease_table, "incomplete")
+        # Several leases for one address are contradicted the same way.
+        self.serve(self.lease(), self.lease(mac=OTHER_MAC))
+        data = await self.source(capabilities).read((ADDRESS,), self.observed)
+        assert data.addressing is not None
+        self.assertEqual(data.addressing.leases, ())
+        self.assertEqual(data.addressing.scopes[0].lease_table, "incomplete")
+
+    async def test_lease_precedence_across_services(self) -> None:
+        self.serve(self.lease())
+        capabilities = frozenset[Capability]({"dhcp_leases", "dhcp_scope"})
+        # A lease outranks another service's neighbour-table record.
+        evidence = await self.collect(
+            capabilities, self.other_record(MAC, "neighbour", "neighbour_table")
+        )
+        [device] = evidence.snapshot.devices
+        self.assertEqual(
+            (device.hostname, device.evidence, device.service),
+            ("lease-name", "dhcp_lease", "dns"),
+        )
+        [assignment] = evidence.snapshot.addressing
+        self.assertEqual(
+            (assignment.mode, assignment.basis), ("dhcp_dynamic", "dhcp_lease")
+        )
+        # A controller client outranks the lease; the lease still addresses it.
+        evidence = await self.collect(capabilities, self.other_record(MAC, "client"))
+        [device] = evidence.snapshot.devices
+        self.assertEqual((device.hostname, device.source), ("client", "unifi"))
+        [assignment] = evidence.snapshot.addressing
+        self.assertEqual(
+            (assignment.mode, assignment.basis), ("dhcp_dynamic", "dhcp_lease")
+        )
 
     async def test_identify_reads_leases(self) -> None:
         self.serve(self.lease())
