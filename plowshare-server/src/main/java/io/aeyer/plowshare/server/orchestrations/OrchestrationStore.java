@@ -1237,6 +1237,46 @@ public class OrchestrationStore {
   }
 
   /**
+   * {@link #stalledSince(String)} for a page of runs in one statement, so a listing does not read
+   * each row's mark back individually. Only runs with a mark appear in the result; an unknown id
+   * answers the same as a run with none.
+   *
+   * @param ids the runs to look up, at most 200 (the largest {@link #byCaller} page)
+   * @return each marked run's id with the time the sweep marked it
+   * @throws IllegalArgumentException if {@code ids} holds a null or more than 200 entries
+   */
+  public Map<String, Instant> stalledSince(List<String> ids) {
+    Objects.requireNonNull(ids, "ids");
+    if (ids.size() > 200) {
+      throw new IllegalArgumentException("at most 200 ids, was " + ids.size());
+    }
+    if (ids.stream().anyMatch(Objects::isNull)) {
+      throw new IllegalArgumentException("ids must not contain null");
+    }
+    if (ids.isEmpty()) return Map.of();
+    Map<String, Instant> marked = new HashMap<>();
+    jdbc.query(
+        "SELECT id, stalled_since FROM orchestrations"
+            + " WHERE id = ANY(?) AND stalled_since IS NOT NULL",
+        rs -> {
+          marked.put(rs.getString("id"), instant(rs, "stalled_since"));
+        },
+        new org.springframework.jdbc.support.SqlArrayValue("text", ids.toArray()));
+    return Map.copyOf(marked);
+  }
+
+  /**
+   * Whether {@link #byCaller} already applies the current log-readability predicate in its own
+   * statement. When it does, a caller must not re-check each returned run with the targeted
+   * predicate ({@code information_log_readable}): the collection predicate ({@code
+   * information_unreadable_logs}, V235) makes the same decision over the same ancestry, and the
+   * targeted one walks the whole ancestry graph once per row.
+   */
+  public boolean filtersReadableLogs() {
+    return informationProtected;
+  }
+
+  /**
    * Every child a run has started, newest first, whether it has ended or not — the ending cascade
    * and a status view both want the full history, not only what is still live.
    */
