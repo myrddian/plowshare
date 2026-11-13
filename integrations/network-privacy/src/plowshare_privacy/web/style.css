@@ -283,25 +283,62 @@ footer { display: flex; justify-content: space-between; gap: var(--s3); padding-
 @keyframes wing-right { from { transform: perspective(1400px) rotateY(62deg); opacity: .15; } }
 .triptych.unveil .leaf-left { transform-origin: right center; animation: wing-left .8s cubic-bezier(.2, .7, .2, 1) both; }
 .triptych.unveil .leaf-right { transform-origin: left center; animation: wing-right .8s cubic-bezier(.2, .7, .2, 1) both; }
-/* Ask: the reading pane scrolls inside its panel so the question box stays in reach. */
+/* Ask: the reading pane scrolls inside its panel so the question box stays in
+   reach. The user's words sit right in a framed bubble; Privacy Watch answers
+   on the left behind a brass rule. The working row is the one place outside
+   the altarpiece that moves, because it stands for work in progress; reduced
+   motion stills it and its words still say what is happening. */
 .workspace.ask-workspace { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
 .ask-workspace .stack > .panel { margin-bottom: var(--s5); }
-.ask-conversation { max-height: min(60vh, 640px); min-height: 160px; overflow-y: auto; padding: var(--s3) var(--inset); }
-.ask-entry { padding: var(--s3) 0; border-bottom: var(--rule-row); }
-.ask-entry:last-child { border-bottom: 0; }
+.ask-state { display: inline-flex; align-items: center; gap: var(--s2); }
+.ask-state::before { content: ''; width: 7px; height: 7px; background: var(--gilt-deep); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.ask-state.working { color: var(--gilt); }
+.ask-state.working::before { background: var(--gilt); animation: ask-beat 1.4s ease-in-out infinite; }
+.ask-state.failed { color: var(--cinnabar); }
+.ask-state.failed::before { background: var(--cinnabar); }
+.ask-log-frame { position: relative; }
+.ask-conversation { max-height: min(62vh, 680px); min-height: 200px; overflow-y: auto; padding: var(--s4) var(--inset); }
+.ask-entry { padding: var(--s3) 0; }
+.ask-entry + .ask-entry { margin-top: var(--s2); }
 .ask-entry-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s3); margin: 0; }
+.ask-entry-head small { color: var(--tallow); font-size: var(--text-xs); }
 .ask-entry .markdown-body, .ask-entry .ask-text { margin: var(--s1) 0 0; font-size: var(--text-md); }
 .ask-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.ask-question .ask-text { color: var(--parchment); }
-.ask-answer { border-left: 2px solid var(--brass); padding-left: var(--s3); }
-.ask-form { max-width: none; padding: var(--s3) var(--inset) var(--s4); border-top: var(--rule); }
-.ask-form textarea { width: 100%; }
+.ask-question { display: flex; flex-direction: column; align-items: flex-end; padding: var(--s2) 0; }
+.ask-question .ask-entry-head { flex-direction: row-reverse; }
+.ask-question .ask-text { position: relative; max-width: min(78%, 560px); margin-top: var(--s1); padding: var(--s2) var(--s3); color: var(--parchment); background: var(--soot); border: var(--rule); clip-path: polygon(0 0, calc(100% - var(--chamfer)) 0, 100% var(--chamfer), 100% 100%, 0 100%); }
+.ask-pending .ask-text { color: var(--tallow); border-style: dashed; }
+.ask-answer { border-left: 2px solid var(--brass); padding: var(--s1) 0 var(--s1) var(--s4); max-width: 92%; }
+.ask-answer .status-line { color: var(--gilt); }
+.ask-jump { position: absolute; right: var(--inset); bottom: var(--s3); font-size: var(--text-sm); padding: var(--s1) var(--s3); }
+.ask-working { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--inset); border-top: var(--rule-row); color: var(--gilt); font-size: var(--text-sm); }
+.ask-working[hidden] { display: none; }
+.ask-working-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ask-working-time { font: 500 var(--text-xs) var(--data); color: var(--tallow); }
+.ask-dots { display: inline-flex; gap: 5px; }
+.ask-dots i { width: 6px; height: 6px; background: var(--gilt); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); animation: ask-beat 1.2s ease-in-out infinite; }
+.ask-dots i:nth-child(2) { animation-delay: .2s; }
+.ask-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes ask-beat { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }
+.ask-form { display: grid; gap: var(--s2); max-width: none; padding: var(--s3) var(--inset) var(--s4); border-top: var(--rule); }
+.ask-label { font-size: var(--text-sm); color: var(--tallow); }
+.ask-form textarea { width: 100%; min-height: 64px; }
+.ask-form .hint:empty { display: none; }
+.ask-form .notice { margin: 0; }
+.ask-composer-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.ask-composer-foot .hint { margin: 0; font-size: var(--text-xs); }
 .ask-badge { margin-left: var(--s1); color: var(--gilt); }
 .ask-workspace .entries > .record { padding-left: var(--inset); padding-right: var(--inset); }
 .ask-workspace .entries > .empty { padding: var(--s3) var(--inset); }
 .ask-workspace .record h4 { overflow-wrap: anywhere; }
+.ask-handed h4 { display: flex; align-items: center; gap: var(--s2); }
+.ask-handed h4::before { content: ''; flex: none; width: 7px; height: 7px; background: var(--gilt); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); animation: ask-beat 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: no-preference) { .ask-conversation { scroll-behavior: smooth; } }
 
-@media (prefers-reduced-motion: reduce) { .triptych.unveil .leaf { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .triptych.unveil .leaf { animation: none; }
+  .ask-dots i, .ask-state.working::before, .ask-handed h4::before { animation: none; opacity: 1; }
+}
 
 .register { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 0 var(--s6); margin-bottom: var(--s6); }
 .register-cell { padding: 2px 0 2px var(--s4); border-left: var(--rule-frame); min-width: 0; }

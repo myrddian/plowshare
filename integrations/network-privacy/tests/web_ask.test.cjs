@@ -75,13 +75,16 @@ test('an unchanged reading is not rebuilt', () => {
   assert.notEqual(node('ask-conversation').children, first);
 });
 
-test('sending is disabled while a turn runs and unconfirmed is explained', () => {
+test('sending waits while a turn runs but the box stays open for a draft', () => {
   const {run, node} = dashboard();
   for (const state of ['sending', 'running']) {
     show(run, askView({turn_state:state}));
-    assert.equal(node('ask-input').disabled, true, state);
+    assert.equal(node('ask-input').disabled, false, state);
     assert.equal(node('ask-send').disabled, true, state);
-    assert.match(node('ask-hint').textContent, /^Privacy Watch is still working on your last question$/);
+    // The working row says it is working; the hint is kept for problems.
+    assert.equal(node('ask-hint').textContent, '');
+    assert.equal(node('ask-working').hidden, false, state);
+    assert.equal(node('ask-state').textContent, state === 'sending' ? 'Sending' : 'Working');
   }
   show(run, askView({turn_state:'unconfirmed', detail:'Internal journal wording'}));
   assert.equal(node('ask-input').disabled, false);
@@ -90,6 +93,8 @@ test('sending is disabled while a turn runs and unconfirmed is explained', () =>
   show(run, askView({turn_state:'answered'}));
   assert.equal(node('ask-input').disabled, false);
   assert.equal(node('ask-hint').textContent, '');
+  assert.equal(node('ask-working').hidden, true);
+  assert.equal(node('ask-state').textContent, 'Ready');
   // The service's own account of a stop is shown; a failure is an error.
   show(run, askView({turn_state:'failed', detail:'The question was not sent to Plowshare.'}));
   assert.equal(node('ask-hint').textContent, 'The question was not sent to Plowshare.');
@@ -109,13 +114,16 @@ test('a question is sent once, kept on refusal and cleared on success', async ()
   await node('ask-form').listeners.submit(submit);
   assert.equal(submit.prevented, true);
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['/api/ask', {question:'Is the camera talking to anyone new?'}]]);
+  // A refused question goes back in the box and leaves no bubble behind.
   assert.equal(node('ask-input').value, 'Is the camera talking to anyone new?');
   assert.equal(node('ask-send').disabled, false);
+  assert.ok(!find(node('ask-conversation'), item => item.className === 'ask-entry ask-question ask-pending').length);
   run('fail = false');
   await node('ask-form').listeners.submit(submit);
   assert.equal(node('ask-input').value, '');
-  // The reply is the new reading: the box now waits for the answer.
-  assert.equal(node('ask-input').disabled, true);
+  // The reply is the new reading: sending waits for the answer, drafting does not.
+  assert.equal(node('ask-send').disabled, true);
+  assert.equal(node('ask-input').disabled, false);
   // A blank question is never sent.
   sent.length = 0;
   node('ask-input').value = '   ';
@@ -302,7 +310,8 @@ test('a running turn shows the reading error instead of still working', () => {
   show(run, askView({turn_state:'running', detail}));
   assert.equal(node('ask-hint').textContent, detail);
   show(run, askView({turn_state:'running', detail:null}));
-  assert.match(node('ask-hint').textContent, /still working/);
+  assert.equal(node('ask-hint').textContent, '');
+  assert.equal(node('ask-working').hidden, false);
 });
 
 test('an unavailable Ask explains itself instead of reading', () => {
@@ -318,4 +327,91 @@ test('the step setting is labelled Steps per request', () => {
   assert.match(html, /<label>Steps per request<input id="ask-max-turns"/);
   assert.ok(!html.includes('<label>Turns<'));
   assert.match(html, /runaway guard/);
+});
+
+test('the question shows at once while it is being sent', async () => {
+  const {run, node} = dashboard();
+  let release;
+  run('api = async () => new Promise(resolve => {release = resolve;})', {});
+  run('askConversation = view', {view:askView({entries:[entry(0, 'agent', 'Earlier answer', 'answer')]})});
+  node('ask-input').value = 'Which device is new?';
+  const sending = node('ask-form').listeners.submit({preventDefault() {}});
+  const log = node('ask-conversation');
+  const pending = find(log, item => item.className === 'ask-entry ask-question ask-pending');
+  assert.equal(pending.length, 1);
+  assert.ok(texts(pending[0]).includes('Which device is new?'));
+  assert.ok(texts(pending[0]).includes('Sending…'));
+  assert.equal(node('ask-input').value, '');
+  assert.equal(node('ask-working').hidden, false);
+  assert.equal(node('ask-working-text').textContent, 'Sending your question');
+  run('release(reply)', {reply:askView({turn_state:'running', entries:[entry(0, 'agent', 'Earlier answer', 'answer'), entry(1, 'user', 'Which device is new?', 'question')]})});
+  await sending;
+  assert.equal(find(node('ask-conversation'), item => item.className === 'ask-entry ask-question ask-pending').length, 0);
+  assert.equal(node('ask-working-text').textContent, 'Thinking');
+});
+
+test('the working row names the step in hand in household words', () => {
+  const {run, node} = dashboard();
+  const question = entry(0, 'user', 'Is anything exposed?', 'question');
+  const devices = entry(1, 'agent', '', 'answer', {calls:[{id:'c1', tool:'network_devices', target:null, about:null, reply:false}]});
+  show(run, askView({turn_state:'running', entries:[question, devices]}));
+  assert.equal(node('ask-working-text').textContent, 'Reading the device list');
+  const result = entry(2, 'tool', '{}', 'tool_result', {answers:'c1', tool:'network_devices'});
+  show(run, askView({turn_state:'running', entries:[question, devices, result]}));
+  assert.equal(node('ask-working-text').textContent, 'Weighing what it found');
+  const handOff = entry(3, 'agent', '', 'answer', {calls:[{id:'c2', tool:'send_message', target:'privacy_analyst', about:'Look', reply:false}]});
+  show(run, askView({turn_state:'running', entries:[question, devices, result, handOff]}));
+  assert.equal(node('ask-working-text').textContent, 'Asking the analyst');
+  const other = entry(4, 'agent', '', 'answer', {calls:[{id:'c3', tool:'information_search', target:null, about:null, reply:false}]});
+  show(run, askView({turn_state:'running', entries:[question, other]}));
+  assert.equal(node('ask-working-text').textContent, 'Using information search');
+  // The timer counts from the question.
+  assert.match(node('ask-working-time').textContent, /^\d+:\d\d$/);
+});
+
+test('Enter sends, Shift+Enter does not, and nothing sends while a turn runs', () => {
+  const {run, node} = dashboard();
+  let submitted = 0;
+  node('ask-form').requestSubmit = () => {submitted++;};
+  show(run, askView());
+  const key = (extra = {}) => {const event = {key:'Enter', shiftKey:false, isComposing:false, prevented:false, preventDefault() {this.prevented = true;}, ...extra}; node('ask-input').listeners.keydown(event); return event;};
+  assert.equal(key().prevented, true);
+  assert.equal(submitted, 1);
+  assert.equal(key({shiftKey:true}).prevented, false);
+  assert.equal(key({isComposing:true}).prevented, false);
+  assert.equal(submitted, 1);
+  show(run, askView({turn_state:'running'}));
+  key();
+  assert.equal(submitted, 1);
+});
+
+test('a running turn is followed faster only while the tab is open', async () => {
+  const {run} = dashboard();
+  const gets = [];
+  run('api = async path => {gets.push(path); return reply;}', {gets, reply:askView({turn_state:'running'})});
+  run('authenticated = true; overview = value; askConversation = running', {value:overview({unread:false, paused:false, turn_state:'running', detail:null}), running:askView({turn_state:'running'})});
+  run('followAsk()');
+  assert.equal(gets.length, 0);
+  run("currentView = 'ask'; askReadAt = 0; followAsk()");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(gets.length, 1);
+  // Just read: the next tick waits.
+  run('followAsk()');
+  assert.equal(gets.length, 1);
+  // An idle conversation is not read by the tick.
+  run('askConversation = idle; askReadAt = 0; followAsk()', {idle:askView()});
+  assert.equal(gets.length, 1);
+});
+
+test('a reply that lands while reading earlier answers offers a jump instead of scrolling', () => {
+  const {run, node} = dashboard();
+  const log = node('ask-conversation');
+  show(run, askView({entries:[entry(0, 'user', 'Hi', 'question')]}));
+  Object.assign(log, {scrollHeight:2000, clientHeight:400, scrollTop:100});
+  show(run, askView({entries:[entry(0, 'user', 'Hi', 'question'), entry(1, 'agent', 'Hello', 'answer')]}));
+  assert.equal(node('ask-jump').hidden, false);
+  assert.equal(log.scrollTop, 100);
+  node('ask-jump').listeners.click();
+  assert.equal(log.scrollTop, 2000);
+  assert.equal(node('ask-jump').hidden, true);
 });
