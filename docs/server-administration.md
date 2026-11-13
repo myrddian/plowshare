@@ -226,6 +226,173 @@ inconsistent values fail startup.
 | `notified.heartbeat-timeout` | `3s` | Unanswered-probe limit before the listener reconnects; also its network timeout. |
 | `version-connections` | `4` | Connections of the separate `projection-versions` pool (1..32). |
 
+### Projection cache and listener metrics
+
+These meters read server memory only. Scraping does not acquire database connections,
+validate versions or send probes. Projection labels are the fixed names registered
+by server composition, bounded by `max-projections`. No account, project, cache key,
+SQL or exception message becomes a label. Counters restart with the server; compare
+rates or interval deltas across deployments.
+
+`plowshare.projection.cache.events` is a counter tagged by `projection` and `event`:
+
+| Event | Meaning |
+| --- | --- |
+| `trusted_hit` | Value returned after notification freshness, transaction and expiry checks, without version SQL. |
+| `versioned_hit` | Previously loaded or coalesced value returned after validating its stored version. |
+| `loaded_return` | Elected loader's caller returned its newly loaded value after all freshness checks passed. |
+| `load` | Actual bounded-loader invocation, including attempts later rejected or failed. Joiners and failed trusted lookups do not increment it. |
+| `bypass_not_ready` | Ordinary-loader attempt while the listener/cache is recovering or closed. |
+| `bypass_not_cacheable` | Ordinary-loader attempt for an explicitly uncacheable selection. |
+| `bypass_ineligible` | Version capture refused sharing, for example because of transaction state or an authority expiry window. |
+| `bypass_load_refused` | Explicit load bypass, oversized value, or failed post-load eligibility/version check led to an ordinary-loader attempt. |
+| `bypass_cache_refused` | Recoverable backing-cache refusal led to an ordinary-loader attempt. |
+| `bypass_stale` | Retrieved candidate failed the final readiness/version check and led to an ordinary-loader attempt. |
+| `capacity_rejected` | Capacity exhaustion refused the read without an ordinary-loader fallback. |
+
+The first three events count successful cache returns and are mutually exclusive per
+read. `load` and bypasses count attempts; adding them to returns double-counts work.
+A bypass is not a SQL execution count: some owners return an unavailable marker and
+decide their SQL fallback later. SQL failures retain their original error behavior
+and do not replay a load. Authority snapshot load attempts use
+`projection="authority-snapshot-v1",event="load"`; `loaded_return` counts the subset
+that could be returned through the cache.
+
+`plowshare.projection.cache.backing` exports existing backing-cache counters with
+`projection` and `event` tags: `hits`, `misses`, `coalesced`, `evictions`, `bypassed`,
+`invalidations` and `load_failures`. These describe activity before final freshness
+checks. A backing hit can subsequently be rejected, and an internal trusted lookup
+can miss without loading data. Use projection outcomes to assess useful reuse.
+Gauges tagged only by `projection` use the `plowshare.projection.cache` prefix:
+`.entries`, `.resident.bytes`, `.loads.active`, `.loading.bytes` and `.waiters`.
+
+Listener meters use the `plowshare.projection.listener` prefix and have no
+application-level tags:
+
+| Suffix | Type | Meaning |
+| --- | --- | --- |
+| `.ready` | gauge | 1 after LISTEN and the authoritative baseline complete; 0 during startup, outage or shutdown. |
+| `.proof.available` | gauge | 1 when an answered probe proves delivery in the current ready generation; otherwise 0. |
+| `.proof.age` | seconds gauge | Monotonic-clock age of the send time of the newest answered probe; `NaN` when proof is unavailable. |
+| `.notified.enabled` | gauge | Whether trusted reads and delivery probes are configured on (1) or off (0). |
+| `.staleness` | seconds gauge | Configured maximum proof age for trusted reads. |
+| `.reconnects` | counter | Session-open attempts after the initial attempt, including failed recovery attempts. Initial startup and probes do not increment it. |
+
+Ready does not imply fresh: recovery can finish before a probe echo, and proof can
+age while the session remains ready. Disconnection clears proof availability instead
+of reporting a misleading zero age. With probes disabled, absent proof is expected
+and reads remain versioned. Trusted reads already stop when proof is missing or too
+old; telemetry does not enforce that fence.
+
+Prometheus names replace dots with underscores. Counters append `_total`; duration
+gauges append `_seconds`. For example, this expression identifies a listener unable
+to support configured trusted reads:
+
+```promql
+(plowshare_projection_listener_notified_enabled == 1)
+and
+(
+  (plowshare_projection_listener_ready == 0)
+  or (plowshare_projection_listener_proof_available == 0)
+  or (plowshare_projection_listener_proof_age_seconds
+      > plowshare_projection_listener_staleness_seconds)
+)
+```
+
+Allow an alert hold period for startup/recovery and monitor scrape failure separately.
+Scrapes sample independent gauges and can race a listener transition. An interval
+longer than the staleness bound cannot observe every brief loss of freshness; the
+cache's per-read fence still applies.
+
+### Token usage and inference metrics
+
+The default-on durable inference accounting path also exports live aggregates under
+`plowshare.inference`. Labels are fixed enums: `lane` (`chat` or `embedding`) and
+`operation` (such as `agent_chat`, `fold`, `document_summary` or `embedding_query`).
+There are no account, project, job, model, pool or provider-request identifiers.
+These meters are absent when `plowshare.llm.accounting.enabled=false`, and standalone
+contexts without a registry keep their existing behavior.
+
+| Meter suffix | Type | Additional labels and meaning |
+| --- | --- | --- |
+| `.admitted` | counter | Calls whose canonical admission succeeded. Failed admission is excluded. |
+| `.active` | gauge | Admitted calls not yet finished, including calls waiting in a lane queue. |
+| `.calls` | counter | `outcome`: terminal call outcomes. Calls with no upstream attempt are `not_dispatched`. |
+| `.attempts` | counter | `outcome`: each completed upstream attempt, including retries and failures. |
+| `.tokens` | counter | `kind`: valid provider-reported `input`, `output`, `provider_total`, `cache_read`, `cache_write`, or `reasoning` tokens. |
+| `.tokens.measured` | counter | `kind`: number of attempts supplying that valid provider field, including explicit zeroes. |
+| `.usage` | counter | `coverage` and `source`: completeness and provenance of each attempt's final usage observation. |
+| `.duration` | function timer | Admission-to-finish call duration, including queueing and terminal accounting. |
+| `.attempt.duration` | function timer | Attempt duration measured by the existing inference observer. |
+| `.queue.duration` | function timer | Measured queue waits; absent queue time does not add a zero sample. |
+| `.first.output` | function timer | Time to first observed output, only for attempts that produced output. |
+
+Token observations are counted once when an attempt ends. Repeated streaming usage
+updates replace that attempt's observation; they are not added together. Every retry
+is a separate attempt and may incur additional tokens. A failed/cancelled attempt's
+reported usage still counts. Journal retries and projector replay never increment
+these metrics. A buffered terminal accounting record does not undo spent inference.
+
+Unknown counts are not filled with zero or derived from other fields. Invalid usage
+increments `coverage="invalid"` and contributes no token quantities. Partial valid
+observations contribute only known fields. Tokenizer/estimate observations remain
+visible through `source` on `.usage`, but never enter provider-token totals. An
+embedding can have complete input usage without any output measurement. Check
+`.tokens.measured` and coverage alongside totals to distinguish measured zero from
+missing data.
+
+**Do not sum all token kinds.** Reasoning is already included in output, cache-read
+quantities may be subsets of input, and `provider_total` overlaps input/output.
+For example, this query keeps input and output rates separate:
+
+```promql
+sum by (kind) (
+  rate(plowshare_inference_tokens_total{kind=~"input|output"}[5m])
+)
+```
+
+These are process-local monitoring counters, not a billing ledger. They reset at
+restart, do not backfill history, and use floating-point totals. The
+[durable usage reports](model-usage-accounting.md) remain authoritative for exact
+counts, ownership, pricing, incompleteness and historical queries. Scrapes only read
+memory and perform no accounting/database queries.
+
+### Job lifecycle metrics
+
+JobStore exports process-local executor-task metrics under `plowshare.jobs`:
+
+| Meter suffix | Type | Meaning |
+| --- | --- | --- |
+| `.started` | counter | Actual task starts after executor acceptance. |
+| `.active` | gauge | Tasks still executing, including completion callbacks. |
+| `.completed` | counter | Task exits tagged by the fixed `ending` enum, such as `answered`, `cancelled`, `unavailable` or `call_budget`. |
+| `.rejected` | counter | Executor refusals during shutdown; these do not invent starts or completions. |
+| `.duration` | function timer | Task lifetime by `ending`, including completion callbacks. |
+
+Cancellation requests do not count as completed jobs until their task exits. A
+runtime failure is counted as `unavailable`; an exit without a recorded outcome also
+uses that ending. Dropped WebSocket events do not affect these measurements. A job
+may already be visible as DONE while its final callback is still executing and
+`.active` still includes it. Direct inline/delegated runs outside JobStore are not
+additional JobStore tasks; their inference still passes through inference accounting.
+These metrics do not scan durable jobs or reconstruct active work after restart.
+
+All function timers export cumulative count and seconds sum, without histogram or
+percentile buckets. Prometheus counters append `_total`; timers append
+`_seconds_count` and `_seconds_sum`. For example, mean completed job duration over
+five minutes is:
+
+```promql
+sum(rate(plowshare_jobs_duration_seconds_sum[5m]))
+/
+sum(rate(plowshare_jobs_duration_seconds_count[5m]))
+```
+
+The inference and job recorders update only bounded in-memory totals on execution
+threads. Scraping or a failing export backend cannot replay work or change admission,
+authorization, cancellation or durable lifecycle decisions. Use the restricted
+management listener described below for exporting all of these meters.
+
 ### Actuator endpoints
 
 The `health`, `info` and `metrics` actuator endpoints are exposed on the main API
@@ -233,6 +400,29 @@ port **without authentication**; no security starter is present. They reveal JVM
 connection-pool and request metrics, and the health probe borrows a database
 connection. A deployment must restrict them with `management.server.port` and
 `management.server.address`, or by a front proxy that blocks `/actuator`.
+
+The Prometheus registry is bundled and receives the same meters. Its HTTP endpoint,
+`/actuator/prometheus`, is **not exposed by default**. To enable it later, configure
+an explicitly restricted management listener and include `prometheus`, for example
+in the operator's private server configuration:
+
+```yaml
+management:
+  server:
+    port: ${PLOWSHARE_MANAGEMENT_PORT}
+    address: ${PLOWSHARE_MANAGEMENT_BIND}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+```
+
+Supply an unused port distinct from the API port and a bind address reachable only
+by the intended monitoring system. A separate port does not add authentication;
+restrict network/proxy access as well. A configured Prometheus scraper and persistent
+time-series storage retain samples across server restarts; Grafana can query that
+history. Bundling the registry alone does not collect history. Container publishing,
+ingress, scrapes, alerts and PostgreSQL instrumentation remain deployment work.
 
 ## Information feature switches
 

@@ -1,5 +1,9 @@
 # Model usage, counting and cloud pools
 
+Live aggregate token, coverage, inference-timing and job metrics are documented in
+[server administration](server-administration.md#token-usage-and-inference-metrics).
+They complement this durable ledger; they do not replace its historical or ownership guarantees.
+
 Durable token accounting is enabled by default. Apply all Flyway migrations shipped with the server and retain the configured server data directory. Token usage is captured even when no prices are configured; missing prices remain unknown. Detailed cost calculation uses optional pricing configuration. `plowshare.llm.accounting.enabled: false` explicitly disables capture (for example, isolated tests with ephemeral storage). Data layout 6 reserves `<data.dir>/accounting`. The database stores call and attempt metadata; the durable journal bridges temporary projection outages. Neither stores prompts, model output, images, credentials or provider error bodies.
 
 Every enabled inference request needs explicit server-resolved ownership. New legacy-unattributed requests fail before contacting the model. Runtime calls retain their account, stable project ID, conversation and run ancestry, actual agent, turn and step. Folds, validators, advisors, learning, digestion, navigation, scheduling, corpus summaries and embedding write/query/repair paths carry explicit operations. Background maintenance without a human requester uses a system bucket. Shared corpus work has global scope; a document query made by an agent keeps the requesting execution's project scope.

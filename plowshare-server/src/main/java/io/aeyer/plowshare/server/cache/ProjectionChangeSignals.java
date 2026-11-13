@@ -36,6 +36,11 @@ public interface ProjectionChangeSignals extends AutoCloseable {
 
   boolean healthy();
 
+  /** Session open attempts after the initial attempt, including failed attempts; never a probe. */
+  default long reconnectAttempts() {
+    return 0;
+  }
+
   /**
    * {@link System#nanoTime()} at which the newest answered delivery probe was sent, within the
    * current ready state. Every change committed before that instant has already been passed to

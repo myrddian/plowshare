@@ -8,6 +8,8 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,6 +74,12 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   // Written only by the worker; read by cache hits. Valid only for deliveredGeneration.
   private volatile long deliveredNanos;
   private volatile long deliveredGeneration = -1;
+  private final AtomicLong reconnectAttempts = new AtomicLong();
+
+  @Override
+  public long reconnectAttempts() {
+    return reconnectAttempts.get();
+  }
 
   public ListeningProjectionChangeSignals(
       ProjectionNotificationSource source,
@@ -182,8 +190,11 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   }
 
   private void run() {
+    boolean firstAttempt = true;
     try {
       while (!isClosed()) {
+        if (!firstAttempt) reconnectAttempts.incrementAndGet();
+        firstAttempt = false;
         try (var opened = source.open()) {
           synchronized (lock) {
             if (closed) return;
@@ -301,7 +312,7 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
       var relevant =
           changed.stream()
               .filter(registration.domains::contains)
-              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+              .collect(Collectors.toUnmodifiableSet());
       if (relevant.isEmpty()) continue;
       try {
         registration.observer.changed(relevant);

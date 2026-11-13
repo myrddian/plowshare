@@ -1,5 +1,8 @@
 package io.aeyer.plowshare.server.cache;
 
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOAD;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOADED_RETURN;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.TRUSTED_HIT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
@@ -114,6 +117,9 @@ class NotifiedProjectionCacheTest {
       verify(f.versions, times(1)).capture(DOMAINS);
       verify(f.versions, times(2)).current(any()); // The first read's load and hit checks only.
       assertEquals(1, f.loads.get());
+      assertEquals(100, f.cache.statistics().count(TRUSTED_HIT));
+      assertEquals(1, f.cache.statistics().count(LOAD));
+      assertEquals(1, f.cache.statistics().count(LOADED_RETURN));
     }
   }
 

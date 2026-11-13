@@ -137,8 +137,10 @@ class ProjectionDeliveryProbeTest {
             }
           });
       assertTrue(signals.deliveredThrough().isEmpty(), "Nothing is proven before the first echo");
+      assertEquals(0, signals.reconnectAttempts());
       signals.start();
       await(() -> signals.deliveredThrough().isPresent());
+      assertEquals(0, signals.reconnectAttempts(), "Initial connection is not a reconnect");
 
       long revokedAt = System.nanoTime();
       session.commit(AUTHORITY);
@@ -169,6 +171,7 @@ class ProjectionDeliveryProbeTest {
           "Silent loss is noticed within the probe timeout");
       await(() -> signals.deliveredThrough().isPresent());
       assertTrue(signals.healthy());
+      assertEquals(1, signals.reconnectAttempts());
     }
   }
 

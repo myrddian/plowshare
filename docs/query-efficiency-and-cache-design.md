@@ -1,5 +1,10 @@
 # Query efficiency and cache design
 
+Current [cache and listener telemetry](server-administration.md#projection-cache-and-listener-metrics)
+exports validated projection outcomes separately from backing lookups, bounded-load
+attempts, fallback reasons and listener delivery proof. Scrapes read memory only;
+notification freshness and durable version checks remain the authority for reuse.
+
 Status: proposed implementation strategy. The
 [query efficiency rules](coding-standards.md#query-efficiency-and-reuse) apply to
 new and changed code. The [first implementation slice](query-efficiency-first-slice.md)

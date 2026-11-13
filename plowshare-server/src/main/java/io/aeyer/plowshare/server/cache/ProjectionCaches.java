@@ -16,6 +16,7 @@ public final class ProjectionCaches implements AutoCloseable {
   private final ProjectionCacheProperties properties;
   private final UUID database;
   private final Duration notifiedStaleness;
+  private final ProjectionTelemetry telemetry;
   private final ConcurrentMap<String, VersionedProjectionCache<?>> caches =
       new ConcurrentHashMap<>();
   private final AtomicInteger reservations = new AtomicInteger();
@@ -37,10 +38,20 @@ public final class ProjectionCaches implements AutoCloseable {
       ProjectionChangeSignals signals,
       ProjectionCacheProperties properties,
       Duration notifiedStaleness) {
+    this(versions, signals, properties, notifiedStaleness, ProjectionTelemetry.NONE);
+  }
+
+  public ProjectionCaches(
+      ProjectionVersions versions,
+      ProjectionChangeSignals signals,
+      ProjectionCacheProperties properties,
+      Duration notifiedStaleness,
+      ProjectionTelemetry telemetry) {
     this.versions = Objects.requireNonNull(versions);
     this.signals = Objects.requireNonNull(signals);
     this.properties = Objects.requireNonNull(properties);
     this.notifiedStaleness = notifiedStaleness;
+    this.telemetry = Objects.requireNonNull(telemetry);
     database = versions.databaseIdentity();
   }
 
@@ -102,6 +113,19 @@ public final class ProjectionCaches implements AutoCloseable {
         }
       }
       throw new IllegalStateException("Projection caches closed");
+    }
+    try {
+      // Failed subscriptions and duplicate/capacity refusals must not register orphaned meters.
+      telemetry.observeCache(projection, cache.statistics(), backing::statistics);
+    } catch (RuntimeException | Error failure) {
+      if (caches.remove(projection, cache)) {
+        try {
+          cache.close();
+        } finally {
+          reservations.decrementAndGet();
+        }
+      }
+      throw failure;
     }
     return cache;
   }
