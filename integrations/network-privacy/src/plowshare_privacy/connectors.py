@@ -31,6 +31,7 @@ from .contracts import (
 from .identity_source import IdentitySample
 from .pihole import DeviceDataSource, PiHoleV6
 from .source_set import (
+    AddressingReader,
     Bound,
     DnsActivityReader,
     PresenceReader,
@@ -154,11 +155,24 @@ class _ControllerIdentity:
         return await self._network.controller_identity(targets, observed_at)
 
 
+# UniFi's fixed IPs and DHCP ranges are read by its own addressing reader.
+_UNIFI_ADDRESSING: frozenset[Capability] = frozenset(
+    {"dhcp_reservations", "dhcp_scope"}
+)
+
+
 def _bind_unifi(service: ServicePlan) -> SourceSet:
     enabled = service.capabilities
-    if not enabled & {"controller_clients", "managed_inventory", "traffic_counters"}:
+    if not enabled & {
+        "controller_clients",
+        "managed_inventory",
+        "traffic_counters",
+        *_UNIFI_ADDRESSING,
+    }:
         return SourceSet()
-    network = UniFiNetwork(_unifi_settings(service.settings), capabilities=enabled)
+    network = UniFiNetwork(
+        _unifi_settings(service.settings), capabilities=enabled, service=service.id
+    )
     managed = "managed_inventory" in enabled
     return SourceSet(
         identity=(Bound(service.id, "unifi", _ControllerIdentity(network)),)
@@ -170,6 +184,9 @@ def _bind_unifi(service: ServicePlan) -> SourceSet:
         else None,
         product=network if managed else None,
         managed=(network,) if managed else (),
+        addressing=(Bound[AddressingReader](service.id, "unifi", network),)
+        if enabled & _UNIFI_ADDRESSING
+        else (),
     )
 
 

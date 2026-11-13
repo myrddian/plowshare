@@ -18,6 +18,7 @@ from aiohttp import (
     ServerFingerprintMismatch,
 )
 
+from .addressing import AddressingSample, DhcpScope, Reservation
 from .contracts import (
     Capability,
     DeviceIdentity,
@@ -44,6 +45,19 @@ _MAX_TRAFFIC_CLIENTS = 2048
 _DEFAULT_CAPABILITIES: frozenset[Capability] = frozenset(
     {"controller_clients", "managed_inventory", "traffic_counters"}
 )
+# Addressing reads: stat/sta lists connected clients (with their fixed-IP
+# setting), rest/networkconf the site's networks (with their DHCP server).
+_MAX_FIXED_IP_CLIENTS = 1024
+_MAX_NETWORKS = 64
+_MAX_NETWORK_BYTES = 1024 * 1024
+FIXED_IP_UNAVAILABLE = (
+    "addressing_unavailable: UniFi fixed IP settings could not be read"
+)
+DHCP_UNAVAILABLE = "addressing_unavailable: UniFi DHCP settings could not be read"
+INVALID_FIXED_IP = "addressing_partial: UniFi returned an invalid fixed IP"
+INVALID_DHCP_RANGE = "addressing_partial: UniFi returned an invalid DHCP range"
+CLIENT_LIMIT = "addressing_partial: UniFi client limit reached"
+NETWORK_LIMIT = "addressing_partial: UniFi DHCP network limit reached"
 _INVENTORY_DISAGREES = (
     "unifi_ambiguous: connected and adopted inventory disagree on a watched address"
 )
@@ -143,6 +157,10 @@ class UniFiNetwork:
     ``capabilities`` selects what the bound readers use: ``controller_identity``
     merges adopted inventory only with ``managed_inventory``, and traffic is
     read only with ``traffic_counters`` and a configured legacy site name.
+    ``addressing`` reads fixed IPs only with ``dhcp_reservations`` and DHCP
+    ranges only with ``dhcp_scope``; both need the legacy site name, which
+    ``ServicePlan`` already requires. ``service`` names the configured service
+    and is recorded on its addressing facts.
     """
 
     def __init__(
@@ -150,8 +168,10 @@ class UniFiNetwork:
         plan: UniFiPlan,
         *,
         capabilities: frozenset[Capability] = _DEFAULT_CAPABILITIES,
+        service: str = "unifi",
     ):
         self.capabilities = capabilities
+        self.service = service
         key = os.environ.get(plan.api_key_environment)
         if (
             key is None
@@ -164,9 +184,20 @@ class UniFiNetwork:
         self._clients = site + "/clients"
         self._devices = site + "/devices"
         self._networks = site + "/networks"
+        legacy = _legacy_site_url(plan.api_base, plan.traffic_site)
         self._traffic = (
-            _traffic_url(plan.api_base, plan.traffic_site)
-            if "traffic_counters" in capabilities
+            legacy + "/stat/sta"
+            if legacy is not None and "traffic_counters" in capabilities
+            else None
+        )
+        self._fixed_ips = (
+            legacy + "/stat/sta"
+            if legacy is not None and "dhcp_reservations" in capabilities
+            else None
+        )
+        self._networkconf = (
+            legacy + "/rest/networkconf"
+            if legacy is not None and "dhcp_scope" in capabilities
             else None
         )
         self._gateway = plan.gateway
@@ -291,25 +322,11 @@ class UniFiNetwork:
         if self._traffic is None:
             return (), ()
         try:
-            async with asyncio.timeout(15):
-                async with ClientSession(
-                    headers={"X-API-Key": self._api_key, "Accept": "application/json"},
-                    timeout=ClientTimeout(total=10),
-                ) as session:
-                    async with session.get(
-                        self._traffic, ssl=self._tls, allow_redirects=False
-                    ) as response:
-                        if response.status != 200:
-                            raise ValueError("UniFi traffic request failed")
-                        body = bytearray()
-                        async for chunk in response.content.iter_chunked(65536):
-                            body.extend(chunk)
-                            if len(body) > _MAX_TRAFFIC_BYTES:
-                                raise ValueError("UniFi traffic exceeded the limit")
-            return _decode_traffic(
-                parse_json(bytes(body), maximum_bytes=_MAX_TRAFFIC_BYTES),
-                frozenset(targets),
-            ), ()
+            async with asyncio.timeout(15), self._legacy_session() as session:
+                value = await self._read_legacy(
+                    session, self._traffic, _MAX_TRAFFIC_BYTES
+                )
+            return _decode_traffic(value, frozenset(targets)), ()
         except ServerFingerprintMismatch:
             return (), (
                 "unifi_traffic_unavailable: UniFi controller certificate pin mismatch",
@@ -318,6 +335,88 @@ class UniFiNetwork:
             return (), (
                 "unifi_traffic_unavailable: UniFi client counters could not be read or validated",
             )
+
+    async def addressing(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> AddressingSample:
+        """Fixed IPs and DHCP ranges, as addressing facts for ``targets``.
+
+        Reads ``stat/sta`` (``dhcp_reservations``), then ``rest/networkconf``
+        (``dhcp_scope``), each with one GET on one session configured as the
+        traffic read; neither capability means no request. A client with
+        ``use_fixedip: true`` whose ``fixed_ip`` is a target becomes a
+        ``controller_fixed_ip`` reservation. Each enabled IPv4 network with an
+        enabled DHCP server becomes a scope without a lease table (UniFi
+        exposes none, so rule 3 reads an in-range address as dynamic).
+
+        An unreadable endpoint is ``addressing_unavailable`` for that endpoint
+        only; the other's facts still apply. Scopes are ``complete`` only when
+        nothing could be missing: a network read reaching its limit or holding
+        an invalid network, or a fixed-IP read that failed, reached its limit
+        or held an invalid fixed IP, leaves every scope incomplete, because a
+        missing network or fixed IP could otherwise make an address look static.
+        Issue texts are fixed and never carry URLs or bodies.
+        """
+        if self._fixed_ips is None and self._networkconf is None:
+            return AddressingSample()
+        reservations: tuple[Reservation, ...] = ()
+        scopes: tuple[DhcpScope, ...] = ()
+        issues: list[str] = []
+        complete = True
+        async with self._legacy_session() as session:
+            if self._fixed_ips is not None:
+                try:
+                    async with asyncio.timeout(15):
+                        value = await self._read_legacy(
+                            session, self._fixed_ips, _MAX_TRAFFIC_BYTES
+                        )
+                    rows = _legacy_rows(value)
+                except (ClientError, TimeoutError, ValueError):
+                    issues.append(FIXED_IP_UNAVAILABLE)
+                    complete = False
+                else:
+                    reservations, fixed_issues = _decode_fixed_ips(
+                        rows, frozenset(targets), self.service
+                    )
+                    issues.extend(fixed_issues)
+                    complete = not fixed_issues
+            if self._networkconf is not None:
+                try:
+                    async with asyncio.timeout(15):
+                        value = await self._read_legacy(
+                            session, self._networkconf, _MAX_NETWORK_BYTES
+                        )
+                    rows = _legacy_rows(value)
+                except (ClientError, TimeoutError, ValueError):
+                    issues.append(DHCP_UNAVAILABLE)
+                else:
+                    scopes, scope_issues = _decode_networks(rows, self.service)
+                    issues.extend(scope_issues)
+                    complete = complete and not scope_issues
+        if not complete:
+            scopes = tuple(replace(scope, complete=False) for scope in scopes)
+        return AddressingSample((), reservations, scopes, tuple(issues))
+
+    def _legacy_session(self) -> ClientSession:
+        """A session for the legacy endpoints, sending the API key and accepting JSON."""
+        return ClientSession(
+            headers={"X-API-Key": self._api_key, "Accept": "application/json"},
+            timeout=ClientTimeout(total=10),
+        )
+
+    async def _read_legacy(
+        self, session: ClientSession, url: str, maximum_bytes: int
+    ) -> object:
+        """One GET of a legacy endpoint: 200 only, no redirects, bounded body."""
+        async with session.get(url, ssl=self._tls, allow_redirects=False) as response:
+            if response.status != 200:
+                raise ValueError("UniFi legacy request failed")
+            body = bytearray()
+            async for chunk in response.content.iter_chunked(65536):
+                body.extend(chunk)
+                if len(body) > maximum_bytes:
+                    raise ValueError("UniFi legacy response exceeded the limit")
+        return parse_json(bytes(body), maximum_bytes=maximum_bytes)
 
     def recently_managed(self, identity: DeviceIdentity) -> bool:
         return (
@@ -652,13 +751,105 @@ def _decode_page(
     return _ClientPage(total, tuple(ids), tuple(devices))
 
 
-def _traffic_url(api_base: str, site: str | None) -> str | None:
-    """Derive the legacy client-statistics URL on the same controller origin."""
+def _legacy_site_url(api_base: str, site: str | None) -> str | None:
+    """Derive the legacy ``/api/s/{site}`` base on the same controller origin."""
     if site is None:
         return None
     url = urlsplit(api_base)
     prefix = "/proxy/network" if url.path.startswith("/proxy/network/") else ""
-    return f"{url.scheme}://{url.netloc}{prefix}/api/s/{site}/stat/sta"
+    return f"{url.scheme}://{url.netloc}{prefix}/api/s/{site}"
+
+
+def _legacy_rows(value: object) -> list[object]:
+    """The ``data`` list of a successful legacy ``{meta: {rc: ok}, data}`` reply."""
+    if not isinstance(value, dict):
+        raise ValueError("Expected a UniFi legacy response")
+    meta = value.get("meta")
+    if not isinstance(meta, dict) or meta.get("rc") != "ok":
+        raise ValueError("UniFi legacy response was not successful")
+    rows = value.get("data")
+    if not isinstance(rows, list):
+        raise ValueError("Expected a UniFi legacy data list")
+    return rows
+
+
+def _decode_fixed_ips(
+    rows: list[object], targets: frozenset[str], service: str
+) -> tuple[tuple[Reservation, ...], tuple[str, ...]]:
+    """Fixed-IP reservations at ``targets`` from at most the client limit.
+
+    Only ``use_fixedip: true`` clients count. Every such client is validated,
+    whether or not it is a target, so a rejected entry is always reported:
+    it could hold a target's fixed IP. A non-boolean flag is invalid too.
+    """
+    issues = [CLIENT_LIMIT] if len(rows) > _MAX_FIXED_IP_CLIENTS else []
+    reservations: list[Reservation] = []
+    for row in rows[:_MAX_FIXED_IP_CLIENTS]:
+        try:
+            if not isinstance(row, dict):
+                raise ValueError("Expected UniFi client statistics")
+            flag = row.get("use_fixedip", False)
+            if type(flag) is not bool:
+                raise ValueError("Expected a UniFi fixed-IP flag")
+            if not flag:
+                continue
+            address = str(ipaddress.IPv4Address(text(row.get("fixed_ip"), 15)))
+            mac = mac_address(row.get("mac"))
+        except ValueError:
+            if INVALID_FIXED_IP not in issues:
+                issues.append(INVALID_FIXED_IP)
+            continue
+        if address in targets:
+            reservations.append(
+                Reservation(address, mac, "controller_fixed_ip", service)
+            )
+    return tuple(dict.fromkeys(reservations)), tuple(issues)
+
+
+def _decode_networks(
+    rows: list[object], service: str
+) -> tuple[tuple[DhcpScope, ...], tuple[str, ...]]:
+    """DHCP scopes from at most the network limit, all initially complete.
+
+    A network without ``ip_subnet`` (WAN, VPN, VLAN-only) or with an IPv6
+    one has no IPv4 DHCP server and is ignored. A disabled network or DHCP
+    server contributes nothing. Otherwise ``ip_subnet`` is the gateway's CIDR
+    and ``dhcpd_start``-``dhcpd_stop`` must lie inside it in order; any other
+    form skips that network with ``addressing_partial``.
+    """
+    issues = [NETWORK_LIMIT] if len(rows) > _MAX_NETWORKS else []
+    scopes: list[DhcpScope] = []
+    for row in rows[:_MAX_NETWORKS]:
+        try:
+            scope = _network_scope(row, service)
+        except ValueError:
+            if INVALID_DHCP_RANGE not in issues:
+                issues.append(INVALID_DHCP_RANGE)
+            continue
+        if scope is not None:
+            scopes.append(scope)
+    return tuple(scopes), tuple(issues)
+
+
+def _network_scope(row: object, service: str) -> DhcpScope | None:
+    if not isinstance(row, dict):
+        raise ValueError("Expected a UniFi network")
+    if "ip_subnet" not in row:
+        return None
+    enabled = row.get("enabled", True)
+    dhcp = row.get("dhcpd_enabled")
+    if type(enabled) is not bool or type(dhcp) is not bool:
+        raise ValueError("Expected UniFi network flags")
+    if not enabled or not dhcp:
+        return None
+    network = ipaddress.ip_network(text(row["ip_subnet"], 64), strict=False)
+    if not isinstance(network, ipaddress.IPv4Network):
+        return None
+    start = ipaddress.IPv4Address(text(row.get("dhcpd_start"), 15))
+    end = ipaddress.IPv4Address(text(row.get("dhcpd_stop"), 15))
+    if start not in network or end not in network or start > end:
+        raise ValueError("UniFi DHCP range outside its network")
+    return DhcpScope(service, network, str(start), str(end), True, "none")
 
 
 def _decode_traffic(value: object, scope: frozenset[str]) -> tuple[TrafficCounter, ...]:

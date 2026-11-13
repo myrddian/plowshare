@@ -437,6 +437,28 @@ part of the receipt journal's identity.
   - `config.dns.hosts[]` is `"IP HOSTNAME [HOSTNAME ...]"`, as assumed.
 - Confirm that the UniFi API key can read the legacy client fixed-IP fields
   and network DHCP settings (`stat/sta`, `rest/networkconf`) read-only.
+  Checked against public references only, not against a controller:
+  - `GET /api/s/{site}/stat/sta` lists connected clients; on UniFi OS the
+    path is prefixed `/proxy/network` (ubntwiki "UniFi Controller API",
+    Art-of-WiFi `UniFi-API-client` `list_clients`). Legacy replies are
+    `{"meta": {"rc": "ok"|"error"}, "data": [...]}`.
+  - Client objects carry `ip`, `mac`, `use_fixedip: bool` and
+    `fixed_ip: str` (aiounifi `models/client.py` `TypedClient`, reading
+    `/stat/sta`). `stat/sta` lists connected clients only; the complete
+    configured list is `rest/user`, so a fixed IP held for an offline client is
+    not seen.
+  - `GET /api/s/{site}/rest/networkconf` lists the site's networks
+    (Art-of-WiFi `list_networkconf`). The fields `ip_subnet` (the gateway's
+    CIDR, such as `192.168.1.1/24`), `dhcpd_enabled`, `dhcpd_start` and
+    `dhcpd_stop` come from community references (create-network payloads and
+    `networkconf` documents), not an official schema. WAN and VLAN-only
+    entries carry no `ip_subnet`. The reader takes exactly these forms and
+    reports anything else as `addressing_partial`.
+  - No public document says whether the Integration API key (`X-API-Key`)
+    is accepted on the legacy paths; the public clients log in with a
+    session. The existing traffic read already depends on it. The owner
+    should confirm on the controller (one read-only GET of each path with the
+    key) before enabling these capabilities.
 - Whether the Java side (`NetworkDeviceAssessmentTest` and the dossier port)
   tolerates the new optional `evidence` and `service` fields without changes.
   If it does not, that is a contract change and is reported before going ahead.
