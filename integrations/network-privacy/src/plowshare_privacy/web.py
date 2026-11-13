@@ -54,6 +54,7 @@ from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
 from .profile_research import DAILY_LIMIT as RESEARCH_DAILY_LIMIT
 from .profile_research import ResearchReview, admitted_today
+from .reference_service import PHASE_LABELS, ReferenceService
 from .schedule_editor import ScheduleManagement
 from .system_view import describe
 from .tools import (
@@ -84,6 +85,7 @@ def application(
     assessments: AssessmentControl | None = None,
     deep_scans: DeepScanner | None = None,
     deep_scans_detail: str | None = None,
+    references: ReferenceService | None = None,
     ask: AskService | None = None,
     ask_detail: str | None = None,
     advisory_origin: str | None = None,
@@ -243,6 +245,9 @@ def application(
                     "configured_ports": list(worker.config.collection.ports),
                 }
                 if deep_scans is not None
+                else None,
+                "references": asdict(references.counts())
+                if references is not None
                 else None,
                 "ask": ask_overview(),
             }
@@ -709,6 +714,50 @@ def application(
             )
         service.set_automatic_limit(limit)
         return deep_scan_settings_view(service)
+
+    def reference_library() -> ReferenceService:
+        if references is None:
+            raise web.HTTPNotFound(text="The reference library is not enabled")
+        return references
+
+    def reference_rows(service: ReferenceService) -> web.Response:
+        # Server text in ``error`` was bounded and stripped when it was journaled.
+        return web.json_response(
+            {
+                "references": [
+                    {
+                        "url": item.url,
+                        "product": item.product,
+                        "title": item.title,
+                        "origin": item.origin,
+                        "phase": item.phase,
+                        "label": PHASE_LABELS[item.phase],
+                        "error": item.error,
+                        "retired": item.retired,
+                        "untag_failed": item.untag_failed,
+                    }
+                    for item in service.view()
+                ],
+                "error": service.error,
+            }
+        )
+
+    async def reference_list(request: web.Request) -> web.Response:
+        return reference_rows(reference_library())
+
+    async def reference_retry(request: web.Request) -> web.Response:
+        service = reference_library()
+        row = object_fields(parse_json(await request.read()), {"url"})
+        url = row["url"]
+        if not isinstance(url, str):
+            return web.json_response({"error": "Name the reference's link"}, status=400)
+        try:
+            await service.retry(url)
+        except (ValueError, LookupError) as error:
+            # The library's own refusals (unknown reference, wrong phase) say why;
+            # the generic ValueError mapping would hide it.
+            return web.json_response({"error": str(error.args[0])}, status=400)
+        return reference_rows(service)
 
     def assistant() -> AskService:
         if ask is None:
@@ -1179,6 +1228,8 @@ def application(
     app.router.add_get("/api/devices/{device_id}/deep-scan", deep_scan_view)
     app.router.add_post("/api/devices/{device_id}/deep-scan/request", deep_scan_request)
     app.router.add_post("/api/devices/{device_id}/deep-scan/cancel", deep_scan_cancel)
+    app.router.add_get("/api/references", reference_list)
+    app.router.add_post("/api/references/retry", reference_retry)
     app.router.add_get("/api/ask", ask_view)
     app.router.add_post("/api/ask", ask_send)
     app.router.add_post("/api/ask/top-up", ask_top_up)

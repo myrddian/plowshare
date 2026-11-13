@@ -1801,6 +1801,33 @@ byId('deep-scan-settings').addEventListener('submit', async event => {
 });
 // ---- end Deep port scans ----
 
+// ---- Reference library ----
+// The collector's vendor documentation acquisitions. Only the Retry button
+// re-sends anything; document and server text is shown with textContent.
+function renderReferences(value) {
+  byId('reference-library').hidden = false;
+  byId('reference-list').replaceChildren(...value.references.map(item => {
+    const row = element('div', undefined, 'record');
+    const line = element('div', undefined, 'entry-line');
+    line.append(element('span', item.label, 'badge'), element('strong', item.title));
+    row.append(line, element('p', item.product + (item.retired ? ' · Retired from the shipped list' : ''), 'hint'));
+    if (item.error) row.append(element('p', item.error, 'notice error'));
+    if (item.untag_failed) row.append(element('p', 'Removing it from search failed.', 'notice error'));
+    if (item.phase === 'failed' || item.phase === 'blocked' || item.untag_failed) {
+      row.append(actionButton('Retry', 'secondary', () => retryReference(item.url)));
+    }
+    return row;
+  }));
+  byId('reference-detail').textContent = value.error || '';
+}
+async function loadReferences() {
+  renderReferences(await api('/api/references'));
+}
+async function retryReference(url) {
+  renderReferences(await api('/api/references/retry', {method:'POST', body:JSON.stringify({url})}));
+}
+// ---- end Reference library ----
+
 // ---- Ask ----
 // One conversation with the privacy assistant. The collector owns the turn and
 // its state; this block only shows the reading it is given. The conversation
@@ -2365,6 +2392,9 @@ function renderAttention(value) {
   const unseen = value.devices.filter(device => deepScanNeedsReview(device, value));
   if (unseen.length) items.push(attentionItem(formatCount(unseen.length), 'New open ports',
     `${deviceNames(unseen)} answered on ports outside the usual checks.`, ...reviewAction(unseen)));
+  const stuck = (value.references?.failed || 0) + (value.references?.blocked || 0);
+  if (stuck) items.push(attentionItem(formatCount(stuck), 'Reference docs need a check',
+    'Some vendor documentation could not be fetched or is held. Retry it from the Reference library.', 'Open Settings', () => showView('settings', true)));
   const drafts = latestStatus?.profile_drafts_waiting || 0;
   if (drafts) items.push(attentionItem(formatCount(drafts), drafts === 1 ? 'Profile draft awaiting review' : 'Profile drafts awaiting review',
     'Background research drafted device profiles. Review each before it is saved.', 'Open drafts', () => {
@@ -2486,6 +2516,8 @@ function renderOverview(value) {
   renderAttention(value);
   renderBackgroundUsage(value);
   renderDeepScanGroup(value);
+  if (value.references) loadReferences().catch(error => {byId('reference-detail').textContent = error.message;});
+  else byId('reference-library').hidden = true;
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates, value.assessments?.summaries || null]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;

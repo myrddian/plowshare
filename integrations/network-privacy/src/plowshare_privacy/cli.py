@@ -58,6 +58,8 @@ from .presence import PresenceHistory, PresenceView, PresenceWatch
 from .profile_port import SdkProfilePort
 from .profile_research import ProfileResearch, ResearchJournal, reviewed_model
 from .profile_research_port import SdkResearchPort
+from .reference_port import SdkReferencePort
+from .reference_service import ReferenceService, project_scope
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
 from .tool_journal_upgrade import open_tool_journal
@@ -247,6 +249,12 @@ async def execute(args: argparse.Namespace) -> None:
             deep_scans, deep_scans_detail = compose_scanner(
                 worker, config.state_directory, operator_store is not None
             )
+            # Vendor documentation for the assistant. The seed is queued once here;
+            # the loop below fetches it and nothing retries without the owner.
+            references = ReferenceService.open(
+                config.state_directory,
+                SdkReferencePort(client, project_scope(config.project)),
+            )
             # The household's Ask conversation. An unreadable journal disables it
             # only; collection starts and /api/status says why.
             ask, ask_detail = compose_ask(
@@ -417,6 +425,9 @@ async def execute(args: argparse.Namespace) -> None:
                             console.port = SdkConsolePort(
                                 replacement, worker.config, assistant_conversation
                             )
+                        references.library.port = SdkReferencePort(
+                            replacement, project_scope(worker.config.project)
+                        )
                         if dossiers is not None:
                             dossiers.port = SdkDossierPort(
                                 replacement, worker.config, worker.port
@@ -557,6 +568,7 @@ async def execute(args: argparse.Namespace) -> None:
                     assessments=assessments,
                     deep_scans=deep_scans,
                     deep_scans_detail=deep_scans_detail,
+                    references=references,
                     ask=ask,
                     ask_detail=ask_detail,
                     advisory_origin=advisory_origin,
@@ -573,6 +585,7 @@ async def execute(args: argparse.Namespace) -> None:
             research_task: asyncio.Task[None] | None = None
             assessment_task: asyncio.Task[None] | None = None
             deep_scan_task: asyncio.Task[None] | None = None
+            reference_task: asyncio.Task[None] | None = None
             ask_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
@@ -622,6 +635,7 @@ async def execute(args: argparse.Namespace) -> None:
                     assessment_task = asyncio.create_task(assessments.run(stop))
                 if deep_scans is not None:
                     deep_scan_task = asyncio.create_task(deep_scans.run(stop))
+                reference_task = asyncio.create_task(references.run(stop))
                 if ask is not None:
                     ask_task = asyncio.create_task(ask.run(stop))
                 await stop.wait()
@@ -630,6 +644,7 @@ async def execute(args: argparse.Namespace) -> None:
                 await stop_tasks(
                     (
                         ask_task,
+                        reference_task,
                         deep_scan_task,
                         assessment_task,
                         research_task,
