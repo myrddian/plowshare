@@ -135,6 +135,10 @@ unchanged.
 - **Fallbacks.** A dirty, historical or expiry-spanning transaction, a disabled
   cache, or a table over 10,000 rows receives no snapshot and runs the SQL
   functions as before.
+- **Capacity.** The snapshot is the twenty-first projection cache, so the default
+  `max-projections` rises from 20 to 24. An installation that sets a lower value
+  fails at startup with "Projection cache capacity exceeded". Per-cache budgets are
+  unchanged; the snapshot itself holds a few kilobytes on deployed installations.
 
 `AuthoritySnapshotDifferentialDatabaseTest` compares every method with its SQL
 function after each of 20 fixture states. These cover account enablement, server

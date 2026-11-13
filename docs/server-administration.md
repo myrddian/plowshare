@@ -219,7 +219,7 @@ inconsistent values fail startup.
 | `notification-poll` | `1s` | Version-notification poll cadence, at most 30s. |
 | `reconnect-delay` | `1s` | Delay before reconnecting a lost notification session, at most 1m. |
 | `max-pending-transactions` | `128` | Pending transactions tracked (1..4096). |
-| `max-projections` | `20` | Distinct projections (1..64). |
+| `max-projections` | `24` | Distinct projections (1..64). |
 | `version-connections` | `4` | Connections of the separate `projection-versions` pool (1..32). |
 
 ### Actuator endpoints
