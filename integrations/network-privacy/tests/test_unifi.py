@@ -16,7 +16,7 @@ from uuid import UUID
 
 from aiohttp import web
 from aiohttp.test_utils import TestServer
-from support import with_sources
+from support import legacy_sources, with_sources
 
 from plowshare_privacy.collection import NetworkCollector, scope_fingerprint
 from plowshare_privacy.contracts import (
@@ -252,7 +252,7 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {KEY: "fixture-key"}):
             unifi = UniFiNetwork(UniFiPlan.decode(configuration()))
         plan = CollectionPlan("tcp", (FIRST, SECOND), (443,), 0.1, 1, None, 3600)
-        collector = NetworkCollector("fixture", plan, identity_source=unifi)
+        collector = NetworkCollector("fixture", plan, legacy_sources(controller=unifi))
         with (
             patch.object(
                 unifi, "identify", AsyncMock(return_value=IdentitySample((observed,)))
@@ -714,7 +714,9 @@ class UniFiTest(unittest.IsolatedAsyncioTestCase):
             "plowshare_privacy.collection.asyncio.open_connection",
             side_effect=TimeoutError,
         ):
-            evidence = await NetworkCollector("fixture", plan, pihole, unifi).collect(
+            evidence = await NetworkCollector(
+                "fixture", plan, legacy_sources(pihole, unifi)
+            ).collect(
                 SITE,
                 "00000000-0000-4000-8000-000000000002",
                 None,

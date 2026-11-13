@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
+from support import legacy_sources
 from test_pihole import ADDRESS, MAC, PiHoleServerCase
 
 from plowshare_privacy import collection, connectors, contracts
@@ -21,14 +24,15 @@ from plowshare_privacy.contracts import (
     Capability,
     CollectionPlan,
     DeviceIdentity,
+    EvidenceKind,
     PiHolePlan,
     ServicePlan,
     UniFiPlan,
     utc_now,
 )
-from plowshare_privacy.identity_source import IdentitySample
-from plowshare_privacy.pihole import PiHoleV6
-from plowshare_privacy.source_set import SourceSet
+from plowshare_privacy.identity_source import DeviceIdentitySource, IdentitySample
+from plowshare_privacy.pihole import DeviceData, DeviceDataSource, PiHoleV6
+from plowshare_privacy.source_set import Bound, SourceSet
 from plowshare_privacy.unifi import UniFiNetwork
 
 SITE = "00000000-0000-4000-8000-000000000001"
@@ -318,7 +322,9 @@ class ControllerIdentityTest(unittest.IsolatedAsyncioTestCase):
         )
         with patch.dict(os.environ, ENVIRONMENT):
             network = UniFiNetwork(UNIFI)
-        collector = NetworkCollector("fixture", plan(), identity_source=network)
+        collector = NetworkCollector(
+            "fixture", plan(), legacy_sources(controller=network)
+        )
         with (
             patch.object(
                 network, "identify", AsyncMock(return_value=IdentitySample((client,)))
@@ -384,7 +390,9 @@ class ControllerIdentityTest(unittest.IsolatedAsyncioTestCase):
         }
         with patch.dict(os.environ, ENVIRONMENT):
             network = UniFiNetwork(UNIFI)
-        collector = NetworkCollector("fixture", plan(), identity_source=network)
+        collector = NetworkCollector(
+            "fixture", plan(), legacy_sources(controller=network)
+        )
         with (
             patch.object(network, "identify", AsyncMock(return_value=clients)),
             patch.object(network, "_read_page", AsyncMock(return_value=response)),
@@ -414,6 +422,149 @@ class ControllerIdentityTest(unittest.IsolatedAsyncioTestCase):
             sample = await network.controller_identity((FIRST,), stamp)
         self.assertEqual(sample, IdentitySample((client,)))
         read.assert_not_called()
+
+
+class _Table:
+    """A fake network-table read holding fixed records, without DNS."""
+
+    def __init__(self, *devices: DeviceIdentity) -> None:
+        self.devices = devices
+
+    async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
+        return DeviceData(
+            tuple(d for d in self.devices if d.address in targets), (), None, ()
+        )
+
+
+class _Identities:
+    def __init__(self, *devices: DeviceIdentity) -> None:
+        self.devices = devices
+
+    async def identify(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        return IdentitySample(tuple(d for d in self.devices if d.address in targets))
+
+
+def _record(
+    address: str,
+    mac: str,
+    source: Literal["pihole-v6", "unifi"],
+    hostname: str,
+    evidence: EvidenceKind | None = None,
+) -> DeviceIdentity:
+    stamp = utc_now()
+    return DeviceIdentity(
+        address,
+        "mac:" + mac,
+        None,
+        hostname,
+        mac,
+        None,
+        source,
+        stamp,
+        stamp,
+        evidence=evidence,
+    )
+
+
+class CollectorSourcesTest(unittest.IsolatedAsyncioTestCase):
+    """The collector reads only bound capabilities and names no vendor itself."""
+
+    async def collect(self, sources: SourceSet) -> contracts.Evidence:
+        with patch(
+            "plowshare_privacy.collection.asyncio.open_connection",
+            side_effect=TimeoutError,
+        ):
+            return await NetworkCollector("fixture", plan(), sources).collect(
+                SITE, "fixture:event", None, None
+            )
+
+    async def test_conflict_issue_text_is_unchanged(self) -> None:
+        table = _Table(_record(FIRST, MAC, "pihole-v6", "table"))
+        controller = _Identities(_record(FIRST, OTHER_MAC, "unifi", "client"))
+        evidence = await self.collect(
+            SourceSet(
+                device_reads=(Bound[DeviceDataSource]("home-dns", "pihole", table),),
+                identity=(
+                    Bound[DeviceIdentitySource]("controller", "unifi", controller),
+                ),
+            )
+        )
+        expected = (
+            "identity_conflict: "
+            + REGISTRY["unifi"].display_name
+            + " and "
+            + REGISTRY["pihole"].display_name
+            + " disagreed on a selected IP's MAC address"
+        )
+        self.assertEqual(
+            expected,
+            "identity_conflict: UniFi and Pi-hole disagreed on a selected IP's MAC address",
+        )
+        self.assertIn(expected, evidence.issues)
+        first = evidence.snapshot.devices[0]
+        self.assertEqual((first.address, first.source), (FIRST, "configured"))
+        self.assertIsNone(first.mac)
+
+    async def test_two_identity_services_merge_by_precedence(self) -> None:
+        # The lower-ranked record comes first, so order cannot decide the winner.
+        lease = _Identities(
+            _record(FIRST, MAC, "pihole-v6", "lease", evidence="dhcp_lease")
+        )
+        client = _Identities(_record(FIRST, MAC, "unifi", "client"))
+        sources = SourceSet(
+            identity=(
+                Bound[DeviceIdentitySource]("home-dns", "pihole", lease),
+                Bound[DeviceIdentitySource]("controller", "unifi", client),
+            )
+        )
+        evidence = await self.collect(sources)
+        self.assertEqual(evidence.snapshot.devices[0].hostname, "client")
+        self.assertFalse(
+            any(issue.startswith("identity_conflict:") for issue in evidence.issues)
+        )
+        confirmed = await NetworkCollector("fixture", plan(), sources).confirm_identity(
+            (FIRST,), utc_now()
+        )
+        self.assertEqual([d.hostname for d in confirmed.devices], ["client"])
+
+    def test_configured_service_requires_a_binding(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no bound reader"):
+            NetworkCollector("fixture", plan(pihole("network_table")))
+        # Adopted inventory alone binds no service-tagged reader.
+        NetworkCollector("fixture", plan(unifi(UNIFI, "managed_inventory")))
+
+    def test_collector_contains_no_vendor_names(self) -> None:
+        tree = ast.parse(Path(collection.__file__).read_text(encoding="utf-8"))
+        docstrings = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(
+                node,
+                (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+            )
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+        }
+        vendors = {"pihole", "unifi"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = (node.module or "").rsplit(".", 1)[-1]
+                self.assertNotIn(module, vendors)
+                self.assertFalse(vendors & {alias.name for alias in node.names})
+            elif isinstance(node, ast.Import):
+                self.assertFalse(
+                    vendors & {a.name.rsplit(".", 1)[-1] for a in node.names}
+                )
+            elif isinstance(node, ast.Attribute):
+                self.assertNotIn(node.attr.lower(), vendors)
+            elif isinstance(node, ast.Constant) and id(node) not in docstrings:
+                self.assertNotIn(node.value, {"pihole-v6", "unifi", "pihole"})
+                if isinstance(node.value, str):
+                    self.assertNotIn("unifi", node.value.lower())
+                    self.assertNotIn("pi-hole", node.value.lower())
 
 
 if __name__ == "__main__":

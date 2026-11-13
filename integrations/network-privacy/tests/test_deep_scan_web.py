@@ -10,7 +10,14 @@ from typing import Awaitable, Callable
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
+from support import (
+    CountingCollector,
+    FixturePort,
+    MemoryReceipts,
+    configuration,
+    event,
+    legacy_sources,
+)
 from test_deep_scan import (
     ADDRESSES,
     LAMP,
@@ -261,7 +268,9 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         plan = worker.config.collection
         self.assertFalse(scanner.available)
         worker.collector = NetworkCollector(
-            worker.config.collector, plan, identity_source=self.identities
+            worker.config.collector,
+            plan,
+            legacy_sources(identity_source=self.identities),
         )
         self.assertTrue(scanner.available)
         worker.collector = NetworkCollector(worker.config.collector, plan)
@@ -285,14 +294,14 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         worker = self.tcp_worker()
         plan = worker.config.collection
         worker.collector = NetworkCollector(
-            worker.config.collector, plan, device_source=PiHole()
+            worker.config.collector, plan, legacy_sources(PiHole())
         )
         composed, _ = compose_scanner(worker, self.root, True)
         assert composed is not None
         self.assertTrue(composed.available)
         self.assertIsNone(composed.detail)
         scanner = self.collector_scanner(
-            NetworkCollector(worker.config.collector, plan, device_source=PiHole())
+            NetworkCollector(worker.config.collector, plan, legacy_sources(PiHole()))
         )
         scanner.request(LAMP)
         await scanner.poll()
@@ -303,7 +312,7 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         plan = self.tcp_worker().config.collection
         scanner = self.collector_scanner(
             NetworkCollector(
-                self.worker.config.collector, plan, identity_source=Adopted()
+                self.worker.config.collector, plan, legacy_sources(adopted=Adopted())
             )
         )
         scanner.request(LAMP)
@@ -320,8 +329,7 @@ class DeepScanWebTest(unittest.IsolatedAsyncioTestCase):
         collector = NetworkCollector(
             self.worker.config.collector,
             plan,
-            device_source=PiHole(),
-            identity_source=unifi,
+            legacy_sources(PiHole(), identity_source=unifi),
         )
         sample = await collector.confirm_identity((ADDRESSES[LAMP],), NOW)
         self.assertEqual(frozenset({ADDRESSES[LAMP]}), sample.ambiguous_addresses)

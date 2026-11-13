@@ -21,6 +21,7 @@ from support import (
     FixturePort,
     MemoryReceipts,
     configuration,
+    legacy_sources,
     with_sources,
 )
 
@@ -400,7 +401,9 @@ class PiHoleTest(PiHoleServerCase):
                 return data
 
         plan = CollectionPlan("tcp", (ADDRESS,), (443,), 1, 1, None, 0)
-        collector = NetworkCollector("fixture-collector", plan, Source())
+        collector = NetworkCollector(
+            "fixture-collector", plan, legacy_sources(Source())
+        )
         with patch(
             "plowshare_privacy.collection.asyncio.open_connection",
             side_effect=ConnectionRefusedError(61, "fixture refused"),

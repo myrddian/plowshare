@@ -7,6 +7,7 @@ import ssl
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
+from typing import Protocol
 from urllib.parse import urlsplit
 
 from aiohttp import (
@@ -46,6 +47,52 @@ _DEFAULT_CAPABILITIES: frozenset[Capability] = frozenset(
 _INVENTORY_DISAGREES = (
     "unifi_ambiguous: connected and adopted inventory disagree on a watched address"
 )
+
+
+class ControllerInventory(Protocol):
+    """A controller's connected clients together with its adopted inventory."""
+
+    async def identify(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample: ...
+
+    async def managed_sightings(
+        self,
+        targets: tuple[str, ...],
+        observed_at: str,
+        clients: tuple[DeviceIdentity, ...] = (),
+    ) -> IdentitySample: ...
+
+
+async def adopted_identity(
+    controller: ControllerInventory, targets: tuple[str, ...], observed_at: str
+) -> IdentitySample:
+    """Connected clients merged with adopted inventory, as collection uses them.
+
+    The adopted record replaces the client record where their MACs agree;
+    where they disagree the address is ambiguous and has no identity. Issue
+    order is clients, inventory, then the disagreement. Samples outside
+    ``targets`` raise ``ValueError``.
+    """
+    clients = await controller.identify(targets, observed_at)
+    managed = await controller.managed_sightings(targets, observed_at, clients.devices)
+    # Adopted records carry no evidence kind, so retained evidence text is
+    # unchanged; they are tagged only to rank above clients in the merge.
+    tagged = {
+        replace(device, evidence="managed_device"): device for device in managed.devices
+    }
+    merge = merge_identities(
+        (clients, IdentitySample(tuple(tagged), managed.ambiguous_addresses)),
+        frozenset(targets),
+    )
+    issues = [*clients.issues, *managed.issues]
+    if merge.conflicts:
+        issues.append(_INVENTORY_DISAGREES)
+    return IdentitySample(
+        tuple(tagged.get(device, device) for device in merge.devices),
+        merge.ambiguous | merge.conflicts,
+        tuple(dict.fromkeys(issues)),
+    )
 
 
 @dataclass(frozen=True)
@@ -224,28 +271,9 @@ class UniFiNetwork:
         identity. Issue order is clients, inventory, then the disagreement.
         Samples outside ``targets`` raise ``ValueError``, as the collector did.
         """
-        clients = await self.identify(targets, observed_at)
         if "managed_inventory" not in self.capabilities:
-            return clients
-        managed = await self.managed_sightings(targets, observed_at, clients.devices)
-        # Adopted records carry no evidence kind, so retained evidence text is
-        # unchanged; they are tagged only to rank above clients in the merge.
-        tagged = {
-            replace(device, evidence="managed_device"): device
-            for device in managed.devices
-        }
-        merge = merge_identities(
-            (clients, IdentitySample(tuple(tagged), managed.ambiguous_addresses)),
-            frozenset(targets),
-        )
-        issues = [*clients.issues, *managed.issues]
-        if merge.conflicts:
-            issues.append(_INVENTORY_DISAGREES)
-        return IdentitySample(
-            tuple(tagged.get(device, device) for device in merge.devices),
-            merge.ambiguous | merge.conflicts,
-            tuple(dict.fromkeys(issues)),
-        )
+            return await self.identify(targets, observed_at)
+        return await adopted_identity(self, targets, observed_at)
 
     @property
     def reads_traffic(self) -> bool:

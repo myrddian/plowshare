@@ -11,7 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from support import FixturePort, MemoryReceipts, configuration, event
+from support import (
+    FixturePort,
+    MemoryReceipts,
+    configuration,
+    event,
+    legacy_sources,
+)
 
 from plowshare_privacy.collection import NetworkCollector
 from plowshare_privacy.contracts import (
@@ -85,7 +91,7 @@ class SubnetTest(unittest.IsolatedAsyncioTestCase):
             "tcp", targets, (80, 443, 8008, 8009, 8091, 22, 53, 8080), 0.1, 8, None, 0
         )
         source = BatchIdentitySource()
-        collector = NetworkCollector("fixture-collector", plan, source)
+        collector = NetworkCollector("fixture-collector", plan, legacy_sources(source))
         scan_id, event_id = str(uuid4()), str(uuid4())
         with patch(
             "plowshare_privacy.collection.asyncio.open_connection",
@@ -226,7 +232,10 @@ class SubnetTest(unittest.IsolatedAsyncioTestCase):
             port.events["schedule.due"] = [event()]
             receipts = MemoryReceipts()
             worker = Worker(
-                config, port, receipts, NetworkCollector(config.collector, plan, source)
+                config,
+                port,
+                receipts,
+                NetworkCollector(config.collector, plan, legacy_sources(source)),
             )
             with patch(
                 "plowshare_privacy.collection.asyncio.open_connection",
