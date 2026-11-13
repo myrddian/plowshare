@@ -104,6 +104,31 @@ class MergeIdentitiesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             merge_identities([sample], SCOPE)
 
+    def test_devices_keep_first_seen_order(self) -> None:
+        scope = frozenset({"192.0.2.9", "192.0.2.10", "192.0.2.12"})
+        result = merge_identities(
+            [
+                IdentitySample(
+                    (identity(address="192.0.2.10"), identity(address="192.0.2.9"))
+                ),
+                IdentitySample(
+                    (
+                        identity(address="192.0.2.12"),
+                        identity(address="192.0.2.10", evidence="managed_device"),
+                    )
+                ),
+            ],
+            scope,
+        )
+        self.assertEqual(
+            [(d.address, d.evidence) for d in result.devices],
+            [
+                ("192.0.2.10", "managed_device"),
+                ("192.0.2.9", None),
+                ("192.0.2.12", None),
+            ],
+        )
+
     def test_configured_ranks_below_local_dns(self) -> None:
         configured = identity(source="configured", mac=None)
         dns = identity(source="pihole-v6", mac=None, evidence="local_dns")

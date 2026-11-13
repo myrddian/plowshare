@@ -676,20 +676,13 @@ class ServicePlan:
             raise ValueError("Service settings do not match the service kind")
         if not self.capabilities <= KIND_CAPABILITIES[self.kind]:
             raise ValueError("Service enables a capability its kind does not offer")
-        if (
-            isinstance(self.settings, UniFiPlan)
-            and self.settings.traffic_site is None
-            and self.capabilities & _UNIFI_SITE_CAPABILITIES
-        ):
-            raise ValueError("UniFi DHCP capabilities require trafficSite")
-        if (
-            isinstance(self.settings, UniFiPlan)
-            and self.settings.traffic_site is None
-            and "traffic_counters" in self.capabilities
-        ):
-            # Byte counters come from the legacy stat/sta endpoint, addressed
+        if isinstance(self.settings, UniFiPlan) and self.settings.traffic_site is None:
+            # DHCP and byte-counter reads use the legacy endpoints, addressed
             # by the short site name; without it there is nothing to read.
-            raise ValueError("UniFi traffic counters require a legacy site name")
+            if self.capabilities & _UNIFI_SITE_CAPABILITIES:
+                raise ValueError("UniFi DHCP capabilities require trafficSite")
+            if "traffic_counters" in self.capabilities:
+                raise ValueError("UniFi traffic counters require a legacy site name")
 
     @classmethod
     def legacy_service(

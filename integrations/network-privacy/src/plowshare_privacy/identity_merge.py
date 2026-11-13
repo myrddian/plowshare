@@ -18,6 +18,9 @@ emit their own issue strings from the returned sets):
   (sample order, then record order). `local_dns` is name-only, so it never wins
   against a MAC-bearing record. `configured` is not in `PRECEDENCE`; callers
   never pass it, but if one is passed it ranks below `local_dns`.
+* Order: devices are returned in first-seen order, the order their addresses
+  first appear across the samples (sample order, then record order), never
+  sorted.
 """
 
 from collections.abc import Sequence
@@ -68,7 +71,8 @@ def merge_identities(
         ambiguous |= sample.ambiguous_addresses
     devices: list[DeviceIdentity] = []
     conflicts: set[str] = set()
-    for address in sorted(by_address):
+    # First-seen order: snapshot device order feeds retained evidence text.
+    for address in by_address:
         if address in ambiguous:
             continue
         records = by_address[address]

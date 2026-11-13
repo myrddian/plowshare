@@ -12,7 +12,7 @@ from uuid import UUID
 
 from test_pihole import ADDRESS, MAC, PiHoleServerCase
 
-from plowshare_privacy import collection
+from plowshare_privacy import collection, connectors, contracts
 from plowshare_privacy.collection import NetworkCollector
 from plowshare_privacy.connectors import REGISTRY, bind
 from plowshare_privacy.contracts import (
@@ -70,6 +70,24 @@ def bound(sources: CollectionPlan) -> SourceSet:
         return bind(sources)
 
 
+def accepted_keys(kind: str) -> set[str]:
+    """The top-level keys the kind's settings decoder accepts (required | optional)."""
+    rows = {
+        "pihole": {
+            "origin": "https://pihole.example.invalid",
+            "passwordEnvironment": "PIHOLE_PASSWORD",
+        },
+        "unifi": UNIFI_ROW,
+    }
+    decode = PiHolePlan.decode if kind == "pihole" else UniFiPlan.decode
+    with patch.object(
+        contracts, "object_fields", wraps=contracts.object_fields
+    ) as fields:
+        decode(rows[kind])
+    _, required, optional = fields.call_args_list[0].args
+    return {*required, *optional}
+
+
 class RegistryTest(unittest.TestCase):
     def test_every_kind_is_registered(self) -> None:
         self.assertEqual(set(REGISTRY), set(KIND_CAPABILITIES))
@@ -106,14 +124,17 @@ class RegistryTest(unittest.TestCase):
             "pihole": {"origin"},
             "unifi": {"apiBase", "siteId", "apiKeyEnvironment"},
         }
-        expected = {
-            "pihole": {*minimal["pihole"], *list(values)[:5]},
-            "unifi": {*UNIFI_ROW, *list(values)[5:]},
+        non_form = {
+            "pihole": connectors._PIHOLE_NON_FORM_KEYS,
+            "unifi": connectors._UNIFI_NON_FORM_KEYS,
         }
         for kind, connector in REGISTRY.items():
             keys = [field.key for field in connector.settings_fields]
             self.assertEqual(len(keys), len(set(keys)))
-            self.assertEqual(set(keys), expected[kind])
+            # Form fields plus deliberate non-form keys are exactly what the
+            # decoder accepts, so a new settings key cannot be dropped silently.
+            self.assertEqual(set(keys) | non_form[kind], accepted_keys(kind))
+            self.assertFalse(set(keys) & non_form[kind])
             self.assertEqual(
                 {field.key for field in connector.settings_fields if field.required},
                 required[kind],
@@ -325,6 +346,54 @@ class ControllerIdentityTest(unittest.IsolatedAsyncioTestCase):
             "unifi_ambiguous: connected and adopted inventory disagree on a watched address",
             merged.issues,
         )
+
+    async def test_order_matches_the_collector_merge(self) -> None:
+        # String sorting would put 192.0.2.12 before 192.0.2.9; first-seen
+        # order keeps the clients' order, then the managed-only address.
+        stamp = utc_now()
+        nine, twelve = "192.0.2.9", "192.0.2.12"
+        targets = (FIRST, nine, twelve)
+        clients = IdentitySample(
+            tuple(
+                DeviceIdentity(
+                    address, "mac:" + mac, None, None, mac, None, "unifi", stamp, stamp
+                )
+                for address, mac in ((FIRST, MAC), (nine, OTHER_MAC))
+            )
+        )
+        rows = [
+            {
+                "id": str(UUID(int=index)),
+                "ipAddress": address,
+                "macAddress": mac,
+                "state": "ONLINE",
+                "name": "Managed " + str(index),
+                "model": "USW-Pro",
+            }
+            for index, address, mac in (
+                (1, twelve, "00:11:22:33:44:77"),
+                (2, "192.0.2.99", MAC),
+            )
+        ]
+        response = {
+            "offset": 0,
+            "limit": 100,
+            "count": 2,
+            "totalCount": 2,
+            "data": rows,
+        }
+        with patch.dict(os.environ, ENVIRONMENT):
+            network = UniFiNetwork(UNIFI)
+        collector = NetworkCollector("fixture", plan(), identity_source=network)
+        with (
+            patch.object(network, "identify", AsyncMock(return_value=clients)),
+            patch.object(network, "_read_page", AsyncMock(return_value=response)),
+        ):
+            today = await collector._identity_sample(stamp, targets)
+            merged = await network.controller_identity(targets, stamp)
+        self.assertEqual(merged, today)
+        self.assertEqual([d.address for d in merged.devices], [FIRST, nine, twelve])
+        self.assertEqual(merged.devices[0].hostname, "Managed 2")
 
     async def test_without_managed_inventory_only_clients_are_read(self) -> None:
         stamp = utc_now()

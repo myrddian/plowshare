@@ -6,8 +6,10 @@ scope, which settings name a credential, and how a configured service becomes
 the readers in a `SourceSet`. The registry is a fixed mapping in this package;
 no code is loaded from elsewhere.
 
-Binding constructs the connector, which reads its credential, so a missing or
-invalid secret fails at startup rather than silently dropping a source.
+A service that enables at least one readable capability is constructed at
+binding, which reads its credential, so a missing or invalid secret fails at
+startup rather than silently dropping a source. A service that binds an empty
+`SourceSet` constructs nothing and reads no credential.
 """
 
 from __future__ import annotations
@@ -211,6 +213,11 @@ _PIHOLE_FIELDS = (
         "Timeout for each Pi-hole session; 0.1 to 10, default 5.",
     ),
 )
+
+# Accepted by the decoder but not typed into a form: ``gateway`` is a nested
+# {deviceId, lanMac} alias written by the gateway-binding command in bootstrap.
+_PIHOLE_NON_FORM_KEYS: frozenset[str] = frozenset()
+_UNIFI_NON_FORM_KEYS: frozenset[str] = frozenset({"gateway"})
 
 _UNIFI_FIELDS = (
     SettingField(
