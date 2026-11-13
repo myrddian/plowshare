@@ -23,6 +23,7 @@ from .tools import (
     DEFINITIONS,
     LINK_NOTE_LIMIT,
     NOTE_LIMIT,
+    QUESTION_LIMIT,
     PrivacyTools,
     ScanCall,
     ToolRefusal,
@@ -103,6 +104,27 @@ def parameters(name: str, parameter: str | None) -> tuple[Parameter, ...]:
                     "note",
                     "STRING",
                     f"What was found or done, up to {LINK_NOTE_LIMIT} characters; dated and attributed to Privacy Watch, replacing the link's earlier note. Required for confirmed_affected, applied, verified and reverted.",
+                    required=False,
+                ),
+            )
+        )
+    if name == "network.request_reference":
+        values.extend(
+            (
+                Parameter(
+                    "product",
+                    "STRING",
+                    "The product slug, as in the device-reference tags: lowercase letters, digits and hyphens, at most 48 characters.",
+                ),
+                Parameter(
+                    "question",
+                    "STRING",
+                    f"What the library could not answer, up to {QUESTION_LIMIT} characters, for the owner to read. Nothing in it is fetched.",
+                ),
+                Parameter(
+                    "device_id",
+                    "STRING",
+                    "Optional: the device_id from network_devices the question is about.",
                     required=False,
                 ),
             )

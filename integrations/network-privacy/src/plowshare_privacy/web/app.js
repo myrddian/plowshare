@@ -117,6 +117,7 @@ function showView(name, focusHeading = false) {
   if (focusHeading) byId('page-title').focus({preventScroll:true});
   recordLocation();
   // Reading the conversation marks it read, so it is read only while it is shown.
+  if (name === 'settings') {followReferences(overview); followRequests(overview, true);}
   if (name === 'ask') {renderAsk(); readAsk().catch(error => notice(error.message, true));}
 }
 for (const name of Object.keys(views)) {
@@ -1801,6 +1802,115 @@ byId('deep-scan-settings').addEventListener('submit', async event => {
 });
 // ---- end Deep port scans ----
 
+// ---- Reference library ----
+// The collector's vendor documentation acquisitions. Only the Retry button
+// re-sends anything; document and server text is shown with textContent.
+function renderReferences(value) {
+  byId('reference-library').hidden = false;
+  byId('reference-list').replaceChildren(...value.references.map(item => {
+    const row = element('div', undefined, 'record');
+    const line = element('div', undefined, 'entry-line');
+    line.append(element('span', item.label, 'badge'), element('strong', item.title));
+    row.append(line, element('p', item.product + (item.retired ? ' · Retired from the shipped list' : ''), 'hint'));
+    if (item.error) row.append(element('p', item.error, 'notice error'));
+    if (item.untag_failed) row.append(element('p', 'Removing it from search failed.', 'notice error'));
+    // A ``submitted`` row with an error is an uncertain acquire whose ticket was
+    // never found; Retry replays it with the same request id. One without an
+    // error is still in flight and is left alone.
+    if (item.phase === 'failed' || item.phase === 'blocked' || item.untag_failed || (item.phase === 'submitted' && item.error)) {
+      row.append(actionButton('Retry', 'secondary', () => retryReference(item.url)));
+    }
+    return row;
+  }));
+  byId('reference-detail').textContent = value.error || '';
+  renderReferenceSettings(value);
+}
+// The interval arrives with the rows; a field being edited is left alone.
+function renderReferenceSettings(value) {
+  const field = byId('reference-refresh-days');
+  if (Number.isInteger(value.refresh_days) && document.activeElement !== field) field.value = String(value.refresh_days);
+}
+byId('reference-settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  const detail = byId('reference-settings-detail');
+  try {
+    const days = Number(byId('reference-refresh-days').value);
+    if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error('Choose a whole number of days from 1 to 365.');
+    const saved = await api('/api/references/settings', {method:'POST', body:JSON.stringify({refresh_days:days})});
+    byId('reference-refresh-days').value = String(saved.refresh_days);
+    detail.textContent = `Pages are fetched again every ${plural(saved.refresh_days, 'day', 'days')}.`;
+  } catch (error) {
+    detail.textContent = error.message;
+  }
+});
+// The list is read only while Settings is open (and by Retry, which returns
+// the rows); the overview's counts are all the other tabs need.
+function followReferences(value) {
+  byId('reference-library').hidden = !value?.references;
+  if (value?.references && currentView === 'settings') loadReferences().catch(error => {byId('reference-detail').textContent = error.message;});
+}
+async function loadReferences() {
+  renderReferences(await api('/api/references'));
+}
+async function retryReference(url) {
+  renderReferences(await api('/api/references/retry', {method:'POST', body:JSON.stringify({url})}));
+}
+// ---- end Reference library ----
+
+// ---- Documentation requests ----
+// The Ask agent's asks for product documentation. The owner supplies the links
+// (one per line, up to five) or dismisses; approving only queues the pages for
+// the library. Product and question are agent text and are shown as text only.
+const MAX_REQUEST_LINKS = 5;
+let requestsSeen = null;
+function requestsSignature(products) {
+  return `${products.length}:${products.join(',')}`;
+}
+function renderRequests(value) {
+  byId('reference-requests').hidden = value.requests.length === 0;
+  requestsSeen = requestsSignature(value.requests.map(item => item.product));
+  byId('reference-request-list').replaceChildren(...value.requests.map(item => {
+    const row = element('div', undefined, 'record');
+    const area = element('textarea');
+    area.rows = 3;
+    area.placeholder = 'https://…';
+    const label = element('label', 'Documentation links, one per line (up to 5, https only)');
+    label.append(area);
+    row.append(element('strong', item.product), element('p', item.question), label);
+    const actions = element('div', undefined, 'actions');
+    actions.append(
+      actionButton('Approve', undefined, () => approveRequest(item.id, area.value)),
+      actionButton('Dismiss', 'secondary', () => dismissRequest(item.id)));
+    row.append(actions);
+    return row;
+  }));
+}
+// Called with every overview, but it only reads the list when Settings is shown
+// and the waiting requests changed, so typed links are not redrawn away.
+function followRequests(value, force = false) {
+  const waiting = value?.reference_requests;
+  byId('reference-requests').hidden = !waiting?.pending;
+  // Nothing waits: forget what was drawn so a later request always reloads.
+  if (!waiting?.pending) requestsSeen = null;
+  if (!waiting?.pending || currentView !== 'settings') return;
+  if (!force && requestsSeen === requestsSignature(waiting.products)) return;
+  loadRequests().catch(error => notice(error.message, true));
+}
+async function loadRequests() {
+  renderRequests(await api('/api/reference-requests'));
+}
+async function approveRequest(id, text) {
+  const urls = text.split('\n').map(line => line.trim()).filter(Boolean);
+  if (!urls.length) throw new Error('Add at least one documentation link, or dismiss the request.');
+  if (urls.length > MAX_REQUEST_LINKS) throw new Error(`Add at most ${MAX_REQUEST_LINKS} links.`);
+  renderRequests(await api(`/api/reference-requests/${encodeURIComponent(id)}/approve`, {method:'POST', body:JSON.stringify({urls})}));
+  notice('Queued. The collector will fetch the pages shortly.');
+}
+async function dismissRequest(id) {
+  renderRequests(await api(`/api/reference-requests/${encodeURIComponent(id)}/dismiss`, {method:'POST', body:'{}'}));
+}
+// ---- end Documentation requests ----
+
 // ---- Ask ----
 // One conversation with the privacy assistant. The collector owns the turn and
 // its state; this block only shows the reading it is given. The conversation
@@ -1912,6 +2022,7 @@ const askSteps = {
   network_scope:'Checking what the collector watches', network_scan_list:'Checking recent scans',
   network_scan_status:'Checking a scan', network_scan:'Requesting a scan',
   network_request_deep_scan:'Asking for a deep scan', network_request_assessment:'Asking for an assessment',
+  network_request_reference:'Asked the owner for product documentation',
   network_note_profile:'Noting what a device is', network_record_issue:'Recording a finding',
 };
 function askStep(call) {
@@ -2365,6 +2476,20 @@ function renderAttention(value) {
   const unseen = value.devices.filter(device => deepScanNeedsReview(device, value));
   if (unseen.length) items.push(attentionItem(formatCount(unseen.length), 'New open ports',
     `${deviceNames(unseen)} answered on ports outside the usual checks.`, ...reviewAction(unseen)));
+  const asked = value.reference_requests;
+  if (asked?.detail) items.push(attentionItem('!', 'Docs requests unavailable', asked.detail, 'Open Settings', () => showView('settings', true)));
+  if (asked?.pending) items.push(attentionItem(formatCount(asked.pending), 'Docs requested',
+    `Privacy Watch could not answer about ${asked.products.join(', ')}. Add a documentation link or dismiss.`, 'Review', () => {
+      showView('settings', true);
+      byId('reference-requests').scrollIntoView?.({block:'start'});
+    }));
+  // An unusable reference journal: reported by the overview while running, or
+  // by /api/status when it could not be opened at startup.
+  const referenceProblem = value.references?.detail || (!value.references && latestStatus?.references_detail) || null;
+  if (referenceProblem) items.push(attentionItem('!', 'Reference docs unavailable', referenceProblem, 'Open Settings', () => showView('settings', true)));
+  const stuck = (value.references?.failed || 0) + (value.references?.blocked || 0) + (value.references?.unresolved || 0);
+  if (stuck) items.push(attentionItem(formatCount(stuck), 'Reference docs need a check',
+    'Some vendor documentation could not be fetched or is held. Retry it from the Reference library.', 'Open Settings', () => showView('settings', true)));
   const drafts = latestStatus?.profile_drafts_waiting || 0;
   if (drafts) items.push(attentionItem(formatCount(drafts), drafts === 1 ? 'Profile draft awaiting review' : 'Profile drafts awaiting review',
     'Background research drafted device profiles. Review each before it is saved.', 'Open drafts', () => {
@@ -2486,6 +2611,8 @@ function renderOverview(value) {
   renderAttention(value);
   renderBackgroundUsage(value);
   renderDeepScanGroup(value);
+  followReferences(value);
+  followRequests(value);
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates, value.assessments?.summaries || null]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
