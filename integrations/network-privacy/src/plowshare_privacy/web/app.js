@@ -1820,7 +1820,26 @@ function renderReferences(value) {
     return row;
   }));
   byId('reference-detail').textContent = value.error || '';
+  renderReferenceSettings(value);
 }
+// The interval arrives with the rows; a field being edited is left alone.
+function renderReferenceSettings(value) {
+  const field = byId('reference-refresh-days');
+  if (Number.isInteger(value.refresh_days) && document.activeElement !== field) field.value = String(value.refresh_days);
+}
+byId('reference-settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  const detail = byId('reference-settings-detail');
+  try {
+    const days = Number(byId('reference-refresh-days').value);
+    if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error('Choose a whole number of days from 1 to 365.');
+    const saved = await api('/api/references/settings', {method:'POST', body:JSON.stringify({refresh_days:days})});
+    byId('reference-refresh-days').value = String(saved.refresh_days);
+    detail.textContent = `Pages are fetched again every ${plural(saved.refresh_days, 'day', 'days')}.`;
+  } catch (error) {
+    detail.textContent = error.message;
+  }
+});
 // The list is read only while Settings is open (and by Retry, which returns
 // the rows); the overview's counts are all the other tabs need.
 function followReferences(value) {

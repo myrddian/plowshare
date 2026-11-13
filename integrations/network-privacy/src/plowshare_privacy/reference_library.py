@@ -23,10 +23,14 @@ Phase machine. ``advance`` moves every receipt at most one step, in journal orde
   and a later ``advance`` looks the ticket up in ``information.acquisitions``
   instead of acquiring again. The public listing carries no request id, so the
   source name binds the ticket to its attempt: it is ``Reference: {title} ·
-  {first 8 hex of request_id}``, and a requeue or refresh takes a new request id
-  and therefore a new name. Matching needs that exact URL and name, also skips
-  every ticket this receipt already used (``superseded``), and the newest
-  ``created_at`` wins among the rest. A ticket observed by its id must still
+  {first 8 hex of request_id}``, and a requeue takes a new request id and
+  therefore a new name. A refresh is the exception: the server keys a Library
+  resource by its home and source name (not its URL), so a refresh sends the
+  resource's existing name (``resource_name``) to add a revision to that
+  resource rather than create a second one. Matching needs that exact URL and
+  name, also skips every ticket this receipt already used (``superseded``), and
+  the newest ``created_at`` wins among the rest, which is what separates a
+  refresh's attempts. A ticket observed by its id must still
   show this receipt's URL and name, or the receipt fails with a fixed message. If no ticket is found the
   receipt stays ``submitted``; only the owner's Retry re-sends that acquire, with
   the same request id, which the server treats as an idempotent replay.
@@ -48,11 +52,21 @@ Phase machine. ``advance`` moves every receipt at most one step, in journal orde
   is derived from the receipt, the step, the revision and the version read, so a
   replay after uncertain delivery is idempotent and a fresh read after a version
   conflict is a fresh request.
+- Refresh. ``schedule_refresh`` requeues every ``tagged``, non-retired receipt
+  whose ``fetched_at`` is older than the ledger's ``refresh_days`` (1 to 365,
+  default 90), through the same requeue as a retry: a new request id, the old
+  ticket superseded, ``revision_id`` kept until the new revision is retained.
+  Tags live on the resource, so the new revision already carries them and the
+  retained step makes no tags call. Retired and failed receipts are never
+  refreshed.
 - A seed entry dropped from a new seed is ``retired``, failed ones included
   (they stay failed): its source is kept so existing citations resolve, only the
   ``device-reference`` tag is removed so it is no longer searched. The removal
-  runs for any retired receipt whose revision is known, whatever its phase, and
-  takes priority over the receipt's other step. Once a removal attempt fails,
+  runs for any retired receipt whose revision is known and that has no
+  acquisition in flight, and takes priority over the receipt's other step. A
+  refresh in flight (``submitted`` or ``awaiting`` with the earlier revision)
+  is observed instead, so a refused removal cannot fail it; once retained, its
+  tagging leaves ``device-reference`` out. Once a removal attempt fails,
   ``untag_failed`` stops further automatic attempts until the owner's Retry.
   A retired entry that was never submitted is not fetched.
 
@@ -68,7 +82,7 @@ import asyncio
 import json
 import math
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Literal
 from uuid import UUID, uuid4, uuid5
@@ -105,6 +119,8 @@ LIBRARY_TAG = "device-reference"
 MAX_RECEIPTS = 256
 MAX_TITLE = 200
 MAX_ERROR = 1000
+# "Reference: " + a bounded title + " · " + 8 hex, with room to spare.
+MAX_SOURCE_NAME = 256
 # Ticket ids a receipt has moved past; the oldest is dropped beyond this bound,
 # which only matters after that many owner retries or refreshes of one page.
 MAX_SUPERSEDED = 32
@@ -166,6 +182,10 @@ def _error(value: object) -> str:
     return text(value, MAX_ERROR)
 
 
+def _resource_name(value: object) -> str:
+    return text(value, MAX_SOURCE_NAME)
+
+
 def _server_text(value: object, fallback: str) -> str:
     """Untrusted server prose, made journal-safe: no control characters, bounded."""
     if not isinstance(value, str):
@@ -181,7 +201,8 @@ class ReferenceReceipt:
     """One documentation page's acquisition, from queueing to tagging.
 
     ``request_id`` is the acquire idempotency key; it is fixed when the receipt is
-    created and replaced only when a blocked or refused receipt is requeued.
+    created and replaced only when a blocked or refused receipt is requeued or
+    a tagged one is refreshed.
     ``revision_id`` is the retained revision once known. ``retired`` marks a seed
     entry the current seed no longer lists; ``retired_tagged`` records that its
     ``device-reference`` tag has been removed. ``fetched_at`` is when it was tagged.
@@ -189,6 +210,9 @@ class ReferenceReceipt:
     uncertain acquire is never matched to an old ticket for the same page.
     ``untag_failed`` records that removing ``device-reference`` from a retired
     receipt failed, so it is not attempted again until the owner retries.
+    ``resource_name`` is the source name of the Library resource that holds
+    ``revision_id``, recorded when a refresh is scheduled so every later attempt
+    targets that resource; it is absent until the first refresh.
     """
 
     url: str
@@ -206,6 +230,7 @@ class ReferenceReceipt:
     fetched_at: str | None
     superseded: tuple[str, ...] = ()
     untag_failed: bool = False
+    resource_name: str | None = None
 
     def __post_init__(self) -> None:
         reference_url(self.url)
@@ -222,6 +247,7 @@ class ReferenceReceipt:
         _optional(self.revision_id, uuid)
         _optional(self.error, _error)
         _optional(self.fetched_at, timestamp)
+        _optional(self.resource_name, _resource_name)
         if any(
             type(flag) is not bool
             for flag in (self.retired, self.retired_tagged, self.untag_failed)
@@ -269,6 +295,8 @@ class ReferenceReceipt:
                 "superseded",
                 "untag_failed",
             },
+            # Absent from journals written before refresh existed.
+            {"resource_name"},
         )
         retired, retired_tagged = row["retired"], row["retired_tagged"]
         untag_failed = row["untag_failed"]
@@ -294,6 +322,7 @@ class ReferenceReceipt:
             _optional(row["fetched_at"], timestamp),
             tuple(uuid(t) for t in items(row["superseded"], MAX_SUPERSEDED)),
             untag_failed,
+            _optional(row.get("resource_name"), _resource_name),
         )
 
 
@@ -447,6 +476,45 @@ class ReferenceLibrary:
         receipt = _queued(url, product, title, (), "owner")
         self.journal.save(replace(ledger, receipts=(*ledger.receipts, receipt)))
         return receipt
+
+    def refresh_days(self) -> int:
+        return self.journal.read().refresh_days
+
+    def set_refresh_days(self, days: int) -> None:
+        """Set the refresh interval; anything but a whole 1 to 365 is refused."""
+        days = integer(days, 1, MAX_REFRESH_DAYS)
+        self.journal.save(replace(self.journal.read(), refresh_days=days))
+
+    def refresh_due(self, now: datetime) -> tuple[str, ...]:
+        """URLs of tagged, non-retired receipts fetched more than the interval ago.
+
+        A tagged receipt always records ``fetched_at``; one that somehow lacks it
+        has an unknown age and is treated as due.
+        """
+        ledger = self.journal.read()
+        return tuple(
+            receipt.url
+            for receipt in ledger.receipts
+            if _refresh_due(receipt, now, ledger.refresh_days)
+        )
+
+    def schedule_refresh(self, now: datetime) -> None:
+        """Requeue every receipt due for refresh; the next ``advance`` acquires it.
+
+        A synchronous journal edit like ``plan_seed``. It only touches ``tagged``,
+        non-retired receipts, which neither ``advance`` nor ``retry`` steps, so
+        it cannot overwrite a step in flight. The resource's current name is kept
+        so the acquire adds a revision to it (see the module doc).
+        """
+        ledger = self.journal.read()
+        receipts = tuple(
+            replace(_requeued(receipt), resource_name=_source_name(receipt))
+            if _refresh_due(receipt, now, ledger.refresh_days)
+            else receipt
+            for receipt in ledger.receipts
+        )
+        if receipts != ledger.receipts:
+            self.journal.save(replace(ledger, receipts=receipts))
 
     async def advance(self) -> None:
         async with self._lock:
@@ -812,8 +880,23 @@ def _newest(
 
 
 def _source_name(receipt: ReferenceReceipt) -> str:
-    """The acquire name, bound to this attempt by its request id's first 8 hex."""
+    """The acquire name: the refreshed resource's own, else bound to this attempt.
+
+    A first acquisition is named by its request id's first 8 hex; a refresh
+    reuses the resource's name so the server adds a revision to it.
+    """
+    if receipt.resource_name is not None:
+        return receipt.resource_name
     return f"Reference: {receipt.title} · {receipt.request_id[:8]}"
+
+
+def _refresh_due(receipt: ReferenceReceipt, now: datetime, days: int) -> bool:
+    if receipt.phase != "tagged" or receipt.retired:
+        return False
+    if receipt.fetched_at is None:
+        return True
+    fetched = datetime.fromisoformat(receipt.fetched_at.replace("Z", "+00:00"))
+    return now - fetched > timedelta(days=days)
 
 
 def _owns(receipt: ReferenceReceipt, ticket: InformationAcquisitionDto) -> bool:
@@ -833,14 +916,18 @@ def _needs_untag(receipt: ReferenceReceipt) -> bool:
     """A retired receipt with a known revision whose tag removal is still due.
 
     ``retained`` is excluded because its tagging step already leaves
-    ``device-reference`` out for a retired receipt.
+    ``device-reference`` out for a retired receipt. ``submitted`` and
+    ``awaiting`` with a revision are a refresh in flight: they are observed
+    first, so a refused removal cannot fail the acquisition, and they reach
+    ``retained`` (tagged without the library tag) or an end state that is
+    untagged here on the next pass.
     """
     return (
         receipt.retired
         and not receipt.retired_tagged
         and not receipt.untag_failed
         and receipt.revision_id is not None
-        and receipt.phase != "retained"
+        and receipt.phase not in {"retained", "submitted", "awaiting"}
     )
 
 

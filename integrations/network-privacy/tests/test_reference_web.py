@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -347,6 +348,48 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         self.requests.journal.path.chmod(0o644)
         again = await client.get("/api/overview", headers=HEADERS)
         self.assertEqual(200, again.status)
+
+    async def test_reference_settings_require_key_and_validate(self) -> None:
+        client = await self.client(self.service)
+        path = "/api/references/settings"
+        self.assertEqual(401, (await client.get(path)).status)
+        self.assertEqual(
+            401, (await client.post(path, json={"refresh_days": 30})).status
+        )
+        shown = await client.get(path, headers=HEADERS)
+        self.assertEqual({"refresh_days": 90}, await shown.json())
+        for body in (
+            {"refresh_days": 0},
+            {"refresh_days": 366},
+            {"refresh_days": "30"},
+            {"refresh_days": True},
+            {"refresh_days": 30, "extra": 1},
+            {},
+        ):
+            refused = await client.post(path, headers=HEADERS, json=body)
+            self.assertEqual(400, refused.status, body)
+        saved = await client.post(path, headers=HEADERS, json={"refresh_days": 30})
+        self.assertEqual({"refresh_days": 30}, await saved.json())
+        self.assertEqual(30, self.service.library.refresh_days())
+        missing = await self.client(None)
+        self.assertEqual(404, (await missing.get(path, headers=HEADERS)).status)
+
+    async def test_poll_requeues_references_due_for_refresh(self) -> None:
+        library = self.service.library
+        library.plan_seed((ENTRY,))
+        await self.service.poll()
+        self.port.finish(0)
+        await self.service.poll()
+        await self.service.poll()
+        tagged = next(r for r in library.view() if r.url == URL)
+        self.assertEqual("tagged", tagged.phase)
+        later = ReferenceService(
+            library, lambda: datetime(2030, 1, 1, tzinfo=timezone.utc)
+        )
+        await later.poll()
+        refreshed = next(r for r in library.view() if r.url == URL)
+        self.assertNotEqual(tagged.request_id, refreshed.request_id)
+        self.assertEqual("awaiting", refreshed.phase)
 
     async def test_missing_requests_are_not_found(self) -> None:
         client = await self.client(self.service)

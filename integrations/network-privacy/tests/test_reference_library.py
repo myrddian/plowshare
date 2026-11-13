@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -74,6 +76,9 @@ class FakePort:
     acquires: list[tuple[str, str, str]] = field(default_factory=list)
     tag_calls: list[tuple[str, tuple[str, ...], int, str]] = field(default_factory=list)
     retries: list[tuple[str, str]] = field(default_factory=list)
+    # The source name of each revision's resource. The server keys a resource by
+    # its home and source name, and a resource's tags are shared by its revisions.
+    names: dict[str, str] = field(default_factory=dict)
     # One-shot faults raised by the next call of that operation.
     acquire_fault: Exception | None = None
     acquire_lands: bool = True
@@ -125,11 +130,24 @@ class FakePort:
                 ticket.state, ticket.error = "queued", None
 
     def finish(
-        self, index: int = -1, tags: tuple[str, ...] = (), version: float = 1.0
+        self,
+        index: int = -1,
+        tags: tuple[str, ...] = (),
+        version: float = 1.0,
+        after: str | None = None,
     ) -> str:
-        """Complete one ticket (the newest by default) with a fresh revision."""
+        """Complete one ticket (the newest by default) with a fresh revision.
+
+        ``after`` names an earlier revision: when the ticket's source name is that
+        revision's, the new one joins the same resource and carries its tags, as
+        the server's admission does; any other name is a new resource.
+        """
         revision = str(uuid4())
+        name = self.tickets[index].name
+        if after is not None and self.names.get(after) == name:
+            tags, version = self.revisions[after].tags, self.revisions[after].version
         self.revisions[revision] = Revision(tags, version)
+        self.names[revision] = name
         self.tickets[index].state = "succeeded"
         self.tickets[index].revision_id = revision
         return revision
@@ -151,6 +169,136 @@ class LibraryTest(unittest.IsolatedAsyncioTestCase):
 
     def receipt(self, url: str = URL) -> ReferenceReceipt:
         return next(r for r in self.library.view() if r.url == url)
+
+    async def tagged(self, *entries: SeedEntry) -> str:
+        """Plan ``entries`` and drive the first to ``tagged``; its revision."""
+        self.library.plan_seed(entries or (ENTRY,))
+        await self.library.advance()
+        revision = self.port.finish(0)
+        await self.library.advance()
+        await self.library.advance()
+        self.assertEqual("tagged", self.receipt().phase)
+        return revision
+
+    async def test_refresh_due_after_interval_only(self) -> None:
+        await self.tagged()
+        fetched = datetime(2026, 11, 14, 12, tzinfo=timezone.utc)
+        self.assertEqual((), self.library.refresh_due(fetched))
+        self.assertEqual(
+            (),
+            self.library.refresh_due(
+                fetched + timedelta(days=90) - timedelta(seconds=1)
+            ),
+        )
+        self.assertEqual(
+            (URL,), self.library.refresh_due(fetched + timedelta(days=90, seconds=1))
+        )
+        self.library.set_refresh_days(7)
+        self.assertEqual(7, self.library.refresh_days())
+        self.assertEqual(
+            (URL,), self.library.refresh_due(fetched + timedelta(days=7, seconds=1))
+        )
+        # Only due receipts move; a pass before the interval changes nothing.
+        before = self.library.view()
+        self.library.schedule_refresh(fetched + timedelta(days=6))
+        self.assertEqual(before, self.library.view())
+
+    async def test_refresh_requeues_with_new_request_id(self) -> None:
+        revision = await self.tagged()
+        tagged = self.receipt()
+        self.library.schedule_refresh(
+            datetime(2026, 11, 14, 12, tzinfo=timezone.utc) + timedelta(days=91)
+        )
+        queued = self.receipt()
+        self.assertEqual("queued", queued.phase)
+        self.assertNotEqual(tagged.request_id, queued.request_id)
+        self.assertEqual(revision, queued.revision_id)
+        self.assertIsNone(queued.acquisition_id)
+        self.assertEqual((tagged.acquisition_id,), queued.superseded)
+        await self.library.advance()
+        # The same URL under the resource's own source name, so the server adds a
+        # revision to that resource instead of creating a second one.
+        self.assertEqual(2, len(self.port.acquires))
+        first, second = self.port.acquires
+        self.assertEqual((first[0], first[1]), (second[0], second[1]))
+        self.assertEqual(queued.request_id, second[2])
+        self.assertEqual("awaiting", self.receipt().phase)
+
+    async def test_refresh_skips_retired_and_failed(self) -> None:
+        await self.tagged(ENTRY, SECOND)
+        await self.library.advance()
+        self.port.tags_fault = Refusal("FORBIDDEN", "No tags")
+        self.port.finish(1)
+        await self.library.advance()
+        await self.library.advance()
+        self.assertEqual("failed", self.receipt(OTHER).phase)
+        self.library.plan_seed((SECOND,))
+        await self.library.advance()
+        self.assertTrue(self.receipt().retired_tagged)
+        later = datetime(2027, 6, 1, tzinfo=timezone.utc)
+        self.assertEqual((), self.library.refresh_due(later))
+        before = self.library.view()
+        self.library.schedule_refresh(later)
+        self.assertEqual(before, self.library.view())
+
+    async def test_refresh_days_bounds(self) -> None:
+        for days in (0, 366, True, 7.0):
+            with self.assertRaises(ValueError):
+                self.library.set_refresh_days(days)  # type: ignore[arg-type]
+        self.assertEqual(90, self.library.refresh_days())
+        for days in (1, 365):
+            self.library.set_refresh_days(days)
+            self.assertEqual(days, self.open().refresh_days())
+
+    async def test_refreshed_source_keeps_tags_without_retagging_call(self) -> None:
+        old = await self.tagged()
+        self.assertEqual(1, len(self.port.tag_calls))
+        self.library.schedule_refresh(datetime(2027, 3, 1, tzinfo=timezone.utc))
+        await self.library.advance()
+        new = self.port.finish(after=old)
+        self.assertEqual(self.port.revisions[old].tags, self.port.revisions[new].tags)
+        await self.library.advance()
+        self.assertEqual(("retained", new), self.phase_and_revision())
+        await self.library.advance()
+        refreshed = self.receipt()
+        self.assertEqual(("tagged", new), (refreshed.phase, refreshed.revision_id))
+        self.assertEqual(1, len(self.port.tag_calls))
+
+    async def test_refreshing_receipt_is_never_untagged_in_flight(self) -> None:
+        old = await self.tagged()
+        self.library.schedule_refresh(datetime(2027, 3, 1, tzinfo=timezone.utc))
+        await self.library.advance()
+        self.assertEqual("awaiting", self.receipt().phase)
+        # Not retired: waiting passes never read or change tags.
+        await self.library.advance()
+        self.assertEqual(1, len(self.port.tag_calls))
+        # Retired while the refresh is in flight: a refused removal must not drop
+        # the acquisition; the refresh completes and its tagging leaves the
+        # library tag out.
+        self.library.plan_seed(())
+        self.port.tags_fault = Refusal("CONFLICT", "Tags changed")
+        await self.library.advance()
+        self.assertEqual("awaiting", self.receipt().phase)
+        self.assertEqual(1, len(self.port.tag_calls))
+        self.port.tags_fault = None
+        new = self.port.finish(after=old)
+        await self.library.advance()
+        await self.library.advance()
+        done = self.receipt()
+        self.assertEqual(("tagged", True), (done.phase, done.retired_tagged))
+        self.assertNotIn("device-reference", self.port.revisions[new].tags)
+
+    async def test_journal_written_before_refresh_still_reads(self) -> None:
+        await self.tagged()
+        journal = ReferenceJournal(self.root)
+        raw = json.loads(journal.path.read_text())
+        for row in raw["receipts"]:
+            self.assertIsNone(row.pop("resource_name"))
+        journal.path.write_text(json.dumps(raw))
+        self.assertEqual("tagged", self.receipt().phase)
+        self.library.schedule_refresh(datetime(2027, 3, 1, tzinfo=timezone.utc))
+        first_name = self.port.acquires[0][1]
+        self.assertEqual(first_name, self.open().view()[0].resource_name)
 
     async def test_seed_entry_reaches_tagged(self) -> None:
         self.library.plan_seed((ENTRY,))

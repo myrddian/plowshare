@@ -54,6 +54,7 @@ from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
 from .profile_research import DAILY_LIMIT as RESEARCH_DAILY_LIMIT
 from .profile_research import ResearchReview, admitted_today
+from .reference_library import MAX_REFRESH_DAYS
 from .reference_requests import ReferenceRequest, ReferenceRequests
 from .reference_service import PHASE_LABELS, ReferenceService
 from .schedule_editor import ScheduleManagement
@@ -747,9 +748,28 @@ def application(
                     }
                     for item in service.view()
                 ],
+                "refresh_days": service.refresh_days(),
                 "error": service.error,
             }
         )
+
+    async def reference_settings(request: web.Request) -> web.Response:
+        return web.json_response({"refresh_days": reference_library().refresh_days()})
+
+    async def save_reference_settings(request: web.Request) -> web.Response:
+        service = reference_library()
+        row = object_fields(parse_json(await request.read()), {"refresh_days"})
+        days = row["refresh_days"]
+        if type(days) is not int or not 1 <= days <= MAX_REFRESH_DAYS:
+            return web.json_response(
+                {
+                    "error": "Choose a whole number of days from 1 to "
+                    f"{MAX_REFRESH_DAYS} between reference refreshes"
+                },
+                status=400,
+            )
+        service.set_refresh_days(days)
+        return web.json_response({"refresh_days": service.refresh_days()})
 
     async def reference_list(request: web.Request) -> web.Response:
         return reference_rows(reference_library())
@@ -1333,6 +1353,8 @@ def application(
     app.router.add_post("/api/devices/{device_id}/deep-scan/cancel", deep_scan_cancel)
     app.router.add_get("/api/references", reference_list)
     app.router.add_post("/api/references/retry", reference_retry)
+    app.router.add_get("/api/references/settings", reference_settings)
+    app.router.add_post("/api/references/settings", save_reference_settings)
     app.router.add_get("/api/reference-requests", request_list)
     app.router.add_post("/api/reference-requests/{request_id}/approve", request_approve)
     app.router.add_post("/api/reference-requests/{request_id}/dismiss", request_dismiss)

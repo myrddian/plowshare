@@ -4,17 +4,21 @@
 ``ReferenceLibrary`` with the periodic ``advance`` pass and a visible loop
 error, and summarises receipts for the dashboard's attention band.
 
-The pass runs on the deep-scan cadence. ``advance`` re-raises only
-``TransportError``; the loop records that once and keeps going, so connection
-loss neither crashes the collector nor retries a receipt by itself. A receipt
-that failed or was blocked stays that way until the owner presses Retry.
+Each pass first requeues the references due for their periodic refresh
+(``schedule_refresh``), then advances. The pass runs on the deep-scan cadence.
+``advance`` re-raises only ``TransportError``; the loop records that once and
+keeps going, so connection loss neither crashes the collector nor retries a
+receipt by itself. A receipt that failed or was blocked stays that way until
+the owner presses Retry.
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from plowshare import TransportError
 from plowshare.contracts import SelectionDtoScopeVariant3Dto
@@ -53,8 +57,13 @@ class ReferenceCounts:
 
 
 class ReferenceService:
-    def __init__(self, library: ReferenceLibrary):
+    def __init__(
+        self,
+        library: ReferenceLibrary,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    ):
         self.library = library
+        self.now = now
         self.error: str | None = None
 
     @classmethod
@@ -84,8 +93,19 @@ class ReferenceService:
     async def retry(self, url: str) -> None:
         await self.library.retry(url)
 
+    def refresh_days(self) -> int:
+        return self.library.refresh_days()
+
+    def set_refresh_days(self, days: int) -> None:
+        self.library.set_refresh_days(days)
+
     async def poll(self) -> None:
-        """One ``advance`` pass; a clean pass clears the recorded error."""
+        """Requeue due refreshes, then one ``advance`` pass.
+
+        A clean pass clears the recorded error. The refresh is a journal edit
+        only; its acquire is sent by this same ``advance``.
+        """
+        self.library.schedule_refresh(self.now())
         try:
             await self.library.advance()
         except TransportError as error:

@@ -459,6 +459,12 @@
             <p class="hint">The collector fetches these pages into the Plowshare Library. A page that fails or is held is not retried until you choose Retry.</p>
             <div id="reference-list" class="entries"></div>
             <p id="reference-detail" role="status" class="hint"></p>
+            <form id="reference-settings" class="inline-form">
+              <label>Refresh each page every (days)<input id="reference-refresh-days" type="number" min="1" max="365" step="1" inputmode="numeric" required></label>
+              <button type="submit">Save interval</button>
+            </form>
+            <p class="hint">Each ready page is fetched again after this many days, as a new revision of the same Library source. 1 to 365; 90 by default.</p>
+            <p id="reference-settings-detail" role="status" class="hint"></p>
           </div>
         </section>
         <details class="panel">

@@ -189,3 +189,24 @@ test('attention explains an unreadable request journal', () => {
   run('renderAttention(value)');
   assert.match(texts(node('attention-items').children[0]).join(' | '), /Docs requests unavailable \| could not be read/);
 });
+
+test('the refresh interval shows with the rows and saves a whole number of days', async () => {
+  const calls = [];
+  const {node, run} = dashboard(async (path, options = {}) => {
+    calls.push([path, options.method, options.body]);
+    return {ok:true, status:200, json:async () => ({refresh_days:30})};
+  });
+  run("renderReferences({references:[], refresh_days:90, error:null})");
+  assert.equal(node('reference-refresh-days').value, '90');
+  const submit = node('reference-settings').listeners.submit;
+  node('reference-refresh-days').value = '0';
+  await submit({preventDefault() {}});
+  const saves = () => calls.filter(call => call[0] === '/api/references/settings');
+  assert.equal(saves().length, 0);
+  assert.match(node('reference-settings-detail').textContent, /1 to 365/);
+  node('reference-refresh-days').value = '30';
+  await submit({preventDefault() {}});
+  assert.deepEqual(saves(), [['/api/references/settings', 'POST', JSON.stringify({refresh_days:30})]]);
+  assert.equal(node('reference-refresh-days').value, '30');
+  assert.equal(node('reference-settings-detail').textContent, 'Pages are fetched again every 30 days.');
+});
