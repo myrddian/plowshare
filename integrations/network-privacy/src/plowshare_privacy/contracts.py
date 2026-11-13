@@ -176,6 +176,34 @@ def mac_address(value: object) -> str:
     return mac
 
 
+EvidenceKind = Literal[
+    "configured",
+    "neighbour_table",
+    "dhcp_lease",
+    "controller_client",
+    "managed_device",
+    "local_dns",
+]
+_EVIDENCE_KINDS: dict[str, EvidenceKind] = {
+    kind: kind
+    for kind in (
+        "configured",
+        "neighbour_table",
+        "dhcp_lease",
+        "controller_client",
+        "managed_device",
+        "local_dns",
+    )
+}
+IDENTITY_SOURCES: frozenset[str] = frozenset({"configured", "pihole-v6", "unifi"})
+# Evidence kinds a legacy source may assert; absent provenance maps to the first.
+_LEGACY_KIND: dict[str, EvidenceKind] = {
+    "configured": "configured",
+    "pihole-v6": "neighbour_table",
+    "unifi": "controller_client",
+}
+
+
 @dataclass(frozen=True)
 class DeviceIdentity:
     """A time-specific address association, not proof of a physical device's identity."""
@@ -189,6 +217,10 @@ class DeviceIdentity:
     source: Literal["configured", "pihole-v6", "unifi"]
     observed_at: str
     last_seen: str | None
+    # Optional provenance appended last: older receipts and positional callers
+    # omit it, and encode() drops absent values so retained text is unchanged.
+    evidence: EvidenceKind | None = None
+    service: str | None = None
 
     @classmethod
     def decode(cls, value: object) -> DeviceIdentity:
@@ -205,17 +237,25 @@ class DeviceIdentity:
                 "observed_at",
                 "last_seen",
             },
+            {"evidence", "service"},
         )
         address = str(ipaddress.ip_address(text(row["address"])))
         mac = mac_address(row["mac"]) if row["mac"] is not None else None
         expected = "mac:" + mac if mac else "ip:" + address
         source = row["source"]
-        if row["device_id"] != expected or source not in (
-            "configured",
-            "pihole-v6",
-            "unifi",
-        ):
+        if row["device_id"] != expected or source not in IDENTITY_SOURCES:
             raise ValueError("Invalid device identity provenance")
+        kind = row.get("evidence")
+        if kind is not None and (
+            kind not in _EVIDENCE_KINDS
+            or (kind == "configured") != (source == "configured")
+        ):
+            raise ValueError("Invalid device evidence kind")
+        service = row.get("service")
+        if service is not None:
+            service = identifier(service)
+            if len(service) > 64:
+                raise ValueError("Invalid device service name")
         if source == "unifi" and mac is None:
             raise ValueError("UniFi association requires a client MAC address")
         if row["source"] == "configured" and (
@@ -239,7 +279,14 @@ class DeviceIdentity:
             else "configured",
             timestamp(row["observed_at"]),
             timestamp(row["last_seen"]) if row["last_seen"] is not None else None,
+            _EVIDENCE_KINDS[kind] if isinstance(kind, str) else None,
+            service,
         )
+
+
+def evidence_kind(identity: DeviceIdentity) -> EvidenceKind:
+    """The kind of evidence behind an identity, inferred from its source when unstated."""
+    return identity.evidence or _LEGACY_KIND[identity.source]
 
 
 @dataclass(frozen=True)
@@ -863,6 +910,10 @@ class Evidence:
         enriched = bool(self.snapshot.devices) or self.snapshot.dns_window is not None
         if not self.snapshot.devices:
             row["snapshot"].pop("devices")
+        for device in row["snapshot"].get("devices", ()):
+            for key in ("evidence", "service"):
+                if device[key] is None:
+                    del device[key]
         if self.snapshot.dns_window is None:
             row["snapshot"].pop("dns_window")
         return json.dumps(

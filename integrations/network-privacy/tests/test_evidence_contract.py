@@ -11,7 +11,12 @@ from uuid import uuid4
 
 from support import CountingCollector, configuration
 
-from plowshare_privacy.contracts import Evidence
+from plowshare_privacy.contracts import (
+    IDENTITY_SOURCES,
+    DeviceIdentity,
+    Evidence,
+    evidence_kind,
+)
 from plowshare_privacy.journal import FileReceipts, Receipt
 from plowshare_privacy.operator_state import FileOperatorStore, Preferences, findings
 
@@ -105,3 +110,96 @@ class EvidenceContractTest(unittest.IsolatedAsyncioTestCase):
             row["baseline"] = invalid
             with self.assertRaises(ValueError):
                 Evidence.decode(row)
+
+
+STAMP = "2026-01-01T00:00:00Z"
+
+
+def raw_evidence(**device: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "address": "192.0.2.10",
+        "device_id": "mac:aa:bb:cc:dd:ee:ff",
+        "label": None,
+        "hostname": "host",
+        "mac": "aa:bb:cc:dd:ee:ff",
+        "vendor": None,
+        "source": "pihole-v6",
+        "observed_at": STAMP,
+        "last_seen": STAMP,
+    }
+    row.update(device)
+    return {
+        "scan_id": str(uuid4()),
+        "source_event": "fixture:event",
+        "collector": "fixture",
+        "mode": "fixture",
+        "scope": "fixture",
+        "started_at": STAMP,
+        "finished_at": STAMP,
+        "snapshot": {"observed_at": STAMP, "tcp": [], "dns": [], "devices": [row]},
+        "issues": [],
+        "changes": [],
+        "previous_revision": None,
+    }
+
+
+class IdentityProvenanceTest(unittest.TestCase):
+    def test_identity_without_provenance_encodes_exactly_as_before(self) -> None:
+        raw = raw_evidence()
+        encoded = Evidence.decode(raw).encode()
+        self.assertEqual(
+            encoded, json.dumps(raw, separators=(",", ":"), allow_nan=False)
+        )
+        self.assertNotIn('"evidence"', encoded)
+        self.assertNotIn('"service"', encoded)
+
+    def test_identity_provenance_round_trips(self) -> None:
+        raw = raw_evidence(evidence="dhcp_lease", service="home-dns")
+        encoded = Evidence.decode(raw).encode()
+        self.assertEqual(
+            json.loads(encoded)["snapshot"]["devices"][0]["evidence"], "dhcp_lease"
+        )
+        self.assertEqual(
+            json.loads(encoded)["snapshot"]["devices"][0]["service"], "home-dns"
+        )
+        self.assertEqual(Evidence.decode(json.loads(encoded)).encode(), encoded)
+
+    def test_identity_provenance_is_validated(self) -> None:
+        for device in (
+            {"evidence": "router"},
+            {"service": "a b"},
+            {"service": "a" * 65},
+            {"evidence": "configured"},
+        ):
+            with self.subTest(device=device), self.assertRaises(ValueError):
+                Evidence.decode(raw_evidence(**device))
+
+    def test_evidence_kind_maps_legacy_sources(self) -> None:
+        self.assertEqual(
+            IDENTITY_SOURCES, frozenset({"configured", "pihole-v6", "unifi"})
+        )
+        decoded = {
+            source: DeviceIdentity.decode(
+                raw_evidence(source=source)["snapshot"]["devices"][0]  # type: ignore[index]
+                if source != "configured"
+                else {
+                    "address": "192.0.2.10",
+                    "device_id": "ip:192.0.2.10",
+                    "label": "x",
+                    "hostname": None,
+                    "mac": None,
+                    "vendor": None,
+                    "source": "configured",
+                    "observed_at": STAMP,
+                    "last_seen": None,
+                }
+            )
+            for source in ("unifi", "pihole-v6", "configured")
+        }
+        self.assertEqual(evidence_kind(decoded["unifi"]), "controller_client")
+        self.assertEqual(evidence_kind(decoded["pihole-v6"]), "neighbour_table")
+        self.assertEqual(evidence_kind(decoded["configured"]), "configured")
+        self.assertEqual(
+            evidence_kind(replace(decoded["unifi"], evidence="managed_device")),
+            "managed_device",
+        )
