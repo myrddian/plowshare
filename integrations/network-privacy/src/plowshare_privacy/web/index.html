@@ -367,35 +367,34 @@
         <p class="limit footnote">An observed DNS lookup does not reveal its encrypted payload. A published collection does not mean an investigation has finished. Missing sources remain visible as gaps.</p>
       </section>
 
-      <section id="view-ask" role="tabpanel" aria-labelledby="tab-ask" hidden>
-        <div class="workspace ask-workspace">
-          <section class="panel ask-panel">
-            <div class="panel-heading"><h2>Conversation</h2><span id="ask-state" class="ask-state">Ready</span></div>
-            <div class="ask-log-frame">
-              <div id="ask-conversation" class="ask-conversation" role="log" aria-live="polite" tabindex="0" aria-label="Conversation with Privacy Watch"></div>
-              <button id="ask-jump" class="secondary ask-jump" type="button" hidden>New reply</button>
-            </div>
-            <div id="ask-working" class="ask-working" role="status" hidden>
-              <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span id="ask-working-text" class="ask-working-text"></span>
-              <span id="ask-working-time" class="ask-working-time"></span>
-            </div>
-            <form id="ask-form" class="ask-form">
-              <label for="ask-input" class="ask-label">Your question</label>
-              <textarea id="ask-input" rows="3" maxlength="4000" placeholder="Ask about a device, a finding or what changed…" aria-describedby="ask-hint ask-keys"></textarea>
-              <p id="ask-hint" role="status" class="hint"></p>
-              <div class="ask-composer-foot">
-                <span id="ask-keys" class="hint">Enter sends. Shift+Enter adds a line.</span>
-                <button id="ask-send" type="submit">Ask</button>
-              </div>
-            </form>
-          </section>
-          <div class="stack">
-            <section id="ask-pause" class="panel" hidden></section>
-            <section class="panel"><div class="panel-heading"><h2>Waiting on</h2><span>Handed off</span></div><div id="ask-waiting" class="entries"></div></section>
-            <section class="panel"><div class="panel-heading"><h2>Done</h2><span>Handed off</span></div><div id="ask-done" class="entries"></div></section>
+      <section id="view-ask" class="ask-view" role="tabpanel" aria-labelledby="tab-ask" hidden>
+        <h2 class="vh">Conversation</h2>
+        <div id="ask-conversation" class="ask-conversation" role="log" aria-live="polite" tabindex="0" aria-label="Conversation with Privacy Watch"></div>
+        <div class="ask-dock">
+          <button id="ask-jump" class="secondary ask-jump" type="button" hidden>New reply</button>
+          <section id="ask-pause" class="panel ask-pause" hidden></section>
+          <div id="ask-working" class="ask-working" role="status" hidden>
+            <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="ask-working-text" class="ask-working-text"></span>
+            <span id="ask-working-time" class="ask-working-time"></span>
           </div>
+          <form id="ask-form" class="ask-form panel">
+            <label for="ask-input" class="vh">Your question</label>
+            <textarea id="ask-input" rows="2" maxlength="4000" placeholder="Ask about a device, a finding or what changed…" aria-describedby="ask-hint ask-keys"></textarea>
+            <p id="ask-hint" role="status" class="hint"></p>
+            <div class="ask-composer-foot">
+              <span id="ask-state" class="ask-state">Ready</span>
+              <span id="ask-keys" class="hint">Enter sends. Shift+Enter adds a line.</span>
+              <button id="ask-handed" class="quiet ask-handed-toggle" type="button" aria-expanded="false" aria-controls="ask-drawer">Handed off</button>
+              <button id="ask-send" type="submit">Ask</button>
+            </div>
+          </form>
         </div>
+        <aside id="ask-drawer" class="ask-drawer panel" aria-labelledby="ask-drawer-title" tabindex="-1" hidden>
+          <div class="ask-drawer-head"><h2 id="ask-drawer-title">Handed off</h2><button id="ask-drawer-close" class="quiet" type="button">Close</button></div>
+          <section class="ask-drawer-group"><h3>Waiting on</h3><div id="ask-waiting" class="entries"></div></section>
+          <section class="ask-drawer-group"><h3>Done</h3><div id="ask-done" class="entries"></div></section>
+        </aside>
       </section>
 
       <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>

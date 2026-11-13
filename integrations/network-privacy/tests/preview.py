@@ -535,7 +535,16 @@ class PreviewAsk:
             AskEntry(
                 len(self._entries),
                 "agent",
-                "Nothing new stands out since this morning. The sample network is unchanged.",
+                "Nothing new stands out since this morning. These sample devices are the ones "
+                "worth a look:\n\n"
+                "| Address | Name | Why it stands out | What to do next |\n"
+                "| --- | --- | --- | --- |\n"
+                "| 192.0.2.10 (mac:00:00:5e:00:53:10) | Living room TV | Looked up advertising "
+                "and telemetry names it had not used before | Check its privacy settings |\n"
+                "| 192.0.2.20 (mac:00:00:5e:00:53:20) | Driveway camera | Offers a management "
+                "page on the local network | Ask the security specialist to review its firmware |\n"
+                "| 192.0.2.30 (mac:00:00:5e:00:53:30) | Unnamed device | First seen today; "
+                "no name or owner recorded | Name it in Devices |",
                 self._stamp(0),
                 "answer",
             )
