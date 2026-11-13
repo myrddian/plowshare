@@ -157,15 +157,6 @@ public class BoardStore implements BoardRecords {
         .findFirst();
   }
 
-  /** Private messaging transports are not public board topics. */
-  public boolean messagingTopic(String id) {
-    return Boolean.TRUE.equals(
-        jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM message_instances WHERE former_topic = ?)",
-            Boolean.class,
-            id));
-  }
-
   /** Viewer reads never change a seat's model read watermark. */
   public record Summary(BoardTopic topic, int messages, int documents) {}
 
@@ -177,8 +168,8 @@ public class BoardStore implements BoardRecords {
             + ","
             + " (SELECT count(*) FROM board_messages m WHERE m.topic = t.id) AS messages,"
             + " (SELECT count(*) FROM board_messages m WHERE m.topic = t.id AND m.kind = 'document') AS documents"
-            + " FROM board_allowance_state t WHERE NOT EXISTS (SELECT 1 FROM message_instances i WHERE i.former_topic = t.id)"
-            + " AND (account = ? OR project = ?::text) AND (?::text IS NULL OR project = ?)"
+            + " FROM board_allowance_state t"
+            + " WHERE (account = ? OR project = ?::text) AND (?::text IS NULL OR project = ?)"
             + " AND (NOT ? OR closed_at IS NULL) ORDER BY (closed_at IS NOT NULL), opened_at DESC, id"
             + " OFFSET ? LIMIT ?",
         (rs, n) -> new Summary(topicRow(rs, n), rs.getInt("messages"), rs.getInt("documents")),
@@ -210,8 +201,7 @@ public class BoardStore implements BoardRecords {
             + " LEFT JOIN LATERAL (SELECT status, job_id, reason, finished_at FROM firings"
             + " WHERE topic = s.topic AND target = 'conversation:' || s.conversation"
             + " ORDER BY (status = 'started' AND finished_at IS NULL) DESC, arrived_at DESC, id DESC LIMIT 1) f ON TRUE"
-            + " WHERE NOT EXISTS (SELECT 1 FROM message_instances i WHERE i.former_topic = t.id)"
-            + " AND (t.account = ? OR t.id = ?::text) AND (?::text IS NULL OR t.id = ?)"
+            + " WHERE (t.account = ? OR t.id = ?::text) AND (?::text IS NULL OR t.id = ?)"
             + " AND (NOT ? OR t.closed_at IS NULL) ORDER BY t.opened_at, s.occupant COLLATE \"C\"",
         (rs, n) ->
             new SeatActivity(
@@ -356,7 +346,7 @@ public class BoardStore implements BoardRecords {
         "SELECT "
             + TOPIC_COLUMNS
             + " FROM board_allowance_state WHERE closed_at IS"
-            + " NULL AND NOT EXISTS (SELECT 1 FROM message_instances i WHERE i.former_topic = board_allowance_state.id)"
+            + " NULL"
             + " ORDER BY opened_at, id",
         BoardStore::topicRow);
   }

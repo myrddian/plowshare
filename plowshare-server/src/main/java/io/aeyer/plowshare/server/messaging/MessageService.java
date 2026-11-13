@@ -1,9 +1,8 @@
 package io.aeyer.plowshare.server.messaging;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.protocol.Incoming;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
-import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentTool;
 import io.aeyer.plowshare.server.agents.Budget;
@@ -14,7 +13,6 @@ import io.aeyer.plowshare.server.agents.SendMessageTool;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.approvals.RunApproval;
-import io.aeyer.plowshare.server.board.Board;
 import io.aeyer.plowshare.server.events.Dispatcher;
 import io.aeyer.plowshare.server.events.FiringRecord;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
@@ -23,7 +21,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -31,7 +28,8 @@ import java.util.function.Consumer;
  * Stable messaging capability; owns instance lifecycle, delivery, recovery and authenticated
  * routes.
  */
-public interface MessageService extends Dispatcher.Wakes, Messaging {
+public interface MessageService
+    extends Dispatcher.Wakes, Messaging, NativeMessageExports, MessageIngress {
   /** Signals waiting instances when a turn in their retained conversation releases its gate. */
   void whenFree(String conversation);
 
@@ -64,7 +62,31 @@ public interface MessageService extends Dispatcher.Wakes, Messaging {
       boolean finalReply,
       boolean generated,
       String ending,
-      boolean handled) {
+      boolean handled,
+      RelayCausation causation) {
+    public Route(
+        String message,
+        String sender,
+        String recipient,
+        String replyTo,
+        boolean replyExpected,
+        boolean finalReply,
+        boolean generated,
+        String ending,
+        boolean handled) {
+      this(
+          message,
+          sender,
+          recipient,
+          replyTo,
+          replyExpected,
+          finalReply,
+          generated,
+          ending,
+          handled,
+          null);
+    }
+
     public Route {
       message = MessagePayload.identifier(message, "bdm_");
       sender = MessagePayload.identifier(sender, "ins_");
@@ -137,7 +159,45 @@ public interface MessageService extends Dispatcher.Wakes, Messaging {
         String approval,
         Budget lease,
         Consumer<Outcome> ended) {
-      throw new Board.Refused("Delegate continuation is unavailable.");
+      throw new MessageRefused("Delegate continuation is unavailable.");
+    }
+
+    /** Exact message ancestry follows every native continuation into its paid turn. */
+    default String speakFrom(
+        Instance instance,
+        AgentDefinition definition,
+        String utterance,
+        Budget lease,
+        TurnCap cap,
+        Consumer<Outcome> ended,
+        Speaker source,
+        boolean command,
+        RelayCausation causation) {
+      return speakFrom(instance, definition, utterance, lease, cap, ended, source, command);
+    }
+
+    default String continueApproved(
+        Instance instance,
+        AgentDefinition definition,
+        String utterance,
+        String approval,
+        Budget lease,
+        TurnCap cap,
+        Consumer<Outcome> ended,
+        RelayCausation causation) {
+      return continueApproved(instance, definition, utterance, approval, lease, cap, ended);
+    }
+
+    default String resumeDelegate(
+        Instance instance,
+        String child,
+        AgentDefinition definition,
+        String utterance,
+        String approval,
+        Budget lease,
+        Consumer<Outcome> ended,
+        RelayCausation causation) {
+      return resumeDelegate(instance, child, definition, utterance, approval, lease, ended);
     }
   }
 
@@ -199,19 +259,6 @@ public interface MessageService extends Dispatcher.Wakes, Messaging {
   Optional<Instance> instance(String id);
 
   Optional<Route> route(String message);
-
-  Incoming.Task receive(String account, Incoming.Receive request);
-
-  Incoming.Task receiveScheduled(
-      String account,
-      String sourceProject,
-      String schedule,
-      String firing,
-      ScheduledWork definition);
-
-  Incoming.Task externalTask(String account, String project, String client, UUID id);
-
-  Incoming.Task cancelExternal(String account, String project, String client, UUID id);
 
   SendMessageTool tool(RunExtras.Context context);
 

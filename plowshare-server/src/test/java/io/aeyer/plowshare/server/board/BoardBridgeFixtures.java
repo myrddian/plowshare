@@ -2,16 +2,23 @@ package io.aeyer.plowshare.server.board;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 final class BoardBridgeFixtures {
   static final Instant NOW = Instant.parse("2026-11-13T02:00:00Z");
 
+  static final UUID REPLY_GENERATION = UUID.fromString("44444444-4444-4444-4444-444444444444");
+
   private BoardBridgeFixtures() {}
 
   static BoardTopic topic(String state) {
+    return topic(state, "destination");
+  }
+
+  static BoardTopic topic(String state, String project) {
     return new BoardTopic(
         "bdt_Topic",
-        "destination",
+        project,
         null,
         "bdt_Topic",
         0,

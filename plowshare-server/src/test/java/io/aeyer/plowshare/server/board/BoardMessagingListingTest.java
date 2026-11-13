@@ -17,6 +17,7 @@ import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.messaging.JdbcMessagingRepository;
 import io.aeyer.plowshare.server.messaging.MessageInboxes;
+import io.aeyer.plowshare.server.messaging.MessageRefused;
 import io.aeyer.plowshare.server.messaging.MessageService;
 import io.aeyer.plowshare.server.messaging.MessagingRepository;
 import io.aeyer.plowshare.server.messaging.MessagingRepository.InstanceListing;
@@ -193,12 +194,12 @@ class BoardMessagingListingTest {
     when(repository.instance("sender")).thenReturn(Optional.of(sender));
     when(repository.deliveryPage("sender", 0, 1))
         .thenReturn(List.of(delivery("message", sender, foreign, false, false, null, false)));
-    assertThrows(Board.Refused.class, () -> service.deliveries("sender", "alice", 0, 1));
+    assertThrows(MessageRefused.class, () -> service.deliveries("sender", "alice", 0, 1));
     var recipient = listed("recipient", true, false, false, 0, null).instance();
     when(repository.deliveryPage("sender", 0, 1))
         .thenReturn(List.of(delivery("message", sender, recipient, false, false, null, false)));
     service.useLogVisibility((conversation, account) -> !conversation.equals("cnv_recipient"));
-    assertThrows(Board.Refused.class, () -> service.deliveries("sender", "alice", 0, 1));
+    assertThrows(MessageRefused.class, () -> service.deliveries("sender", "alice", 0, 1));
   }
 
   private MessagingRepository.DeliveryListing delivery(

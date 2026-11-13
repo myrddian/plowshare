@@ -137,6 +137,23 @@ public final class JdbcRelayRepository implements RelayRepository {
 
   @Override
   public Relay.Publication append(Relay.TopicKey key, Relay.Draft draft, Instant publishedAt) {
+    var result = appendChecked(key, Optional.empty(), draft, publishedAt);
+    if (result instanceof Relay.Appended appended) return appended.publication();
+    throw new IllegalStateException("An unpinned append returned no publication");
+  }
+
+  @Override
+  public Relay.AppendResult append(
+      Relay.TopicKey key, UUID expectedGeneration, Relay.Draft draft, Instant publishedAt) {
+    return appendChecked(
+        key, Optional.of(Objects.requireNonNull(expectedGeneration)), draft, publishedAt);
+  }
+
+  private Relay.AppendResult appendChecked(
+      Relay.TopicKey key,
+      Optional<UUID> expectedGeneration,
+      Relay.Draft draft,
+      Instant publishedAt) {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(draft, "draft");
     Instant admittedAt = RelayValues.time(publishedAt);
@@ -198,9 +215,21 @@ public final class JdbcRelayRepository implements RelayRepository {
     String payloadDigest = digest;
     return transactions.inTransaction(
         () -> {
-          Relay.Topic topic = topic(key, true);
-          if (topic.kind() != draft.payload().kind())
-            throw new IllegalArgumentException("Relay payload differs from the topic family");
+          Relay.Topic topic;
+          if (expectedGeneration.isPresent()) {
+            var selected = findTopic(key, true);
+            if (selected.isEmpty())
+              return new Relay.DestinationUnavailable(Relay.DestinationFailure.MISSING);
+            topic = selected.orElseThrow();
+            if (!expectedGeneration.orElseThrow().equals(topic.generation()))
+              return new Relay.DestinationUnavailable(Relay.DestinationFailure.REPLACED);
+            if (topic.kind() != draft.payload().kind())
+              return new Relay.DestinationUnavailable(Relay.DestinationFailure.INVALID_KIND);
+          } else {
+            topic = topic(key, true);
+            if (topic.kind() != draft.payload().kind())
+              throw new IllegalArgumentException("Relay payload differs from the topic family");
+          }
           var retained =
               jdbc.query(
                   "SELECT "
@@ -216,7 +245,7 @@ public final class JdbcRelayRepository implements RelayRepository {
             if (!original.event().equals(draft))
               throw new IllegalArgumentException("Relay event ID conflicts with retained content");
             claimBlob(original);
-            return original;
+            return new Relay.Appended(original);
           }
           // The probe saw a retained event that pruning removed before the topic lock was taken, so
           // nothing was stored. This is a genuinely new append: validate and store it here. It is
@@ -261,7 +290,7 @@ public final class JdbcRelayRepository implements RelayRepository {
                   digestToWrite));
           var publication = new Relay.Publication(key, position, admittedAt, draft);
           claimBlob(publication);
-          return publication;
+          return new Relay.Appended(publication);
         });
   }
 

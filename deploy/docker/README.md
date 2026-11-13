@@ -13,7 +13,8 @@ host provisioning belongs to your installation tooling. See [distribution instru
 ## A2A general-purpose receiver
 
 Add `compose.a2a.yaml` to run the separate A2A adapter beside the server. This
-requires a receiver-capable server, including migration V108. Select one existing
+requires the general messaging Relay receivers and their migrations, plus explicit
+command/return topics, grants and route configuration. Select one existing
 project and one exported agent. `interlocutor` is the shipped general-purpose
 entry point: its grants determine the skills, workflows and specialists it can
 use. The public Agent Card advertises its granted skills and workflows; ordinary
@@ -37,8 +38,16 @@ project and external address:
 
 ```json
 {
-  "plowshare": "http://server:8091",
+  "origin": "http://server:8091",
+  "tokenEnv": "PLOWSHARE_TOKEN",
+  "principal": "REPLACE_WITH_VERIFIED_NATIVE_PRINCIPAL",
+  "journal": "/var/lib/plowshare-a2a",
   "project": "a2a",
+  "requests": "a2a.receive.commands",
+  "replies": "a2a.receive.tasks",
+  "group": "a2a-receiving-view",
+  "consumer": "11111111-1111-1111-1111-111111111111",
+  "replyPublisher": "messaging:ingress",
   "receive": {
     "bind": "0.0.0.0",
     "port": 8093,
@@ -50,18 +59,21 @@ project and external address:
 }
 ```
 
-Put the existing account's current password in
-`/srv/plowshare/secrets/a2a-account-password` and a newly generated, separate caller
-bearer in `/srv/plowshare/secrets/a2a-caller-token`. Keep both mode 0600, owned by
-UID 1000. Complete the existing account's first password change before using it;
-the operator bootstrap token has no account and cannot receive A2A messages.
-Clients get the caller token; the adapter's account password stays on the host.
-The adapter logs in on each container start and uses the returned token for WS.
-Rotating a mounted secret requires recreating/restarting the adapter.
+Create a service credential for the intended native principal and store it in a
+private file; the sidecar does not perform account/password login. Put a distinct
+external caller bearer in a second private file. Both files must be readable by
+UID1000 and excluded from source. Clients receive only the caller bearer.
 
-Set `PLOWSHARE_A2A_HANDLE`, `PLOWSHARE_A2A_LISTEN_ADDRESS`,
-`PLOWSHARE_A2A_PUBLISHED_PORT` and `PLOWSHARE_A2A_PORT` in the private deployment
-environment. The last must match `receive.port`. Also set
+Set `PLOWSHARE_A2A_SERVICE_TOKEN_FILE`, `PLOWSHARE_A2A_CALLER_TOKEN_FILE`,
+`PLOWSHARE_A2A_CONFIG_FILE` and `PLOWSHARE_A2A_JOURNAL_HOST` to the explicit host
+files/durable directory. Create the journal directory mode0700 owned by UID1000;
+the receiver's container path above matches the overlay's writable volume. Its
+other filesystem remains read-only. The directory contains retained operation
+receipts and immutable external provenance/reply bodies. Back up the complete
+volume; deleting it can destroy uncertainty and ownership evidence.
+
+Also set `PLOWSHARE_A2A_LISTEN_ADDRESS`, `PLOWSHARE_A2A_PUBLISHED_PORT` and
+`PLOWSHARE_A2A_PORT`; the last must match `receive.port`. Set
 `PLOWSHARE_A2A_HEALTH_URL` to the full HTTP(S) Agent Card URL reachable inside the
 adapter container. Addresses and ports have no deployment defaults. Use your TLS proxy
 for external access. Forward `/rpc`, `/.well-known/agent-card.json`, `Authorization`,
@@ -80,11 +92,25 @@ docker compose --env-file /srv/plowshare/deployment/deployment.env \
 
 Keep your existing immutable server/search image overlay in the deployment
 command too. Use `up -d --no-deps a2a-receiver` after the receiver-capable server
-is healthy; this does not replace other services. The sidecar reads only its
-configuration and credentials. Tasks and contexts persist in Plowshare's database.
+is healthy; this does not replace other services. The sidecar reads its configuration/credentials and writes only its private
+journal volume. Tasks and contexts remain authoritative in Plowshare's database.
+Configure the [native route](../../docs/a2a-receiving.md#configure-the-native-relay-route)
+with one shared command topic/subscription/channel for receive/cancel/inspect;
+agent.list supplies its public command catalog. Existing historical contexts need
+the server's explicit channel-adoption mapping rather than automatic rebinding.
 After startup, validate discovery and an authenticated message round trip with
 an independent client, such as Google ADK; a healthy container alone is not proof
 of agent execution. The initial protocol subset is text, polling and cancellation.
+
+The overlay uses bounded `on-failure:5` restart. Docker cannot exclude exit78
+(operator action) like systemd can, so repeated configuration/storage failures stop
+after that bound and need investigation. Receiving transport restarts reuse the
+same journal and inspect uncertain requests; they never resubmit them blindly.
+Secret rotation requires stopping the sole journal owner and running its explicit
+`owner`/`rotate-config` CLI with matching principal/channel identity before restart.
+See the [receiving manual](../../docs/a2a-receiving.md) for recovery, capacity and
+supported response limits. No deployment or live credential rotation is performed
+by these examples.
 
 ## Build
 

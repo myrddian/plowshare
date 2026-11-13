@@ -17,6 +17,31 @@ public interface DispatchJournal extends AutoCloseable {
   /** Commits and fsyncs before returning; failures forbid the next side effect. */
   void save(RelayWork.Entry entry) throws IOException;
 
+  /** Compact metadata is consulted before any new effect, even after full records are archived. */
+  default Optional<RelayWork.Archived> archived(UUID requestId) throws IOException {
+    return Optional.empty();
+  }
+
+  default boolean ownsRemote(String producer, String peer, String task, String context)
+      throws IOException {
+    return entries().stream()
+        .anyMatch(
+            e -> {
+              var observed = e.observation();
+              return e.producer().equals(producer)
+                  && e.peer().equals(peer)
+                  && observed != null
+                  && observed.result() != null
+                  && context.equals(observed.context())
+                  && (task == null || task.equals(observed.task()));
+            });
+  }
+
+  /** Archive full terminal records without forgetting operation identities or remote ownership. */
+  default int archiveConfirmed() throws IOException {
+    throw new IOException("Journal does not support durable archiving");
+  }
+
   @Override
   void close() throws IOException;
 }

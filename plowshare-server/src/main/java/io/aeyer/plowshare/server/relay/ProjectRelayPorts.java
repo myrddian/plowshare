@@ -9,6 +9,9 @@ import io.aeyer.plowshare.server.relay.tools.RelayToolAuthority;
 import io.aeyer.plowshare.server.relay.tools.RelayToolProperties;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -90,6 +93,40 @@ public final class ProjectRelayPorts implements RelayPorts {
   @Override
   public Relay.TopicKey authorizePublisher(String account, String project, String topic) {
     return require(account, project, topic, RelayPortProperties.Direction.INGRESS, null);
+  }
+
+  @Override
+  public Map<String, Relay.TopicKey> authorizePublishers(
+      String account, String project, List<String> topics) {
+    RelayPort.identity(account);
+    var names = List.copyOf(topics);
+    if (names.isEmpty() || names.size() > 32)
+      throw new IllegalArgumentException("Invalid topic authorization bound");
+    names.forEach(RelayPort::topic);
+    var owner = projects.personalOwner(project);
+    boolean mayWork =
+        owner.filter(value -> !value.equals(account)).isEmpty()
+            && members.mayWork(project, account);
+    // A live replacement publishes a whole immutable policy. Both topic checks must use that
+    // same snapshot rather than combine grants from different replacements during this batch.
+    var grants = properties.getBindings();
+    if (!mayWork
+        || names.stream()
+            .anyMatch(
+                topic ->
+                    !grants.contains(
+                        new RelayPortProperties.Binding(
+                            project,
+                            topic,
+                            account,
+                            RelayPortProperties.Direction.INGRESS,
+                            List.of()))))
+      throw new CallerFault("Relay port is unavailable to this account");
+    Long id = projects.id(project);
+    if (id == null) throw new CallerFault("Relay project unavailable");
+    var authorized = new LinkedHashMap<String, Relay.TopicKey>();
+    names.forEach(topic -> authorized.put(topic, new Relay.TopicKey(id, topic)));
+    return Map.copyOf(authorized);
   }
 
   private Relay.TopicKey require(

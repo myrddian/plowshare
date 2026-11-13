@@ -10,8 +10,8 @@ import java.util.Optional;
 
 /**
  * Messaging-owned TEXT publication and decoding. No topic name or messaging DTO enters Relay's
- * envelope, kind vocabulary or schema. This capability is staged for the messaging cutover; the
- * existing board-backed sender is not wired to it and therefore never dual-publishes.
+ * envelope, kind vocabulary or schema. The messaging send transaction uses this sole publication
+ * boundary; forum storage has no role in message admission or delivery.
  */
 public final class RelayMessagePublications implements MessagePublications {
   // SDK publishers are always sdk:<hash>, derived by RelayPort.publisher; no public transport can

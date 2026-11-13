@@ -49,8 +49,22 @@ public class BoardBridgeConfiguration {
       BoardClosing closing,
       SwarmCatalog swarms,
       Relay relay,
-      UnitOfWork work) {
-    return new ForumBoardBridge(board, records, receipts, replies, closing, swarms, relay, work);
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      UnitOfWork work,
+      BoardNativeRequests nativeRequests) {
+    return new ForumBoardBridge(
+        board,
+        records,
+        receipts,
+        replies,
+        closing,
+        swarms,
+        relay,
+        members,
+        projects,
+        work,
+        nativeRequests);
   }
 
   @Bean
@@ -58,9 +72,10 @@ public class BoardBridgeConfiguration {
       BoardBridgeRepository replies,
       Relay relay,
       UnitOfWork work,
-      RelayWorkerProperties properties) {
+      RelayWorkerProperties properties,
+      BoardNativeRequests nativeRequests) {
     return new RelayBoardReplies(
-        replies, relay, work, properties.getFailureBackoff(), Instant::now);
+        replies, relay, work, properties.getFailureBackoff(), Instant::now, nativeRequests);
   }
 
   @Bean(destroyMethod = "close")
@@ -75,8 +90,9 @@ public class BoardBridgeConfiguration {
       RelayPublisherAccounts publishers,
       RelayPorts ports,
       RelayForwardingHistory history,
-      RelayProperties properties) {
-    return receiver("board.open", bridge, publishers, ports, history, properties);
+      RelayProperties properties,
+      BoardNativeRequests nativeRequests) {
+    return receiver("board.open", bridge, publishers, ports, history, properties, nativeRequests);
   }
 
   @Bean
@@ -85,8 +101,9 @@ public class BoardBridgeConfiguration {
       RelayPublisherAccounts publishers,
       RelayPorts ports,
       RelayForwardingHistory history,
-      RelayProperties properties) {
-    return receiver("board.post", bridge, publishers, ports, history, properties);
+      RelayProperties properties,
+      BoardNativeRequests nativeRequests) {
+    return receiver("board.post", bridge, publishers, ports, history, properties, nativeRequests);
   }
 
   @Bean
@@ -95,8 +112,9 @@ public class BoardBridgeConfiguration {
       RelayPublisherAccounts publishers,
       RelayPorts ports,
       RelayForwardingHistory history,
-      RelayProperties properties) {
-    return receiver("board.close", bridge, publishers, ports, history, properties);
+      RelayProperties properties,
+      BoardNativeRequests nativeRequests) {
+    return receiver("board.close", bridge, publishers, ports, history, properties, nativeRequests);
   }
 
   private static RelayReceivers.Binding receiver(
@@ -105,10 +123,17 @@ public class BoardBridgeConfiguration {
       RelayPublisherAccounts publishers,
       RelayPorts ports,
       RelayForwardingHistory history,
-      RelayProperties properties) {
+      RelayProperties properties,
+      BoardNativeRequests nativeRequests) {
     return new RelayReceivers.Binding(
         name,
         new BoardRelayReceiver(
-            name, bridge, publishers, ports, history, properties.getMaxForwardingHops()));
+            name,
+            bridge,
+            publishers,
+            ports,
+            history,
+            properties.getMaxForwardingHops(),
+            nativeRequests));
   }
 }

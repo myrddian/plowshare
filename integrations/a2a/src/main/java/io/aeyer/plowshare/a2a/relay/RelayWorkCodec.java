@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import io.aeyer.plowshare.sdk.ExternalPayloadCodec;
+import io.aeyer.plowshare.a2a.model.ExternalPayloadCodec;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CodingErrorAction;
@@ -21,6 +21,7 @@ public final class RelayWorkCodec {
   public static final int MAX_REQUEST_BYTES = 256 * 1024;
   public static final int MAX_ENTRY_BYTES = 2 * 1024 * 1024;
   static final int MAX_JOURNAL_BYTES = 64 * 1024 * 1024;
+  static final int MAX_COMPACT_BYTES = 64 * 1024;
   private static final ObjectMapper JSON =
       new ObjectMapper()
           .findAndRegisterModules()
@@ -60,7 +61,15 @@ public final class RelayWorkCodec {
   }
 
   static byte[] snapshot(RelayWork.Snapshot value) throws IOException {
-    return write(value, MAX_JOURNAL_BYTES).getBytes(StandardCharsets.UTF_8);
+    byte[] bytes = JSON.writeValueAsBytes(value);
+    if (bytes.length > MAX_JOURNAL_BYTES) throw new JournalCapacityExceeded();
+    return bytes;
+  }
+
+  static final class JournalCapacityExceeded extends IOException {
+    JournalCapacityExceeded() {
+      super("A2A journal snapshot exceeds its byte bound");
+    }
   }
 
   static RelayWork.Snapshot snapshot(byte[] source) throws IOException {
@@ -74,7 +83,18 @@ public final class RelayWorkCodec {
                   .decode(ByteBuffer.wrap(source))
                   .toString(),
               MAX_JOURNAL_BYTES);
-      fields(root, "schema", "owner", "generation", "entries");
+      boolean legacy = !root.has("identity");
+      if (legacy) fields(root, "schema", "owner", "generation", "entries");
+      else
+        fields(
+            root,
+            "schema",
+            "owner",
+            "identity",
+            "previousOwner",
+            "migratedAt",
+            "generation",
+            "entries");
       var rows = root.get("entries");
       if (!rows.isObject() || rows.size() > 1024) throw new IllegalArgumentException();
       var entries = new LinkedHashMap<String, RelayWork.Entry>();
@@ -84,26 +104,52 @@ public final class RelayWorkCodec {
         entries.put(row.getKey(), entry(row.getValue()));
       }
       return new RelayWork.Snapshot(
-          text(root, "schema"), text(root, "owner"), optional(root, "generation"), entries);
+          text(root, "schema"),
+          text(root, "owner"),
+          legacy ? text(root, "owner") : text(root, "identity"),
+          legacy ? null : optional(root, "previousOwner"),
+          legacy || root.get("migratedAt").isNull()
+              ? null
+              : Instant.parse(text(root, "migratedAt")),
+          optional(root, "generation"),
+          entries);
     } catch (IOException | RuntimeException invalid) {
       throw new IOException("Invalid retained A2A journal");
     }
   }
 
   private static RelayWork.Entry entry(JsonNode row) throws IOException {
-    fields(
-        row,
-        "requestId",
-        "hash",
-        "sourceEvent",
-        "producer",
-        "peer",
-        "action",
-        "task",
-        "context",
-        "phase",
-        "observation",
-        "occurredAt");
+    boolean legacy = !row.has("replyAttempts");
+    if (legacy)
+      fields(
+          row,
+          "requestId",
+          "hash",
+          "sourceEvent",
+          "producer",
+          "peer",
+          "action",
+          "task",
+          "context",
+          "phase",
+          "observation",
+          "occurredAt");
+    else
+      fields(
+          row,
+          "requestId",
+          "hash",
+          "sourceEvent",
+          "producer",
+          "peer",
+          "action",
+          "task",
+          "context",
+          "phase",
+          "observation",
+          "occurredAt",
+          "replyAttempts",
+          "resolution");
     if (JSON.writeValueAsBytes(row).length > MAX_ENTRY_BYTES) throw new IllegalArgumentException();
     RemotePeer.Observation observation = null;
     JsonNode result = row.get("observation");
@@ -130,7 +176,75 @@ public final class RelayWorkCodec {
         optional(row, "context"),
         RelayWork.Phase.valueOf(text(row, "phase")),
         observation,
-        Instant.parse(text(row, "occurredAt")));
+        Instant.parse(text(row, "occurredAt")),
+        legacy ? 0 : integer(row, "replyAttempts"),
+        legacy ? null : optional(row, "resolution"));
+  }
+
+  static byte[] archived(RelayWork.Archived value) throws IOException {
+    return write(value, MAX_COMPACT_BYTES).getBytes(StandardCharsets.UTF_8);
+  }
+
+  static RelayWork.Archived archived(byte[] source) throws IOException {
+    try {
+      var root = parse(strictText(source), MAX_COMPACT_BYTES);
+      fields(
+          root,
+          "requestId",
+          "hash",
+          "sourceEvent",
+          "producer",
+          "peer",
+          "phase",
+          "remoteTask",
+          "remoteContext",
+          "resolution");
+      return new RelayWork.Archived(
+          uuid(text(root, "requestId")),
+          text(root, "hash"),
+          text(root, "sourceEvent"),
+          text(root, "producer"),
+          text(root, "peer"),
+          RelayWork.Phase.valueOf(text(root, "phase")),
+          optional(root, "remoteTask"),
+          optional(root, "remoteContext"),
+          optional(root, "resolution"));
+    } catch (IOException | RuntimeException invalid) {
+      throw new IOException("Invalid compact A2A receipt");
+    }
+  }
+
+  static byte[] ownership(RelayWork.RemoteOwnership value) throws IOException {
+    return write(value, MAX_COMPACT_BYTES).getBytes(StandardCharsets.UTF_8);
+  }
+
+  static RelayWork.RemoteOwnership ownership(byte[] source) throws IOException {
+    try {
+      var root = parse(strictText(source), MAX_COMPACT_BYTES);
+      fields(root, "producer", "peer", "task", "context");
+      return new RelayWork.RemoteOwnership(
+          text(root, "producer"),
+          text(root, "peer"),
+          optional(root, "task"),
+          text(root, "context"));
+    } catch (IOException | RuntimeException invalid) {
+      throw new IOException("Invalid A2A ownership proof");
+    }
+  }
+
+  private static String strictText(byte[] value) throws IOException {
+    return StandardCharsets.UTF_8
+        .newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(value))
+        .toString();
+  }
+
+  private static int integer(JsonNode row, String field) {
+    var value = row.get(field);
+    if (!value.isIntegralNumber() || !value.canConvertToInt()) throw new IllegalArgumentException();
+    return value.intValue();
   }
 
   private static String write(Object value, int max) throws IOException {

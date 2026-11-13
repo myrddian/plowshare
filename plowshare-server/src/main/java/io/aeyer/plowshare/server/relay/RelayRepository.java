@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.relay;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Specialist persistence contract. Each operation is atomic, joins an owning domain transaction
@@ -21,6 +22,10 @@ public interface RelayRepository {
 
   /** Allocates and appends in one transaction; see {@link Relay#publish} for identity semantics. */
   Relay.Publication append(Relay.TopicKey key, Relay.Draft draft, Instant publishedAt);
+
+  /** Atomic generation-fenced append, preserving the ordinary payload-before-topic lock order. */
+  Relay.AppendResult append(
+      Relay.TopicKey key, UUID expectedGeneration, Relay.Draft draft, Instant publishedAt);
 
   /** Coherent read of a retained scoped event; absence is inconclusive after log retention. */
   Optional<Relay.Publication> retained(Relay.TopicKey key, String eventId);

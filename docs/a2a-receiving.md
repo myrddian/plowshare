@@ -1,9 +1,12 @@
 # Receive A2A messages in Plowshare
 
-This manual describes the retained implementation. Slice 5 adds a separate
-[Relay outbound worker](a2a-relay-outbound.md); the inbound/core cutover is still
-blocked by the [reviewed public capability gaps](decisions/0065-a2a-relay-adapter-contracts-and-capability-gaps.md).
-Existing SDK operations remain available until their consumers can migrate safely.
+The receiving adapter uses the public Java SDK and general messaging Relay
+receivers described in [0066](decisions/0066-relay-messaging-receiver-and-review-remediation.md).
+Its HTTP listener, authenticated client aliases and A2A provenance stay outside
+core. Existing native admission still owns execution, context, grants, approvals
+and durable outcomes. The rewritten receiving launcher uses Relay exclusively.
+See the [cutover contract](relay-legacy-cutover.md) and
+[verification graph](relay-review-task-graph.md) for legacy retirement and evidence.
 
 Run the separate A2A adapter with a `receive` section selecting one project and one
 exported Plowshare agent. External callers discover that agent's public Agent Card
@@ -74,7 +77,8 @@ messages carrying `taskId`, including follow-ups to a task awaiting approval.
 Approval remains a Plowshare operator action; see [task state and cancellation](#4-read-or-cancel-a-task).
 Relay event identities and correlation IDs serve transport and causal tracking;
 they do not replace the retained context-to-conversation or task-to-message
-mapping. The adapter uses public `IncomingClient` operations for these records.
+mapping. The adapter publishes typed receive/cancel/inspect TEXT commands and consumes
+authoritative messaging snapshots through existing SDK Relay operations.
 
 The [Relay external-work design](decisions/0008-relay-external-work-and-a2a-mapping.md)
 records the planned correlation contract, common outbound delivery and final-artifact
@@ -160,8 +164,16 @@ Save an operator-owned configuration outside tracked source:
 
 ```json
 {
-  "plowshare": "https://plowshare.example.invalid",
+  "origin": "https://plowshare.example.invalid",
+  "tokenEnv": "PLOWSHARE_TOKEN",
+  "principal": "REPLACE_WITH_VERIFIED_NATIVE_PRINCIPAL",
+  "journal": "/REPLACE_WITH_DURABLE_PRIVATE_JOURNAL",
   "project": "my-project",
+  "requests": "a2a.receive.commands",
+  "replies": "a2a.receive.tasks",
+  "group": "a2a-receiving-view",
+  "consumer": "11111111-1111-1111-1111-111111111111",
+  "replyPublisher": "messaging:ingress",
   "receive": {
     "bind": "127.0.0.1",
     "port": 8093,
@@ -177,7 +189,12 @@ Save an operator-owned configuration outside tracked source:
 
 | Setting | Meaning |
 | --- | --- |
-| `plowshare` | Server HTTP(S) origin; the SDK connects to `/v1/events` |
+| `origin` / `tokenEnv` | Explicit server origin and service-token environment variable |
+| `principal` | Verified stable native principal identity, never a credential |
+| `journal` | Absolute private durable POSIX directory, reused after restart |
+| `requests` / `replies` | Configured command and authoritative return topics |
+| `group` / `consumer` | Persistent view group and canonical consumer UUID |
+| `replyPublisher` | Exact server-owned `messaging:ingress` snapshot publisher |
 | `project` | Required receiving project; the account must have access |
 | `receive.agent` | One exported, served agent in that project's server catalog |
 | `receive.bind` | Required explicit listener address |
@@ -192,19 +209,42 @@ rotation. Each external client sees only its own tasks and contexts within the
 configured account/project. The authenticated adapter supplies these identities to
 Plowshare; a remote caller cannot choose another alias in the request body.
 
-Supply `PLOWSHARE_TOKEN` with the adapter's Plowshare access token and
-`RESEARCH_CALLER_TOKEN` with a separate token issued to that external caller. Read
-secrets from your environment or secret manager; do not put token values in the
-configuration, URLs, command-line arguments or agent definitions.
+Supply the service credential through the configured `tokenEnv`, and
+`RESEARCH_CALLER_TOKEN` separately for that external caller. Read secrets from
+environment/secret files; there is no human-login fallback. Stable aliases do not
+replace native principal/channel ownership. Before publication or history reads,
+the launcher checks authenticated `admin.status.handle` equals `principal`; a
+mismatch stops startup with a content-free refusal. Rotation checks this identity
+before updating journal ownership. A changed principal, route or endpoint
+cannot silently adopt historical contexts. The server's explicit legacy-channel
+adoption mapping is required for old receiving contexts/tasks. Use the
+[historical provenance export/import recipe](../integrations/a2a/migration/README.md)
+before retiring old operations; native ID mapping alone does not preserve A2A
+source history. Missing source/context evidence is explicit and cannot authorize
+a fresh receive.
 
-Alternatively, supply `PLOWSHARE_HANDLE` and `PLOWSHARE_PASSWORD` to log into an
-existing account when the adapter starts. Authentication uses the existing HTTP
-login bootstrap; all message operations still use WebSocket. The account must
-have completed its first password change. A supplied `PLOWSHARE_TOKEN` takes
-precedence. The Docker entrypoint reads the password from a mounted secret file.
-The process authenticates again on supervisor restart; it does not replay
-previous message mutations. No automatic credential renewal occurs in a running
-process, and rotating/revoking the account credential remains an operator action.
+Before each new publication intent, the adapter reads actual return-topic
+metadata through `relay.log` and durably pins its generation and observed head.
+The topic generation and consumer-group generation have separate durable pins;
+they are independent broker identities. Both are checked again across restart.
+Missing or recreated return topics stop intake; a log gap or empty log never
+proves non-delivery or authorizes mutation replay.
+
+The journal pins the destination, channel topics, consumer and caller aliases.
+Only one process may own its private POSIX directory. Replacement processes reuse
+that directory and credentials; independent-journal replicas are unsupported.
+Secret changes require stopped-owner, identity-preserving rotation:
+
+```sh
+plowshare-a2a OLD_CONFIG owner
+plowshare-a2a NEW_CONFIG rotate-config PREVIOUS_OWNER_DIGEST
+```
+
+The launcher verifies replacement credentials against the configured native
+principal. Verify external caller identity separately before rotation. Backup the whole directory. Operation receipts and
+immutable reply bodies grow on disk until deliberate binding retirement; the
+hot task view retains only the supported latest 200 reply references. Monitor disk
+capacity. Do not reset a journal to replay an unresolved submission.
 
 ```sh
 integrations/a2a/build/install/plowshare-a2a/bin/plowshare-a2a /absolute/private/path/a2a.json
@@ -216,11 +256,60 @@ Route HTTPS through your reverse proxy to the configured listener. Forward
 external address; it does not configure TLS on the local listener. Set proxy
 request timeouts to cover `waitMs`, or use immediate responses and polling.
 
-You may configure outgoing `peers` in the same process. For independent listener
-and outgoing availability, run separate configurations/processes. A lost Plowshare
-connection ends the process; your supervisor can restart it. Previously accepted
-messages and their outcomes remain in Plowshare. The adapter does not refresh its
-Plowshare access token automatically.
+Outbound dispatch runs separately through [plowshare-a2a-relay](a2a-relay-outbound.md).
+The receiving launcher accepts the explicit receiving configuration above.
+
+### Configure the native Relay route
+
+Create the command and return TEXT topics with the account's exact ingress and
+return-consumer egress grants. Configure one command-topic subscription shared by
+all three receivers. Its routing work pins the same receiving agent, return topic
+and channel; bodies cannot select those values. For example:
+
+```javascript
+export const manifest = {version: 1, subscriptions: [
+  {name: 'receive', topic: 'a2a.receive.commands', kind: 'text', start: 'oldest-retained'}
+]};
+export function route(event) {
+  const schema = JSON.parse(event.payload.text).schema;
+  let receiver;
+  switch (schema) {
+    case 'plowshare-message-request/1': receiver = 'message.receive'; break;
+    case 'plowshare-message-cancel/1': receiver = 'message.cancel'; break;
+    case 'plowshare-message-inspect/1': receiver = 'message.inspect'; break;
+    default: return [];
+  }
+  return [{name: 'receiving', receiver, work: {
+    agent: 'interlocutor', replyTopic: 'a2a.receive.tasks', channel: 'a2a-receiving'
+  }}];
+}
+```
+
+Install routes through the normal [Relay project configuration](relay.md).
+Different command topics/subscriptions or channel families have independent task
+ownership. Sharing a client alias or conversation ID cannot cross those fences.
+
+The adapter journals publication intent before each mutation. If a receive or
+cancel acknowledgement is lost, it inspects retained native evidence instead of
+republishing. Task-not-accessible/absence never proves the old mutation was not
+submitted. Fresh inspect queries are read-only. Return revisions prevent delayed
+snapshots from regressing state. Bounded pages assemble Unicode body chunks by
+exact offset and persist each body before view acknowledgement. Each page saves
+a task-scoped `next` checkpoint before fetching more; interrupted paging resumes
+that fixed head after restart instead of rescanning its prefix. Save a final resume
+cursor only after the captured reply head is complete. Future reads use that
+checkpoint to fetch new replies rather than rereading lifetime history. A current
+terminal header drains its captured head and performs one fresh FOLLOW inspection
+before returning terminal artifacts; the follow intent is retained across restart.
+Retention
+gaps invalidate cached freshness and are crossed only while awaiting a fresh
+authoritative inspect; no cached state is asserted as current.
+
+A lost native connection ends the process for bounded supervisor restart with the
+same journal. Corrupt storage/configuration requires operator action. See the
+[outbound supervision contract](a2a-relay-outbound.md#supervision-and-restart-safety)
+for exit statuses; receiving restarts recover uncertain admission through inspect,
+without repeating peer sends or native mutations.
 
 ## 2. Discover the Agent Card
 
@@ -303,9 +392,12 @@ Use the same caller credential and headers:
 ```
 
 The result is the task itself. `historyLength` is 0–200, defaults to 200, and zero
-omits history. The bridge reads the latest 200 replies; older replies remain in the
-durable Plowshare message log. RPC results are bounded to 1 MiB; request a smaller
-`historyLength` if the selected history exceeds that limit. Replies appear as agent messages in history and the latest reply
+omits history. The adapter exposes the supported latest 200 replies while retaining assembled
+private body evidence and authoritative native paging checkpoints. Older replies
+remain in the durable Plowshare message log. RPC results are bounded to 1 MiB; request a smaller
+`historyLength` if the selected history exceeds that limit. A single reply whose
+encoded response exceeds 1 MiB is explicitly refused; its body is retained and is
+never silently truncated. Replies appear as agent messages in history and the latest reply
 appears in `status.message`. `metadata.plowshareEnding` preserves the actual run
 ending. Reply metadata distinguishes generated outcomes from explicit agent
 replies and identifies final replies. Terminal tasks cannot be canceled or reopened.
@@ -363,7 +455,7 @@ starts no implicit filesystem provider; any tool execution requires the same
 existing server/provider configuration and approvals as a normal run.
 
 When sending from another Plowshare, put the same `metadata.plowshareCommand` on
-`outgoing_send`'s message. Its A2A adapter adds the extension header. SDKs still
+the message in an explicit Relay SEND request. Its A2A adapter adds the extension header. SDKs still
 communicate with Plowshare over WebSocket; the adapter speaks A2A HTTP.
 
 ## Supported operations and boundaries
@@ -374,12 +466,13 @@ subscriptions, push notifications, extended cards, OAuth negotiation, binary/dat
 parts and task follow-ups remain unsupported and return explicit protocol errors.
 No silent protocol downgrade, request replay or approval bypass occurs.
 
-The server's protocol-neutral adapter operations are `incoming.catalog`,
-`incoming.receive`, `incoming.status` and `incoming.cancel`. Java's `IncomingClient`
-provides typed receipt/read/cancel calls. The JS/TS, Python, C# and Go SDKs can use
-the same generic operation catalog. These operations trust an authenticated adapter
-to supply external client aliases; they are not anonymous A2A endpoints on the
-Plowshare server itself.
+The adapter uses existing public SDK Relay operations and `agent.list`. Registered
+native `message.receive`, `message.inspect` and `message.cancel` receivers consume
+its typed publications; these names are Relay receivers, not additional WebSocket
+operations. Authenticated publisher, pinned channel/project/topic generations and
+current command grants determine authority. External client aliases are isolated
+inside that configured boundary. The Plowshare server exposes no anonymous A2A
+endpoint. See the [receiver contract](relay-messaging-receivers.md).
 
 The container health probe requires `PLOWSHARE_A2A_HEALTH_URL`, the complete
 HTTP(S) `/.well-known/agent-card.json` URL reachable from the adapter container.
@@ -387,3 +480,15 @@ It does not infer an address or port and does not follow redirects. Configure
 `PLOWSHARE_A2A_LISTEN_ADDRESS`, `PLOWSHARE_A2A_PUBLISHED_PORT` and
 `PLOWSHARE_A2A_PORT` explicitly for the Compose overlay; the last must match
 `receive.port`. Keep the public RPC URL distinct from this readiness URL.
+
+Private reply assembly accepts the native portable ceiling of 50MiB UTF-8 per
+body, independently from the 1MiB A2A HTTP response ceiling. Partial prefixes may
+be empty or whitespace-only; exact codepoint offsets and immutable metadata still
+apply. Each retained reply file atomically stores a versioned magic, bounded
+64KiB typed JSON header, and raw UTF-8 bytes with their exact length and SHA-256.
+Its maximum size is 50MiB + 64KiB + the fixed prefix, below the existing 64MiB
+file guard. Escaped control characters cannot expand the body into a 300MiB JSON
+value. Legacy bounded JSON reply files remain readable and become the new format
+on a genuine append. Corrupt, truncated, foreign or invalid UTF-8 evidence fails
+closed. A complete body and paging checkpoint are persisted before an oversized
+HTTP projection is refused; refusal never truncates or rolls back that evidence.

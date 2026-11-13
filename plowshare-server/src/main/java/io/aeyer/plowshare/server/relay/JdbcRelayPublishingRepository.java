@@ -1,7 +1,8 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
-import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.server.archive.JdbcTurnRelaySources;
+import io.aeyer.plowshare.server.archive.TurnRelaySources;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.sql.Timestamp;
@@ -16,38 +17,42 @@ public final class JdbcRelayPublishingRepository implements RelayPublishingRepos
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
   private final Relay relay;
+  private final ExecutionPublicationObserver observer;
+  private final TurnRelaySources sources;
 
   public JdbcRelayPublishingRepository(JdbcTemplate jdbc, UnitOfWork transactions, Relay relay) {
+    this(
+        jdbc,
+        transactions,
+        relay,
+        ExecutionPublicationObserver.NONE,
+        new JdbcTurnRelaySources(jdbc));
+  }
+
+  public JdbcRelayPublishingRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      ExecutionPublicationObserver observer) {
+    this(jdbc, transactions, relay, observer, new JdbcTurnRelaySources(jdbc));
+  }
+
+  public JdbcRelayPublishingRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      ExecutionPublicationObserver observer,
+      TurnRelaySources sources) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.transactions = Objects.requireNonNull(transactions);
     this.relay = Objects.requireNonNull(relay);
+    this.observer = Objects.requireNonNull(observer);
+    this.sources = Objects.requireNonNull(sources);
   }
 
   @Override
   public Optional<RelayCausation> ancestry(long project, UsageAttribution owner) {
-    // Accounting run IDs differ from job IDs. Native scripts also retain run ownership before
-    // dispatch; no model call is required to establish this provenance.
-    return jdbc
-        .query(
-            """
-        SELECT c.relay_causation::text
-        FROM conversations c JOIN inference_run_ownership o ON o.conversation_id=c.id
-        WHERE c.project_id=? AND c.id=? AND o.turn_ordinal=?
-          AND o.attribution->>'accountHandle'=? AND o.attribution->>'projectId'=?
-          AND o.attribution->'runs'->>'id'=? AND o.attribution->>'agentName'=?
-          AND o.attribution->>'status'='ATTRIBUTED'
-        """,
-            (row, index) -> RelayCausationCodec.read(row.getString(1)),
-            project,
-            owner.conversations().id(),
-            owner.turnOrdinal(),
-            owner.accountHandle(),
-            Long.toString(project),
-            owner.runs().id(),
-            owner.agentName())
-        .stream()
-        .filter(Objects::nonNull)
-        .findFirst();
+    return sources.ancestry(project, owner);
   }
 
   @Override
@@ -78,6 +83,9 @@ public final class JdbcRelayPublishingRepository implements RelayPublishingRepos
                       intent.fingerprint())
                   == 1;
           if (inserted) {
+            // Native requester allocation precedes export, joining this same rollback boundary.
+            // Retained repeats return their old receipt without minting another native request.
+            observer.beforeAppend(intent);
             var topic = new Relay.TopicKey(intent.project(), intent.request().topic());
             // A grant permits creating its exact TEXT topic with the standard initial policy, never
             // changing an existing kind or retention policy.
@@ -87,7 +95,7 @@ public final class JdbcRelayPublishingRepository implements RelayPublishingRepos
                     topic,
                     new Relay.Draft(
                         intent.id().toString(),
-                        RelayPort.publisher(owner.accountHandle()),
+                        RelayExecutionPublisher.identity(owner.accountHandle(), owner.agentName()),
                         intent.occurredAt(),
                         intent.id().toString(),
                         intent.causation().parentId(),

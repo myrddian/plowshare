@@ -153,7 +153,9 @@ public record RetentionPolicy(Duration curator, Duration submission, Duration jo
       // deliberately left unchanged -- a durable-data decision is not made on the strength of a
       // correction at the end of a slice -- and ADR 0042 records the void justification with the
       // two candidate follow-ups, one of which is to give this origin a real age.
-      case TURN, DELEGATION, ORCHESTRATION, BOARD, CONTAINED -> null;
+      // A messaging participant is a retained context across wakes; closing/archiving it is
+      // messaging lifecycle's decision, never the age of its latest unattended turn.
+      case TURN, DELEGATION, ORCHESTRATION, BOARD, MESSAGE, CONTAINED -> null;
     };
   }
 }

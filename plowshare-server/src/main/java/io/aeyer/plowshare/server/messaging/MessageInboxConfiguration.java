@@ -4,7 +4,6 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
-import io.aeyer.plowshare.server.board.MessagingProperties;
 import io.aeyer.plowshare.server.events.Dispatcher;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.relay.JdbcRelayRetirementRepository;
@@ -56,7 +55,8 @@ public class MessageInboxConfiguration {
       FiringStore firings,
       UnitOfWork work,
       Dispatcher dispatcher,
-      RelayRetirementRepository retirement) {
+      RelayRetirementRepository retirement,
+      ObjectProvider<MessageInboxWorker> workers) {
     return new RelayMessageInboxes(
         messages,
         inboxes,
@@ -67,7 +67,8 @@ public class MessageInboxConfiguration {
         work,
         dispatcher::drain,
         Instant::now,
-        retirement);
+        retirement,
+        inbox -> workers.getObject().signal(inbox));
   }
 
   @Bean(destroyMethod = "close")

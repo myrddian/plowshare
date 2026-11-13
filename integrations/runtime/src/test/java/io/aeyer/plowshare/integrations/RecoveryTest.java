@@ -1,12 +1,18 @@
 package io.aeyer.plowshare.integrations;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.protocol.Outgoing;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.time.*;
-import java.util.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -19,7 +25,6 @@ class RecoveryTest {
             "house",
             "fake",
             "home",
-            "ha-house",
             new IntegrationFixtures.Settings(),
             Map.of(),
             allowed,
@@ -30,7 +35,6 @@ class RecoveryTest {
             "other",
             "fake",
             "home",
-            "other-peer",
             new IntegrationFixtures.Settings(),
             Map.of(),
             Set.of("other"),
@@ -186,78 +190,41 @@ export default {onEvent(e,c){c.state.value=c.readStates('house',['temperature'])
   }
 
   @Test
-  void stranded_claim_stops_before_any_new_external_work() throws Exception {
-    UUID id = UUID.randomUUID();
-    var gateway =
-        new IntegrationRuntimeTest.FakeGateway() {
-          @Override
-          public Outgoing.Work outgoing(UUID request) {
-            return new Outgoing.Work(
-                id,
-                UUID.randomUUID(),
-                "ha-house",
-                "home",
-                null,
-                io.aeyer.plowshare.protocol.ExternalMessage.text("fixture"),
-                "DISPATCHED",
-                false,
-                null,
-                null,
-                null,
-                null,
-                1,
-                Instant.now());
-          }
-        };
-    var house = new IntegrationRuntimeTest.FakeAdapter();
-    try (var journal = new Journal(directory);
-        var runtime =
-            runtime(
-                config(null, Set.of("house")),
-                journal,
-                gateway,
-                house,
-                new IntegrationRuntimeTest.FakeAdapter())) {
-      journal.write(
-          "outgoing:" + id,
-          Json.object()
-              .put("kind", "outgoing")
-              .put("revision", 1)
-              .put("binding", "house")
-              .put("status", "DISPATCHED"));
-      runtime.start();
-      assertThrows(IOException.class, runtime::tick);
-      assertEquals(0, house.actions);
-      assertEquals(0, gateway.starts);
-      assertEquals("DISPATCHED", journal.record("outgoing:" + id).path("status").asText());
+  void unfinished_legacy_claims_fence_startup_before_any_adapter_or_gateway_effect()
+      throws Exception {
+    for (String phase : List.of("DISPATCHED", "REPORTING")) {
+      UUID id = UUID.randomUUID();
+      var gateway = new IntegrationRuntimeTest.FakeGateway();
+      var house = new IntegrationRuntimeTest.FakeAdapter();
+      try (var journal = new Journal(directory.resolve(phase));
+          var runtime =
+              runtime(
+                  config(null, Set.of("house")),
+                  journal,
+                  gateway,
+                  house,
+                  new IntegrationRuntimeTest.FakeAdapter())) {
+        journal.write(
+            "outgoing:" + id,
+            Json.object()
+                .put("kind", "outgoing")
+                .put("revision", 1)
+                .put("binding", "house")
+                .put("status", phase));
+        assertThrows(IOException.class, runtime::start);
+        assertNull(house.listener);
+        assertEquals(0, house.actions);
+        assertEquals(0, gateway.starts);
+        assertEquals(phase, journal.record("outgoing:" + id).path("status").asText());
+      }
     }
   }
 
   @Test
-  void reported_claim_recovery_accepts_only_matching_durable_terminal_result() throws Exception {
+  void completed_legacy_receipts_remain_readable_without_obsolete_sdk_operations()
+      throws Exception {
     UUID id = UUID.randomUUID();
-    var gateway =
-        new IntegrationRuntimeTest.FakeGateway() {
-          @Override
-          public Outgoing.Work outgoing(UUID request) {
-            return new Outgoing.Work(
-                id,
-                UUID.randomUUID(),
-                "ha-house",
-                "home",
-                null,
-                io.aeyer.plowshare.protocol.ExternalMessage.text("fixture"),
-                "COMPLETED",
-                false,
-                null,
-                null,
-                new io.aeyer.plowshare.protocol.ExternalResult.IntegrationResult(
-                    null, true, null, null, null),
-                null,
-                2,
-                Instant.now());
-          }
-        };
+    var gateway = new IntegrationRuntimeTest.FakeGateway();
     try (var journal = new Journal(directory);
         var runtime =
             runtime(
@@ -271,13 +238,14 @@ export default {onEvent(e,c){c.state.value=c.readStates('house',['temperature'])
               .put("kind", "outgoing")
               .put("revision", 1)
               .put("binding", "house")
-              .put("status", "REPORTING")
+              .put("status", "DONE")
               .put("state", "COMPLETED");
       record.set("result", Json.object().put("acknowledged", true));
       journal.write("outgoing:" + id, record);
       runtime.start();
       runtime.tick();
       assertEquals("DONE", journal.record("outgoing:" + id).path("status").asText());
+      assertTrue(journal.record("outgoing:" + id).path("result").path("acknowledged").asBoolean());
     }
   }
 

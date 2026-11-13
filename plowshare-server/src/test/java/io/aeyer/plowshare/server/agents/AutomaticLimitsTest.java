@@ -56,7 +56,7 @@ class AutomaticLimitsTest {
     var limits =
         new AutomaticLimits(
             (p, s) -> enabled(true),
-            id -> Optional.of(owner("message", Origin.BOARD, null, null)),
+            id -> Optional.of(owner("message", Origin.MESSAGE, null, null)),
             (id, total, spent) -> fail("Message renewal must not grant the conversation"));
     assertTrue(limits.budget("message", budget, definition, null, log));
     assertEquals(List.of(4), grants);

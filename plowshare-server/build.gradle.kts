@@ -25,7 +25,6 @@ dependencies {
     implementation("com.twelvemonkeys.imageio:imageio-webp:$twelveMonkeysVersion")
     // Only the tokenizer runtime; model files are explicit local, checksum-pinned configuration.
     implementation("ai.djl.huggingface:tokenizers:$huggingFaceTokenizersVersion")
-    testImplementation(project(":plowshare-a2a"))
     implementation(project(":plowshare-protocol"))
 
     // Syntax-only code navigation on the server's Java 21 runtime. These JNI

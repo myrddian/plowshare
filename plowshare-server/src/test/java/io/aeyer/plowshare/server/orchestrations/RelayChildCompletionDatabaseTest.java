@@ -15,7 +15,6 @@ import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.DurableRelay;
-import io.aeyer.plowshare.server.relay.JdbcChildCompletions;
 import io.aeyer.plowshare.server.relay.JdbcRelayConsumerRepository;
 import io.aeyer.plowshare.server.relay.JdbcRelayDeliveryRepository;
 import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;

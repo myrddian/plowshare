@@ -420,32 +420,6 @@ for (const [length, valid] of [[1024,true],[1025,false]]) {
   input('tool.scope.worker.consume',{...hostWorker,consumption:{...hostConsumption,topic}},valid);
   input('tool.scope.worker.ack',{...hostWorker,acknowledgement:{...hostAck,topic}},valid);
 }
-const message = { parts: [{ text: 'hello' }] };
-input('outgoing.send', { requestId: receipt, peer: 'fixture', message }, true);
-for (const requestId of ['bad', ''])
-  input('outgoing.send', { requestId, peer: 'fixture', message }, false);
-for (const parts of [
-  [],
-  [{ text: '\0bad' }],
-  [{ text: 3 }],
-  [{ text: 'hi', raw: 'AAAA' }],
-  [{ raw: 'AB==' }],
-  [{ url: 'https://user:secret@example.invalid/a' }],
-  [{ text: 'ok', filename: '../x' }],
-])
-  input(
-    'outgoing.send',
-    { requestId: receipt, peer: 'fixture', message: { parts } },
-    false,
-  );
-input('outgoing.claim', { peers: ['fixture'] }, true);
-input('outgoing.claim', { peers: [] }, false);
-input('outgoing.claim', { peers: ['fixture', 'fixture'] }, false);
-input(
-  'outgoing.report',
-  { id: receipt, claim: 'fixture', revision: -1, state: 'WORKING' },
-  false,
-);
 result('project.list', [], true);
 const project = {
   name: 'fixture',
@@ -468,8 +442,6 @@ result('information.search', informationSearch, true);
 result('information.search', [{ ...informationSearch[0], distance: 'near' }], false);
 result('information.search', [{ ...informationSearch[0], chunk: { ...informationSearch[0].chunk, placement: { sectionId: 'partial' } } }], false);
 result('information.search', { query: 'question', document: null, limit: 10, hits: [] }, false);
-result('outgoing.claim', { work: null, action: null }, true);
-result('outgoing.claim', { work: null, action: 'send' }, false);
 push({ kind: 'inbox.changed', unread: 1, future: 1 }, true);
 push({ kind: 'information.invalidated' }, true);
 push({ kind: 'information.invalidated', future: 'ignored' }, true);

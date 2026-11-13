@@ -10,7 +10,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.protocol.Incoming;
 import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.Callers;
@@ -20,6 +19,7 @@ import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageIngress;
 import io.aeyer.plowshare.server.messaging.MessageService;
 import java.util.Optional;
 import org.junit.jupiter.api.Assertions;
@@ -261,7 +261,7 @@ class AgentRunnerTest {
             "daily", "project", "server", "schedules/daily.json", "daily", work, "active", null);
     when(definitions.managed("daily", "owner")).thenReturn(Optional.of(file));
     when(definitions.sourceOf("daily", "owner")).thenReturn(Optional.of(source));
-    var task = mock(Incoming.Task.class);
+    var task = mock(MessageIngress.Task.class);
     when(task.message()).thenReturn("bdm_delivery");
     when(messages.receiveScheduled("owner", "project", "daily", "firing", work)).thenReturn(task);
     var firing = mock(FiringRecord.class);

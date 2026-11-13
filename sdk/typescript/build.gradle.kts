@@ -11,6 +11,8 @@ fun Exec.clientSources() {
     dependsOn(pnpmInstall)
     inputs.dir("scripts").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("scripts/build-javascript-sdk.mjs"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files("package.json", "pnpm-lock.yaml", "tsconfig.json", "tsconfig.base.json")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
@@ -26,13 +28,15 @@ val clientBuild by tasks.registering(Exec::class) {
     outputs.dir("build/jobs-tests")
     outputs.dir("build/operations")
     outputs.dir("build/operations-tests")
-    commandLine("node", "node_modules/typescript/bin/tsc", "-b", "--force")
+    commandLine("node", rootProject.file("scripts/build-javascript-sdk.mjs"), "typescript")
 }
 
 val clientTest by tasks.registering(Exec::class) {
     group = "verification"
     clientSources()
     dependsOn(clientBuild)
+    inputs.file(rootProject.file("scripts/build-javascript-sdk.test.mjs"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(rootProject.file("test-support/contracts/tool-schemas.json"),
         rootProject.file("test-support/contracts/relay-tools.json"))
         .withPathSensitivity(PathSensitivity.RELATIVE)

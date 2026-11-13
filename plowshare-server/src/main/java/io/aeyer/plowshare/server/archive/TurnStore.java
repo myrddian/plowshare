@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.archive;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
+import io.aeyer.plowshare.server.relay.RelayCausationCodec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -146,6 +148,27 @@ public final class TurnStore implements TurnJournal {
         "UPDATE conversations SET turn_sequence=turn_sequence+1 WHERE id=? AND turn_sequence<2147483647 RETURNING turn_sequence",
         Integer.class,
         ConversationStore.named(conversation));
+  }
+
+  @Override
+  public int reserve(String conversation, RelayCausation causation) {
+    if (causation == null) return reserve(conversation);
+    String encoded = RelayCausationCodec.write(causation);
+    // One SQL statement makes allocation and its trusted source atomic, including outside an
+    // enclosing application transaction. A failed source write cannot leave an unbound paid turn.
+    return jdbc.queryForObject(
+        """
+        WITH reserved AS (
+          UPDATE conversations SET turn_sequence=turn_sequence+1
+          WHERE id=? AND turn_sequence<2147483647 RETURNING id,turn_sequence
+        ), retained AS (
+          INSERT INTO turn_relay_sources(conversation_id,turn_ordinal,relay_causation)
+          SELECT id,turn_sequence,?::jsonb FROM reserved RETURNING turn_ordinal
+        ) SELECT turn_ordinal FROM retained
+        """,
+        Integer.class,
+        ConversationStore.named(conversation),
+        encoded);
   }
 
   @Override

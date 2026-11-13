@@ -3,7 +3,6 @@ package io.aeyer.plowshare.server.messaging;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aeyer.plowshare.protocol.Incoming;
 import io.aeyer.plowshare.protocol.MemoryIds;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Outcome;
@@ -12,6 +11,7 @@ import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.messaging.MessageService.Instance;
 import io.aeyer.plowshare.server.messaging.MessageService.Route;
+import io.aeyer.plowshare.server.relay.RelayCausationCodec;
 import java.io.IOException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -54,7 +54,7 @@ public final class JdbcMessagingRepository implements MessagingRepository {
       throw new IllegalArgumentException("invalid messaging page");
   }
 
-  private static String json(Incoming.Source value) {
+  private static String json(MessageIngress.Source value) {
     try {
       return JSON.writeValueAsString(value);
     } catch (IOException invalid) {
@@ -62,9 +62,10 @@ public final class JdbcMessagingRepository implements MessagingRepository {
     }
   }
 
-  private static Incoming.Source source(String value) {
+  private static MessageIngress.Source source(String value) {
+    if (value == null) return null;
     try {
-      return JSON.readValue(value, Incoming.Source.class);
+      return JSON.readValue(value, MessageIngress.Source.class);
     } catch (IOException invalid) {
       throw new IllegalStateException("invalid persisted ingress provenance");
     }
@@ -75,7 +76,7 @@ public final class JdbcMessagingRepository implements MessagingRepository {
     return jdbc
         .query(
             "SELECT message, sender, recipient, reply_to, reply_expected, final,"
-                + " generated, ending, handled_at IS NOT NULL FROM message_routes WHERE message = ?",
+                + " generated, ending, handled_at IS NOT NULL,relay_causation FROM message_routes WHERE message = ?",
             (rs, n) ->
                 new Route(
                     rs.getString(1),
@@ -86,7 +87,8 @@ public final class JdbcMessagingRepository implements MessagingRepository {
                     rs.getBoolean(6),
                     rs.getBoolean(7),
                     rs.getString(8),
-                    rs.getBoolean(9)),
+                    rs.getBoolean(9),
+                    RelayCausationCodec.read(rs.getString(10))),
             message)
         .stream()
         .findFirst();
@@ -104,7 +106,7 @@ public final class JdbcMessagingRepository implements MessagingRepository {
                   connection.prepareStatement(
                       """
           SELECT r.message,r.sender,r.recipient,r.reply_to,r.reply_expected,r.final,r.generated,
-                 r.ending,r.handled_at,CASE WHEN r.message=ANY(?) THEN m.body END AS inline_body,
+                 r.ending,r.handled_at,r.relay_causation,CASE WHEN r.message=ANY(?) THEN m.body END AS inline_body,
                  i.account,i.project,i.agent,i.conversation,i.lifetime,i.active
           FROM message_routes r JOIN message_records m ON m.id=r.message
           JOIN message_instances i ON i.id=r.recipient WHERE r.message=ANY(?)
@@ -134,7 +136,8 @@ public final class JdbcMessagingRepository implements MessagingRepository {
                         row.getBoolean("final"),
                         row.getBoolean("generated"),
                         row.getString("ending"),
-                        row.getTimestamp("handled_at") != null),
+                        row.getTimestamp("handled_at") != null,
+                        RelayCausationCodec.read(row.getString("relay_causation"))),
                     new Instance(
                         row.getString("recipient"),
                         row.getString("account"),
@@ -218,14 +221,19 @@ public final class JdbcMessagingRepository implements MessagingRepository {
   }
 
   public void insertExternalContext(
-      UUID context, String account, Incoming.Receive request, String sender, String recipient) {
+      UUID context,
+      String account,
+      MessageIngress.Request request,
+      String sender,
+      String recipient) {
 
     changed(
         jdbc.update(
-            "INSERT INTO message_external_contexts(id,account,project,client,agent,sender,recipient) VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO message_external_contexts(id,account,project,channel,client,agent,sender,recipient) VALUES(?,?,?,?,?,?,?,?)",
             context,
             account,
             request.project(),
+            request.channel(),
             request.client(),
             request.agent(),
             sender,
@@ -302,8 +310,8 @@ public final class JdbcMessagingRepository implements MessagingRepository {
         jdbc.update(
             """
             INSERT INTO message_routes (message,sender,recipient,reply_to,reply_expected,final,
-              generated,ending,call_id,send_fingerprint,allowance_id,runnable)
-            SELECT ?,?,?,?,?,?,?,?,?,?,?,? FROM message_records b
+              generated,ending,call_id,send_fingerprint,allowance_id,runnable,relay_causation)
+            SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb FROM message_records b
             JOIN message_instances s ON s.id=? JOIN message_instances d ON d.id=b.recipient
             WHERE b.id=? AND b.recipient=? AND s.account=d.account
               AND (CAST(? AS text) IS NULL OR EXISTS(SELECT 1 FROM message_routes original
@@ -321,6 +329,7 @@ public final class JdbcMessagingRepository implements MessagingRepository {
             fingerprint,
             allowance.id().value(),
             runnable,
+            RelayCausationCodec.write(route.causation()),
             route.sender(),
             route.message(),
             route.recipient(),
@@ -618,7 +627,8 @@ public final class JdbcMessagingRepository implements MessagingRepository {
                         row.getBoolean("final"),
                         row.getBoolean("generated"),
                         row.getString("ending"),
-                        row.getTimestamp("handled_at") != null),
+                        row.getTimestamp("handled_at") != null,
+                        RelayCausationCodec.read(row.getString("relay_causation"))),
                     deliveryInstance(row, "sender"),
                     deliveryInstance(row, "recipient"),
                     new DeliveryState(
@@ -827,10 +837,10 @@ public final class JdbcMessagingRepository implements MessagingRepository {
         message);
   }
 
-  public Optional<ExternalPrior> priorExternal(String account, Incoming.Receive request) {
+  public Optional<ExternalPrior> priorExternal(String account, MessageIngress.Request request) {
     return jdbc
         .query(
-            "SELECT t.id, t.request_context, t.body, t.command, c.agent, t.source = CAST(? AS jsonb) AS matches FROM message_external_tasks t JOIN message_external_contexts c ON c.id=t.context WHERE t.account=? AND t.project=? AND t.client=? AND t.request_id=?",
+            "SELECT t.id, t.request_context, t.body, t.command, c.agent, t.native_source = CAST(? AS jsonb) AS matches FROM message_external_tasks t JOIN message_external_contexts c ON c.id=t.context WHERE t.account=? AND t.project=? AND t.channel=? AND t.client=? AND t.request_id=?",
             (row, n) ->
                 new ExternalPrior(
                     row.getObject(1, UUID.class),
@@ -842,6 +852,7 @@ public final class JdbcMessagingRepository implements MessagingRepository {
             json(request.source()),
             account,
             request.project(),
+            request.channel(),
             request.client(),
             request.requestId())
         .stream()
@@ -849,14 +860,15 @@ public final class JdbcMessagingRepository implements MessagingRepository {
   }
 
   public Optional<ExternalContext> externalContext(
-      UUID context, String account, Incoming.Receive request) {
+      UUID context, String account, MessageIngress.Request request) {
     return jdbc
         .query(
-            "SELECT sender,recipient FROM message_external_contexts WHERE id=? AND account=? AND project=? AND client=? AND agent=?",
+            "SELECT sender,recipient FROM message_external_contexts WHERE id=? AND account=? AND project=? AND channel=? AND client=? AND agent=?",
             (row, n) -> new ExternalContext(row.getString(1), row.getString(2)),
             context,
             account,
             request.project(),
+            request.channel(),
             request.client(),
             request.agent())
         .stream()
@@ -864,14 +876,15 @@ public final class JdbcMessagingRepository implements MessagingRepository {
   }
 
   public void insertExternalTask(
-      UUID id, UUID context, String account, Incoming.Receive request, String message) {
+      UUID id, UUID context, String account, MessageIngress.Request request, String message) {
     changed(
         jdbc.update(
-            "INSERT INTO message_external_tasks(id,context,account,project,client,request_id,request_context,body,command,source,message) VALUES(?,?,?,?,?,?,?,?,?,CAST(? AS jsonb),?)",
+            "INSERT INTO message_external_tasks(id,context,account,project,channel,client,request_id,request_context,body,command,source,native_source,message) VALUES(?,?,?,?,?,?,?,?,?,?,'null'::jsonb,CAST(? AS jsonb),?)",
             id,
             context,
             account,
             request.project(),
+            request.channel(),
             request.client(),
             request.requestId(),
             request.context(),
@@ -882,20 +895,35 @@ public final class JdbcMessagingRepository implements MessagingRepository {
   }
 
   public Optional<ExternalTask> externalTask(
-      String account, String project, String client, UUID id) {
+      String account, String project, String channel, String client, UUID id) {
+    return externalTask(account, project, channel, client, id, false);
+  }
+
+  @Override
+  public Optional<ExternalTask> lockExternalTask(
+      String account, String project, String channel, String client, UUID id) {
+    return externalTask(account, project, channel, client, id, true);
+  }
+
+  private Optional<ExternalTask> externalTask(
+      String account, String project, String channel, String client, UUID id, boolean lock) {
     return jdbc
         .query(
-            "SELECT t.context,c.agent,t.message,t.source,t.created_at FROM message_external_tasks t JOIN message_external_contexts c ON c.id=t.context WHERE t.id=? AND t.account=? AND t.project=? AND t.client=?",
+            "SELECT t.context,t.request_id,t.revision,c.agent,t.message,t.native_source,t.created_at FROM message_external_tasks t JOIN message_external_contexts c ON c.id=t.context WHERE t.id=? AND t.account=? AND t.project=? AND t.channel=? AND t.client=?"
+                + (lock ? " FOR UPDATE OF t" : ""),
             (row, n) ->
                 new ExternalTask(
                     row.getObject(1, UUID.class),
-                    row.getString(2),
-                    row.getString(3),
-                    source(row.getString(4)),
-                    row.getTimestamp(5).toInstant()),
+                    row.getObject(2, UUID.class),
+                    row.getLong(3),
+                    row.getString(4),
+                    row.getString(5),
+                    source(row.getString(6)),
+                    row.getTimestamp(7).toInstant()),
             id,
             account,
             project,
+            channel,
             client)
         .stream()
         .findFirst();

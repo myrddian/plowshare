@@ -5,8 +5,6 @@ import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
-import io.aeyer.plowshare.server.agents.JobRuntime;
-import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.RunExtras;
@@ -14,7 +12,6 @@ import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
-import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
@@ -23,60 +20,36 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.delivery.PersonDelivery;
 import io.aeyer.plowshare.server.events.Dispatcher;
-import io.aeyer.plowshare.server.events.FiringRecord;
+import io.aeyer.plowshare.server.events.EventPayload;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.faults.CallerFault;
-import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
-import io.aeyer.plowshare.server.messaging.MessageInboxes;
-import io.aeyer.plowshare.server.messaging.MessageService;
-import io.aeyer.plowshare.server.messaging.MessagingRepository;
-import io.aeyer.plowshare.server.messaging.RelayMessaging;
 import io.aeyer.plowshare.server.swarm.DispatcherPools;
+import io.aeyer.plowshare.server.swarm.RunShareProvider;
 import io.aeyer.plowshare.server.swarm.SwarmProperties;
 import io.aeyer.plowshare.server.swarm.SwarmScheduler;
-import io.aeyer.plowshare.server.swarm.SwarmScheduling;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * The board — spec 2026-09-29, the project board and the swarm, step 2. Wires the store, the swarm,
- * the pot and the service; hands the dispatcher its wakes; and switches the swarm scheduler on for
- * seat runs, which step 1 built and left unwired.
+ * Composes the public forum, participant seats, topic allowances and person deliveries.
  *
- * <p><b>One clock kind for the store, the board and the seat runner.</b> All three are given {@code
- * Instant::now}. A seat runner decides a wake was silent by asking the store for messages posted
- * since the wake began, so the instant it records a wake's start and the instant the board stamps a
- * message's {@code posted_at} must come from clocks that can be compared; a fixed or offset clock
- * on any one of the three would count every wake silent, or none.
- *
- * <p><b>The seams are set inside the {@code @Bean} methods, not after the context is up.</b> {@code
- * EventsConfig.eventsAtBoot} drains every waiting firing target on {@code ApplicationReadyEvent},
- * and a wake left queued by the last run is among them; were the dispatcher handed its {@link
- * SeatRunner} any later than the runner's own construction, that drain would find {@code
- * Wakes.NONE} and refuse a wake that had a runner all along. Singletons are built before the ready
- * event, so setting the seam here is always first. {@link JobRuntime#useScheduling} is set the same
- * way for the same reason — a seat run started by that drain must already be scheduled.
- *
- * <p><b>No bean cycle.</b> Nothing below the board — the dispatcher, {@code Turn}, {@code Callers},
- * the job runtime, the scheduler — asks for any bean here, so every collaborator is taken directly.
- * {@link LogStages} is asked through a provider only because a context without the log stages (a
- * slice test) is a board with {@link LogStages#NONE}, as every other holder of that seam is.
+ * <p>Store, board and seat runner use the same wall-clock kind so wake silence and retained message
+ * times remain comparable. Wake ownership and recovery are registered before application-ready
+ * draining. Messaging registers its own typed wake family independently.
  */
 @Configuration
-@EnableConfigurationProperties(MessagingProperties.class)
 public class BoardConfig {
 
   private static final Logger log = LoggerFactory.getLogger(BoardConfig.class);
@@ -107,168 +80,6 @@ public class BoardConfig {
   @Bean
   public BoardPot boardPot(BoardStore store) {
     return new BoardPot(store);
-  }
-
-  @Bean
-  public MessageService messageService(
-      MessagingRepository repository,
-      AllowanceRepository allowances,
-      MessageInboxes inboxes,
-      ConversationStore conversations,
-      FiringStore firings,
-      UnitOfWork work,
-      Turn turn,
-      Callers callers,
-      Dispatcher dispatcher,
-      ObjectProvider<InformationJobs> information,
-      ObjectProvider<LogStages> logStages,
-      RunApprovalStore approvals,
-      JobStore jobs,
-      MessagingProperties messagingProperties,
-      ProjectMessageRouting routing) {
-    RelayMessaging messaging =
-        new RelayMessaging(
-            repository,
-            allowances,
-            conversations,
-            firings,
-            inboxes,
-            work,
-            new MessageService.Voice() {
-              @Override
-              public String speakFrom(
-                  MessageService.Instance instance,
-                  AgentDefinition definition,
-                  String utterance,
-                  Budget lease,
-                  TurnCap cap,
-                  Consumer<Outcome> ended,
-                  Speaker source,
-                  boolean command) {
-                return turn.speakToMessage(
-                    instance.conversation(),
-                    definition,
-                    utterance,
-                    lease,
-                    cap,
-                    source,
-                    ended,
-                    command,
-                    instance.account());
-              }
-
-              public boolean busy(MessageService.Instance instance) {
-                return turn.isMessageSpeaking(instance.conversation(), instance.agent());
-              }
-
-              public boolean busy(String conversation) {
-                return turn.isSpeaking(conversation);
-              }
-
-              public String speak(
-                  MessageService.Instance instance,
-                  AgentDefinition definition,
-                  String utterance,
-                  Budget lease,
-                  TurnCap cap,
-                  Consumer<Outcome> ended) {
-                return turn.speakToMessage(
-                    instance.conversation(),
-                    definition,
-                    utterance,
-                    lease,
-                    cap,
-                    Speaker.harness(),
-                    ended,
-                    false,
-                    instance.account());
-              }
-
-              public String speakCommand(
-                  MessageService.Instance instance,
-                  AgentDefinition definition,
-                  String utterance,
-                  Budget lease,
-                  TurnCap cap,
-                  Consumer<Outcome> ended) {
-                return turn.speakToMessage(
-                    instance.conversation(),
-                    definition,
-                    utterance,
-                    lease,
-                    cap,
-                    Speaker.harness(),
-                    ended,
-                    true,
-                    instance.account());
-              }
-
-              public String continueApproved(
-                  MessageService.Instance instance,
-                  AgentDefinition definition,
-                  String utterance,
-                  String approval,
-                  Budget lease,
-                  TurnCap cap,
-                  Consumer<Outcome> ended) {
-                return turn.speakToMessage(
-                    instance.conversation(),
-                    definition,
-                    utterance,
-                    lease,
-                    cap,
-                    Speaker.approval(approval),
-                    ended,
-                    false,
-                    instance.account());
-              }
-
-              public String resumeDelegate(
-                  MessageService.Instance instance,
-                  String child,
-                  AgentDefinition definition,
-                  String utterance,
-                  String approval,
-                  Budget lease,
-                  Consumer<Outcome> ended) {
-                String parent = conversations.find(child).orElseThrow().parentId();
-                return turn.speakToDelegate(
-                    child,
-                    parent,
-                    definition,
-                    utterance,
-                    instance.account(),
-                    lease,
-                    Speaker.approval(approval),
-                    ended);
-              }
-            },
-            (name, project) -> callers.readAgent(name, callers.callerFor(project, null)),
-            dispatcher::drain,
-            Instant::now);
-    messaging.useApprovals(approvals);
-    messaging.useLimits(messagingProperties);
-    messaging.useRouting(routing);
-    messaging.useCancellation(jobs::cancel);
-    messaging.useLogVisibility(
-        (conversation, account) -> {
-          var inputs = information.getIfAvailable();
-          return inputs == null || inputs.logAllowed(conversation, account);
-        });
-    LogStages stages = logStages.getIfAvailable();
-    if (stages != null) messaging.useLogStages(stages);
-    messaging.useLineage(
-        (sender, recipient) -> {
-          var inputs = information.getIfAvailable();
-          if (inputs != null)
-            inputs.inherit(sender.conversation(), recipient.conversation(), sender.account());
-        });
-    return messaging;
-  }
-
-  @Bean(destroyMethod = "close")
-  public MessageMaintenance messageMaintenance(MessageService messaging) {
-    return new MessageMaintenance(messaging);
   }
 
   /**
@@ -341,8 +152,7 @@ public class BoardConfig {
       Callers callers,
       Dispatcher dispatcher,
       SwarmProperties properties,
-      LlmDispatcher llm,
-      MessageService messaging) {
+      LlmDispatcher llm) {
     if (properties.getWakeCap() < 1) {
       throw new IllegalStateException(
           "plowshare.swarm.wake-cap is "
@@ -378,21 +188,7 @@ public class BoardConfig {
             Instant::now,
             dispatcher::drain,
             new DispatcherPools(llm));
-    dispatcher.useWakes(
-        new Dispatcher.Wakes() {
-          public boolean busy(FiringRecord wake) {
-            return messaging.owns(wake) ? messaging.busy(wake) : runner.busy(wake);
-          }
-
-          public String start(FiringRecord wake, BiConsumer<String, Outcome> ended) {
-            return messaging.owns(wake) ? messaging.start(wake, ended) : runner.start(wake, ended);
-          }
-
-          public void settled(FiringRecord wake) {
-            if (messaging.owns(wake)) messaging.settled(wake);
-            else runner.settled(wake);
-          }
-        });
+    dispatcher.registerWakes("board", wake -> wake.data() instanceof EventPayload.Seat, runner);
     return runner;
   }
 
@@ -418,28 +214,14 @@ public class BoardConfig {
     return delegates;
   }
 
-  /** The swarm scheduler, switched on for seat runs — see this class's javadoc for why here. */
+  /** Board shares compose with other lifecycle owners in the scheduler configuration. */
   @Bean
-  public SwarmScheduling swarmScheduling(
-      SwarmScheduler scheduler,
-      BoardStore store,
-      JobRuntime runtime,
-      ConversationStore conversations,
-      LlmDispatcher llm,
-      MessageService messaging) {
-    DispatcherPools pools = new DispatcherPools(llm);
-    SwarmScheduling scheduling =
-        new SwarmScheduling(
-            scheduler,
-            context -> {
-              Optional<SwarmScheduler.Share> direct = messaging.share(context);
-              if (direct.isPresent()) return direct;
-              return shareOf(store, conversations).apply(context);
-            },
-            pools,
-            context -> messaging.share(context).isPresent());
-    runtime.useScheduling(scheduling);
-    return scheduling;
+  @Order(20)
+  public RunShareProvider boardShares(BoardStore store, ConversationStore conversations) {
+    return context ->
+        shareOf(store, conversations)
+            .apply(context)
+            .map(share -> new RunShareProvider.Selection(share, false));
   }
 
   /**
@@ -503,8 +285,8 @@ public class BoardConfig {
 
   @Bean
   public BoardRunExtras boardRunExtras(
-      BoardStore store, Board board, ConversationStore conversations, MessageService messaging) {
-    return new BoardRunExtras(store, board, conversations, messaging);
+      BoardStore store, Board board, ConversationStore conversations) {
+    return new BoardRunExtras(store, board, conversations);
   }
 
   @Bean
@@ -559,12 +341,11 @@ public class BoardConfig {
       Board board,
       BoardDelivery delivery,
       SwarmProperties properties,
-      Dispatcher dispatcher,
-      MessageService messaging) {
+      Dispatcher dispatcher) {
     return () ->
-        dispatcher.useWakeRecovery(
+        dispatcher.registerWakeRecovery(
+            "board",
             () -> {
-              messaging.recover();
               if (properties.isRecoverAtBoot()) {
                 recover(store, board, delivery);
               } else {

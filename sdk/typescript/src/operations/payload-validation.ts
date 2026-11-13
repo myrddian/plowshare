@@ -406,13 +406,6 @@ export const SHAPES: Record<
   ],
   'admin.service.token.rotate': [['handle', 'id'], ['expiresInDays']],
   'admin.service.token.revoke': [['handle', 'id'], []],
-  'outgoing.send': [
-    ['requestId', 'peer', 'message'],
-    ['project', 'conversation'],
-  ],
-  'outgoing.status': [['id'], []],
-  'outgoing.cancel': [['id'], []],
-  'outgoing.peers': [[], ['project']],
   'usage.conversation': [
     ['conversation'],
     [
@@ -1251,7 +1244,6 @@ export function commandProblem(
     type === 'board.open' ||
     type === 'board.close' ||
     type === 'board.retry' ||
-    type === 'outgoing.send' ||
     type === 'message.instance.open'
   ) {
     if (
@@ -1437,13 +1429,6 @@ export function commandProblem(
     return schedulePayloadProblem(type, body);
   if (type.startsWith('information.'))
     return informationPayloadProblem(type, body, required);
-  if (
-    type === 'outgoing.send' &&
-    (body['message'] === null ||
-      typeof body['message'] !== 'object' ||
-      isList(body['message']))
-  )
-    return 'message must be a JSON object';
   if (type === 'web.search')
     for (const key of ['pageSize', 'max', 'page'])
       if (!(key in body))
@@ -1455,7 +1440,6 @@ export function commandProblem(
       key !== 'scopes' &&
       key !== 'applicationRoot' &&
       key !== 'writableAreas' &&
-      !(type === 'outgoing.send' && key === 'message') &&
       (typeof body[key] !== 'string' || body[key].trim() === '')
     )
       return `${type} needs ${key} as nonblank text`;

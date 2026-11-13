@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.board;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aeyer.plowshare.server.faults.CallerFault;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
@@ -53,8 +52,7 @@ public class JdbcBoardPostRepository implements BoardPostRepository {
             account,
             request);
     if (receipts.isEmpty()) return Optional.empty();
-    if (!receipts.getFirst().matches())
-      throw new CallerFault("This requestId was already used for a different board action.");
+    if (!receipts.getFirst().matches()) throw new BoardPostRepository.Conflict();
     return Optional.of(receipts.getFirst().message());
   }
 

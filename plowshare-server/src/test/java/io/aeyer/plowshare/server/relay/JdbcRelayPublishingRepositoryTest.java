@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.relay;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -99,6 +100,7 @@ class JdbcRelayPublishingRepositoryTest {
         new RelayPublishingRepository.Intent(
             UUID.randomUUID(),
             project,
+            "publishing-fixture",
             owner,
             "call",
             new RelayPublishing.Request("reports.input", "  retained text\n"),
@@ -125,9 +127,52 @@ class JdbcRelayPublishingRepositoryTest {
                 new Relay.TopicKey(intent.project(), intent.request().topic()),
                 intent.id().toString())
             .orElseThrow();
-    assertEquals(RelayPort.publisher("alice"), published.event().publisher());
+    assertEquals(
+        RelayExecutionPublisher.identity("alice", "writer"), published.event().publisher());
     assertEquals(intent.causation(), published.event().causation());
     assertEquals(intent.request().text(), ((RelayPayload.Text) published.event().payload()).text());
+  }
+
+  @Test
+  void historicalSdkExecutionProvenanceRequiresAllRetainedReceiptCoordinates() {
+    repository.publish(intent);
+    var topic = new Relay.TopicKey(intent.project(), intent.request().topic());
+    var retained = relay.retained(topic, intent.id().toString()).orElseThrow();
+    var legacyDraft =
+        new Relay.Draft(
+            retained.event().eventId(),
+            RelayPort.publisher("alice"),
+            retained.event().occurredAt(),
+            retained.event().correlationId(),
+            retained.event().causationId(),
+            retained.event().payload(),
+            retained.event().causation());
+    var legacy =
+        new Relay.Publication(topic, retained.position(), retained.publishedAt(), legacyDraft);
+    var ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
+    assertTrue(ports.executionPublication(legacy));
+    assertFalse(
+        ports.executionPublication(
+            new Relay.Publication(
+                new Relay.TopicKey(topic.projectId() + 1, topic.name()),
+                legacy.position(),
+                legacy.publishedAt(),
+                legacyDraft)));
+    assertFalse(
+        ports.executionPublication(
+            new Relay.Publication(
+                new Relay.TopicKey(topic.projectId(), "another.topic"),
+                legacy.position(),
+                legacy.publishedAt(),
+                legacyDraft)));
+    assertFalse(
+        ports.executionPublication(
+            new Relay.Publication(
+                topic, legacy.position() + 1, legacy.publishedAt(), legacyDraft)));
+    assertFalse(
+        ports.executionPublication(
+            new Relay.Publication(
+                topic, legacy.position(), legacy.publishedAt().plusSeconds(1), legacyDraft)));
   }
 
   @Test
@@ -144,6 +189,7 @@ class JdbcRelayPublishingRepositoryTest {
         new RelayPublishingRepository.Intent(
             intent.id(),
             intent.project(),
+            intent.projectName(),
             intent.owner(),
             intent.call(),
             new RelayPublishing.Request("other.topic", "changed"),
@@ -183,6 +229,7 @@ class JdbcRelayPublishingRepositoryTest {
         new RelayPublishingRepository.Intent(
             UUID.randomUUID(),
             intent.project(),
+            intent.projectName(),
             intent.owner(),
             "other-call",
             new RelayPublishing.Request(wrong.name(), "text"),
@@ -255,6 +302,7 @@ class JdbcRelayPublishingRepositoryTest {
         new RelayPublishingRepository.Intent(
             UUID.randomUUID(),
             intent.project(),
+            intent.projectName(),
             intent.owner(),
             "next-call",
             new RelayPublishing.Request("other.topic", "éé"),

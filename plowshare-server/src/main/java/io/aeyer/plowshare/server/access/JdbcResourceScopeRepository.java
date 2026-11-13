@@ -41,13 +41,8 @@ public class JdbcResourceScopeRepository implements ResourceScopeRepository {
               "SELECT COALESCE(t.project,p.name,'personal:'||encode(convert_to(t.defined_by,'UTF8'),'hex')) FROM triggers t LEFT JOIN conversations c ON c.id=t.conversation LEFT JOIN projects p ON p.id=c.project_id WHERE t.name=?";
           case APPROVAL ->
               "SELECT p.name FROM run_approvals a JOIN projects p ON p.id=a.project_id WHERE a.id=?";
-          case OUTGOING ->
-              "SELECT p.name FROM outgoing_work w LEFT JOIN projects p ON p.id=w.project_id WHERE w.id=?";
         };
-    return jdbc.queryForList(
-        sql,
-        String.class,
-        resource.kind() == Kind.OUTGOING ? UUID.fromString(resource.id()) : resource.id());
+    return jdbc.queryForList(sql, String.class, resource.id());
   }
 
   @Override

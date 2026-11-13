@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
@@ -23,11 +24,26 @@ public record RelayConfiguration(
     Path journal,
     RelayAdapter.Binding binding,
     Map<String, Peer> peers) {
-  public record Peer(String endpoint, String agentCard, String bearer, Duration timeout) {
+  public record Peer(
+      String endpoint, String agentCard, String bearer, Duration timeout, String principal) {
+    public Peer(String endpoint, String agentCard, String bearer, Duration timeout) {
+      this(endpoint, agentCard, bearer, timeout, null);
+    }
+
     public Peer {
       endpoint = url(endpoint, false);
       if (agentCard != null) agentCard = url(agentCard, false);
-      if (bearer != null) secret(bearer);
+      if (bearer != null) {
+        secret(bearer);
+        if (principal == null)
+          throw new IllegalArgumentException(
+              "Configure a stable peer principal before credential rotation");
+      }
+      if (principal != null) {
+        RelayWork.identity(principal);
+        if (principal.length() > 128 || principal.matches("ps[sat]_.*"))
+          throw new IllegalArgumentException("Use an opaque principal label, never a credential");
+      }
       if (timeout.isZero() || timeout.isNegative() || timeout.compareTo(Duration.ofMinutes(5)) > 0)
         throw new IllegalArgumentException("Invalid peer timeout");
     }
@@ -54,27 +70,16 @@ public record RelayConfiguration(
     return "RelayConfiguration{redacted}";
   }
 
-  /** Binds all recovered identities to these destinations and credential fingerprints. */
-  public String fingerprint() {
-    var value =
-        new StringBuilder(origin)
-            .append('\0')
-            .append(RelayPort.hash(token))
-            .append('\0')
-            .append(binding.project())
-            .append('\0')
-            .append(binding.requests())
-            .append('\0')
-            .append(binding.replies())
-            .append('\0')
-            .append(binding.group())
-            .append('\0')
-            .append(binding.consumer())
-            .append('\0')
-            .append(binding.replyPublisher())
-            .append('\0')
-            .append(binding.maxDepth());
-    binding.producers().stream().sorted().forEach(p -> value.append('\0').append(p));
+  /**
+   * Legacy combined digest, used only to establish v1 journal ownership during one-time upgrade.
+   */
+  public String legacyFingerprint() {
+    var value = new StringBuilder(origin).append('\0').append(RelayPort.hash(token));
+    // MESSAGE_RETURN did not exist in v1. Its domain-separated digest must never match a legacy
+    // observation journal and silently reinterpret an already retained publication intent.
+    if (binding.encoding() != RelayAdapter.ReplyEncoding.A2A_OBSERVATION)
+      value.insert(0, "a2a-nonlegacy-format:" + binding.encoding() + "\0");
+    appendBinding(value);
     new TreeMap<>(peers)
         .forEach(
             (name, peer) ->
@@ -90,6 +95,73 @@ public record RelayConfiguration(
                     .append('\0')
                     .append(peer.timeout()));
     return RelayPort.hash(value.toString());
+  }
+
+  /**
+   * Stable destination/identity descriptor. Mutable secret bytes and request timeouts are excluded.
+   */
+  public String identityFingerprint() {
+    var value = new StringBuilder("a2a-identity/2:").append(origin);
+    appendBinding(value);
+    if (binding.encoding() != RelayAdapter.ReplyEncoding.A2A_OBSERVATION)
+      value.append('\0').append(binding.encoding());
+    new TreeMap<>(peers)
+        .forEach(
+            (name, peer) ->
+                value
+                    .append('\0')
+                    .append(name)
+                    .append('\0')
+                    .append(peer.endpoint())
+                    .append('\0')
+                    .append(peer.agentCard())
+                    .append('\0')
+                    // Anonymous peers use a fixed public marker; authenticated peers require an
+                    // operator-owned
+                    // stable principal label, which must be independently verified during rotation.
+                    .append(
+                        peer.principal() == null
+                            ? "credential:"
+                                + RelayPort.hash(Objects.toString(peer.bearer(), "public"))
+                            : "principal:" + peer.principal()));
+    return RelayPort.hash(value.toString());
+  }
+
+  /** Credential changes require an explicit locked journal rotation, never automatic adoption. */
+  public String fingerprint() {
+    var value =
+        new StringBuilder("a2a-credentials/2:")
+            .append(identityFingerprint())
+            .append('\0')
+            .append(RelayPort.hash(token));
+    new TreeMap<>(peers)
+        .forEach(
+            (name, peer) ->
+                value
+                    .append('\0')
+                    .append(name)
+                    .append('\0')
+                    .append(peer.bearer() == null ? "" : RelayPort.hash(peer.bearer())));
+    return RelayPort.hash(value.toString());
+  }
+
+  private void appendBinding(StringBuilder value) {
+    value
+        .append('\0')
+        .append(binding.project())
+        .append('\0')
+        .append(binding.requests())
+        .append('\0')
+        .append(binding.replies())
+        .append('\0')
+        .append(binding.group())
+        .append('\0')
+        .append(binding.consumer())
+        .append('\0')
+        .append(binding.replyPublisher())
+        .append('\0')
+        .append(binding.maxDepth());
+    binding.producers().stream().sorted().forEach(p -> value.append('\0').append(p));
   }
 
   public static RelayConfiguration read(Path file, Function<String, String> environment)
@@ -117,7 +189,10 @@ public record RelayConfiguration(
               "producers",
               "maxDepth",
               "peers"),
-          Set.of());
+          Set.of("replicaMode", "replyFormat"));
+      if (value.has("replicaMode")
+          && !text(value, "replicaMode").equals("SHARED_JOURNAL_SINGLE_OWNER"))
+        throw new IllegalArgumentException("Independent journals are not a supported replica mode");
       if (!value.get("producers").isArray()
           || value.get("producers").isEmpty()
           || value.get("producers").size() > 64) throw new IllegalArgumentException();
@@ -135,7 +210,10 @@ public record RelayConfiguration(
               text(value, "consumer"),
               text(value, "replyPublisher"),
               producers,
-              integer(value, "maxDepth", 1, 32));
+              integer(value, "maxDepth", 1, 32),
+              value.has("replyFormat")
+                  ? RelayAdapter.ReplyEncoding.valueOf(text(value, "replyFormat"))
+                  : RelayAdapter.ReplyEncoding.A2A_OBSERVATION);
       var configured = value.get("peers");
       if (!configured.isObject() || configured.isEmpty() || configured.size() > 64)
         throw new IllegalArgumentException();
@@ -144,7 +222,8 @@ public record RelayConfiguration(
       while (entries.hasNext()) {
         var entry = entries.next();
         var peer = entry.getValue();
-        fields(peer, Set.of("endpoint"), Set.of("agentCard", "bearerEnv", "timeoutMs"));
+        fields(
+            peer, Set.of("endpoint"), Set.of("agentCard", "bearerEnv", "timeoutMs", "principal"));
         peers.put(
             RelayWork.alias(entry.getKey()),
             new Peer(
@@ -152,7 +231,8 @@ public record RelayConfiguration(
                 peer.has("agentCard") ? text(peer, "agentCard") : null,
                 peer.has("bearerEnv") ? credential(peer, "bearerEnv", environment) : null,
                 Duration.ofMillis(
-                    peer.has("timeoutMs") ? integer(peer, "timeoutMs", 1, 300000) : 20000)));
+                    peer.has("timeoutMs") ? integer(peer, "timeoutMs", 1, 300000) : 20000),
+                peer.has("principal") ? text(peer, "principal") : null));
       }
       return new RelayConfiguration(
           text(value, "origin"),

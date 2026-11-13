@@ -41,6 +41,7 @@ import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.hooks.HookContext;
 import io.aeyer.plowshare.server.information.InformationGateRepository;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
+import io.aeyer.plowshare.server.messaging.MessagingRunExtras;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage.Kind;
 import io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore;
 import io.aeyer.plowshare.server.session.Presence;
@@ -449,7 +450,8 @@ public class OrchestrationsConfig {
       ObjectProvider<DefinitionResolver> definitions,
       ObjectProvider<OrchestrationResolver> resolver,
       ObjectProvider<DataLayout> data,
-      ObjectProvider<BoardRunExtras> boards) {
+      ObjectProvider<BoardRunExtras> boards,
+      ObjectProvider<MessagingRunExtras> messages) {
     Studio studio =
         studio(
             orchestrations,
@@ -484,6 +486,14 @@ public class OrchestrationsConfig {
             context -> {
               BoardRunExtras boardExtras = boards.getIfAvailable();
               return boardExtras == null ? RunExtras.Extras.NONE : boardExtras.forRun(context);
+            },
+            store);
+    extras =
+        combinedRunExtras(
+            extras,
+            context -> {
+              MessagingRunExtras available = messages.getIfAvailable();
+              return available == null ? RunExtras.Extras.NONE : available.forRun(context);
             },
             store);
     runtime.useRunExtras(extras);

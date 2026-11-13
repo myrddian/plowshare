@@ -12,6 +12,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
@@ -30,9 +33,20 @@ class ForumBoardBridgeTest {
   private final BoardClosing closing = mock(BoardClosing.class);
   private final SwarmCatalog swarms = mock(SwarmCatalog.class);
   private final Relay relay = mock(Relay.class);
+  private final ProjectMembers members = mock(ProjectMembers.class);
+  private final ProjectWorkspaces projects = mock(ProjectWorkspaces.class);
   private final BoardBridge bridge =
       new ForumBoardBridge(
-          board, records, receipts, replies, closing, swarms, relay, UnitOfWork.NONE);
+          board,
+          records,
+          receipts,
+          replies,
+          closing,
+          swarms,
+          relay,
+          members,
+          projects,
+          UnitOfWork.NONE);
   private final UUID request = UUID.randomUUID();
 
   private BoardBridge.Command command(BoardBridge.Target target) {
@@ -48,6 +62,9 @@ class ForumBoardBridgeTest {
 
   @BeforeEach
   void setup() {
+    when(projects.id("destination")).thenReturn(7L);
+    when(projects.personalOwner("destination")).thenReturn(Optional.empty());
+    when(members.mayWork("destination", "publisher")).thenReturn(true);
     when(records.topic("bdt_Topic")).thenReturn(Optional.of(BoardBridgeFixtures.topic("open")));
     when(records.message("bdm_Post"))
         .thenReturn(Optional.of(BoardBridgeFixtures.message("bdm_Post", BoardMessage.POST)));
@@ -58,7 +75,8 @@ class ForumBoardBridgeTest {
                 RelayPayload.Kind.TEXT,
                 Relay.Policy.systemDefault(),
                 0,
-                0));
+                0,
+                BoardBridgeFixtures.REPLY_GENERATION));
   }
 
   @Test
@@ -92,10 +110,11 @@ class ForumBoardBridgeTest {
                 "bdt_Topic",
                 7,
                 "requester.inbox",
+                BoardBridgeFixtures.REPLY_GENERATION,
                 "source-event",
                 null));
-    verifyNoInteractions(
-        closing, swarms); // A post does not demand a destination membership or seat.
+    verifyNoInteractions(closing, swarms); // A post grants no opener or member seat.
+    verify(members).mayWork("destination", "publisher");
   }
 
   @Test
@@ -127,7 +146,8 @@ class ForumBoardBridgeTest {
                 RelayPayload.Kind.EMPTY,
                 Relay.Policy.systemDefault(),
                 0,
-                0));
+                0,
+                BoardBridgeFixtures.REPLY_GENERATION));
     assertThrows(
         Board.Refused.class, () -> bridge.accept(command(new BoardBridge.Post("bdt_Topic"))));
     verifyNoInteractions(board, replies);
@@ -143,7 +163,7 @@ class ForumBoardBridgeTest {
   }
 
   @Test
-  void closed_missing_private_and_exhausted_topics_refuse_without_open_fallback() {
+  void closed_missing_foreign_and_exhausted_topics_refuse_without_open_fallback() {
     var cmd = command(new BoardBridge.Post("bdt_Topic"));
     when(records.topic("bdt_Topic")).thenReturn(Optional.of(BoardBridgeFixtures.topic("closed")));
     assertThrows(Board.Refused.class, () -> bridge.require(cmd));
@@ -153,9 +173,45 @@ class ForumBoardBridgeTest {
         .thenReturn(Optional.of(BoardBridgeFixtures.topic("exhausted")));
     assertThrows(Board.Refused.class, () -> bridge.require(cmd));
     when(records.topic("bdt_Topic")).thenReturn(Optional.of(BoardBridgeFixtures.topic("open")));
-    when(records.messagingTopic("bdt_Topic")).thenReturn(true);
+    when(records.topic("bdt_Topic"))
+        .thenReturn(Optional.of(BoardBridgeFixtures.topic("open", "foreign")));
+    when(projects.id("foreign")).thenReturn(8L);
     assertThrows(Board.Refused.class, () -> bridge.require(cmd));
     verifyNoInteractions(board, replies, receipts);
+  }
+
+  @Test
+  void foreign_project_and_personal_topics_cannot_become_disclosure_targets() {
+    var cmd = command(new BoardBridge.Post("bdt_Topic"));
+    when(records.topic("bdt_Topic"))
+        .thenReturn(Optional.of(BoardBridgeFixtures.topic("open", "foreign")));
+    when(projects.id("foreign")).thenReturn(8L);
+    assertThrows(Board.Refused.class, () -> bridge.require(cmd));
+    assertThrows(Board.Refused.class, () -> bridge.accept(cmd));
+    when(records.topic("bdt_Topic")).thenReturn(Optional.of(BoardBridgeFixtures.topic("open")));
+    when(projects.personalOwner("destination")).thenReturn(Optional.of("another-owner"));
+    assertThrows(Board.Refused.class, () -> bridge.require(cmd));
+    assertThrows(Board.Refused.class, () -> bridge.accept(cmd));
+    verifyNoInteractions(board, replies, receipts);
+  }
+
+  @Test
+  void revoked_project_write_authority_is_rechecked_at_dispatch_before_any_forum_effect() {
+    var cmd = command(new BoardBridge.Post("bdt_Topic"));
+    bridge.require(cmd);
+    when(members.mayWork("destination", "publisher")).thenReturn(false);
+    assertThrows(Board.Refused.class, () -> bridge.accept(cmd));
+    verifyNoInteractions(board, replies, receipts);
+  }
+
+  @Test
+  void a_close_route_cannot_cross_projects_even_if_the_publisher_could_write_there() {
+    when(records.topic("bdt_Topic"))
+        .thenReturn(Optional.of(BoardBridgeFixtures.topic("open", "foreign")));
+    when(projects.id("foreign")).thenReturn(8L);
+    assertThrows(
+        Board.Refused.class, () -> bridge.accept(command(new BoardBridge.Close("bdt_Topic"))));
+    verifyNoInteractions(board, closing, replies, receipts);
   }
 
   @Test
@@ -188,5 +244,50 @@ class ForumBoardBridgeTest {
     assertTrue(bridge.inspect(command(new BoardBridge.Post("bdt_Topic"))).isPresent());
     verifyNoInteractions(board, closing, replies, relay);
     verify(receipts, never()).lockAndRead(any(), any(), any());
+  }
+
+  @Test
+  void proven_execution_posts_as_nonseat_agent_without_native_log_links_or_topic_grants() {
+    var source = UUID.fromString("55555555-5555-5555-5555-555555555555");
+    var actor = new BoardBridge.Agent("publisher", "worker", source);
+    var command =
+        new BoardBridge.Command(
+            actor.effectRequestId(),
+            actor,
+            7,
+            source.toString(),
+            new BoardBridge.Post("bdt_Topic"),
+            new BoardBridge.Payload("Agent request", null),
+            new RelayCausation("root", source.toString(), 2));
+    when(board.post(any()))
+        .thenReturn(
+            new Board.Posted(
+                BoardBridgeFixtures.message("bdm_Post", BoardMessage.POST), List.of(), false));
+    bridge.accept(command);
+    verify(board)
+        .post(
+            new Board.Post(
+                "bdt_Topic",
+                BoardMessage.BY_AGENT,
+                "worker",
+                null,
+                null,
+                BoardMessage.POST,
+                null,
+                "Agent request",
+                null,
+                List.of(),
+                false));
+    verify(replies)
+        .bind(
+            new BoardBridgeRepository.Binding(
+                actor.effectRequestId(),
+                "publisher",
+                "bdm_Post",
+                "bdt_Topic",
+                new BoardBridgeRepository.NativeDestination(source),
+                source.toString(),
+                command.causation()));
+    verifyNoInteractions(relay, closing, swarms);
   }
 }

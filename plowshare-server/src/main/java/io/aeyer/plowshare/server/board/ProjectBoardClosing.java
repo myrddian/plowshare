@@ -93,9 +93,7 @@ public final class ProjectBoardClosing implements BoardClosing {
   }
 
   private BoardTopic selected(Command command, BoardTopic selected) {
-    if (!command.topic().equals(selected.id())
-        || !command.project().equals(selected.project())
-        || records.messagingTopic(selected.id()))
+    if (!command.topic().equals(selected.id()) || !command.project().equals(selected.project()))
       throw new Board.Refused("No forum topic in the selected project");
     return selected;
   }

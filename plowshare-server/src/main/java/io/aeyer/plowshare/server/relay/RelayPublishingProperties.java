@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /** Operator-installed exact grants supplement, but never replace, definition tool grants. */
 @ConfigurationProperties(value = "plowshare.relay.publishing", ignoreUnknownFields = false)
 public final class RelayPublishingProperties {
-  private List<Grant> grants = List.of();
+  private volatile List<Grant> grants = List.of();
 
   /** No wildcard, project fallback or implicit topic creation authority is inferred. */
   public record Grant(String project, String definition, String topic) {

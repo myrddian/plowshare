@@ -281,10 +281,14 @@ public final class Board implements BoardForum {
       throw new Refused("topic " + topic.id() + " is closed; nothing more is said on it");
     }
     requireText(request.body(), "body");
+    if (BoardMessage.BY_AGENT.equals(request.authorKind())
+        && (request.conversation() != null || request.entry() != null))
+      throw new Refused("Nonseat agent posts cannot disclose a private execution log");
     if (!Set.of(
             BoardMessage.BY_MEMBER,
             BoardMessage.BY_OPENER,
             BoardMessage.BY_PERSON,
+            BoardMessage.BY_AGENT,
             BoardMessage.BY_HARNESS)
         .contains(String.valueOf(request.authorKind()))) {
       throw new Refused("there is no board author kind '" + request.authorKind() + "'");
@@ -405,8 +409,6 @@ public final class Board implements BoardForum {
         work.inTransaction(
             () -> {
               BoardTopic topic = lockedOpenTopic(topicId);
-              if (store.messagingTopic(topic.id()))
-                throw new Refused("Private message instances use their own lifecycle controls");
               members.requireRole(topic.project(), account, ProjectRole.CONTRIBUTOR);
               if (!members(topic).contains(member)) {
                 throw new Refused("Choose a member of this project's swarm.");
@@ -772,6 +774,8 @@ public final class Board implements BoardForum {
     if (!request.topic().equals(topic.id()))
       throw new Refused("Closing topic differs from its snapshot");
     requireText(request.body(), "resolution");
+    if (BoardMessage.BY_AGENT.equals(request.authorKind()) && request.conversation() != null)
+      throw new Refused("Nonseat agent closure cannot disclose a private execution log");
     var citationTopics = store.citationTopics(request.cites());
     for (String cited : request.cites()) {
       String citedTopic = citationTopics.get(cited);
@@ -1009,8 +1013,6 @@ public final class Board implements BoardForum {
   public BoardTopic topup(String topicId, Integer total, String account) {
     if (total == null) throw new Refused("A top-up requires maxModelCalls, the new absolute total");
     BoardTopic selected = openTopic(topicId);
-    if (store.messagingTopic(selected.id()))
-      throw new Refused("Private message instances use their own lifecycle controls");
     members.requireRole(selected.project(), account, ProjectRole.CONTRIBUTOR);
     String rootId = selected.root();
     List<Seated> seated = new ArrayList<>();

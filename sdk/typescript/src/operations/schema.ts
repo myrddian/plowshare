@@ -21,10 +21,7 @@ import {
 } from './conversation-replies.ts';
 import { validateMessagingOrigins } from './messaging.ts';
 import { validateReportDetails } from './report-details.ts';
-import {
-  validateExternalRequest,
-  validateExternalResponse,
-} from './external-validation.ts';
+
 import { problem, commandProblem, SHAPES } from './payload-validation.ts';
 import type { ExtendedPayloads } from './catalog.ts';
 import { isList } from '../binding/values.ts';
@@ -229,7 +226,6 @@ export function decodePayload<K extends Operation>(
   const request = { type, payload: decoded } as Request;
   if (request.type === 'information.record.report')
     validateReportDetails(request.payload);
-  validateExternalRequest(request);
   return decoded as Payloads[K];
 }
 
@@ -286,9 +282,6 @@ export function decodeReply<K extends keyof Replies>(
   validateProcReply(type, decoded);
   validateFileStoreReplies(type, decoded);
   validateMessagingOrigins(type, decoded);
-  validateExternalResponse({ type, payload: decoded } as Parameters<
-    typeof validateExternalResponse
-  >[0]);
   return decoded;
 }
 

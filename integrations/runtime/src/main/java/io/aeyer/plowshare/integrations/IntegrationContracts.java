@@ -3,12 +3,21 @@ package io.aeyer.plowshare.integrations;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonValue;
-import io.aeyer.plowshare.protocol.ExternalResult.IntegrationResult;
-import io.aeyer.plowshare.protocol.IntegrationPayload.*;
+import io.aeyer.plowshare.protocol.IntegrationPayload.ActionContext;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Arguments;
+import io.aeyer.plowshare.protocol.IntegrationPayload.NumberParameter;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Parameter;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Reading;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Request;
 import io.aeyer.plowshare.protocol.Orchestration;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Adapter/runtime contracts. Collections are bounded immutable values, never arbitrary JSON trees.
@@ -352,6 +361,31 @@ public final class IntegrationContracts {
       throw new IllegalArgumentException("invalid adapter outcome");
   }
 
+  private static boolean sameRelayRequest(Request expected, Request stored) {
+    if (expected == stored) return true;
+    if (expected == null
+        || stored == null
+        || !expected.schema().equals(stored.schema())
+        || !expected.binding().equals(stored.binding())
+        || !expected.operation().equals(stored.operation())) return false;
+    var left = expected.arguments();
+    var right = stored.arguments();
+    if (!Objects.equals(left.entities(), right.entities())
+        || !Objects.equals(left.action(), right.action())) return false;
+    if (left.parameters() == null || right.parameters() == null)
+      return left.parameters() == right.parameters();
+    if (!left.parameters().keySet().equals(right.parameters().keySet())) return false;
+    for (var entry : left.parameters().entrySet()) {
+      var value = right.parameters().get(entry.getKey());
+      // Persistence may canonicalize 22.0 to 22. Compare exact decimal values, never floating
+      // approximations or textual scale. The immutable source text itself is never rewritten.
+      if (entry.getValue() instanceof NumberParameter a && value instanceof NumberParameter b) {
+        if (a.value().compareTo(b.value()) != 0) return false;
+      } else if (!entry.getValue().equals(value)) return false;
+    }
+    return true;
+  }
+
   /**
    * Immutable durable record. Drafts are private planning state and must validate before storage.
    */
@@ -385,9 +419,10 @@ public final class IntegrationContracts {
       String diagnostic,
       String causalDiagnostic,
       Long createdAt,
-      Long settledAt) {
+      Long settledAt,
+      RelayRequests.Delivery relay) {
     public Entry {
-      if (!Set.of("handler", "effect", "outgoing").contains(kind))
+      if (!Set.of("handler", "effect", "outgoing", "relay").contains(kind))
         throw new IllegalArgumentException("invalid journal entry kind");
       Configuration.name(binding);
       if (!kind.equals("outgoing")) identity(fingerprint, 1024);
@@ -437,7 +472,7 @@ public final class IntegrationContracts {
               || coalescedCount != null
               || coalescedSince != null))
         throw new IllegalArgumentException("handler fields in external effect entry");
-      if (kind.equals("outgoing")
+      if ((kind.equals("outgoing") || kind.equals("relay"))
           && (effect != null
               || payload != null
               || source != null
@@ -465,6 +500,36 @@ public final class IntegrationContracts {
         throw new IllegalArgumentException("planned effect required");
       if (kind.equals("outgoing") && (revision == null || revision < 0))
         throw new IllegalArgumentException("outgoing revision required");
+      if (kind.equals("relay") != (relay != null) || kind.equals("relay") && revision != null)
+        throw new IllegalArgumentException(
+            "Relay request evidence required only for Relay entries");
+      if (kind.equals("relay")) {
+        Request expected = null;
+        try {
+          var decoded = IntegrationCodec.read(relay.source().text(), Request.class);
+          if (binding.equals(decoded.binding())) expected = decoded;
+        } catch (IOException invalidSource) {
+          // Invalid or foreign source text deliberately retains a null command for safe refusal.
+          // A stored parsed projection must never reinterpret that immutable wire evidence.
+        }
+        if (!sameRelayRequest(expected, relay.request()))
+          throw new IllegalArgumentException("Relay command differs from retained source text");
+        // These persisted phases decide whether an external action may be attempted. Reject an
+        // impossible combination before transport or adapter startup, rather than interpreting a
+        // missing publication/result as recoverable execution state.
+        boolean outcome = state != null;
+        boolean publication = relay.publication() != null;
+        if (outcome != (result != null)
+            || !Set.of("QUEUED", "DISPATCHED", "REPORTING", "DONE").contains(status)
+            || status.equals("QUEUED") && publication
+            || status.equals("DISPATCHED") && (outcome || publication || relay.request() == null)
+            || Set.of("REPORTING", "DONE").contains(status) && (!outcome || !publication)
+            || relay.request() == null && outcome && !state.equals("REJECTED"))
+          throw new IllegalArgumentException("Invalid retained Relay request phase");
+      }
+      if (kind.equals("relay")
+          && !binding.equals(relay.request() == null ? binding : relay.request().binding()))
+        throw new IllegalArgumentException("Relay request names a different binding");
       if ((context == null) != (baseState == null) || context != null && evaluatedAt == null)
         throw new IllegalArgumentException(
             "captured context requires base state and evaluation time");
@@ -523,6 +588,7 @@ public final class IntegrationContracts {
     Effect effect;
     Orchestration.Start payload;
     IntegrationResult result;
+    RelayRequests.Delivery relay;
 
     Draft() {}
 
@@ -556,6 +622,7 @@ public final class IntegrationContracts {
       causalDiagnostic = e.causalDiagnostic();
       createdAt = e.createdAt();
       settledAt = e.settledAt();
+      relay = e.relay();
     }
 
     Entry build() {
@@ -588,7 +655,8 @@ public final class IntegrationContracts {
           diagnostic,
           causalDiagnostic,
           createdAt,
-          settledAt);
+          settledAt,
+          relay);
     }
   }
 }

@@ -19,8 +19,7 @@ public interface ResourceScopeRepository {
     MESSAGE,
     TRIGGER,
     SCHEDULE,
-    APPROVAL,
-    OUTGOING
+    APPROVAL
   }
 
   List<String> projects(AccessRequest.Resource resource);

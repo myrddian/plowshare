@@ -5,13 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.protocol.AgentCard;
-import io.aeyer.plowshare.protocol.ExternalMessage;
-import io.aeyer.plowshare.protocol.ExternalResult;
+import io.aeyer.plowshare.a2a.model.AgentCard;
+import io.aeyer.plowshare.a2a.model.AgentCardCodec;
+import io.aeyer.plowshare.a2a.model.ExternalMessage;
+import io.aeyer.plowshare.a2a.model.ExternalResult;
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayLog;
 import io.aeyer.plowshare.protocol.RelayPort;
-import io.aeyer.plowshare.sdk.AgentCardCodec;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -221,7 +221,7 @@ class RelayAdapterTest {
   }
 
   @Test
-  void foreign_publishers_are_skipped_and_invalid_own_requests_and_effect_depth_stop_before_io()
+  void foreign_publishers_are_visible_and_exhausted_requests_are_rejected_before_peer_io()
       throws Exception {
     var gateway = new FakeGateway();
     var peer = new FakePeer();
@@ -242,9 +242,11 @@ class RelayAdapterTest {
       assertEquals(0, peer.sends);
       gateway.sources.add(
           event(send(), "deep", PRODUCER, new RelayCausation("root", "parent", 32)));
-      assertThrows(IOException.class, worker::tick);
+      assertTrue(worker.tick());
       assertEquals(0, peer.cards);
-      assertEquals(1, gateway.acks);
+      assertEquals(2, gateway.acks);
+      assertEquals(1, worker.diagnostics().foreignPublications());
+      assertEquals(1, worker.diagnostics().rejectedRequests());
     }
   }
 
@@ -292,10 +294,9 @@ class RelayAdapterTest {
                   null,
                   "remote-task",
                   "remote-context")));
-      assertThrows(IOException.class, worker::tick);
-      gateway.sources.clear();
+      assertTrue(worker.tick());
       gateway.sources.add(event(request));
-      assertThrows(IOException.class, worker::tick);
+      assertTrue(worker.tick());
       assertEquals(1, peer.sends);
     }
   }
@@ -346,7 +347,7 @@ class RelayAdapterTest {
               "remote-context");
       gateway.sources.add(
           event(read, "another-source", otherProducer, RelayCausation.root("root")));
-      assertThrows(IOException.class, worker::tick);
+      assertTrue(worker.tick());
       assertEquals(0, peer.reads);
       assertEquals(1, peer.cards);
     }
@@ -355,10 +356,12 @@ class RelayAdapterTest {
   static final class FakePeer implements RemotePeer {
     int sends, reads, cancels, cards;
     boolean fail;
+    int unavailableCards;
 
     @Override
     public AgentCard agentCard() throws IOException {
       cards++;
+      if (unavailableCards-- > 0) throw new IOException("temporary card unavailable");
       return AgentCardCodec.read(
           "{\"name\":\"peer\",\"description\":\"peer\",\"version\":\"1\",\"defaultInputModes\":[\"text/plain\"],\"defaultOutputModes\":[\"text/plain\"],\"capabilities\":{},\"skills\":[],\"supportedInterfaces\":[{\"url\":\"https://peer.example.invalid/rpc\",\"protocolBinding\":\"JSONRPC\",\"protocolVersion\":\"1.0\"}]}");
     }
@@ -406,7 +409,7 @@ class RelayAdapterTest {
     final ArrayDeque<RelayLog.Event> sources = new ArrayDeque<>();
     final List<RelayPort.Publish> publications = new ArrayList<>();
     int acks;
-    boolean loseReply, failAck, commitAck;
+    boolean loseReply, failAck, commitAck, notSubmitted;
 
     @Override
     public RelayPort.Batch consume(RelayPort.Consume request) {
@@ -428,6 +431,7 @@ class RelayAdapterTest {
 
     @Override
     public RelayPort.Published publish(RelayPort.Publish request) throws IOException {
+      if (notSubmitted) throw new RelayGateway.PublicationNotSubmitted();
       publications.add(request);
       if (loseReply) throw new IOException("lost publication acknowledgement");
       return new RelayPort.Published(

@@ -59,6 +59,47 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
   }
 
   @Override
+  public boolean executionPublication(Relay.Publication publication) {
+    return RelayExecutionPublisher.reserved(publication.event().publisher())
+        || executionIdentity(publication).isPresent();
+  }
+
+  @Override
+  public Optional<Execution> executionIdentity(Relay.Publication publication) {
+    Objects.requireNonNull(publication, "publication");
+    if (!(publication.topic().scope() instanceof Relay.ProjectScope)) return Optional.empty();
+    try {
+      if (!UUID.fromString(publication.event().eventId())
+          .toString()
+          .equals(publication.event().eventId())) return Optional.empty();
+    } catch (IllegalArgumentException ordinaryEvent) {
+      return Optional.empty();
+    }
+    // All immutable receipt coordinates are required. A matching UUID on another SDK topic is
+    // never sufficient to acquire an execution's account or definition authority.
+    return jdbc
+        .query(
+            """
+        SELECT account,agent FROM relay_execution_publications
+        WHERE id=?::uuid AND project_id=? AND topic=? AND position=? AND published_at=?
+        """,
+            (row, number) -> new Execution(row.getString(1), row.getString(2)),
+            publication.event().eventId(),
+            publication.topic().projectId(),
+            publication.topic().name(),
+            publication.position(),
+            Timestamp.from(publication.publishedAt()))
+        .stream()
+        .filter(
+            identity ->
+                RelayExecutionPublisher.identity(identity.account(), identity.definition())
+                        .equals(publication.event().publisher())
+                    || RelayPort.publisher(identity.account())
+                        .equals(publication.event().publisher()))
+        .findFirst();
+  }
+
+  @Override
   public RelayPort.Batch consume(
       Relay.TopicKey topic, String account, RelayPort.Consume request, RelayReadBudget budget) {
     return consumeObserved(topic, account, request, budget, null).batch();

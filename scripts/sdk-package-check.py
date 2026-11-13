@@ -22,6 +22,13 @@ def main():
     def run(*args, cwd=ROOT):
         subprocess.run(args, cwd=cwd, env=env, check=True)
 
+    # A deleted source must not survive incremental compilation in a wildcard export.
+    for package in ['plowshare-client-ts', 'plowshare-client-node']:
+        with tarfile.open(OUT / (package + '-0.1.0.tgz')) as archive:
+            forbidden = {'external.js', 'external.d.ts', 'external-validation.js',
+                         'external-validation.d.ts', 'outgoing.js', 'outgoing.d.ts'}
+            assert not any(Path(member.name).name in forbidden for member in archive.getmembers()), 'Retired external-work module remains packaged'
+
     node = base / 'node'
     node.mkdir()
     (node / 'package.json').write_text(json.dumps({'name': 'sdk-consumer-fixture', 'private': True, 'type': 'module'}))
@@ -30,6 +37,23 @@ def main():
     # or resolving declarations through checkout node_modules.
     node_types = json.loads((ROOT / 'sdk/node/node_modules/@types/node/package.json').read_text())['version']
     run('npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund', str(OUT / 'plowshare-client-ts-0.1.0.tgz'), str(OUT / 'plowshare-client-node-0.1.0.tgz'), '@types/node@' + node_types, cwd=node)
+    (node / 'retirement.mjs').write_text("""
+import { Plowshare } from 'plowshare-client-ts';
+import { Plowshare as NodePlowshare } from 'plowshare-client-node';
+for (const type of [Plowshare, NodePlowshare])
+  for (const method of ['sendOutgoing', 'outgoingStatus', 'cancelOutgoing'])
+    if (method in type.prototype) throw new Error('Retired facade remains installed');
+for (const module of ['external', 'external-validation', 'outgoing']) {
+  try {
+    await import('plowshare-client-ts/operations/' + module);
+  } catch (error) {
+    if (error?.code === 'ERR_MODULE_NOT_FOUND') continue;
+    throw error;
+  }
+  throw new Error('Retired operation subpath remains importable');
+}
+""")
+    run('node', 'retirement.mjs', cwd=node)
     (node / 'entry.mjs').write_text("export * from 'plowshare-client-node'\n")
     (node / 'types.ts').write_text("import { connectPlowshare, type Reply, type Payloads } from 'plowshare-client-node'\nconst payload: Payloads['project.list'] = {}\nasync function exercise(origin: string, token: string): Promise<Reply> { const client = await connectPlowshare({ origin, token }); try { return await client.request('project.list', payload) } finally { client.close() } }\n")
     run('node', str(ROOT / 'sdk/node/node_modules/typescript/bin/tsc'), '--noEmit', '--strict', '--target', 'ES2022', '--lib', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', 'types.ts', cwd=node)

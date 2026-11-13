@@ -61,7 +61,7 @@ class RelayBoundaryTest {
       {"origin":"https://plowshare.example.invalid","tokenEnv":"SERVICE_TOKEN","journal":"JOURNAL",
        "project":"project","requests":"adapter.requests","replies":"adapter.replies","group":"adapter",
        "consumer":"11111111-1111-1111-1111-111111111111","replyPublisher":"PUBLISHER",
-       "producers":["PRODUCER"],"maxDepth":32,"peers":{"peer":{"endpoint":"https://peer.example.invalid/rpc","bearerEnv":"PEER_TOKEN"}}}
+       "producers":["PRODUCER"],"maxDepth":32,"peers":{"peer":{"endpoint":"https://peer.example.invalid/rpc","bearerEnv":"PEER_TOKEN","principal":"research-account"}}}
       """
             .replace("JOURNAL", directory.resolve("journal").toString())
             .replace("PUBLISHER", RelayAdapterTest.PUBLISHER)
@@ -81,7 +81,10 @@ class RelayBoundaryTest {
           source.replace(
               "https://plowshare.example.invalid", "https://user:secret@example.invalid"),
           source.replace("\"maxDepth\":32", "\"maxDepth\":32,\"surprise\":true"),
-          source.replace("adapter.replies", "adapter.requests")
+          source.replace("adapter.replies", "adapter.requests"),
+          source.replace(
+              "\"maxDepth\":32", "\"maxDepth\":32,\"replicaMode\":\"INDEPENDENT_JOURNALS\""),
+          source.replace(",\"principal\":\"research-account\"", "")
         }) {
       Files.writeString(config, bad);
       assertThrows(IOException.class, () -> RelayConfiguration.read(config, environment::get));

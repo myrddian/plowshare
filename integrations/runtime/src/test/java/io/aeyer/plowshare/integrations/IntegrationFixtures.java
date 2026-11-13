@@ -2,9 +2,16 @@ package io.aeyer.plowshare.integrations;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.aeyer.plowshare.integrations.IntegrationContracts.*;
-import io.aeyer.plowshare.protocol.IntegrationPayload.*;
-import java.util.*;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Action;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Draft;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Empty;
+import io.aeyer.plowshare.integrations.IntegrationContracts.EventEnvelope;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Reading;
+import io.aeyer.plowshare.protocol.IntegrationPayload.TextParameter;
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 /** Wire fixtures convert at their boundary; fakes implement exactly the typed production API. */
 final class IntegrationFixtures {
@@ -20,14 +27,14 @@ final class IntegrationFixtures {
             return "fake";
           }
 
-          public AdapterConfiguration decode(String source) throws java.io.IOException {
+          public AdapterConfiguration decode(String source) throws IOException {
             JsonNode node = Json.parse(source);
             Json.fields(node);
             return new Settings();
           }
 
           public IntegrationAdapter create(
-              AdapterConfiguration settings, java.util.function.Function<String, String> env) {
+              AdapterConfiguration settings, Function<String, String> env) {
             throw new UnsupportedOperationException("parser fixture only");
           }
         });
@@ -60,9 +67,7 @@ final class IntegrationFixtures {
 
   static IntegrationAdapter.Result result(String state, JsonNode data) {
     return new IntegrationAdapter.Result(
-        state,
-        IntegrationCodec.decode(
-            data, io.aeyer.plowshare.protocol.ExternalResult.IntegrationResult.class));
+        state, IntegrationCodec.decode(data, IntegrationResult.class));
   }
 
   static Map<String, Reading> readings(JsonNode n) {

@@ -34,8 +34,22 @@ Strict boundary conversion rejects unknown fields, duplicate keys, trailing
 values, coercion, nulls, invalid topic names and invalid text. Text is preserved
 verbatim within Relay's portable and deployment UTF-8 limits. Model arguments
 cannot choose a publisher, project, event ID, correlation or parent. The publisher
-is the authenticated account, allowing existing receivers to apply their own
-publisher checks. Publication acceptance does not assert downstream completion.
+is `execution:<sha256(account)>:<sha256(definition)>`, a server-owned namespace
+separate from `sdk:<sha256(account)>`. SDK port publishers cannot choose it. A
+receiver must explicitly authorize execution provenance and must never interpret it
+as a person-authored SDK command. Publication acceptance does not assert downstream
+completion.
+
+Earlier retained execution events used the SDK namespace. Their immutable broker
+history and repeat-call receipts remain unchanged. Publisher-sensitive receivers
+check the exact project/event/topic/position/timestamp against the execution call
+ledger before resolving a person; the board bridge refuses those historical events
+as well as the reserved execution namespace. Existing deployment allowlists that
+intend to receive execution output must explicitly select the new identity. Old
+allowlists are not silently widened, and no retained event is republished. External
+consumers cannot disambiguate old SDK envelopes without server-ledger evidence;
+cutover requires draining them under the previous contract or explicit legacy
+handling. The namespace change does not rewrite historical provenance.
 
 ## Identity, ancestry and transactions
 

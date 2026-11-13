@@ -33,13 +33,14 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
   private static final String BRANCH_COLUMNS =
       """
       d.id,d.branch_index,d.branch_name,d.receiver,d.publish_to,d.handler_path,d.handler_source,d.handler_hash,
-      d.work_agent,d.work_project,d.work_definition,d.work_topic,d.work_swarm,d.state,d.fence,d.worker,d.lease_until,d.updated_at,d.receipt_namespace,d.receipt_id,d.failure_code
+      d.work_agent,d.work_project,d.work_definition,d.work_topic,d.work_swarm,d.work_reply_topic,d.work_channel,d.state,d.fence,d.worker,d.lease_until,d.updated_at,d.receipt_namespace,d.receipt_id,d.failure_code,source.generation AS source_generation
       """;
   private static final String JOIN =
       """
       FROM relay_deliveries d JOIN relay_admissions a ON a.scope_key=d.scope_key AND a.topic=d.topic
           AND a.subscriber=d.subscriber AND a.publication_position=d.publication_position
         JOIN relay_payloads q ON q.digest=a.payload_digest
+        JOIN relay_topics source ON source.scope_key=a.scope_key AND source.name=a.topic
       """;
   private static final String LIFECYCLE_COLUMNS =
       "state,fence,worker,lease_until,updated_at,receipt_namespace,receipt_id,failure_code";
@@ -181,8 +182,8 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                 jdbc.update(
                     """
             INSERT INTO relay_deliveries(id,scope_key,topic,subscriber,publication_position,branch_index,
-                branch_name,receiver,publish_to,handler_path,handler_source,handler_hash,updated_at,work_agent,work_project,work_definition,work_topic,work_swarm)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                branch_name,receiver,publish_to,handler_path,handler_source,handler_hash,updated_at,work_agent,work_project,work_definition,work_topic,work_swarm,work_reply_topic,work_channel)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
                     id,
                     RelayScopeCodec.write(topic),
@@ -201,7 +202,9 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                     branch.work() == null ? null : branch.work().project(),
                     branch.work() == null ? null : branch.work().definition(),
                     branch.work() == null ? null : branch.work().topic(),
-                    branch.work() == null ? null : branch.work().swarm()));
+                    branch.work() == null ? null : branch.work().swarm(),
+                    branch.work() == null ? null : branch.work().replyTopic(),
+                    branch.work() == null ? null : branch.work().channel()));
             identities.add(new RelayDeliveries.DeliveryKey(subscription, id));
           }
           // The copied input and every fan-out branch commit before this cursor can hide the event.
@@ -246,7 +249,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
     var branches =
         jdbc.query(
             """
-        SELECT id,branch_index,branch_name,receiver,publish_to,handler_path,handler_source,handler_hash,work_agent,work_project,work_definition,work_topic,work_swarm FROM relay_deliveries
+        SELECT id,branch_index,branch_name,receiver,publish_to,handler_path,handler_source,handler_hash,work_agent,work_project,work_definition,work_topic,work_swarm,work_reply_topic,work_channel FROM relay_deliveries
         WHERE scope_key=? AND topic=? AND subscriber=? AND publication_position=? ORDER BY branch_index
         """,
             (row, index) -> {
@@ -547,7 +550,8 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
         namespace == null
             ? null
             : new RelayDeliveries.Receipt(namespace, row.getString("receipt_id")),
-        row.getString("failure_code"));
+        row.getString("failure_code"),
+        previous.sourceGeneration());
   }
 
   private RelayDeliveries.Delivery locked(RelayDeliveries.DeliveryKey key) {
@@ -652,7 +656,9 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                 row.getString("work_project"),
                 row.getString("work_definition"),
                 row.getString("work_topic"),
-                row.getString("work_swarm")));
+                row.getString("work_swarm"),
+                row.getString("work_reply_topic"),
+                row.getString("work_channel")));
   }
 
   private static RelayDeliveries.Delivery deliveryRow(ResultSet row) throws SQLException {
@@ -677,7 +683,8 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
         input.admittedAt(),
         instant(row, "updated_at"),
         receipt,
-        row.getString("failure_code"));
+        row.getString("failure_code"),
+        row.getObject("source_generation", UUID.class));
   }
 
   private static Instant instant(ResultSet row, String column) throws SQLException {

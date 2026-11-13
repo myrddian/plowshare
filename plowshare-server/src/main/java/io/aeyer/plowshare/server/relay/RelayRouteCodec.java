@@ -111,13 +111,18 @@ final class RelayRouteCodec {
   }
 
   private static RelayWork work(JsonNode value) {
-    fields(value, Set.of(), Set.of("agent", "project", "definition", "topic", "swarm"));
+    fields(
+        value,
+        Set.of(),
+        Set.of("agent", "project", "definition", "topic", "swarm", "replyTopic", "channel"));
     return new RelayWork(
         value.has("agent") ? text(value.get("agent")) : null,
         value.has("project") ? text(value.get("project")) : null,
         value.has("definition") ? text(value.get("definition")) : null,
         value.has("topic") ? text(value.get("topic")) : null,
-        value.has("swarm") ? text(value.get("swarm")) : null);
+        value.has("swarm") ? text(value.get("swarm")) : null,
+        value.has("replyTopic") ? text(value.get("replyTopic")) : null,
+        value.has("channel") ? text(value.get("channel")) : null);
   }
 
   static String event(Relay.Publication input) {

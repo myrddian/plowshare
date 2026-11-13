@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.board;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
@@ -20,7 +22,10 @@ public final class ForumBoardBridge implements BoardBridge {
   private final BoardClosing closing;
   private final SwarmCatalog swarms;
   private final Relay relay;
+  private final ProjectMembers members;
+  private final ProjectWorkspaces projects;
   private final UnitOfWork work;
+  private final BoardNativeRequests nativeRequests;
 
   public ForumBoardBridge(
       BoardForum board,
@@ -30,7 +35,36 @@ public final class ForumBoardBridge implements BoardBridge {
       BoardClosing closing,
       SwarmCatalog swarms,
       Relay relay,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
       UnitOfWork work) {
+    this(
+        board,
+        records,
+        receipts,
+        replies,
+        closing,
+        swarms,
+        relay,
+        members,
+        projects,
+        work,
+        BoardNativeRequests.NONE);
+  }
+
+  public ForumBoardBridge(
+      BoardForum board,
+      BoardRecords records,
+      BoardPostRepository receipts,
+      BoardBridgeRepository replies,
+      BoardClosing closing,
+      SwarmCatalog swarms,
+      Relay relay,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      UnitOfWork work,
+      BoardNativeRequests nativeRequests) {
+    this.nativeRequests = Objects.requireNonNull(nativeRequests);
     this.board = Objects.requireNonNull(board);
     this.records = Objects.requireNonNull(records);
     this.receipts = Objects.requireNonNull(receipts);
@@ -38,14 +72,17 @@ public final class ForumBoardBridge implements BoardBridge {
     this.closing = Objects.requireNonNull(closing);
     this.swarms = Objects.requireNonNull(swarms);
     this.relay = Objects.requireNonNull(relay);
+    this.members = Objects.requireNonNull(members);
+    this.projects = Objects.requireNonNull(projects);
     this.work = Objects.requireNonNull(work);
   }
 
   @Override
   public void require(Command command) {
     Objects.requireNonNull(command);
-    replyTopic(command);
+    replyDestination(command);
     if (command.target() instanceof Open open) {
+      authorize(command, open.project());
       if (swarms.select(open.project(), open.swarm()).members().isEmpty())
         throw new Board.Refused("The configured swarm is unavailable");
     } else {
@@ -65,11 +102,16 @@ public final class ForumBoardBridge implements BoardBridge {
           var action = action(command, selected);
           var prior = receipts.lockAndRead(command.account(), command.requestId(), action);
           if (prior.isPresent()) return receipt(prior.get());
-          replyTopic(command);
+          // The same canonical advisory lock guards native refusal intent. A refused export
+          // cannot later acquire a forum effect through another consumer group or target.
+          if (command.actor() instanceof Agent agent && nativeRequests.refused(agent))
+            throw new Board.Refused("This native board request already has a refusal outcome");
+          var reply = replyDestination(command);
           BoardMessage message;
           String topic;
           switch (command.target()) {
             case Open open -> {
+              authorize(command, open.project());
               var opened =
                   board.open(
                       new Board.Open(
@@ -78,8 +120,10 @@ public final class ForumBoardBridge implements BoardBridge {
                           Board.fold(command.payload().body(), BoardTopic.LABEL_MAX),
                           command.payload().body(),
                           command.account(),
-                          BoardTopic.BY_PERSON,
-                          command.account(),
+                          command.actor() instanceof Agent
+                              ? BoardTopic.BY_AGENT
+                              : BoardTopic.BY_PERSON,
+                          author(command),
                           null,
                           null,
                           open.swarm()));
@@ -93,8 +137,8 @@ public final class ForumBoardBridge implements BoardBridge {
                       .post(
                           new Board.Post(
                               selected.id(),
-                              BoardMessage.BY_PERSON,
-                              command.account(),
+                              authorKind(command),
+                              author(command),
                               null,
                               null,
                               BoardMessage.POST,
@@ -111,8 +155,8 @@ public final class ForumBoardBridge implements BoardBridge {
                   board.close(
                       new Board.Close(
                           selected.id(),
-                          BoardMessage.BY_PERSON,
-                          command.account(),
+                          authorKind(command),
+                          author(command),
                           null,
                           command.payload().body(),
                           List.of()),
@@ -122,15 +166,14 @@ public final class ForumBoardBridge implements BoardBridge {
             }
           }
           receipts.save(command.account(), command.requestId(), action, message.id());
-          if (command.payload().replyTo() != null)
+          if (reply.isPresent())
             replies.bind(
                 new BoardBridgeRepository.Binding(
                     command.requestId(),
                     command.account(),
                     message.id(),
                     topic,
-                    command.sourceProject(),
-                    command.payload().replyTo(),
+                    reply.orElseThrow(),
                     command.sourceEvent(),
                     command.causation()));
           return new Receipt(topic, message.id());
@@ -156,6 +199,7 @@ public final class ForumBoardBridge implements BoardBridge {
         records
             .topic(id)
             .orElseThrow(() -> new Board.Refused("No forum topic at the configured destination"));
+    requireSourceProject(command, topic.project());
     if (authorizeClose && command.target() instanceof Close)
       return closing.require(
           command.account(),
@@ -166,9 +210,27 @@ public final class ForumBoardBridge implements BoardBridge {
               List.of(),
               command.requestId()),
           topic);
-    if (records.messagingTopic(topic.id()))
-      throw new Board.Refused("Messaging topics are not forum destinations");
+    if (authorizeClose) authorizeAccount(command, topic.project());
     return topic;
+  }
+
+  /** A route can never turn source-project authority into a destination-project grant. */
+  private void requireSourceProject(Command command, String project) {
+    Long selected = projects.id(project);
+    if (selected == null || selected.longValue() != command.sourceProject())
+      throw new Board.Refused("The forum destination must belong to the source project");
+  }
+
+  private void authorize(Command command, String project) {
+    requireSourceProject(command, project);
+    authorizeAccount(command, project);
+  }
+
+  private void authorizeAccount(Command command, String project) {
+    var owner = projects.personalOwner(project);
+    if (!members.mayWork(project, command.account())
+        || owner.isPresent() && !owner.get().equals(command.account()))
+      throw new Board.Refused("A forum bridge write requires project write permission");
   }
 
   private void requireOpen(BoardTopic topic, boolean allowance) {
@@ -179,13 +241,28 @@ public final class ForumBoardBridge implements BoardBridge {
     }
   }
 
-  private void replyTopic(Command command) {
-    if (command.payload().replyTo() != null
-        && relay
-                .topic(new Relay.TopicKey(command.sourceProject(), command.payload().replyTo()))
-                .kind()
-            != RelayPayload.Kind.TEXT)
-      throw new Board.Refused("The reply destination must be an existing TEXT topic");
+  private Optional<BoardBridgeRepository.ReplyDestination> replyDestination(Command command) {
+    if (command.actor() instanceof Agent agent) {
+      if (command.payload().replyTo() != null)
+        throw new Board.Refused("Execution board replies use their retained native requester");
+      return Optional.of(new BoardBridgeRepository.NativeDestination(agent.sourceEvent()));
+    }
+    if (command.payload().replyTo() == null) return Optional.empty();
+    var topic =
+        relay.topic(new Relay.TopicKey(command.sourceProject(), command.payload().replyTo()));
+    if (topic.kind() != RelayPayload.Kind.TEXT || topic.generation() == null)
+      throw new Board.Refused("The reply destination must be an existing versioned TEXT topic");
+    return Optional.of(
+        new BoardBridgeRepository.TopicDestination(
+            command.sourceProject(), command.payload().replyTo(), topic.generation()));
+  }
+
+  private static String author(Command command) {
+    return command.actor() instanceof Agent agent ? agent.definition() : command.account();
+  }
+
+  private static String authorKind(Command command) {
+    return command.actor() instanceof Agent ? BoardMessage.BY_AGENT : BoardMessage.BY_PERSON;
   }
 
   private Receipt receipt(String messageId) {
@@ -196,7 +273,7 @@ public final class ForumBoardBridge implements BoardBridge {
     return new Receipt(message.topic(), message.id());
   }
 
-  private static BoardPostRepository.Bridge action(Command command, BoardTopic selected) {
+  private static BoardPostRepository.Action action(Command command, BoardTopic selected) {
     String operation =
         switch (command.target()) {
           case Open ignored -> "board.open";
@@ -210,13 +287,17 @@ public final class ForumBoardBridge implements BoardBridge {
           case Close close -> close.topic();
         };
     String project = command.target() instanceof Open open ? open.project() : selected.project();
-    return new BoardPostRepository.Bridge(
-        operation,
-        command.sourceProject(),
-        command.sourceEvent(),
-        target,
-        project,
-        command.payload().body(),
-        command.payload().replyTo());
+    var intent =
+        new BoardPostRepository.Bridge(
+            operation,
+            command.sourceProject(),
+            command.sourceEvent(),
+            target,
+            project,
+            command.payload().body(),
+            command.payload().replyTo());
+    return command.actor() instanceof Agent agent
+        ? new BoardPostRepository.BridgeExecution(intent, agent.definition(), agent.sourceEvent())
+        : intent;
   }
 }

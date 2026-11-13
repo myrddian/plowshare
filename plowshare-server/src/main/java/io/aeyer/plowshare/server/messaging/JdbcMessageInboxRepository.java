@@ -86,7 +86,7 @@ public final class JdbcMessageInboxRepository implements MessageInboxRepository 
   private record Retained(Inbox inbox, boolean retired) {}
 
   @Override
-  public List<Inbox> ready(String after, int limit) {
+  public List<Inbox> ready(Cursor after, int limit) {
     if (limit < 1 || limit > 256)
       throw new IllegalArgumentException("Invalid inbox discovery bound");
     return jdbc.query(
@@ -95,8 +95,8 @@ public final class JdbcMessageInboxRepository implements MessageInboxRepository 
         JOIN relay_topics t ON t.project_id=i.project_id AND t.name=i.topic
         JOIN relay_subscriptions s ON s.scope_key=t.scope_key AND s.topic=t.name AND s.subscriber='messaging.inbox'
         WHERE i.retired_at IS NULL AND s.seen_through<t.last_position
-          AND (CAST(? AS text) IS NULL OR i.project_id::text||'/'||i.topic>?)
-        ORDER BY i.project_id::text||'/'||i.topic LIMIT ?
+          AND (CAST(? AS bigint) IS NULL OR (i.project_id,i.topic)>(?,?))
+        ORDER BY i.project_id,i.topic LIMIT ?
         """,
         (row, number) ->
             new Inbox(
@@ -106,13 +106,14 @@ public final class JdbcMessageInboxRepository implements MessageInboxRepository 
                 new Relay.SubscriptionKey(
                     new Relay.TopicKey(row.getLong("project_id"), row.getString("topic")),
                     "messaging.inbox")),
-        after,
-        after,
+        after == null ? null : after.project(),
+        after == null ? null : after.project(),
+        after == null ? null : after.topic(),
         limit);
   }
 
   @Override
-  public List<Inbox> drained(String after, int limit) {
+  public List<Inbox> drained(Cursor after, int limit) {
     if (limit < 1 || limit > 256) throw new IllegalArgumentException("Invalid retirement bound");
     return jdbc.query(
         """
@@ -122,8 +123,8 @@ public final class JdbcMessageInboxRepository implements MessageInboxRepository 
         WHERE i.retired_at IS NULL AND s.seen_through=t.last_position
           AND NOT EXISTS(SELECT 1 FROM message_instances n JOIN message_routes r ON r.recipient=n.id
             WHERE n.account=i.account AND n.project=i.project AND n.agent=i.agent AND r.handled_at IS NULL)
-          AND (CAST(? AS text) IS NULL OR i.project_id::text||'/'||i.topic>?)
-        ORDER BY i.project_id::text||'/'||i.topic LIMIT ?
+          AND (CAST(? AS bigint) IS NULL OR (i.project_id,i.topic)>(?,?))
+        ORDER BY i.project_id,i.topic LIMIT ?
         """,
         (row, number) ->
             new Inbox(
@@ -133,8 +134,9 @@ public final class JdbcMessageInboxRepository implements MessageInboxRepository 
                 new Relay.SubscriptionKey(
                     new Relay.TopicKey(row.getLong("project_id"), row.getString("topic")),
                     "messaging.inbox")),
-        after,
-        after,
+        after == null ? null : after.project(),
+        after == null ? null : after.project(),
+        after == null ? null : after.topic(),
         limit);
   }
 
@@ -164,17 +166,8 @@ public final class JdbcMessageInboxRepository implements MessageInboxRepository 
   }
 
   @Override
-  public List<Inbox> retired(String after, int limit) {
+  public List<Inbox> retired(Cursor after, int limit) {
     if (limit < 1 || limit > 256) throw new IllegalArgumentException("Invalid retirement bound");
-    Long projectId = null;
-    String topic = null;
-    if (after != null) {
-      int separator = after.indexOf('/');
-      if (separator < 1) throw new IllegalArgumentException("Invalid retirement cursor");
-      projectId = Long.valueOf(after.substring(0, separator));
-      topic = RelayPort.topic(after.substring(separator + 1));
-      if (projectId < 1) throw new IllegalArgumentException("Invalid retirement project cursor");
-    }
     return jdbc.query(
         """
         SELECT account,project,project_id,agent,topic FROM message_agent_inboxes
@@ -189,9 +182,9 @@ public final class JdbcMessageInboxRepository implements MessageInboxRepository 
                 new Relay.SubscriptionKey(
                     new Relay.TopicKey(row.getLong("project_id"), row.getString("topic")),
                     "messaging.inbox")),
-        projectId,
-        projectId,
-        topic,
+        after == null ? null : after.project(),
+        after == null ? null : after.project(),
+        after == null ? null : after.topic(),
         limit);
   }
 

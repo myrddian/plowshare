@@ -8,7 +8,6 @@ import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.BoundTools;
 import io.aeyer.plowshare.server.agents.ClasspathDefinitions;
 import io.aeyer.plowshare.server.agents.Environments;
-import io.aeyer.plowshare.server.agents.OutgoingTool;
 import io.aeyer.plowshare.server.agents.RelayPublishTool;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
@@ -127,10 +126,6 @@ class NothingEnumeratesImagesTest {
    * adapters return document paragraphs, outlines and citation coordinates. None reads {@code
    * ImageStore} or lists image files, so these reads preserve the same reachability boundary.
    *
-   * <p>The outgoing tools read peer aliases and account-owned external-work receipts. They neither
-   * reach the image store nor enumerate local files. They are available for explicit operator
-   * grants and are not granted to shipped agents.
-   *
    * <p>{@code send_message} sends supplied text and returns a routing receipt. It does not inspect
    * image stores or enumerate image ids. Any ids carried in a later reply are data explicitly
    * supplied by that participant.
@@ -174,10 +169,6 @@ class NothingEnumeratesImagesTest {
             "memory_read",
             "memory_recall",
             "memory_write",
-            "outgoing_cancel",
-            "outgoing_peers",
-            "outgoing_read",
-            "outgoing_send",
             "relay_publish",
             "result_list",
             "result_read",
@@ -203,7 +194,7 @@ class NothingEnumeratesImagesTest {
       declared.addAll(shipped.tools());
     }
     // run is behind a permission flag rather than a declaration, so whether a shipped agent
-    // names it yet does not move this rule. Outgoing and Relay publishing tools need explicit
+    // names it yet does not move this rule. Relay publishing tools need explicit
     // grants;
     // the shipped definitions must not acquire them through this inventory update.
     assertEquals(
@@ -212,7 +203,6 @@ class NothingEnumeratesImagesTest {
                 tool ->
                     !tool.equals("run")
                         && !tool.equals("information_write")
-                        && !OutgoingTool.NAMES.contains(tool)
                         && !tool.equals(RelayPublishTool.NAME)
                         && !tool.equals("send_message"))
             .toList(),

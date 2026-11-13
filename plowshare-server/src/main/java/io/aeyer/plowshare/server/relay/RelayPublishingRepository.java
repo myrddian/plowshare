@@ -22,6 +22,7 @@ public interface RelayPublishingRepository {
   record Intent(
       UUID id,
       long project,
+      String projectName,
       UsageAttribution owner,
       String call,
       RelayPublishing.Request request,
@@ -30,6 +31,7 @@ public interface RelayPublishingRepository {
       RelayCausation causation) {
     public Intent {
       Objects.requireNonNull(id);
+      projectName = RelayPort.identity(projectName);
       Objects.requireNonNull(owner);
       Objects.requireNonNull(request);
       Objects.requireNonNull(occurredAt);

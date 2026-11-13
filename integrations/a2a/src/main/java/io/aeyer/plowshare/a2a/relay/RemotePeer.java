@@ -1,8 +1,8 @@
 package io.aeyer.plowshare.a2a.relay;
 
-import io.aeyer.plowshare.protocol.AgentCard;
-import io.aeyer.plowshare.protocol.ExternalMessage;
-import io.aeyer.plowshare.protocol.ExternalResult;
+import io.aeyer.plowshare.a2a.model.AgentCard;
+import io.aeyer.plowshare.a2a.model.ExternalMessage;
+import io.aeyer.plowshare.a2a.model.ExternalResult;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Set;
@@ -45,8 +45,6 @@ public interface RemotePeer extends AutoCloseable {
       if (error != null) RelayWork.text(error, 4096);
       if (task != null && context == null)
         throw new IllegalArgumentException("A remote task needs its context");
-      if (result instanceof ExternalResult.IntegrationResult)
-        throw new IllegalArgumentException("Not an A2A result");
       if (result instanceof ExternalResult.TaskResult remote) {
         String expected = remote.task().status().state().substring("TASK_STATE_".length());
         if (expected.equals("SUBMITTED")) expected = "WORKING";
@@ -60,7 +58,7 @@ public interface RemotePeer extends AutoCloseable {
               || task != null
               || !Objects.equals(context, remote.message().contextId())))
         throw new IllegalArgumentException("Inconsistent direct A2A reply");
-      if (result == null && !Set.of("FAILED", "UNKNOWN").contains(state))
+      if (result == null && !Set.of("FAILED", "UNKNOWN", "REJECTED").contains(state))
         throw new IllegalArgumentException("Missing remote result");
       if (result == null && error == null)
         throw new IllegalArgumentException("Missing failure diagnostic");

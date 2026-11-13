@@ -2,14 +2,16 @@ package io.aeyer.plowshare.server.board;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
  * An admitted Relay publication's forum write. The receiver supplies the authenticated publisher,
- * source scope and pinned destination after checking live ingress authority. A route grants no read
- * or seat rights. Closing additionally checks the publisher's destination-project write authority.
+ * source scope and pinned destination after checking live source and reply ingress authority. A
+ * route grants no membership or seat rights. Every forum write requires live source-project write
+ * authority; post/close destinations must be in that same project.
  */
 public interface BoardBridge {
   record Payload(String body, String replyTo) {
@@ -41,19 +43,64 @@ public interface BoardBridge {
     }
   }
 
+  sealed interface Actor permits Person, Agent {
+    String account();
+  }
+
+  record Person(String account) implements Actor {
+    public Person {
+      account = RelayPort.identity(account);
+    }
+  }
+
+  /**
+   * Proven server execution; the owning account grants write authority, never person authorship.
+   */
+  record Agent(String account, String definition, UUID sourceEvent) implements Actor {
+    public Agent {
+      account = RelayPort.identity(account);
+      definition = RelayPort.identity(definition);
+      Objects.requireNonNull(sourceEvent);
+    }
+
+    public UUID effectRequestId() {
+      return UUID.nameUUIDFromBytes(
+          ("native-board-effect/1\n" + sourceEvent).getBytes(StandardCharsets.UTF_8));
+    }
+  }
+
   record Command(
       UUID requestId,
-      String account,
+      Actor actor,
       long sourceProject,
       String sourceEvent,
       Target target,
       Payload payload,
       RelayCausation causation) {
+    public Command(
+        UUID requestId,
+        String account,
+        long sourceProject,
+        String sourceEvent,
+        Target target,
+        Payload payload,
+        RelayCausation causation) {
+      this(requestId, new Person(account), sourceProject, sourceEvent, target, payload, causation);
+    }
+
+    public String account() {
+      return actor.account();
+    }
+
     public Command {
       Objects.requireNonNull(requestId);
-      account = RelayPort.identity(account);
+      Objects.requireNonNull(actor);
       if (sourceProject < 1) throw new IllegalArgumentException("Bridge requires a project source");
       sourceEvent = RelayPort.identity(sourceEvent);
+      if (actor instanceof Agent agent
+          && (!agent.sourceEvent().toString().equals(sourceEvent)
+              || !agent.effectRequestId().equals(requestId)))
+        throw new IllegalArgumentException("Native board identity differs from its proven source");
       Objects.requireNonNull(target);
       Objects.requireNonNull(payload);
     }

@@ -14,6 +14,7 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.messaging.MessageInboxWorker;
+import io.aeyer.plowshare.server.messaging.MessageRelayWorker;
 import io.aeyer.plowshare.server.messaging.MessageService;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.relay.Relay;
@@ -242,7 +243,8 @@ public class EventsConfig {
       EventsProperties properties,
       ScheduledExecutorService eventsTickerThread,
       RelayInternalWorkers relayInternalWorkers,
-      MessageInboxWorker messageInboxes) {
+      MessageInboxWorker messageInboxes,
+      MessageRelayWorker messageSnapshots) {
     return ready -> {
       if (properties.isRecoverAtBoot()) {
         Instant now = Instant.now();
@@ -259,6 +261,7 @@ public class EventsConfig {
       dispatcher.recoverWakes();
       relayInternalWorkers.start();
       messageInboxes.start();
+      messageSnapshots.start();
       if (properties.isRecoverAtBoot()) {
         firings.targetsWaiting().forEach(dispatcher::drain);
       }

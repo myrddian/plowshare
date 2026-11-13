@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.messaging;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.messaging.MessageService.Instance;
 import io.aeyer.plowshare.server.messaging.MessageService.Route;
 
@@ -9,12 +10,28 @@ import io.aeyer.plowshare.server.messaging.MessageService.Route;
  */
 public interface MessageInboxes {
   /** Resolved participants are the owning send's authorized snapshot, never caller assertions. */
-  void publish(
+  default MessageInboxRepository.Inbox publish(
       MessageRecord record,
       Route route,
       Instance sender,
       Instance recipient,
-      MessagePublications.Reply reply);
+      MessagePublications.Reply reply) {
+    return publish(record, route, sender, recipient, reply, null);
+  }
+
+  MessageInboxRepository.Inbox publish(
+      MessageRecord record,
+      Route route,
+      Instance sender,
+      Instance recipient,
+      MessagePublications.Reply reply,
+      RelayCausation causation);
+
+  /** Signals already committed work using its authorized inbox snapshot; no repeat lookup. */
+  void admitSoon(MessageInboxRepository.Inbox inbox);
+
+  /** Bounded admission for one committed inbox; the worker coalesces duplicate signals. */
+  int poll(MessageInboxRepository.Inbox inbox);
 
   /** Bounded discovery/admission pass. A gap is surfaced without acknowledging or skipping it. */
   int poll();

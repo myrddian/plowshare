@@ -55,9 +55,7 @@ remain owned by their existing concurrency-safe loaders.
 | `orchestration.status`, `orchestration.receipt`, `orchestration.definitions`, `orchestration.record` | `OrchestrationFrames`, `RecordFrames` → owned run/start receipt, todo/message/child/stall reads, definition resolvers and `RecordReads`/`RecordStore`. Records are paged reads; no cap application, answer, resume or retained-work replay. |
 | `memory.index`, `proposal.list`, `provider.list` | Their handlers → `Archive.index`/`MemoryStore.index`, `PromotionQueue.waiting`, `ProviderStore.all`. No memory-use counters, proposal settlement or provider deregistration. |
 | `trigger.list`, `firing.list`, `union.conflict.list` | `TriggerListHandler`, `FiringListHandler`, `UnionFrames.listConflicts` → stores, with existing owner/project result filtering. No trigger execution, conflict resolution or sync claim changes. |
-| `message.instances`, `message.instance`, `message.deliveries`, `message.delivery`, `incoming.status` | `MessageFrames` / `IncomingFrames` → `BoardMessaging` account-owned instances/routes, current participant/log visibility, listing/delivery/state/reply reads. Neither delivery inspection nor external-task inspection settles or cancels a message. |
-| `incoming.catalog` | `IncomingFrames.catalog` → session/project/agent checks and definition/skill/orchestration catalogues. No external message receipt or work creation. |
-| `outgoing.status`, `outgoing.peers` | `OutgoingFrames` → owned `OutgoingWork.get`/`peers` → repository reads. No advertise, claim, send, cancel or report. |
+| `message.instances`, `message.instance`, `message.deliveries`, `message.delivery` | `MessageFrames` → messaging-owned `MessageService` and repositories; account-owned instances/routes, current participant/log visibility and bounded delivery/state reads. Inspection does not settle or cancel a message. |
 | `application.files`, `application.file.read`, `filestore.list` | `ApplicationFileFrames`, `FileStoreFrames` → `WorkspaceApplicationFiles` bounded directory/UTF-8 reads and `FileStores.catalog`. Source/placement/role/fence checks remain; no save, staging file or directory creation. |
 | `application.identity.status`, `application.token.receipt`, `application.deployment.status`, `application.deployment.receipt` | Application frames → `OwnedApplicationIdentities` / `SourceApplicationDeployments` → current binding/status or retained receipt reads. Receipt ownership remains checked; absence never authorizes replay or token issuance. |
 | `provider.connection.list`, `provider.connection.status`, `provider.connection.receipt` | `ProviderCredentialFrames` → `OwnedProviderConnections` → access checks and unlocked connection/receipt reads. The receipt branch checks any retained credential subject but does not retrieve/expire live credentials. |
@@ -153,3 +151,8 @@ Local verification on 2026-10-26: `./gradlew --no-daemon --max-workers=2 format
 formatCheck check` passed with Java 21 and Node 22. The seven dispatcher/read
 policy/authorization test classes contain 339 passing cases, zero failures and
 zero errors in that run. No `-PfullDb` or database-backed smoke task was used.
+
+The retired `incoming.*` and `outgoing.*` families have no independent-read
+registration. Relay receiver inspection is typed messaging work over existing
+Relay operations; it does not add a WebSocket status family or relax read policy.
+See the [cutover contract](relay-legacy-cutover.md).

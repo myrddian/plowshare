@@ -9,6 +9,4 @@ public interface BoardRecords {
   Optional<BoardTopic> topic(String id);
 
   Optional<BoardMessage> message(String id);
-
-  boolean messagingTopic(String id);
 }

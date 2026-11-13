@@ -6,13 +6,25 @@ import java.util.Set;
 
 /** Pinned, one-way work destination. Authority is resolved live, never granted by a route. */
 public record RelayWork(
-    String agent, String project, String definition, String topic, String swarm) {
+    String agent,
+    String project,
+    String definition,
+    String topic,
+    String swarm,
+    String replyTopic,
+    String channel) {
   public RelayWork(String agent, String project, String definition) {
-    this(agent, project, definition, null, null);
+    this(agent, project, definition, null, null, null, null);
+  }
+
+  public RelayWork(String agent, String project, String definition, String topic, String swarm) {
+    this(agent, project, definition, topic, swarm, null, null);
   }
 
   public RelayWork {
     if (agent != null) agent = RelayValues.identity(agent, "agent");
+    if (replyTopic != null) replyTopic = RelayValues.topic(replyTopic);
+    if (channel != null) channel = RelayValues.identity(channel, "message channel");
     if (project != null) project = RelayValues.identity(project, "destination project");
     if (definition != null)
       definition = RelayValues.identity(definition, "orchestration definition");
@@ -25,6 +37,24 @@ public record RelayWork(
   }
 
   static void require(String receiver, RelayWork work, boolean scripted) {
+    boolean messaging =
+        Set.of("message.receive", "message.cancel", "message.inspect").contains(receiver);
+    if (messaging) {
+      if (work == null
+          || scripted
+          || work.agent() == null
+          || work.project() != null
+          || work.definition() != null
+          || work.topic() != null
+          || work.swarm() != null
+          || work.replyTopic() == null
+          || work.channel() == null)
+        throw new IllegalArgumentException(
+            "Messaging receivers require a pinned agent, replyTopic and shared channel");
+      return;
+    }
+    if (work != null && (work.replyTopic() != null || work.channel() != null))
+      throw new IllegalArgumentException("Message return pins belong only to messaging receivers");
     boolean board = Set.of("board.open", "board.post", "board.close").contains(receiver);
     if (board) {
       if (work == null

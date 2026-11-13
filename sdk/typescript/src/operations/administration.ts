@@ -1,9 +1,3 @@
-import type {
-  ExternalMessage,
-  ExternalResult,
-  IncomingSource,
-  AgentCard,
-} from './external.ts';
 import type { UsagePayloads } from './usage.ts';
 import type { ScheduleDefinition } from './schedule-files.ts';
 /** JSON choices/data are owned and interpreted by the server. */
@@ -18,15 +12,6 @@ type Tier = { readonly project?: string | null };
 type Id = { readonly id: string };
 type Page = { readonly offset?: number; readonly limit?: number };
 export interface AdministrativePayloads {
-  'outgoing.send': Tier & {
-    readonly requestId: string;
-    readonly peer: string;
-    readonly message: ExternalMessage;
-    readonly conversation?: string | null;
-  };
-  'outgoing.status': Id;
-  'outgoing.cancel': Id;
-  'outgoing.peers': Tier;
   'approval.list': Tier & {
     readonly conversation?: string | null;
     readonly mine?: boolean;
@@ -188,42 +173,6 @@ export interface BoundPayloads {
     readonly conversation?: string;
   };
   'acting.turn.receipt': { readonly requestId: string };
-
-  'incoming.catalog': { readonly project: string; readonly agent: string };
-  'incoming.receive': {
-    readonly project: string;
-    readonly client: string;
-    readonly agent: string;
-    readonly requestId: string;
-    readonly context?: string | null;
-    readonly body: string;
-    readonly command?: string | null;
-    readonly source?: IncomingSource | null;
-  };
-  'incoming.status': {
-    readonly project: string;
-    readonly client: string;
-    readonly id: string;
-  };
-  'incoming.cancel': {
-    readonly project: string;
-    readonly client: string;
-    readonly id: string;
-  };
-
-  'outgoing.advertise': Tier & {
-    readonly peers: readonly string[];
-    readonly agentCards?: Readonly<Record<string, AgentCard>> | null;
-  };
-  'outgoing.claim': Tier & { readonly peers: readonly string[] };
-  'outgoing.report': Id & {
-    readonly revision: number;
-    readonly state: string;
-    readonly remoteTask?: string | null;
-    readonly remoteContext?: string | null;
-    readonly result?: ExternalResult | null;
-    readonly error?: string | null;
-  };
   'usage.subscribe': UsagePayloads['usage.subscribe'];
   'usage.unsubscribe': { readonly subscription: string };
   'job.stream': { readonly on?: boolean };
@@ -262,14 +211,6 @@ export const BOUND_OPERATIONS = {
   'acting.context.close': 'physical-connection-subject-context',
   'acting.turn.start': 'selected-Personal-authority',
   'acting.turn.receipt': 'selected-Personal-authority',
-  'incoming.catalog': 'persistent inbound adapter',
-  'incoming.receive': 'persistent inbound adapter',
-  'incoming.status': 'persistent inbound adapter',
-  'incoming.cancel': 'persistent inbound adapter',
-
-  'outgoing.advertise': 'persistent outbound adapter',
-  'outgoing.claim': 'persistent outbound adapter',
-  'outgoing.report': 'persistent outbound adapter',
   'usage.subscribe': 'usage-view-snapshot-subscription',
   'usage.unsubscribe': 'usage-view-snapshot-subscription',
   'job.stream': 'persistent-observer',

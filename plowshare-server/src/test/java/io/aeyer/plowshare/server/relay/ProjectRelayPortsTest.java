@@ -138,6 +138,28 @@ class ProjectRelayPortsTest {
   }
 
   @Test
+  void batched_publish_authority_uses_one_immutable_deployment_policy_snapshot() {
+    var policy = mock(RelayPortProperties.class);
+    var source =
+        new RelayPortProperties.Binding(
+            "project", "commands", "reviewer", RelayPortProperties.Direction.INGRESS, List.of());
+    var returned =
+        new RelayPortProperties.Binding(
+            "project", "results", "reviewer", RelayPortProperties.Direction.INGRESS, List.of());
+    when(policy.getBindings()).thenReturn(List.of(source, returned)).thenReturn(List.of());
+    when(members.mayWork("project", "reviewer")).thenReturn(true);
+    when(projects.id("project")).thenReturn(7L);
+    var batch = new ProjectRelayPorts(relay, repository, policy, members, projects, 8);
+    assertEquals(
+        2, batch.authorizePublishers("reviewer", "project", List.of("commands", "results")).size());
+    verify(policy).getBindings();
+    assertThrows(
+        CallerFault.class,
+        () -> batch.authorizePublishers("reviewer", "project", List.of("commands", "results")));
+    verifyNoInteractions(relay, repository);
+  }
+
+  @Test
   void publisher_is_authenticated_and_text_is_preserved() {
     allow();
     when(relay.publish(any(), any()))

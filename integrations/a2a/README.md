@@ -1,141 +1,50 @@
 # Plowshare A2A adapter
 
-The Slice 5 rewrite has an SDK-only [Relay outbound worker](../../docs/a2a-relay-outbound.md),
-launched as `plowshare-a2a-relay`. Its dispatch journal and remote protocol state
-live in the adapter. Inbound cutover remains blocked by the exact public messaging
-admission/catalog gaps in [ADR 0065](../../docs/decisions/0065-a2a-relay-adapter-contracts-and-capability-gaps.md).
-The existing launcher and consumers below remain available pending that cutover.
-This is partial Slice 5 implementation, not removal of A2A or completion of its rewrite.
+A2A remains a separate Java process using the public Plowshare SDK. The rewrite
+uses existing Relay TEXT ports and native messaging receivers; external HTTP,
+peer credentials and A2A provenance remain in the adapter.
 
-For setup, CLI/SDK examples, follow-ups, cancellation and recovery, use the
-[A2A sending manual](../../docs/a2a-sending.md).
+- `plowshare-a2a CONFIG` runs the receiving HTTP listener. Follow the
+  [receiving manual](../../docs/a2a-receiving.md) for explicit service credentials,
+  durable journal, native routes, client aliases, discovery, context and recovery.
+- `plowshare-a2a-relay CONFIG` dispatches configured remote SEND/READ/CANCEL work.
+  Follow the [outbound manual](../../docs/a2a-relay-outbound.md) for producer grants,
+  journal ownership, native requester returns and uncertain publication recovery.
 
-Plowshare sends and receives A2A messages through a separate Java process.
-For inbound authentication, public Agent Cards and task handling, follow the
-[A2A receiving manual](../../docs/a2a-receiving.md).
+Build with `./gradlew :plowshare-a2a:installDist`. Java 21 is required. Bind addresses,
+server origins, public URLs, journal paths and credentials are explicit deployment
+configuration. There is no human-login fallback or assumed colocated server.
 
-Outgoing work:
+One active process owns each private durable POSIX journal. Independent journals
+cannot fence duplicate external effects. Retained mutation receipts and immutable
+reply bodies grow until deliberate binding retirement; monitor and back up the
+whole volume. A restart inspects unknown native admission and never blindly
+repeats a peer mutation. See each manual for distinct recovery and exit statuses.
 
-```
-agent / SDK / CLI -- Plowshare WS --> durable outgoing work
-                         ^
-                         | WS claim/report
-                    A2A adapter -- A2A 1.0 JSON-RPC/HTTP --> configured remote agent
-```
+The receiver preserves the supported A2A 1.0 JSON-RPC text subset: Agent Cards,
+SendMessage, GetTask, CancelTask, authenticated client/context isolation and the
+explicit granted-command extension. Approval remains a native operator action.
+HistoryLength is 0..200 and HTTP results remain bounded to 1 MiB; oversized data is
+refused explicitly without changing or truncating retained body evidence.
 
-The adapter depends on `plowshare-sdk`; it imports no server classes. Plowshare knows
-peer aliases, fetched Agent Cards and durable messages/results. The adapter owns endpoints, authentication
-and A2A wire translation. Remote execution and files remain opaque external work.
+The [Application template](examples/application/plowshare.json) remains an
+operator-owned root manifest. Supply explicit access grants and server membership
+before registering it. A source directory alone grants no account or runtime
+filesystem access. [Integration boundary ADR 0001](../../docs/decisions/0001-integration-boundary.md)
+and [native messaging receiver design](../../docs/decisions/0066-relay-messaging-receiver-and-review-remediation.md)
+separate platform admission from adapter translation. Consumer migration and
+legacy surface retirement are reviewed independently; this README is not a claim
+that every dependent client has completed cutover.
 
-Build with `./gradlew :plowshare-a2a:installDist`. Set `PLOWSHARE_TOKEN`, configure an
-operator-owned JSON file, and launch
-`integrations/a2a/build/install/plowshare-a2a/bin/plowshare-a2a /path/to/config.json`.
+Historical contexts require explicit native channel adoption and the private
+[provenance migration recipe](migration/README.md). Database identity mapping alone
+does not reconstruct A2A history, and an unknown original request is never resent.
 
-The distribution includes [an A2A Application template](examples/application/plowshare.json).
-Copy it to the server's intended Application root and add explicit `access.accounts`
-grants for the operator and adapter account (a service token uses its owner's
-handle), with matching server membership. The template is hidden until granted.
-Register the root through [Application creation or adoption](../../docs/projects.md#create-or-adopt-an-alias-based-application).
-The adapter configuration's `project` field selects that Application; a binding
-alone does not create or classify it. The adapter's private endpoint and credential
-configuration remains outside the Application template.
-
-```json
-{
-  "plowshare": "https://plowshare.example.invalid",
-  "project": "my-project",
-  "peers": {
-    "research": {
-      "endpoint": "https://agent.example.invalid/rpc",
-      "agentCard": "https://agent.example.invalid/.well-known/agent-card.json",
-      "bearerEnv": "RESEARCH_AGENT_TOKEN"
-    }
-  }
-}
-```
-
-Omit `project` for global work and `bearerEnv` for a peer needing no authentication.
-Credentials are read from the named environment variables. No token belongs in the
-configuration file, a URL or command-line argument. The Plowshare account must have
-access to the configured project. Advertisements are account/project scoped and
-expire after two minutes without renewal. The adapter operates one claim at a time;
-run additional instances for capacity.
-
-The sender pins the [A2A 1.0 JSON-RPC binding](https://a2a-protocol.org/v1.0.0/specification/),
-using `A2A-Version: 1.0`, `SendMessage` with `returnImmediately: true`, `GetTask` polling
-and `CancelTask`. Before advertising/claiming, the adapter fetches each Agent Card,
-validates the pinned endpoint's A2A 1.0 JSONRPC interface and publishes its description,
-skills and capabilities to Plowshare's `outgoing_peers` tool and `outgoing.peers`
-WebSocket operation. Omit `agentCard` to use the endpoint origin's
-`/.well-known/agent-card.json`. Expired cards use conditional revalidation; invalid
-cards stop dispatch. See the manual for cache, size and credential boundaries.
-Version negotiation, authenticated extended cards, SSE, webhooks, OAuth flows are deferred. Inbound text serving is described in the receiving manual.
-This is a sender subset, not an implementation of every A2A operation. No downgrade,
-redirect or automatic HTTP send retry is performed.
-
-## Inbound status
-
-Messaging and Skills are implemented. Inbound text receipt, context continuity,
-task reads, cancellation and public Agent Cards are now supported. The receiver
-publishes granted commands and binds explicitly requested commands through the
-existing skill/orchestration path. Follow the
-[receiving manual](../../docs/a2a-receiving.md) for the supported subset and
-operator-owned approval handling.
-
-## Send and observe
-
-Using the Java SDK on the same account/project:
-
-```java
-var outgoing = new OutgoingClient(sdk);
-var receipt = outgoing.send(new Outgoing.Send(
-    UUID.randomUUID(), "research",
-    Map.of("parts", List.of(Map.of("text", "Research this question"))),
-    "my-project", null));
-var observed = outgoing.status(receipt.id());
-// outgoing.cancel(receipt.id()) requests cancellation; check status for its outcome.
-```
-
-Retain the request UUID before submitting. Repeating the identical `outgoing.send`
-with that UUID recovers the same receipt; changed work with that UUID is refused.
-The adapter supplies A2A `messageId` from the durable work ID and `ROLE_USER`. Content
-supports A2A 1.0 text, URL and base64 raw bytes. Structured data parts use the
-registered integration DTOs; unsupported object shapes are refused. Metadata is
-limited to the declared command, ending, generated and final fields. Remote
-messages and artifacts are validated against the supported result DTOs. URLs are
-references; neither Plowshare nor this adapter downloads them or makes remote
-filesystem claims.
-
-The TS headless CLI also exposes `outgoing send`, `outgoing status`, `outgoing cancel`
-and `outgoing peers`. Send takes a JSON payload with `requestId`, `peer`, `message`
-and optional `project`/`conversation`. Agent definitions can explicitly grant
-`outgoing_peers`, `outgoing_send`, `outgoing_read`, `outgoing_cancel`. These use the
-runtime's immutable account, project and conversation; a model cannot choose its
-own owner or project. Existing shipped bot grants are unchanged.
-
-## Delivery and state
-
-`QUEUED` becomes `DISPATCHED` in a committed transaction before remote I/O. Only one
-adapter can claim the initial send. Reports require the claiming session and current
-revision; stale or foreign reports are refused. Queued cancellation is local and
-prevents dispatch. After dispatch, cancellation is a remote request whose outcome
-must be observed.
-
-Remote task states map to the corresponding local state; `SUBMITTED` maps to
-`WORKING`. A direct agent message completes that outgoing message without inventing
-a remote task. `INPUT_REQUIRED` and `AUTH_REQUIRED` preserve the remote task and
-context. To respond, explicitly send a new message/receipt containing the returned
-`taskId` and `contextId`; terminal tasks cannot be reopened. This first version does
-not automatically resume a Plowshare run or satisfy remote authentication requests.
-
-A lost initial remote response becomes `UNKNOWN` and is never resent. A process that
-dies after claiming but before reporting can leave `DISPATCHED` with no remote task;
-that also means uncertain delivery and requires operator reconciliation. If a remote
-task ID was durably reported, a replacement adapter can resume reads/cancellation
-after the 30-second claim lease. Initial sends are never reclaimed. A lost WS report
-acknowledgment stops that adapter; inspect the durable record before starting another.
-
-Remote observations may be retried through `GetTask`. Neither a timeout nor malformed
-remote response is recorded as successful completion. Remote usage/cost, internal
-steps, filesystem execution and artifact availability are not asserted by Plowshare.
-Results represent what the peer reported, with their remote provenance intact.
+A2A peer DTOs and strict codecs are adapter-owned in
+`io.aeyer.plowshare.a2a.model`. They are independent from the platform protocol and
+Java SDK. Moving Java packages preserves supported A2A JSON and retained Relay
+journal shapes; existing journal identities are never recomputed from class names.
+The live adapter uses general Relay and catalog capabilities. Legacy
+`incoming.*`/`outgoing.*` operations and their old Java worker are retired; the
+separate historical exporter recipe deliberately targets an archived pre-cutover
+SDK and must run before upgrading away from those operations.

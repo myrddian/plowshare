@@ -12,7 +12,20 @@ receipts, and SDK contracts stay unchanged. The A2A rewrite remains Slice 5.
 handling. `RelayMessaging` consumes typed repository, allowance and inbox
 interfaces. Only specialist JDBC repositories execute messaging SQL. Instances
 keep their existing account, project, definition, conversation and lifetime;
-creating an instance creates no board topic, seat or post.
+creating an instance creates no board topic, seat or post. Messaging configuration,
+resource properties, routing validation, tool extras, refusals and deadline upkeep
+belong to `messaging/`. The dispatcher registers the distinct typed messaging and
+forum wake families independently; scheduling combines domain-owned share snapshots
+without re-reading messaging state to determine model fallback policy.
+
+Private participant conversations use origin `message`, share their instance's
+allowance, remain open across individual wakes and have no automatic age policy.
+The migration reclassifies only former private messaging contexts; ordinary person
+conversations and retained forum seats keep their origins and authority. Neither
+Origin.MESSAGE nor tool composition makes a context publicly speakable or grants
+access to its inputs. Public forum capture and reads do not consult the historical
+`former_topic` column. Historical records retain that column solely as cutover
+evidence.
 
 One TEXT topic serves each (account, project, definition name). Messaging derives
 `messaging.agent.<SHA-256(account)>.<SHA-256(definition)>` inside the destination
@@ -45,7 +58,17 @@ database work, never inference. Agent bindings are also acquired in deterministi
 identity order. Publication and drained-inbox retirement serialize on those
 bindings.
 
-A bounded worker discovers inboxes by keyset and leases each consumer group. It
+A committed send queues a bounded, coalescing hint for its already authorized inbox
+snapshot. The hint runs admission after the owning transaction commits and the
+log-open callback completes; it never drains a recipient before its firing exists.
+Hints accepted before worker start wait for startup recovery. Overflow, a busy
+admission pass or process loss leaves durable publication debt for periodic recovery.
+Each worker batch admits at most 32 hinted inboxes, and one failed inbox does not
+prevent another hint from running. The worker never invokes inference directly.
+
+Periodic discovery uses a typed numeric `(project_id, topic)` keyset and matching
+active/retired partial indexes rather than a computed text sort. Discovery wraps at
+the end of each bounded pass to preserve fairness. It leases each consumer group. It
 validates the complete bounded batch, reads retained admission snapshots in one
 repository query, fetching bodies only for inline validation rather than hydrating
 retained outcome references. It verifies payload participants, thread, flags, conversation

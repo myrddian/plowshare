@@ -20,20 +20,33 @@ public interface MessageInboxRepository {
     }
   }
 
+  /** Numeric project/topic keyset; lexical project strings cannot use the broker's B-tree. */
+  record Cursor(long project, String topic) {
+    public Cursor {
+      if (project < 1) throw new IllegalArgumentException("Invalid inbox project cursor");
+      topic = RelayPort.topic(topic);
+    }
+
+    public static Cursor after(Inbox inbox) {
+      return new Cursor(
+          inbox.subscription().topic().projectId(), inbox.subscription().topic().name());
+    }
+  }
+
   /**
    * Retains one deterministic binding; caller registers its broker topic in the same transaction.
    */
   Inbox retain(String account, String project, String agent, String topic);
 
-  List<Inbox> ready(String after, int limit);
+  List<Inbox> ready(Cursor after, int limit);
 
-  List<Inbox> drained(String after, int limit);
+  List<Inbox> drained(Cursor after, int limit);
 
   /** Rechecks the drained state under the publication binding lock; retains historical content. */
   boolean retire(Inbox inbox);
 
   /** Bounded retired bindings; callers recheck under lock before deleting broker metadata. */
-  List<Inbox> retired(String after, int limit);
+  List<Inbox> retired(Cursor after, int limit);
 
   /** Locks a still-retired binding, serializing cleanup with a restored definition's send. */
   boolean lockRetired(Inbox inbox);

@@ -71,14 +71,12 @@ class ProjectBoardClosingTest {
   }
 
   @Test
-  void wrong_project_private_messaging_topics_and_foreign_personal_ownership_are_refused() {
+  void wrong_project_and_foreign_personal_ownership_are_refused() {
     when(members.mayWork(any(), any())).thenReturn(true);
     var wrong =
         new BoardClosing.Command("other", "bdt_Topic", "Resolved", List.of(), command.requestId());
     when(records.topic("bdt_Topic")).thenReturn(Optional.of(BoardBridgeFixtures.topic("open")));
     assertThrows(Board.Refused.class, () -> closing.close("publisher", wrong));
-    when(records.messagingTopic("bdt_Topic")).thenReturn(true);
-    assertThrows(Board.Refused.class, () -> closing.close("publisher", command));
     when(projects.personalOwner("destination")).thenReturn(Optional.of("owner"));
     assertThrows(Board.Refused.class, () -> closing.close("publisher", command));
     verifyNoInteractions(board, receipts);

@@ -1,12 +1,19 @@
 package io.aeyer.plowshare.server.archive;
 
+import io.aeyer.plowshare.protocol.ContainedProjects;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.MemoryIds;
+import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.access.AuthorityAction;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.relay.RelayCausationCodec;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -15,7 +22,10 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -200,19 +210,16 @@ public final class ConversationStore {
             SELECT id FROM tree ORDER BY depth, id"""
           .formatted(DEEPEST_DELEGATION);
 
-  private io.aeyer.plowshare.server.access.OperationAuthority operations;
+  private OperationAuthority operations;
 
   /** Production creation boundary with required action admission. */
-  public ConversationStore(
-      JdbcTemplate jdbc, io.aeyer.plowshare.server.access.OperationAuthority operations) {
+  public ConversationStore(JdbcTemplate jdbc, OperationAuthority operations) {
     this(jdbc, operations, new JdbcAllowanceRepository(jdbc));
   }
 
   /** Production wiring supplies the canonical allowance contract. */
   public ConversationStore(
-      JdbcTemplate jdbc,
-      io.aeyer.plowshare.server.access.OperationAuthority operations,
-      AllowanceRepository allowances) {
+      JdbcTemplate jdbc, OperationAuthority operations, AllowanceRepository allowances) {
     this(jdbc, Instant::now, null, allowances);
     this.operations = Objects.requireNonNull(operations);
   }
@@ -304,7 +311,7 @@ public final class ConversationStore {
           // A request's project name, resolved to the scope admission decides on. The global tier
           // is refused by that resolution, exactly as it was refused by admission before.
           operations.scope(home),
-          java.util.Set.of(io.aeyer.plowshare.server.access.AuthorityAction.CONVERSATION_CREATE));
+          Set.of(AuthorityAction.CONVERSATION_CREATE));
     return write(Origin.TURN, home, null, null, budget, turnCap, owner, null);
   }
 
@@ -369,16 +376,16 @@ public final class ConversationStore {
       Budget budget,
       TurnCap turnCap,
       String owner,
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission child,
+      OperationAuthority.Admission child,
       String agent,
       String capabilities) {
     Objects.requireNonNull(budget, "budget");
     Objects.requireNonNull(child, "child");
-    if (!io.aeyer.plowshare.protocol.ContainedProjects.name(home.project()))
-      throw new io.aeyer.plowshare.server.faults.CallerFault(
+    if (!ContainedProjects.name(home.project()))
+      throw new CallerFault(
           "openContained opens a conversation in a contained Application's own home; use open");
     if (!child.home().equals(home))
-      throw new io.aeyer.plowshare.server.faults.CallerFault(
+      throw new CallerFault(
           "This admission was not retained for that contained Application's home");
     if (operations == null)
       throw new IllegalStateException("A contained conversation needs the authority substrate");
@@ -395,13 +402,8 @@ public final class ConversationStore {
     // and an admission whose account is the container's. bind proves the conversation belongs to
     // the admission's own home before it writes.
     operations.bind(
-        new io.aeyer.plowshare.server.access.OperationAuthority.Conversation(
-            opened.id(),
-            agent,
-            child,
-            null,
-            new io.aeyer.plowshare.server.allowances.AllowanceId(budget.identity()),
-            capabilities));
+        new OperationAuthority.Conversation(
+            opened.id(), agent, child, null, new AllowanceId(budget.identity()), capabilities));
     return opened;
   }
 
@@ -413,10 +415,8 @@ public final class ConversationStore {
    * down, which read as a defect in containment rather than as a door that was never built.
    */
   private static void requireUncontained(Home home, String door) {
-    if (home != null
-        && !home.isGlobal()
-        && io.aeyer.plowshare.protocol.ContainedProjects.name(home.project()))
-      throw new io.aeyer.plowshare.server.faults.CallerFault(
+    if (home != null && !home.isGlobal() && ContainedProjects.name(home.project()))
+      throw new CallerFault(
           "A contained Application's conversation is opened through openContained, not "
               + door
               + ": its scope is never resolved from its project name, and its admission comes from"
@@ -496,7 +496,7 @@ public final class ConversationStore {
       Budget owned,
       String owner,
       String openedBy,
-      io.aeyer.plowshare.server.access.SystemOperations.Work work) {
+      SystemOperations.Work work) {
     Objects.requireNonNull(work).requireLog(home, agent);
     return logInternal(origin, home, agent, parent, owned, owner, openedBy, work);
   }
@@ -507,7 +507,7 @@ public final class ConversationStore {
     return jdbc
         .query(
             "SELECT allowance_id FROM conversations WHERE id=? AND allowance_id IS NOT NULL",
-            (r, n) -> new AllowanceId(r.getObject(1, java.util.UUID.class)),
+            (r, n) -> new AllowanceId(r.getObject(1, UUID.class)),
             conversation)
         .stream()
         .findFirst()
@@ -518,6 +518,21 @@ public final class ConversationStore {
     return allowances;
   }
 
+  /**
+   * A causal child inherits its executing parent's turn source, never another shared turn's root.
+   */
+  public ConversationRecord logCausalDelegate(
+      Home home,
+      String agent,
+      String parent,
+      String owner,
+      String openedBy,
+      RelayCausation causation) {
+    Objects.requireNonNull(causation, "causation");
+    return logInternal(
+        Origin.DELEGATION, home, agent, parent, null, owner, openedBy, null, causation);
+  }
+
   private ConversationRecord logInternal(
       Origin origin,
       Home home,
@@ -526,7 +541,20 @@ public final class ConversationStore {
       Budget owned,
       String owner,
       String openedBy,
-      io.aeyer.plowshare.server.access.SystemOperations.Work system) {
+      SystemOperations.Work system) {
+    return logInternal(origin, home, agent, parent, owned, owner, openedBy, system, null);
+  }
+
+  private ConversationRecord logInternal(
+      Origin origin,
+      Home home,
+      String agent,
+      String parent,
+      Budget owned,
+      String owner,
+      String openedBy,
+      SystemOperations.Work system,
+      RelayCausation causation) {
     Objects.requireNonNull(origin, "origin");
     if (origin == Origin.TURN) {
       throw new IllegalArgumentException(
@@ -595,11 +623,8 @@ public final class ConversationStore {
     if (system == null
         && operations != null
         && (origin == Origin.SUBMISSION || origin == Origin.EVENT))
-      operations.admit(
-          owner,
-          operations.scope(home),
-          java.util.Set.of(io.aeyer.plowshare.server.access.AuthorityAction.CONVERSATION_CREATE));
-    return write(origin, home, agent, parent, owned, null, owner, openedBy);
+      operations.admit(owner, operations.scope(home), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    return write(origin, home, agent, parent, owned, null, owner, openedBy, causation);
   }
 
   private ConversationRecord write(
@@ -611,6 +636,19 @@ public final class ConversationStore {
       TurnCap turnCap,
       String owner,
       String openedBy) {
+    return write(origin, home, agent, parent, budget, turnCap, owner, openedBy, null);
+  }
+
+  private ConversationRecord write(
+      Origin origin,
+      Home home,
+      String agent,
+      String parent,
+      Budget budget,
+      TurnCap turnCap,
+      String owner,
+      String openedBy,
+      RelayCausation causation) {
     Objects.requireNonNull(home, "home");
     Instant at = now.get();
     String id = idFactory.get();
@@ -651,11 +689,11 @@ public final class ConversationStore {
                     + " (id, project_id, origin, lifecycle, parent_id, agent,"
                     + " created_at, last_turn_at, budget_total, budget_spent,"
                     + " budget_lifted, turn_cap, turn_cap_lifted, opened_by_call,"
-                    + " budget_id, owner_handle)"
+                    + " budget_id, owner_handle, relay_causation)"
                     + " VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?,"
                     // The named owner, or a delegated child's parent's (amendment 2).
                     + " COALESCE(CAST(? AS TEXT), (SELECT p.owner_handle"
-                    + " FROM conversations p WHERE p.id = CAST(? AS TEXT))))",
+                    + " FROM conversations p WHERE p.id = CAST(? AS TEXT))),?::jsonb)",
                 // Registered before the row that references it, and
                 // inside this supplier so that a database which is down
                 // is reported as "open a conversation": `project_id` is
@@ -675,9 +713,10 @@ public final class ConversationStore {
                 cap,
                 lifted,
                 openedBy,
-                budget == null ? java.util.UUID.randomUUID() : budget.identity(),
+                budget == null ? UUID.randomUUID() : budget.identity(),
                 owner,
-                parent));
+                parent,
+                RelayCausationCodec.write(causation)));
     // No title, and it is not a field this door takes. A conversation is
     // named by the first thing said in it, and nothing has been said in this
     // one yet -- `nameFromFirstTurn` is what fills the column, from
@@ -694,10 +733,7 @@ public final class ConversationStore {
             at,
             null,
             readBudget(
-                budget == null ? java.util.UUID.randomUUID() : budget.identity(),
-                total,
-                spent,
-                budgetLifted),
+                budget == null ? UUID.randomUUID() : budget.identity(), total, spent, budgetLifted),
             readBack(cap, lifted),
             null));
   }
@@ -1203,7 +1239,7 @@ public final class ConversationStore {
     String from =
         target.reachedFrom().stream()
             .map(state -> "'" + state.wireName() + "'")
-            .collect(java.util.stream.Collectors.joining(", "));
+            .collect(Collectors.joining(", "));
     int rows =
         ArchiveUnavailableException.translating(
             "move a conversation's lifecycle",
@@ -1282,7 +1318,7 @@ public final class ConversationStore {
                 ? "nothing -- " + target.wireName() + " is terminal"
                 : target.reachedFrom().stream()
                     .map(ConversationLifecycle::wireName)
-                    .collect(java.util.stream.Collectors.joining(", ")))
+                    .collect(Collectors.joining(", ")))
             + ".");
   }
 
@@ -1609,8 +1645,7 @@ public final class ConversationStore {
    * rather than of a cursor. That is what lets the insert's return value and a later read go
    * through the same three lines instead of agreeing by hand.
    */
-  private static Budget readBudget(
-      java.util.UUID id, Integer total, Integer spent, boolean lifted) {
+  private static Budget readBudget(UUID id, Integer total, Integer spent, boolean lifted) {
     if (total != null) {
       return Budget.restored(id, total, spent);
     }
@@ -1656,7 +1691,7 @@ public final class ConversationStore {
             instant(rs, "created_at"),
             instant(rs, "last_turn_at"),
             readBudget(
-                rs.getObject("budget_id", java.util.UUID.class),
+                rs.getObject("budget_id", UUID.class),
                 total,
                 spent,
                 rs.getBoolean("budget_lifted")),

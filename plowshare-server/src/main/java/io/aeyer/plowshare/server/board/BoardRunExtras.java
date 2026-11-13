@@ -8,8 +8,6 @@ import io.aeyer.plowshare.server.agents.RunExtras;
 import io.aeyer.plowshare.server.agents.TurnEnd;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
-import io.aeyer.plowshare.server.messaging.MessageService;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -17,26 +15,19 @@ import java.util.Optional;
 /**
  * Who is handed which board tools — spec 2026-09-29 §7. A run in a seat's conversation gets that
  * seat's tools, bound to its topic and occupant; an opted-in definition's run in a person's
- * conversation with a project gets {@code board_open}. Account-owned project runs also get
- * messaging, composed with the ordinary tools and orchestration extras.
+ * conversation with a project gets {@code board_open}. Messaging contexts retain the same opted-in
+ * public board capability; their private participant state is never a forum seat.
  */
 public final class BoardRunExtras implements RunExtras {
 
   private final BoardStore store;
   private final Board board;
   private final ConversationStore conversations;
-  private final MessageService messaging;
 
   public BoardRunExtras(BoardStore store, Board board, ConversationStore conversations) {
-    this(store, board, conversations, null);
-  }
-
-  public BoardRunExtras(
-      BoardStore store, Board board, ConversationStore conversations, MessageService messaging) {
     this.store = Objects.requireNonNull(store, "store");
     this.board = Objects.requireNonNull(board, "board");
     this.conversations = Objects.requireNonNull(conversations, "conversations");
-    this.messaging = messaging;
   }
 
   @Override
@@ -44,17 +35,6 @@ public final class BoardRunExtras implements RunExtras {
     String conversation = context.conversationId();
     if (conversation == null) {
       return Extras.NONE;
-    }
-    if (messaging != null && messaging.isTransport(conversation)) {
-      // Public board participation is a definition capability; its private
-      // messaging transport never exposes its own seat or board tools.
-      return new Extras(
-          context.definition().board()
-              ? List.of(
-                  messaging.tool(context), BoardTools.open(opening(context)), swarmTypes(context))
-              : List.of(messaging.tool(context)),
-          context.end(),
-          false);
     }
     Optional<BoardSeat> seat = store.seatByConversation(conversation);
     if (seat.isPresent()) {
@@ -68,35 +48,23 @@ public final class BoardRunExtras implements RunExtras {
           seat.get().isOpener()
               ? BoardTools.forOpenerSeat(actions, end)
               : BoardTools.forMember(actions, end);
-      if (messaging != null) {
-        tools = new ArrayList<>(tools);
-        tools.add(messaging.tool(context));
-      }
       return new Extras(tools, end, false);
     }
     if (context.definition().board()
         && context.home() != null
         && !context.home().isGlobal()
-        && isPersons(conversation)) {
+        && canOpen(conversation)) {
       return new Extras(
-          messaging == null
-              ? List.of(BoardTools.open(opening(context)), swarmTypes(context))
-              : List.of(
-                  BoardTools.open(opening(context)), messaging.tool(context), swarmTypes(context)),
-          context.end(),
-          false);
-    }
-    if (messaging != null
-        && context.home() != null
-        && !context.home().isGlobal()
-        && conversations.ownerOf(conversation).isPresent()) {
-      return new Extras(List.of(messaging.tool(context)), context.end(), false);
+          List.of(BoardTools.open(opening(context)), swarmTypes(context)), context.end(), false);
     }
     return Extras.NONE;
   }
 
-  private boolean isPersons(String conversation) {
-    return conversations.find(conversation).map(row -> row.origin() == Origin.TURN).orElse(false);
+  private boolean canOpen(String conversation) {
+    return conversations
+        .find(conversation)
+        .map(row -> row.origin() == Origin.TURN || row.origin() == Origin.MESSAGE)
+        .orElse(false);
   }
 
   private AgentTool swarmTypes(Context context) {

@@ -53,7 +53,7 @@ public final class AutomaticLimits {
   private ProjectCaps policy(ConversationRecord owner, String session, boolean message) {
     if (owner == null
         || owner.origin() == Origin.ORCHESTRATION
-        || owner.origin() == Origin.BOARD && !message
+        || (owner.origin() == Origin.BOARD || owner.origin() == Origin.MESSAGE) && !message
         || owner.home().isGlobal()) return ProjectCaps.NONE;
     return caps.apply(owner.home().project(), session);
   }

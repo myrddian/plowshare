@@ -1,14 +1,23 @@
 package io.aeyer.plowshare.server.board;
 
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-/** Account-owned person-post receipts. Read and save must share the board mutation transaction. */
+/** Account-owned forum receipts. Read and save must share the board mutation transaction. */
 public interface BoardPostRepository {
-  sealed interface Action permits Open, Post, Retry, Close, Bridge {}
+  /** A different intent already owns this account/request UUID; no new effect was accepted. */
+  final class Conflict extends CallerFault {
+    public Conflict() {
+      super("This requestId was already used for a different board action.");
+    }
+  }
+
+  sealed interface Action permits Open, Post, Retry, Close, Bridge, BridgeExecution {}
 
   record Open(
       String project, String title, String label, String body, Integer maxModelCalls, String swarm)
@@ -58,6 +67,17 @@ public interface BoardPostRepository {
       project = RelayPort.identity(project);
       body = BoardClosing.text(body);
       if (replyTo != null) replyTo = RelayPort.topic(replyTo);
+    }
+  }
+
+  /** New execution identities cannot collide with historical person bridge receipts. */
+  record BridgeExecution(Bridge command, String definition, UUID sourceEvent) implements Action {
+    public BridgeExecution {
+      Objects.requireNonNull(command);
+      definition = RelayPort.identity(definition);
+      Objects.requireNonNull(sourceEvent);
+      if (!sourceEvent.toString().equals(command.sourceEvent()))
+        throw new IllegalArgumentException("Execution receipt differs from its source");
     }
   }
 

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.archive.CompactionRecord;
@@ -90,11 +91,10 @@ import org.slf4j.LoggerFactory;
  * physically written; and {@code EntryStore.supersede} bounds its update at {@code turn_ordinal <=
  * through}, so a fold that lands late cannot swallow the entries of a turn it does not stand for.
  *
- * <p><b>One fold per conversation at a time.</b> {@code Turn} already refuses a second concurrent
- * turn, and that guard does not reach this one: a fold deliberately outlives the turn that started
- * it, so a slow fold and a fast next turn is the ordinary case rather than the exceptional one.
- * {@link #folding} is the separate guard, and a fold that finds one in flight is dropped rather
- * than queued — the reach only moves forward, so the next fold's span is simply wider.
+ * <p><b>One fold per conversation at a time.</b> Independent definitions can hold distinct run
+ * seats in one conversation. Both in-turn and background folds use {@link #folding}, preventing
+ * overlapping summaries from claiming the same entries. A fold that finds one in flight is dropped
+ * rather than queued; a later threshold crossing can reconsider the settled prefix.
  *
  * <p>Folds execute under bounded SYSTEM authority with their own operation allowance, unlimited
  * unless the service spending policy limits/disables them. Usage retains the source conversation as
@@ -1525,16 +1525,41 @@ public final class Compaction implements SkillSummaries {
       String owner,
       String openedBy,
       String session) {
+    return logFor(origin, home, definition, parent, owned, speaker, owner, openedBy, session, null);
+  }
+
+  private Transcript logFor(
+      Origin origin,
+      Home home,
+      AgentDefinition definition,
+      String parent,
+      Budget owned,
+      Speaker speaker,
+      String owner,
+      String openedBy,
+      String session,
+      RelayCausation causation) {
     Objects.requireNonNull(origin, "origin");
     Objects.requireNonNull(definition, "definition");
     if (conversations == null) {
+      if (causation != null)
+        throw new IllegalStateException("Causal delegation requires durable conversation storage");
       // A fixture, not a deployment. See the field.
       return Transcript.NONE;
     }
     String id;
     try {
-      id = conversations.log(origin, home, definition.name(), parent, owned, owner, openedBy).id();
+      id =
+          causation == null
+              ? conversations
+                  .log(origin, home, definition.name(), parent, owned, owner, openedBy)
+                  .id()
+              : conversations
+                  .logCausalDelegate(home, definition.name(), parent, owner, openedBy, causation)
+                  .id();
     } catch (RuntimeException notOpened) {
+      if (causation != null)
+        throw new IllegalStateException("Cannot retain a causal delegated conversation", notOpened);
       // First line only; see JobRuntime.describe. A constraint violation's
       // second line quotes the failing row.
       log.warn(
@@ -1569,7 +1594,7 @@ public final class Compaction implements SkillSummaries {
     // The budget it was written with, carried so that what the run
     // spends is written back onto the row that granted it. See
     // TurnTranscript.owned and TODO §11.
-    return new TurnTranscript(id, definition, owned, speaker, origin);
+    return new TurnTranscript(id, definition, owned, speaker, origin, causation);
   }
 
   /**
@@ -1581,6 +1606,15 @@ public final class Compaction implements SkillSummaries {
    */
   public TurnTranscript transcriptFor(
       String conversationId, AgentDefinition definition, Speaker speaker) {
+    return transcriptFor(conversationId, definition, speaker, null);
+  }
+
+  /** Exact causal source for this execution, independent of other turns sharing its history. */
+  public TurnTranscript transcriptFor(
+      String conversationId,
+      AgentDefinition definition,
+      Speaker speaker,
+      RelayCausation causation) {
     return new TurnTranscript(
         Objects.requireNonNull(conversationId, "conversationId"),
         Objects.requireNonNull(definition, "definition"),
@@ -1594,7 +1628,8 @@ public final class Compaction implements SkillSummaries {
         // Read from the row: a machine log continued after AWAITING -- an approved
         // submission, a delegated child spoken to again -- is reached here and not
         // through logFor, and still closes when its run ends (spec §3).
-        originOf(conversationId));
+        originOf(conversationId),
+        causation);
   }
 
   /**
@@ -1685,6 +1720,16 @@ public final class Compaction implements SkillSummaries {
     @Override
     public UsageAttribution usage() {
       return turn.usage();
+    }
+
+    @Override
+    public RelayCausation causation() {
+      return turn.causation();
+    }
+
+    @Override
+    public void reserveCausalSource() {
+      turn.reserveCausalSource();
     }
 
     @Override
@@ -1935,6 +1980,20 @@ public final class Compaction implements SkillSummaries {
             models.compactionNowThreshold(definition.model())));
   }
 
+  /**
+   * Largest completed prefix bounded by the proposed reach. Missing reservations are not evidence
+   * of completion: a concurrent writer may still append there, so folding waits rather than hiding
+   * entries that were absent from its summary. An abandoned gap stays visible for recovery.
+   */
+  static int settledFoldThrough(List<TurnRecord> completed, int maximum) {
+    int settled = 0;
+    for (TurnRecord turn : completed) {
+      if (turn.ordinal() > maximum || turn.ordinal() != settled + 1) break;
+      settled = turn.ordinal();
+    }
+    return settled;
+  }
+
   /** A count, with a third again where it is an estimate. See {@link #HEADROOM_NUMERATOR}. */
   static long withHeadroom(TokenCount count) {
     if (count.isMeasured()) {
@@ -2147,6 +2206,12 @@ public final class Compaction implements SkillSummaries {
     }
 
     private final Origin origin;
+    private final RelayCausation causation;
+
+    @Override
+    public RelayCausation causation() {
+      return causation;
+    }
 
     /** Read once per run and kept: a log's opening never changes once written. */
     private String opening;
@@ -2174,6 +2239,17 @@ public final class Compaction implements SkillSummaries {
         Budget owned,
         Speaker speaker,
         Origin origin) {
+      this(conversationId, definition, owned, speaker, origin, null);
+    }
+
+    private TurnTranscript(
+        String conversationId,
+        AgentDefinition definition,
+        Budget owned,
+        Speaker speaker,
+        Origin origin,
+        RelayCausation causation) {
+      this.causation = causation;
       this.conversationId = conversationId;
       this.definition = definition;
       this.owned = owned;
@@ -2645,7 +2721,10 @@ public final class Compaction implements SkillSummaries {
       var own = new CompletableFuture<Integer>();
       if (turnReservation.compareAndSet(null, own)) {
         try {
-          int next = turns.reserve(conversationId);
+          int next =
+              causation == null
+                  ? turns.reserve(conversationId)
+                  : turns.reserve(conversationId, causation);
           if (next < 1) throw new IllegalStateException("A turn reservation must be positive");
           turnOrdinal = next;
           own.complete(next);
@@ -2656,6 +2735,13 @@ public final class Compaction implements SkillSummaries {
         }
       }
       return turnReservation.get().join();
+    }
+
+    /** Before job registration, so its causal row cannot precede the trusted turn source. */
+    @Override
+    public void reserveCausalSource() {
+      if (causation == null) throw new IllegalStateException("A causal source is required");
+      turnOrdinal();
     }
 
     /**
@@ -2711,7 +2797,12 @@ public final class Compaction implements SkillSummaries {
           return openedAt;
         }
         armed = false;
-        return foldWithinTheTurn(history, openedAt, at, standing, stood);
+        if (!folding.add(conversationId)) return openedAt;
+        try {
+          return foldWithinTheTurn(history, openedAt, at, standing, stood);
+        } finally {
+          folding.remove(conversationId);
+        }
       } catch (RuntimeException failed) {
         // First line only; see JobRuntime.describe.
         log.warn(
@@ -2783,6 +2874,13 @@ public final class Compaction implements SkillSummaries {
       int keptFrom = keptFrom(history, steps, at.ceiling());
       int since = entries.foldedThrough(conversationId);
       boolean earlier = since < turn - 1;
+      // An in-turn summary also claims every preceding ordinal. Another reserved turn may
+      // still append model/tool entries, so defer the whole fold until that prefix is settled.
+      // Never infer completion from the presence of partial entries or a later reservation.
+      if (earlier
+          && settledFoldThrough(turns.forConversation(conversationId), turn - 1) < turn - 1) {
+        return openedAt;
+      }
       if (keptFrom == 0 && !earlier) {
         record(
             LoggedEntry.diagnostic(
@@ -3223,23 +3321,37 @@ public final class Compaction implements SkillSummaries {
         if (conversations == null)
           throw new IllegalStateException("Child conversation store required");
         String id =
-            conversations
-                .log(
-                    Origin.DELEGATION,
-                    home,
-                    callee.name(),
-                    conversationId,
-                    null,
-                    retainedSubject,
-                    openedBy)
-                .id();
+            causation == null
+                ? conversations
+                    .log(
+                        Origin.DELEGATION,
+                        home,
+                        callee.name(),
+                        conversationId,
+                        null,
+                        retainedSubject,
+                        openedBy)
+                    .id()
+                : conversations
+                    .logCausalDelegate(
+                        home, callee.name(), conversationId, retainedSubject, openedBy, causation)
+                    .id();
         TurnTranscript child =
-            new TurnTranscript(id, callee, null, Speaker.harness(), Origin.DELEGATION);
+            new TurnTranscript(id, callee, null, Speaker.harness(), Origin.DELEGATION, causation);
         child.confine(retainedAuthority, retainedSubject);
         return child;
       }
       return logFor(
-          Origin.DELEGATION, home, callee, conversationId, null, Speaker.harness(), null, openedBy);
+          Origin.DELEGATION,
+          home,
+          callee,
+          conversationId,
+          null,
+          Speaker.harness(),
+          null,
+          openedBy,
+          null,
+          causation);
     }
 
     /**
@@ -3250,7 +3362,8 @@ public final class Compaction implements SkillSummaries {
       return origin != null
           && origin != Origin.TURN
           && origin != Origin.ORCHESTRATION
-          && origin != Origin.BOARD;
+          && origin != Origin.BOARD
+          && origin != Origin.MESSAGE;
     }
 
     /**
@@ -3691,7 +3804,11 @@ public final class Compaction implements SkillSummaries {
         // ending callback ran -- but a `turns` read that came back empty
         // would index out of bounds rather than decline, and this method
         // is the one place a fold can still decide nothing safely.
-        through = spoken.isEmpty() ? 0 : spoken.get(spoken.size() - 1).ordinal() - 1;
+        // A later reserved turn may finish before an earlier one. A summary must not cross
+        // that open ordinal: its model/tool entries can still arrive after this snapshot.
+        // Reuse the completed history already loaded above rather than resolving it again.
+        int requestedThrough = spoken.isEmpty() ? 0 : spoken.get(spoken.size() - 1).ordinal() - 1;
+        through = settledFoldThrough(spoken, requestedThrough);
         if (through < 1) {
           log.warn(
               "conversation {}: its one turn already sent {} tokens against a"

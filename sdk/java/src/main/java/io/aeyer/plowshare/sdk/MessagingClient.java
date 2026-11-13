@@ -2,6 +2,7 @@ package io.aeyer.plowshare.sdk;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.aeyer.plowshare.protocol.RelayPort;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -108,8 +109,7 @@ public final class MessagingClient {
       ForumChecks.optional(conversation);
       ForumChecks.optional(sourceConversation);
       Objects.requireNonNull(postedAt);
-      ForumChecks.text(body, 32768, false);
-      Objects.requireNonNull(body);
+      RelayPort.text(body);
       if (finalReply && replyTo == null || generated && (!finalReply || ending == null))
         throw new IllegalArgumentException("Inconsistent reply lifecycle");
     }

@@ -2,8 +2,18 @@ package io.aeyer.plowshare.integrations;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
-import java.nio.file.*;
-import java.util.*;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.ServiceLoader;
+import java.util.Set;
+import java.util.UUID;
 
 /** Pinned local configuration. Project/account authority comes from the SDK session. */
 public record Configuration(
@@ -14,7 +24,7 @@ public record Configuration(
     Retention retention) {
   public Configuration {
     IntegrationContracts.identity(plowshare, 4096);
-    java.net.URI origin = java.net.URI.create(plowshare);
+    URI origin = URI.create(plowshare);
     if (!Set.of("http", "https").contains(origin.getScheme())
         || origin.getHost() == null
         || origin.getUserInfo() != null
@@ -31,10 +41,11 @@ public record Configuration(
     bindings = Map.copyOf(bindings);
     if (bindings.isEmpty() || bindings.size() > 32)
       throw new IllegalArgumentException("one to 32 bindings required");
-    Set<String> peers = new HashSet<>();
+    Set<String> requests = new HashSet<>();
     for (var e : bindings.entrySet()) {
       Binding b = e.getValue();
-      if (!e.getKey().equals(b.name()) || !peers.add(b.project() + ":" + b.peer()))
+      if (!e.getKey().equals(b.name())
+          || b.relay() != null && !requests.add(b.project() + ":" + b.relay().requests()))
         throw new IllegalArgumentException("inconsistent or duplicate binding");
       for (String target : b.allowBindings())
         if (!bindings.containsKey(target) || !bindings.get(target).project().equals(b.project()))
@@ -155,18 +166,17 @@ public record Configuration(
       String name,
       String adapter,
       String project,
-      String peer,
       AdapterConfiguration configuration,
       Map<String, Route> routes,
       Set<String> allowBindings,
       String script,
       String fingerprint,
       QueuePolicy queue,
-      FeedbackPolicy feedback) {
+      FeedbackPolicy feedback,
+      RelayRequests.Policy relay) {
     public Binding {
       Configuration.name(name);
       Configuration.name(adapter);
-      Configuration.name(peer);
       IntegrationContracts.identity(project, 1024);
       IntegrationContracts.identity(fingerprint, 1024);
       Objects.requireNonNull(configuration);
@@ -187,11 +197,38 @@ public record Configuration(
               "unconditional routes require an explicit script handler");
     }
 
+    /**
+     * Event-only embeddings have no request intake; deployment files require explicit Relay pins.
+     */
     public Binding(
         String name,
         String adapter,
         String project,
-        String peer,
+        AdapterConfiguration configuration,
+        Map<String, Route> routes,
+        Set<String> allowBindings,
+        String script,
+        String fingerprint,
+        QueuePolicy queue,
+        FeedbackPolicy feedback) {
+      this(
+          name,
+          adapter,
+          project,
+          configuration,
+          routes,
+          allowBindings,
+          script,
+          fingerprint,
+          queue,
+          feedback,
+          null);
+    }
+
+    public Binding(
+        String name,
+        String adapter,
+        String project,
         AdapterConfiguration configuration,
         Map<String, Route> routes,
         Set<String> allowBindings,
@@ -202,7 +239,6 @@ public record Configuration(
           name,
           adapter,
           project,
-          peer,
           configuration,
           routes,
           allowBindings,
@@ -216,7 +252,6 @@ public record Configuration(
         String name,
         String adapter,
         String project,
-        String peer,
         AdapterConfiguration configuration,
         Map<String, Route> routes,
         Set<String> allowBindings,
@@ -226,7 +261,6 @@ public record Configuration(
           name,
           adapter,
           project,
-          peer,
           configuration,
           routes,
           allowBindings,
@@ -262,7 +296,7 @@ public record Configuration(
       retention =
           new Retention(r.path("settledSeconds").asLong(), r.path("dedupeSeconds").asLong());
     }
-    java.net.URI origin = java.net.URI.create(Json.text(root, "plowshare"));
+    URI origin = URI.create(Json.text(root, "plowshare"));
     if (!Set.of("http", "https").contains(origin.getScheme())
         || origin.getHost() == null
         || origin.getUserInfo() != null
@@ -283,7 +317,7 @@ public record Configuration(
         || root.path("bindings").size() > 32)
       throw new IllegalArgumentException("one to 32 bindings required");
     Map<String, Binding> bindings = new LinkedHashMap<>();
-    Set<String> peers = new HashSet<>();
+    Set<String> requestTopics = new HashSet<>();
     var entries = root.path("bindings").fields();
     while (entries.hasNext()) {
       var entry = entries.next();
@@ -294,17 +328,17 @@ public record Configuration(
           n,
           "adapter",
           "project",
-          "peer",
+          "relay",
           "configuration",
           "routes",
           "allowBindings",
           "script",
           "queue",
           "feedback");
-      String project = Json.text(n, "project"), peer = Json.text(n, "peer");
-      name(peer);
-      if (!peers.add(project + ":" + peer))
-        throw new IllegalArgumentException("duplicate project/peer binding");
+      String project = Json.text(n, "project");
+      RelayRequests.Policy relay = relay(n.path("relay"));
+      if (!requestTopics.add(project + ":" + relay.requests()))
+        throw new IllegalArgumentException("duplicate project/request topic binding");
     }
     // Parse named routes without treating their names as configuration field names.
     entries = root.path("bindings").fields();
@@ -436,14 +470,14 @@ public record Configuration(
               name,
               Json.text(n, "adapter"),
               Json.text(n, "project"),
-              Json.text(n, "peer"),
               settings,
               Map.copyOf(routes),
               Set.copyOf(allowed),
               script,
               Json.hash(n) + ":" + Json.hash(script == null ? "" : script),
               queue,
-              feedback));
+              feedback,
+              relay(n.path("relay"))));
     }
     for (Binding b : bindings.values())
       for (String target : b.allowBindings()) {
@@ -461,6 +495,52 @@ public record Configuration(
 
   public static void name(String name) {
     if (name == null || !name.matches("[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}"))
-      throw new IllegalArgumentException("invalid binding/peer name");
+      throw new IllegalArgumentException("invalid binding name");
+  }
+
+  private static RelayRequests.Policy relay(JsonNode node) {
+    Json.fields(
+        node,
+        "requests",
+        "requestGeneration",
+        "returns",
+        "returnGeneration",
+        "channel",
+        "publisher",
+        "producers",
+        "maxDepth",
+        "maxReturnBytes");
+    if (!node.path("producers").isArray()
+        || node.path("producers").isEmpty()
+        || node.path("producers").size() > 64)
+      throw new IllegalArgumentException("Explicit Relay producers required");
+    Set<String> producers = new HashSet<>();
+    for (JsonNode producer : node.path("producers")) {
+      if (!producer.isTextual() || !producers.add(producer.textValue()))
+        throw new IllegalArgumentException("Invalid or duplicate Relay producer");
+    }
+    if (!node.path("maxReturnBytes").isIntegralNumber()
+        || !node.path("maxReturnBytes").canConvertToInt()
+        || !node.path("maxDepth").isIntegralNumber()
+        || !node.path("maxDepth").canConvertToInt())
+      throw new IllegalArgumentException("Explicit integral return byte limit required");
+    return new RelayRequests.Policy(
+        Json.text(node, "requests"),
+        uuid(node, "requestGeneration"),
+        Json.text(node, "returns"),
+        uuid(node, "returnGeneration"),
+        Json.text(node, "channel"),
+        Json.text(node, "publisher"),
+        producers,
+        node.path("maxDepth").intValue(),
+        node.path("maxReturnBytes").intValue());
+  }
+
+  private static UUID uuid(JsonNode node, String field) {
+    String value = Json.text(node, field);
+    UUID parsed = UUID.fromString(value);
+    if (!parsed.toString().equals(value))
+      throw new IllegalArgumentException("Canonical UUID required");
+    return parsed;
   }
 }

@@ -1,19 +1,28 @@
 package io.aeyer.plowshare.integrations;
 
-import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.*;
-import java.util.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
 
 /** Bounded JSON at the external integration boundary. No server dependencies. */
 public final class Json {
   public static final ObjectMapper MAPPER =
       new ObjectMapper()
           .findAndRegisterModules()
+          .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-          .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   public static final int MAX_MESSAGE = 256 * 1024;
 

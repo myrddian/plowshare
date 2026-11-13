@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.messaging.MessageInboxWorker;
+import io.aeyer.plowshare.server.messaging.MessageRelayWorker;
 import io.aeyer.plowshare.server.relay.RelayInternalWorkers;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
@@ -46,7 +47,15 @@ class EventsAtBootTest {
 
   private void boot() {
     new EventsConfig()
-        .eventsAtBoot(firings, dispatcher, ticker, properties, thread, internal, messageInboxes)
+        .eventsAtBoot(
+            firings,
+            dispatcher,
+            ticker,
+            properties,
+            thread,
+            internal,
+            messageInboxes,
+            mock(MessageRelayWorker.class))
         .onApplicationEvent(null);
   }
 

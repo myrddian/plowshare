@@ -1,9 +1,11 @@
 package io.aeyer.plowshare.server.board;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.messaging.JdbcMessageInboxRepository;
 import io.aeyer.plowshare.server.messaging.JdbcMessagingRepository;
 import io.aeyer.plowshare.server.messaging.MessageDefinitions;
+import io.aeyer.plowshare.server.messaging.MessageInboxRepository;
 import io.aeyer.plowshare.server.messaging.MessageInboxes;
 import io.aeyer.plowshare.server.messaging.MessagePayloadCodec;
 import io.aeyer.plowshare.server.messaging.MessagePublications;
@@ -39,6 +41,14 @@ final class MessageInboxFixture {
   }
 
   static MessageInboxes inboxes(BoardFixture fixture, Consumer<String> drain, FiringStore firings) {
+    return inboxes(fixture, drain, firings, inbox -> {});
+  }
+
+  static MessageInboxes inboxes(
+      BoardFixture fixture,
+      Consumer<String> drain,
+      FiringStore firings,
+      Consumer<MessageInboxRepository.Inbox> hints) {
     var payloads =
         new JdbcRelayPayloadStore(
             fixture.jdbc,
@@ -69,13 +79,26 @@ final class MessageInboxFixture {
     fixture.messageInboxes.add(inboxes);
     return new MessageInboxes() {
       @Override
-      public void publish(
+      public MessageInboxRepository.Inbox publish(
           MessageRecord record,
           MessageService.Route route,
           MessageService.Instance sender,
           MessageService.Instance recipient,
-          MessagePublications.Reply reply) {
-        inboxes.publish(record, route, sender, recipient, reply);
+          MessagePublications.Reply reply,
+          RelayCausation causation) {
+        return inboxes.publish(record, route, sender, recipient, reply, causation);
+      }
+
+      @Override
+      public void admitSoon(MessageInboxRepository.Inbox inbox) {
+        // A fixture pulse owns the executor pass. Production after-commit callbacks are virtual
+        // threads, so running database admission here would race assertions and the next reset.
+        hints.accept(inbox);
+      }
+
+      @Override
+      public int poll(MessageInboxRepository.Inbox inbox) {
+        return inboxes.poll(inbox);
       }
 
       @Override

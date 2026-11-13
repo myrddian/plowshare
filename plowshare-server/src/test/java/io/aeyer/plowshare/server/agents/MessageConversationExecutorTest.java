@@ -34,7 +34,7 @@ class MessageConversationExecutorTest {
     var record = mock(ConversationRecord.class);
     when(record.id()).thenReturn("conversation");
     when(record.home()).thenReturn(Home.of("project"));
-    when(record.origin()).thenReturn(Origin.BOARD);
+    when(record.origin()).thenReturn(Origin.MESSAGE);
     when(record.lifecycle()).thenReturn(ConversationLifecycle.ACTIVE);
     when(conversations.find("conversation")).thenReturn(Optional.of(record));
     var turn = new Turn(jobs, conversations, mock(TurnStore.class), compaction);
@@ -93,7 +93,7 @@ class MessageConversationExecutorTest {
     var home = Home.of("project");
     when(record.id()).thenReturn("conversation");
     when(record.home()).thenReturn(home);
-    when(record.origin()).thenReturn(Origin.BOARD);
+    when(record.origin()).thenReturn(Origin.MESSAGE);
     when(record.lifecycle()).thenReturn(ConversationLifecycle.ACTIVE);
     when(record.agent()).thenReturn("worker");
     when(conversations.find("conversation")).thenReturn(Optional.of(record));
@@ -111,7 +111,7 @@ class MessageConversationExecutorTest {
             isNull(),
             eq(lease),
             eq(transcript),
-            eq(Origin.BOARD),
+            eq(Origin.MESSAGE),
             any(),
             any(),
             anyList(),
@@ -139,7 +139,7 @@ class MessageConversationExecutorTest {
             isNull(),
             eq(lease),
             eq(transcript),
-            eq(Origin.BOARD),
+            eq(Origin.MESSAGE),
             any(),
             any(),
             anyList(),

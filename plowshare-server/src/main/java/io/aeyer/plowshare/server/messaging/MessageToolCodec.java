@@ -5,7 +5,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
-import io.aeyer.plowshare.protocol.Incoming;
 import io.aeyer.plowshare.server.agents.Outcome;
 import java.io.IOException;
 
@@ -57,7 +56,7 @@ final class MessageToolCodec {
     return encode(new DelegateResult(outcome.ending(), outcome.text()));
   }
 
-  static String source(Incoming.Source source) {
+  static String source(MessageIngress.Source source) {
     return encode(source);
   }
 

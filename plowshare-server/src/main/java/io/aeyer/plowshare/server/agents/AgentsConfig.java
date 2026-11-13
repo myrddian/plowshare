@@ -64,7 +64,6 @@ import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import io.aeyer.plowshare.server.messaging.MessageService;
-import io.aeyer.plowshare.server.outgoing.OutgoingWork;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.relay.RelayPublishing;
 import io.aeyer.plowshare.server.relay.tools.RelayToolDefinition;
@@ -795,7 +794,6 @@ public class AgentsConfig {
       ObjectProvider<ImageStore> images,
       ObjectProvider<Scribe> scribe,
       TodoBoard todos,
-      ObjectProvider<OutgoingWork> outgoing,
       ObjectProvider<MessageService> messaging,
       RelayPublishing relayPublishing,
       ObjectProvider<RelayToolProperties> relayTools,
@@ -870,10 +868,6 @@ public class AgentsConfig {
                     new GetDateTool(Instant::now, ZoneId.systemDefault()),
                     new FetchTool(fetch),
                     new SearchTool(search),
-                    new OutgoingTool(outgoing::getIfAvailable, "send"),
-                    new OutgoingTool(outgoing::getIfAvailable, "read"),
-                    new OutgoingTool(outgoing::getIfAvailable, "cancel"),
-                    new OutgoingTool(outgoing::getIfAvailable, "peers"),
                     new RelayPublishTool(relayPublishing)),
                 relayTools.getIfAvailable(),
                 relayInvocations.getIfAvailable()),

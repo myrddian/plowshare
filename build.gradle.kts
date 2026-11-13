@@ -70,8 +70,10 @@ val personalStarterInstallTest by tasks.registering(Exec::class) {
 }
 val deploymentConfigTest by tasks.registering(Exec::class) {
     group = "verification"
-    description = "Checks persistent image FileStore initialization without Docker or a database."
-    inputs.files("deploy/docker/server-filestores.sh", "deploy/docker/server-entrypoint.sh", "deploy/docker/server.Dockerfile", "deploy/docker/server.Dockerfile.dockerignore", "deploy/docker/tests/test_filestores.py")
+    description = "Checks deployment initialization and adapter configuration without Docker or a database."
+    inputs.files("deploy/docker/server-filestores.sh", "deploy/docker/server-entrypoint.sh", "deploy/docker/server.Dockerfile", "deploy/docker/server.Dockerfile.dockerignore", "deploy/docker/a2a-entrypoint.sh", "deploy/docker/compose.a2a.yaml")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("deploy/docker/tests")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     commandLine("python3", "-B", "-m", "unittest", "discover", "-s", "deploy/docker/tests")
 }

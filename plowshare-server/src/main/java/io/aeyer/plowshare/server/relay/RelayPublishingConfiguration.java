@@ -4,6 +4,7 @@ import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.OrchestrationResolver;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
+import io.aeyer.plowshare.server.archive.TurnRelaySources;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import java.time.Instant;
 import org.springframework.beans.factory.ObjectProvider;
@@ -20,8 +21,17 @@ public class RelayPublishingConfiguration {
   @Bean
   @DependsOnDatabaseInitialization
   public RelayPublishingRepository relayPublishingRepository(
-      JdbcTemplate jdbc, UnitOfWork transactions, Relay relay) {
-    return new JdbcRelayPublishingRepository(jdbc, transactions, relay);
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Relay relay,
+      ObjectProvider<ExecutionPublicationObserver> observers,
+      TurnRelaySources sources) {
+    return new JdbcRelayPublishingRepository(
+        jdbc,
+        transactions,
+        relay,
+        intent -> observers.orderedStream().forEach(observer -> observer.beforeAppend(intent)),
+        sources);
   }
 
   @Bean

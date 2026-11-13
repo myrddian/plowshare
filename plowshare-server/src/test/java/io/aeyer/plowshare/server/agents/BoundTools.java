@@ -88,7 +88,6 @@ public final class BoundTools {
     // that refuses is a refusal this tool answers in words rather than a
     // wiring a deployment declined.
     names.add(SearchTool.NAME);
-    names.addAll(OutgoingTool.NAMES);
     // A read of the server clock, gated by nothing and requiring no scope.
     names.add(GetDateTool.NAME);
     // The bounded persisted-log read, wired from stores ArchiveConfig binds

@@ -2,6 +2,15 @@
 
 What Relay is meant to be, what it is today, and how to get it there properly.
 
+**Review remediation, 13 November 2026:** the latest execution state is the
+[review task graph](relay-review-task-graph.md). Native receivers, exact retained
+requester returns, consumer replacements, legacy transport retirement and integrated
+verification are independently accepted under that graph's active scope. The user
+explicitly deferred fresh reads from manually started Home Assistant
+orchestrations. Older dated slice reports and the baseline inventory below
+describe their historical checkpoint, not the current API surface. Follow the
+[legacy cutover contract](relay-legacy-cutover.md) for upgrade and history rules.
+
 Written 2026-11-12 against branch `privacy-deep-scan-design`. Every factual claim cites
 `path:line`. **(inference)** marks a reading of the evidence. **(owner)** marks intent stated by
 the owner directly; it is the original intent, not a new direction, but no single record states it.
@@ -102,12 +111,14 @@ Focused crash/authorization/codec tests, a real SDK WebSocket with an independen
 A2A HTTP peer fixture, both installed launchers, Google formatting, `formatCheck`,
 `check` and `integrationBoundaryCheck` passed. No database tests were required.
 
-The inbound/core cutover is still blocked: existing public SDK publications cannot
-enter trusted agent inbox admission; external message receipt/routing and current
-served-command projection still depend on `incoming.*`. A separate general
-platform task needs explicit authorization under 0001 before those capabilities
-can be added. Existing incoming/outgoing consumers, external storage and the
-legacy launcher remain until replacements and consumer migrations can be tested.
+The inbound/core cutover remains unfinished. Existing `incoming.receive` already
+provides authenticated durable admission, and `agent.list` exposes granted served
+commands. Arbitrary SDK publications deliberately cannot impersonate trusted
+inbox records. The work is to relocate native admission behind registered Relay
+receivers and retain requester returns, under the separately authorized general
+platform decision [0066](decisions/0066-relay-messaging-receiver-and-review-remediation.md).
+Existing incoming/outgoing consumers, external storage and the legacy launcher
+remain until replacements and consumer migrations can be tested.
 Slice 5 and the overall plan are **not complete**.
 
 Sections 1–3 retain the original review's evidence and drift inventory. Their
@@ -551,13 +562,15 @@ The SDK-only Relay outbound worker is implemented under `integrations/a2a`, with
 its own typed dispatch/observation protocol, durable intent journal and explicit
 reconciliation. See [its manual](a2a-relay-outbound.md).
 
-The full rewrite cannot ship within the integration boundary yet: SDK publications
-are deliberately skipped by agent inboxes, `message.*` lacks authenticated external
-message admission, and the current served-command projection is still
-`incoming.catalog`. Those general platform capabilities require a separately
-authorized platform task under 0001. Inbound `incoming.*`, outgoing consumers,
-external-lifetime storage and affected adapters therefore remain until their
-replacements can be tested and cut over. This slice is **not complete**.
+The full rewrite still requires the structural admission relocation authorized
+by [0066](decisions/0066-relay-messaging-receiver-and-review-remediation.md).
+`incoming.receive` already admits authenticated work, `agent.list` provides the
+served-command projection, and message schedules share native admission currently
+typed with `Incoming` DTOs. Registered Relay receivers must reuse that admission
+without weakening private inbox checks, and preserve durable requester returns.
+Inbound `incoming.*`, outgoing consumers, external-lifetime storage and affected
+adapters remain until replacements can be tested and cut over. This slice is
+**not complete**.
 
 - **Shape (owner's direction).** Adapters are SDK consumers of Relay topics through ports. There
   may be several adapters, each with its own topic set, behind one API. Inbound work lands on the

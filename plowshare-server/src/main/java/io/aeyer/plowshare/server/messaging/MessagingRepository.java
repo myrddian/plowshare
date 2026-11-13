@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.messaging;
 
-import io.aeyer.plowshare.protocol.Incoming;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
@@ -72,7 +71,13 @@ public interface MessagingRepository {
   record ExternalContext(String sender, String recipient) {}
 
   record ExternalTask(
-      UUID context, String agent, String message, Incoming.Source source, Instant createdAt) {}
+      UUID context,
+      UUID requestId,
+      long revision,
+      String agent,
+      String message,
+      MessageIngress.Source source,
+      Instant createdAt) {}
 
   Optional<Route> route(String message);
 
@@ -124,7 +129,11 @@ public interface MessagingRepository {
   void passiveSender(String id, String client);
 
   void insertExternalContext(
-      UUID context, String account, Incoming.Receive request, String sender, String recipient);
+      UUID context,
+      String account,
+      MessageIngress.Request request,
+      String sender,
+      String recipient);
 
   List<String> replies(String message);
 
@@ -234,12 +243,18 @@ public interface MessagingRepository {
 
   DeliveryState deliveryState(String message);
 
-  Optional<ExternalPrior> priorExternal(String account, Incoming.Receive request);
+  Optional<ExternalPrior> priorExternal(String account, MessageIngress.Request request);
 
-  Optional<ExternalContext> externalContext(UUID context, String account, Incoming.Receive request);
+  Optional<ExternalContext> externalContext(
+      UUID context, String account, MessageIngress.Request request);
 
   void insertExternalTask(
-      UUID id, UUID context, String account, Incoming.Receive request, String message);
+      UUID id, UUID context, String account, MessageIngress.Request request, String message);
 
-  Optional<ExternalTask> externalTask(String account, String project, String client, UUID id);
+  Optional<ExternalTask> externalTask(
+      String account, String project, String channel, String client, UUID id);
+
+  /** Locks the scoped revision row for an internally consistent bounded native snapshot. */
+  Optional<ExternalTask> lockExternalTask(
+      String account, String project, String channel, String client, UUID id);
 }

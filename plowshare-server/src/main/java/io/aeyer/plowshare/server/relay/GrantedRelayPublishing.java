@@ -106,6 +106,6 @@ public final class GrantedRelayPublishing implements RelayPublishing {
     String fingerprint = RelayPort.hash(identity + "\n" + request.topic() + "\n" + request.text());
     return repository.publish(
         new RelayPublishingRepository.Intent(
-            event, id, owner, call, request, fingerprint, clock.get(), causation));
+            event, id, project, owner, call, request, fingerprint, clock.get(), causation));
   }
 }

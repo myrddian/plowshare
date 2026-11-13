@@ -300,64 +300,6 @@ class InvariantsTest {
   private static final String KEY_PREFIX = "sk" + "-lm-";
 
   /**
-   * The seven files in {@code main} allowed to hold an HTTP client, by simple name rather than by
-   * path.
-   *
-   * <p>By name because that is how the invariant is stated, and because a package move is not the
-   * regression this is watching for; an unargued eighth file is. Equality against the whole list
-   * and not a size check, so a swap — one of these seven deleted and a different file gaining the
-   * import — cannot net out to seven and pass.
-   *
-   * <p><b>Three, not one, of the search names on this list share a single client.</b> This used to
-   * be a list of three, one file per client, until the search feature added {@code
-   * RemoteSearchProvider}, {@code SearchConfig} and {@code SearchRegistrar}. That is not a fourth
-   * (and fifth, and sixth) instance of "a file configures its own timeouts, retries and connection
-   * pool for the endpoints it calls" — the thing the assertion message below asks an author to
-   * argue against before adding a holder. It is one client, configured once in {@code
-   * SearchConfig.searchHttpClient()}, injected into both {@code RemoteSearchProvider} and {@code
-   * SearchRegistrar}, and it dials a different class of endpoint than either of the original two
-   * anyway: the LLM vendor ({@code OpenAiTransport}), this server's own file and event sockets
-   * ({@code SocketPeer}, {@code ControllerPeer}), and now, third, whatever provider process an
-   * operator has registered — a destination this server does not know the shape of in advance,
-   * unlike the first two. {@code SearchConfig} and {@code SearchRegistrar} each import the type —
-   * one to build the shared bean, one to receive it and apply its own probe timeout per call
-   * through {@code Call#timeout()} — which is why the count for search is three files for one
-   * client rather than one file for one client with two callers holding no import of their own.
-   *
-   * <p><b>The seventh, {@code BuiltinFetcher}, is a fourth class of endpoint, not a second client
-   * for the search feature's class of endpoint.</b> {@code RemoteSearchProvider} and {@code
-   * SearchRegistrar} both dial a provider process an operator registered in advance — addresses
-   * this server already knows before the call. {@code BuiltinFetcher} dials whatever {@code url} an
-   * agent hands it at request time, which can be any origin on the open web; nothing an operator
-   * configured in advance names it. That is the same distinction that already separates the LLM
-   * vendor and this server's own sockets from each other and from the registered-provider case, so
-   * it is a fourth bucket rather than a restatement of the third.
-   *
-   * <p><b>Built to share, and wired.</b> {@code BuiltinFetcher}'s constructor takes an {@code
-   * OkHttpClient} as an argument rather than building one — the same shape {@code
-   * RemoteSearchProvider} and {@code SearchRegistrar} already use — and {@code
-   * FetchConfig#pageFetcher} builds it through {@code FetchConfig.guardedFetcher(http, allowlist,
-   * props.getTimeout())}, which derives fetch's strict and per-allowlist-entry clients once, at
-   * boot, from {@code http}, the {@code OkHttpClient} parameter {@code
-   * SearchConfig#searchHttpClient} supplies. {@code FetchConfig} spells okhttp's types fully
-   * qualified, so the derivation adds no holder. It landed in {@code FetchConfig}, not in {@code
-   * SearchConfig} as an earlier draft of this paragraph predicted — naming the wrong class was this
-   * paragraph's own mistake, not a fact about where the wiring belonged. This paragraph used to say
-   * the wiring had not happened yet and named a later task in this slice as the one expected to do
-   * it; that task landed three commits after this paragraph was written and nobody came back to
-   * update the prose, which is exactly the stale-guard shape this file exists to catch in other
-   * files. What this invariant actually needs to be true, independent of the wiring's state, is
-   * narrower: the import here exists only to declare a constructor parameter and to call {@link
-   * okhttp3.Call#timeout()} on the one call {@link
-   * io.aeyer.plowshare.server.fetch.BuiltinFetcher#fetch} makes — {@code BuiltinFetcher} itself
-   * builds no client. {@code FetchConfig} derives fetch's clients — one strict, one per allowlist
-   * entry — from the shared bean, each with its own {@code ConnectionPool} (spec
-   * 2026-09-28-fetch-stays-on-the-public-web §2.6: OkHttp 4.12's {@code Address} does not compare
-   * the socket factory, so a shared pool would not keep the strict and per-entry clients apart).
-   * That derivation lives in {@code FetchConfig}, which is why it does not add an eighth holder
-   * below.
-   */
-  /**
    * Where the authorisation rule for presence is written. A path and not a scan: the rule lives in
    * exactly one place on purpose, and an invariant that searched the tree for it would go green on
    * a copy in a comment somewhere.
@@ -365,10 +307,27 @@ class InvariantsTest {
   private static final String PRESENCE_REGISTRY =
       "plowshare-server/src/main/java/io/aeyer/plowshare/server/session/" + "PresenceRegistry.java";
 
+  /**
+   * Exact allowed owners across core, SDK and integration main sources. Equality checks identities,
+   * so replacing one owner with an unrelated holder cannot pass by preserving the count.
+   *
+   * <p>SearchConfig builds one shared client for RemoteSearchProvider and SearchRegistrar to dial
+   * configured search services. BuiltinFetcher receives a derived client for arbitrary public URLs;
+   * FetchConfig preserves distinct connection pools for strict and allowlisted destinations because
+   * OkHttp Address equality does not compare the socket factory. OpenAiTransport owns inference
+   * I/O.
+   *
+   * <p>A2aClient and HomeAssistantAdapter are separate SDK consumers speaking their external
+   * protocols through explicitly configured endpoints. The Home Assistant client already existed;
+   * expanding its wildcard import made that ownership visible to this lexical guard. It does not
+   * introduce another core HTTP client or a client/server HTTP fallback. A new holder needs a
+   * source-based ownership and configuration explanation before joining this exact list.
+   */
   private static final List<String> HTTP_CLIENT_HOLDERS =
       List.of(
           "A2aClient.java",
           "BuiltinFetcher.java",
+          "HomeAssistantAdapter.java",
           "OpenAiTransport.java",
           "RemoteSearchProvider.java",
           "SearchConfig.java",
@@ -415,27 +374,10 @@ class InvariantsTest {
             + "; over the whole tracked tree it"
             + " is "
             + anywhere.size()
-            + ", the difference being files this scan's"
-            + " .java restriction does not read. Six, not three, because the search"
-            + " feature's RemoteSearchProvider, SearchConfig and SearchRegistrar"
-            + " share ONE client configured once in SearchConfig.searchHttpClient()"
-            + " and dial registered provider processes, not the LLM vendor or this"
-            + " server's own sockets the original two already cover. Seven, not six,"
-            + " because the fetch slice's BuiltinFetcher addresses a fourth class of"
-            + " endpoint again — an arbitrary remote origin an agent names at request"
-            + " time, unlike the vendor, this server's own sockets, or a provider"
-            + " process an operator registered in advance — and it is built to take"
-            + " that one search-package client by injection: BuiltinFetcher builds no"
-            + " client of its own. FetchConfig.pageFetcher wires it, deriving fetch's"
-            + " strict and per-allowlist-entry clients once from the client"
-            + " SearchConfig.searchHttpClient() built, each with its own ConnectionPool"
-            + " (spec §2.6: OkHttp 4.12's Address does not compare the socket factory,"
-            + " so a shared pool would not keep the strict and per-entry fetch clients"
-            + " apart); see HTTP_CLIENT_HOLDERS' own javadoc for the argument in full."
-            + " An EIGHTH"
-            + " holder is a different claim: either a second client for one of these"
-            + " four classes of endpoint, or a client for a fifth kind of endpoint —"
-            + " argue for it in the build files before adding it here.");
+            + ", the difference being files outside the Java source restriction. Search holders"
+            + " share one configured client; the fetcher derives destination-specific pools."
+            + " A2A and Home Assistant own external protocol clients outside core. New holders"
+            + " require an explicit ownership/configuration explanation; keep exact set equality.");
   }
 
   /**

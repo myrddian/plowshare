@@ -35,7 +35,7 @@
   ],
   "scripts": {
     "schemas": "node scripts/generate-operation-schemas.mjs",
-    "build": "tsc -b --force",
+    "build": "node ../../scripts/build-javascript-sdk.mjs typescript",
     "typecheck": "tsc -b --force",
     "test": "vitest run",
     "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=build/vitest/junit.xml",

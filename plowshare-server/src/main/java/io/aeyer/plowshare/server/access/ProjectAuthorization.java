@@ -135,8 +135,6 @@ public class ProjectAuthorization {
           "usage.calls",
           "usage.subscribe",
           "usage.unsubscribe",
-          "outgoing.status",
-          "outgoing.peers",
           "information.interchange.capabilities",
           "information.interchange.export",
           "information.interchange.readable",
@@ -168,9 +166,7 @@ public class ProjectAuthorization {
           "information.symbols",
           "information.search",
           "information.rank",
-          "information.evidence.read",
-          "incoming.catalog",
-          "incoming.status");
+          "information.evidence.read");
   private static final Set<String> PERSONAL_DEFAULT =
       Set.of(
           "conversation.open",
@@ -178,11 +174,6 @@ public class ProjectAuthorization {
           "orchestration.start",
           "message.instance.open",
           "inbox.read",
-          "outgoing.send",
-          "outgoing.advertise",
-          "outgoing.claim",
-          "outgoing.report",
-          "outgoing.cancel",
           "image.upload");
   private static final Set<String> ACCOUNT_OWNED = Set.of("schedule.pause", "schedule.forget");
   // These existing typed read handlers enforce current root policy and selection in SQL. Public
@@ -247,7 +238,6 @@ public class ProjectAuthorization {
                 "provider.connection.status",
                 "provider.connection.receipt")
             .contains(operation)
-        || operation.startsWith("incoming.")
         || operation.startsWith("conversation.")
         || operation.startsWith("memory.")
         || operation.startsWith("proposal.")
@@ -291,14 +281,7 @@ public class ProjectAuthorization {
                 "usage.conversation",
                 "usage.agent",
                 "usage.run",
-                "usage.orchestration",
-                "outgoing.send",
-                "outgoing.status",
-                "outgoing.cancel",
-                "outgoing.peers",
-                "outgoing.advertise",
-                "outgoing.claim",
-                "outgoing.report")
+                "usage.orchestration")
             .contains(operation);
   }
 
@@ -478,8 +461,7 @@ public class ProjectAuthorization {
     }
     for (String project : projects) {
       if (project == null) {
-        if (permission != ProjectRole.VIEWER && !operation.startsWith("outgoing."))
-          accounts.requireServerAdmin(account);
+        if (permission != ProjectRole.VIEWER) accounts.requireServerAdmin(account);
       } else {
         PersonalSpaces.requireOwn(project, account);
         members.requireRole(project, account, permission);

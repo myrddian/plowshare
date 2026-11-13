@@ -3,8 +3,10 @@
 Status: accepted replacement direction for Slice 5 of
 [Finishing Relay](../relay-finishing.md), recorded during Slice 0.
 [0065](0065-a2a-relay-adapter-contracts-and-capability-gaps.md) now records the
-SDK-only outbound implementation and the reviewed public capability gaps blocking
-the inbound/core cutover. The full rewrite and core removal have not shipped.
+SDK-only outbound implementation and the corrected capability review.
+[0066](0066-relay-messaging-receiver-and-review-remediation.md) authorizes the
+general messaging admission relocation required for the Relay cutover. The full
+rewrite and core removal have not shipped.
 
 Supersedes [0008](0008-relay-external-work-and-a2a-mapping.md). Its EW01–EW08 plan
 is retired; its observed behavior, identity mappings, crash-window analysis and
@@ -35,7 +37,8 @@ An integration that needs core changes is a failed integration task under
 and assessed against SDK-only alternatives. Any general platform extension needs
 its own authorized platform task and design decision covering authority,
 lifecycle, compatibility and verification. Adapter tests use the public SDK;
-neither production code nor adapter acceptance tests reach into server internals.
+production code never reaches into server internals. Test-only server fixtures
+may verify the public boundary without becoming shipped adapter dependencies.
 
 ## Requirements retained for the review
 
@@ -57,11 +60,18 @@ core API or compatibility shim for those gaps.
 
 ## Dependencies and affected consumers
 
+This section records the original cutover requirements. The separately authorized
+[review remediation](../relay-review-task-graph.md) now accepts native admission,
+retained returns and consumer replacements, and accepts legacy retirement and final
+verification. Native schedule/context/task history is preserved. Fresh manual
+Home Assistant orchestration reads are explicitly user-deferred.
+
 Slice 5 depends on Slices 1–3. Current `incoming.*`, `outgoing.*`, the external
 instance lifetime/context/task tables and the outgoing package are candidates
-for removal, not removals authorized by this documentation change. The Slice 5 review confirms that current scheduled agent work already enters
-the native turn runtime through `events/AgentRunner`; it does not depend on
-`incoming.*`.
+for removal, not removals authorized by this documentation change. Scheduled
+ordinary agent turns enter through `events/AgentRunner`; message schedules reuse
+native admission currently expressed with `Incoming` DTOs. Rehome that admission
+under messaging and preserve its schedule semantics before removing the DTOs.
 
 Keep and adapt Home Assistant and the shared integration runtime through the
 public SDK; move the runtime's current `OutgoingClient` use to the rewritten
@@ -73,5 +83,5 @@ consumer or treat this direction as proof of a safe cutover.
 
 Acceptance requires public-SDK adapter tests, crash-window and no-replay checks,
 and an independent A2A client. The separate Relay outbound entry point can run through its existing SDK grants.
-Current incoming/outgoing consumers remain available until replacement platform
-capabilities are separately authorized, implemented and verified.
+Current incoming/outgoing consumers remain available until the replacements
+authorized by 0066 are implemented, verified and adopted by every consumer.

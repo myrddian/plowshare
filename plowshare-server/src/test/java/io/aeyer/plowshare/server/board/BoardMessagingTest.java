@@ -12,7 +12,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.protocol.Incoming;
+import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
@@ -66,9 +67,14 @@ import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.messaging.JdbcMessagingRepository;
+import io.aeyer.plowshare.server.messaging.MessageInboxRepository;
 import io.aeyer.plowshare.server.messaging.MessageInboxes;
+import io.aeyer.plowshare.server.messaging.MessageIngress;
+import io.aeyer.plowshare.server.messaging.MessageRefused;
 import io.aeyer.plowshare.server.messaging.MessageService;
 import io.aeyer.plowshare.server.messaging.MessageWake;
+import io.aeyer.plowshare.server.messaging.MessagingProperties;
+import io.aeyer.plowshare.server.messaging.ProjectMessageRouting;
 import io.aeyer.plowshare.server.messaging.RelayMessageInboxes;
 import io.aeyer.plowshare.server.messaging.RelayMessaging;
 import io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository;
@@ -86,6 +92,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -95,6 +102,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -266,8 +274,8 @@ class BoardMessagingTest {
     return new Outcome(ending, text, 1, 1, "");
   }
 
-  private Incoming.Receive incoming(UUID request, UUID context, String body, String command) {
-    return new Incoming.Receive(
+  private MessageIngress.Request incoming(UUID request, UUID context, String body, String command) {
+    return new MessageIngress.Request(
         "payments",
         "remote",
         "reviewer",
@@ -275,15 +283,10 @@ class BoardMessagingTest {
         context,
         body,
         command,
-        new Incoming.Source(
+        new MessageIngress.Source(
+            "test",
             request.toString(),
-            "ROLE_USER",
-            null,
-            context,
-            List.of(new Incoming.TextPart(body)),
-            command == null ? null : new Incoming.Metadata(command),
-            null,
-            null));
+            RelayPort.hash(request + "\n" + context + "\n" + body + "\n" + command)));
   }
 
   private FiringRecord incomingWake(String message) {
@@ -463,6 +466,7 @@ class BoardMessagingTest {
             ArgumentMatchers.any(),
             ArgumentMatchers.any(),
             ArgumentMatchers.any(),
+            ArgumentMatchers.any(),
             ArgumentMatchers.any());
     var service =
         new RelayMessaging(
@@ -500,18 +504,25 @@ class BoardMessagingTest {
     var request = incoming(UUID.randomUUID(), null, "Review", null);
     var first = messages.receive("enzo", request);
     MessageInboxFixture.pulse(fixture);
-    assertEquals(first, messages.receive("enzo", request));
+    var recovered = messages.receive("enzo", request);
+    assertEquals(first.id(), recovered.id());
+    assertEquals(first.context(), recovered.context());
+    assertEquals(first.requestId(), recovered.requestId());
+    assertEquals(first.message(), recovered.message());
+    assertEquals(first.source(), recovered.source());
+    assertEquals(first.createdAt(), recovered.createdAt());
+    assertTrue(recovered.revision() >= first.revision());
     assertEquals("SUBMITTED", first.state());
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.receive("enzo", incoming(request.requestId(), null, "Different", null)));
     assertThrows(
-        Board.Refused.class, () -> messages.externalTask("enzo", "payments", "other", first.id()));
+        MessageRefused.class, () -> messages.externalTask("enzo", "payments", "other", first.id()));
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.externalTask("enzo", "elsewhere", "remote", first.id()));
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.externalTask("other", "payments", "remote", first.id()));
     var next = messages.receive("enzo", incoming(UUID.randomUUID(), first.context(), "Next", null));
     assertEquals(first.context(), next.context());
@@ -539,7 +550,7 @@ class BoardMessagingTest {
     assertEquals("Reached the cap", done.replies().getLast().body());
     assertEquals(1, firingCount(), "Passive return address never runs a model");
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.cancelExternal("enzo", "payments", "remote", accepted.id()));
   }
 
@@ -560,7 +571,7 @@ class BoardMessagingTest {
         messages
             .receive(
                 "enzo",
-                incoming(UUID.fromString(accepted.source().messageId()), null, "Review", null))
+                incoming(UUID.fromString(accepted.source().identity()), null, "Review", null))
             .source());
     assertEquals(
         "CANCELED", messages.cancelExternal("enzo", "payments", "remote", accepted.id()).state());
@@ -582,9 +593,10 @@ class BoardMessagingTest {
     assertEquals(List.of("/skill:review Do it"), voice.commands);
     messages.useLogVisibility((conversation, account) -> false);
     assertThrows(
-        Board.Refused.class, () -> messages.externalTask("enzo", "payments", "remote", bound.id()));
+        MessageRefused.class,
+        () -> messages.externalTask("enzo", "payments", "remote", bound.id()));
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.cancelExternal("enzo", "payments", "remote", bound.id()));
   }
 
@@ -1422,6 +1434,22 @@ class BoardMessagingTest {
 
   @Test
   void attributedSendRetriesSurviveRestartAndDistinctStepsReuseProviderIds() throws Exception {
+    // This test owns invocation deduplication. The archive's exact run-source proof is covered
+    // separately; provide an explicit trusted source rather than treating missing history as root.
+    messages =
+        new RelayMessaging(
+            new JdbcMessagingRepository(fixture.jdbc),
+            new JdbcAllowanceRepository(fixture.jdbc),
+            fixture.conversations,
+            fixture.firings,
+            MessageInboxFixture.inboxes(fixture),
+            fixture.work,
+            voice,
+            (name, project) -> agents.get(name),
+            fixture.drained::add,
+            fixture.clock,
+            (project, owner) -> Optional.of(RelayCausation.root("fixture-run")),
+            8);
     var lineage = UsageLineage.root(caller.conversationId());
     var run = UsageLineage.root("retained-run");
     var base = UsageAttribution.project("enzo", "1", UsageAttribution.Operation.AGENT_CHAT);
@@ -1438,6 +1466,27 @@ class BoardMessagingTest {
     JsonNode second = JSON.readTree(reconstructed.run(input, caller.home(), secondOwner));
     assertNotEquals(first.path("message"), second.path("message"));
     assertEquals(2, firingCount());
+  }
+
+  @Test
+  void attributed_send_without_exact_execution_ancestry_never_acquires_a_fresh_root()
+      throws Exception {
+    var owner =
+        UsageAttribution.project("enzo", "1", UsageAttribution.Operation.AGENT_CHAT)
+            .withExecution(
+                UsageLineage.root(caller.conversationId()),
+                UsageLineage.root("retained-run"),
+                UsageLineage.NONE,
+                "sender",
+                1L,
+                1L);
+    var tool = messages.tool(caller);
+    tool.calledAs("provider-id");
+    assertEquals(
+        "Message execution ancestry is unavailable",
+        tool.run("{\"to\":\"reviewer\",\"body\":\"Review\"}", caller.home(), owner));
+    assertEquals(
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
@@ -1526,9 +1575,9 @@ class BoardMessagingTest {
         page.stream().filter(row -> row.message().equals(original)).findFirst().orElseThrow();
     assertEquals(reply.path("message").asText(), requestRow.reply());
     assertEquals(page.subList(1, 2), messages.deliveries(sender, "enzo", 1, 1));
-    assertThrows(Board.Refused.class, () -> messages.deliveries(sender, "another-account", 0, 10));
+    assertThrows(MessageRefused.class, () -> messages.deliveries(sender, "another-account", 0, 10));
     messages.useLogVisibility((conversation, account) -> false);
-    assertThrows(Board.Refused.class, () -> messages.deliveries(sender, "enzo", 0, 10));
+    assertThrows(MessageRefused.class, () -> messages.deliveries(sender, "enzo", 0, 10));
   }
 
   @Test
@@ -1786,7 +1835,7 @@ class BoardMessagingTest {
     assertEquals(
         second.id(),
         messages.listingPage("enzo", "payments", false, 1, 1).instances().getFirst().id());
-    assertThrows(Board.Refused.class, () -> messages.inspect(first.id(), "enzo"));
+    assertThrows(MessageRefused.class, () -> messages.inspect(first.id(), "enzo"));
   }
 
   @Test
@@ -1794,7 +1843,7 @@ class BoardMessagingTest {
     String key = UUID.randomUUID().toString();
     var first = messages.open("enzo", "payments", "reviewer", true, key);
     assertEquals(first, messages.open("enzo", "payments", "reviewer", true, key));
-    assertThrows(Board.Refused.class, () -> messages.open("enzo", "payments", "bot", true, key));
+    assertThrows(MessageRefused.class, () -> messages.open("enzo", "payments", "bot", true, key));
     var second = messages.open("enzo", "payments", "reviewer", false, UUID.randomUUID().toString());
     assertEquals(first.id(), request(false).path("to").asText());
     messages.makeDefault(second.id(), "enzo");
@@ -1804,7 +1853,7 @@ class BoardMessagingTest {
             .path("to")
             .asText());
     assertFalse(messages.inspect(first.id(), "enzo").defaultInstance());
-    assertThrows(Board.Refused.class, () -> messages.inspect(first.id(), "someone"));
+    assertThrows(MessageRefused.class, () -> messages.inspect(first.id(), "someone"));
     var archived = messages.stop(second.id(), "enzo", true);
     assertFalse(archived.active());
     assertTrue(archived.archived());
@@ -1836,7 +1885,7 @@ class BoardMessagingTest {
     assertEquals("CANCELLED", cancelled.ending());
     assertEquals(cancelled, messages.cancel(original, "enzo"));
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.start(wakeFrom(original), (conversation, outcome) -> {}));
     messages.complete(original, outcome(Outcome.Ending.ANSWERED, "Late answer"));
     assertEquals(cancelled.reply(), messages.finalReply(original).orElseThrow());
@@ -2089,7 +2138,7 @@ class BoardMessagingTest {
     messages.useLogVisibility(
         (conversation, account) -> !conversation.equals(recipient(request).conversationId()));
     assertThrows(
-        Board.Refused.class, () -> messages.cancel(request.path("message").asText(), "enzo"));
+        MessageRefused.class, () -> messages.cancel(request.path("message").asText(), "enzo"));
     assertFalse(messages.route(request.path("message").asText()).orElseThrow().handled());
     assertTrue(messages.finalReply(request.path("message").asText()).isEmpty());
   }
@@ -2164,6 +2213,53 @@ class BoardMessagingTest {
     assertTrue(denied.contains("not in the sending project"), denied);
     assertEquals(
         1, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
+  }
+
+  @Test
+  void committed_send_admits_immediately_but_never_before_the_outer_transaction_commits()
+      throws Exception {
+    var hinted = new CountDownLatch(1);
+    var drained = new CountDownLatch(1);
+    var hint = new AtomicReference<MessageInboxRepository.Inbox>();
+    var transport =
+        MessageInboxFixture.inboxes(
+            fixture,
+            target -> drained.countDown(),
+            fixture.firings,
+            inbox -> {
+              hint.set(inbox);
+              hinted.countDown();
+            });
+    var engine =
+        new RelayMessaging(
+            new JdbcMessagingRepository(fixture.jdbc),
+            new JdbcAllowanceRepository(fixture.jdbc),
+            fixture.conversations,
+            fixture.firings,
+            transport,
+            fixture.work,
+            voice,
+            (name, project) -> agents.get(name),
+            fixture.drained::add,
+            fixture.clock);
+    fixture.work.inTransaction(
+        () -> {
+          engine.tool(caller).run("{\"to\":\"reviewer\",\"body\":\"Hello\"}", caller.home());
+          assertEquals(1, hinted.getCount(), "The hint must wait for the owning send commit");
+          assertEquals(
+              0, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+          assertEquals(0, voice.calls.size());
+          return null;
+        });
+    assertTrue(hinted.await(2, TimeUnit.SECONDS), "A committed send must signal without discovery");
+    // Execute the queued hint as the production worker does, without running a periodic scan.
+    assertEquals(1, transport.poll(hint.get()));
+    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+    assertTrue(drained.await(2, TimeUnit.SECONDS));
+    assertEquals(
+        0,
+        voice.calls.size(),
+        "Admission queues native work rather than directly invoking inference");
   }
 
   @Test
@@ -2298,11 +2394,10 @@ class BoardMessagingTest {
     agents = AgentRegistry.of(definitions, Set.of("send_message"));
     JsonNode receipt = request(false);
     var extras =
-        new BoardRunExtras(
-            fixture.store, fixture.board(BoardFixture.TWO), fixture.conversations, messages);
+        new BoardRunExtras(fixture.store, fixture.board(BoardFixture.TWO), fixture.conversations);
     List<String> names =
         extras.forRun(recipient(receipt)).tools().stream().map(t -> t.schema().name()).toList();
-    assertEquals(List.of("send_message", "board_open", "board_swarm_types"), names);
+    assertEquals(List.of("board_open", "board_swarm_types"), names);
     assertFalse(names.contains("board_read"));
     assertFalse(names.contains("board_post"));
   }

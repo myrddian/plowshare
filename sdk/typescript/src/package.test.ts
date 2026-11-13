@@ -18,6 +18,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const directories = ['binding', 'jobs', 'operations'];
 
 describe('the independently installable neutral package', () => {
+  it('checks compiler cleanup containment before touching any output', () => {
+    execFileSync(
+      process.execPath,
+      ['--test', resolve(root, '../../scripts/build-javascript-sdk.test.mjs')],
+      { cwd: root, encoding: 'utf8' },
+    );
+  });
+
   it('has no runtime dependencies and imports only other neutral binding modules', () => {
     const manifest = parseObject(
       readFileSync(join(root, 'package.json'), 'utf8'),
@@ -74,6 +82,18 @@ describe('the independently installable neutral package', () => {
         .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
         .map((name) => `operations/${name.slice(0, -3)}`),
     );
+    // Wildcard exports must not expose artifacts for sources removed since an earlier build.
+    for (const directory of directories) {
+      const expected = readdirSync(join(root, 'src', directory))
+        .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
+        .map((name) => name.slice(0, -3));
+      for (const suffix of ['.js', '.d.ts']) {
+        const emitted = readdirSync(join(root, 'build', directory))
+          .filter((name) => name.endsWith(suffix))
+          .map((name) => name.slice(0, -suffix.length));
+        expect(emitted.sort()).toEqual([...expected].sort());
+      }
+    }
     const output = execFileSync(
       process.execPath,
       [

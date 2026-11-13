@@ -1,8 +1,14 @@
 # A2A Relay adapter contracts and public capability gaps
 
 Status: outbound adapter contract accepted under the authorized Slice 5 rewrite;
-inbound cutover and removal remain blocked by the public capability gaps below.
-No platform extension is authorized or implemented by this record.
+inbound/core cutover is being remediated through the separately authorized
+[general messaging receiver task](0066-relay-messaging-receiver-and-review-remediation.md).
+The table below is the **pre-implementation capability review**. Native receiver,
+requester-return and consumer replacement tasks have since passed their independent
+acceptance gates; see the [task graph](../relay-review-task-graph.md). Legacy
+retirement and integrated verification are now accepted there, with the explicit
+user-deferred orchestration-read limitation and separate operational rehearsal. This
+historical table is not a current operation catalog.
 
 Follows [0058](0058-a2a-rebuild-on-relay.md) and
 [0001](0001-integration-boundary.md). A2A is retained and rewritten outside core.
@@ -17,11 +23,11 @@ Plowshare owns conversations, turns, permissions, approvals and accounting.
 | Adapter request/reply topics, multiple topic sets | `relay.publish`, `relay.consume`, `relay.ack`, `relay.log` with explicit project/account port grants | Available; separate configured topics/groups per adapter binding |
 | A2A peer discovery/send/read/cancel and stable remote artifacts | Adapter-owned A2A 1.0 JSON-RPC HTTP transport and typed external content codecs | Available; remote identities remain bound to the configured peer |
 | Durable intent before external I/O, crash evidence and no repeated mutation | Adapter-owned locked/fsynced journal, Relay source identity and typed receipts | Available without an outgoing core queue |
-| Inbound delivery to a receiving agent topic | Publishing TEXT through Relay is available, but authenticated messaging admission is not | **Blocked**: the inbox skips `sdk:<hash>` publications and only accepts `messaging:<hash>` publications with existing authorized messaging records/routes |
+| Inbound delivery to a receiving agent topic | Raw Relay TEXT cannot directly enter the trusted inbox; incoming.receive already provides authenticated admission | **Direct raw publication blocked**: the inbox skips `sdk:<hash>` publications and only accepts `messaging:<hash>` publications with existing authorized messaging records/routes |
 | Context continuity, idempotent receipt, task read/cancel | `incoming.*` supplies today's adapter-specific implementation; `message.*` supplies instance inspection/lifecycle, not external message admission | **Blocked for removal**: no independent public messaging admission operation binds an external sender/context to an authorized instance, creates its record/route and returns a durable receipt |
-| Agent Card and explicit commands from current grants | `incoming.catalog` is the current served-agent/command projection | **Blocked for removal**: general agent/run and Relay operations do not replace its current served-command admission contract |
+| Agent Card and explicit commands from current grants | `agent.list` already projects served commands; incoming.catalog duplicates that discovery | **Admission relocation required**: preserve current-grant command checks inside the owning messaging receiver, rather than creating a new catalog |
 | Home Assistant/shared runtime, Discord, Network Privacy Watch | Existing outgoing/incoming SDK consumers | Hold their existing implementations until the corresponding replacement ingress/dispatch contracts are usable; never remove a live dependency first |
-| Scheduled agent work | Current `events/AgentRunner` directly calls the native turn runtime | Already independent of `incoming.*`; no adapter workaround is needed |
+| Scheduled agent work | Agent/command targets call the native turn runtime; message targets call receiveScheduled and share incoming native admission | Preserve and rehome shared native admission before removing Incoming DTO coupling or historical context/task storage |
 
 Evidence: `RelayMessagePublications.read` checks the exact server-derived
 `messaging:` publisher **before decoding**; `ProjectRelayPorts.publish` derives
@@ -37,16 +43,19 @@ Relay topic does not create an authorized message or a receiving turn. An
 orchestration wrapper would create a separate execution path and would not
 establish messaging reply ownership. None is an inbound cutover.
 
-A separate general platform task is needed before the inbound rewrite can ship:
-define authenticated external message admission with explicit project/agent and
-external principal/context identity, idempotent receipts and authorized task
-inspection/cancellation; keep instance routing, definitions, conversation
-visibility, budgets and approvals owned by their existing services. Define a
-public current-grant command projection/admission contract independently of A2A.
-That task must settle identity namespaces, principal isolation, reply routing,
-retention, cancellation, migrations and compatibility tests before implementation.
-This document proposes no permission bypass, internal publisher selection,
-transport escape hatch or adapter-specific replacement endpoint.
+The separately authorized remediation task is now specified in
+[0066](0066-relay-messaging-receiver-and-review-remediation.md): a messaging-owned
+registered Relay receiver using existing publish/consume/log operations. It rehomes
+native admission shared with message schedules, current command-grant checks and
+a complete retained return path. It does not add another receive/status/cancel WS
+family or another command catalog. Existing incoming.receive works; replacing that
+surface is a structural task, not proof that SDK inbound delivery is impossible.
+
+The original alternatives review omitted the registered-receiver pattern already
+used by the board bridge. The supplied claims review correctly identifies that
+omission and that the outbound observation topic alone cannot deliver results to
+an agent. A new receiver must verify original requester/instance return bindings;
+publishing arbitrary observations onto an agent topic remains forbidden.
 
 ## Outbound contract
 
@@ -58,8 +67,10 @@ message content and null top-level task/context. `READ` and `CANCEL` require a
 previously observed task and context for that peer and null message. Send role
 and message identity are adapter-controlled. The configured producer publisher
 allowlist is checked before parsing; a foreign publication is skipped without
-external effects. Unknown fields, malformed JSON, invalid content, unsupported
-carriers and retention gaps stop the worker without acknowledgement.
+external effects. Malformed authorized inputs and definite pre-effect refusals receive a durable,
+source-correlated REJECTED diagnostic before acknowledgement. Read-only peer
+discovery uses bounded retries before rejection. Retention gaps, journal failures
+and uncertain effects remain operator stops.
 
 A typed `plowshare-a2a-observation/1` reply contains the request UUID, original
 source event, authenticated producer publisher, peer and a validated remote observation. Its destination comes
@@ -67,24 +78,33 @@ only from configuration. Replies carry remote provenance; they do not resume a
 local turn or claim remote usage/cost. A2A's `INPUT_REQUIRED` and `AUTH_REQUIRED`
 remain explicit remote states; approvals remain operator actions.
 
-The journal binds to the server origin, caller credential fingerprint, project,
-topics, group, durable consumer UUID, producer publishers and configured peer
-endpoints/credential fingerprints. It never stores credentials. The journal is
+The v2 journal pins server origin, project, topics, group, durable consumer UUID,
+producer publishers, peer endpoints and declared stable peer principal labels.
+Credential digests are separate; an explicit locked migration requires the exact
+previous digest and independent operator verification that replacement credentials
+name the same principals. The peer label is an operator assertion, not remote
+identity introspection. Timeout changes do not change binding identity. Legacy v1
+requires one load under its original matching configuration. No credentials are stored. The journal is
 single-owner and must live on the same durable volume across restarts; replicas
 must share that journal/lock, not independently consume one group with separate
 journals. Separate adapter bindings use separate topic/group sets and journals.
 A lease alone cannot prevent an external effect from being repeated after expiry.
 
-Before external I/O, persist/fsync an intent with the canonical request hash and
+Before send/read/cancel I/O, persist/fsync an intent with the canonical request hash and
 source identity. A recovered intent becomes `UNKNOWN`; neither send nor cancel
 is repeated. A retained task/context can be inspected by an explicit new READ
 request for the same peer. A new operation UUID cannot claim another peer's or producer's
-observed remote task. The journal never evicts operation identities automatically;
-capacity exhaustion stops before another external effect.
+observed remote task. Confirmed full records compact into durable direct-lookup UUID receipts and
+producer/peer remote-ownership metadata. The active record bound is not a lifetime
+operation cap; retained metadata disk usage grows until deliberate retirement of
+the whole binding. Storage failures stop before another effect. Dedup evidence
+is never silently evicted to make room.
 
 Persist the observation and a stable reply publication intent before publishing.
-After an uncertain reply publication, stop instead of republishing. Reconciliation
-accepts only an authorized typed `relay.log` page for the configured project/topic
+A definitely NOT_SUBMITTED reply can retry publication only. Unknown submission
+stops without automatic replay. Explicit operator abandonment retains evidence
+and does not claim delivery. Bounded paged reconciliation to a captured log head
+accepts only authorized typed `relay.log` evidence for the configured project/topic
 containing the exact event/publisher/content/time/correlation receipt. Once
 confirmed, a replacement source lease can acknowledge the original request without
 repeating peer I/O. Lost acknowledgement never justifies repeating the external
@@ -119,5 +139,20 @@ manifest declaration check makes no claim to prove server authorization.
 The server HTTP-client inventory now names the existing A2A HTTP boundary, which
 had previously been hidden from its import scan by a wildcard import.
 No SDK, shared protocol or core production implementation was extended for this
-adapter. The platform admission/catalog gaps, dependent consumer migrations and
-legacy core removal remain unfinished; Slice 5 must not be marked complete.
+adapter. The platform receiver/command-admission relocation, complete agent return loop,
+dependent consumer migrations and legacy core removal remain unfinished until
+the task graph reviewers accept them; Slice 5 must not be marked complete.
+
+## Review corrections
+
+The reviews are preserved with task traceability in the task graph. Public
+agent.list command discovery and scheduled message dependencies were missed in the
+original assessment. SDK socket tests use a fake broker and establish no server
+RBAC proof. Agent Card discovery is read-only authenticated network I/O preceding
+the send marker. First-send UNKNOWN without observed remote IDs cannot be repaired
+by inventing a READ target. The baseline adapter had a hard journal cap and strict credential fingerprint;
+the remediation implements v2 compaction, explicit identity-preserving credential
+migration and uncertainty recovery. Acceptance remains subject to the task graph
+reviewers and actual checks. Batch.generation existed in the saved pre-Slice-5 snapshot for group retirement;
+one squash commit obscures that chronology. Server test-only reverse dependencies
+are allowed by 0001, but independent acceptance ownership is reviewed separately.

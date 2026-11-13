@@ -128,10 +128,6 @@ public final class FrameTypes {
   public static final String APPLICATION_FILES = "application.files";
   public static final String APPLICATION_FILE_READ = "application.file.read";
   public static final String APPLICATION_FILE_SAVE = "application.file.save";
-  public static final String INCOMING_CATALOG = "incoming.catalog";
-  public static final String INCOMING_RECEIVE = "incoming.receive";
-  public static final String INCOMING_STATUS = "incoming.status";
-  public static final String INCOMING_CANCEL = "incoming.cancel";
   public static final String ADMIN_SERVICE_ACCOUNTS = "admin.service.accounts";
   public static final String ADMIN_SERVICE_ACCOUNT_CREATE = "admin.service.account.create";
   public static final String ADMIN_SERVICE_ACCOUNT_UPDATE = "admin.service.account.update";
@@ -151,13 +147,6 @@ public final class FrameTypes {
   public static final String ADMIN_PRICING_LIST = "admin.pricing.list";
   public static final String ADMIN_PRICING_SET = "admin.pricing.set";
   public static final String ADMIN_STATUS = "admin.status";
-  public static final String OUTGOING_SEND = "outgoing.send";
-  public static final String OUTGOING_STATUS = "outgoing.status";
-  public static final String OUTGOING_CANCEL = "outgoing.cancel";
-  public static final String OUTGOING_PEERS = "outgoing.peers";
-  public static final String OUTGOING_ADVERTISE = "outgoing.advertise";
-  public static final String OUTGOING_CLAIM = "outgoing.claim";
-  public static final String OUTGOING_REPORT = "outgoing.report";
 
   private static final Pattern DOTTED = Pattern.compile("^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$");
 

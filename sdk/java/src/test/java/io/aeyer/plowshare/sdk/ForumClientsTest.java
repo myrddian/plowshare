@@ -73,6 +73,21 @@ class ForumClientsTest {
   }
 
   @Test
+  void native_agent_forum_authorship_is_readable_without_private_execution_log_links()
+      throws Exception {
+    ObjectNode value = fixture("board.open").path("message").deepCopy();
+    value.put("authorKind", "agent");
+    value.put("author", "worker");
+    value.putNull("conversation");
+    value.putNull("entry");
+    var message = SdkJson.decode(SdkJson.mapper(), value, BoardClient.Message.class);
+    assertEquals("agent", message.authorKind());
+    assertEquals("worker", message.author());
+    assertEquals(null, message.conversation());
+    assertEquals(null, message.entry());
+  }
+
+  @Test
   void all_mutations_and_reads_use_existing_operations_and_never_replay_a_foreign_receipt()
       throws Exception {
     var received = new AtomicInteger();

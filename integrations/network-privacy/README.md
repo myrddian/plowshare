@@ -662,12 +662,23 @@ counterparts. No model tool accepts targets, ports, a shell command or a path.
 If the native tool call itself returns UNKNOWN, use `relay_tool_read` with its
 invocation UUID before considering any new operation.
 
-The optional existing outgoing compatibility peer remains available through
-`outgoingPeer` in private configuration. It uses the same public SDK contract as
-Home Assistant and its separate outgoing receipts. Enable either that peer or the
-native tool provider for a collector. The packaged agent definitions use named
-native tools; choosing outgoing compatibility requires corresponding outgoing
-grants/instructions. Neither path deploys the Python service.
+The outgoing compatibility peer is retired. Remove `outgoingPeer` from private
+configuration and launch the existing native Relay tool provider with explicit
+`--tool-provider` and `--tool-account` values. The packaged agent definitions
+already use named native tools. The six former capabilities remain available as
+individual tools, with paged reads; a group of tool reads is not an atomic snapshot.
+Native scans use the harness invocation UUID and its retained causation, rather
+than the former outgoing work/request identity. No model chooses an effect UUID.
+
+Keep `outgoing.json` in the collector state directory. Startup validates its
+original deployment identity and every receipt under the collector lock. All
+`executing`, `ready` and `reporting` rows block native intake and collection. Stop
+and settle them using the archived version and its public status/reconciliation
+path before retiring those server operations. Do not mark rows done manually,
+remove the journal, or replay them as new tool calls. A `done` journal remains
+read-only private evidence; its work ID is not necessarily a scan request UUID.
+The new provider does not submit an old outgoing report or fabricate a native
+invocation from historical evidence. Neither path deploys the Python service.
 
 ## Receipts, disconnects and recovery
 
@@ -716,7 +727,7 @@ PLOWSHARE_PRIVACY_PYTHON="$PWD/build/privacy-python-env/bin/python" ./gradlew :p
 
 The Python gate checks strict types and formatting, actual TCP/HTTP listeners on
 ephemeral fixture ports, authentication, scope/invalid inputs, journal handoff,
-redelivery, gaps, unknown outcomes, native tool declarations/handlers, outgoing compatibility operations and public SDK WebSocket transport. The Gradle
+redelivery, gaps, unknown outcomes, native tool declarations/handlers, retired peer receipt fences and native public SDK WebSocket transport. The Gradle
 project is **test-only**: it checks the Application using real definition loaders,
 the Relay routing sandbox and the deterministic schedule script. It ships no Java
 collector. Neither suite starts PostgreSQL or an inference provider.

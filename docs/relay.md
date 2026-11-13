@@ -60,8 +60,9 @@ agent or orchestration definition. A grant can register its exact TEXT topic wit
 standard retention but cannot change an existing kind or policy. It grants no
 read access or downstream feature permission.
 
-The harness supplies event identity, account publisher and verified execution
-ancestry. Unknown or exhausted ancestry refuses publication. Success returns
+The harness supplies event identity, a server-only
+`execution:<sha(account)>:<sha(definition)>` publisher and verified execution
+ancestry. SDK ports use a distinct `sdk:<sha(account)>` namespace. Unknown or exhausted ancestry refuses publication. Success returns
 JSON `{eventId, topic, position, publishedAt}` with a decimal-string position and
 an ISO timestamp. This is broker acceptance, not downstream completion. A durable
 call receipt prevents republishing after Relay expiry or topic removal; changed
@@ -1105,3 +1106,13 @@ sequence of its own to order currently visible rows and a nullable project for
 wake requests. `relay_tool_invocations` records tool calls with their causation.
 `information_revision_events` is the one non-`relay_` table keyed by a Relay
 position: revision history kept after the second delivery substrate was removed.
+
+## Messaging receiver remediation
+
+The general native receiver, retained outbound returns and consumer migrations
+are tracked in [the remediation task graph](relay-review-task-graph.md). Their
+contracts are documented in [native messaging receivers](relay-messaging-receivers.md)
+and [retained requester returns](messaging-relay-exports.md), under
+[ADR 0066](decisions/0066-relay-messaging-receiver-and-review-remediation.md).
+The task graph records which implementation and independent checks are accepted;
+it does not treat design or source review alone as completed cutover.

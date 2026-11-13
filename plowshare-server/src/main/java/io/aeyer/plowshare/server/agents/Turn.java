@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.ContainedProjects;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.archive.ArchiveException;
 import io.aeyer.plowshare.server.archive.ConversationLifecycle;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
@@ -10,6 +11,7 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.TurnHistoryRepository;
 import io.aeyer.plowshare.server.archive.TurnRecord;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.llm.dispatch.Content;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import java.util.EnumSet;
 import java.util.List;
@@ -714,6 +716,30 @@ public final class Turn {
         child, conductorConversation, callee, utterance, callerHandle, null, given, speaker, ended);
   }
 
+  /** A resumed native delegate retains its original message's exact effect ancestry. */
+  public String speakToDelegate(
+      String child,
+      String conductorConversation,
+      AgentDefinition callee,
+      String utterance,
+      String callerHandle,
+      Budget given,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      RelayCausation causation) {
+    return speakToDelegate(
+        child,
+        conductorConversation,
+        callee,
+        utterance,
+        callerHandle,
+        null,
+        given,
+        speaker,
+        ended,
+        causation);
+  }
+
   private String speakToDelegate(
       String child,
       String conductorConversation,
@@ -724,6 +750,30 @@ public final class Turn {
       Budget given,
       Speaker speaker,
       Consumer<Outcome> ended) {
+    return speakToDelegate(
+        child,
+        conductorConversation,
+        callee,
+        utterance,
+        callerHandle,
+        sessionId,
+        given,
+        speaker,
+        ended,
+        null);
+  }
+
+  private String speakToDelegate(
+      String child,
+      String conductorConversation,
+      AgentDefinition callee,
+      String utterance,
+      String callerHandle,
+      String sessionId,
+      Budget given,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      RelayCausation causation) {
     String retainedExecutor = jobs.retainedExecutor(child);
     if (retainedExecutor != null && !retainedExecutor.equals(callerHandle))
       throw new Refused("A delegation cannot replace its retained executor");
@@ -803,11 +853,15 @@ public final class Turn {
       // The plain harness: a delegation is spoken to by nobody but the harness, and this
       // door is handed no approval id to name as its source -- the question the child
       // stopped on was asked, and answered, in its conductor's name.
-      Compaction.TurnTranscript transcript = compaction.transcriptFor(child, callee, speaker);
+      Compaction.TurnTranscript transcript =
+          causation == null
+              ? compaction.transcriptFor(child, callee, speaker)
+              : compaction.transcriptFor(child, callee, speaker, causation);
+      if (causation != null) transcript.reserveCausalSource();
       // incoming = false: the harness carrying a sub-agent on after an approval, never a
       // person's own words arriving fresh -- spec §6.
       String job =
-          jobs.submit(
+          submitCausalTurn(
               callee,
               utterance,
               delegate.home(),
@@ -842,7 +896,8 @@ public final class Turn {
               TurnCap.from(callee),
               List.of(),
               callerHandle,
-              false);
+              false,
+              causation);
       started = true;
       return job;
     } finally {
@@ -1008,10 +1063,35 @@ public final class Turn {
       Consumer<Outcome> ended,
       boolean command,
       String executor) {
+    return speakToMessage(
+        conversation, definition, utterance, lease, cap, speaker, ended, command, executor, null);
+  }
+
+  /** Native admission supplies exact per-message ancestry; no other turn can overwrite it. */
+  public String speakToMessage(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      Budget lease,
+      TurnCap cap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      boolean command,
+      String executor,
+      RelayCausation causation) {
     if (executor == null || executor.isBlank())
       throw new Refused("A bound message executor is required");
     return messageTurn(
-        conversation, definition, utterance, lease, cap, speaker, ended, command, executor);
+        conversation,
+        definition,
+        utterance,
+        lease,
+        cap,
+        speaker,
+        ended,
+        command,
+        executor,
+        causation);
   }
 
   private String messageTurn(
@@ -1024,7 +1104,30 @@ public final class Turn {
       Consumer<Outcome> ended,
       boolean incomingCommand,
       String executor) {
+    return messageTurn(
+        conversation,
+        definition,
+        utterance,
+        lease,
+        cap,
+        speaker,
+        ended,
+        incomingCommand,
+        executor,
+        null);
+  }
 
+  private String messageTurn(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      Budget lease,
+      TurnCap cap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      boolean incomingCommand,
+      String executor,
+      RelayCausation causation) {
     return speak(
         conversation,
         definition,
@@ -1043,7 +1146,8 @@ public final class Turn {
         speaker,
         lease,
         null,
-        executor);
+        executor,
+        causation);
   }
 
   /**
@@ -1160,6 +1264,38 @@ public final class Turn {
       Budget given,
       RunAdmission admission,
       String executor) {
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        maxModelCalls,
+        alsoEnded,
+        admissible,
+        incoming,
+        speaker,
+        given,
+        admission,
+        executor,
+        null);
+  }
+
+  private String speak(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      Consumer<Outcome> alsoEnded,
+      Consumer<ConversationRecord> admissible,
+      boolean incoming,
+      Speaker speaker,
+      Budget given,
+      RunAdmission admission,
+      String executor,
+      RelayCausation causation) {
     ConversationRecord record =
         conversations
             .find(conversation)
@@ -1245,7 +1381,11 @@ public final class Turn {
                 + " on, so what happens next is a person's decision and not this"
                 + " server's.");
       }
-      Compaction.TurnTranscript transcript = compaction.transcriptFor(id, definition, speaker);
+      Compaction.TurnTranscript transcript =
+          causation == null
+              ? compaction.transcriptFor(id, definition, speaker)
+              : compaction.transcriptFor(id, definition, speaker, causation);
+      if (causation != null) transcript.reserveCausalSource();
       if (automaticBudgetGrant)
         transcript.record(
             LoggedEntry.diagnostic(
@@ -1294,7 +1434,7 @@ public final class Turn {
           };
       String job =
           admission == null
-              ? jobs.submit(
+              ? submitCausalTurn(
                   definition,
                   utterance,
                   record.home(),
@@ -1310,7 +1450,8 @@ public final class Turn {
                       : speaker.kind() == Speaker.Kind.PERSON
                           ? speaker.name()
                           : conversations.ownerOf(id).orElse(null),
-                  incoming)
+                  incoming,
+                  causation)
               : jobs.submitAdmitted(
                   definition,
                   utterance,
@@ -1328,6 +1469,51 @@ public final class Turn {
         free(execution, id);
       }
     }
+  }
+
+  /** Preserve the ordinary submission door; causal admission never falls back to it on failure. */
+  private String submitCausalTurn(
+      AgentDefinition definition,
+      String utterance,
+      Home home,
+      String sessionId,
+      Budget budget,
+      Transcript transcript,
+      Origin origin,
+      Consumer<Outcome> ended,
+      TurnCap cap,
+      List<Content.Image> images,
+      String caller,
+      boolean incoming,
+      RelayCausation causation) {
+    if (causation == null)
+      return jobs.submit(
+          definition,
+          utterance,
+          home,
+          sessionId,
+          budget,
+          transcript,
+          origin,
+          ended,
+          cap,
+          images,
+          caller,
+          incoming);
+    return jobs.submit(
+        definition,
+        utterance,
+        home,
+        sessionId,
+        budget,
+        transcript,
+        origin,
+        ended,
+        cap,
+        images,
+        caller,
+        incoming,
+        causation);
   }
 
   /**

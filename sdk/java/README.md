@@ -12,8 +12,8 @@ try (var client = new WsServerClient(origin, token)) {
 
 `WsServerClient` implements typed memory, document, information, conversation, job
 and project methods. It connects lazily and is `AutoCloseable`. `AgentClient`,
-`AdministrationClient`, `OrchestrationClient`, `UsageClient`, `IncomingClient` and
-`OutgoingClient`, `BoardClient`, `SwarmClient` and `MessagingClient`
+`AdministrationClient`, `OrchestrationClient`, `UsageClient`, `RelayClient`,
+`BoardClient`, `SwarmClient` and `MessagingClient`
 use an existing authenticated `Plowshare` connection. Wire JSON parsing stays inside
 the SDK; application callers consume validated immutable DTOs. Information and
 orchestration input codecs reject unsupported fields and malformed nested values.
@@ -78,8 +78,11 @@ The artifacts are configured for publication, but have not been published remote
 To install both locally, run
 `./gradlew :plowshare-protocol:publishToMavenLocal :plowshare-sdk:publishToMavenLocal`.
 
-Adapter integrations use `IncomingClient` for durable receive/status/cancel calls
-and `OutgoingClient` for outbound work, over the same authenticated WebSocket.
+Adapters use the public `RelayClient` ports and `AgentClient` catalog over the
+authenticated WebSocket. Native message lifecycle remains available through
+`MessagingClient`. A2A protocol DTOs and peer codecs belong to the separate A2A
+adapter; the retired `incoming.*` and `outgoing.*` operation families have no SDK
+facades.
 The separate [A2A adapter](../../integrations/a2a/README.md) implements HTTP serving; see
 the [receiving manual](../../docs/a2a-receiving.md) for client identities and scope.
 
@@ -133,3 +136,11 @@ close authority and lifecycle transitions remain server decisions.
 Keep each `requestId` before calling `open`, `post`, `retry` or `close` and reconcile
 uncertain delivery explicitly. These facades never replay a mutation. Pages are
 bounded at 200 rows; board topics default to 200 and messaging pages to 100.
+
+`new AgentClient(connection).list("project")` discovers the existing `agent.list`
+projection in an explicit project. `listAsync` supports the usual request options.
+Definitions include served/bot flags and complete typed command metadata, including
+aliases, context modes and source hashes. Discovery describes current advertised
+capabilities; invoking a command still passes the server's current grant and
+approval checks. The operation returns an array without a project field, so scope
+comes from the explicit authenticated request and its correlated SDK response.

@@ -179,6 +179,8 @@ class MessageCutoverDatabaseTest {
     assertTrue(boards.claim(recipientTopic.id(), 1).isPresent());
 
     Flyway.configure().dataSource(source).load().migrate();
+    assertEquals(Origin.MESSAGE, conversations.find(recipientLog).orElseThrow().origin());
+    assertEquals(Origin.TURN, conversations.find(sourceLog).orElseThrow().origin());
     var messages = new JdbcMessagingRepository(jdbc);
     assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM message_records", Integer.class));
     assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM board_topics", Integer.class));
@@ -251,6 +253,59 @@ class MessageCutoverDatabaseTest {
             "SELECT count(*) FROM firings WHERE data->>'direct_message'=?",
             Integer.class,
             paid.id()));
+    // Former IDs are retained historical evidence. Even a colliding value cannot hide a new
+    // public forum topic, suppress its messages, or suppress its close lifecycle event.
+    var forum =
+        boards.openRoot(
+            new BoardStore.NewTopic(
+                "project",
+                "Public forum",
+                "PUBLIC",
+                "owner",
+                BoardTopic.BY_PERSON,
+                "owner",
+                null,
+                20,
+                1));
+    jdbc.update("UPDATE message_instances SET former_topic=? WHERE id=?", forum.id(), receiver);
+    assertTrue(boards.openTopics().stream().anyMatch(topic -> topic.id().equals(forum.id())));
+    assertTrue(
+        boards.summaries("owner", "project", false, 0, 10).stream()
+            .anyMatch(summary -> summary.topic().id().equals(forum.id())));
+    var forumMessage =
+        boards.post(
+            new BoardStore.NewMessage(
+                forum.id(),
+                null,
+                BoardMessage.BY_PERSON,
+                "owner",
+                sourceLog,
+                null,
+                BoardMessage.POST,
+                null,
+                "Public resolution",
+                false,
+                List.of()));
+    assertTrue(boards.close(forum.id(), forumMessage.id()));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM relay_source_events WHERE topic='board.message.posted' AND subject=?",
+            Integer.class,
+            forumMessage.id()));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM relay_source_events WHERE topic='board.closed' AND subject=?",
+            Integer.class,
+            forum.id()));
+    for (String function :
+        List.of("relay_capture_board_topic()", "relay_capture_board_message()")) {
+      String definition =
+          jdbc.queryForObject("SELECT pg_get_functiondef(?::regprocedure)", String.class, function);
+      assertFalse(definition.contains("message_instances"));
+      assertFalse(definition.contains("former_topic"));
+    }
     verifyNoInteractions(voice);
   }
 }
