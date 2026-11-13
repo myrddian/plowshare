@@ -59,6 +59,7 @@ from .profile_port import SdkProfilePort
 from .profile_research import ProfileResearch, ResearchJournal, reviewed_model
 from .profile_research_port import SdkResearchPort
 from .reference_port import SdkReferencePort
+from .reference_requests import AssistantReferenceRequests, ReferenceRequests
 from .reference_service import open_references, project_scope
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
@@ -255,6 +256,14 @@ async def execute(args: argparse.Namespace) -> None:
                 config.state_directory,
                 SdkReferencePort(client, project_scope(config.project)),
             )
+            # The agent's requests for missing docs; disabled with the library.
+            reference_requests = (
+                AssistantReferenceRequests(
+                    ReferenceRequests(config.state_directory, references.library)
+                )
+                if references is not None
+                else None
+            )
             # The household's Ask conversation. An unreadable journal disables it
             # only; collection starts and /api/status says why.
             ask, ask_detail = compose_ask(
@@ -301,6 +310,7 @@ async def execute(args: argparse.Namespace) -> None:
                     assessments=assessments,
                     profiles=profiles,
                     issues=issues,
+                    references=reference_requests,
                 )
 
             peer = (
