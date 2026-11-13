@@ -117,6 +117,11 @@ MAX_LEASES = 1024
 _DHCP_SETTINGS: frozenset[Capability] = frozenset(
     {"dhcp_scope", "dhcp_reservations", "dhcp_leases"}
 )
+_LOCAL_DNS_INVALID = "identity_partial: Pi-hole returned an invalid local DNS record"
+_LOCAL_DNS_LIMIT = "identity_partial: Pi-hole local DNS record limit reached"
+_LOCAL_DNS_UNREADABLE = "identity_partial: Pi-hole local DNS records could not be read"
+# Pi-hole returns the whole ``dns.hosts`` list; at most this many are decoded.
+MAX_LOCAL_DNS = 512
 # Optional trailing ``dhcp.hosts`` fields accepted after MAC and address: a
 # hostname and a lease time ("24h", "infinite").
 _HOST_FIELD = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252}[A-Za-z0-9])?")
@@ -158,6 +163,22 @@ def _reservation(entry: object) -> tuple[str, str]:
         if not _HOST_FIELD.fullmatch(extra) or extra.lower() == "ignore":
             raise ValueError("Unsupported Pi-hole DHCP reservation")
     return address, mac
+
+
+def _local_record(entry: object) -> tuple[str, str]:
+    """``(address, name)`` of one ``dns.hosts`` entry ``"IP NAME [NAME ...]"``.
+
+    The address must be a valid IPv4 or IPv6 address; the first name is kept
+    and must be 1 to 128 printable characters. Anything else raises ValueError.
+    """
+    fields = text(entry, 1024).split()
+    if len(fields) < 2:
+        raise ValueError("Unsupported Pi-hole local DNS record")
+    address = str(ipaddress.ip_address(fields[0]))
+    name = fields[1]
+    if len(name) > 128 or not name.isprintable():
+        raise ValueError("Unsupported Pi-hole local DNS record")
+    return address, name
 
 
 @dataclass(frozen=True)
@@ -521,7 +542,12 @@ class PiHoleV6:
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
         """The full collection read; it alone carries addressing facts."""
         sample, _, _ = await self._read(
-            targets, observed_at, queries=True, addressing=True, leases=True
+            targets,
+            observed_at,
+            queries=True,
+            addressing=True,
+            leases=True,
+            names=True,
         )
         return sample
 
@@ -741,16 +767,91 @@ class PiHoleV6:
             tuple(addressing_issues),
         )
 
+    async def _local_names(
+        self, session: aiohttp.ClientSession, sid: str, targets: tuple[str, ...]
+    ) -> tuple[dict[str, str], tuple[str, ...]]:
+        """One ``GET config/dns/hosts``: ``({address: name}, issues)`` for ``targets``.
+
+        Every decoded entry is validated, in scope or not; an invalid one is
+        skipped with one deduplicated issue. Only the first ``MAX_LOCAL_DNS``
+        entries are decoded. The first record for an address wins. An
+        unreadable response gives no names and a fixed issue, and never
+        affects the other reads of the session.
+        """
+        try:
+            raw = await self._request(session, "GET", "config/dns/hosts", sid=sid)
+            if not isinstance(raw, dict) or not isinstance(raw.get("config"), dict):
+                raise ValueError("Expected Pi-hole configuration")
+            dns = raw["config"].get("dns")
+            if not isinstance(dns, dict) or not isinstance(dns.get("hosts"), list):
+                raise ValueError("Expected Pi-hole local DNS records")
+        except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
+            return {}, (_LOCAL_DNS_UNREADABLE,)
+        hosts: list[object] = dns["hosts"]
+        issues: list[str] = []
+        if len(hosts) > MAX_LOCAL_DNS:
+            issues.append(_LOCAL_DNS_LIMIT)
+        scope = frozenset(targets)
+        names: dict[str, str] = {}
+        for entry in hosts[:MAX_LOCAL_DNS]:
+            try:
+                address, name = _local_record(entry)
+            except ValueError:
+                if _LOCAL_DNS_INVALID not in issues:
+                    issues.append(_LOCAL_DNS_INVALID)
+                continue
+            if address in scope:
+                names.setdefault(address, name)
+        return names, tuple(issues)
+
+    def _apply_names(
+        self,
+        devices: tuple[DeviceIdentity, ...],
+        names: dict[str, str],
+        ambiguous: frozenset[str],
+        observed: float,
+    ) -> tuple[DeviceIdentity, ...]:
+        """Add local DNS names to the final identities; a name is never a MAC.
+
+        An identity without a hostname gets the name (evidence and source
+        unchanged); an address with no identity gets an IP-only ``local_dns``
+        record. An address Pi-hole found ambiguous is left alone, so a name
+        cannot hide the ambiguity. Address order is kept.
+        """
+        by_address = {device.address: device for device in devices}
+        for address, name in names.items():
+            if address in ambiguous:
+                continue
+            existing = by_address.get(address)
+            if existing is None:
+                by_address[address] = DeviceIdentity(
+                    address,
+                    "ip:" + address,
+                    None,
+                    name,
+                    None,
+                    None,
+                    "pihole-v6",
+                    instant(observed),
+                    None,
+                    evidence="local_dns",
+                    service=self.service,
+                )
+            elif existing.hostname is None:
+                by_address[address] = replace(existing, hostname=name)
+        return tuple(sorted(by_address.values(), key=lambda device: device.address))
+
     async def identify(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
         """Operator-only identity checks; no DNS history is fetched or retained.
 
         With ``dhcp_leases`` enabled the lease table is identity evidence here
-        too; no addressing facts are returned.
+        too, and with ``local_dns_names`` the local DNS names are applied; no
+        addressing facts are returned.
         """
         if len(targets) > BATCH_SIZE:
             raise ValueError("Pi-hole requires at most 32 unique selected addresses")
         sample, _, _ = await self._read(
-            targets, observed_at, queries=False, leases=True
+            targets, observed_at, queries=False, leases=True, names=True
         )
         return sample
 
@@ -779,12 +880,15 @@ class PiHoleV6:
         since: str | None = None,
         addressing: bool = False,
         leases: bool = False,
+        names: bool = False,
     ) -> tuple[DeviceData, frozenset[str], tuple[QuerySample, ...]]:
         """One session reading the enabled capabilities for ``targets``.
 
         ``addressing`` returns the DHCP facts (full collections only);
         ``leases`` reads the lease table as identity evidence when
         ``dhcp_leases`` is enabled and ``config/dhcp`` reports DHCP active.
+        ``names`` reads ``config/dns/hosts`` when ``local_dns_names`` is enabled
+        and applies it after the merge (``_apply_names``).
         Lease identities are merged with the network table by
         ``merge_identities``: a lease outranks a table record with the same MAC,
         and a different MAC leaves the address ambiguous.
@@ -808,18 +912,20 @@ class PiHoleV6:
         table = since is None and "network_table" in self.capabilities
         queries = queries and "dns_queries" in self.capabilities
         lease_read = leases and since is None and "dhcp_leases" in self.capabilities
+        name_read = names and since is None and "local_dns_names" in self.capabilities
         dhcp_settings = (
             addressing and bool(self.capabilities & _DHCP_SETTINGS)
         ) or lease_read
         dhcp: PiHoleDhcp | None = None
         leased: _LeaseRead | None = None
+        local: dict[str, str] = {}
         samples: tuple[QuerySample, ...] = ()
         identity = IdentitySample()
         dns: tuple[DnsObservation, ...] = ()
         window: DnsWindow | None = None
         issues: set[str] = set()
         sid: str | None = None
-        if not table and not queries and not dhcp_settings:
+        if not table and not queries and not dhcp_settings and not name_read:
             return DeviceData((), (), None, ()), frozenset(), ()
         async with self._session() as session:
             try:
@@ -856,6 +962,9 @@ class PiHoleV6:
                     leased = await self._leases(
                         session, sid, targets, end, identity.devices
                     )
+                if name_read:
+                    local, name_issues = await self._local_names(session, sid, targets)
+                    issues.update(name_issues)
                 if queries:
                     semaphore = asyncio.Semaphore(4)
 
@@ -924,7 +1033,7 @@ class PiHoleV6:
             except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
                 # Unchanged for the default capabilities, including activity
                 # reads, which have always reported both gaps.
-                if "network_table" in self.capabilities or lease_read:
+                if "network_table" in self.capabilities or lease_read or name_read:
                     issues.add(
                         "identity_unavailable: Pi-hole authentication or connection failed"
                     )
@@ -960,6 +1069,8 @@ class PiHoleV6:
             )
             if kept != leased.leases:
                 leased = replace(leased, leases=kept, complete=False)
+        if local:
+            devices = self._apply_names(devices, local, ambiguous, end)
         addressing_sample: AddressingSample | None = None
         if addressing and dhcp_settings:
             # A session that failed before the settings read is a gap too.

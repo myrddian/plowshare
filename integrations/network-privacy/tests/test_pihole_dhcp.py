@@ -338,7 +338,7 @@ class PiHoleDhcpTest(PiHoleServerCase):
         self.assertEqual(self.dhcp_calls(), 0)
         # A read without any capability it can serve opens no session.
         self.calls.clear()
-        data = await self.source(frozenset({"local_dns_names"})).read(
+        data = await self.source(frozenset({"controller_clients"})).read(
             (ADDRESS,), utc_now()
         )
         self.assertIsNone(data.addressing)
@@ -895,6 +895,180 @@ class DhcpOnlyServiceTest(unittest.TestCase):
             NetworkCollector(
                 "fixture", self.plan(frozenset({"dhcp_scope"})), SourceSet()
             )
+
+
+NAMES: frozenset[Capability] = frozenset({"local_dns_names"})
+TABLE_AND_NAMES: frozenset[Capability] = frozenset({"network_table", "local_dns_names"})
+INVALID_NAME = "identity_partial: Pi-hole returned an invalid local DNS record"
+NAME_LIMIT = "identity_partial: Pi-hole local DNS record limit reached"
+NAMES_UNREADABLE = "identity_partial: Pi-hole local DNS records could not be read"
+NAMES_CALL = ("GET", "/api/config/dns/hosts")
+
+
+class PiHoleLocalDnsTest(PiHoleServerCase):
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        self.observed = instant(int(self.now))
+
+    def source(
+        self, capabilities: frozenset[Capability] = NAMES, service: str = "dns"
+    ) -> PiHoleV6:
+        return PiHoleV6(self.plan, capabilities=capabilities, service=service)
+
+    def serve(self, *hosts: object) -> None:
+        self.dns_hosts = {"config": {"dns": {"hosts": list(hosts)}}, "took": 0.01}
+
+    def named(self, address: str = ADDRESS, name: str = "tv.lan") -> DeviceIdentity:
+        return DeviceIdentity(
+            address,
+            "ip:" + address,
+            None,
+            name,
+            None,
+            None,
+            "pihole-v6",
+            self.observed,
+            None,
+            "local_dns",
+            "dns",
+        )
+
+    async def test_local_name_fills_missing_hostname_only(self) -> None:
+        self.serve(f"{ADDRESS} first.lan second.lan", f"{OTHER} other.lan")
+        # No table record: an IP-only local_dns record, first name wins.
+        data = await self.source().read((ADDRESS, OTHER), self.observed)
+        self.assertEqual(
+            data.devices,
+            (self.named(ADDRESS, "first.lan"), self.named(OTHER, "other.lan")),
+        )
+        self.assertEqual(data.issues, ())
+        # A table record that has a hostname keeps it; one without gets the name.
+        self.serve(f"{ADDRESS} first.lan")
+        data = await self.source(TABLE_AND_NAMES).read((ADDRESS,), self.observed)
+        [device] = data.devices
+        self.assertEqual(device.hostname, "living-room-tv")
+        self.assertEqual(device.mac, MAC)
+        self.assertIsNone(device.evidence)
+
+        original = self.device
+
+        def unnamed(address: str, mac: str = MAC) -> dict[str, object]:
+            record = original(address, mac)
+            cast(list[dict[str, object]], record["ips"])[0]["name"] = ""
+            return record
+
+        with patch.object(self, "device", unnamed):
+            data = await self.source(TABLE_AND_NAMES).read((ADDRESS,), self.observed)
+            identified = await self.source(TABLE_AND_NAMES).identify(
+                (ADDRESS,), self.observed
+            )
+        for sample in (data, identified):
+            [device] = sample.devices
+            self.assertEqual(
+                (device.hostname, device.mac, device.evidence, device.device_id),
+                ("first.lan", MAC, None, "mac:" + MAC),
+            )
+
+    async def test_local_name_never_asserts_mac_or_conflicts(self) -> None:
+        self.serve(f"{ADDRESS} first.lan")
+        data = await self.source().read((ADDRESS,), self.observed)
+        [device] = data.devices
+        self.assertIsNone(device.mac)
+        self.assertEqual(device.device_id, "ip:" + ADDRESS)
+        # Next to a table record with a MAC, no conflict or ambiguity arises.
+        data = await self.source(TABLE_AND_NAMES).read((ADDRESS,), self.observed)
+        self.assertEqual([d.mac for d in data.devices], [MAC])
+        self.assertEqual(data.issues, ())
+
+    async def test_ambiguous_address_gets_no_local_name(self) -> None:
+        self.mode = "ambiguous"
+        self.serve(f"{ADDRESS} first.lan")
+        data = await self.source(TABLE_AND_NAMES).read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, ())
+        self.assertIn(
+            "identity_ambiguous: Pi-hole lists multiple devices for a selected address",
+            data.issues,
+        )
+
+    async def test_malformed_host_lines_are_partial(self) -> None:
+        malformed: list[object] = [
+            "not-an-ip name.lan",
+            f"{ADDRESS}",
+            f"{ADDRESS} bad\x00name",
+            f"{ADDRESS} " + "x" * 129,
+            "192.0.2.300 name.lan",
+            17,
+            "",
+            "   ",
+        ]
+        for entry in malformed:
+            with self.subTest(entry=entry):
+                self.serve(entry, f"{OTHER} other.lan")
+                data = await self.source().read((ADDRESS, OTHER), self.observed)
+                self.assertEqual(data.devices, (self.named(OTHER, "other.lan"),))
+                self.assertEqual(data.issues, (INVALID_NAME,))
+
+    async def test_out_of_scope_records_are_ignored_silently(self) -> None:
+        self.serve(f"{OUTSIDE} outside.lan", f"{ADDRESS} first.lan")
+        data = await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, (self.named(ADDRESS, "first.lan"),))
+        self.assertEqual(data.issues, ())
+        self.assertNotIn("outside.lan", repr(data))
+
+    async def test_record_limit(self) -> None:
+        filler = [f"10.1.{n // 256}.{n % 256} h{n}.lan" for n in range(1, 513)]
+        self.serve(*filler, f"{ADDRESS} late.lan")
+        data = await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, ())
+        self.assertEqual(data.issues, (NAME_LIMIT,))
+        self.serve(*filler[:511], f"{ADDRESS} last.lan")
+        data = await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(data.devices, (self.named(ADDRESS, "last.lan"),))
+        self.assertEqual(data.issues, ())
+
+    async def test_unreadable_records_do_not_affect_other_results(self) -> None:
+        cases: dict[str, tuple[int, object]] = {
+            "503": (503, None),
+            "403": (403, None),
+            "not an object": (200, ["x"]),
+            "no config": (200, {"took": 0.01}),
+            "hosts not a list": (200, {"config": {"dns": {"hosts": "x"}}}),
+        }
+        for name, (status, body) in cases.items():
+            with self.subTest(name):
+                self.hosts_status = status
+                self.dns_hosts = self.dns_hosts if body is None else body
+                data = await self.source(TABLE_AND_NAMES).read(
+                    (ADDRESS,), self.observed
+                )
+                self.assertEqual([d.mac for d in data.devices], [MAC])
+                self.assertEqual([d.hostname for d in data.devices], ["living-room-tv"])
+                self.assertEqual(data.issues, (NAMES_UNREADABLE,))
+                self.assertNotIn(SECRET, repr(data))
+                self.assertNotIn(self.origin, repr(data))
+
+    async def test_names_skipped_when_capability_off(self) -> None:
+        self.serve(f"{ADDRESS} first.lan")
+        source = self.source(frozenset({"network_table"}))
+        await source.read((ADDRESS,), self.observed)
+        await source.identify((ADDRESS,), self.observed)
+        self.assertNotIn(NAMES_CALL, self.calls)
+        # Names alone make no table request.
+        self.calls.clear()
+        await self.source().read((ADDRESS,), self.observed)
+        self.assertEqual(
+            self.calls,
+            [("POST", "/api/auth"), NAMES_CALL, ("DELETE", "/api/auth")],
+        )
+
+    async def test_names_not_read_by_presence_or_activity(self) -> None:
+        self.serve(f"{ADDRESS} first.lan")
+        source = self.source(frozenset({"network_table", "local_dns_names"}))
+        await source.presence((ADDRESS,), self.observed)
+        await source.activity((ADDRESS,), instant(int(self.now) - 60), self.observed)
+        self.assertNotIn(NAMES_CALL, self.calls)
+        await source.identify((ADDRESS,), self.observed)
+        self.assertIn(NAMES_CALL, self.calls)
 
 
 if __name__ == "__main__":
