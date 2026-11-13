@@ -45,11 +45,17 @@ _MAX_TRAFFIC_CLIENTS = 2048
 _DEFAULT_CAPABILITIES: frozenset[Capability] = frozenset(
     {"controller_clients", "managed_inventory", "traffic_counters"}
 )
-# Addressing reads: stat/sta lists connected clients (with their fixed-IP
-# setting), rest/networkconf the site's networks (with their DHCP server).
-_MAX_FIXED_IP_CLIENTS = 1024
+# Addressing reads: rest/user lists every known client, connected or offline,
+# with its fixed-IP setting (stat/sta lists connected clients only, so an
+# offline device's fixed IP would be missed); rest/networkconf lists the site's
+# networks with their DHCP server.
+_MAX_FIXED_IP_CLIENTS = 4096
+_MAX_USER_BYTES = 4 * 1024 * 1024
 _MAX_NETWORKS = 64
 _MAX_NETWORK_BYTES = 1024 * 1024
+# A DHCP network is a private unicast LAN of this prefix length.
+_MIN_PREFIX, _MAX_PREFIX = 8, 30
+_THIS_NETWORK = ipaddress.IPv4Network("0.0.0.0/8")
 FIXED_IP_UNAVAILABLE = (
     "addressing_unavailable: UniFi fixed IP settings could not be read"
 )
@@ -58,6 +64,7 @@ INVALID_FIXED_IP = "addressing_partial: UniFi returned an invalid fixed IP"
 INVALID_DHCP_RANGE = "addressing_partial: UniFi returned an invalid DHCP range"
 CLIENT_LIMIT = "addressing_partial: UniFi client limit reached"
 NETWORK_LIMIT = "addressing_partial: UniFi DHCP network limit reached"
+OVERLAPPING_NETWORKS = "addressing_partial: UniFi returned overlapping DHCP networks"
 _INVENTORY_DISAGREES = (
     "unifi_ambiguous: connected and adopted inventory disagree on a watched address"
 )
@@ -191,7 +198,7 @@ class UniFiNetwork:
             else None
         )
         self._fixed_ips = (
-            legacy + "/stat/sta"
+            legacy + "/rest/user"
             if legacy is not None and "dhcp_reservations" in capabilities
             else None
         )
@@ -341,34 +348,37 @@ class UniFiNetwork:
     ) -> AddressingSample:
         """Fixed IPs and DHCP ranges, as addressing facts for ``targets``.
 
-        Reads ``stat/sta`` (``dhcp_reservations``), then ``rest/networkconf``
+        Reads ``rest/user`` (``dhcp_reservations``), then ``rest/networkconf``
         (``dhcp_scope``), each with one GET on one session configured as the
-        traffic read; neither capability means no request. A client with
-        ``use_fixedip: true`` whose ``fixed_ip`` is a target becomes a
-        ``controller_fixed_ip`` reservation. Each enabled IPv4 network with an
-        enabled DHCP server becomes a scope without a lease table (UniFi
-        exposes none, so rule 3 reads an in-range address as dynamic).
+        traffic read; neither capability means no request. ``rest/user`` lists
+        every known client, including offline ones, so a fixed IP held for a
+        disconnected device is still seen. A client with ``use_fixedip: true``
+        whose ``fixed_ip`` is a target becomes a ``controller_fixed_ip``
+        reservation. Each enabled private IPv4 network with an enabled DHCP
+        server becomes a scope without a lease table (UniFi exposes none, so
+        rule 3 reads an in-range address as dynamic).
 
         An unreadable endpoint is ``addressing_unavailable`` for that endpoint
-        only; the other's facts still apply. Scopes are ``complete`` only when
-        nothing could be missing: a network read reaching its limit or holding
-        an invalid network, or a fixed-IP read that failed, reached its limit
-        or held an invalid fixed IP, leaves every scope incomplete, because a
-        missing network or fixed IP could otherwise make an address look static.
-        Issue texts are fixed and never carry URLs or bodies.
+        only; the other's facts still apply. Scopes fail closed: they are
+        ``complete`` only when ``dhcp_reservations`` is enabled and both reads
+        succeeded fully (no limit reached, no invalid or overlapping network,
+        no invalid fixed IP), because an unseen network or fixed IP could
+        otherwise make an address look static. Issue texts are fixed and never
+        carry URLs or bodies.
         """
         if self._fixed_ips is None and self._networkconf is None:
             return AddressingSample()
         reservations: tuple[Reservation, ...] = ()
         scopes: tuple[DhcpScope, ...] = ()
         issues: list[str] = []
-        complete = True
+        # Without a fixed-IP check, any in-scope address could be reserved.
+        complete = self._fixed_ips is not None
         async with self._legacy_session() as session:
             if self._fixed_ips is not None:
                 try:
                     async with asyncio.timeout(15):
                         value = await self._read_legacy(
-                            session, self._fixed_ips, _MAX_TRAFFIC_BYTES
+                            session, self._fixed_ips, _MAX_USER_BYTES
                         )
                     rows = _legacy_rows(value)
                 except (ClientError, TimeoutError, ValueError):
@@ -811,11 +821,14 @@ def _decode_networks(
 ) -> tuple[tuple[DhcpScope, ...], tuple[str, ...]]:
     """DHCP scopes from at most the network limit, all initially complete.
 
-    A network without ``ip_subnet`` (WAN, VPN, VLAN-only) or with an IPv6
-    one has no IPv4 DHCP server and is ignored. A disabled network or DHCP
-    server contributes nothing. Otherwise ``ip_subnet`` is the gateway's CIDR
+    A disabled network, or one whose DHCP server is not enabled (including
+    WAN, VPN and VLAN-only entries without ``dhcpd_enabled``), contributes
+    nothing; an IPv6 ``ip_subnet`` is ignored. Otherwise ``ip_subnet`` is the
+    gateway's CIDR, which must be a private unicast IPv4 LAN from /8 to /30,
     and ``dhcpd_start``-``dhcpd_stop`` must lie inside it in order; any other
-    form skips that network with ``addressing_partial``.
+    form skips that network with ``addressing_partial``. Overlapping scopes
+    cannot say which network decides an address: they are reported and the
+    caller marks the read incomplete.
     """
     issues = [NETWORK_LIMIT] if len(rows) > _MAX_NETWORKS else []
     scopes: list[DhcpScope] = []
@@ -828,23 +841,38 @@ def _decode_networks(
             continue
         if scope is not None:
             scopes.append(scope)
+    if any(
+        first.network.overlaps(second.network)
+        for index, first in enumerate(scopes)
+        for second in scopes[index + 1 :]
+    ):
+        issues.append(OVERLAPPING_NETWORKS)
     return tuple(scopes), tuple(issues)
 
 
 def _network_scope(row: object, service: str) -> DhcpScope | None:
     if not isinstance(row, dict):
         raise ValueError("Expected a UniFi network")
-    if "ip_subnet" not in row:
-        return None
     enabled = row.get("enabled", True)
-    dhcp = row.get("dhcpd_enabled")
+    dhcp = row.get("dhcpd_enabled", False)
     if type(enabled) is not bool or type(dhcp) is not bool:
         raise ValueError("Expected UniFi network flags")
     if not enabled or not dhcp:
         return None
-    network = ipaddress.ip_network(text(row["ip_subnet"], 64), strict=False)
+    network = ipaddress.ip_network(text(row.get("ip_subnet"), 64), strict=False)
     if not isinstance(network, ipaddress.IPv4Network):
         return None
+    if (
+        not _MIN_PREFIX <= network.prefixlen <= _MAX_PREFIX
+        or not network.is_private
+        or network.is_loopback
+        or network.is_link_local
+        or network.is_multicast
+        or network.is_unspecified
+        or network.is_reserved
+        or network.overlaps(_THIS_NETWORK)
+    ):
+        raise ValueError("UniFi DHCP network is not a private LAN")
     start = ipaddress.IPv4Address(text(row.get("dhcpd_start"), 15))
     end = ipaddress.IPv4Address(text(row.get("dhcpd_stop"), 15))
     if start not in network or end not in network or start > end:

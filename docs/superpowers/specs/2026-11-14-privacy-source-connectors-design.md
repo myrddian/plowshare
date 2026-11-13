@@ -195,9 +195,12 @@ connector with several capabilities and credentials of a different shape (an
 environment variable plus a CA file or certificate pin).
 
 Once the Addressing bucket exists, UniFi gains `dhcp_reservations` and
-`dhcp_scope`. Reservations come from each client's fixed-IP setting
-(`use_fixedip`, `fixed_ip`); the DHCP scope comes from each network's DHCP
-server setting and range. Both use the controller's legacy endpoints, as
+`dhcp_scope`. Reservations come from each known client's fixed-IP setting
+(`use_fixedip`, `fixed_ip`) in `rest/user`, which lists offline clients too;
+`stat/sta` lists only connected clients, so an offline device's fixed IP would
+be missed and the address could wrongly look static. The DHCP scope comes from
+each network's DHCP server setting and range (`rest/networkconf`). UniFi
+scopes are complete only when fixed IPs were also read completely. Both use the controller's legacy endpoints, as
 traffic does today, so they need the legacy site name (`trafficSite`). UniFi
 has no lease table, which is why rule 3 treats an address inside its range as
 `inside_dhcp_range`.
@@ -436,7 +439,7 @@ part of the receipt journal's identity.
     or the default lease time), so a reservation cannot be inferred from it.
   - `config.dns.hosts[]` is `"IP HOSTNAME [HOSTNAME ...]"`, as assumed.
 - Confirm that the UniFi API key can read the legacy client fixed-IP fields
-  and network DHCP settings (`stat/sta`, `rest/networkconf`) read-only.
+  and network DHCP settings (`rest/user`, `rest/networkconf`) read-only.
   Checked against public references only, not against a controller:
   - `GET /api/s/{site}/stat/sta` lists connected clients; on UniFi OS the
     path is prefixed `/proxy/network` (ubntwiki "UniFi Controller API",
@@ -444,16 +447,21 @@ part of the receipt journal's identity.
     `{"meta": {"rc": "ok"|"error"}, "data": [...]}`.
   - Client objects carry `ip`, `mac`, `use_fixedip: bool` and
     `fixed_ip: str` (aiounifi `models/client.py` `TypedClient`, reading
-    `/stat/sta`). `stat/sta` lists connected clients only; the complete
-    configured list is `rest/user`, so a fixed IP held for an offline client is
-    not seen.
+    `/stat/sta`). `stat/sta` lists connected clients only. The known-client
+    list `GET /api/s/{site}/rest/user` (aiounifi `AllClientListRequest`;
+    Art-of-WiFi `edit_client_fixedip` writes `use_fixedip`/`fixed_ip` there)
+    includes offline clients, so reservations are read from `rest/user`: a
+    fixed IP held for an offline device is still seen, and another device
+    holding that address is a conflict rather than `static`.
   - `GET /api/s/{site}/rest/networkconf` lists the site's networks
     (Art-of-WiFi `list_networkconf`). The fields `ip_subnet` (the gateway's
     CIDR, such as `192.168.1.1/24`), `dhcpd_enabled`, `dhcpd_start` and
     `dhcpd_stop` come from community references (create-network payloads and
     `networkconf` documents), not an official schema. WAN and VLAN-only
     entries carry no `ip_subnet`. The reader takes exactly these forms and
-    reports anything else as `addressing_partial`.
+    reports anything else as `addressing_partial`. A network is accepted
+    only as a private unicast IPv4 LAN from /8 to /30; overlapping networks
+    are reported and leave the read's scopes incomplete.
   - No public document says whether the Integration API key (`X-API-Key`)
     is accepted on the legacy paths; the public clients log in with a
     session. The existing traffic read already depends on it. The owner
