@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .contracts import Configuration
+from .connectors import REGISTRY
+from .contracts import Configuration, ConnectorKind
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,13 @@ def _variable(environment: Mapping[str, str], purpose: str, name: str) -> Creden
     return Credential(purpose, "environment", name, bool(value and value.strip()))
 
 
+# How each kind of service names its secret in the credential list.
+_PURPOSES: Mapping[ConnectorKind, str] = {
+    "pihole": "Pi-hole password",
+    "unifi": "UniFi API key",
+}
+
+
 def describe(
     config: Configuration,
     advisory_origin: str | None,
@@ -117,8 +125,16 @@ def describe(
         ),
         _variable(environment, "Dashboard access token", config.web_token_environment),
     ]
-    credentials += [c.password for c in (pihole,) if c is not None]
-    credentials += [c.api_key for c in (unifi,) if c is not None]
+    # Environment secrets come from each configured service's connector, so a
+    # new service is redacted without editing this module. A Pi-hole password
+    # read from a private file has no variable name and is listed separately.
+    for service in plan.sources:
+        credentials += [
+            _variable(environment, _PURPOSES[service.kind], name)
+            for name in REGISTRY[service.kind].credential_environments(service.settings)
+        ]
+    if pihole is not None and pihole.password.source == "file":
+        credentials.append(pihole.password)
     return SystemView(
         pihole,
         unifi,

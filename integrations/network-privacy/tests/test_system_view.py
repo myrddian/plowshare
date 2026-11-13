@@ -3,9 +3,11 @@ import tempfile
 import unittest
 from dataclasses import asdict, replace
 from pathlib import Path
+from unittest.mock import patch
 
 from support import configuration, with_sources
 
+from plowshare_privacy.connectors import REGISTRY
 from plowshare_privacy.contracts import PiHolePlan, UniFiPlan
 from plowshare_privacy.system_view import describe
 
@@ -49,6 +51,31 @@ class SystemViewTest(unittest.TestCase):
         self.assertEqual(view.unifi.trust, "pinned")
         self.assertIsNone(view.unifi.traffic_site)
         self.assertIsNone(view.advisory_origin)
+
+    def test_every_service_credential_is_redacted(self) -> None:
+        pihole = replace(PIHOLE, password_file=None, password_environment="PIHOLE_PW")
+        config = replace(
+            self.config,
+            collection=with_sources(self.config.collection, pihole=pihole, unifi=UNIFI),
+        )
+        view = describe(config, None, {}, lambda path: True)
+        names = {c.variable for c in view.deployment.credentials}
+        self.assertTrue({"PIHOLE_PW", "UNIFI_KEY"} <= names)
+        other = {
+            **REGISTRY,
+            "unifi": replace(
+                REGISTRY["unifi"], credential_environments=lambda s: ("OTHER",)
+            ),
+        }
+        with patch("plowshare_privacy.system_view.REGISTRY", other):
+            names = {
+                c.variable
+                for c in describe(
+                    config, None, {}, lambda p: True
+                ).deployment.credentials
+            }
+        self.assertIn("OTHER", names)
+        self.assertNotIn("UNIFI_KEY", names)
 
     def test_reports_a_missing_password_file_and_byte_counters(self) -> None:
         config = replace(
