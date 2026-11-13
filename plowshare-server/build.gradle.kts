@@ -56,6 +56,8 @@ dependencies {
     // publishes hikaricp.connections.pending/active, the database pool pressure
     // that connection starvation is diagnosed from.
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    // Boot manages the compatible registry version. HTTP exposure remains an operator opt-in.
+    implementation("io.micrometer:micrometer-registry-prometheus")
 
     implementation("org.flywaydb:flyway-core:$flywayVersion")
     // Flyway 10 moved Postgres support out of core; without this the migration

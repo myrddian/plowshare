@@ -70,6 +70,13 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   // Written only by the worker; read by cache hits. Valid only for deliveredGeneration.
   private volatile long deliveredNanos;
   private volatile long deliveredGeneration = -1;
+  private final java.util.concurrent.atomic.AtomicLong reconnectAttempts =
+      new java.util.concurrent.atomic.AtomicLong();
+
+  @Override
+  public long reconnectAttempts() {
+    return reconnectAttempts.get();
+  }
 
   public ListeningProjectionChangeSignals(
       ProjectionNotificationSource source,
@@ -181,8 +188,11 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   }
 
   private void run() {
+    boolean firstAttempt = true;
     try {
       while (!isClosed()) {
+        if (!firstAttempt) reconnectAttempts.incrementAndGet();
+        firstAttempt = false;
         try (var opened = source.open()) {
           synchronized (lock) {
             if (closed) return;

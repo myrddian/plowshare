@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.cache;
 
 import com.zaxxer.hikari.HikariDataSource;
+import io.micrometer.core.instrument.MeterRegistry;
 import javax.sql.DataSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
@@ -18,6 +20,14 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 })
 @DependsOnDatabaseInitialization
 public class ProjectionCacheConfiguration {
+  @Bean
+  public ProjectionTelemetry projectionTelemetry(ObjectProvider<MeterRegistry> registries) {
+    var registry = registries.getIfAvailable();
+    return registry == null
+        ? ProjectionTelemetry.NONE
+        : new MicrometerProjectionTelemetry(registry);
+  }
+
   /** Not a DataSource bean: registering another one would disable Boot's primary pool creation. */
   public record VersionConnections(HikariDataSource source) implements AutoCloseable {
     public void close() {
@@ -79,7 +89,8 @@ public class ProjectionCacheConfiguration {
       VersionConnections connections,
       ProjectionVersions versions,
       ProjectionCacheProperties properties,
-      ProjectionNotificationProperties notified) {
+      ProjectionNotificationProperties notified,
+      ProjectionTelemetry telemetry) {
     // LISTEN owns one unpooled session. It must not pin a main or version-pool connection.
     var notificationSource =
         new DriverManagerDataSource(
@@ -92,23 +103,30 @@ public class ProjectionCacheConfiguration {
         new io.aeyer.plowshare.server.pool.TracedDataSource(
             notificationSource, new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace());
     int observers = properties.maxProjections() + 2; // Relay wakeups and information invalidation.
-    if (!notified.enabled())
-      return new ListeningProjectionChangeSignals(
-          new PostgresProjectionNotificationSource(traced),
-          versions,
-          observers,
-          properties.notificationPoll(),
-          properties.reconnectDelay());
-    // Probes bound how long a silently lost session goes unnoticed, whether or not any cache
-    // trusts notifications for disclosure.
-    return new ListeningProjectionChangeSignals(
-        new PostgresProjectionNotificationSource(traced, notified.heartbeatTimeout()),
-        versions,
-        observers,
-        properties.notificationPoll(),
-        properties.reconnectDelay(),
-        notified.heartbeat(),
-        notified.heartbeatTimeout());
+    ProjectionChangeSignals signals;
+    if (!notified.enabled()) {
+      signals =
+          new ListeningProjectionChangeSignals(
+              new PostgresProjectionNotificationSource(traced),
+              versions,
+              observers,
+              properties.notificationPoll(),
+              properties.reconnectDelay());
+    } else {
+      // Probes bound how long a silently lost session goes unnoticed, whether or not any cache
+      // trusts notifications for disclosure.
+      signals =
+          new ListeningProjectionChangeSignals(
+              new PostgresProjectionNotificationSource(traced, notified.heartbeatTimeout()),
+              versions,
+              observers,
+              properties.notificationPoll(),
+              properties.reconnectDelay(),
+              notified.heartbeat(),
+              notified.heartbeatTimeout());
+    }
+    telemetry.observeListener(signals, notified);
+    return signals;
   }
 
   @Bean(destroyMethod = "close")
@@ -116,8 +134,9 @@ public class ProjectionCacheConfiguration {
       ProjectionVersions versions,
       ProjectionChangeSignals signals,
       ProjectionCacheProperties properties,
-      ProjectionNotificationProperties notified) {
+      ProjectionNotificationProperties notified,
+      ProjectionTelemetry telemetry) {
     return new ProjectionCaches(
-        versions, signals, properties, notified.enabled() ? notified.staleness() : null);
+        versions, signals, properties, notified.enabled() ? notified.staleness() : null, telemetry);
   }
 }

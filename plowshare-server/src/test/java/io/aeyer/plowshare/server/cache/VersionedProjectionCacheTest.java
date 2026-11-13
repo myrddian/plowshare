@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.cache;
 
 import static io.aeyer.plowshare.server.cache.CacheTestSupport.*;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -50,6 +51,9 @@ class VersionedProjectionCacheTest {
       verify(fixture.versions, times(2)).capture(DOMAINS);
       verify(fixture.versions, times(3)).current(fixture.token);
       assertEquals(1, fixture.backing.statistics().hits());
+      assertEquals(1, fixture.cache.statistics().count(LOAD));
+      assertEquals(1, fixture.cache.statistics().count(LOADED_RETURN));
+      assertEquals(1, fixture.cache.statistics().count(VERSIONED_HIT));
     }
   }
 
@@ -77,6 +81,8 @@ class VersionedProjectionCacheTest {
       verify(fixture.versions, never()).current(fresh);
       verify(fixture.versions, times(3)).current(old);
       assertEquals(0, fixture.backing.statistics().entries());
+      assertEquals(0, fixture.cache.statistics().count(VERSIONED_HIT));
+      assertEquals(1, fixture.cache.statistics().count(BYPASS_STALE));
       assertEquals(
           new Value("new"), fixture.cache.read(KEY, true, () -> new Value("new"), ignored -> 100));
       verify(fixture.versions, times(2)).current(fresh);
@@ -109,6 +115,8 @@ class VersionedProjectionCacheTest {
               () -> new Value("direct-after"),
               ignored -> 100));
       assertEquals(0, fixture.backing.statistics().entries());
+      assertEquals(1, fixture.cache.statistics().count(BYPASS_INELIGIBLE));
+      assertEquals(1, fixture.cache.statistics().count(BYPASS_LOAD_REFUSED));
       fixture.share.set(true);
       assertEquals(
           new Value("committed"),
@@ -194,6 +202,9 @@ class VersionedProjectionCacheTest {
         release.countDown();
         assertSame(first.get(5, TimeUnit.SECONDS), second.get(5, TimeUnit.SECONDS));
         assertEquals(1, loads.get());
+        assertEquals(1, fixture.cache.statistics().count(LOAD));
+        assertEquals(1, fixture.cache.statistics().count(LOADED_RETURN));
+        assertEquals(1, fixture.cache.statistics().count(VERSIONED_HIT));
         verify(fixture.versions, never()).current(joiningToken);
         verify(fixture.versions, times(3)).current(loadedToken);
         verify(fixture.versions).canShare();
@@ -235,6 +246,9 @@ class VersionedProjectionCacheTest {
                       () -> fail("SQL errors must not replay a projection"),
                       ignored -> 100)));
       assertEquals(1, fallbacks.get());
+      assertEquals(2, fixture.cache.statistics().count(LOAD));
+      assertEquals(1, fixture.cache.statistics().count(BYPASS_LOAD_REFUSED));
+      assertEquals(0, fixture.cache.statistics().count(LOADED_RETURN));
       assertEquals(0, fixture.backing.statistics().entries());
     }
   }
@@ -286,6 +300,8 @@ class VersionedProjectionCacheTest {
           io.aeyer.plowshare.protocol.frames.Code.ARCHIVE_UNAVAILABLE,
           io.aeyer.plowshare.server.faults.Faults.of(refused).code(),
           "Never promise that an enclosing mutation has not started or invite automatic replay");
+      assertEquals(1, fixture.cache.statistics().count(CAPACITY_REJECTED));
+      assertEquals(0, fixture.cache.statistics().count(LOAD));
       fixture.signals.state(2, false);
       assertEquals(
           new Value("recovering"),
@@ -304,6 +320,8 @@ class VersionedProjectionCacheTest {
               () -> fail("Selection is not cacheable"),
               () -> new Value("disabled"),
               ignored -> 100));
+      assertEquals(1, fixture.cache.statistics().count(BYPASS_NOT_READY));
+      assertEquals(1, fixture.cache.statistics().count(BYPASS_NOT_CACHEABLE));
     }
   }
 

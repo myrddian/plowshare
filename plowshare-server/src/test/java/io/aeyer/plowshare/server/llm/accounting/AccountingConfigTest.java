@@ -10,6 +10,8 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.llm.LlmProperties;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import javax.sql.DataSource;
@@ -67,6 +69,7 @@ class AccountingConfigTest {
   void default_enabled_storage_binds_limits_and_closes_the_writer_with_the_context() {
     var layout = new DataLayout(directory).initialise();
     storage(layout)
+        .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
         .withPropertyValues(
             "plowshare.llm.accounting.max-journal-bytes=32KB",
             "plowshare.llm.accounting.segment-bytes=2KB",
@@ -80,6 +83,9 @@ class AccountingConfigTest {
               assertEquals(
                   3, context.getBean(LlmProperties.class).getAccounting().getRetryBufferEvents());
               assertNotNull(context.getBean(AccountingRecorder.class));
+              assertTrue(
+                  context.getBean(InferenceTelemetry.class)
+                      instanceof MicrometerInferenceTelemetry);
               assertNotNull(context.getBean(AccountingProjector.class));
               assertTrue(Files.exists(layout.accounting().resolve("checkpoint")));
             });

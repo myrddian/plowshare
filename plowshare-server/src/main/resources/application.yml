@@ -70,6 +70,9 @@ server:
 # present) and expose JVM, pool and request metrics; the health indicator also
 # borrows a database connection per probe. A deployment must restrict them
 # with management.server.port / management.server.address or a front proxy.
+# The Prometheus registry is bundled. Opt in to its HTTP endpoint with
+# management.endpoints.web.exposure.include on a restricted management listener;
+# adding a registry does not make the public API an authenticated metrics endpoint.
 management:
   endpoints:
     web:

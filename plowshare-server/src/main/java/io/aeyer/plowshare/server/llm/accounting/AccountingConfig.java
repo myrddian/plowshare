@@ -6,6 +6,7 @@ import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.llm.LlmProperties;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceAccounting;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -91,9 +92,15 @@ public class AccountingConfig {
   }
 
   @Bean
+  public InferenceTelemetry inferenceTelemetry(ObjectProvider<MeterRegistry> registries) {
+    var registry = registries.getIfAvailable();
+    return registry == null ? InferenceTelemetry.NONE : new MicrometerInferenceTelemetry(registry);
+  }
+
+  @Bean
   public InferenceAccounting inferenceAccounting(
-      AccountingRecorder recorder, InferencePrices prices) {
-    return new DurableInferenceAccounting(recorder, prices, Clock.systemUTC());
+      AccountingRecorder recorder, InferencePrices prices, InferenceTelemetry telemetry) {
+    return new DurableInferenceAccounting(recorder, prices, Clock.systemUTC(), telemetry);
   }
 
   @Bean

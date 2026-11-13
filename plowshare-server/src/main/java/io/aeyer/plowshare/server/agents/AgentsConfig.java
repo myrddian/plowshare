@@ -1814,7 +1814,8 @@ public class AgentsConfig {
       JobsProperties properties,
       ObjectProvider<RunEnds> runEnds,
       io.aeyer.plowshare.server.access.ProjectAuthorization projectAccess,
-      io.aeyer.plowshare.server.access.OperationAuthority operations) {
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      ObjectProvider<JobTelemetry> telemetry) {
     JobStore store =
         new JobStore(
             runtime,
@@ -1822,7 +1823,8 @@ public class AgentsConfig {
             compaction,
             jobs,
             properties.getHeartbeat(),
-            operations);
+            operations,
+            telemetry.getIfAvailable(() -> JobTelemetry.NONE));
     store.useProjectAccess(projectAccess);
     store.onRunEnded(runEnds.getIfAvailable(() -> RunEnds.NONE));
     return store;
