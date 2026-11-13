@@ -72,6 +72,77 @@ Private installation no longer reports that Help is ready. Existing Personal
 sources are not automatically shared; publish the intended checked-in chapters
 through the installer's documented Global/shared workflow.
 
+## Targeted log readability and job listings
+
+On a deployed `b630d96b` installation, one PostgreSQL backend stayed saturated.
+Sampling active statements attributed most backend time to permission checks
+rather than data reads: `service_project_role`, `information_log_readable` and the
+per-revision catalogue `information_readable` check. Over one minute the database
+answered 341 transactions per second, with about 3,200 `admins` lookups per second.
+Neither cache version domain changed during that minute.
+
+Two separate causes were involved:
+
+- **JIT compilation.** V235 redefined `information_log_readable` and
+  `information_readable_input_selections` with `CREATE OR REPLACE` and no `SET`
+  clause, so neither carried the function-local `jit=off` that V196 gave the
+  collection routines. With JIT, one check over a log with 82 retained inputs took
+  1,983 ms; without it, 47 ms. For a single retained revision, compilation was
+  78 ms of 89 ms. V240 restores the setting on both routines only.
+  `service_project_role` and the catalogue check timed the same with JIT on or off.
+  `FunctionJitSettingsTest` replays the migrations and fails when a later
+  redefinition drops the setting.
+- **Repeated questions.** Targeted log checks bypassed the account's deny set
+  (`information_unreadable_logs`), which feed reads already cache under READABILITY
+  and AUTHORITY. `InformationLogVisibility.readable` now answers point checks from
+  that set when it is current.
+  - Loading the set cost 85–130 ms, about two point checks.
+  - A dirty or historical transaction, an oversized set or a missing account uses
+    the statement predicate.
+  - On deployed data, set membership matched `information_log_readable` for
+    768 of 768 checks across both service accounts.
+  - Job listings also resolved a selection and checked a revision once per input
+    of every job. `InformationJobs.listing` now asks each distinct question once
+    per listing, against current authority.
+
+## Authority decided in server memory
+
+Project role resolution used to issue three statements per check, and every
+permission check repeated it:
+- the service-owner lookup;
+- `service_project_role` or `authority_project_role`, each walking
+  `authority_live_grants()` with `account_active()` evaluated per grant;
+- the `projectLineages` recursive CTE.
+
+Those tables hold tens of rows on deployed installations.
+
+**The snapshot.** `AuthoritySnapshot` holds a typed copy of the authority tables
+and evaluates those functions in Java, clause by clause: grant liveness, account
+activity, project and service roles, the service owner, server administration,
+membership and lineages. `CachedProjectMembers` and `ApplicationGrantLineage` read
+from it. Mutations, history, administrative control and manifest limits are
+unchanged.
+
+**Consistency.**
+- **Versioning.** The snapshot is one entry in the bounded projection cache under
+  the AUTHORITY domain. Every table it copies moves that counter on insert, update
+  and delete (V175). The cache validates the token captured before loading, then
+  validates the stored token again on every hit. A write during or after loading
+  therefore prevents use.
+- **Expiry.** The token's window contains no grant or token expiry, so evaluating
+  expiry at the loading statement's `now()` gives the verdict for any instant the
+  snapshot is served.
+- **Fallbacks.** A dirty, historical or expiry-spanning transaction, a disabled
+  cache, or a table over 10,000 rows receives no snapshot and runs the SQL
+  functions as before.
+
+`AuthoritySnapshotDifferentialDatabaseTest` compares every method with its SQL
+function after each of 20 fixture states. These cover account enablement, server
+administration, bootstrap, credential withdrawal, token revocation and expiry,
+owner disablement, ceilings, membership removal, delegated revocation and expiry,
+and issuer removal. A changed authority function must change its Java mirror in
+the same change, or that test fails.
+
 ## Regression provenance and validation
 
 The per-row document guard and unconditional retrieval dispatch originate in

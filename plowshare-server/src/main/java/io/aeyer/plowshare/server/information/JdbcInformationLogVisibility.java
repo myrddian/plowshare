@@ -59,6 +59,32 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
     return value;
   }
 
+  /**
+   * Answers a targeted check from the account's deny set. A miss loads that set once (about two
+   * targeted checks' cost on a deployed database); later checks are free until READABILITY or
+   * AUTHORITY moves. The cache validates a hit's own token before returning it, and an ineligible
+   * caller transaction receives the authoritative marker without loading. Membership is decided in
+   * memory, so nothing can change between that validation and the verdict.
+   */
+  @Override
+  public boolean readable(
+      String account, String log, java.util.function.BooleanSupplier authoritative) {
+    Objects.requireNonNull(authoritative);
+    if (account == null || log == null) return authoritative.getAsBoolean();
+    if (account.isBlank())
+      throw new IllegalArgumentException("Current account required for log visibility");
+    var facts =
+        cache.read(
+            new SnapshotCache.Key("blocked-logs", ProjectionCache.fingerprint(account)),
+            true,
+            () -> admission.read(account, ReadAdmission.Work.AUTHORITY, () -> load(account)),
+            Facts::authoritative,
+            value -> value.blocked().map(JdbcInformationLogVisibility::weight).orElse(1024L));
+    var blocked = facts.blocked();
+    if (blocked.isEmpty()) return authoritative.getAsBoolean();
+    return !blocked.get().contains(log);
+  }
+
   private Facts load(String account) {
     var logs =
         jdbc.queryForList(

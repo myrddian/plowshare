@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.information;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 /**
@@ -24,10 +25,25 @@ public interface InformationLogVisibility {
 
   <T> T read(String account, Function<Facts, T> reader);
 
+  /**
+   * Whether {@code account} may read {@code log}, with the verdict of {@code
+   * information_log_readable}. A current deny set answers in memory: it is the inverse closure of
+   * that predicate over the same ancestry edges, quarantine and retained-input authority, versioned
+   * on READABILITY and AUTHORITY. Whenever facts cannot be shared — no account, a dirty or
+   * historical transaction, an oversized deny set, or a disabled cache — the owner's {@code
+   * authoritative} predicate decides instead. No SQL runs between validating the facts and using
+   * them, so no further fence is needed.
+   */
+  boolean readable(String account, String log, BooleanSupplier authoritative);
+
   static InformationLogVisibility direct() {
     return new InformationLogVisibility() {
       public <T> T read(String account, Function<Facts, T> reader) {
         return reader.apply(Facts.authoritative());
+      }
+
+      public boolean readable(String account, String log, BooleanSupplier authoritative) {
+        return authoritative.getAsBoolean();
       }
     };
   }

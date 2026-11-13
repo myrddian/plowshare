@@ -333,9 +333,10 @@ public class InformationConfig {
   public InformationJobs informationJobs(
       JdbcTemplate jdbc,
       InformationAccess access,
-      ObjectProvider<InformationReadAccess> catalogue) {
+      ObjectProvider<InformationReadAccess> catalogue,
+      InformationLogVisibility visibility) {
     return new InformationJobs(
-        new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+        new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc, visibility),
         access,
         (context, revision) -> catalogue.getObject().requireReadable(context, revision));
   }

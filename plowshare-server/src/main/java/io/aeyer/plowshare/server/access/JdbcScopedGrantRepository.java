@@ -276,7 +276,8 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
     if (scopes.size() != 1) throw new CallerFault("Scope is unavailable or restricted");
   }
 
-  private static Binding read(ResultSet row) throws SQLException {
+  /** Maps one {@code authority_grant_records} row; shared with the authority snapshot loader. */
+  static Binding read(ResultSet row) throws SQLException {
     java.sql.Array array = row.getArray("actions");
     Set<AuthorityAction> actions = new HashSet<>();
     try {
