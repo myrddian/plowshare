@@ -109,6 +109,12 @@ public class OrchestrationStore {
    * <p>{@code MAX} over a possibly empty join still returns one row, so this always answers with a
    * row; the row's one column is {@code NULL} when the tree holds no entries yet, which {@link
    * #quietSince} reads as "nothing to go on" rather than as a time.
+   *
+   * <p><b>One index probe per conversation in the tree, not one row per entry.</b> The newest entry
+   * of each conversation is a backward step on V239's {@code (conversation_id, recorded_at)}; the
+   * outer {@code MAX} folds those. A single aggregate over the joined entries read every entry of
+   * every live tree, every minute, from the stall sweep. {@link #activity} and {@link #markStalled}
+   * use the same shape.
    */
   private static final String QUIET_SINCE =
       """
@@ -117,7 +123,9 @@ public class OrchestrationStore {
               UNION ALL
                 SELECT c.id FROM conversations c JOIN tree t ON c.parent_id = t.id
             )
-            SELECT MAX(e.recorded_at) FROM entries e WHERE e.conversation_id IN (SELECT id FROM tree)""";
+            SELECT MAX(last.recorded_at) FROM tree t CROSS JOIN LATERAL (
+                SELECT max(e.recorded_at) AS recorded_at FROM entries e WHERE e.conversation_id = t.id
+            ) last""";
 
   private final JdbcTemplate jdbc;
   private final Supplier<Instant> clock;
@@ -1086,7 +1094,11 @@ public class OrchestrationStore {
    */
   public List<OrchestrationRecord> running() {
     return jdbc.query(
-        SELECT_ORCHESTRATIONS + " WHERE state = ?",
+        // ended_at IS NULL restates what orchestrations_ended_iff_terminal already guarantees for a
+        // running run; the planner does not use CHECKs to match partial indexes, and without it
+        // this twice-a-minute sweep read scanned every run ever retained instead of
+        // orchestrations_live.
+        SELECT_ORCHESTRATIONS + " WHERE state = ? AND ended_at IS NULL",
         ORCHESTRATION_ROW_MAPPER,
         OrchestrationState.RUNNING.wire());
   }
@@ -1125,8 +1137,9 @@ public class OrchestrationStore {
                   + String.join(",", Collections.nCopies(part.size(), "(?::text,?::text)"))
                   + "), tree(run,id) AS (SELECT run,conversation FROM roots UNION SELECT t.run,c.id"
                   + " FROM conversations c JOIN tree t ON c.parent_id=t.id)"
-                  + " SELECT root.run,MAX(e.recorded_at) AS latest FROM roots root LEFT JOIN tree t ON t.run=root.run"
-                  + " LEFT JOIN entries e ON e.conversation_id=t.id GROUP BY root.run",
+                  + " SELECT root.run,MAX(last.recorded_at) AS latest FROM roots root LEFT JOIN tree t ON t.run=root.run"
+                  + " LEFT JOIN LATERAL (SELECT max(e.recorded_at) AS recorded_at FROM entries e"
+                  + " WHERE e.conversation_id=t.id) last ON true GROUP BY root.run",
               (row, index) ->
                   new QuietActivity(row.getString(1), row.getObject(2, OffsetDateTime.class)),
               arguments.toArray());
@@ -1198,8 +1211,9 @@ public class OrchestrationStore {
                 + " AND coalesce((WITH RECURSIVE tree(id) AS ("
                 + " SELECT current.conductor_conversation"
                 + " UNION SELECT c.id FROM conversations c JOIN tree t ON c.parent_id = t.id)"
-                + " SELECT max(e.recorded_at) FROM entries e JOIN tree t"
-                + " ON e.conversation_id = t.id), current.created_at) <= ?"
+                + " SELECT max(last.recorded_at) FROM tree t CROSS JOIN LATERAL"
+                + " (SELECT max(e.recorded_at) AS recorded_at FROM entries e"
+                + " WHERE e.conversation_id = t.id) last), current.created_at) <= ?"
                 + " AND NOT EXISTS (SELECT 1 FROM orchestrations child"
                 + " WHERE child.parent = current.id AND child.ended_at IS NULL"
                 + " AND (child.state <> ? OR child.pending_cap IN ("

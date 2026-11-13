@@ -115,7 +115,9 @@ class ProcAuditTest {
   void toolPagesUseNumericOrdinalRowValuesInOneDirection() {
     String oldest = JdbcProcRepository.toolsSql(false, false, false);
     assertFalse(oldest.contains(":after"));
-    assertTrue(oldest.endsWith(" ORDER BY e.conversation_id,e.ordinal,tool->>'id' LIMIT :limit"));
+    assertTrue(
+        oldest.contains(" ORDER BY e.conversation_id,e.ordinal,tool->>'id' LIMIT :limit) page"));
+    assertTrue(oldest.endsWith(" ORDER BY page.conversation_id,page.ordinal,page.tool_id"));
     assertFalse(oldest.contains("ORDER BY id"), "the concatenated text id is not the sort key");
     String newest = JdbcProcRepository.toolsSql(true, true, true);
     assertTrue(
@@ -123,10 +125,31 @@ class ProcAuditTest {
             " AND (e.conversation_id,e.ordinal,tool->>'id')<(CAST(:afterConversation AS text),"
                 + "CAST(:afterOrdinal AS integer),CAST(:afterTool AS text))"));
     assertTrue(
-        newest.endsWith(
-            " ORDER BY e.conversation_id DESC,e.ordinal DESC,tool->>'id' DESC LIMIT :limit"));
+        newest.contains(
+            " ORDER BY e.conversation_id DESC,e.ordinal DESC,tool->>'id' DESC LIMIT :limit) page"));
+    assertTrue(
+        newest.endsWith(" ORDER BY page.conversation_id DESC,page.ordinal DESC,page.tool_id DESC"));
     assertTrue(newest.contains("AND NOT EXISTS(SELECT 1 FROM entries result"));
     assertTrue(JdbcProcRepository.toolsSql(false, false, true).contains("tool->>'id')>(CAST("));
+  }
+
+  @Test
+  void toolReceiptStateIsProbedOnlyForThePage() {
+    for (boolean active : new boolean[] {false, true}) {
+      String sql = JdbcProcRepository.toolsSql(active, true, false);
+      int inner = sql.indexOf("FROM (SELECT e.");
+      int page = sql.indexOf(" LIMIT :limit) page");
+      assertTrue(inner > 0 && page > inner);
+      String outer = sql.substring(0, inner);
+      String candidates = sql.substring(inner, page);
+      assertTrue(outer.contains("'RESULT_RECORDED'"), "state is derived over the chosen page");
+      assertEquals(1, count(outer, "FROM entries result"));
+      // Only the active filter probes candidates, because it decides which rows are listed.
+      assertEquals(active ? 1 : 0, count(candidates, "FROM entries result"));
+      assertFalse(candidates.contains("'RESULT_RECORDED'"));
+      assertTrue(
+          sql.contains(" AND e.tool_calls IS NOT NULL"), "entries without calls are skipped");
+    }
   }
 
   @Test
