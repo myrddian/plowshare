@@ -1,9 +1,18 @@
 package io.aeyer.plowshare.integrations;
 
+import io.aeyer.plowshare.protocol.IntegrationPayload;
 import io.aeyer.plowshare.sdk.Plowshare;
-import java.nio.file.*;
-import java.time.*;
-import java.util.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.ServiceLoader;
 
 /** External runtime launcher. Adapter modules are explicit classpath dependencies. */
 public final class Main {
@@ -72,20 +81,18 @@ public final class Main {
                 .get(b.name())
                 .validate(
                     "states.read",
-                    new io.aeyer.plowshare.protocol.IntegrationPayload.Arguments(
-                        List.of(route.entity()), null, null));
+                    new IntegrationPayload.Arguments(List.of(route.entity()), null, null));
           if (route.completionAction() != null)
             adapters
                 .get(b.name())
                 .validate(
                     "actions.execute",
-                    new io.aeyer.plowshare.protocol.IntegrationPayload.Arguments(
+                    new IntegrationPayload.Arguments(
                         null,
                         route.completionAction(),
                         Map.of(
                             "message",
-                            new io.aeyer.plowshare.protocol.IntegrationPayload.TextParameter(
-                                "Configuration check"))));
+                            new IntegrationPayload.TextParameter("Configuration check"))));
         }
       }
       if (check) {
@@ -112,8 +119,14 @@ public final class Main {
                   new ScriptHost(Duration.ofSeconds(5)),
                   Instant::now)) {
         runtime.start();
+        Map<String, String> reportedAttention = Map.of();
         while (!Thread.currentThread().isInterrupted()) {
           runtime.tick();
+          var attention = runtime.relayAttention();
+          if (!attention.equals(reportedAttention)) {
+            System.err.println("Integration Relay attention: " + attention);
+            reportedAttention = attention;
+          }
           Thread.sleep(500);
         }
       }
@@ -125,6 +138,7 @@ public final class Main {
   private static Gateway connect(Configuration config, String token, Journal journal)
       throws Exception {
     journal.verifyDtos();
+    journal.requireRequestCutover();
     journal.bindOwner(Json.hash(config.plowshare() + "\n" + token));
     return new Gateway.Sdk(
         Plowshare.connect(config.plowshare(), token, Duration.ofSeconds(30), null));

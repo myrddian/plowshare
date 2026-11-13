@@ -2,24 +2,28 @@ package io.aeyer.plowshare.server.ws;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.cfg.CoercionAction;
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.type.LogicalType;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.RelayPorts;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import org.springframework.stereotype.Component;
 
 /** Strict public ingress/egress boundary. No publisher or account is accepted from the payload. */
 @Component
 public final class RelayPortFrames implements FrameArea {
-  private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+  private static final ObjectMapper JSON =
       JsonMapper.builder()
-          .addModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+          .addModule(new JavaTimeModule())
           .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
           .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
           .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -52,10 +56,9 @@ public final class RelayPortFrames implements FrameArea {
           }
 
           @Override
-          public java.util.concurrent.CompletionStage<Outcome> handleAsync(
-              Map<String, Object> payload, Asking asking) {
+          public CompletionStage<Outcome> handleAsync(Map<String, Object> payload, Asking asking) {
             var request = decode(payload, RelayPort.Consume.class);
-            return java.util.concurrent.CompletableFuture.completedFuture(
+            return CompletableFuture.completedFuture(
                 Outcome.ok(
                     ports.observe(
                         asking.requireHandle(FrameTypes.RELAY_CONSUME),
@@ -65,7 +68,11 @@ public final class RelayPortFrames implements FrameArea {
           }
         },
         FrameTypes.RELAY_ACK,
-        this::ack);
+        this::ack,
+        FrameTypes.RELAY_GROUP_DELETE,
+        this::deleteGroup,
+        FrameTypes.RELAY_GROUP_INSPECT,
+        this::inspectGroup);
   }
 
   Outcome publish(Map<String, Object> payload, Asking asking) {
@@ -83,6 +90,18 @@ public final class RelayPortFrames implements FrameArea {
   Outcome ack(Map<String, Object> payload, Asking asking) {
     var request = decode(payload, RelayPort.Ack.class);
     return Outcome.ok(ports.acknowledge(asking.requireHandle(FrameTypes.RELAY_ACK), request));
+  }
+
+  Outcome deleteGroup(Map<String, Object> payload, Asking asking) {
+    var request = decode(payload, RelayPort.DeleteGroup.class);
+    return Outcome.ok(
+        ports.deleteGroup(asking.requireHandle(FrameTypes.RELAY_GROUP_DELETE), request));
+  }
+
+  Outcome inspectGroup(Map<String, Object> payload, Asking asking) {
+    var query = decode(payload, RelayPort.GroupQuery.class);
+    return Outcome.ok(
+        ports.inspectGroup(asking.requireHandle(FrameTypes.RELAY_GROUP_INSPECT), query));
   }
 
   private static <T> T decode(Map<String, Object> payload, Class<T> type) {

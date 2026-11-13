@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sql.DataSource;
 import org.postgresql.PGConnection;
@@ -97,7 +98,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
     private final JdbcTemplate jdbc;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final boolean probes;
-    private final String nonce = java.util.UUID.randomUUID().toString();
+    private final String nonce = UUID.randomUUID().toString();
     private boolean listening;
     private long echoed;
 

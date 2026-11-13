@@ -18,8 +18,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.protocol.AccountEvent;
+import io.aeyer.plowshare.protocol.CommandRunner;
+import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.AgentTool;
@@ -27,6 +31,7 @@ import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.CallerAccess;
 import io.aeyer.plowshare.server.agents.CallerOrchestrationTools;
 import io.aeyer.plowshare.server.agents.Callers;
+import io.aeyer.plowshare.server.agents.Commands;
 import io.aeyer.plowshare.server.agents.ConductorTools;
 import io.aeyer.plowshare.server.agents.DefinitionChecks;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
@@ -52,6 +57,7 @@ import io.aeyer.plowshare.server.agents.Transcript;
 import io.aeyer.plowshare.server.agents.TriggerNoticing;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.ConversationStore;
@@ -61,11 +67,15 @@ import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.RunProviders;
 import io.aeyer.plowshare.server.hooks.Gate;
 import io.aeyer.plowshare.server.hooks.HookContext;
 import io.aeyer.plowshare.server.hooks.HookRecord;
+import io.aeyer.plowshare.server.hooks.Stage;
 import io.aeyer.plowshare.server.hooks.StageDone;
 import io.aeyer.plowshare.server.hooks.StageStart;
+import io.aeyer.plowshare.server.information.InformationGateRepository;
+import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
@@ -78,8 +88,11 @@ import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage.Kind;
+import io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.server.testing.AuthorityFixtures;
+import io.aeyer.plowshare.server.todos.LockedMoves;
 import io.aeyer.plowshare.server.todos.TodoBoard;
 import io.aeyer.plowshare.server.todos.TodoItem;
 import io.aeyer.plowshare.server.todos.TodoLists;
@@ -90,6 +103,8 @@ import io.aeyer.plowshare.server.todos.TodoStatus;
 import io.aeyer.plowshare.server.todos.TodoStore;
 import io.aeyer.plowshare.server.todos.TodosConfig;
 import java.io.InputStream;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -99,6 +114,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -108,6 +124,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
@@ -208,7 +226,7 @@ class OrchestrationsConfigTest {
 
   @BeforeEach
   void fresh() {
-    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+    AuthorityFixtures.truncate(
         jdbc,
         "TRUNCATE TABLE orchestration_messages, orchestrations, todos, todo_notices,"
             + " entries, turns, conversations, admins CASCADE");
@@ -278,9 +296,9 @@ class OrchestrationsConfigTest {
         run -> {},
         cancelledJobs::add,
         2,
-        org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class),
+        Mockito.mock(CallerAccess.class),
         new JdbcOrchestrationRecovery(jdbc, work),
-        new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc));
+        new JdbcScriptStore(jdbc));
   }
 
   private OrchestrationRecord started(Orchestrations engine) {
@@ -318,7 +336,7 @@ class OrchestrationsConfigTest {
     jdbc.update(
         "UPDATE todos SET status = 'done' WHERE conversation = ?",
         finished.conductorConversation());
-    assertEquals(java.util.Optional.empty(), engine.finish(finished.id(), "built"));
+    assertEquals(Optional.empty(), engine.finish(finished.id(), "built"));
     RunExtras provider = OrchestrationsConfig.runExtras(store, engine);
 
     RunExtras.Extras first = provider.forRun(context(live.conductorConversation()));
@@ -507,7 +525,7 @@ class OrchestrationsConfigTest {
         engine.askInstall(
             run.id(),
             "Install triage?",
-            io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+            OrchestrationStructures.decode(
                 "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}],\"name\":\"triage\","
                     + "\"path\":\"artifacts/triage.md\",\"text\":\"---\",\"sha256\":\"sha256:cb3f91d54eee30e53e35b2b99905f70f169ed549fd78909d3dac2defc9ed8d3b\"}")));
     voice.end(0, Ending.AWAITING, "Install triage?");
@@ -539,7 +557,7 @@ class OrchestrationsConfigTest {
     engine.askInstall(
         run.id(),
         "Install triage?",
-        io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+        OrchestrationStructures.decode(
             "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}],"
                 + "\"name\":\"triage\",\"path\":\"artifacts/triage.md\",\"text\":\"---\",\"sha256\":\"sha256:cb3f91d54eee30e53e35b2b99905f70f169ed549fd78909d3dac2defc9ed8d3b\"}"));
     voice.end(0, Ending.AWAITING, "Install triage?");
@@ -595,7 +613,7 @@ class OrchestrationsConfigTest {
     engine.askInstall(
         run.id(),
         "Install triage?",
-        io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+        OrchestrationStructures.decode(
             "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}],"
                 + "\"name\":\"triage\",\"path\":\"artifacts/triage.md\",\"text\":\"---\",\"sha256\":\"sha256:cb3f91d54eee30e53e35b2b99905f70f169ed549fd78909d3dac2defc9ed8d3b\"}"));
     voice.end(0, Ending.AWAITING, "Install triage?");
@@ -669,7 +687,7 @@ class OrchestrationsConfigTest {
         Sampling sampling,
         List<ToolSchema> tools,
         Deltas sink,
-        java.util.function.BooleanSupplier abandoned) {
+        BooleanSupplier abandoned) {
       return complete(model, messages, sampling, tools);
     }
 
@@ -689,8 +707,7 @@ class OrchestrationsConfigTest {
    *
    * @param files the runtime's providers, or null for a runtime that reaches no filesystem
    */
-  private String checkedDoneMoveThroughTheRuntime(
-      io.aeyer.plowshare.server.files.RunProviders files) {
+  private String checkedDoneMoveThroughTheRuntime(RunProviders files) {
     Orchestrations engine = engine();
     OrchestrationDefinition checked =
         OrchestrationRegistry.parsePinned(
@@ -729,7 +746,7 @@ class OrchestrationsConfigTest {
                         Map.of("reasoning", "model-reasoning"),
                         4,
                         1,
-                        java.time.Duration.ofSeconds(5),
+                        Duration.ofSeconds(5),
                         model)),
                 new NoOpTokenLedger()),
             List.of(),
@@ -790,7 +807,7 @@ class OrchestrationsConfigTest {
   @Test
   void a_checked_conductor_run_is_offered_the_checked_todo_write_through_the_runtime() {
     FileProvider machine = mock(FileProvider.class);
-    when(machine.roots()).thenReturn(List.of(java.nio.file.Path.of("/repo")));
+    when(machine.roots()).thenReturn(List.of(Path.of("/repo")));
 
     String shown =
         checkedDoneMoveThroughTheRuntime((home, grants, session, owner) -> List.of(machine));
@@ -947,12 +964,7 @@ class OrchestrationsConfigTest {
 
     RunExtras.Fence fence =
         OrchestrationsConfig.runExtras(store, engine, board, null, null)
-            .forRun(
-                new RunExtras.Context(
-                    null,
-                    run.conductorConversation(),
-                    null,
-                    io.aeyer.plowshare.server.agents.Transcript.NONE))
+            .forRun(new RunExtras.Context(null, run.conductorConversation(), null, Transcript.NONE))
             .fence();
 
     assertTrue(fence.refusal("file_edit", PRODUCT_EDIT).endsWith(ArtifactsFence.REFUSAL));
@@ -1081,8 +1093,7 @@ class OrchestrationsConfigTest {
 
   @Test
   void a_context_with_no_orchestration_store_refuses_every_locked_move() {
-    assertSame(
-        io.aeyer.plowshare.server.todos.LockedMoves.REFUSE_ALL, TodosConfig.lockedMoves(null));
+    assertSame(LockedMoves.REFUSE_ALL, TodosConfig.lockedMoves(null));
   }
 
   /**
@@ -1254,19 +1265,17 @@ class OrchestrationsConfigTest {
     Orchestrations engine = engine();
     OrchestrationRecord run = accepting(engine);
     OrchestrationAcceptance acceptance = new JdbcOrchestrationAcceptance(jdbc, work);
-    io.aeyer.plowshare.server.agents.Commands.Port port =
-        new io.aeyer.plowshare.server.agents.Commands.Port() {
+    Commands.Port port =
+        new Commands.Port() {
           @Override
-          public io.aeyer.plowshare.server.agents.Commands.Placed place(
-              Home home, java.nio.file.Path cwd, List<String> argv) {
-            io.aeyer.plowshare.protocol.EnvironmentFile.Side d =
-                io.aeyer.plowshare.protocol.EnvironmentFile.Side.DEFAULT;
-            return new io.aeyer.plowshare.server.agents.Commands.Placed(
+          public Commands.Placed place(Home home, Path cwd, List<String> argv) {
+            EnvironmentFile.Side d = EnvironmentFile.Side.DEFAULT;
+            return new Commands.Placed(
                 argv,
-                java.nio.file.Path.of("/repo"),
+                Path.of("/repo"),
                 null,
                 "local",
-                new io.aeyer.plowshare.protocol.EnvironmentFile.Side(
+                new EnvironmentFile.Side(
                     "open",
                     false,
                     d.inherit(),
@@ -1278,14 +1287,12 @@ class OrchestrationsConfigTest {
           }
 
           @Override
-          public io.aeyer.plowshare.server.agents.Commands.Verdict judge(
-              io.aeyer.plowshare.server.agents.Commands.Placed placed) {
-            return io.aeyer.plowshare.server.agents.Commands.Verdict.ALLOWED;
+          public Commands.Verdict judge(Commands.Placed placed) {
+            return Commands.Verdict.ALLOWED;
           }
 
           @Override
-          public io.aeyer.plowshare.protocol.CommandRunner.Outcome run(
-              io.aeyer.plowshare.server.agents.Commands.Placed placed) {
+          public CommandRunner.Outcome run(Commands.Placed placed) {
             throw new AssertionError("nothing runs at the spec stage");
           }
 
@@ -1528,12 +1535,21 @@ class OrchestrationsConfigTest {
     return engine.get();
   }
 
+  /**
+   * Explicitly drive the consumer-only delivery seam; SQL lease fencing has its own regressions.
+   */
+  private void completeChild(String child) {
+    var current = row(child);
+    delivery.childCompleted(
+        new ChildCompletions.Completion(0, child, current.parent(), current.endedAt()), () -> {});
+  }
+
   private List<String> spokenInto() {
     return voice.calls.stream().map(OrchestrationsTest.FakeVoice.Call::conversation).toList();
   }
 
   @Test
-  void at_boot_a_child_that_ended_during_the_outage_is_delivered_to_its_waiting_parent() {
+  void boot_defers_child_reports_until_the_leased_consumer_delivers_them() {
     Orchestrations engine = nestedEngine();
     OrchestrationRecord parent = started(engine);
     Orchestrations.Started child =
@@ -1547,8 +1563,14 @@ class OrchestrationsConfigTest {
 
     OrchestrationsConfig.recover(store, engine, delivery);
 
+    assertEquals(
+        OrchestrationState.WAITING,
+        row(parent.id()).state(),
+        "boot cannot bypass the Relay consumer");
+    assertTrue(voice.calls.isEmpty());
+    completeChild(child.run().id());
     OrchestrationRecord woken = row(parent.id());
-    assertEquals(OrchestrationState.RUNNING, woken.state(), "the boot drain woke it");
+    assertEquals(OrchestrationState.RUNNING, woken.state(), "the leased report woke it");
     assertNull(woken.waitingFor());
     assertEquals(0, woken.restarts(), "a waiting row is not restarted, it is reported to");
     assertEquals(List.of(parent.conductorConversation()), spokenInto());
@@ -1678,8 +1700,9 @@ class OrchestrationsConfigTest {
     String kid = ruleOneRaceWithTheChildOver(engine, parent);
 
     delivery.drainCaller(parent.conductorConversation());
+    assertNull(row(kid).resultDeliveredAt(), "a free-turn drain cannot bypass Relay");
+    completeChild(kid);
     voice.endRequested(0, Ending.ANSWERED, ruleOneSentence(kid));
-
     assertTheReportWokeTheParentAndNothingFinishedIt(parent, kid);
   }
 
@@ -1688,13 +1711,31 @@ class OrchestrationsConfigTest {
    * it, rather than leaving a running conductor with nothing to wake it.
    */
   @Test
-  void a_rule_one_ending_delivers_a_report_still_held_when_it_is_routed() {
+  void a_rule_one_ending_waits_for_the_leased_child_report_without_nudging() {
     Orchestrations engine = nestedEngine();
     OrchestrationRecord parent = started(engine);
     String kid = ruleOneRaceWithTheChildOver(engine, parent);
 
     voice.endRequested(0, Ending.ANSWERED, ruleOneSentence(kid));
+    assertNull(row(kid).resultDeliveredAt(), "routing cannot bypass the leased consumer");
+    assertEquals(0, row(parent.id()).nudges(), "the pending report blocks a nudge");
+    completeChild(kid);
+    assertTheReportWokeTheParentAndNothingFinishedIt(parent, kid);
+  }
 
+  @Test
+  void plain_text_does_not_auto_finish_a_parent_before_its_pending_child_report() {
+    var engine = nestedEngine();
+    var parent = started(engine);
+    String kid = ruleOneRaceWithTheChildOver(engine, parent);
+    int before = voice.calls.size();
+    voice.end(0, Ending.ANSWERED, "Everything appears complete.");
+    assertEquals(OrchestrationState.RUNNING, row(parent.id()).state());
+    assertNull(row(parent.id()).result());
+    assertNull(row(kid).resultDeliveredAt());
+    assertEquals(
+        before, voice.calls.size(), "neither auto-finish nor a nudge may overtake the report");
+    completeChild(kid);
     assertTheReportWokeTheParentAndNothingFinishedIt(parent, kid);
   }
 
@@ -1730,10 +1771,7 @@ class OrchestrationsConfigTest {
 
     OrchestrationsConfig.pushChanges(provider).accept(run);
 
-    verify(accountPushes)
-        .push(
-            "enzo",
-            new io.aeyer.plowshare.protocol.AccountEvent.OrchestrationChanged("orc_1", "asking"));
+    verify(accountPushes).push("enzo", new AccountEvent.OrchestrationChanged("orc_1", "asking"));
   }
 
   @Test
@@ -1956,6 +1994,11 @@ class OrchestrationsConfigTest {
     new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(OrchestrationsConfig.class, CallerOrchestrationsConfig.class)
+        .withBean(ChildCompletionWorker.class, () -> mock(ChildCompletionWorker.class))
+        .withBean(InformationLogVisibility.class, InformationLogVisibility::direct)
+        .withBean(InformationGateRepository.class, () -> mock(InformationGateRepository.class))
+        .withBean(OperationAuthority.class, () -> mock(OperationAuthority.class))
+        .withBean(AllowanceRepository.class, () -> mock(AllowanceRepository.class))
         .withBean(CallerAccess.class, () -> mock(CallerAccess.class))
         .withBean(JdbcTemplate.class, () -> mockJdbc)
         .withBean(UnitOfWork.class, () -> work)
@@ -1989,6 +2032,7 @@ class OrchestrationsConfigTest {
                   context.getBean("orchestrationsAtBoot", ApplicationListener.class);
               clearInvocations(mockJdbc);
               atBoot.onApplicationEvent(mock(ApplicationReadyEvent.class));
+              verify(context.getBean(ChildCompletionWorker.class)).start();
               verifyNoInteractions(mockJdbc);
               // A returned agent_run resets its conductor's nudges (spec 2026-09-28).
               @SuppressWarnings("unchecked")
@@ -1997,8 +2041,7 @@ class OrchestrationsConfigTest {
               returned.getValue().accept("cnv_conductor");
               verify(mockJdbc)
                   .update(
-                      org.mockito.ArgumentMatchers.contains(
-                          "SET nudges = 0 WHERE conductor_conversation = ?"),
+                      ArgumentMatchers.contains("SET nudges = 0 WHERE conductor_conversation = ?"),
                       eq("cnv_conductor"));
             });
   }
@@ -2012,6 +2055,11 @@ class OrchestrationsConfigTest {
     new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(OrchestrationsConfig.class)
+        .withBean(ChildCompletionWorker.class, () -> mock(ChildCompletionWorker.class))
+        .withBean(InformationLogVisibility.class, InformationLogVisibility::direct)
+        .withBean(InformationGateRepository.class, () -> mock(InformationGateRepository.class))
+        .withBean(OperationAuthority.class, () -> mock(OperationAuthority.class))
+        .withBean(AllowanceRepository.class, () -> mock(AllowanceRepository.class))
         .withBean(CallerAccess.class, () -> mock(CallerAccess.class))
         .withBean(JdbcTemplate.class, () -> mockJdbc)
         .withBean(UnitOfWork.class, () -> work)
@@ -2117,8 +2165,9 @@ class OrchestrationsConfigTest {
                   new HookRecord(
                       "freeze",
                       "f.js",
+                      // Both hook Tier and OrchestrationDefinition.Tier are required in this test.
                       io.aeyer.plowshare.server.hooks.Tier.PROJECT,
-                      io.aeyer.plowshare.server.hooks.Stage.STAGE_PRE,
+                      Stage.STAGE_PRE,
                       null,
                       HookRecord.DENY,
                       "not today",

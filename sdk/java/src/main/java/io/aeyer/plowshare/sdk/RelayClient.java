@@ -5,6 +5,7 @@ import io.aeyer.plowshare.protocol.RelayLog;
 import io.aeyer.plowshare.protocol.RelayPort;
 import java.io.IOException;
 import java.util.Objects;
+import java.util.concurrent.CompletionStage;
 
 /** Broker inspection and explicit bounded processing over the authenticated WebSocket. */
 public final class RelayClient {
@@ -30,6 +31,56 @@ public final class RelayClient {
   public RelayPort.Acknowledged acknowledge(RelayPort.Ack request) throws IOException {
     return AsyncSupport.await(
         connection.defaultOptions(), options -> acknowledgeAsync(request, options));
+  }
+
+  /** Exact read-only group state for reconciliation without registering a new cursor. */
+  public RelayPort.GroupState inspectGroup(RelayPort.GroupQuery query) throws IOException {
+    return AsyncSupport.await(
+        connection.defaultOptions(), options -> inspectGroupAsync(query, options));
+  }
+
+  public CompletionStage<RelayPort.GroupState> inspectGroupAsync(
+      RelayPort.GroupQuery query, RequestOptions options) {
+    return AsyncSupport.map(
+        connection.exchangeAsync("relay.group.inspect", query, RelayPort.GroupState.class, options),
+        result -> {
+          if (!query.project().equals(result.project())
+              || !query.topic().equals(result.topic())
+              || !query.group().equals(result.group()))
+            throw new IOException("Foreign Relay group state");
+          return result;
+        });
+  }
+
+  public CompletionStage<RelayPort.GroupState> inspectGroupAsync(RelayPort.GroupQuery query) {
+    return inspectGroupAsync(query, null);
+  }
+
+  /**
+   * Retires a drained SDK group at its inspected incarnation; uncertain delivery is not replayed.
+   */
+  public RelayPort.GroupDeleted deleteGroup(RelayPort.DeleteGroup request) throws IOException {
+    return AsyncSupport.await(
+        connection.defaultOptions(), options -> deleteGroupAsync(request, options));
+  }
+
+  public CompletionStage<RelayPort.GroupDeleted> deleteGroupAsync(
+      RelayPort.DeleteGroup request, RequestOptions options) {
+    return AsyncSupport.map(
+        connection.exchangeAsync(
+            "relay.group.delete", request, RelayPort.GroupDeleted.class, options),
+        result -> {
+          if (!request.project().equals(result.project())
+              || !request.topic().equals(result.topic())
+              || !request.group().equals(result.group())
+              || !request.generation().equals(result.generation()))
+            throw new IOException("Foreign Relay group retirement");
+          return result;
+        });
+  }
+
+  public CompletionStage<RelayPort.GroupDeleted> deleteGroupAsync(RelayPort.DeleteGroup request) {
+    return deleteGroupAsync(request, null);
   }
 
   /** Submit one bounded pass. Uncertain transport delivery must not be retried automatically. */
@@ -58,7 +109,7 @@ public final class RelayClient {
   }
 
   /** Asynchronous typed counterpart; cancellation never cancels remote work. */
-  public java.util.concurrent.CompletionStage<RelayPort.Published> publishAsync(
+  public CompletionStage<RelayPort.Published> publishAsync(
       RelayPort.Publish request, RequestOptions options) {
 
     return AsyncSupport.map(
@@ -73,13 +124,12 @@ public final class RelayClient {
         });
   }
 
-  public java.util.concurrent.CompletionStage<RelayPort.Published> publishAsync(
-      RelayPort.Publish request) {
+  public CompletionStage<RelayPort.Published> publishAsync(RelayPort.Publish request) {
     return publishAsync(request, null);
   }
 
   /** Asynchronous typed counterpart; cancellation never cancels remote work. */
-  public java.util.concurrent.CompletionStage<RelayPort.Batch> consumeAsync(
+  public CompletionStage<RelayPort.Batch> consumeAsync(
       RelayPort.Consume request, RequestOptions options) {
 
     return AsyncSupport.map(
@@ -97,13 +147,12 @@ public final class RelayClient {
         });
   }
 
-  public java.util.concurrent.CompletionStage<RelayPort.Batch> consumeAsync(
-      RelayPort.Consume request) {
+  public CompletionStage<RelayPort.Batch> consumeAsync(RelayPort.Consume request) {
     return consumeAsync(request, null);
   }
 
   /** Asynchronous typed counterpart; cancellation never cancels remote work. */
-  public java.util.concurrent.CompletionStage<RelayPort.Acknowledged> acknowledgeAsync(
+  public CompletionStage<RelayPort.Acknowledged> acknowledgeAsync(
       RelayPort.Ack request, RequestOptions options) {
 
     return AsyncSupport.map(
@@ -120,13 +169,12 @@ public final class RelayClient {
         });
   }
 
-  public java.util.concurrent.CompletionStage<RelayPort.Acknowledged> acknowledgeAsync(
-      RelayPort.Ack request) {
+  public CompletionStage<RelayPort.Acknowledged> acknowledgeAsync(RelayPort.Ack request) {
     return acknowledgeAsync(request, null);
   }
 
   /** Asynchronous typed counterpart; cancellation never cancels remote work. */
-  public java.util.concurrent.CompletionStage<RelayLog.Processed> processAsync(
+  public CompletionStage<RelayLog.Processed> processAsync(
       RelayLog.Process query, RequestOptions options) {
 
     return AsyncSupport.map(
@@ -142,13 +190,12 @@ public final class RelayClient {
         });
   }
 
-  public java.util.concurrent.CompletionStage<RelayLog.Processed> processAsync(
-      RelayLog.Process query) {
+  public CompletionStage<RelayLog.Processed> processAsync(RelayLog.Process query) {
     return processAsync(query, null);
   }
 
   /** Asynchronous typed counterpart; cancellation never cancels remote work. */
-  public java.util.concurrent.CompletionStage<RelayControl.Result> operateAsync(
+  public CompletionStage<RelayControl.Result> operateAsync(
       RelayControl.Request request, RequestOptions options) {
 
     return AsyncSupport.map(
@@ -166,14 +213,12 @@ public final class RelayClient {
         });
   }
 
-  public java.util.concurrent.CompletionStage<RelayControl.Result> operateAsync(
-      RelayControl.Request request) {
+  public CompletionStage<RelayControl.Result> operateAsync(RelayControl.Request request) {
     return operateAsync(request, null);
   }
 
   /** Asynchronous typed counterpart; cancellation never cancels remote work. */
-  public java.util.concurrent.CompletionStage<RelayLog.Page> logAsync(
-      RelayLog.Query query, RequestOptions options) {
+  public CompletionStage<RelayLog.Page> logAsync(RelayLog.Query query, RequestOptions options) {
 
     return AsyncSupport.map(
         connection.exchangeAsync("relay.log", query, RelayLog.Page.class, options),
@@ -190,11 +235,11 @@ public final class RelayClient {
         });
   }
 
-  public java.util.concurrent.CompletionStage<RelayLog.Page> logAsync(RelayLog.Query query) {
+  public CompletionStage<RelayLog.Page> logAsync(RelayLog.Query query) {
     return logAsync(query, null);
   }
 
-  public java.util.concurrent.CompletionStage<RelayLog.Topics> topicsAsync(
+  public CompletionStage<RelayLog.Topics> topicsAsync(
       RelayLog.TopicsQuery query, RequestOptions options) {
 
     return AsyncSupport.map(
@@ -208,8 +253,7 @@ public final class RelayClient {
         });
   }
 
-  public java.util.concurrent.CompletionStage<RelayLog.Topics> topicsAsync(
-      RelayLog.TopicsQuery query) {
+  public CompletionStage<RelayLog.Topics> topicsAsync(RelayLog.TopicsQuery query) {
     return topicsAsync(query, null);
   }
 }

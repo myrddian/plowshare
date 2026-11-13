@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.board;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.agents.RunExtras;
 import io.aeyer.plowshare.server.swarm.SwarmProperties;
@@ -29,8 +31,7 @@ class BoardConfigTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                new BoardConfig()
-                    .seatRunner(null, null, null, null, null, null, properties, null, null));
+                new BoardConfig().seatRunner(null, null, null, null, null, null, properties, null));
     assertEquals(
         "plowshare.swarm.wake-cap is 0; a wake cap is a number of steps, at least 1",
         refused.getMessage());
@@ -133,9 +134,9 @@ class BoardConfigTest {
   @Test
   void recovery_defaults_to_on_and_can_be_disabled() {
     SwarmProperties properties = new SwarmProperties();
-    org.junit.jupiter.api.Assertions.assertTrue(properties.isRecoverAtBoot());
+    assertTrue(properties.isRecoverAtBoot());
     properties.setRecoverAtBoot(false);
-    org.junit.jupiter.api.Assertions.assertFalse(properties.isRecoverAtBoot());
+    assertFalse(properties.isRecoverAtBoot());
   }
 
   @Test

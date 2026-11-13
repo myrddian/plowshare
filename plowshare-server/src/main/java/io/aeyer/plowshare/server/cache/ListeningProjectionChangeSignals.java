@@ -1,11 +1,15 @@
 package io.aeyer.plowshare.server.cache;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,8 +74,7 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   // Written only by the worker; read by cache hits. Valid only for deliveredGeneration.
   private volatile long deliveredNanos;
   private volatile long deliveredGeneration = -1;
-  private final java.util.concurrent.atomic.AtomicLong reconnectAttempts =
-      new java.util.concurrent.atomic.AtomicLong();
+  private final AtomicLong reconnectAttempts = new AtomicLong();
 
   @Override
   public long reconnectAttempts() {
@@ -125,14 +128,13 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   }
 
   @Override
-  public java.util.OptionalLong deliveredThrough() {
+  public OptionalLong deliveredThrough() {
     long generation = deliveredGeneration;
     long nanos = deliveredNanos;
     synchronized (lock) {
-      if (closed || !state.ready() || state.generation() != generation)
-        return java.util.OptionalLong.empty();
+      if (closed || !state.ready() || state.generation() != generation) return OptionalLong.empty();
     }
-    return java.util.OptionalLong.of(nanos);
+    return OptionalLong.of(nanos);
   }
 
   @Override
@@ -243,7 +245,7 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
     synchronized (lock) {
       generation = state.generation();
     }
-    var sent = new java.util.ArrayDeque<long[]>();
+    var sent = new ArrayDeque<long[]>();
     long sequence = 0;
     long interval = heartbeat.toNanos();
     long timeout = heartbeatTimeout.toNanos();
@@ -310,7 +312,7 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
       var relevant =
           changed.stream()
               .filter(registration.domains::contains)
-              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+              .collect(Collectors.toUnmodifiableSet());
       if (relevant.isEmpty()) continue;
       try {
         registration.observer.changed(relevant);

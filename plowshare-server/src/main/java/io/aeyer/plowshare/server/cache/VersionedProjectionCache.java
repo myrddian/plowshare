@@ -1,8 +1,21 @@
 package io.aeyer.plowshare.server.cache;
 
-import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.*;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_CACHE_REFUSED;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_INELIGIBLE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_LOAD_REFUSED;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_NOT_CACHEABLE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_NOT_READY;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_STALE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.CAPACITY_REJECTED;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOAD;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOADED_RETURN;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.TRUSTED_HIT;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
 
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import java.sql.Connection;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
@@ -247,7 +260,7 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
       if (cause instanceof SnapshotCache.CacheException failure
           && failure.failure() == SnapshotCache.Failure.CAPACITY) {
         statistics.record(CAPACITY_REJECTED);
-        throw new io.aeyer.plowshare.server.reads.ReadUnavailableException();
+        throw new ReadUnavailableException();
       }
       if (cause instanceof SnapshotCache.CacheException failure
           && (failure.failure() == SnapshotCache.Failure.REENTRANT_LOAD
@@ -288,7 +301,7 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
       return null;
     if (!callerHasNoOwnWrites()) return null;
     var token = entry.token();
-    var now = java.time.Instant.now();
+    var now = Instant.now();
     if (token.windowStart() != null && now.isBefore(token.windowStart().plus(margin))) return null;
     if (token.validUntil() != null && !now.plus(margin).isBefore(token.validUntil())) return null;
     var request =
@@ -321,7 +334,7 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
     if (!TransactionSynchronizationManager.isActualTransactionActive()) return true;
     if (!TransactionSynchronizationManager.isCurrentTransactionReadOnly()) return false;
     Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
-    return isolation == null || isolation == java.sql.Connection.TRANSACTION_READ_COMMITTED;
+    return isolation == null || isolation == Connection.TRANSACTION_READ_COMMITTED;
   }
 
   public void close() {

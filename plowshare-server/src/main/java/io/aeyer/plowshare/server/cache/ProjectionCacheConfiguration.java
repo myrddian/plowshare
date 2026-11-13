@@ -1,7 +1,10 @@
 package io.aeyer.plowshare.server.cache;
 
 import com.zaxxer.hikari.HikariDataSource;
+import io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace;
+import io.aeyer.plowshare.server.pool.TracedDataSource;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.util.Properties;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
@@ -52,7 +55,7 @@ public class ProjectionCacheConfiguration {
       source.setUsername(configured.getUsername());
       source.setPassword(configured.getPassword());
       source.setDriverClassName(configured.getDriverClassName());
-      var driver = new java.util.Properties();
+      var driver = new Properties();
       driver.putAll(configured.getDataSourceProperties());
       source.setDataSourceProperties(driver);
       source.setSchema(configured.getSchema());
@@ -79,8 +82,7 @@ public class ProjectionCacheConfiguration {
       JdbcTemplate jdbc, VersionConnections authoritative, ProjectionCacheProperties properties) {
     return new JdbcProjectionVersions(
         jdbc,
-        new io.aeyer.plowshare.server.pool.TracedDataSource(
-            authoritative.source(), new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace()),
+        new TracedDataSource(authoritative.source(), new JfrJdbcExecutionTrace()),
         properties.maxPendingTransactions());
   }
 
@@ -99,9 +101,7 @@ public class ProjectionCacheConfiguration {
             connections.source().getPassword());
     notificationSource.setDriverClassName(connections.source().getDriverClassName());
     notificationSource.setConnectionProperties(connections.source().getDataSourceProperties());
-    var traced =
-        new io.aeyer.plowshare.server.pool.TracedDataSource(
-            notificationSource, new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace());
+    var traced = new TracedDataSource(notificationSource, new JfrJdbcExecutionTrace());
     int observers = properties.maxProjections() + 2; // Relay wakeups and information invalidation.
     ProjectionChangeSignals signals;
     if (!notified.enabled()) {

@@ -2,7 +2,9 @@ package io.aeyer.plowshare.server.information;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -21,10 +23,10 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
    * the account's current deny set instead of re-walking ancestry and retained inputs per call.
    * Component scanning constructs this class, so Spring must be told which constructor to use.
    */
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public JdbcJobInformationRepository(JdbcTemplate jdbc, InformationLogVisibility visibility) {
     this.jdbc = jdbc;
-    this.visibility = java.util.Objects.requireNonNull(visibility);
+    this.visibility = Objects.requireNonNull(visibility);
   }
 
   public boolean hasInputs(String log) {

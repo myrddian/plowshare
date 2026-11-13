@@ -3,8 +3,6 @@ import type { ToolScopeReplies } from './tool-scopes.ts';
 import type { ImageAdmissionStatus } from './image-admissions.ts';
 import type { ProcReplies } from './proc.ts';
 import type { RelayReplies } from './relay.ts';
-import type { IncomingSource, IncomingCommand, AgentCard } from './external.ts';
-import type { OutgoingWork } from './outgoing.ts';
 import type { MessagingReplies } from './messaging.ts';
 import type { UsageInitial, UsageReplies } from './usage.ts';
 import type { InformationReplies } from './information-replies.ts';
@@ -16,24 +14,6 @@ import type { RecordPageView } from './records.ts';
 import type { RetrievalReplies } from './retrieval.ts';
 import type { ContainedApplicationRunning } from './application-deployments.ts';
 
-export interface IncomingTask {
-  readonly id: string;
-  readonly context: string;
-  readonly agent: string;
-  readonly message: string;
-  readonly state: string;
-  readonly ending: string | null;
-  readonly source: IncomingSource | null;
-  readonly replies: readonly {
-    readonly id: string;
-    readonly body: string;
-    readonly finalReply: boolean;
-    readonly generated: boolean;
-    readonly ending: string | null;
-    readonly postedAt: string;
-  }[];
-  readonly createdAt: string;
-}
 /** The server's StartedJob; older accepted replies may omit agent metadata. */
 export interface StartedJob {
   readonly id: string;
@@ -88,12 +68,6 @@ export interface Replies
   'acting.turn.receipt': ActingTurnReceipt;
   'conversation.follow': void;
   'job.stream': void;
-  'outgoing.advertise': void;
-  'outgoing.claim': {
-    readonly work: OutgoingWork | null;
-    readonly action: 'send' | 'observe' | 'cancel' | null;
-  };
-  'outgoing.report': OutgoingWork;
   'union.enable': { readonly url: string };
   'union.begin': { readonly url: string };
   'union.ready': Readonly<Record<string, never>>;
@@ -107,25 +81,6 @@ export interface Replies
   'union.conflict.resolve': Readonly<Record<string, never>>;
   'usage.subscribe': UsageInitial;
   'usage.unsubscribe': Readonly<Record<string, never>>;
-  'incoming.catalog': {
-    readonly name: string;
-    readonly description: string;
-    readonly served: boolean;
-    readonly commands: readonly IncomingCommand[];
-  };
-  'incoming.receive': IncomingTask;
-  'incoming.status': IncomingTask;
-  'incoming.cancel': IncomingTask;
-  'outgoing.send': OutgoingWork;
-  'outgoing.status': OutgoingWork;
-  'outgoing.cancel': OutgoingWork;
-  'outgoing.peers': {
-    readonly peers: readonly string[];
-    readonly details?: readonly {
-      readonly peer: string;
-      readonly agentCard: AgentCard | null;
-    }[];
-  };
   'conversation.context.count': {
     readonly conversation: string;
     readonly agent: string;

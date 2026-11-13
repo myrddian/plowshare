@@ -380,6 +380,9 @@ result('relay.consume',{...batch,events:[{...relayPage.events[0],payload:{...rel
 
 for(const change of [{events:[]},{batchId:null},{fence:'0'},{fence:'9223372036854775808'},{status:'EMPTY'},{expiredThrough:'1'},{through:'-1'}]) result('relay.consume',{...batch,...change},false);
 const empty={...batch,status:'EMPTY',batchId:null,fence:null,expiresAt:null,events:[]};
+result('relay.consume',{...empty,generation:receipt},true);
+result('relay.consume',{...empty,generation:null},true);
+for(const generation of ['bad',1,true]) result('relay.consume',{...empty,generation},false);
 result('relay.consume',empty,true);
 result('relay.consume',{...empty,status:'BUSY'},true);
 result('relay.consume',{...batch,status:'GAP',events:[],expiredThrough:'1'},true);
@@ -389,6 +392,18 @@ input('relay.ack',ack,true);
 for(const change of [{fence:'0'},{fence:'01'},{batchId:'bad'},{expiredThrough:'9223372036854775808'}]) input('relay.ack',{...ack,...change},false);
 result('relay.publish',{requestId:receipt,project:'fixture',topic:'checks.requests',position:'1',publishedAt:publish.occurredAt},true);
 result('relay.ack',{project:'fixture',topic:'checks.requests',group:'detectors',batchId:receipt,through:'1',gap:false},true);
+const groupQuery={project:'fixture',topic:'checks.requests',group:'detectors'};
+input('relay.group.inspect',groupQuery,true);
+for(const change of [{group:' '},{topic:'x'.repeat(1025)},{generation:receipt}])input('relay.group.inspect',{...groupQuery,...change},false);
+result('relay.group.inspect',{...groupQuery,exists:true,generation:receipt},true);
+result('relay.group.inspect',{...groupQuery,exists:false,generation:null},true);
+for(const change of [{exists:false},{generation:null},{generation:'bad'},{exists:'true'}])result('relay.group.inspect',{...groupQuery,exists:true,generation:receipt,...change},false);
+const deleteGroup={project:'fixture',topic:'checks.requests',group:'detectors',generation:receipt};
+input('relay.group.delete',deleteGroup,true);
+for(const change of [{generation:'bad'},{generation:null},{group:' '},{topic:'x'.repeat(1025)},{unexpected:true}]) input('relay.group.delete',{...deleteGroup,...change},false);
+result('relay.group.delete',{...deleteGroup,removed:true},true);
+result('relay.group.delete',{...deleteGroup,removed:false},true);
+for(const change of [{generation:'bad'},{generation:null},{removed:'true'},{group:' '},{topic:'x'.repeat(1025)}]) result('relay.group.delete',{...deleteGroup,removed:true,...change},false);
 // Topic capacity is independent of subscribers/groups, across plain and hosted ports.
 for (const [length, valid] of [[1024,true],[1025,false]]) {
   const topic = 'a'.repeat(length);
@@ -405,32 +420,6 @@ for (const [length, valid] of [[1024,true],[1025,false]]) {
   input('tool.scope.worker.consume',{...hostWorker,consumption:{...hostConsumption,topic}},valid);
   input('tool.scope.worker.ack',{...hostWorker,acknowledgement:{...hostAck,topic}},valid);
 }
-const message = { parts: [{ text: 'hello' }] };
-input('outgoing.send', { requestId: receipt, peer: 'fixture', message }, true);
-for (const requestId of ['bad', ''])
-  input('outgoing.send', { requestId, peer: 'fixture', message }, false);
-for (const parts of [
-  [],
-  [{ text: '\0bad' }],
-  [{ text: 3 }],
-  [{ text: 'hi', raw: 'AAAA' }],
-  [{ raw: 'AB==' }],
-  [{ url: 'https://user:secret@example.invalid/a' }],
-  [{ text: 'ok', filename: '../x' }],
-])
-  input(
-    'outgoing.send',
-    { requestId: receipt, peer: 'fixture', message: { parts } },
-    false,
-  );
-input('outgoing.claim', { peers: ['fixture'] }, true);
-input('outgoing.claim', { peers: [] }, false);
-input('outgoing.claim', { peers: ['fixture', 'fixture'] }, false);
-input(
-  'outgoing.report',
-  { id: receipt, claim: 'fixture', revision: -1, state: 'WORKING' },
-  false,
-);
 result('project.list', [], true);
 const project = {
   name: 'fixture',
@@ -453,8 +442,6 @@ result('information.search', informationSearch, true);
 result('information.search', [{ ...informationSearch[0], distance: 'near' }], false);
 result('information.search', [{ ...informationSearch[0], chunk: { ...informationSearch[0].chunk, placement: { sectionId: 'partial' } } }], false);
 result('information.search', { query: 'question', document: null, limit: 10, hits: [] }, false);
-result('outgoing.claim', { work: null, action: null }, true);
-result('outgoing.claim', { work: null, action: 'send' }, false);
 push({ kind: 'inbox.changed', unread: 1, future: 1 }, true);
 push({ kind: 'information.invalidated' }, true);
 push({ kind: 'information.invalidated', future: 'ignored' }, true);
@@ -565,6 +552,19 @@ for (const change of [{name:'../privacy'}, {revision:'bad'}, {budget:1}, {budget
 result('swarm.types', {project:'fixture', types:[{...namedType, members:['critic']}]}, false);
 const namedOpening = {project:'fixture',title:'Topic',label:'Review',body:'Evidence',requestId:receipt,swarm:'privacy'};
 input('board.open', namedOpening, true);
+const closing = {project:'fixture',topic:'bdt_Fixture',body:'Resolved',requestId:receipt};
+input('board.close', closing, true);
+input('board.close', {...closing,cites:['bdm_Answer']}, true);
+input('board.close', {...closing,body:'😀'.repeat(8000)}, true);
+input('board.close', {...closing,body:'😀'.repeat(8001)}, false);
+input('board.close', {...closing,body:'\uD800'}, false);
+input('board.close', {...closing,body:'\uDC00'}, false);
+input('board.close', {...closing,body:'\uD800x'}, false);
+input('board.close', {...closing,body:'\uFFFD'}, true);
+input('board.close', {...closing,body:'\\ud800'}, true);
+input('board.close', {...closing,project:'x'.repeat(257)}, false);
+for(const change of [{topic:'../topic'},{topic:'bdt_'},{body:''},{body:'x'.repeat(16001)},{body:'NUL\0'},{cites:null},{cites:['wrong']},{cites:['bdm_Answer',4]},{cites:Array(201).fill('bdm_Answer')},{requestId:'bad'},{author:'forged'}])
+  input('board.close', {...closing,...change}, false);
 for (const swarm of ['../privacy', 'Privacy', '', 'p'.repeat(65), null]) input('board.open', {...namedOpening,swarm}, false);
 input('swarm.types', {project:'fixture'}, true);
 input('swarm.types', {}, false);
@@ -652,6 +652,15 @@ if (process.argv.includes('--check')) {
 console.log('Canonical SDK DTO cases verified:', cases.length);
 
 // Coordinate fixtures supplement schema cases with structurally valid foreign replies.
+const groupCorrelations=[{operation:'relay.group.delete',request:deleteGroup,reply:{...deleteGroup,removed:true},valid:true}];
+for(const key of ['project','topic','group','generation']) {
+  const request={...deleteGroup,[key]:key==='generation'?'99999999-9999-9999-9999-999999999999':'foreign'};
+  groupCorrelations.push({operation:'relay.group.delete',request,reply:{...deleteGroup,removed:true},valid:false});
+}
+groupCorrelations.push({operation:'relay.group.inspect',request:groupQuery,reply:{...groupQuery,exists:true,generation:receipt},valid:true});
+for(const key of ['project','topic','group'])groupCorrelations.push({operation:'relay.group.inspect',request:{...groupQuery,[key]:'foreign'},reply:{...groupQuery,exists:true,generation:receipt},valid:false});
+const groupCorrelationPath=new URL('../test-support/contracts/relay-group-correlations.json',import.meta.url),groupCorrelationContent=JSON.stringify(groupCorrelations,null,2)+'\n';
+if(process.argv.includes('--check')){if(readFileSync(groupCorrelationPath,'utf8')!==groupCorrelationContent)throw new Error('Stale Relay correlation fixtures');}else writeFileSync(groupCorrelationPath,groupCorrelationContent);
 const correlations=[];
 for(const operation of [...new Set(cases.filter(c=>c.operation?.startsWith('tool.scope.host.')||c.operation?.startsWith('tool.scope.worker.')).map(c=>c.operation))]) {
  const reply=cases.find(c=>c.operation===operation&&c.boundary==='result'&&c.valid)?.value;

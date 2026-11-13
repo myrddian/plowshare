@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.protocol.RelayPort;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Explicit deployment grants; project membership alone never opens an external port. */
@@ -18,28 +20,30 @@ public final class RelayPortProperties {
       RelayPort.identity(project);
       RelayPort.topic(topic);
       RelayPort.identity(account);
-      java.util.Objects.requireNonNull(direction);
+      Objects.requireNonNull(direction);
       groups = groups == null ? List.of() : List.copyOf(groups);
       if (groups.size() > 100
           || direction == Direction.INGRESS && !groups.isEmpty()
           || direction == Direction.EGRESS && groups.isEmpty())
         throw new IllegalArgumentException("Invalid Relay port groups");
       groups.forEach(RelayPort::group);
-      if (new java.util.HashSet<>(groups).size() != groups.size())
+      if (new HashSet<>(groups).size() != groups.size())
         throw new IllegalArgumentException("Duplicate Relay group");
     }
   }
 
-  private List<Binding> bindings = List.of();
+  private volatile List<Binding> bindings = List.of();
 
   public List<Binding> getBindings() {
     return bindings;
   }
 
   public void setBindings(List<Binding> value) {
-    bindings = List.copyOf(value);
-    if (bindings.size() > 1000 || new java.util.HashSet<>(bindings).size() != bindings.size())
+    var snapshot = List.copyOf(value);
+    if (snapshot.size() > 1000 || new HashSet<>(snapshot).size() != snapshot.size())
       throw new IllegalArgumentException("Invalid Relay port bindings");
+    // Readers observe one completely validated policy, including during explicit live replacement.
+    bindings = snapshot;
   }
 
   public boolean permits(

@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.board;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.agents.AgentTool;
 import io.aeyer.plowshare.server.agents.BoardTools;
 import io.aeyer.plowshare.server.agents.RunExtras;
@@ -13,26 +15,19 @@ import java.util.Optional;
 /**
  * Who is handed which board tools — spec 2026-09-29 §7. A run in a seat's conversation gets that
  * seat's tools, bound to its topic and occupant; an opted-in definition's run in a person's
- * conversation with a project gets {@code board_open}. Account-owned project runs also get
- * messaging, composed with the ordinary tools and orchestration extras.
+ * conversation with a project gets {@code board_open}. Messaging contexts retain the same opted-in
+ * public board capability; their private participant state is never a forum seat.
  */
 public final class BoardRunExtras implements RunExtras {
 
   private final BoardStore store;
   private final Board board;
   private final ConversationStore conversations;
-  private final BoardMessaging messaging;
 
   public BoardRunExtras(BoardStore store, Board board, ConversationStore conversations) {
-    this(store, board, conversations, null);
-  }
-
-  public BoardRunExtras(
-      BoardStore store, Board board, ConversationStore conversations, BoardMessaging messaging) {
     this.store = Objects.requireNonNull(store, "store");
     this.board = Objects.requireNonNull(board, "board");
     this.conversations = Objects.requireNonNull(conversations, "conversations");
-    this.messaging = messaging;
   }
 
   @Override
@@ -41,65 +36,46 @@ public final class BoardRunExtras implements RunExtras {
     if (conversation == null) {
       return Extras.NONE;
     }
-    if (messaging != null && messaging.isTransport(conversation)) {
-      // Public board participation is a definition capability; its private
-      // messaging transport never exposes its own seat or board tools.
-      return new Extras(
-          context.definition().board()
-              ? List.of(
-                  messaging.tool(context), BoardTools.open(opening(context)), swarmTypes(context))
-              : List.of(messaging.tool(context)),
-          context.end(),
-          false);
-    }
     Optional<BoardSeat> seat = store.seatByConversation(conversation);
     if (seat.isPresent()) {
       TurnEnd end = context.end() != null ? context.end() : new TurnEnd();
-      BoardTools.Seat actions = new SeatActions(seat.get(), conversation);
+      String account =
+          context.callerHandle() != null
+              ? context.callerHandle()
+              : conversations.ownerOf(conversation).orElse(null);
+      BoardTools.Seat actions = new SeatActions(seat.get(), conversation, account);
       List<AgentTool> tools =
           seat.get().isOpener()
               ? BoardTools.forOpenerSeat(actions, end)
               : BoardTools.forMember(actions, end);
-      if (messaging != null) {
-        tools = new java.util.ArrayList<>(tools);
-        tools.add(messaging.tool(context));
-      }
       return new Extras(tools, end, false);
     }
     if (context.definition().board()
         && context.home() != null
         && !context.home().isGlobal()
-        && isPersons(conversation)) {
+        && canOpen(conversation)) {
       return new Extras(
-          messaging == null
-              ? List.of(BoardTools.open(opening(context)), swarmTypes(context))
-              : List.of(
-                  BoardTools.open(opening(context)), messaging.tool(context), swarmTypes(context)),
-          context.end(),
-          false);
-    }
-    if (messaging != null
-        && context.home() != null
-        && !context.home().isGlobal()
-        && conversations.ownerOf(conversation).isPresent()) {
-      return new Extras(List.of(messaging.tool(context)), context.end(), false);
+          List.of(BoardTools.open(opening(context)), swarmTypes(context)), context.end(), false);
     }
     return Extras.NONE;
   }
 
-  private boolean isPersons(String conversation) {
-    return conversations.find(conversation).map(row -> row.origin() == Origin.TURN).orElse(false);
+  private boolean canOpen(String conversation) {
+    return conversations
+        .find(conversation)
+        .map(row -> row.origin() == Origin.TURN || row.origin() == Origin.MESSAGE)
+        .orElse(false);
   }
 
-  private io.aeyer.plowshare.server.agents.AgentTool swarmTypes(Context context) {
+  private AgentTool swarmTypes(Context context) {
     return BoardTools.types(
         () -> {
           try {
-            return new com.fasterxml.jackson.databind.ObjectMapper()
+            return new ObjectMapper()
                 .writeValueAsString(board.swarmTypes(context.home().project()));
           } catch (Board.Refused refused) {
             return refused.getMessage();
-          } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
+          } catch (JsonProcessingException failed) {
             throw new IllegalStateException("Swarm types could not be encoded", failed);
           }
         });
@@ -153,11 +129,13 @@ public final class BoardRunExtras implements RunExtras {
   /** One seat's verbs, bound to its topic, occupant and conversation. */
   private final class SeatActions implements BoardTools.Seat {
     private final BoardSeat seat;
+    private final String account;
     private final String conversation;
 
-    SeatActions(BoardSeat seat, String conversation) {
+    SeatActions(BoardSeat seat, String conversation, String account) {
       this.seat = seat;
       this.conversation = conversation;
+      this.account = account;
     }
 
     private String authorKind() {
@@ -275,8 +253,9 @@ public final class BoardRunExtras implements RunExtras {
     @Override
     public Optional<String> close(String resolution, List<String> cites) {
       try {
-        board.close(
-            new Board.Close(seat.topic(), authorKind(), author(), conversation, resolution, cites));
+        board.closeForAccount(
+            new Board.Close(seat.topic(), authorKind(), author(), conversation, resolution, cites),
+            account);
         return Optional.empty();
       } catch (Board.Refused refused) {
         return Optional.of(refused.getMessage());

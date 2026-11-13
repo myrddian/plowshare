@@ -4,9 +4,12 @@ import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.hooks.Handover;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,9 +58,8 @@ public class Dispatcher {
   }
 
   /**
-   * What starts a board wake — a firing with a topic and no trigger (spec 2026-09-29 §4).
-   * Production is {@code board.SeatRunner}; {@link #NONE} until the board is wired, which refuses
-   * every wake it is asked to start rather than leaving it queued forever.
+   * An owner of a durable wake family, such as forum seats or messaging participants. Typed payload
+   * predicates select one registered owner; unowned wakes are refused.
    */
   public interface Wakes {
 
@@ -70,8 +72,7 @@ public class Dispatcher {
 
           @Override
           public String start(FiringRecord wake, BiConsumer<String, Outcome> ended) {
-            throw new IllegalStateException(
-                "no board is wired on this server to start a" + " wake");
+            throw new IllegalStateException("No owner is wired on this server to start this wake");
           }
         };
 
@@ -90,24 +91,59 @@ public class Dispatcher {
   }
 
   private volatile Wakes wakes = Wakes.NONE;
+  private final List<WakeOwner> wakeOwners = new CopyOnWriteArrayList<>();
+  private final List<WakeRecovery> wakeRecoveries = new CopyOnWriteArrayList<>();
 
-  /** Set once at wiring, by the board. See {@link Wakes}. */
+  private record WakeOwner(String name, Predicate<FiringRecord> owns, Wakes handler) {}
+
+  private record WakeRecovery(String name, Runnable action) {}
+
+  /** Legacy fixture seam; production owners register disjoint typed wake families. */
   public void useWakes(Wakes wakes) {
     this.wakes = Objects.requireNonNull(wakes, "wakes");
   }
 
-  private volatile Runnable wakeRecovery = () -> {};
+  /** Register once during composition. Overlapping claims are refused before any wake executes. */
+  public synchronized void registerWakes(String name, Predicate<FiringRecord> owns, Wakes handler) {
+    if (name == null || name.isBlank()) throw new IllegalArgumentException("Missing wake owner");
+    if (wakeOwners.stream().anyMatch(owner -> owner.name().equals(name)))
+      throw new IllegalStateException("Duplicate wake owner: " + name);
+    wakeOwners.add(
+        new WakeOwner(name, Objects.requireNonNull(owns), Objects.requireNonNull(handler)));
+  }
 
-  /** Board recovery runs after abandoned claims are released and before boot queue draining. */
+  private Wakes ownerOf(FiringRecord firing) {
+    Wakes selected = null;
+    for (WakeOwner owner : wakeOwners) {
+      if (!owner.owns().test(firing)) continue;
+      if (selected != null)
+        throw new IllegalStateException("Multiple owners claim firing " + firing.id());
+      selected = owner.handler();
+    }
+    return selected == null ? wakes : selected;
+  }
+
+  /** Legacy fixture seam; production recovery callbacks have independently named owners. */
   public void useWakeRecovery(Runnable recovery) {
-    wakeRecovery = Objects.requireNonNull(recovery, "recovery");
+    registerWakeRecovery("legacy", recovery);
+  }
+
+  /** Recovery runs after abandoned paid claims are released and before boot queue draining. */
+  public synchronized void registerWakeRecovery(String name, Runnable recovery) {
+    if (name == null || name.isBlank())
+      throw new IllegalArgumentException("Missing recovery owner");
+    if (wakeRecoveries.stream().anyMatch(owner -> owner.name().equals(name)))
+      throw new IllegalStateException("Duplicate wake recovery: " + name);
+    wakeRecoveries.add(new WakeRecovery(name, Objects.requireNonNull(recovery)));
   }
 
   public void recoverWakes() {
-    try {
-      wakeRecovery.run();
-    } catch (RuntimeException failed) {
-      log.warn("board wakes could not recover at boot", failed);
+    for (WakeRecovery recovery : wakeRecoveries) {
+      try {
+        recovery.action().run();
+      } catch (RuntimeException failed) {
+        log.warn("{} wakes could not recover at boot", recovery.name(), failed);
+      }
     }
   }
 
@@ -250,21 +286,22 @@ public class Dispatcher {
   }
 
   /**
-   * A wake starts through {@link #wakes}; a trigger's firing through {@link #runner}, while its
-   * trigger still exists.
+   * A wake starts through its registered owner; a trigger's firing through {@link #runner}, while
+   * its trigger still exists.
    */
   private Optional<Start> startFor(FiringRecord next) {
     if (next.topic() != null) {
+      Wakes owner = ownerOf(next);
       return Optional.of(
           new Start() {
             @Override
             public boolean busy() {
-              return wakes.busy(next);
+              return owner.busy(next);
             }
 
             @Override
             public Started start() {
-              return new Started.Job(wakes.start(next, (conversation, outcome) -> wakeEnded(next)));
+              return new Started.Job(owner.start(next, (conversation, outcome) -> wakeEnded(next)));
             }
 
             @Override
@@ -313,7 +350,7 @@ public class Dispatcher {
 
   private void settled(FiringRecord wake) {
     try {
-      wakes.settled(wake);
+      ownerOf(wake).settled(wake);
     } catch (RuntimeException failed) {
       log.warn("lifecycle check failed for {}", wake.topic(), failed);
     }

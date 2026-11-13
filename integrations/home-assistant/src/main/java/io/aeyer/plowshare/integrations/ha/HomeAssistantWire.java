@@ -2,10 +2,16 @@ package io.aeyer.plowshare.integrations.ha;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.integrations.IntegrationCodec;
-import io.aeyer.plowshare.protocol.ExternalResult.IntegrationResult;
-import io.aeyer.plowshare.protocol.IntegrationPayload.*;
+import io.aeyer.plowshare.integrations.IntegrationResult;
+import io.aeyer.plowshare.protocol.IntegrationPayload.ActionContext;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Parameter;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Reading;
+import io.aeyer.plowshare.protocol.IntegrationPayload.TextParameter;
+import java.time.DateTimeException;
 import java.time.Instant;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 
 /** Vendor projection boundary. Unselected attributes/user identities never enter runtime DTOs. */
 final class HomeAssistantWire {
@@ -65,7 +71,7 @@ final class HomeAssistantWire {
     try {
       Instant.parse(value.textValue());
       return value.textValue();
-    } catch (java.time.DateTimeException invalid) {
+    } catch (DateTimeException invalid) {
       return null;
     }
   }

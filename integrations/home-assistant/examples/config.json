@@ -7,26 +7,49 @@
     "house": {
       "adapter": "home-assistant",
       "project": "home-assistant",
-      "peer": "ha-house",
       "configuration": {
         "endpoint": "https://home-assistant.example.invalid",
         "tokenEnv": "HA_TOKEN",
         "entities": {
-          "office.temperature": {"entity": "sensor.example_office_temperature", "attributes": []},
-          "office.occupancy": {"entity": "binary_sensor.example_office_occupancy", "attributes": []},
-          "office.climate": {"entity": "climate.example_office", "attributes": ["temperature", "current_temperature", "hvac_action"]}
+          "office.temperature": {
+            "entity": "sensor.example_office_temperature",
+            "attributes": []
+          },
+          "office.occupancy": {
+            "entity": "binary_sensor.example_office_occupancy",
+            "attributes": []
+          },
+          "office.climate": {
+            "entity": "climate.example_office",
+            "attributes": [
+              "temperature",
+              "current_temperature",
+              "hvac_action"
+            ]
+          }
         },
-        "subscriptions": ["office.temperature"],
+        "subscriptions": [
+          "office.temperature"
+        ],
         "actions": {
           "send_report": {
             "service": "notify.example_phone",
             "targets": [],
-            "parameters": {"message": {"type": "string", "maxLength": 4096}},
-            "required": ["message"]
+            "parameters": {
+              "message": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "message"
+            ]
           },
           "evening_scene": {
             "service": "scene.turn_on",
-            "targets": ["scene.example_evening"],
+            "targets": [
+              "scene.example_evening"
+            ],
             "parameters": {},
             "required": []
           }
@@ -43,6 +66,19 @@
           "request": "Investigate why the office is hot using selected HA evidence. Explain missing evidence and uncertainty.",
           "completionAction": "send_report"
         }
+      },
+      "relay": {
+        "requests": "ha.requests",
+        "requestGeneration": "11111111-1111-4111-8111-111111111111",
+        "returns": "ha.results",
+        "returnGeneration": "22222222-2222-4222-8222-222222222222",
+        "channel": "ha-return",
+        "publisher": "sdk:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "producers": [
+          "execution:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "maxDepth": 8,
+        "maxReturnBytes": 65536
       }
     }
   }

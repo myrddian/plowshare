@@ -9,6 +9,8 @@ fun Exec.nodeSources() {
     workingDir = projectDir
     dependsOn(pnpmInstall, ":plowshare-client-ts:clientBuild")
     inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("scripts/build-javascript-sdk.mjs"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("sdk/typescript/src")).withPathSensitivity(PathSensitivity.RELATIVE)
@@ -23,7 +25,7 @@ val nodeBuild by tasks.registering(Exec::class) {
     group = "build"
     nodeSources()
     outputs.dir("build")
-    commandLine("node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.json")
+    commandLine("node", rootProject.file("scripts/build-javascript-sdk.mjs"), "node")
 }
 
 tasks.named("assemble") { dependsOn(nodeBuild) }

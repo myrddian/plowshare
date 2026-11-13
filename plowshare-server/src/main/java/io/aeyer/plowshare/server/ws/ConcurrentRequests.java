@@ -9,8 +9,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -51,8 +53,7 @@ final class ConcurrentRequests implements AutoCloseable {
   private final ReentrantLock state = new ReentrantLock();
   private final Semaphore changed = new Semaphore(0);
   private final ConcurrentMap<String, Connection> connections = new ConcurrentHashMap<>();
-  private final java.util.concurrent.ConcurrentLinkedQueue<Request> waiting =
-      new java.util.concurrent.ConcurrentLinkedQueue<>();
+  private final ConcurrentLinkedQueue<Request> waiting = new ConcurrentLinkedQueue<>();
   private final ConcurrentMap<DispatchPolicy.Resource, Integer> references =
       new ConcurrentHashMap<>();
   private final Set<DispatchPolicy.Resource> occupied = ConcurrentHashMap.newKeySet();
@@ -389,8 +390,8 @@ final class ConcurrentRequests implements AutoCloseable {
                     finished(request, failure);
                   } finally {
                     Throwable cause = failure;
-                    while (cause instanceof java.util.concurrent.CompletionException
-                        && cause.getCause() != null) cause = cause.getCause();
+                    while (cause instanceof CompletionException && cause.getCause() != null)
+                      cause = cause.getCause();
                     // Throwing inside whenComplete would only fail an ignored dependent stage.
                     // Explicitly report a deferred JVM error through the completion thread's
                     // uncaught-error owner, after releasing request ownership and closing it.

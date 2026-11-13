@@ -1,9 +1,22 @@
 package io.aeyer.plowshare.sdk;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
-import java.lang.reflect.*;
-import java.util.*;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.GenericArrayType;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.RecordComponent;
+import java.lang.reflect.Type;
+import java.lang.reflect.WildcardType;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -21,12 +34,12 @@ class PublicContractsTest {
             AdministrationClient.class,
             AuthClient.class,
             AgentClient.class,
-            IncomingClient.class,
-            OutgoingClient.class,
+            RelayClient.class,
+            BoardClient.class,
+            MessagingClient.class,
+            SwarmClient.class,
             OrchestrationClient.class,
-            UsageClient.class,
-            ExternalPayloadCodec.class,
-            AgentCardCodec.class)) {
+            UsageClient.class)) {
       for (Method method : facade.getDeclaredMethods()) {
         if (!Modifier.isPublic(method.getModifiers()) || method.isSynthetic()) continue;
         checked(method.getGenericReturnType(), method.toString(), visited);

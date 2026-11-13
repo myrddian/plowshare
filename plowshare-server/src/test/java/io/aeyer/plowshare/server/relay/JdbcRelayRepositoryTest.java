@@ -1,19 +1,28 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.LongStream;
 import org.flywaydb.core.Flyway;
@@ -21,6 +30,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -87,9 +97,9 @@ class JdbcRelayRepositoryTest {
             new JdbcRelayPayloadStore(
                 jdbc,
                 transactions,
-                java.time.Duration.ofHours(1),
-                java.time.Duration.ofHours(24),
-                java.time.Duration.ofDays(30)));
+                Duration.ofHours(1),
+                Duration.ofHours(24),
+                Duration.ofDays(30)));
     repository.configureTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
   }
 
@@ -104,19 +114,126 @@ class JdbcRelayRepositoryTest {
   }
 
   @Test
+  void deadlines_track_first_append_policy_changes_partial_prune_and_empty_reuse() {
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT prune_at FROM relay_topics WHERE name=?", Timestamp.class, topic.name()));
+    repository.configureTopic(
+        topic, RelayPayload.Kind.TEXT, new Relay.Policy(Duration.ofSeconds(10), 2L));
+    repository.append(topic, draft("one"), T0);
+    repository.append(topic, draft("two"), T0.plusSeconds(5));
+    assertTrue(repository.topicsToPrune(T0.plusSeconds(9), 100).isEmpty());
+    assertEquals(List.of(topic), repository.topicsToPrune(T0.plusSeconds(10), 100));
+    assertEquals(1, repository.prune(topic, T0.plusSeconds(10), 1));
+    assertTrue(repository.topicsToPrune(T0.plusSeconds(14), 100).isEmpty());
+    repository.configureTopic(
+        topic, RelayPayload.Kind.TEXT, new Relay.Policy(Duration.ofSeconds(2), 2L));
+    assertEquals(List.of(topic), repository.topicsToPrune(T0.plusSeconds(7), 100));
+    assertEquals(1, repository.prune(topic, T0.plusSeconds(7), 100));
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT prune_at FROM relay_topics WHERE name=?", Timestamp.class, topic.name()));
+    repository.append(topic, draft("three"), T0.plusSeconds(20));
+    assertTrue(repository.topicsToPrune(T0.plusSeconds(21), 100).isEmpty());
+    assertEquals(List.of(topic), repository.topicsToPrune(T0.plusSeconds(22), 100));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            transactions.inTransaction(
+                () -> {
+                  repository.prune(topic, T0.plusSeconds(22), 100);
+                  throw new IllegalStateException("rollback");
+                }));
+    assertEquals(List.of(topic), repository.topicsToPrune(T0.plusSeconds(22), 100));
+  }
+
+  @Test
+  void due_selection_uses_bounded_partial_indexes_with_thousands_of_empty_topics() {
+    jdbc.update(
+        "INSERT INTO relay_topics(scope_key,project_id,name,payload_kind,retention_seconds) SELECT ?,?,'idle.'||n,'TEXT',3600 FROM generate_series(1,5000) n",
+        RelayScopeCodec.write(topic),
+        topic.projectId());
+    repository.configureTopic(
+        topic, RelayPayload.Kind.TEXT, new Relay.Policy(Duration.ofSeconds(1), 1L));
+    repository.append(topic, draft("one"), T0);
+    repository.append(topic, draft("two"), T0);
+    jdbc.execute("ANALYZE relay_topics");
+    assertEquals(List.of(topic), repository.topicsToPrune(T0.plusSeconds(2), 100));
+    for (String query :
+        List.of(
+            "SELECT scope_key,name,prune_at FROM relay_topics WHERE prune_at<=? ORDER BY prune_at,scope_key,name LIMIT 100",
+            "SELECT scope_key,name,oldest_published_at FROM relay_topics WHERE over_record_limit ORDER BY oldest_published_at,scope_key,name LIMIT 100")) {
+      var plans =
+          query.contains("<=?")
+              ? jdbc.queryForList(
+                  "EXPLAIN (ANALYZE,BUFFERS) " + query,
+                  String.class,
+                  Timestamp.from(T0.plusSeconds(2)))
+              : jdbc.queryForList("EXPLAIN (ANALYZE,BUFFERS) " + query, String.class);
+      String plan = String.join("\n", plans);
+      assertTrue(
+          plan.contains(
+              query.contains("<=?") ? "relay_topics_expiry_due" : "relay_topics_record_excess"),
+          plan);
+      assertFalse(plan.contains("relay_publications"), plan);
+      System.out.println("Retention candidate plan (5001 topics, 1 due):\n" + plan);
+    }
+  }
+
+  @Test
+  void owning_retirement_waits_for_retention_live_leases_and_other_groups() {
+    var retirement = new JdbcRelayRetirementRepository(jdbc, transactions);
+    repository.subscribe(a, Relay.Start.OLDEST_RETAINED, T0);
+    repository.subscribe(b, Relay.Start.OLDEST_RETAINED, T0);
+    repository.configureTopic(
+        topic, RelayPayload.Kind.TEXT, new Relay.Policy(Duration.ofSeconds(1), null));
+    repository.append(topic, draft("one"), T0);
+    repository.advanceSeen(a, 1, T0);
+    assertFalse(retirement.retireOwned(a));
+    assertEquals(1, repository.prune(topic, T0.plusSeconds(2), 100));
+    jdbc.update(
+        "INSERT INTO relay_consumer_leases(scope_key,topic,subscriber,worker,account,epoch,lease_until) VALUES(?,?,?,'worker','reader',1,clock_timestamp()+interval '1 hour')",
+        RelayScopeCodec.write(topic),
+        topic.name(),
+        a.subscriber());
+    assertFalse(retirement.retireOwned(a));
+    assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM relay_subscriptions", Integer.class));
+    jdbc.update(
+        "UPDATE relay_consumer_leases SET lease_until=clock_timestamp()-interval '1 second'");
+    assertFalse(retirement.retireOwned(a));
+    assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM relay_subscriptions", Integer.class));
+    repository.acknowledgeGap(b, 1, T0.plusSeconds(2));
+    var generation = repository.topic(topic).generation();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            transactions.inTransaction(
+                () -> {
+                  assertTrue(retirement.retireOwned(b));
+                  throw new IllegalStateException("owner rollback");
+                }));
+    assertEquals(generation, repository.topic(topic).generation());
+    assertEquals(1, repository.unread(b).subscription().seenThrough());
+    assertTrue(retirement.retireOwned(b));
+    assertTrue(retirement.retireOwned(b));
+    assertEquals(0, repository.prune(topic, T0.plusSeconds(3), 100));
+    assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM relay_topics", Integer.class));
+  }
+
+  @Test
   void catalogue_head_selects_latest_position_and_preserves_expired_history_without_offsets() {
     var logs = new JdbcRelayLogRepository(jdbc, transactions);
     assertEquals(
-        new RelayLogRepository.Head(0, java.util.Optional.empty()),
+        new RelayLogRepository.Head(0, Optional.empty()),
         logs.latest(new Relay.TopicKey(topic.projectId(), "missing.catalog")));
-    assertEquals(new RelayLogRepository.Head(0, java.util.Optional.empty()), logs.latest(topic));
+    assertEquals(new RelayLogRepository.Head(0, Optional.empty()), logs.latest(topic));
     repository.subscribe(a, Relay.Start.OLDEST_RETAINED, T0);
     repository.append(topic, draft("first"), T0);
     var second = repository.append(topic, draft("second"), T0.plusSeconds(1));
-    assertEquals(new RelayLogRepository.Head(2, java.util.Optional.of(second)), logs.latest(topic));
+    assertEquals(new RelayLogRepository.Head(2, Optional.of(second)), logs.latest(topic));
     assertEquals(0, repository.unread(a).subscription().seenThrough());
     assertEquals(2, repository.prune(topic, T0.plus(Duration.ofDays(5)), 100));
-    assertEquals(new RelayLogRepository.Head(2, java.util.Optional.empty()), logs.latest(topic));
+    assertEquals(new RelayLogRepository.Head(2, Optional.empty()), logs.latest(topic));
     assertEquals(0, repository.unread(a).subscription().seenThrough());
   }
 
@@ -133,13 +250,13 @@ class JdbcRelayRepositoryTest {
     var otherProject = new Relay.TopicKey(Objects.requireNonNull(project), topic.name());
     repository.configureTopic(otherProject, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     var foreign = repository.append(otherProject, draft("shared"), T0);
-    assertEquals(java.util.Optional.of(original), repository.retained(topic, "shared"));
-    assertEquals(java.util.Optional.of(other), repository.retained(otherTopic, "shared"));
-    assertEquals(java.util.Optional.of(foreign), repository.retained(otherProject, "shared"));
+    assertEquals(Optional.of(original), repository.retained(topic, "shared"));
+    assertEquals(Optional.of(other), repository.retained(otherTopic, "shared"));
+    assertEquals(Optional.of(foreign), repository.retained(otherProject, "shared"));
     assertTrue(repository.retained(topic, "missing").isEmpty());
     assertEquals(1, repository.prune(topic, T0.plus(Duration.ofDays(4)), 100));
     assertTrue(repository.retained(topic, "shared").isEmpty());
-    assertEquals(java.util.Optional.of(other), repository.retained(otherTopic, "shared"));
+    assertEquals(Optional.of(other), repository.retained(otherTopic, "shared"));
     assertThrows(IllegalArgumentException.class, () -> repository.retained(topic, "bad\n"));
   }
 
@@ -187,7 +304,7 @@ class JdbcRelayRepositoryTest {
   @Test
   void
       publication_accepted_before_exception_reconciles_without_replay_and_expired_receipts_stay_unknown() {
-    var time = new java.util.concurrent.atomic.AtomicReference<>(T0);
+    var time = new AtomicReference<>(T0);
     var log = new DurableRelay(repository, time::get);
     var deliveries =
         new DurableRelayDeliveries(new JdbcRelayDeliveryRepository(jdbc, transactions), time::get);
@@ -205,7 +322,7 @@ class JdbcRelayRepositoryTest {
             throw new IllegalStateException("accepted but receipt was lost");
           }
 
-          public java.util.Optional<RelayDeliveries.Resolution> inspect(Request request) {
+          public Optional<RelayDeliveries.Resolution> inspect(Request request) {
             return forward.inspect(request);
           }
         };
@@ -237,11 +354,10 @@ class JdbcRelayRepositoryTest {
   }
 
   private RelayDispatch dispatch(RelayDeliveries deliveries, RelayReceiver receiver) {
-    var members = org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class);
-    var projects =
-        org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectWorkspaces.class);
-    org.mockito.Mockito.when(members.mayWork("relay-fixture", "operator")).thenReturn(true);
-    org.mockito.Mockito.when(projects.id("relay-fixture")).thenReturn(topic.projectId());
+    var members = Mockito.mock(ProjectMembers.class);
+    var projects = Mockito.mock(ProjectWorkspaces.class);
+    Mockito.when(members.mayWork("relay-fixture", "operator")).thenReturn(true);
+    Mockito.when(projects.id("relay-fixture")).thenReturn(topic.projectId());
     var receivers =
         new RegisteredRelayReceivers(
             List.of(new RelayReceivers.Binding("relay.publish", receiver)));

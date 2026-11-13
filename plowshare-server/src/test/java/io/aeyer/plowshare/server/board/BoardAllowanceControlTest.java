@@ -1,7 +1,15 @@
 package io.aeyer.plowshare.server.board;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
@@ -66,9 +74,10 @@ class BoardAllowanceControlTest {
   }
 
   @Test
-  void publicBoardControlsCannotMutatePrivateMessageInstances() {
+  void publicBoardControlsRequireAnExistingForumTopic() {
     Board board = board();
-    when(store.messagingTopic("root")).thenReturn(true);
+    when(store.topic("root")).thenReturn(Optional.empty());
+    when(store.lockTopic("root")).thenReturn(Optional.empty());
     assertThrows(Board.Refused.class, () -> board.topup("root", 20, "operator"));
     assertThrows(Board.Refused.class, () -> board.retry("root", "critic", "operator", 12));
     verify(store, never()).topup(anyString(), anyInt(), anyInt());

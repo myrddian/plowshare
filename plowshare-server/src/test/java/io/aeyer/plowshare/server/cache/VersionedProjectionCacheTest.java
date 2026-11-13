@@ -1,17 +1,43 @@
 package io.aeyer.plowshare.server.cache;
 
-import static io.aeyer.plowshare.server.cache.CacheTestSupport.*;
-import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.*;
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static io.aeyer.plowshare.server.cache.CacheTestSupport.awaitStatistics;
+import static io.aeyer.plowshare.server.cache.CacheTestSupport.namespace;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_INELIGIBLE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_LOAD_REFUSED;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_NOT_CACHEABLE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_NOT_READY;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_STALE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.CAPACITY_REJECTED;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOAD;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOADED_RETURN;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.protocol.frames.Code;
+import io.aeyer.plowshare.server.cache.CacheTestSupport.Value;
+import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -288,7 +314,7 @@ class VersionedProjectionCacheTest {
           .readInline(any(), any());
       var refused =
           assertThrows(
-              io.aeyer.plowshare.server.reads.ReadUnavailableException.class,
+              ReadUnavailableException.class,
               () ->
                   fixture.cache.read(
                       KEY,
@@ -297,8 +323,8 @@ class VersionedProjectionCacheTest {
                       () -> fail("Capacity exhaustion must not multiply uncached SQL loads"),
                       ignored -> 100));
       assertEquals(
-          io.aeyer.plowshare.protocol.frames.Code.ARCHIVE_UNAVAILABLE,
-          io.aeyer.plowshare.server.faults.Faults.of(refused).code(),
+          Code.ARCHIVE_UNAVAILABLE,
+          Faults.of(refused).code(),
           "Never promise that an enclosing mutation has not started or invite automatic replay");
       assertEquals(1, fixture.cache.statistics().count(CAPACITY_REJECTED));
       assertEquals(0, fixture.cache.statistics().count(LOAD));
@@ -443,11 +469,9 @@ class VersionedProjectionCacheTest {
   private static SnapshotCache.Read<VersionedProjectionCache.Versioned<Value>> failed(
       SnapshotCache.Failure failure) {
     return new SnapshotCache.Read<>() {
-      public java.util.concurrent.CompletionStage<
-              SnapshotCache.Tracked<VersionedProjectionCache.Versioned<Value>>>
+      public CompletionStage<SnapshotCache.Tracked<VersionedProjectionCache.Versioned<Value>>>
           result() {
-        return java.util.concurrent.CompletableFuture.failedFuture(
-            new SnapshotCache.CacheException(failure));
+        return CompletableFuture.failedFuture(new SnapshotCache.CacheException(failure));
       }
 
       public boolean cancel() {

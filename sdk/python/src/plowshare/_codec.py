@@ -167,6 +167,46 @@ def decode_reply(operation: str, value: object) -> object:
     return _decode(_schema(_object(_SCHEMAS["results"])[operation]), value, False)
 
 
+def http_contract(name: str, value: object, *, input: bool = True) -> object:
+    """Private binary HTTP boundary, sharing generated DTOs and portable constraints."""
+    schema = _schema(_object(_SCHEMAS["http"])[name])
+    return _decode(schema, _wire(value) if input else value, input)
+
+
+def blob_metadata(
+    value: contracts.RelayBlobPublishDto | contracts.RelayBlobReadDto,
+) -> dict[str, str]:
+    name = (
+        "RelayBlobPublish"
+        if isinstance(value, contracts.RelayBlobPublishDto)
+        else "RelayBlobRead"
+    )
+    http_contract(name, value)
+    row = _object(_wire(value))
+    if any(not isinstance(entry, str) for entry in row.values()):
+        raise ValueError("Invalid binary HTTP metadata")
+    return cast(dict[str, str], row)
+
+
+def blob_receipt(data: bytes) -> contracts.RelayBlobPublishedDto:
+    def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        row: dict[str, object] = {}
+        for key, value in pairs:
+            if key in row:
+                raise ValueError("Duplicate binary receipt field")
+            row[key] = value
+        return row
+
+    return cast(
+        contracts.RelayBlobPublishedDto,
+        http_contract(
+            "RelayBlobPublished",
+            json.loads(data.decode("utf-8"), object_pairs_hook=unique),
+            input=False,
+        ),
+    )
+
+
 def decode_push(value: object) -> contracts.ServerPush:
     row = _object(value)
     if "protocol_version" in row:
@@ -180,6 +220,21 @@ def decode_push(value: object) -> contracts.ServerPush:
 
 def deployment_matches(operation: str, request: object, result: object) -> bool:
     """A structural reply cannot certify a different project's retained receipt."""
+    if operation == "relay.group.inspect":
+        asked = _object(_wire(request))
+        return isinstance(result, contracts.RelayGroupStateDto) and (
+            result.project == asked.get("project")
+            and result.topic == asked.get("topic")
+            and result.group == asked.get("group")
+        )
+    if operation == "relay.group.delete":
+        asked = _object(_wire(request))
+        return isinstance(result, contracts.RelayGroupDeletedDto) and (
+            result.project == asked.get("project")
+            and result.topic == asked.get("topic")
+            and result.group == asked.get("group")
+            and result.generation == asked.get("generation")
+        )
     if operation == "tool.invocation.read":
         return isinstance(
             result, contracts.ToolInvocationResultDto

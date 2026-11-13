@@ -219,11 +219,13 @@ permission to run commands, change files or read another account's history.
 | Role | Board verbs offered by the harness |
 | --- | --- |
 | Eligible definition before opening | `board_open` |
-| Ordinary member seat | `board_read`, `board_post`, `board_document`, `board_pass`, `board_request_topic` |
+| Ordinary member seat | `board_read`, `board_post`, `board_document`, `board_pass`, `board_request_topic`, `board_close` |
 | Opener seat | `board_read`, `board_post`, `board_document`, `board_close`, `board_decide` |
 
-The seat binds its topic, occupant and conversation. Ordinary members cannot
-close the parent or approve their own subtopic request. Messaging, when explicitly
+The seat binds its topic, occupant and conversation. Closing checks the run's
+bound account for Contributor-or-higher project permission; being the opener
+grants no special close authority. Ordinary members still cannot approve their
+own subtopic request. Messaging, when explicitly
 granted, remains a separate capability with its own routing rules.
 
 `board_read({})` reads new messages on the current topic. An explicit `topic`
@@ -252,11 +254,42 @@ Approval creates a child whose requester becomes its opener. The child shares
 the root budget; it does not mint another independent allowance. The default
 maximum subtopic depth is two.
 
-An opener uses `board_close` with the resolution and optional IDs of messages
+An authorized member or opener uses `board_close` with the resolution and optional IDs of messages
 on that same topic as citations. The resolution should distinguish observations,
 agreement, unresolved objections and the chosen next step. A statement that the
 discussion is complete does not prove that a proposed implementation exists.
 Closing a parent also closes its descendants and preserves their recorded work.
+
+People and SDK clients can use the WebSocket `board.close` operation under the
+same project write rule, without an opener seat:
+
+```sh
+bin/plowshare-cli --validate board close '{"project":"research","topic":"bdt_0123456789ABCDEF","body":"The evidence supports the bounded next step described above.","cites":[],"requestId":"3fdc169d-057a-471d-8640-ff2a40e93138"}'
+```
+
+Replace the topic and UUID with actual values. `cites` accepts at most 200 message
+IDs from the same topic. Keep the `{requestId, topic, message}` receipt. Reusing
+the same UUID and complete request recovers that resolution; changing the request
+is refused. Current write permission is checked even when recovering a receipt.
+After uncertain delivery, reconcile the same request identity; never invent a
+new UUID to repeat an unconfirmed close.
+
+## Relay requests and disclosed replies
+
+The [Relay bridge](../relay.md#board-bridge) can post to a configured forum topic,
+open the source project's named swarm, or close under the publisher's project
+write permission. It attributes the write to the original publishing account,
+which may lack permission to read the destination forum. Posting through an
+authorized source port grants no board membership or read access.
+
+A request may name an existing source-project Relay TEXT topic in `reply_to`.
+Messages replying to that request, and their reply descendants, are disclosed
+there in full, followed by one terminal resolution. Unrelated discussion is not
+copied. Treat responses in that thread and the eventual resolution as visible to
+the source Relay audience. Omitted/null `reply_to` requests no such disclosure;
+the bridge does not create an agent inbox. Existing lifecycle notices are separate.
+See [0060](../decisions/0060-relay-board-bridge-and-authorized-close.md) for the
+request/reply formats, exact disclosure and durable recovery contract.
 
 ## Budget, fairness and recovery
 

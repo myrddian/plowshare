@@ -1,17 +1,110 @@
 package io.aeyer.plowshare.server.board;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.agents.*;
+import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.protocol.ScheduledWork;
+import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.AgentRegistry;
+import io.aeyer.plowshare.server.agents.AgentTool;
+import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.EntryKind;
+import io.aeyer.plowshare.server.agents.JobRuntime;
+import io.aeyer.plowshare.server.agents.JobStore;
+import io.aeyer.plowshare.server.agents.LogStages;
+import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.agents.RunExtras;
+import io.aeyer.plowshare.server.agents.SendMessageTool;
+import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.agents.Transcript;
+import io.aeyer.plowshare.server.agents.Turn;
+import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
+import io.aeyer.plowshare.server.approvals.RunApproval;
+import io.aeyer.plowshare.server.approvals.RunApprovalStore;
+import io.aeyer.plowshare.server.archive.ArchiveConfig;
+import io.aeyer.plowshare.server.archive.CompactionStore;
+import io.aeyer.plowshare.server.archive.ConversationLifecycle;
+import io.aeyer.plowshare.server.archive.EntryStore;
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
+import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.archive.TurnStore;
+import io.aeyer.plowshare.server.data.DataLayout;
+import io.aeyer.plowshare.server.events.AccountPushes;
+import io.aeyer.plowshare.server.events.Dispatcher;
+import io.aeyer.plowshare.server.events.EventPayload;
 import io.aeyer.plowshare.server.events.FiringRecord;
+import io.aeyer.plowshare.server.events.Inbox;
+import io.aeyer.plowshare.server.events.JdbcInboxStore;
+import io.aeyer.plowshare.server.events.JdbcTriggerStore;
+import io.aeyer.plowshare.server.events.TriggerRecord;
+import io.aeyer.plowshare.server.faults.NotFoundFault;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
+import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
+import io.aeyer.plowshare.server.llm.dispatch.Completion;
+import io.aeyer.plowshare.server.llm.dispatch.Deltas;
+import io.aeyer.plowshare.server.llm.dispatch.Embeddings;
+import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
+import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
+import io.aeyer.plowshare.server.llm.dispatch.LlmTransport;
+import io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger;
+import io.aeyer.plowshare.server.llm.dispatch.Sampling;
+import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
+import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.messaging.JdbcMessagingRepository;
+import io.aeyer.plowshare.server.messaging.MessageInboxRepository;
+import io.aeyer.plowshare.server.messaging.MessageInboxes;
+import io.aeyer.plowshare.server.messaging.MessageIngress;
+import io.aeyer.plowshare.server.messaging.MessageRefused;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.messaging.MessageWake;
+import io.aeyer.plowshare.server.messaging.MessagingProperties;
+import io.aeyer.plowshare.server.messaging.ProjectMessageRouting;
+import io.aeyer.plowshare.server.messaging.RelayMessageInboxes;
+import io.aeyer.plowshare.server.messaging.RelayMessaging;
+import io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
+import io.aeyer.plowshare.server.relay.JdbcRelayRepository;
+import io.aeyer.plowshare.server.relay.Relay;
+import io.aeyer.plowshare.server.relay.RelayPayload;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -19,6 +112,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -36,21 +134,21 @@ class BoardMessagingTest {
   private static final ObjectMapper JSON = new ObjectMapper();
   @TempDir Path definitions;
   private BoardFixture fixture;
-  private BoardMessaging messages;
+  private RelayMessaging messages;
   private AgentRegistry agents;
   private RunExtras.Context caller;
   private FakeVoice voice;
 
   record Call(
-      BoardMessaging.Instance instance, String utterance, Budget lease, Consumer<Outcome> ended) {}
+      MessageService.Instance instance, String utterance, Budget lease, Consumer<Outcome> ended) {}
 
-  static final class FakeVoice implements BoardMessaging.Voice {
+  static final class FakeVoice implements MessageService.Voice {
     boolean busy;
     final List<Call> calls = new ArrayList<>();
     final List<String> commands = new ArrayList<>();
 
     public String speakCommand(
-        BoardMessaging.Instance instance,
+        MessageService.Instance instance,
         AgentDefinition definition,
         String utterance,
         Budget lease,
@@ -63,7 +161,7 @@ class BoardMessagingTest {
     final List<String> resumedChildren = new ArrayList<>();
 
     public String resumeDelegate(
-        BoardMessaging.Instance instance,
+        MessageService.Instance instance,
         String child,
         AgentDefinition definition,
         String utterance,
@@ -80,7 +178,7 @@ class BoardMessagingTest {
     }
 
     public String speak(
-        BoardMessaging.Instance instance,
+        MessageService.Instance instance,
         AgentDefinition definition,
         String utterance,
         Budget lease,
@@ -117,12 +215,12 @@ class BoardMessagingTest {
     agents = AgentRegistry.of(definitions, Set.of("send_message"));
     voice = new FakeVoice();
     messages =
-        new BoardMessaging(
-            new JdbcBoardMessagingRepository(fixture.jdbc),
-            fixture.store,
+        new RelayMessaging(
+            new JdbcMessagingRepository(fixture.jdbc),
+            new JdbcAllowanceRepository(fixture.jdbc),
             fixture.conversations,
             fixture.firings,
-            new BoardPot(fixture.store),
+            MessageInboxFixture.inboxes(fixture),
             fixture.work,
             voice,
             (name, project) -> agents.get(name),
@@ -145,6 +243,7 @@ class BoardMessagingTest {
     tool.calledAs(call);
     String result = tool.run(arguments, context.home());
     assertTrue(result.startsWith("{"), result);
+    MessageInboxFixture.pulse(fixture);
     return JSON.readTree(result);
   }
 
@@ -160,18 +259,23 @@ class BoardMessagingTest {
     return context(instance.agent(), instance.conversation());
   }
 
+  private int firingCount() {
+    MessageInboxFixture.pulse(fixture);
+    return fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class);
+  }
+
   private FiringRecord wake(JsonNode receipt) {
+    MessageInboxFixture.pulse(fixture);
     var recipient = messages.instance(receipt.path("to").asText()).orElseThrow();
-    return fixture.firings.oldestWaiting("conversation:" + recipient.conversation()).orElseThrow();
+    return fixture.firings.oldestWaiting(RelayMessageInboxes.target(recipient)).orElseThrow();
   }
 
   private Outcome outcome(Outcome.Ending ending, String text) {
     return new Outcome(ending, text, 1, 1, "");
   }
 
-  private io.aeyer.plowshare.protocol.Incoming.Receive incoming(
-      java.util.UUID request, java.util.UUID context, String body, String command) {
-    return new io.aeyer.plowshare.protocol.Incoming.Receive(
+  private MessageIngress.Request incoming(UUID request, UUID context, String body, String command) {
+    return new MessageIngress.Request(
         "payments",
         "remote",
         "reviewer",
@@ -179,18 +283,14 @@ class BoardMessagingTest {
         context,
         body,
         command,
-        new io.aeyer.plowshare.protocol.Incoming.Source(
+        new MessageIngress.Source(
+            "test",
             request.toString(),
-            "ROLE_USER",
-            null,
-            context,
-            List.of(new io.aeyer.plowshare.protocol.Incoming.TextPart(body)),
-            command == null ? null : new io.aeyer.plowshare.protocol.Incoming.Metadata(command),
-            null,
-            null));
+            RelayPort.hash(request + "\n" + context + "\n" + body + "\n" + command)));
   }
 
   private FiringRecord incomingWake(String message) {
+    MessageInboxFixture.pulse(fixture);
     return fixture
         .firings
         .find(
@@ -200,37 +300,241 @@ class BoardMessagingTest {
   }
 
   @Test
-  void incoming_receipts_are_idempotent_and_owned_by_account_project_client() {
-    var request = incoming(java.util.UUID.randomUUID(), null, "Review", null);
-    var first = messages.receive("enzo", request);
-    assertEquals(first, messages.receive("enzo", request));
-    assertEquals("SUBMITTED", first.state());
-    assertThrows(
-        Board.Refused.class,
-        () -> messages.receive("enzo", incoming(request.requestId(), null, "Different", null)));
-    assertThrows(
-        Board.Refused.class, () -> messages.externalTask("enzo", "payments", "other", first.id()));
-    assertThrows(
-        Board.Refused.class,
-        () -> messages.externalTask("enzo", "elsewhere", "remote", first.id()));
-    assertThrows(
-        Board.Refused.class,
-        () -> messages.externalTask("other", "payments", "remote", first.id()));
-    var next =
-        messages.receive(
-            "enzo", incoming(java.util.UUID.randomUUID(), first.context(), "Next", null));
-    assertEquals(first.context(), next.context());
+  void physical_inbox_retirement_keeps_message_history_and_restores_a_fresh_topic_incarnation()
+      throws Exception {
+    var receipt = request(false);
+    String message = receipt.path("message").asText();
+    var inbox = fixture.messageInboxes.getFirst();
+    var row =
+        fixture.jdbc.queryForMap(
+            "SELECT project_id,topic FROM message_agent_inboxes WHERE agent='reviewer'");
+    var key =
+        new Relay.TopicKey(((Number) row.get("project_id")).longValue(), (String) row.get("topic"));
+    var broker =
+        new JdbcRelayRepository(
+            fixture.jdbc,
+            fixture.work,
+            new JdbcRelayPayloadStore(
+                fixture.jdbc,
+                fixture.work,
+                Duration.ofHours(1),
+                Duration.ofHours(24),
+                Duration.ofDays(30)));
+    var generation = broker.topic(key).generation();
+    messages.complete(message, outcome(Outcome.Ending.ANSWERED, "Done"));
+    inbox.retireMissing((account, project) -> Set.of("sender"));
+    assertEquals(
+        0, inbox.cleanupRetired(), "Retained publications must survive until their normal expiry");
+    broker.configureTopic(
+        key, RelayPayload.Kind.TEXT, new Relay.Policy(Duration.ofSeconds(1), null));
+    broker.prune(key, fixture.clock.get().plusSeconds(2), 100);
+    inbox.cleanupRetired(); // Advance/wrap the bounded cursor from the earlier blocked attempt.
+    inbox.cleanupRetired();
+    assertEquals(
+        0,
+        fixture.jdbc.queryForObject(
+            "SELECT count(*) FROM message_agent_inboxes WHERE agent='reviewer'", Integer.class));
+    assertEquals(
+        "Review", new JdbcMessagingRepository(fixture.jdbc).message(message).orElseThrow().body());
+    assertTrue(messages.route(message).orElseThrow().handled());
+    var restored =
+        send(caller, "{\"to\":\"reviewer\",\"body\":\"Restored\"}", "restored-after-cleanup");
+    assertEquals(receipt.path("to"), restored.path("to"));
+    assertNotEquals(generation, broker.topic(key).generation());
+    assertEquals(1, broker.topic(key).lastPosition());
+    assertEquals(0, voice.calls.size(), "Retirement never replays previously handled work");
+  }
+
+  @Test
+  void inbox_order_is_preserved_when_admission_timestamps_are_identical() throws Exception {
+    var first = request(false);
+    var second = send(caller, "{\"to\":\"reviewer\",\"body\":\"Second\"}", "second");
+    var third = send(caller, "{\"to\":\"reviewer\",\"body\":\"Third\"}", "third");
+    for (var receipt : List.of(first, second, third)) {
+      var firing = wake(first);
+      assertEquals(
+          receipt.path("message").asText(),
+          ((EventPayload.Message) firing.data()).wake().message());
+      assertTrue(fixture.firings.claimStart(firing.id(), fixture.clock.get()));
+      fixture.firings.finish(firing.id(), fixture.clock.get());
+    }
+  }
+
+  @Test
+  void removed_definitions_retire_only_after_their_pending_requests_drain() throws Exception {
+    var receipt = request(false);
+    var inbox = fixture.messageInboxes.getFirst();
+    assertEquals(0, inbox.retireMissing((account, project) -> Set.of("sender")));
+    assertFalse(
+        fixture.jdbc.queryForObject(
+            "SELECT retired_at IS NOT NULL FROM message_agent_inboxes WHERE agent='reviewer'",
+            Boolean.class));
+    messages.complete(receipt.path("message").asText(), outcome(Outcome.Ending.ANSWERED, "Done"));
+    // Reset the bounded keyset after its first pass before reconsidering the now-drained inbox.
+    inbox.retireMissing((account, project) -> Set.of("sender"));
+    inbox.retireMissing((account, project) -> Set.of("sender"));
+    assertTrue(
+        fixture.jdbc.queryForObject(
+            "SELECT retired_at IS NOT NULL FROM message_agent_inboxes WHERE agent='reviewer'",
+            Boolean.class));
+    send(caller, "{\"to\":\"reviewer\",\"body\":\"Restored\"}", "restored");
+    assertFalse(
+        fixture.jdbc.queryForObject(
+            "SELECT retired_at IS NOT NULL FROM message_agent_inboxes WHERE agent='reviewer'",
+            Boolean.class));
+  }
+
+  @Test
+  void a_failed_wake_insert_rolls_back_admission_and_cursor_then_retries_once() throws Exception {
+    var receipt =
+        messages.send(
+            caller,
+            new SendMessageTool.Request(
+                "reviewer", "body", null, false, false, "persistent", "call"),
+            caller.home());
+    String message = JSON.readTree(receipt).path("message").asText();
+    fixture.messageInboxes.clear();
+    var firings = Mockito.spy(fixture.firings);
+    Mockito.doThrow(new IllegalStateException("Wake refused"))
+        .when(firings)
+        .oweMessage(
+            ArgumentMatchers.anyString(),
+            ArgumentMatchers.anyString(),
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any());
+    var inbox = MessageInboxFixture.inboxes(fixture, fixture.drained::add, firings);
+    assertThrows(IllegalStateException.class, inbox::poll);
+    assertFalse(
+        fixture.jdbc.queryForObject(
+            "SELECT inbox_admitted FROM message_routes WHERE message=?", Boolean.class, message));
+    assertEquals(
+        0L,
+        fixture.jdbc.queryForObject(
+            "SELECT sum(seen_through) FROM relay_subscriptions WHERE subscriber='messaging.inbox'",
+            Long.class));
+    assertEquals(0, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+    Mockito.doCallRealMethod()
+        .when(firings)
+        .oweMessage(
+            ArgumentMatchers.anyString(),
+            ArgumentMatchers.anyString(),
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any());
+    MessageInboxFixture.pulse(fixture);
+    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+    assertTrue(
+        fixture.jdbc.queryForObject(
+            "SELECT inbox_admitted FROM message_routes WHERE message=?", Boolean.class, message));
+    MessageInboxFixture.pulse(fixture);
+    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+  }
+
+  @Test
+  void task_instances_reuse_one_agent_topic_but_have_independent_wakes_and_allowances()
+      throws Exception {
+    var one = send(caller, "{\"to\":\"reviewer\",\"body\":\"One\",\"lifetime\":\"task\"}", "one");
+    var two = send(caller, "{\"to\":\"reviewer\",\"body\":\"Two\",\"lifetime\":\"task\"}", "two");
+    assertNotEquals(one.path("to"), two.path("to"));
+    assertEquals(
+        1,
+        fixture.jdbc.queryForObject(
+            "SELECT count(*) FROM message_agent_inboxes WHERE agent='reviewer'", Integer.class));
+    assertEquals(
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM board_topics", Integer.class));
     assertEquals(
         2,
-        fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_instances", Integer.class));
-    assertEquals(2, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+        fixture.jdbc.queryForObject(
+            "SELECT count(DISTINCT allowance_id) FROM message_routes", Integer.class));
+    messages.start(wake(one), (conversation, outcome) -> {});
+    assertFalse(
+        messages.busy(wake(two)),
+        "Busy task instances must not delay others on the same agent topic");
+    messages.start(wake(two), (conversation, outcome) -> {});
+    assertEquals(2, voice.calls.size());
+    voice.calls.forEach(call -> call.ended().accept(outcome(Outcome.Ending.ANSWERED, "Done")));
+  }
+
+  @Test
+  void a_failed_publication_rolls_back_the_message_instance_and_allowance() {
+    var broken = Mockito.mock(MessageInboxes.class);
+    Mockito.doThrow(new IllegalStateException("Publication refused"))
+        .when(broken)
+        .publish(
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any(),
+            ArgumentMatchers.any());
+    var service =
+        new RelayMessaging(
+            new JdbcMessagingRepository(fixture.jdbc),
+            new JdbcAllowanceRepository(fixture.jdbc),
+            fixture.conversations,
+            fixture.firings,
+            broken,
+            fixture.work,
+            voice,
+            (name, project) -> agents.get(name),
+            fixture.drained::add,
+            fixture.clock);
+    int allowances =
+        fixture.jdbc.queryForObject("SELECT count(*) FROM execution_allowances", Integer.class);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            service.send(
+                caller,
+                new SendMessageTool.Request(
+                    "reviewer", "body", null, false, false, "persistent", "call"),
+                caller.home()));
+    assertEquals(
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_records", Integer.class));
+    assertEquals(
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_instances", Integer.class));
+    assertEquals(
+        allowances,
+        fixture.jdbc.queryForObject("SELECT count(*) FROM execution_allowances", Integer.class));
+  }
+
+  @Test
+  void incoming_receipts_are_idempotent_and_owned_by_account_project_client() {
+    var request = incoming(UUID.randomUUID(), null, "Review", null);
+    var first = messages.receive("enzo", request);
+    MessageInboxFixture.pulse(fixture);
+    var recovered = messages.receive("enzo", request);
+    assertEquals(first.id(), recovered.id());
+    assertEquals(first.context(), recovered.context());
+    assertEquals(first.requestId(), recovered.requestId());
+    assertEquals(first.message(), recovered.message());
+    assertEquals(first.source(), recovered.source());
+    assertEquals(first.createdAt(), recovered.createdAt());
+    assertTrue(recovered.revision() >= first.revision());
+    assertEquals("SUBMITTED", first.state());
+    assertThrows(
+        MessageRefused.class,
+        () -> messages.receive("enzo", incoming(request.requestId(), null, "Different", null)));
+    assertThrows(
+        MessageRefused.class, () -> messages.externalTask("enzo", "payments", "other", first.id()));
+    assertThrows(
+        MessageRefused.class,
+        () -> messages.externalTask("enzo", "elsewhere", "remote", first.id()));
+    assertThrows(
+        MessageRefused.class,
+        () -> messages.externalTask("other", "payments", "remote", first.id()));
+    var next = messages.receive("enzo", incoming(UUID.randomUUID(), first.context(), "Next", null));
+    assertEquals(first.context(), next.context());
+    assertEquals(
+        2, fixture.jdbc.queryForObject("SELECT count(*) FROM message_instances", Integer.class));
+    assertEquals(2, firingCount());
   }
 
   @Test
   void external_reply_is_durable_without_a_model_wake_and_retains_failure_ending()
       throws Exception {
-    var accepted =
-        messages.receive("enzo", incoming(java.util.UUID.randomUUID(), null, "Review", null));
+    var accepted = messages.receive("enzo", incoming(UUID.randomUUID(), null, "Review", null));
     var route = messages.route(accepted.message()).orElseThrow();
     var recipient = messages.instance(route.recipient()).orElseThrow();
     send(
@@ -244,19 +548,15 @@ class BoardMessagingTest {
     assertEquals(2, done.replies().size());
     assertTrue(done.replies().getLast().generated());
     assertEquals("Reached the cap", done.replies().getLast().body());
-    assertEquals(
-        1,
-        fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class),
-        "Passive return address never runs a model");
+    assertEquals(1, firingCount(), "Passive return address never runs a model");
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.cancelExternal("enzo", "payments", "remote", accepted.id()));
   }
 
   @Test
   void cancellation_fences_late_completion_and_approval_does_not_replace_the_receipt() {
-    var accepted =
-        messages.receive("enzo", incoming(java.util.UUID.randomUUID(), null, "Review", null));
+    var accepted = messages.receive("enzo", incoming(UUID.randomUUID(), null, "Review", null));
     messages.start(incomingWake(accepted.message()), (conversation, outcome) -> {});
     voice
         .calls
@@ -271,8 +571,7 @@ class BoardMessagingTest {
         messages
             .receive(
                 "enzo",
-                incoming(
-                    java.util.UUID.fromString(accepted.source().messageId()), null, "Review", null))
+                incoming(UUID.fromString(accepted.source().identity()), null, "Review", null))
             .source());
     assertEquals(
         "CANCELED", messages.cancelExternal("enzo", "payments", "remote", accepted.id()).state());
@@ -284,31 +583,30 @@ class BoardMessagingTest {
   @Test
   void only_explicit_external_commands_enter_command_binding_and_revoked_logs_refuse_reads() {
     var plain =
-        messages.receive(
-            "enzo", incoming(java.util.UUID.randomUUID(), null, "/skill:review Do it", null));
+        messages.receive("enzo", incoming(UUID.randomUUID(), null, "/skill:review Do it", null));
     messages.start(incomingWake(plain.message()), (conversation, outcome) -> {});
     assertTrue(voice.commands.isEmpty());
     assertTrue(voice.calls.getFirst().utterance().startsWith("Incoming message"));
     var bound =
-        messages.receive(
-            "enzo", incoming(java.util.UUID.randomUUID(), null, "Do it", "/skill:review"));
+        messages.receive("enzo", incoming(UUID.randomUUID(), null, "Do it", "/skill:review"));
     messages.start(incomingWake(bound.message()), (conversation, outcome) -> {});
     assertEquals(List.of("/skill:review Do it"), voice.commands);
     messages.useLogVisibility((conversation, account) -> false);
     assertThrows(
-        Board.Refused.class, () -> messages.externalTask("enzo", "payments", "remote", bound.id()));
+        MessageRefused.class,
+        () -> messages.externalTask("enzo", "payments", "remote", bound.id()));
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.cancelExternal("enzo", "payments", "remote", bound.id()));
   }
 
-  private io.aeyer.plowshare.server.archive.ProjectStore routeProjects;
+  private ProjectStore routeProjects;
 
   private Path routingWorkspace(String project) throws Exception {
     Path root = Files.createDirectories(definitions.resolve("workspaces").resolve(project));
     if (routeProjects == null) {
       routeProjects =
-          new io.aeyer.plowshare.server.archive.ProjectStore(
+          new ProjectStore(
               fixture.jdbc,
               definitions.resolve("config"),
               definitions.resolve("sampling"),
@@ -316,9 +614,7 @@ class BoardMessagingTest {
               null,
               null);
       messages.useRouting(
-          new ProjectMessageRouting(
-              routeProjects,
-              new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc)));
+          new ProjectMessageRouting(routeProjects, new JdbcProjectMembers(fixture.jdbc)));
     }
     routeProjects.define(project, root, List.of(), "enzo");
     // A fixture workspace grants no data authority merely because its creator is an admin.
@@ -328,12 +624,11 @@ class BoardMessagingTest {
     return root;
   }
 
-  private void routingManifest(String project, java.util.Map<String, Object> policy)
-      throws Exception {
+  private void routingManifest(String project, Map<String, Object> policy) throws Exception {
     Files.writeString(
         routingWorkspace(project).resolve("plowshare"),
         JSON.writeValueAsString(
-            java.util.Map.of(
+            Map.of(
                 "version",
                 1,
                 "name",
@@ -341,33 +636,26 @@ class BoardMessagingTest {
                 "routing",
                 policy,
                 "integration",
-                java.util.Map.of("enabled", true))));
+                Map.of("enabled", true))));
   }
 
-  private io.aeyer.plowshare.server.personal.PersonalSpaces personalSpaces;
+  private PersonalSpaces personalSpaces;
   private MessagingProperties personalSettings;
 
   private void personalRouting() throws Exception {
     routingWorkspace("payments");
-    var data =
-        new io.aeyer.plowshare.server.data.DataLayout(definitions.resolve("personal-data"))
-            .initialise();
+    var data = new DataLayout(definitions.resolve("personal-data")).initialise();
     personalSpaces =
-        new io.aeyer.plowshare.server.personal.PersonalSpaces(
-            new io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository(fixture.jdbc),
-            new io.aeyer.plowshare.server.archive.ArchiveConfig()
-                .unitOfWork(
-                    new org.springframework.jdbc.datasource.DataSourceTransactionManager(
-                        fixture.jdbc.getDataSource())),
+        new PersonalSpaces(
+            new JdbcPersonalSpaceRepository(fixture.jdbc),
+            new ArchiveConfig()
+                .unitOfWork(new DataSourceTransactionManager(fixture.jdbc.getDataSource())),
             data);
     personalSpaces.ensure("enzo");
     personalSettings = new MessagingProperties();
     messages.useRouting(
         new ProjectMessageRouting(
-            routeProjects,
-            new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc),
-            personalSettings,
-            personalSpaces));
+            routeProjects, new JdbcProjectMembers(fixture.jdbc), personalSettings, personalSpaces));
   }
 
   @Test
@@ -375,7 +663,7 @@ class BoardMessagingTest {
       throws Exception {
     personalRouting();
     routingWorkspace("notifications");
-    String personal = io.aeyer.plowshare.server.personal.PersonalSpaces.name("enzo");
+    String personal = PersonalSpaces.name("enzo");
     JsonNode inbound =
         send(
             caller,
@@ -423,26 +711,25 @@ class BoardMessagingTest {
             .contains("not permitted"));
     fixture.jdbc.update("INSERT INTO admins(handle,password_hash) VALUES ('bob','h')");
     personalSpaces.ensure("bob");
-    for (String address :
-        List.of("Personal:bob", io.aeyer.plowshare.server.personal.PersonalSpaces.name("bob"))) {
+    for (String address : List.of("Personal:bob", PersonalSpaces.name("bob"))) {
       String denied =
           messages
               .tool(caller)
               .run(
                   JSON.writeValueAsString(
-                      java.util.Map.of("to_project", address, "to", "reviewer", "body", "Denied")),
+                      Map.of("to_project", address, "to", "reviewer", "body", "Denied")),
                   caller.home());
       assertTrue(denied.contains("another account"), denied);
     }
     assertEquals(
-        2, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        2, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
   void personal_defaults_can_be_disabled_independently_and_explicit_qualified_routes_then_apply()
       throws Exception {
     personalRouting();
-    String personal = io.aeyer.plowshare.server.personal.PersonalSpaces.name("enzo");
+    String personal = PersonalSpaces.name("enzo");
     JsonNode first =
         send(
             caller,
@@ -481,13 +768,13 @@ class BoardMessagingTest {
     Files.writeString(
         root.resolve("plowshare"),
         JSON.writeValueAsString(
-            java.util.Map.of(
+            Map.of(
                 "version",
                 1,
                 "name",
                 "Personal:enzo",
                 "routing",
-                java.util.Map.of(
+                Map.of(
                     "acceptFrom",
                     List.of("payments"),
                     "sendTo",
@@ -499,8 +786,7 @@ class BoardMessagingTest {
         "{\"version\":1,\"routes\":[{\"name\":\"pay\",\"project\":\"payments\",\"agent\":\"reviewer\"}]}");
     routingManifest(
         "payments",
-        java.util.Map.of(
-            "acceptFrom", List.of("Personal:enzo"), "sendTo", List.of("Personal:enzo")));
+        Map.of("acceptFrom", List.of("Personal:enzo"), "sendTo", List.of("Personal:enzo")));
     send(
         caller,
         "{\"to_project\":\"Personal:enzo\",\"to\":\"reviewer\",\"body\":\"Explicit inbound\"}",
@@ -581,16 +867,15 @@ class BoardMessagingTest {
   @Test
   void cross_project_delivery_requires_both_policies_and_rechecks_revocation_before_new_sends()
       throws Exception {
-    routingManifest("payments", java.util.Map.of());
-    routingManifest("notifications", java.util.Map.of());
+    routingManifest("payments", Map.of());
+    routingManifest("notifications", Map.of());
     String args = "{\"to_project\":\"notifications\",\"to\":\"reviewer\",\"body\":\"Review\"}";
     assertTrue(messages.tool(caller).run(args, caller.home()).contains("Both projects"));
-    routingManifest("payments", java.util.Map.of("sendTo", List.of("notifications")));
+    routingManifest("payments", Map.of("sendTo", List.of("notifications")));
     assertTrue(messages.tool(caller).run(args, caller.home()).contains("Both projects"));
     assertEquals(
-        0,
-        fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_instances", Integer.class));
-    routingManifest("notifications", java.util.Map.of("acceptFrom", List.of("payments")));
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_instances", Integer.class));
+    routingManifest("notifications", Map.of("acceptFrom", List.of("payments")));
     JsonNode receipt = send(caller, args, "cross");
     var destination = messages.instance(receipt.path("to").asText()).orElseThrow();
     assertEquals("notifications", destination.project());
@@ -604,7 +889,7 @@ class BoardMessagingTest {
             .contains("\"from_project\":\"payments\""));
     assertEquals(receipt, send(caller, args, "cross"), "A retried send owes only one durable wake");
     assertEquals(receipt.path("to"), send(caller, args, "second").path("to"));
-    routingManifest("notifications", java.util.Map.of());
+    routingManifest("notifications", Map.of());
     assertTrue(messages.tool(caller).run(args, caller.home()).contains("Both projects"));
     assertTrue(
         messages
@@ -614,8 +899,8 @@ class BoardMessagingTest {
                 caller.home())
             .contains("Both projects"));
     assertEquals(
-        2, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
-    assertEquals(2, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+        2, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
+    assertEquals(2, firingCount());
   }
 
   @Test
@@ -624,9 +909,8 @@ class BoardMessagingTest {
           throws Exception {
     routingManifest(
         "payments",
-        java.util.Map.of(
-            "sendTo", List.of("notifications"), "routeFiles", List.of("routes/internal.json")));
-    routingManifest("notifications", java.util.Map.of("acceptFrom", List.of("payments")));
+        Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("routes/internal.json")));
+    routingManifest("notifications", Map.of("acceptFrom", List.of("payments")));
     Path routes =
         Files.createDirectories(routingWorkspace("payments").resolve("routes"))
             .resolve("internal.json");
@@ -647,8 +931,8 @@ class BoardMessagingTest {
     assertFalse(messages.visible(caller.conversationId(), target.conversation()));
     messages.start(wake(receipt), (conversation, outcome) -> {});
     assertEquals(target, voice.calls.getLast().instance());
-    routingManifest("payments", java.util.Map.of());
-    routingManifest("notifications", java.util.Map.of());
+    routingManifest("payments", Map.of());
+    routingManifest("notifications", Map.of());
     var receiver =
         new RunExtras.Context(
             agents.get(target.agent()),
@@ -686,8 +970,8 @@ class BoardMessagingTest {
 
   @Test
   void routing_files_are_bounded_fenced_and_cannot_expand_project_permissions() throws Exception {
-    routingManifest("payments", java.util.Map.of("routeFiles", List.of("routes.json")));
-    routingManifest("notifications", java.util.Map.of("acceptFrom", List.of("payments")));
+    routingManifest("payments", Map.of("routeFiles", List.of("routes.json")));
+    routingManifest("notifications", Map.of("acceptFrom", List.of("payments")));
     Path route = routingWorkspace("payments").resolve("routes.json");
     String valid =
         "{\"version\":1,\"routes\":[{\"name\":\"review\",\"project\":\"notifications\",\"agent\":\"reviewer\"}]}";
@@ -699,8 +983,7 @@ class BoardMessagingTest {
             .contains("Both projects"));
     routingManifest(
         "payments",
-        java.util.Map.of(
-            "sendTo", List.of("notifications"), "routeFiles", List.of("../outside.json")));
+        Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("../outside.json")));
     assertTrue(
         messages
             .tool(caller)
@@ -708,7 +991,7 @@ class BoardMessagingTest {
             .contains("relative paths"));
     routingManifest(
         "payments",
-        java.util.Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("routes.json")));
+        Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("routes.json")));
     for (String invalid :
         List.of(
             "{",
@@ -734,24 +1017,23 @@ class BoardMessagingTest {
             .run("{\"route\":\"review\",\"body\":\"Denied\"}", caller.home())
             .contains("symbolic links"));
     assertEquals(
-        0, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
     assertEquals(
-        0,
-        fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_instances", Integer.class));
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_instances", Integer.class));
   }
 
-  private void messageRoutes(List<java.util.Map<String, Object>> routes) throws Exception {
+  private void messageRoutes(List<Map<String, Object>> routes) throws Exception {
     routingManifest(
         "payments",
-        java.util.Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("routes.json")));
-    routingManifest("notifications", java.util.Map.of("acceptFrom", List.of("payments")));
+        Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("routes.json")));
+    routingManifest("notifications", Map.of("acceptFrom", List.of("payments")));
     Files.writeString(
         routingWorkspace("payments").resolve("routes.json"),
-        JSON.writeValueAsString(java.util.Map.of("version", 1, "routes", routes)));
+        JSON.writeValueAsString(Map.of("version", 1, "routes", routes)));
   }
 
-  private java.util.Map<String, Object> retainedRoute(String name) {
-    return java.util.Map.of(
+  private Map<String, Object> retainedRoute(String name) {
+    return Map.of(
         "name", name, "project", "notifications", "agent", "reviewer", "retainConversation", true);
   }
 
@@ -762,7 +1044,7 @@ class BoardMessagingTest {
         List.of(
             retainedRoute("review"),
             retainedRoute("audit"),
-            java.util.Map.of("name", "shared", "project", "notifications", "agent", "reviewer")));
+            Map.of("name", "shared", "project", "notifications", "agent", "reviewer")));
     JsonNode shared = send(caller, "{\"route\":\"shared\",\"body\":\"Shared\"}", "shared");
     JsonNode sharedAgain =
         send(caller, "{\"route\":\"shared\",\"body\":\"Shared again\"}", "shared-again");
@@ -780,20 +1062,19 @@ class BoardMessagingTest {
     messages.complete(first.path("message").asText(), outcome(Outcome.Ending.ANSWERED, "Reviewed"));
     messages.makeDefault(audit.path("to").asText(), "enzo");
     messages =
-        new BoardMessaging(
-            new JdbcBoardMessagingRepository(fixture.jdbc),
-            fixture.store,
+        new RelayMessaging(
+            new JdbcMessagingRepository(fixture.jdbc),
+            new JdbcAllowanceRepository(fixture.jdbc),
             fixture.conversations,
             fixture.firings,
-            new BoardPot(fixture.store),
+            MessageInboxFixture.inboxes(fixture),
             fixture.work,
             voice,
             (name, project) -> agents.get(name),
             fixture.drained::add,
             fixture.clock);
     messages.useRouting(
-        new ProjectMessageRouting(
-            routeProjects, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc)));
+        new ProjectMessageRouting(routeProjects, new JdbcProjectMembers(fixture.jdbc)));
     JsonNode later = send(caller, "{\"route\":\"review\",\"body\":\"Later\"}", "retained-later");
     assertEquals(first.path("to"), later.path("to"));
     assertEquals(first.path("to_conversation"), later.path("to_conversation"));
@@ -803,8 +1084,7 @@ class BoardMessagingTest {
             .path("message"));
     assertEquals(
         2,
-        fixture.jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_route_bindings", Integer.class));
+        fixture.jdbc.queryForObject("SELECT count(*) FROM message_route_bindings", Integer.class));
   }
 
   @Test
@@ -817,7 +1097,7 @@ class BoardMessagingTest {
             .id();
     messageRoutes(
         List.of(
-            java.util.Map.of(
+            Map.of(
                 "name",
                 "review",
                 "project",
@@ -826,9 +1106,9 @@ class BoardMessagingTest {
                 "reviewer",
                 "conversation",
                 target)));
-    var opened = new ArrayList<io.aeyer.plowshare.server.agents.LogStages.LogOpened>();
+    var opened = new ArrayList<LogStages.LogOpened>();
     messages.useLogStages(
-        new io.aeyer.plowshare.server.agents.LogStages() {
+        new LogStages() {
           public void opened(LogOpened event) {
             opened.add(event);
           }
@@ -870,7 +1150,7 @@ class BoardMessagingTest {
             .contains("retains its conversation"));
     messageRoutes(
         List.of(
-            java.util.Map.of(
+            Map.of(
                 "name",
                 "review",
                 "project",
@@ -895,8 +1175,7 @@ class BoardMessagingTest {
         2, fixture.jdbc.queryForObject("SELECT count(*) FROM conversations", Integer.class));
     assertEquals(
         1,
-        fixture.jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_route_bindings", Integer.class));
+        fixture.jdbc.queryForObject("SELECT count(*) FROM message_route_bindings", Integer.class));
   }
 
   @Test
@@ -913,8 +1192,7 @@ class BoardMessagingTest {
             .conversations
             .open(Home.of("notifications"), Budget.of(20), TurnCap.of(4), "enzo")
             .id();
-    fixture.conversations.moveTo(
-        archived, io.aeyer.plowshare.server.archive.ConversationLifecycle.ARCHIVED);
+    fixture.conversations.moveTo(archived, ConversationLifecycle.ARCHIVED);
     String hidden =
         fixture
             .conversations
@@ -924,7 +1202,7 @@ class BoardMessagingTest {
     for (String id : List.of(foreign, archived, hidden, caller.conversationId(), "cnv_missing")) {
       messageRoutes(
           List.of(
-              java.util.Map.of(
+              Map.of(
                   "name",
                   "review",
                   "project",
@@ -941,16 +1219,15 @@ class BoardMessagingTest {
           id);
     }
     assertEquals(
-        0, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
     messageRoutes(
-        List.of(
-            java.util.Map.of("name", "plain", "project", "notifications", "agent", "reviewer")));
+        List.of(Map.of("name", "plain", "project", "notifications", "agent", "reviewer")));
     JsonNode task =
         send(caller, "{\"route\":\"plain\",\"body\":\"Task\",\"lifetime\":\"task\"}", "task");
     String taskConversation = task.path("to_conversation").asText();
     messageRoutes(
         List.of(
-            java.util.Map.of(
+            Map.of(
                 "name",
                 "review",
                 "project",
@@ -972,7 +1249,7 @@ class BoardMessagingTest {
     for (Object retain : List.of("true", 1)) {
       messageRoutes(
           List.of(
-              java.util.Map.of(
+              Map.of(
                   "name",
                   "review",
                   "project",
@@ -989,7 +1266,7 @@ class BoardMessagingTest {
     }
     messageRoutes(
         List.of(
-            java.util.Map.of(
+            Map.of(
                 "name",
                 "review",
                 "project",
@@ -1007,10 +1284,9 @@ class BoardMessagingTest {
             .contains("not both"));
     assertEquals(
         0,
-        fixture.jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_route_bindings", Integer.class));
+        fixture.jdbc.queryForObject("SELECT count(*) FROM message_route_bindings", Integer.class));
     assertEquals(
-        0, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
@@ -1019,8 +1295,8 @@ class BoardMessagingTest {
     messageRoutes(List.of(retainedRoute("review")));
     String second =
         fixture.conversations.open(Home.of("payments"), Budget.of(20), TurnCap.of(4), "enzo").id();
-    var start = new java.util.concurrent.CountDownLatch(1);
-    try (var workers = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+    var start = new CountDownLatch(1);
+    try (var workers = Executors.newFixedThreadPool(2)) {
       var first =
           workers.submit(
               () -> {
@@ -1039,13 +1315,11 @@ class BoardMessagingTest {
               });
       start.countDown();
       assertEquals(
-          first.get(10, java.util.concurrent.TimeUnit.SECONDS).path("to"),
-          next.get(10, java.util.concurrent.TimeUnit.SECONDS).path("to"));
+          first.get(10, TimeUnit.SECONDS).path("to"), next.get(10, TimeUnit.SECONDS).path("to"));
     }
     assertEquals(
         1,
-        fixture.jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_route_bindings", Integer.class));
+        fixture.jdbc.queryForObject("SELECT count(*) FROM message_route_bindings", Integer.class));
     assertEquals(
         3, fixture.jdbc.queryForObject("SELECT count(*) FROM conversations", Integer.class));
   }
@@ -1056,7 +1330,7 @@ class BoardMessagingTest {
     messageRoutes(List.of(retainedRoute("review")));
     JsonNode first = send(caller, "{\"route\":\"review\",\"body\":\"Enzo\"}", "enzo-route");
     fixture.jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('other', 'h')");
-    var members = new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc);
+    var members = new JdbcProjectMembers(fixture.jdbc);
     members.add("payments", "other");
     members.add("notifications", "other");
     fixture.jdbc.update("UPDATE project_members SET role='CONTRIBUTOR' WHERE handle='other'");
@@ -1074,13 +1348,11 @@ class BoardMessagingTest {
     assertNotEquals(first.path("to"), second.path("to"));
     routingManifest(
         "operations",
-        java.util.Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("routes.json")));
+        Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("routes.json")));
     Files.writeString(
         routingWorkspace("operations").resolve("routes.json"),
-        JSON.writeValueAsString(
-            java.util.Map.of("version", 1, "routes", List.of(retainedRoute("review")))));
-    routingManifest(
-        "notifications", java.util.Map.of("acceptFrom", List.of("payments", "operations")));
+        JSON.writeValueAsString(Map.of("version", 1, "routes", List.of(retainedRoute("review")))));
+    routingManifest("notifications", Map.of("acceptFrom", List.of("payments", "operations")));
     String operations =
         fixture
             .conversations
@@ -1092,7 +1364,7 @@ class BoardMessagingTest {
     JsonNode third =
         send(source, "{\"route\":\"review\",\"body\":\"Operations\"}", "operations-route");
     assertNotEquals(first.path("to"), third.path("to"));
-    routingManifest("notifications", java.util.Map.of());
+    routingManifest("notifications", Map.of());
     assertTrue(
         messages
             .tool(caller)
@@ -1100,24 +1372,22 @@ class BoardMessagingTest {
             .contains("Both projects"));
     assertEquals(
         3,
-        fixture.jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_route_bindings", Integer.class));
+        fixture.jdbc.queryForObject("SELECT count(*) FROM message_route_bindings", Integer.class));
     assertEquals(
-        3, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        3, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
   void cross_project_routes_do_not_bypass_membership_accounts_or_private_client_scopes()
       throws Exception {
-    routingManifest("payments", java.util.Map.of("sendTo", List.of("notifications")));
-    routingManifest("notifications", java.util.Map.of("acceptFrom", List.of("payments")));
+    routingManifest("payments", Map.of("sendTo", List.of("notifications")));
+    routingManifest("notifications", Map.of("acceptFrom", List.of("payments")));
     fixture.jdbc.update("UPDATE admins SET server_admin = FALSE WHERE handle = 'enzo'");
     fixture.jdbc.update(
         "DELETE FROM project_members WHERE project_id = (SELECT id FROM projects WHERE name = 'notifications') AND handle = 'enzo'");
     String args = "{\"to_project\":\"notifications\",\"to\":\"reviewer\",\"body\":\"Review\"}";
     assertTrue(messages.tool(caller).run(args, caller.home()).contains("not permitted"));
-    new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc)
-        .add("notifications", "enzo");
+    new JdbcProjectMembers(fixture.jdbc).add("notifications", "enzo");
     JsonNode receipt = send(caller, args, "permitted");
     fixture.jdbc.update("INSERT INTO admins(handle,password_hash) VALUES ('other','h')");
     String foreign =
@@ -1144,14 +1414,15 @@ class BoardMessagingTest {
                 caller.home())
             .contains("not permitted"));
     assertEquals(
-        1, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        1, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
-  void a_send_is_a_private_board_record_with_a_durable_return_address_and_wake() throws Exception {
+  void a_send_is_a_messaging_record_with_a_durable_return_address_and_relay_admitted_wake()
+      throws Exception {
     JsonNode receipt = request(true);
     String id = receipt.path("message").asText();
-    assertTrue(fixture.store.message(id).isPresent());
+    assertTrue(new JdbcMessagingRepository(fixture.jdbc).message(id).isPresent());
     assertTrue(messages.owns(wake(receipt)));
     String incoming = messages.incoming(id);
     assertTrue(incoming.contains(receipt.path("from").asText()));
@@ -1163,22 +1434,26 @@ class BoardMessagingTest {
 
   @Test
   void attributedSendRetriesSurviveRestartAndDistinctStepsReuseProviderIds() throws Exception {
-    var lineage =
-        io.aeyer.plowshare.server.llm.accounting.UsageLineage.root(caller.conversationId());
-    var run = io.aeyer.plowshare.server.llm.accounting.UsageLineage.root("retained-run");
-    var base =
-        io.aeyer.plowshare.server.llm.accounting.UsageAttribution.project(
-            "enzo",
-            "1",
-            io.aeyer.plowshare.server.llm.accounting.UsageAttribution.Operation.AGENT_CHAT);
-    var firstOwner =
-        base.withExecution(
-            lineage,
-            run,
-            io.aeyer.plowshare.server.llm.accounting.UsageLineage.NONE,
-            "sender",
-            1L,
-            1L);
+    // This test owns invocation deduplication. The archive's exact run-source proof is covered
+    // separately; provide an explicit trusted source rather than treating missing history as root.
+    messages =
+        new RelayMessaging(
+            new JdbcMessagingRepository(fixture.jdbc),
+            new JdbcAllowanceRepository(fixture.jdbc),
+            fixture.conversations,
+            fixture.firings,
+            MessageInboxFixture.inboxes(fixture),
+            fixture.work,
+            voice,
+            (name, project) -> agents.get(name),
+            fixture.drained::add,
+            fixture.clock,
+            (project, owner) -> Optional.of(RelayCausation.root("fixture-run")),
+            8);
+    var lineage = UsageLineage.root(caller.conversationId());
+    var run = UsageLineage.root("retained-run");
+    var base = UsageAttribution.project("enzo", "1", UsageAttribution.Operation.AGENT_CHAT);
+    var firstOwner = base.withExecution(lineage, run, UsageLineage.NONE, "sender", 1L, 1L);
     String input = "{\"to\":\"reviewer\",\"body\":\"Review\"}";
     var tool = messages.tool(caller);
     tool.calledAs("provider-id");
@@ -1187,23 +1462,37 @@ class BoardMessagingTest {
     reconstructed.calledAs("provider-id");
     assertEquals(first, JSON.readTree(reconstructed.run(input, caller.home(), firstOwner)));
     reconstructed.calledAs("provider-id");
-    var secondOwner =
-        base.withExecution(
-            lineage,
-            run,
-            io.aeyer.plowshare.server.llm.accounting.UsageLineage.NONE,
-            "sender",
-            1L,
-            2L);
+    var secondOwner = base.withExecution(lineage, run, UsageLineage.NONE, "sender", 1L, 2L);
     JsonNode second = JSON.readTree(reconstructed.run(input, caller.home(), secondOwner));
     assertNotEquals(first.path("message"), second.path("message"));
-    assertEquals(2, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+    assertEquals(2, firingCount());
+  }
+
+  @Test
+  void attributed_send_without_exact_execution_ancestry_never_acquires_a_fresh_root()
+      throws Exception {
+    var owner =
+        UsageAttribution.project("enzo", "1", UsageAttribution.Operation.AGENT_CHAT)
+            .withExecution(
+                UsageLineage.root(caller.conversationId()),
+                UsageLineage.root("retained-run"),
+                UsageLineage.NONE,
+                "sender",
+                1L,
+                1L);
+    var tool = messages.tool(caller);
+    tool.calledAs("provider-id");
+    assertEquals(
+        "Message execution ancestry is unavailable",
+        tool.run("{\"to\":\"reviewer\",\"body\":\"Review\"}", caller.home(), owner));
+    assertEquals(
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
   void concurrentIdenticalSendsCommitOneMessageAndWake() throws Exception {
-    var start = new java.util.concurrent.CountDownLatch(1);
-    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+    var start = new CountDownLatch(1);
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
       var a =
           pool.submit(
               () -> {
@@ -1217,23 +1506,21 @@ class BoardMessagingTest {
                 return request(true);
               });
       start.countDown();
-      assertEquals(
-          a.get(10, java.util.concurrent.TimeUnit.SECONDS),
-          b.get(10, java.util.concurrent.TimeUnit.SECONDS));
+      assertEquals(a.get(10, TimeUnit.SECONDS), b.get(10, TimeUnit.SECONDS));
     }
     assertEquals(
-        1, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
-    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+        1, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
+    assertEquals(1, firingCount());
   }
 
   @Test
   void conflictingSendIdentityCannotChangeMessageWakeAllowanceOrDeadline() throws Exception {
     JsonNode first = request(true);
     String id = first.path("message").asText();
-    var before = fixture.jdbc.queryForList("SELECT message,deadline_at FROM board_message_routes");
+    var before = fixture.jdbc.queryForList("SELECT message,deadline_at FROM message_routes");
     String call =
         fixture.jdbc.queryForObject(
-            "SELECT call_id FROM board_message_routes WHERE message=?", String.class, id);
+            "SELECT call_id FROM message_routes WHERE message=?", String.class, id);
     var attempt =
         new SendMessageTool.Request(
             "reviewer",
@@ -1247,8 +1534,8 @@ class BoardMessagingTest {
     String result = messages.send(caller, attempt, Home.of("payments"));
     assertTrue(result.contains("different message arguments"), result);
     assertEquals(
-        before, fixture.jdbc.queryForList("SELECT message,deadline_at FROM board_message_routes"));
-    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+        before, fixture.jdbc.queryForList("SELECT message,deadline_at FROM message_routes"));
+    assertEquals(1, firingCount());
   }
 
   @Test
@@ -1259,8 +1546,8 @@ class BoardMessagingTest {
     JsonNode next = send(caller, "{\"to\":\"reviewer\",\"body\":\"Another\"}", "next");
     assertEquals(first.path("to"), next.path("to"));
     assertEquals(
-        2, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
-    assertEquals(2, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+        2, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
+    assertEquals(2, firingCount());
   }
 
   @Test
@@ -1288,9 +1575,9 @@ class BoardMessagingTest {
         page.stream().filter(row -> row.message().equals(original)).findFirst().orElseThrow();
     assertEquals(reply.path("message").asText(), requestRow.reply());
     assertEquals(page.subList(1, 2), messages.deliveries(sender, "enzo", 1, 1));
-    assertThrows(Board.Refused.class, () -> messages.deliveries(sender, "another-account", 0, 10));
+    assertThrows(MessageRefused.class, () -> messages.deliveries(sender, "another-account", 0, 10));
     messages.useLogVisibility((conversation, account) -> false);
-    assertThrows(Board.Refused.class, () -> messages.deliveries(sender, "enzo", 0, 10));
+    assertThrows(MessageRefused.class, () -> messages.deliveries(sender, "enzo", 0, 10));
   }
 
   @Test
@@ -1309,7 +1596,7 @@ class BoardMessagingTest {
     assertEquals(reply.path("message").asText(), messages.finalReply(original).orElseThrow());
     assertFalse(messages.route(reply.path("message").asText()).orElseThrow().generated());
     assertEquals(
-        2, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        2, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
@@ -1322,10 +1609,12 @@ class BoardMessagingTest {
         "progress");
     messages.complete(original, outcome(Outcome.Ending.TURN_CAP, "The run reached its cap."));
     String finalId = messages.finalReply(original).orElseThrow();
-    BoardMessaging.Route reply = messages.route(finalId).orElseThrow();
+    MessageService.Route reply = messages.route(finalId).orElseThrow();
     assertTrue(reply.generated());
     assertEquals("TURN_CAP", reply.ending());
-    assertEquals("The run reached its cap.", fixture.store.message(finalId).orElseThrow().body());
+    assertEquals(
+        "The run reached its cap.",
+        new JdbcMessagingRepository(fixture.jdbc).message(finalId).orElseThrow().body());
   }
 
   @Test
@@ -1353,7 +1642,12 @@ class BoardMessagingTest {
     assertTrue(call.lease().trySpend());
     call.ended().accept(outcome(Outcome.Ending.ANSWERED, "Reviewed"));
     assertTrue(messages.finalReply(request.path("message").asText()).isPresent());
-    assertEquals(1, fixture.store.topic(call.instance().topic()).orElseThrow().potSpent());
+    assertEquals(
+        1,
+        fixture.jdbc.queryForObject(
+            "SELECT sum(a.spent) FROM execution_allowances a JOIN message_routes r ON r.allowance_id=a.id WHERE r.recipient=?",
+            Integer.class,
+            call.instance().id()));
   }
 
   @Test
@@ -1370,10 +1664,9 @@ class BoardMessagingTest {
     assertTrue(messages.instance(second.path("to").asText()).orElseThrow().active());
   }
 
-  private io.aeyer.plowshare.server.approvals.RunApproval approval(
-      JsonNode receipt, String askedIn) {
+  private RunApproval approval(JsonNode receipt, String askedIn) {
     var instance = messages.instance(receipt.path("to").asText()).orElseThrow();
-    return new io.aeyer.plowshare.server.approvals.RunApproval(
+    return new RunApproval(
         "apr_message",
         1,
         instance.conversation(),
@@ -1421,9 +1714,7 @@ class BoardMessagingTest {
     assertTrue(messages.continueApproved(approval, "Allowed, run it again."));
     assertTrue(messages.continueApproved(approval, "Allowed, run it again."));
     FiringRecord continued = fixture.firings.oldestWaiting(first.target()).orElseThrow();
-    assertTrue(
-        ((io.aeyer.plowshare.server.events.EventPayload.Message) continued.data()).wake().approval()
-            != null);
+    assertTrue(((EventPayload.Message) continued.data()).wake().approval() != null);
     messages.start(continued, (conversation, outcome) -> {});
     voice.calls.getLast().ended().accept(outcome(Outcome.Ending.ANSWERED, "Approved work done"));
     assertEquals(2, voice.calls.size());
@@ -1431,7 +1722,10 @@ class BoardMessagingTest {
     assertFalse(messages.instance(request.path("to").asText()).orElseThrow().active());
     assertEquals(
         "Approved work done",
-        fixture.store.message(messages.finalReply(original).orElseThrow()).orElseThrow().body());
+        new JdbcMessagingRepository(fixture.jdbc)
+            .message(messages.finalReply(original).orElseThrow())
+            .orElseThrow()
+            .body());
   }
 
   @Test
@@ -1459,9 +1753,7 @@ class BoardMessagingTest {
     fixture.firings.startedAs(initial.id(), "job_initial");
     fixture.firings.finish(initial.id(), fixture.clock.get());
     FiringRecord continued = fixture.firings.oldestWaiting(initial.target()).orElseThrow();
-    assertTrue(
-        ((io.aeyer.plowshare.server.events.EventPayload.Message) continued.data()).wake().approval()
-            != null);
+    assertTrue(((EventPayload.Message) continued.data()).wake().approval() != null);
     assertFalse(messages.busy(continued));
     messages.start(continued, (conversation, outcome) -> {});
     voice.calls.getLast().ended().accept(outcome(Outcome.Ending.ANSWERED, "Done without command"));
@@ -1484,12 +1776,7 @@ class BoardMessagingTest {
     String child =
         fixture
             .conversations
-            .log(
-                io.aeyer.plowshare.server.archive.Origin.DELEGATION,
-                Home.of("payments"),
-                "reviewer",
-                root,
-                null)
+            .log(Origin.DELEGATION, Home.of("payments"), "reviewer", root, null)
             .id();
     voice.calls.getFirst().ended().accept(outcome(Outcome.Ending.AWAITING, "Delegate approval"));
     fixture.firings.claimStart(initial.id(), fixture.clock.get());
@@ -1507,9 +1794,7 @@ class BoardMessagingTest {
     fixture.firings.finish(continuation.id(), fixture.clock.get());
     FiringRecord report = fixture.firings.oldestWaiting(initial.target()).orElseThrow();
     assertTrue(
-        ((io.aeyer.plowshare.server.events.EventPayload.Message) report.data())
-                .wake()
-                .continuation()
+        ((EventPayload.Message) report.data()).wake().continuation()
             == MessageWake.Continuation.DELEGATE_RESULT);
     messages.start(report, (conversation, outcome) -> {});
     assertTrue(voice.calls.getLast().utterance().contains("Delegate's findings"));
@@ -1530,12 +1815,7 @@ class BoardMessagingTest {
     String child =
         fixture
             .conversations
-            .log(
-                io.aeyer.plowshare.server.archive.Origin.DELEGATION,
-                Home.of("payments"),
-                "reviewer",
-                root,
-                null)
+            .log(Origin.DELEGATION, Home.of("payments"), "reviewer", root, null)
             .id();
     assertFalse(messages.visible(child, caller.conversationId()));
     assertTrue(messages.visible(child, root));
@@ -1545,12 +1825,8 @@ class BoardMessagingTest {
 
   @Test
   void withheld_instance_rows_preserve_pagination_without_revealing_their_contents() {
-    var first =
-        messages.open(
-            "enzo", "payments", "reviewer", false, java.util.UUID.randomUUID().toString());
-    var second =
-        messages.open(
-            "enzo", "payments", "reviewer", false, java.util.UUID.randomUUID().toString());
+    var first = messages.open("enzo", "payments", "reviewer", false, UUID.randomUUID().toString());
+    var second = messages.open("enzo", "payments", "reviewer", false, UUID.randomUUID().toString());
     messages.useLogVisibility(
         (conversation, account) -> !conversation.equals(first.conversation()));
     var page = messages.listingPage("enzo", "payments", false, 0, 1);
@@ -1559,18 +1835,16 @@ class BoardMessagingTest {
     assertEquals(
         second.id(),
         messages.listingPage("enzo", "payments", false, 1, 1).instances().getFirst().id());
-    assertThrows(Board.Refused.class, () -> messages.inspect(first.id(), "enzo"));
+    assertThrows(MessageRefused.class, () -> messages.inspect(first.id(), "enzo"));
   }
 
   @Test
   void instance_opening_defaults_and_archival_are_durable_and_account_scoped() throws Exception {
-    String key = java.util.UUID.randomUUID().toString();
+    String key = UUID.randomUUID().toString();
     var first = messages.open("enzo", "payments", "reviewer", true, key);
     assertEquals(first, messages.open("enzo", "payments", "reviewer", true, key));
-    assertThrows(Board.Refused.class, () -> messages.open("enzo", "payments", "bot", true, key));
-    var second =
-        messages.open(
-            "enzo", "payments", "reviewer", false, java.util.UUID.randomUUID().toString());
+    assertThrows(MessageRefused.class, () -> messages.open("enzo", "payments", "bot", true, key));
+    var second = messages.open("enzo", "payments", "reviewer", false, UUID.randomUUID().toString());
     assertEquals(first.id(), request(false).path("to").asText());
     messages.makeDefault(second.id(), "enzo");
     assertEquals(
@@ -1579,7 +1853,7 @@ class BoardMessagingTest {
             .path("to")
             .asText());
     assertFalse(messages.inspect(first.id(), "enzo").defaultInstance());
-    assertThrows(Board.Refused.class, () -> messages.inspect(first.id(), "someone"));
+    assertThrows(MessageRefused.class, () -> messages.inspect(first.id(), "someone"));
     var archived = messages.stop(second.id(), "enzo", true);
     assertFalse(archived.active());
     assertTrue(archived.archived());
@@ -1611,7 +1885,7 @@ class BoardMessagingTest {
     assertEquals("CANCELLED", cancelled.ending());
     assertEquals(cancelled, messages.cancel(original, "enzo"));
     assertThrows(
-        Board.Refused.class,
+        MessageRefused.class,
         () -> messages.start(wakeFrom(original), (conversation, outcome) -> {}));
     messages.complete(original, outcome(Outcome.Ending.ANSWERED, "Late answer"));
     assertEquals(cancelled.reply(), messages.finalReply(original).orElseThrow());
@@ -1622,6 +1896,7 @@ class BoardMessagingTest {
   }
 
   private FiringRecord wakeFrom(String message) {
+    MessageInboxFixture.pulse(fixture);
     return fixture
         .jdbc
         .query(
@@ -1640,8 +1915,8 @@ class BoardMessagingTest {
     assertTrue(fixture.firings.claimStart(wake.id(), fixture.clock.get()));
     String job = messages.start(wake, (conversation, outcome) -> {});
     fixture.firings.startedAs(wake.id(), job);
-    List<String> cancelled = new java.util.concurrent.CopyOnWriteArrayList<>();
-    var cancellation = new java.util.concurrent.CompletableFuture<String>();
+    List<String> cancelled = new CopyOnWriteArrayList<>();
+    var cancellation = new CompletableFuture<String>();
     messages.useCancellation(
         id -> {
           cancelled.add(id);
@@ -1649,7 +1924,7 @@ class BoardMessagingTest {
         });
     var stopped = messages.stop(request.path("to").asText(), "enzo", false);
     assertFalse(stopped.active());
-    assertEquals(job, cancellation.get(5, java.util.concurrent.TimeUnit.SECONDS));
+    assertEquals(job, cancellation.get(5, TimeUnit.SECONDS));
     assertEquals(List.of(job), cancelled);
     voice.calls.getFirst().ended().accept(outcome(Outcome.Ending.ANSWERED, "Late result"));
     assertEquals("stopped", messages.delivery(original, "enzo").state());
@@ -1664,7 +1939,7 @@ class BoardMessagingTest {
     assertEquals(
         1,
         fixture.jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_routes WHERE reply_to = ? AND final",
+            "SELECT count(*) FROM message_routes WHERE reply_to = ? AND final",
             Integer.class,
             original));
     assertTrue(
@@ -1685,8 +1960,8 @@ class BoardMessagingTest {
     voice.calls.getFirst().ended().accept(outcome(Outcome.Ending.AWAITING, "Question"));
     assertNotNull(messages.delivery(original, "enzo").deadlineAt());
     fixture.jdbc.update(
-        "UPDATE board_message_routes SET deadline_at = ? WHERE message = ?",
-        java.sql.Timestamp.from(fixture.clock.get().minusSeconds(1)),
+        "UPDATE message_routes SET deadline_at = ? WHERE message = ?",
+        Timestamp.from(fixture.clock.get().minusSeconds(1)),
         original);
     messages.expire();
     messages.expire();
@@ -1695,7 +1970,7 @@ class BoardMessagingTest {
     assertEquals(
         1,
         fixture.jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_routes WHERE reply_to = ? AND final",
+            "SELECT count(*) FROM message_routes WHERE reply_to = ? AND final",
             Integer.class,
             original));
   }
@@ -1709,11 +1984,8 @@ class BoardMessagingTest {
     messages.useLimits(limits);
     JsonNode request = request(false);
     int potBefore =
-        fixture
-            .store
-            .topic(messages.instance(request.path("to").asText()).orElseThrow().topic())
-            .orElseThrow()
-            .potTotal();
+        fixture.jdbc.queryForObject(
+            "SELECT coalesce(sum(call_limit),0) FROM execution_allowances", Integer.class);
     String refused =
         messages
             .tool(caller)
@@ -1721,13 +1993,10 @@ class BoardMessagingTest {
     assertTrue(refused.contains("queue is full"), refused);
     assertEquals(
         potBefore,
-        fixture
-            .store
-            .topic(messages.instance(request.path("to").asText()).orElseThrow().topic())
-            .orElseThrow()
-            .potTotal());
+        fixture.jdbc.queryForObject(
+            "SELECT coalesce(sum(call_limit),0) FROM execution_allowances", Integer.class));
     int instances =
-        fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_instances", Integer.class);
+        fixture.jdbc.queryForObject("SELECT count(*) FROM message_instances", Integer.class);
     refused =
         messages
             .tool(caller)
@@ -1737,9 +2006,9 @@ class BoardMessagingTest {
     assertTrue(refused.contains("size limit"), refused);
     assertEquals(
         instances,
-        fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_instances", Integer.class));
+        fixture.jdbc.queryForObject("SELECT count(*) FROM message_instances", Integer.class));
     assertEquals(
-        1, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        1, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
@@ -1755,9 +2024,8 @@ class BoardMessagingTest {
     assertTrue(refusal.contains("Only the recipient"), refusal);
     AgentTool read =
         new AgentTool() {
-          public io.aeyer.plowshare.server.llm.dispatch.ToolSchema schema() {
-            return io.aeyer.plowshare.server.llm.dispatch.ToolSchema.from(
-                "conversation_trajectory", "test", java.util.Map.of());
+          public ToolSchema schema() {
+            return ToolSchema.from("conversation_trajectory", "test", Map.of());
           }
 
           public String run(String arguments, Home home) {
@@ -1790,7 +2058,7 @@ class BoardMessagingTest {
             .orElseThrow()
             .ending());
     assertEquals(
-        2, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        2, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
@@ -1804,9 +2072,7 @@ class BoardMessagingTest {
     fixture.firings.startedAs(first.id(), "job_initial");
     fixture.firings.finish(first.id(), fixture.clock.get());
     var receiver = messages.instance(request.path("to").asText()).orElseThrow();
-    var approvals =
-        new io.aeyer.plowshare.server.approvals.RunApprovalStore(
-            fixture.jdbc, () -> java.time.Instant.now().plusSeconds(1));
+    var approvals = new RunApprovalStore(fixture.jdbc, () -> Instant.now().plusSeconds(1));
     messages.useApprovals(approvals);
     long project =
         fixture.jdbc.queryForObject(
@@ -1863,7 +2129,7 @@ class BoardMessagingTest {
     assertEquals(
         "UNAVAILABLE", messages.route(request.path("message").asText()).orElseThrow().ending());
     assertEquals(
-        2, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        2, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
   }
 
   @Test
@@ -1872,7 +2138,7 @@ class BoardMessagingTest {
     messages.useLogVisibility(
         (conversation, account) -> !conversation.equals(recipient(request).conversationId()));
     assertThrows(
-        Board.Refused.class, () -> messages.cancel(request.path("message").asText(), "enzo"));
+        MessageRefused.class, () -> messages.cancel(request.path("message").asText(), "enzo"));
     assertFalse(messages.route(request.path("message").asText()).orElseThrow().handled());
     assertTrue(messages.finalReply(request.path("message").asText()).isEmpty());
   }
@@ -1903,7 +2169,12 @@ class BoardMessagingTest {
     for (int i = 0; i < 8; i++) assertTrue(second.lease().trySpend());
     assertFalse(second.lease().trySpend());
     second.ended().accept(outcome(Outcome.Ending.ANSWERED, "Done"));
-    assertEquals(16, fixture.store.topic(call.instance().topic()).orElseThrow().potSpent());
+    assertEquals(
+        16,
+        fixture.jdbc.queryForObject(
+            "SELECT sum(a.spent) FROM execution_allowances a JOIN message_routes r ON r.allowance_id=a.id WHERE r.recipient=?",
+            Integer.class,
+            call.instance().id()));
   }
 
   @Test
@@ -1941,7 +2212,54 @@ class BoardMessagingTest {
             .run("{\"to\":\"reviewer\",\"body\":\"Hello\"}", Home.of("payments"));
     assertTrue(denied.contains("not in the sending project"), denied);
     assertEquals(
-        1, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        1, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
+  }
+
+  @Test
+  void committed_send_admits_immediately_but_never_before_the_outer_transaction_commits()
+      throws Exception {
+    var hinted = new CountDownLatch(1);
+    var drained = new CountDownLatch(1);
+    var hint = new AtomicReference<MessageInboxRepository.Inbox>();
+    var transport =
+        MessageInboxFixture.inboxes(
+            fixture,
+            target -> drained.countDown(),
+            fixture.firings,
+            inbox -> {
+              hint.set(inbox);
+              hinted.countDown();
+            });
+    var engine =
+        new RelayMessaging(
+            new JdbcMessagingRepository(fixture.jdbc),
+            new JdbcAllowanceRepository(fixture.jdbc),
+            fixture.conversations,
+            fixture.firings,
+            transport,
+            fixture.work,
+            voice,
+            (name, project) -> agents.get(name),
+            fixture.drained::add,
+            fixture.clock);
+    fixture.work.inTransaction(
+        () -> {
+          engine.tool(caller).run("{\"to\":\"reviewer\",\"body\":\"Hello\"}", caller.home());
+          assertEquals(1, hinted.getCount(), "The hint must wait for the owning send commit");
+          assertEquals(
+              0, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+          assertEquals(0, voice.calls.size());
+          return null;
+        });
+    assertTrue(hinted.await(2, TimeUnit.SECONDS), "A committed send must signal without discovery");
+    // Execute the queued hint as the production worker does, without running a periodic scan.
+    assertEquals(1, transport.poll(hint.get()));
+    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+    assertTrue(drained.await(2, TimeUnit.SECONDS));
+    assertEquals(
+        0,
+        voice.calls.size(),
+        "Admission queues native work rather than directly invoking inference");
   }
 
   @Test
@@ -1957,13 +2275,12 @@ class BoardMessagingTest {
                   throw new IllegalStateException("rollback");
                 }));
     assertEquals(
-        0, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
     assertEquals(
-        0,
-        fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_instances", Integer.class));
+        0, fixture.jdbc.queryForObject("SELECT count(*) FROM message_instances", Integer.class));
     assertEquals(
         0, fixture.jdbc.queryForObject("SELECT count(*) FROM board_topics", Integer.class));
-    assertEquals(0, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+    assertEquals(0, firingCount());
     assertTrue(fixture.drained.isEmpty());
   }
 
@@ -1972,8 +2289,8 @@ class BoardMessagingTest {
       throws Exception {
     JsonNode receipt = request(true);
     String original = receipt.path("message").asText();
-    var start = new java.util.concurrent.CountDownLatch(1);
-    try (var workers = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+    var start = new CountDownLatch(1);
+    try (var workers = Executors.newFixedThreadPool(2)) {
       var explicit =
           workers.submit(
               () -> {
@@ -1992,14 +2309,14 @@ class BoardMessagingTest {
                 return true;
               });
       start.countDown();
-      String result = explicit.get(10, java.util.concurrent.TimeUnit.SECONDS);
+      String result = explicit.get(10, TimeUnit.SECONDS);
       assertTrue(result.startsWith("{") || result.contains("already has a final reply"), result);
-      assertTrue(fallback.get(10, java.util.concurrent.TimeUnit.SECONDS));
+      assertTrue(fallback.get(10, TimeUnit.SECONDS));
     }
     assertTrue(messages.finalReply(original).isPresent());
     assertEquals(
-        2, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
-    assertEquals(2, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+        2, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
+    assertEquals(2, firingCount());
   }
 
   @Test
@@ -2010,9 +2327,8 @@ class BoardMessagingTest {
     for (String name : List.of("conversation_search", "conversation_list")) {
       AgentTool underlying =
           new AgentTool() {
-            public io.aeyer.plowshare.server.llm.dispatch.ToolSchema schema() {
-              return io.aeyer.plowshare.server.llm.dispatch.ToolSchema.from(
-                  name, "test", java.util.Map.of());
+            public ToolSchema schema() {
+              return ToolSchema.from(name, "test", Map.of());
             }
 
             public String run(String arguments, Home home) {
@@ -2044,8 +2360,7 @@ class BoardMessagingTest {
     String original = receipt.path("message").asText();
     messages.useLineage(
         (sender, recipient) -> {
-          throw new io.aeyer.plowshare.server.faults.NotFoundFault(
-              "log inputs are unavailable to this account");
+          throw new NotFoundFault("log inputs are unavailable to this account");
         });
     messages.complete(original, outcome(Outcome.Ending.ANSWERED, "Restricted result"));
     messages.recover();
@@ -2053,8 +2368,8 @@ class BoardMessagingTest {
     assertEquals("UNAVAILABLE", messages.route(original).orElseThrow().ending());
     assertTrue(messages.finalReply(original).isEmpty());
     assertEquals(
-        1, fixture.jdbc.queryForObject("SELECT count(*) FROM board_message_routes", Integer.class));
-    assertEquals(1, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+        1, fixture.jdbc.queryForObject("SELECT count(*) FROM message_routes", Integer.class));
+    assertEquals(1, firingCount());
     assertEquals(0, voice.calls.size());
   }
 
@@ -2065,13 +2380,7 @@ class BoardMessagingTest {
     String child =
         fixture
             .conversations
-            .log(
-                io.aeyer.plowshare.server.archive.Origin.DELEGATION,
-                parent.home(),
-                "sender",
-                parent.conversationId(),
-                null,
-                "enzo")
+            .log(Origin.DELEGATION, parent.home(), "sender", parent.conversationId(), null, "enzo")
             .id();
     assertEquals(messages.share(parent), messages.share(context("sender", child)));
   }
@@ -2085,36 +2394,31 @@ class BoardMessagingTest {
     agents = AgentRegistry.of(definitions, Set.of("send_message"));
     JsonNode receipt = request(false);
     var extras =
-        new BoardRunExtras(
-            fixture.store, fixture.board(BoardFixture.TWO), fixture.conversations, messages);
+        new BoardRunExtras(fixture.store, fixture.board(BoardFixture.TWO), fixture.conversations);
     List<String> names =
         extras.forRun(recipient(receipt)).tools().stream().map(t -> t.schema().name()).toList();
-    assertEquals(List.of("send_message", "board_open", "board_swarm_types"), names);
+    assertEquals(List.of("board_open", "board_swarm_types"), names);
     assertFalse(names.contains("board_read"));
     assertFalse(names.contains("board_post"));
   }
 
-  @org.junit.jupiter.params.ParameterizedTest
-  @org.junit.jupiter.params.provider.ValueSource(
-      strings = {"local", "server", "personal", "retained", "conversation"})
+  @ParameterizedTest
+  @ValueSource(strings = {"local", "server", "personal", "retained", "conversation"})
   void the_real_dispatcher_and_turn_loop_deliver_an_explicit_reply_and_wake_the_caller(
       String routeKind) throws Exception {
     boolean crossProject = !routeKind.equals("local");
     boolean personalRoute = routeKind.equals("personal");
     boolean pinnedRoute = routeKind.equals("retained") || routeKind.equals("conversation");
-    var calls = new java.util.concurrent.atomic.AtomicInteger();
-    var sawPriorHistory = new java.util.concurrent.atomic.AtomicBoolean();
+    var calls = new AtomicInteger();
+    var sawPriorHistory = new AtomicBoolean();
     var transport =
-        new io.aeyer.plowshare.server.llm.dispatch.LlmTransport() {
+        new LlmTransport() {
           public String poolName() {
             return "test";
           }
 
-          public io.aeyer.plowshare.server.llm.dispatch.Completion complete(
-              String model,
-              List<io.aeyer.plowshare.server.llm.dispatch.ChatMessage> history,
-              io.aeyer.plowshare.server.llm.dispatch.Sampling sampling,
-              List<io.aeyer.plowshare.server.llm.dispatch.ToolSchema> tools) {
+          public Completion complete(
+              String model, List<ChatMessage> history, Sampling sampling, List<ToolSchema> tools) {
             calls.incrementAndGet();
             var last = history.getLast();
             if (last.content().contains("\"body\":\"Review\"")) {
@@ -2127,107 +2431,95 @@ class BoardMessagingTest {
                     JSON.readTree(last.content().substring(last.content().indexOf('\n') + 1));
                 String args =
                     JSON.writeValueAsString(
-                        java.util.Map.of(
+                        Map.of(
                             "reply_to",
                             incoming.path("id").asText(),
                             "body",
                             "Reviewed explicitly",
                             "final",
                             true));
-                return new io.aeyer.plowshare.server.llm.dispatch.Completion(
+                return new Completion(
                     "",
                     "tool_calls",
-                    io.aeyer.plowshare.server.llm.dispatch.TokenUsage.UNKNOWN,
-                    List.of(
-                        new io.aeyer.plowshare.protocol.ToolCall("reply-1", "send_message", args)));
+                    TokenUsage.UNKNOWN,
+                    List.of(new ToolCall("reply-1", "send_message", args)));
               } catch (Exception failure) {
                 throw new IllegalStateException(failure);
               }
             }
-            return new io.aeyer.plowshare.server.llm.dispatch.Completion(
-                "Handled",
-                "stop",
-                io.aeyer.plowshare.server.llm.dispatch.TokenUsage.UNKNOWN,
-                List.of());
+            return new Completion("Handled", "stop", TokenUsage.UNKNOWN, List.of());
           }
 
-          public io.aeyer.plowshare.server.llm.dispatch.Completion stream(
+          public Completion stream(
               String model,
-              List<io.aeyer.plowshare.server.llm.dispatch.ChatMessage> history,
-              io.aeyer.plowshare.server.llm.dispatch.Sampling sampling,
-              List<io.aeyer.plowshare.server.llm.dispatch.ToolSchema> tools,
-              io.aeyer.plowshare.server.llm.dispatch.Deltas sink,
-              java.util.function.BooleanSupplier cancelled) {
+              List<ChatMessage> history,
+              Sampling sampling,
+              List<ToolSchema> tools,
+              Deltas sink,
+              BooleanSupplier cancelled) {
             return complete(model, history, sampling, tools);
           }
 
-          public io.aeyer.plowshare.server.llm.dispatch.Embeddings embed(
-              String model, List<String> input) {
+          public Embeddings embed(String model, List<String> input) {
             throw new UnsupportedOperationException();
           }
 
           public void close() {}
         };
     var pool =
-        new io.aeyer.plowshare.server.llm.dispatch.LlmPool(
+        new LlmPool(
             "test",
             List.of("wire"),
-            java.util.Map.of("test", "wire"),
+            Map.of("test", "wire"),
             2,
             1,
-            java.time.Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
             transport,
             Set.of());
-    var llm =
-        new io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher(
-            List.of(pool), new io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger());
+    var llm = new LlmDispatcher(List.of(pool), new NoOpTokenLedger());
     var runtime = new JobRuntime(llm, List.of());
     JobStore jobs = new JobStore(runtime);
     try {
-      var turns = new io.aeyer.plowshare.server.archive.TurnStore(fixture.jdbc);
-      var entries = new io.aeyer.plowshare.server.archive.EntryStore(fixture.jdbc);
+      var turns = new TurnStore(fixture.jdbc);
+      var entries = new EntryStore(fixture.jdbc);
       var compaction =
           new Compaction(
               llm,
               () -> agents.get("reviewer"),
               turns,
-              new io.aeyer.plowshare.server.archive.CompactionStore(fixture.jdbc),
+              new CompactionStore(fixture.jdbc),
               entries,
               1_000_000);
       var turn = new Turn(jobs, fixture.conversations, turns, compaction);
       var dispatcher =
-          new io.aeyer.plowshare.server.events.Dispatcher(
+          new Dispatcher(
               fixture.firings,
-              new io.aeyer.plowshare.server.events.JdbcTriggerStore(fixture.jdbc),
-              new io.aeyer.plowshare.server.events.Dispatcher.Runner() {
-                public boolean busy(io.aeyer.plowshare.server.events.TriggerRecord trigger) {
+              new JdbcTriggerStore(fixture.jdbc),
+              new Dispatcher.Runner() {
+                public boolean busy(TriggerRecord trigger) {
                   return false;
                 }
 
                 public String start(
-                    io.aeyer.plowshare.server.events.TriggerRecord trigger,
-                    String utterance,
-                    java.util.function.BiConsumer<String, Outcome> ended) {
+                    TriggerRecord trigger, String utterance, BiConsumer<String, Outcome> ended) {
                   throw new AssertionError("No trigger expected");
                 }
               },
-              new io.aeyer.plowshare.server.events.Inbox(
-                  new io.aeyer.plowshare.server.events.JdbcInboxStore(fixture.jdbc),
-                  io.aeyer.plowshare.server.events.AccountPushes.NONE,
-                  fixture.clock),
+              new Inbox(new JdbcInboxStore(fixture.jdbc), AccountPushes.NONE, fixture.clock),
               fixture.clock);
+      fixture.messageInboxes.clear();
       messages =
-          new BoardMessaging(
-              new JdbcBoardMessagingRepository(fixture.jdbc),
-              fixture.store,
+          new RelayMessaging(
+              new JdbcMessagingRepository(fixture.jdbc),
+              new JdbcAllowanceRepository(fixture.jdbc),
               fixture.conversations,
               fixture.firings,
-              new BoardPot(fixture.store),
+              MessageInboxFixture.inboxes(fixture, dispatcher::drain),
               fixture.work,
-              new BoardMessaging.Voice() {
+              new MessageService.Voice() {
                 @Override
                 public String speakFrom(
-                    BoardMessaging.Instance instance,
+                    MessageService.Instance instance,
                     AgentDefinition definition,
                     String utterance,
                     Budget lease,
@@ -2251,7 +2543,7 @@ class BoardMessagingTest {
                 }
 
                 public String speak(
-                    BoardMessaging.Instance instance,
+                    MessageService.Instance instance,
                     AgentDefinition definition,
                     String utterance,
                     Budget lease,
@@ -2271,28 +2563,31 @@ class BoardMessagingTest {
               dispatcher::drain,
               fixture.clock);
       runtime.useMessaging(messages);
-      var runHomes = new java.util.concurrent.CopyOnWriteArrayList<Home>();
+      var runHomes = new CopyOnWriteArrayList<Home>();
       runtime.useRunExtras(
           c -> {
             runHomes.add(c.home());
             return new RunExtras.Extras(List.of(messages.tool(c)), c.end(), false);
           });
       dispatcher.useWakes(messages);
-      turn.whenFree(c -> dispatcher.drain("conversation:" + c));
+      turn.whenFree(
+          c -> {
+            dispatcher.drain("conversation:" + c);
+            messages.whenFree(c);
+          });
       if (crossProject) {
         if (personalRoute) {
           personalRouting();
-          routingManifest("payments", java.util.Map.of("routeFiles", List.of("routes.json")));
+          routingManifest("payments", Map.of("routeFiles", List.of("routes.json")));
         } else {
           routingManifest(
               "payments",
-              java.util.Map.of(
-                  "sendTo", List.of("notifications"), "routeFiles", List.of("routes.json")));
-          routingManifest("notifications", java.util.Map.of("acceptFrom", List.of("payments")));
+              Map.of("sendTo", List.of("notifications"), "routeFiles", List.of("routes.json")));
+          routingManifest("notifications", Map.of("acceptFrom", List.of("payments")));
         }
         var configured =
-            new java.util.LinkedHashMap<String, Object>(
-                java.util.Map.of(
+            new LinkedHashMap<String, Object>(
+                Map.of(
                     "name",
                     "review",
                     "project",
@@ -2309,7 +2604,7 @@ class BoardMessagingTest {
                   .id());
         Files.writeString(
             routingWorkspace("payments").resolve("routes.json"),
-            JSON.writeValueAsString(java.util.Map.of("version", 1, "routes", List.of(configured))));
+            JSON.writeValueAsString(Map.of("version", 1, "routes", List.of(configured))));
       }
       JsonNode receipt =
           crossProject
@@ -2318,13 +2613,13 @@ class BoardMessagingTest {
                   "{\"route\":\"review\",\"body\":\"Review\",\"reply_expected\":true}",
                   "request")
               : request(true);
-      long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
       while (fixture.jdbc.queryForObject(
-              "SELECT count(*) FROM firings WHERE status = 'queued'"
-                  + " OR (status = 'started' AND finished_at IS NULL)",
+              "SELECT (SELECT count(*) FROM firings WHERE status = 'queued' OR (status = 'started' AND finished_at IS NULL)) + (SELECT count(*) FROM message_routes WHERE runnable AND handled_at IS NULL)",
               Integer.class)
           != 0) {
         assertTrue(System.nanoTime() < deadline, "Message wakes did not finish");
+        MessageInboxFixture.pulse(fixture);
         Thread.sleep(20);
       }
       var reply =
@@ -2337,21 +2632,25 @@ class BoardMessagingTest {
               "Calls: "
                   + calls.get()
                   + "; reply: "
-                  + fixture.store.message(reply.message()).orElseThrow().body()
+                  + new JdbcMessagingRepository(fixture.jdbc)
+                      .message(reply.message())
+                      .orElseThrow()
+                      .body()
                   + "; entries: "
                   + fixture.jdbc.queryForList(
                       "SELECT kind,content FROM entries ORDER BY recorded_at"));
       assertEquals(
-          "Reviewed explicitly", fixture.store.message(reply.message()).orElseThrow().body());
+          "Reviewed explicitly",
+          new JdbcMessagingRepository(fixture.jdbc).message(reply.message()).orElseThrow().body());
       assertEquals(
           3, calls.get(), "Reviewer makes a tool call and ends; the original sender wakes once");
-      assertEquals(2, fixture.jdbc.queryForObject("SELECT count(*) FROM firings", Integer.class));
+      assertEquals(2, firingCount());
       assertEquals(1, turns.forConversation(caller.conversationId()).size());
       assertTrue(
           runHomes.contains(
               Home.of(
                   personalRoute
-                      ? io.aeyer.plowshare.server.personal.PersonalSpaces.name("enzo")
+                      ? PersonalSpaces.name("enzo")
                       : crossProject ? "notifications" : "payments")));
       assertEquals(
           Home.of("payments"),
@@ -2361,7 +2660,7 @@ class BoardMessagingTest {
       var trajectory = entries.pageOfLog(delivery.conversation(), 0, 100).listed();
       var incoming =
           trajectory.stream()
-              .filter(row -> row.kind() == io.aeyer.plowshare.server.agents.EntryKind.UTTERANCE)
+              .filter(row -> row.kind() == EntryKind.UTTERANCE)
               .findFirst()
               .orElseThrow();
       assertEquals(Speaker.message(delivery.message()), incoming.speaker());
@@ -2375,13 +2674,13 @@ class BoardMessagingTest {
                 "{\"route\":\"review\",\"body\":\"Review\",\"reply_expected\":true}",
                 "request-later");
         assertEquals(receipt.path("to_conversation"), later.path("to_conversation"));
-        deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
+        deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
         while (fixture.jdbc.queryForObject(
-                "SELECT count(*) FROM firings WHERE status = 'queued'"
-                    + " OR (status = 'started' AND finished_at IS NULL)",
+                "SELECT (SELECT count(*) FROM firings WHERE status = 'queued' OR (status = 'started' AND finished_at IS NULL)) + (SELECT count(*) FROM message_routes WHERE runnable AND handled_at IS NULL)",
                 Integer.class)
             != 0) {
           assertTrue(System.nanoTime() < deadline, "Later retained message wakes did not finish");
+          MessageInboxFixture.pulse(fixture);
           Thread.sleep(20);
         }
         assertFalse(
@@ -2403,15 +2702,13 @@ class BoardMessagingTest {
   @Test
   void scheduledMessagingReusesRoutesAndDeduplicatesTheSameFiring() {
     var work =
-        new io.aeyer.plowshare.protocol.ScheduledWork(
+        new ScheduledWork(
             1,
             "0 0 9 * * *",
             "UTC",
             false,
-            new io.aeyer.plowshare.protocol.ScheduledWork.Action(
-                "skill", "reviewer", "review", "Exact arguments", null),
-            new io.aeyer.plowshare.protocol.ScheduledWork.Target(
-                "message", null, null, "reviewer", null),
+            new ScheduledWork.Action("skill", "reviewer", "review", "Exact arguments", null),
+            new ScheduledWork.Target("message", null, null, "reviewer", null),
             null);
     var first = messages.receiveScheduled("enzo", "payments", "schedule-one", "firing-one", work);
     var repeated =

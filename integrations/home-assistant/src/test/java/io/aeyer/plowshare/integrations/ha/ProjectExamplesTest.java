@@ -1,11 +1,22 @@
 package io.aeyer.plowshare.integrations.ha;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.integrations.*;
-import io.aeyer.plowshare.server.agents.*;
+import io.aeyer.plowshare.integrations.Configuration;
+import io.aeyer.plowshare.integrations.IntegrationContracts;
+import io.aeyer.plowshare.integrations.ScriptHost;
+import io.aeyer.plowshare.server.agents.AgentRegistry;
+import io.aeyer.plowshare.server.agents.ApplicationPolicy;
+import io.aeyer.plowshare.server.agents.DefinitionSource;
+import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
+import io.aeyer.plowshare.server.agents.OrchestrationRegistry;
+import io.aeyer.plowshare.server.agents.SkillDefinition;
+import io.aeyer.plowshare.server.agents.WorkspaceApplicationPolicy;
 import io.aeyer.plowshare.server.archive.ProjectRole;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.Set;
@@ -27,7 +38,7 @@ class ProjectExamplesTest {
     assertTrue(boundary.limit("ungranted", Optional.of(ProjectRole.MANAGER)).isEmpty());
     assertFalse(Files.exists(application.resolve("plowshare")));
     Path definitions = application;
-    Set<String> tools = Set.of("outgoing_peers", "outgoing_send", "outgoing_read");
+    Set<String> tools = Set.of("relay_publish");
     AgentRegistry agents = AgentRegistry.of(definitions.resolve("agents"), tools, Set.of());
     assertTrue(agents.disabled().isEmpty(), agents.disabled().toString());
     assertEquals(Set.of("house_coordinator"), agents.names());
@@ -58,9 +69,8 @@ class ProjectExamplesTest {
             .evaluate(
                 Files.readString(examples.resolve("office.mjs")),
                 "",
-                new io.aeyer.plowshare.integrations.IntegrationContracts.EventEnvelope(
-                    new io.aeyer.plowshare.integrations.IntegrationContracts.Empty()),
-                io.aeyer.plowshare.integrations.IntegrationContracts.ScriptContext.empty())
+                new IntegrationContracts.EventEnvelope(new IntegrationContracts.Empty()),
+                IntegrationContracts.ScriptContext.empty())
             .effects()
             .size());
   }

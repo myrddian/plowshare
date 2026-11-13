@@ -67,3 +67,17 @@ requires fresh login. Cancellation and failed persistence never authorize replay
 an unproven final write retains its lock. Never steal stale locks. Service
 credentials remain explicit and never fall back to a human login. Application
 recovery keeps original UUIDs and payloads. See [the native auth contract](../../docs/decisions/0036-native-sdk-shared-login.md).
+
+## Relay binary transfers
+
+Dispose `RelayBlobs` after use. Its constructor requires the HTTP(S) origin and
+caller bearer, with an optional timeout (60 seconds by default, maximum five
+minutes). `PublishAsync(RelayBlobPublishDto, ReadOnlyMemory<byte>, token)`
+snapshots and submits bytes once; `ReadAsync(RelayBlobReadDto,
+RelayBlobDescriptorDto, token)` returns verified bytes.
+
+The helpers refuse redirects, credential renewal and replay. Keep the caller
+request UUID and original bytes for reconciliation. Cancellation after submission
+raises `RequestCancelledException` with unknown delivery; invalid receipts or
+bytes raise `TransportException` with `InvalidResponse`. See
+[binary HTTP delivery](../../docs/relay-blobs.md).

@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.server.faults.NotFoundFault;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -74,11 +76,10 @@ public final class InformationJobs implements InformationLogAccess {
   /** Operation-scoped decisions for one account; not thread-safe and not a cache. */
   public final class Listing {
     private final String account;
-    private final java.util.Map<InformationContext.Selection, Optional<InformationContext>>
-        contexts = new java.util.HashMap<>();
-    private final java.util.Map<JobInformationRepository.Input, Boolean> inputs =
-        new java.util.HashMap<>();
-    private final java.util.Map<String, Boolean> logs = new java.util.HashMap<>();
+    private final Map<InformationContext.Selection, Optional<InformationContext>> contexts =
+        new HashMap<>();
+    private final Map<JobInformationRepository.Input, Boolean> inputs = new HashMap<>();
+    private final Map<String, Boolean> logs = new HashMap<>();
 
     private Listing(String account) {
       this.account = account;

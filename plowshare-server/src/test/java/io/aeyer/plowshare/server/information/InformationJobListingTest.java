@@ -1,11 +1,19 @@
 package io.aeyer.plowshare.server.information;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
+import io.aeyer.plowshare.server.faults.NotFoundFault;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -64,9 +72,7 @@ class InformationJobListingTest {
     when(repository.inputs("blocked")).thenReturn(inputs(List.of(open, restricted)));
     when(repository.inputs("also-blocked")).thenReturn(inputs(List.of(restricted)));
     when(members.role("application", "reader")).thenReturn(Optional.of(ProjectRole.VIEWER));
-    doThrow(new io.aeyer.plowshare.server.faults.NotFoundFault("hidden"))
-        .when(catalogue)
-        .requireReadable(any(), eq(restricted));
+    doThrow(new NotFoundFault("hidden")).when(catalogue).requireReadable(any(), eq(restricted));
 
     var listing = jobs.listing("reader");
     assertTrue(listing.allowed("readable"));

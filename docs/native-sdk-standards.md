@@ -2,7 +2,7 @@
 
 Python, Go and .NET follow [coding standards](coding-standards.md). Their public
 contracts are generated from the same request, response and notification graph as
-the TypeScript SDK. `scripts/generate-sdk-contracts.mjs` owns generation; never
+the TypeScript SDK, including the explicit Relay binary HTTP DTO roots. `scripts/generate-sdk-contracts.mjs` owns generation; never
 edit generated DTOs, catalogs or schema resources by hand.
 
 ## Public contracts
@@ -11,7 +11,7 @@ Every registered operation pairs a concrete request DTO with its result DTO.
 Python accepts generated `Request[T]` instances and returns `Reply[T]`. Go exposes
 an operation method taking its request struct and returning `Reply[Result]`.
 .NET exposes an operation extension taking its request record and returning
-`Reply<Result>`. Public operation and notification APIs must not expose JSON DOMs,
+`Reply<Result>`. Public WebSocket operation and notification APIs must not expose JSON DOMs,
 raw bytes, arbitrary dictionaries, `Any`/`object` payloads or a string-operation
 escape hatch. Named, recursively typed dictionaries remain appropriate for
 protocol extension data and scalar integration parameters.
@@ -38,6 +38,13 @@ together. Validation errors identify the contract violation without logging
 credentials or complete payloads. Preserve free-form text; never repair malformed
 inputs by coercion, trimming or stripping. Server authorization, workspace fences,
 cron interpretation and durable state transitions remain server responsibilities.
+
+Binary HTTP helpers accept generated metadata/descriptor DTOs and original binary
+bytes; returning verified bytes is their explicit contract. They share portable
+constraints with the WS graph without registering another WS operation. Keep
+JSON conversion inside the owning codec/HTTP transport, refuse redirects and
+replay, bound receipts and downloads, and correlate publication identity and
+content before returning a success. See [Relay binary delivery](relay-blobs.md).
 
 ## Transport ownership
 

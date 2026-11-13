@@ -1,7 +1,12 @@
 package io.aeyer.plowshare.server.events;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.aeyer.plowshare.server.board.SeatWake;
+import io.aeyer.plowshare.server.messaging.MessageWake;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
@@ -110,10 +115,8 @@ class FiredEventCodecTest {
         new EventPayload[] {
           null,
           new EventPayload.Scheduled("tick", Instant.parse("2026-10-05T01:00:00Z")),
-          new EventPayload.Seat(
-              new io.aeyer.plowshare.server.board.SeatWake("opened", "hello", "enzo", 1)),
-          new EventPayload.Message(
-              new io.aeyer.plowshare.server.board.MessageWake("msg_1", null, null, null, null))
+          new EventPayload.Seat(new SeatWake("opened", "hello", "enzo", 1)),
+          new EventPayload.Message(new MessageWake("msg_1", null, null, null, null))
         })
       assertThrows(
           IllegalArgumentException.class,

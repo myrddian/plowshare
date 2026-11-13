@@ -2,7 +2,12 @@ package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.server.access.AuthoritySnapshot;
 import io.aeyer.plowshare.server.access.AuthoritySnapshots;
+import io.aeyer.plowshare.server.auth.ServiceCredentials;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -10,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Stored project membership and roles decided in server memory.
@@ -34,7 +40,7 @@ public final class CachedProjectMembers implements ProjectMembers {
   }
 
   private static boolean service(String handle) {
-    return io.aeyer.plowshare.server.auth.ServiceCredentials.principal(handle);
+    return ServiceCredentials.principal(handle);
   }
 
   @Override
@@ -73,8 +79,7 @@ public final class CachedProjectMembers implements ProjectMembers {
     if (service(handle))
       return snapshot.serviceProjectRole(project, handle).map(ProjectRole::parse);
     // PersonalSpaces.name refuses a blank handle; call it exactly where the SQL path does.
-    if (project.startsWith("personal:")
-        && !project.equals(io.aeyer.plowshare.server.personal.PersonalSpaces.name(handle)))
+    if (project.startsWith("personal:") && !project.equals(PersonalSpaces.name(handle)))
       return Optional.empty();
     var role =
         ClientProjects.privateProject(project)
@@ -82,7 +87,7 @@ public final class CachedProjectMembers implements ProjectMembers {
             : snapshot.authorityProjectRole(project, handle);
     if (role.isEmpty()) return Optional.empty();
     return Optional.of(
-        project.equals(io.aeyer.plowshare.server.personal.PersonalSpaces.name(handle))
+        project.equals(PersonalSpaces.name(handle))
             ? ProjectRole.MANAGER
             : ProjectRole.parse(role.get()));
   }
@@ -90,12 +95,11 @@ public final class CachedProjectMembers implements ProjectMembers {
   /** One snapshot for every project in the operation; otherwise the batched SQL statement. */
   @Override
   public Map<String, ProjectRole> roles(Collection<String> projects, String account) {
-    var selection =
-        new ReadSelection(account, projects == null ? null : new java.util.ArrayList<>(projects));
+    var selection = new ReadSelection(account, projects == null ? null : new ArrayList<>(projects));
     if (selection.projects().isEmpty()) return Map.of();
     return decide(
         snapshot -> {
-          var result = new java.util.LinkedHashMap<String, ProjectRole>();
+          var result = new LinkedHashMap<String, ProjectRole>();
           for (String project : selection.projects())
             role(snapshot, project, selection.account())
                 .ifPresent(role -> result.put(project, role));
@@ -106,22 +110,20 @@ public final class CachedProjectMembers implements ProjectMembers {
 
   @Override
   public Set<String> readableProjects(Collection<String> projects, String account) {
-    var selection =
-        new ReadSelection(account, projects == null ? null : new java.util.ArrayList<>(projects));
+    var selection = new ReadSelection(account, projects == null ? null : new ArrayList<>(projects));
     if (selection.projects().isEmpty()) return Set.of();
     return decide(
         snapshot ->
             selection.projects().stream()
                 .filter(project -> readable(snapshot, project, selection.account()))
-                .collect(java.util.stream.Collectors.toUnmodifiableSet()),
+                .collect(Collectors.toUnmodifiableSet()),
         () -> stored.readableProjects(selection.projects(), selection.account()));
   }
 
   /** The CASE of {@link JdbcProjectMembers#readableProjects}, which tests "client:" literally. */
   private static boolean readable(AuthoritySnapshot snapshot, String project, String account) {
     if (service(account)) return snapshot.serviceProjectRole(project, account).isPresent();
-    if (project.startsWith("personal:")
-        && !project.equals(io.aeyer.plowshare.server.personal.PersonalSpaces.name(account)))
+    if (project.startsWith("personal:") && !project.equals(PersonalSpaces.name(account)))
       return false;
     if (project.startsWith("client:")) return snapshot.memberRole(project, account).isPresent();
     return snapshot.authorityProjectRole(project, account).isPresent();
@@ -145,7 +147,7 @@ public final class CachedProjectMembers implements ProjectMembers {
   @Override
   public void requireRole(String project, String handle, ProjectRole required) {
     if (role(project, handle).filter(role -> role.allows(required)).isEmpty())
-      throw new io.aeyer.plowshare.server.faults.CallerFault(
+      throw new CallerFault(
           "This account needs " + required + " access to project '" + project + "'");
   }
 

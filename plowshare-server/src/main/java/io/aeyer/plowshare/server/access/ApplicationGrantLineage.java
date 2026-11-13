@@ -3,8 +3,10 @@ package io.aeyer.plowshare.server.access;
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectRole;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** An issuing MANAGER must still be a manager under the current deployed manifest. */
@@ -22,12 +24,12 @@ public final class ApplicationGrantLineage implements GrantLineage {
    * Reads project lineages from the current authority snapshot when one may be used, instead of
    * re-walking {@code authority_live_grants()} in SQL for every role check.
    */
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public ApplicationGrantLineage(
       ScopedGrantRepository grants, ApplicationPolicy applications, AuthoritySnapshots snapshots) {
     this.grants = grants;
     this.applications = applications;
-    this.snapshots = java.util.Objects.requireNonNull(snapshots);
+    this.snapshots = Objects.requireNonNull(snapshots);
   }
 
   @Override
@@ -67,7 +69,7 @@ public final class ApplicationGrantLineage implements GrantLineage {
       String account,
       Optional<ProjectRole> ceiling,
       ApplicationPolicy.Boundary boundary) {
-    java.util.Objects.requireNonNull(boundary);
+    Objects.requireNonNull(boundary);
     if (ceiling.isEmpty() || ClientProjects.privateProject(project)) return ceiling;
     var policies = new java.util.HashMap<String, ApplicationPolicy.Boundary>();
     policies.put(project, boundary);

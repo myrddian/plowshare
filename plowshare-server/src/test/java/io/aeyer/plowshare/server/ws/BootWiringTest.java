@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.ws;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -8,11 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 
+import io.aeyer.plowshare.protocol.frames.Code;
+import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.server.agents.Compaction;
 import io.aeyer.plowshare.server.agents.JobEvents;
 import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.agents.learner.Learner;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.BeansException;
@@ -85,6 +90,37 @@ import org.springframework.test.util.ReflectionTestUtils;
  * stand-ins, so hollowing this test out costs a failure rather than a green run.
  */
 class BootWiringTest {
+
+  @Test
+  void retired_adapter_operations_have_no_registered_handler_or_fallback() {
+    try (AnnotationConfigApplicationContext context = boot()) {
+      var router = context.getBean(FrameRouter.class);
+      assertTrue(router.types().contains("relay.publish"));
+      assertTrue(router.types().contains("message.instances"));
+      // Use the scanned production registration, so a leftover legacy FrameArea cannot hide
+      // behind a hand-built empty router. Unsupported mutations stop before any service call.
+      for (String operation :
+          List.of(
+              "incoming.catalog",
+              "incoming.receive",
+              "incoming.status",
+              "incoming.cancel",
+              "outgoing.send",
+              "outgoing.status",
+              "outgoing.cancel",
+              "outgoing.peers",
+              "outgoing.advertise",
+              "outgoing.claim",
+              "outgoing.report")) {
+        assertFalse(router.types().contains(operation), operation);
+        var response =
+            router.route(
+                new Envelope("retired", operation, Envelope.CURRENT_VERSION, Map.of()),
+                new Asking("session", "owner"));
+        assertEquals(Code.NOT_FOUND, response.code(), operation);
+      }
+    }
+  }
 
   /** The two packages the frame surface and its services live in. */
   private static final String[] SCANNED = {

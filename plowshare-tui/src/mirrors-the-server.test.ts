@@ -625,11 +625,8 @@ describe("the frame types a conversation is made of are the server's own", () =>
   });
 
   it('reads the changed push by the keys the server pushes it under', () => {
-    // Not a record: `OrchestrationsConfig.pushChanges` builds a Map literal,
-    // so the three keys are string literals over there and `changedOf` has
-    // to match them. A rename there leaves the alert silent — the push still
-    // arrives, this client just stops recognising the one state that needs a
-    // person — so it is pinned by reading the literals rather than trusted.
+    // Pin the typed push constructor as well as the operation name. The client
+    // must keep reading the same notification when Java imports are cleaned up.
     const source = readFileSync(
       join(ORCHESTRATIONS, 'OrchestrationsConfig.java'),
       'utf8',
@@ -637,8 +634,9 @@ describe("the frame types a conversation is made of are the server's own", () =>
 
     expect(source).toContain('CHANGED = "orchestration.changed"');
     expect(source).toContain(
-      'new io.aeyer.plowshare.protocol.AccountEvent.OrchestrationChanged(',
+      'import io.aeyer.plowshare.protocol.AccountEvent;',
     );
+    expect(source).toContain('new AccountEvent.OrchestrationChanged(');
   });
 
   it('reads every OutcomeView component a failed run is explained out of', () => {

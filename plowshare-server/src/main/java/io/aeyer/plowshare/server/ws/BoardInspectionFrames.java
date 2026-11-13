@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.board.BoardMessage;
 import io.aeyer.plowshare.server.board.BoardSeat;
 import io.aeyer.plowshare.server.board.BoardStore;
@@ -16,12 +18,9 @@ import org.springframework.stereotype.Component;
 public class BoardInspectionFrames implements FrameArea {
   private final BoardStore store;
   private final SwarmScheduler scheduler;
-  private final io.aeyer.plowshare.server.archive.ProjectMembers members;
+  private final ProjectMembers members;
 
-  public BoardInspectionFrames(
-      BoardStore store,
-      SwarmScheduler scheduler,
-      io.aeyer.plowshare.server.archive.ProjectMembers members) {
+  public BoardInspectionFrames(BoardStore store, SwarmScheduler scheduler, ProjectMembers members) {
     this.store = store;
     this.scheduler = scheduler;
     this.members = members;
@@ -76,9 +75,7 @@ public class BoardInspectionFrames implements FrameArea {
   Outcome topics(Map<String, Object> payload, Asking asking) {
     String account = asking.requireHandle(FrameTypes.BOARD_TOPICS);
     ListBody body = Payloads.as(payload, ListBody.class, FrameTypes.BOARD_TOPICS);
-    if (body.project() != null)
-      members.requireRole(
-          body.project(), account, io.aeyer.plowshare.server.archive.ProjectRole.VIEWER);
+    if (body.project() != null) members.requireRole(body.project(), account, ProjectRole.VIEWER);
     int limit = body.limit() == null ? 200 : body.limit();
     int offset = body.offset() == null ? 0 : body.offset();
     if (limit < 1 || limit > 200 || offset < 0) {
@@ -94,12 +91,8 @@ public class BoardInspectionFrames implements FrameArea {
     String id =
         Payloads.required(payload, "topic", FrameTypes.BOARD_MESSAGES, "the topic to inspect");
     BoardTopic topic =
-        store
-            .topic(id)
-            .filter(t -> !store.messagingTopic(id))
-            .orElseThrow(() -> new CallerFault("No public board topic with that id."));
-    members.requireRole(
-        topic.project(), account, io.aeyer.plowshare.server.archive.ProjectRole.VIEWER);
+        store.topic(id).orElseThrow(() -> new CallerFault("No public board topic with that id."));
+    members.requireRole(topic.project(), account, ProjectRole.VIEWER);
     BoardTopic root = store.topic(topic.root()).orElseThrow();
     var snapshot = scheduler.snapshot();
     return Outcome.ok(

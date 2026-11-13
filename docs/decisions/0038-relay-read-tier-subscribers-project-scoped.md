@@ -1,22 +1,26 @@
 # Relay read-tier subscribers, project-scoped
 
-Status: proposed. Requires explicit authorization before any code changes, because it changes
-Relay's consumption authority.
+Status: implemented for project-scoped read-tier subscribers (V187,
+`ReadTierRelayConsumption` and subscription authority). Corrected 13 November
+2026 during Slice 0 of [Finishing Relay](../relay-finishing.md).
 
 Scope: project-scoped topics only. Audiences for content whose home scope has no project are
-separated into `0039-relay-audiences-for-scopeless-content.md`, because that half needs a new Relay
-scope and this half does not.
+separated into [0039](0039-relay-audiences-beyond-a-project.md), because that half
+needs a scope-vocabulary decision and this half does not.
 
-## Need and boundary
+## Need and boundary (historical motivation)
 
-`0037-events-and-messaging-on-relay.md` moves information events onto Relay. That migration is
-blocked: Relay cannot currently deliver to the audience information events have.
+When this decision was written, the information-event migration in 0037 was
+blocked on read-tier delivery. V187 implemented this decision; V188 then moved
+information events onto Relay. The authority mismatch below describes the
+pre-implementation state, not a current blocker.
 
-Information read authority admits more accounts than Relay consumption does.
+Information read authority admitted more accounts than Relay consumption did.
 `EffectiveProjectPermissions` grants READ to VIEWER, CONTRIBUTOR and MANAGER alike, and the
-existing recipient fan-out admits any project member who passes `information_readable`, plus any
+former recipient fan-out admitted any project member who passed `information_readable`, plus any
 `information_global_read_member` for GLOBAL_READ-audience content — accounts that need no project
-role at all. Relay gates consumption at CONTRIBUTOR.
+role at all. Relay then gated consumption at CONTRIBUTOR. Read-tier consumption
+now uses `mayUse`; work-tier consumption, ports and dispatch keep their work checks.
 
 ### This is not an oversight, and the record should say so
 
@@ -24,12 +28,13 @@ Relay already has three authority tiers, and a read tier is one of them:
 
 | tier | check | admits | used for |
 |---|---|---|---|
-| read | `members.mayUse(project, account)` — any role present | VIEWER and above | log inspection, `ScopedRelayInspection` |
-| work | `members.mayWork(project, account)` — CONTRIBUTOR or above | contributor and above | leased consumption (`ProjectRelayProcessing`), ports, receiver dispatch |
+| read | `members.mayUse(project, account)` — any role present | VIEWER and above | log inspection and, since V187, reader subscriptions (`ReadTierRelayConsumption`) |
+| work | `members.mayWork(project, account)` — CONTRIBUTOR or above | contributor and above | work-tier leased processing (`ProjectRelayProcessing`), ports, receiver dispatch |
 | manage | `members.mayManage(project, account)` — MANAGER | manager | topic registration and configuration |
 
-So a read-tier account can already *inspect* a topic's log. What it cannot do is *subscribe*, and
-the reason is sound: consuming takes a lease, and a lease is a write —
+Before V187 a read-tier account could already *inspect* a topic's log but could
+not *subscribe*. The reason for that gate was sound: consuming takes a lease,
+and a lease is a write —
 `JdbcRelayConsumerRepository` issues `INSERT INTO relay_consumer_leases … ON CONFLICT … DO UPDATE`
 and `UPDATE relay_consumer_leases SET lease_until=…`. Durable at-least-once delivery requires
 per-subscriber position state, and persisting that state is by definition a mutation. Gating a
@@ -40,7 +45,7 @@ The defect is the **coupling**, not the tier. A subscriber's lease and offset ar
 *that subscriber*, not content in the project. They are keyed
 `(scope_key, topic, subscriber)` and carry an `account`; nothing in a lease row describes project
 data. Authorizing that write with "may write project content" conflates two unrelated authorities,
-and the consequence is that Relay can only deliver to accounts that could modify the project —
+and the consequence was that Relay could only deliver to accounts that could modify the project —
 which is the wrong audience for any topic that carries readable content, not just information
 events.
 
@@ -52,8 +57,9 @@ signals (`message.wake.requested`, `board.wake.requested` in `RelayInternalWorke
 native workers, and `ScopedRelayInspection` gates system scope on `isServerAdmin`. So global-read
 accounts have no expressible Relay audience.
 
-That needs a new Relay scope, which is a larger change with a different risk profile, so it is
-recorded separately in `0039-relay-audiences-for-scopeless-content.md`. Separating it is safe and
+That needs Relay to name a non-project audience, a larger identity-model change
+with a different risk profile, so it is
+recorded separately in `0039-relay-audiences-beyond-a-project.md`. Separating it is safe and
 unblocks the work now: under the V185 alias, PROJECT, PERSONAL and ACCOUNT_KNOWLEDGE home scopes
 are all project-scoped, and on the live installation those accounted for **every** information
 resource — 2,813 PROJECT, 50 ACCOUNT_KNOWLEDGE, 29 PERSONAL, and no GLOBAL_KNOWLEDGE rows at all

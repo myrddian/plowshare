@@ -14,6 +14,8 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -41,7 +43,7 @@ class AccountingConfigTest {
   private ApplicationContextRunner storage(DataLayout layout) {
     DataSource offline = mock(DataSource.class);
     return runner
-        .withBean(InferencePrices.class, () -> new PricingCatalog(java.util.List.of()))
+        .withBean(InferencePrices.class, () -> new PricingCatalog(List.of()))
         .withBean(DataLayout.class, () -> layout)
         .withBean(ObjectMapper.class, ObjectMapper::new)
         .withBean(JdbcTemplate.class, () -> new JdbcTemplate(offline))
@@ -91,11 +93,7 @@ class AccountingConfigTest {
             });
     try (var reopened =
         new AccountingJournal(
-            layout.accounting(),
-            32768,
-            2048,
-            java.time.Duration.ofSeconds(1),
-            AccountingFixtures.MAPPER)) {
+            layout.accounting(), 32768, 2048, Duration.ofSeconds(1), AccountingFixtures.MAPPER)) {
       assertEquals(AccountingJournal.Problem.NONE, reopened.health().problem());
     }
   }

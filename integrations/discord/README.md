@@ -204,7 +204,7 @@ Each `(guild, channel or thread, thread parent, Discord user, project, bot)` has
 its own retained incoming context. The first accepted message asks the server to
 create that context, including a persistent receiving bot instance/conversation.
 The adapter saves its returned context ID; subsequent messages pass that ID to
-`incoming.receive`. Each message gets a fresh task in the retained conversation,
+the typed `message.receive` Relay receiver. Each message gets a fresh task in the retained conversation,
 with previous conversation history available under the server's context projection
 rules. Completing a task does not discard the context or create a new bot instance.
 
@@ -234,13 +234,44 @@ All output disables user, role, `@here` and `@everyone` pings, including reply-a
 pings. Outputs are split into at most 2,000 UTF-16 units per message without
 splitting surrogate pairs. A reply exceeding 40,000 units produces an explicit
 oversize notice rather than a silently truncated result. Inspect its full retained
-reply with `incoming.status` under the integration's SDK identity.
+reply with the typed `message.inspect` Relay receiver under the integration's SDK identity.
 
 The user allowlist controls who may trigger work; the **Discord channel audience**
 controls who can see its answers. Select projects and channels whose contents may
 be disclosed to that audience. Routing and sender separation do not create
 server-enforced permissions for individual Discord people. The shared token
 retains its project authority; per-bot exposure is adapter policy.
+
+## Messaging channel setup
+
+Every receiving `(project,bot)` requires an explicit `messaging` mapping in the
+adapter configuration. The supplied templates select `discord.requests` and
+`discord.replies`; change these together with the operator-owned server routing.
+The Application includes a `Relay/discord` route selecting `message.receive`,
+`message.inspect` or `message.cancel` by the generic TEXT schema, with one pinned
+agent, return topic and shared channel. The message cannot override any pin.
+
+Provision both TEXT topics before starting the adapter. An operator can use an
+explicit `relay.publish` seed with body `{"schema":"plowshare-topic-seed/1"}`;
+the example route ignores that schema without executing agent work. Retain the
+publication UUID/receipt. Setup does not publish test prompts or create hidden
+work. Missing topics fail clearly; the adapter never fabricates a head or silently
+creates a replacement incarnation.
+
+Configure exact SDK INGRESS bindings for the authenticated service principal on
+both topics, plus the existing project `relay.log` read authority. The native
+receiver rechecks source and return ingress grants; an Application membership by
+itself grants no topic port. Ports are explicit deployment configuration under
+`plowshare.relay.ports.bindings`; use the principal returned by authenticated
+`admin.status`, never a body assertion or guessed handle. See [SDK topic ports](../../docs/relay.md#sdk-topic-ports).
+Notification EGRESS groups remain separately configured as below. Each trusted
+channel isolates native contexts/tasks by principal, source subscription and client
+alias. Discord users remain adapter-authenticated aliases, not Plowshare accounts.
+
+The adapter polls bounded Relay log pages after a captured return-topic head and
+pins both topic generations in durable state before publishing once. Inspection
+is also carried through Relay; the application uses no `incoming.*` or `outgoing.*`
+operations. These local SDK fixture tests do not establish live server RBAC.
 
 ## Service-mode direct messages
 
@@ -273,11 +304,15 @@ public callback. Discord still carries all DM content. Discord privacy settings
 and bot availability must permit the conversation. Notifications remain restricted
 to explicitly mapped guild channels.
 
-Existing version-1 guild journals load as version 2 without changing context keys,
-tasks, receipts or holds. Subsequent saves use version 2 with explicit destination
-kinds. Keep a private stopped-installation backup before upgrading; an older
-binary cannot read the new journal format. Never remove uncertain records to
-roll back or migrate an installation.
+Current journals use version 3 and pin the exact messaging topic mapping plus
+observed topic incarnations. Existing version-1/2 journals with tasks or contexts
+require an explicit server-side legacy channel mapping for the exact principal,
+project and client aliases, followed by `legacyStateMigration:true` in the stopped
+adapter configuration. That flag confirms the operator verified the server mapping;
+it does not create server authority. Task/context IDs, dedup receipts and holds
+remain unchanged. The adapter refuses silent adoption or a changed topic mapping.
+Keep a private stopped-installation backup; never delete uncertain records to
+migrate or roll back. New independent bindings use separate reconciled journals.
 
 ## Discord Application
 
@@ -442,11 +477,17 @@ blocks new effects in that user's context. An uncertain send blocks the remainin
 chunks of that output; other contexts may continue. Changed destination mappings
 or removed allowlist users fence retained delivery rather than reroute it.
 
-There is no public incoming receipt lookup by request UUID. If the first
-`incoming.receive` reply was lost, the adapter cannot invent a task ID or recover
-by resubmitting. It retains an unresolved record for inspection. The same policy
-holds an uncertain Relay acknowledgment; inspect broker positions and receipts
-before any operator repair. Deleting uncertain records or state is not recovery.
+A lost first native receipt is inspected through the original retained request
+UUID on the same channel. Inspection uses a fresh read-only query UUID; it never
+resubmits intake or cancellation. An absent/foreign-scope negative snapshot leaves
+the original submission UNKNOWN. Positive authoritative snapshots recover its
+native task/context IDs. Task replies are assembled from exact Unicode chunks;
+only a fully assembled page advances the persisted FOLLOW cursor. Later polls
+read new replies rather than the task's entire lifetime history. Metadata revisions
+cannot regress. Topic replacement, a retention gap during an operation, unknown
+mutation delivery or conflicting chunks requires retained-evidence inspection.
+Missing log rows never prove a mutation was unsubmitted. The same policy holds
+uncertain Relay notification acknowledgments and Discord sends.
 
 Rotate the **same Application-owned token** through `application.token.issue`
 with a fresh retained request UUID and `rotate:true`, then restart with the
@@ -489,3 +530,18 @@ The consumer check compiles and tests against packed public SDK artifacts outsid
 the checkout. These checks start no database and do not prove live Discord login,
 intents, channel permissions or a configured Plowshare service token. Live
 acceptance requires private deployment configuration and those external services.
+
+Native reply paging retains a private task-scoped traversal with exact topic family,
+client, immutable task identity, assembled Unicode chunks and fixed-head `next`
+cursor. Timeouts and restarts continue that head without refetching its prefix.
+The final FOLLOW cursor advances only after every chunk is assembled. A terminal
+header triggers one fresh FOLLOW capture after draining the previous head so a
+concurrent terminal reply is included. Completed results stay retained until
+output preparation and the final cursor are saved atomically by the adapter.
+State decoding rejects foreign bindings, missing owning delivery records, invalid
+chunks and missing incarnation pins. Existing v3 journals without traversals
+initialize an empty collection. Traversal storage is bounded to 200 pending tasks,
+200 reply bodies per traversal, 1MiB per body and 50MiB across all traversals;
+capacity exhaustion stops that traversal explicitly and never discards an unread
+body or advances its cursor. Operators must reconcile retained backlog before
+resuming; these bounds do not authorize replaying an uncertain native mutation.

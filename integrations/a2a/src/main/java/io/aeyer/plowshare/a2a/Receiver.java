@@ -1,30 +1,54 @@
 package io.aeyer.plowshare.a2a;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import io.aeyer.plowshare.protocol.Incoming;
-import io.aeyer.plowshare.sdk.IncomingClient;
-import io.aeyer.plowshare.sdk.Plowshare;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.stream.StreamSupport;
 import okhttp3.HttpUrl;
 
 /** A2A HTTP terminates here. All Plowshare messages, receipts and reads use the SDK's WS. */
 public final class Receiver implements AutoCloseable {
   public interface Bridge {
-    Incoming.Task receive(Incoming.Receive request) throws IOException;
+    Ingress.Task receive(Ingress.Receive request) throws IOException;
 
-    Incoming.Task status(Incoming.Id id) throws IOException;
+    default Ingress.Task receive(Ingress.Receive request, int historyLength) throws IOException {
+      return receive(request);
+    }
 
-    Incoming.Task cancel(Incoming.Id id) throws IOException;
+    Ingress.Task status(Ingress.Id id) throws IOException;
 
-    JsonNode catalog() throws IOException;
+    default Ingress.Task status(Ingress.Id id, int historyLength) throws IOException {
+      return status(id);
+    }
+
+    Ingress.Task cancel(Ingress.Id id) throws IOException;
+
+    default Ingress.Task cancel(Ingress.Id id, int historyLength) throws IOException {
+      return cancel(id);
+    }
+
+    Ingress.Catalog catalog() throws IOException;
   }
 
   /**
@@ -39,6 +63,11 @@ public final class Receiver implements AutoCloseable {
       String agent,
       Map<String, String> clients,
       long waitMillis) {
+    @Override
+    public String toString() {
+      return "Receiver.Config{redacted}";
+    }
+
     public Config {
       if (bind == null
           || bind.isBlank()
@@ -89,42 +118,21 @@ public final class Receiver implements AutoCloseable {
     }
   }
 
-  private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
+  private static final ObjectMapper JSON =
+      new ObjectMapper()
+          .findAndRegisterModules()
+          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   public static final String COMMAND_EXTENSION = "urn:plowshare:a2a:commands:v1";
   private final Config config;
   private final Bridge bridge;
   private final HttpServer server;
-  private final java.util.concurrent.ExecutorService executor =
-      Executors.newVirtualThreadPerTaskExecutor();
+  private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+  private final Semaphore requests = new Semaphore(32);
   private final String rpcPath;
   private volatile JsonNode card;
   private volatile long cardExpires;
   private volatile Set<String> commands = Set.of();
-
-  public Receiver(Config config, Plowshare sdk) throws IOException {
-    this(
-        config,
-        new Bridge() {
-          private final IncomingClient incoming = new IncomingClient(sdk);
-
-          public Incoming.Task receive(Incoming.Receive request) throws IOException {
-            return incoming.receive(request);
-          }
-
-          public Incoming.Task status(Incoming.Id id) throws IOException {
-            return incoming.status(id);
-          }
-
-          public Incoming.Task cancel(Incoming.Id id) throws IOException {
-            return incoming.cancel(id);
-          }
-
-          public JsonNode catalog() throws IOException {
-            return JSON.valueToTree(
-                incoming.catalog(new Incoming.CatalogQuery(config.project(), config.agent())));
-          }
-        });
-  }
 
   public Receiver(Config config, Bridge bridge) throws IOException {
     this.config = Objects.requireNonNull(config);
@@ -145,45 +153,35 @@ public final class Receiver implements AutoCloseable {
 
   private synchronized JsonNode refreshCard() throws IOException {
     if (card != null && System.currentTimeMillis() < cardExpires) return card;
-    JsonNode catalog = bridge.catalog();
-    JsonNode row = catalog.isObject() ? catalog : null;
-    if (catalog.isArray())
-      for (JsonNode candidate : catalog)
-        if (config.agent().equals(candidate.path("name").asText())
-            && candidate.path("served").asBoolean()) {
-          row = candidate;
-          break;
-        }
-    if (row == null
-        || !row.path("served").asBoolean()
-        || !config.agent().equals(row.path("name").asText()))
-      throw new IOException("receiver agent is not served in the configured project");
+    var catalog = bridge.catalog();
+    if (!catalog.served() || !config.agent().equals(catalog.name()))
+      throw new IOException("Receiver agent is not served in the configured project");
     var skills = JSON.createArrayNode();
     skills
         .addObject()
         .put("id", "message")
         .put("name", config.agent())
-        .put("description", row.path("description").asText())
+        .put("description", catalog.description())
         .putArray("tags")
         .add("message");
     var allowed = new HashSet<String>();
-    for (JsonNode command : row.path("commands")) {
-      String name = command.path("command").asText();
+    for (Ingress.Command command : catalog.commands()) {
+      String name = command.command();
       if (!name.startsWith("/skill:") && !name.startsWith("/orchestration:")) continue;
       allowed.add(name);
       var skill =
           skills
               .addObject()
               .put("id", name)
-              .put("name", command.path("name").asText())
-              .put("description", command.path("description").asText());
-      skill.putArray("tags").add(command.path("kind").asText());
-      skill.putObject("metadata").set("plowshareCommand", command.deepCopy());
+              .put("name", command.name())
+              .put("description", command.description());
+      skill.putArray("tags").add(command.kind());
+      skill.putObject("metadata").set("plowshareCommand", JSON.valueToTree(command));
     }
     var value =
         JSON.createObjectNode()
             .put("name", config.agent())
-            .put("description", row.path("description").asText())
+            .put("description", catalog.description())
             .put("version", "0.1.0");
     value
         .putArray("supportedInterfaces")
@@ -252,6 +250,20 @@ public final class Receiver implements AutoCloseable {
   }
 
   private void handleRpc(HttpExchange exchange) throws IOException {
+    if (!requests.tryAcquire()) {
+      try (exchange) {
+        respond(exchange, 503, Map.of("error", "Receiver request capacity exhausted"));
+      }
+      return;
+    }
+    try {
+      handleAcceptedRpc(exchange);
+    } finally {
+      requests.release();
+    }
+  }
+
+  private void handleAcceptedRpc(HttpExchange exchange) throws IOException {
     try (exchange) {
       if (!exchange.getRequestURI().getPath().equals(rpcPath)
           || !exchange.getRequestMethod().equals("POST")) {
@@ -340,6 +352,8 @@ public final class Receiver implements AutoCloseable {
                 id,
                 -32603,
                 "Task accepted; blocking deadline expired. Recover explicitly with the same messageId and payload."));
+      } catch (IngressResponseTooLarge tooLarge) {
+        respond(exchange, 200, error(id, -32602, tooLarge.getMessage()));
       } catch (IOException | RuntimeException unresolved) {
         respond(
             exchange,
@@ -399,7 +413,7 @@ public final class Receiver implements AutoCloseable {
       for (JsonNode mode : modes)
         if (!mode.isTextual())
           throw new RpcFault(-32602, "acceptedOutputModes must contain media type strings");
-      if (!java.util.stream.StreamSupport.stream(modes.spliterator(), false)
+      if (!StreamSupport.stream(modes.spliterator(), false)
           .anyMatch(mode -> mode.asText().equals("text/plain")))
         throw new RpcFault(-32005, "Only text/plain output is supported");
     }
@@ -428,22 +442,21 @@ public final class Receiver implements AutoCloseable {
             JSON.writeValueAsBytes(
                 List.of(
                     config.project(), config.agent(), client, message.path("messageId").asText())));
-    Incoming.Source source;
+    Ingress.Source source;
     try {
       // Unknown extensions cannot be smuggled through the core's provenance contract.
       source =
-          JSON.readerFor(Incoming.Source.class)
-              .with(
-                  com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+          JSON.readerFor(Ingress.Source.class)
+              .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
               .readValue(message);
     } catch (IOException | IllegalArgumentException invalid) {
       throw new RpcFault(-32602, "Unsupported or invalid incoming message provenance");
     }
-    Incoming.Task accepted;
+    Ingress.Task accepted;
     try {
       accepted =
           bridge.receive(
-              new Incoming.Receive(
+              new Ingress.Receive(
                   config.project(),
                   client,
                   config.agent(),
@@ -451,8 +464,9 @@ public final class Receiver implements AutoCloseable {
                   context,
                   body,
                   command,
-                  source));
-    } catch (IncomingClient.Refused refused) {
+                  source),
+              history);
+    } catch (IngressRefused refused) {
       throw new RpcFault(
           -32602,
           "Message refused: scope, receipt identity, limits or command arguments are invalid");
@@ -467,32 +481,36 @@ public final class Receiver implements AutoCloseable {
           Thread.currentThread().interrupt();
           throw new IOException("Receiver wait interrupted");
         }
-        accepted = read(client, accepted.id());
+        accepted = read(client, accepted.id(), history);
       }
     }
     return Map.of("task", task(accepted, history));
   }
 
-  private Incoming.Task status(String client, JsonNode params) throws IOException {
-    return read(client, identity(params.path("id").asText()));
+  private Ingress.Task status(String client, JsonNode params) throws IOException {
+    return read(client, identity(params.path("id").asText()), historyLength(params));
   }
 
-  private Incoming.Task read(String client, UUID id) throws IOException {
+  private Ingress.Task read(String client, UUID id) throws IOException {
+    return read(client, id, 0);
+  }
+
+  private Ingress.Task read(String client, UUID id, int history) throws IOException {
     try {
-      return bridge.status(new Incoming.Id(config.project(), client, id));
-    } catch (IncomingClient.Refused inaccessible) {
+      return bridge.status(new Ingress.Id(config.project(), client, id), history);
+    } catch (IngressRefused inaccessible) {
       throw new RpcFault(-32001, "Task not found or not accessible");
     }
   }
 
-  private Incoming.Task cancel(String client, JsonNode params) throws IOException {
+  private Ingress.Task cancel(String client, JsonNode params) throws IOException {
     UUID id = identity(params.path("id").asText());
-    Incoming.Task known = read(client, id);
+    Ingress.Task known = read(client, id);
     if (List.of("COMPLETED", "FAILED", "CANCELED").contains(known.state()))
       throw new RpcFault(-32002, "Task is not cancelable");
     try {
-      return bridge.cancel(new Incoming.Id(config.project(), client, id));
-    } catch (IncomingClient.Refused refused) {
+      return bridge.cancel(new Ingress.Id(config.project(), client, id), historyLength(params));
+    } catch (IngressRefused refused) {
       throw new RpcFault(-32002, "Task is not cancelable");
     }
   }
@@ -515,7 +533,7 @@ public final class Receiver implements AutoCloseable {
     return length.asInt();
   }
 
-  private static Map<String, Object> task(Incoming.Task task, int historyLength) {
+  private static Map<String, Object> task(Ingress.Task task, int historyLength) {
     var result = new LinkedHashMap<String, Object>();
     result.put("id", task.id().toString());
     result.put("contextId", task.context().toString());
@@ -525,8 +543,7 @@ public final class Receiver implements AutoCloseable {
     if (task.source() != null) {
       Map<String, Object> user =
           JSON.convertValue(
-              task.source().withTask(task.id(), task.context()),
-              new com.fasterxml.jackson.core.type.TypeReference<>() {});
+              task.source().withTask(task.id(), task.context()), new TypeReference<>() {});
       history.add(user);
     }
     for (var reply : task.replies()) {

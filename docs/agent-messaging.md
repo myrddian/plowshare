@@ -4,15 +4,23 @@ For configuration and a complete cross-project example, see the
 [Internal project messaging manual](internal-messaging.md).
 
 Agents and bots in account-owned project conversations can use `send_message`.
-The harness binds the sender and supplies its return address. Direct messages use
-the board's durable messages, topic allowances, queued firings and wake scheduler;
-the tool exposes participant addresses and message IDs, not boards or seats.
+The harness binds the sender and supplies its return address. Messaging owns its
+records, instances and per-message allowances. Delivery uses one project-readable
+Relay TEXT inbox per (account, project, definition name); task and persistent
+instances reuse that inbox. The `message.*` API, lifecycle notices, `send_message`
+tool and SDK contracts are unchanged. The board remains an independent forum
+connected through its [Relay bridge](decisions/0060-relay-board-bridge-and-authorized-close.md).
+See [the messaging cutover decision](decisions/0061-relay-agent-inboxes-and-messaging-cutover.md).
 
-Messaging is asynchronous. Sending commits a message and its owed wake together,
-then returns a receipt. A busy recipient waits for its conversation to become
-free. Each direct message has a bounded handling run, so its terminal
-outcome is attributable to exactly one incoming message. Direct wakes are never
-coalesced like ordinary board notification wakes.
+Messaging is asynchronous. Sending commits the message, route, allowance and
+publication together, then returns a receipt. The leased inbox consumer admits
+native wakes and advances its cursor in one transaction. A busy instance waits
+for its own handling; it does not block other instances on the same inbox, or a
+different definition using the same conversation. Turn ordinals are reserved
+before execution so concurrent completion cannot mix transcript records.
+Direct wakes are never coalesced. A retention gap stops admission visibly; it
+never silently skips a request. `queued` in a receipt includes committed
+publication debt awaiting that consumer.
 
 Each retained send identity now includes a fingerprint of the validated request,
 including destination selectors, body, reply flags, lifetime and requested timeout.
@@ -99,8 +107,13 @@ restart recovery; it is not automatically replayed and charged again.
 
 ## Visibility, permissions and allowances
 
-Direct transport topics are omitted from public board listings and normal board
-recovery. A recipient is given only its incoming message and its own permitted
+Agent topics are readable by project members under Relay's existing scope policy.
+Publishing a message body makes it visible to that audience; it does not grant
+access to source conversations, document inputs or tools. Addresses and the
+`message.*` inspection API retain their existing account and conversation checks.
+Messaging no longer creates private board topics, seats or posts.
+
+A recipient is given only its incoming message and its own permitted
 history. The model-facing conversation tools refuse other messaging
 participants' conversations and their delegated child histories and filter those histories out of search/list
 results. A filtered search window is explicitly marked incomplete.
@@ -124,13 +137,24 @@ If inputs become unavailable before outcome delivery, the result is withheld
 and the request is recorded as unavailable. A reply expectation does not bypass
 revocation, and recovery does not replay that work.
 
-Each committed incoming message grants at most the receiving definition's
-`max-model-calls` for its handling turn. Grants and spending accumulate durably
-in the existing board pot; retries grant no extra calls. Persistent instances
-retain their history across these bounded turns. Handling turns use the
-definition's normal turn cap. Models with
-dedicated swarm capacity use its fair scheduler; direct messaging can also use
-ordinary model pools without requiring dedicated swarm slots.
+Each committed incoming message starts with the recipient definition's
+`max-model-calls` and normal turn cap. A new message owns a separate durable
+allowance; retries grant no extra calls. Project caps `autoIncrease` can renew
+exhausted steps and calls through the existing policy. Approval continuation adds
+to the same message allowance. Grants never reset spending or increase the
+conversation's allowance. Migrated requests retain their historical accounting
+source and claims, including shared legacy sources. Persistent instances retain
+their history across handling turns. Model pools and fair scheduling retain their
+existing capacity rules.
+
+Agent inboxes are registered on first send or receipt. A removed definition's
+inbox is marked retired only after its cursor and pending requests drain, using
+an authoritative definition inventory. A restored definition reactivates that
+binding. A bounded cleanup pass rechecks that marker under the publication binding
+lock and removes the owned subscription/topic only after normal retention and
+all other groups/work drain. Message history and accounting survive. A restored
+send creates fresh broker incarnations if physical cleanup completed. Project
+deletion cascades its Relay scope. See [Slice 4 retirement](decisions/0062-relay-topic-and-group-retirement.md).
 
 Swarm members are normal agents too: the experimental prohibition on command
 execution, file mutation, memory writes and delegation has been removed. Their
@@ -141,7 +165,7 @@ cancellation. Only delegable agents can be its targets; a bot cannot become a
 delegation target even if its definition says `delegable: true`. Both kinds can
 receive messages.
 
-This adds direct messaging on the board transport. Existing human chat,
+The current implementation provides direct messaging on the board transport. Existing human chat,
 orchestration question/answer and account-inbox records retain their current
 storage models; migrating those records to shared message identities is separate
 work. There is no new HTTP messaging endpoint or A2A protocol adapter: agents

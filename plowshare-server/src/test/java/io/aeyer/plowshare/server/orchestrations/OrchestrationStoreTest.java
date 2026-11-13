@@ -28,6 +28,7 @@ import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
 import io.aeyer.plowshare.server.todos.StageRules;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -1908,8 +1909,7 @@ class OrchestrationStoreTest {
         Map.of(marked, since), store.stalledSince(List.of(marked, quiet, "orc_no_such_run")));
     assertEquals(Map.of(), store.stalledSince(List.of()));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> store.stalledSince(java.util.Collections.nCopies(201, marked)));
+        IllegalArgumentException.class, () -> store.stalledSince(Collections.nCopies(201, marked)));
   }
 
   // --- stalled_since: compare-and-set ------------------------------------------------------

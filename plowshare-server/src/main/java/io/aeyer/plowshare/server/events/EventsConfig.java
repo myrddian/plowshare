@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.events;
 
+import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
@@ -10,8 +11,14 @@ import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.Noticing;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
+import io.aeyer.plowshare.server.messaging.MessageInboxWorker;
+import io.aeyer.plowshare.server.messaging.MessageRelayWorker;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.relay.Relay;
+import io.aeyer.plowshare.server.relay.RelayInternalWorkers;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.Executors;
@@ -22,10 +29,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Wires cron schedules, triggers, firings and the user-inbox, and the one daemon thread that ticks
@@ -59,7 +68,7 @@ public class EventsConfig {
   }
 
   @Bean
-  @org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization
+  @DependsOnDatabaseInitialization
   public FiringStore firingStore(JdbcTemplate jdbc) {
     var repository = new JdbcFiringStore(jdbc);
     // Refuse cutover before the ticker, event transport or any recovery listener can claim work.
@@ -69,9 +78,7 @@ public class EventsConfig {
   }
 
   @Bean
-  public InboxStore inboxStore(
-      JdbcTemplate jdbc,
-      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
+  public InboxStore inboxStore(JdbcTemplate jdbc, InformationLogVisibility visibility) {
     return new JdbcInboxStore(jdbc).useVisibility(visibility);
   }
 
@@ -120,14 +127,19 @@ public class EventsConfig {
       Inbox inbox,
       ObjectProvider<ScheduleDefinitions> definitions,
       ObjectProvider<ScheduleDefinitions.Authority> authority,
-      ObjectProvider<io.aeyer.plowshare.server.board.BoardMessaging> messages,
-      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal) {
+      ObjectProvider<MessageService> messages,
+      ObjectProvider<PersonalSpaces> personal) {
     AgentRunner runner = new AgentRunner(callers, jobs, turns);
     runner.useSchedules(
         definitions::getIfAvailable, authority::getIfAvailable, messages::getIfAvailable);
     if (personal.getIfAvailable() != null) runner.usePersonalSpaces(personal.getIfAvailable());
     Dispatcher dispatcher = new Dispatcher(firings, triggers, runner, inbox, Instant::now);
-    turns.whenFree(conversation -> dispatcher.drain("conversation:" + conversation));
+    turns.whenFree(
+        conversation -> {
+          dispatcher.drain("conversation:" + conversation);
+          var service = messages.getIfAvailable();
+          if (service != null) service.whenFree(conversation);
+        });
     return dispatcher;
   }
 
@@ -147,7 +159,7 @@ public class EventsConfig {
       ObjectProvider<GlobalAgentDefinitions> globals,
       DefinitionResolver resolver,
       Callers callers,
-      io.aeyer.plowshare.server.access.SystemOperations system) {
+      SystemOperations system) {
     return new ScheduleReader(
         llm, GlobalAgentSnapshots.supply(globals, agents), resolver, callers, system);
   }
@@ -161,8 +173,7 @@ public class EventsConfig {
         arrivals,
         transactions,
         () -> {
-          if (org.springframework.transaction.support.TransactionSynchronizationManager
-              .isActualTransactionActive())
+          if (TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException(
                 "scheduled publication must start outside a database transaction");
         });
@@ -182,8 +193,7 @@ public class EventsConfig {
         arrivals,
         transactions,
         () -> {
-          if (org.springframework.transaction.support.TransactionSynchronizationManager
-              .isActualTransactionActive())
+          if (TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException(
                 "a fired event must be published outside a database transaction");
         },
@@ -232,7 +242,9 @@ public class EventsConfig {
       Ticker ticker,
       EventsProperties properties,
       ScheduledExecutorService eventsTickerThread,
-      io.aeyer.plowshare.server.relay.RelayInternalWorkers relayInternalWorkers) {
+      RelayInternalWorkers relayInternalWorkers,
+      MessageInboxWorker messageInboxes,
+      MessageRelayWorker messageSnapshots) {
     return ready -> {
       if (properties.isRecoverAtBoot()) {
         Instant now = Instant.now();
@@ -248,6 +260,8 @@ public class EventsConfig {
       // before the board creates or starts any replacement wake.
       dispatcher.recoverWakes();
       relayInternalWorkers.start();
+      messageInboxes.start();
+      messageSnapshots.start();
       if (properties.isRecoverAtBoot()) {
         firings.targetsWaiting().forEach(dispatcher::drain);
       }

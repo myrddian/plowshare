@@ -1,11 +1,14 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** A per-run sender. Identity, scope and return address are supplied by the harness. */
 public final class SendMessageTool implements AgentTool {
@@ -22,6 +25,34 @@ public final class SendMessageTool implements AgentTool {
       Long timeoutSeconds,
       String toProject,
       String route) {
+    public Request {
+      try {
+        RelayPort.text(body);
+        identity(to, 256);
+        identity(replyTo, 256);
+        identity(callId, 1024);
+        identity(route, 256);
+        identity(lifetime, 32);
+        if (toProject != null) Home.of(toProject);
+        if (timeoutSeconds != null && (timeoutSeconds < 1 || timeoutSeconds > 604800))
+          throw new IllegalArgumentException("Invalid timeout");
+      } catch (IllegalArgumentException invalid) {
+        throw new ToolArguments.BadArguments(
+            "send_message has invalid identity, text or timeout fields.");
+      }
+    }
+
+    private static void identity(String value, int maximum) {
+      if (value != null
+          && (value.isBlank()
+              || value.length() > maximum
+              || !value.equals(value.strip())
+              || value
+                  .codePoints()
+                  .anyMatch(c -> Character.isISOControl(c) || c == 0x2028 || c == 0x2029)))
+        throw new IllegalArgumentException("Invalid messaging identity");
+    }
+
     public Request(
         String to,
         String body,
@@ -64,10 +95,7 @@ public final class SendMessageTool implements AgentTool {
   /** Existing authenticated execution owner, separate from all model-supplied arguments. */
   @FunctionalInterface
   public interface AttributedSender {
-    String send(
-        Request request,
-        Home home,
-        io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner);
+    String send(Request request, Home home, UsageAttribution owner);
   }
 
   private final AttributedSender sender;
@@ -145,13 +173,11 @@ public final class SendMessageTool implements AgentTool {
   }
 
   @Override
-  public String run(
-      String json, Home home, io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
+  public String run(String json, Home home, UsageAttribution owner) {
     return execute(json, home, owner);
   }
 
-  private String execute(
-      String json, Home home, io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
+  private String execute(String json, Home home, UsageAttribution owner) {
     String opening = callId;
     callId = null;
     try {
@@ -163,6 +189,21 @@ public final class SendMessageTool implements AgentTool {
           || args.has("project")
           || args.has("home")) {
         return "The harness supplies sender identity, return address and project; omit those fields.";
+      }
+      var fields = args.fieldNames();
+      while (fields.hasNext()) {
+        String field = fields.next();
+        if (!Set.of(
+                "to",
+                "body",
+                "reply_to",
+                "reply_expected",
+                "final",
+                "lifetime",
+                "timeout_seconds",
+                "to_project",
+                "route")
+            .contains(field)) return "send_message does not accept that field.";
       }
       String body = ToolArguments.requireText(args, "body", NAME, "the message");
       String to =

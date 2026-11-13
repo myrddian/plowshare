@@ -1,7 +1,11 @@
 package io.aeyer.plowshare.server.cache;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.agents.JobTelemetry;
 import io.aeyer.plowshare.server.agents.MicrometerJobTelemetry;
@@ -13,6 +17,7 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.Lane;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -118,7 +123,7 @@ class PrometheusExportTest {
     try (var context =
         (ServletWebServerApplicationContext)
             app.run("--server.port=0", "--server.address=127.0.0.1")) {
-      assertNotNull(context.getBean(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class));
+      assertNotNull(context.getBean(PrometheusMeterRegistry.class));
       try (var client = HttpClient.newHttpClient()) {
         assertEquals(404, get(client, context.getWebServer().getPort()).statusCode());
       }

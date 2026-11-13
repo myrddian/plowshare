@@ -541,6 +541,15 @@ never deferred.
   already-wired invalidation the natural fit, and avoids a second mechanism over the same
   substrate. Cost if wrong: if a non-relay writer can stale a board view, reusing `RELAY`
   serves stale data — which is why the audit gates the choice rather than following it.
+
+  **Correction, 13 November 2026 (Relay Slice 0):** the attribution above that
+  board and swarm are built on Relay was wrong. The board is an independent
+  forum with its own storage and sequencing. Messages to and from it travel over
+  Relay through the planned bridge; messaging's transport is the part to extract
+  from the board. See [0057](../../decisions/0057-board-forum-and-relay-messaging-substrate.md).
+  Shared cache-domain coverage must follow the actual writers and invalidation
+  paths, not that earlier substrate assumption. The four-writer audit remains
+  necessary; this note does not establish its result or change the cache design.
 - **Throttle ceiling 3s rather than the owner's 5s.** 5s collides exactly with Hikari's
   `connection-timeout`, making the two conditions indistinguishable in logs and
   permitting a 10s worst case. The owner has not confirmed 3s.

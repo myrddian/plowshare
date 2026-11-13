@@ -1,8 +1,13 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.RelayLog;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
@@ -18,6 +23,22 @@ class ScopedRelayInspectionTest {
   private final ProjectWorkspaces projects = mock(ProjectWorkspaces.class);
   private final RelayLogRepository logs = mock(RelayLogRepository.class);
   private final RelayInspection inspection = new ScopedRelayInspection(members, projects, logs);
+
+  @Test
+  void an_agent_inbox_has_project_read_authority_without_account_private_topic_rules() {
+    String name = "messaging.agent.fixture.worker";
+    var query = new RelayLog.Query("project", false, name, null, null);
+    assertThrows(CallerFault.class, () -> inspection.log("nonmember", query));
+    verifyNoInteractions(logs);
+    when(members.mayUse("project", "member")).thenReturn(true);
+    when(projects.id("project")).thenReturn(9L);
+    var key = new Relay.TopicKey(9, name);
+    var topic = new Relay.Topic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault(), 0, 0);
+    when(logs.read(key, 0, 100, "member"))
+        .thenReturn(new RelayLogRepository.Snapshot(topic, 0, List.of(), List.of(), List.of()));
+    inspection.log("member", query);
+    verify(logs).read(key, 0, 100, "member");
+  }
 
   @Test
   void no_log_query_occurs_without_live_membership_or_private_union_ownership() {

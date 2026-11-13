@@ -2,6 +2,15 @@
 
 What Relay is meant to be, what it is today, and how to get it there properly.
 
+**Review remediation, 13 November 2026:** the latest execution state is the
+[review task graph](relay-review-task-graph.md). Native receivers, exact retained
+requester returns, consumer replacements, legacy transport retirement and integrated
+verification are independently accepted under that graph's active scope. The user
+explicitly deferred fresh reads from manually started Home Assistant
+orchestrations. Older dated slice reports and the baseline inventory below
+describe their historical checkpoint, not the current API surface. Follow the
+[legacy cutover contract](relay-legacy-cutover.md) for upgrade and history rules.
+
 Written 2026-11-12 against branch `privacy-deep-scan-design`. Every factual claim cites
 `path:line`. **(inference)** marks a reading of the evidence. **(owner)** marks intent stated by
 the owner directly; it is the original intent, not a new direction, but no single record states it.
@@ -9,6 +18,114 @@ Paths beginning `relay/`, `board/`, `events/`, `agents/`, `ws/` are
 under `plowshare-server/src/main/java/io/aeyer/plowshare/server/`; `V…sql` files are under
 `plowshare-server/src/main/resources/db/migration/`. Decision records are cited by number:
 `0040:25` is `docs/decisions/0040-relay-is-the-boards-substrate-rebuilt.md` line 25.
+
+**Slice 0 completed, 13 November 2026.**
+[0057](decisions/0057-board-forum-and-relay-messaging-substrate.md) supersedes
+0040 and corrects the board/messaging direction;
+[0058](decisions/0058-a2a-rebuild-on-relay.md) supersedes 0008 with the A2A rewrite
+direction. A2A remains a feature: its implementation must be rewritten because
+adapter responsibilities entered Plowshare core. The related records, current
+manuals, backlog and cache-spec correction are updated. No later implementation
+slice was authorized by that documentation change.
+
+**Slice 1 completed, 13 November 2026, under separate implementation
+authorization.** [0059](decisions/0059-typed-messaging-payload-contract.md) records
+the typed payload, strict versioned codec and internal publication boundary.
+They use Relay TEXT and the existing envelope/API unchanged. The live sender
+was still board-backed at that slice; Slice 3 below implements its cutover.
+
+**Slice 2 completed, 13 November 2026, under separate implementation
+authorization.** [0060](decisions/0060-relay-board-bridge-and-authorized-close.md)
+records the three board receivers, full threaded replies and one terminal,
+publisher attribution, durable receipts/outbox and project-authorized
+`board.close`. Forum storage and Relay's envelope remain intact.
+
+**Slice 3 completed, 13 November 2026.**
+[0061](decisions/0061-relay-agent-inboxes-and-messaging-cutover.md) records
+messaging-owned records and allowances, one Relay inbox per account/project/definition,
+atomic publication and leased native-wake admission. V243 transfers retained threads,
+queued work and paid evidence without replay; V244 reserves shared-conversation turn
+ordinals before execution. Existing `message.*` and SDK contracts remain unchanged.
+Logical drained-inbox retirement is included; physical cleanup is recorded in Slice 4 below.
+Google formatting, `formatCheck check`, generated contract audits, targeted PostgreSQL
+cutover/lifecycle/concurrency regressions and authenticated application ingress tests passed.
+The default checks did not enable database tests; database verification used selected `-PfullDb`
+classes. No live model inference was required.
+
+**Slice 4 completed, 13 November 2026.**
+[0062](decisions/0062-relay-topic-and-group-retirement.md) records owner-requested
+physical retirement, generation-fenced `relay.group.delete`, exact read-only
+`relay.group.inspect` and V245's indexed
+retention deadlines. Existing operator removal guards, retained input and paid
+execution records remain protected. `formatCheck check sdkCheck`, generated contract
+audits, and targeted PostgreSQL migration, locking, retirement and WebSocket tests passed.
+The default/SDK gate did not enable database tests. The A2A rewrite remains Slice 5.
+
+**Slice 6 completed, 13 November 2026.**
+[0063](decisions/0063-granted-execution-relay-publishing.md) records the ordinary
+`relay_publish` tool and its journaled script command form. Exact operator-installed
+project/definition/topic grants supplement current definition tool grants and
+project authority. V246 retains atomic publication receipts beyond broker retention;
+execution identity and causation come from the harness. Existing feature tools,
+Relay envelopes and SDK operations retain their contracts. Remaining priority:
+Slice 7, then Slice 8, then the deferred A2A rewrite in Slice 5.
+`formatCheck check` passed without database tests enabled. All 20 focused tests
+passed, including six selected PostgreSQL migration, concurrency, rollback and
+retention-recovery cases under `-PfullDb`. Boot wiring and image-reachability
+inventory checks passed. No live model inference was required.
+
+**Slice 7 completed, 13 November 2026.**
+[0064](decisions/0064-relay-child-completion-and-turn-eligibility.md) records the
+single leased completion group, all-terminal capture and V247's durable recovery
+rotation. Callback and boot/free drains cannot deliver child terminal results.
+The shared eligibility decision includes pending-report holds so a nudge or
+plain-text auto-finish cannot overtake the report. Questions, wait legality,
+depth/cancellation policy and existing APIs retain their owners. Remaining work:
+Slice 8, then the deferred A2A rewrite in Slice 5.
+Google formatting and `formatCheck check` passed. Targeted `-PfullDb` checks
+passed for V247 upgrade/backfill, terminal capture rollback, scoped distributed
+leases, retention recovery, fixed-cycle rotation, wait/wake policy, delivery
+fallback and parent nudge/auto-finish fencing. Default checks did not enable
+database tests; no live model inference was required.
+
+**Slice 8 completed, 13 November 2026.**
+Java now has typed `BoardClient`, `SwarmClient` and `MessagingClient` facades,
+including async request options, bounded pages and correlated receipts. Python,
+Go and .NET have explicit binary Relay HTTP helpers using generated metadata and
+descriptor contracts. They validate inputs before submission, refuse redirects
+and automatic replay, bound transfers and verify returned identity and bytes.
+[SDKs](sdks.md) and [binary delivery](relay-blobs.md) document the public surfaces.
+Google formatting, `formatCheck`, `check`, `sdkCheck` and `sdkPackageCheck` passed,
+including native race/type checks, local HTTP/WS fixtures and fresh installed
+consumers. The package consumer harness now includes Node's pinned runtime typings
+and the complete .NET conformance driver. No database tests or live deployment
+were needed. Only the deferred A2A rewrite in Slice 5 remains.
+
+**Slice 5 partially implemented, 13 November 2026.**
+[0065](decisions/0065-a2a-relay-adapter-contracts-and-capability-gaps.md) records the
+fresh capability review and [SDK-only Relay outbound adapter](a2a-relay-outbound.md).
+It has typed dispatch/observation contracts, private durable intent/reply evidence,
+producer/peer-bound remote identities, no replay after uncertainty and explicit
+read-only reconciliation. The A2A module's tests no longer import server internals.
+Focused crash/authorization/codec tests, a real SDK WebSocket with an independent
+A2A HTTP peer fixture, both installed launchers, Google formatting, `formatCheck`,
+`check` and `integrationBoundaryCheck` passed. No database tests were required.
+
+The inbound/core cutover remains unfinished. Existing `incoming.receive` already
+provides authenticated durable admission, and `agent.list` exposes granted served
+commands. Arbitrary SDK publications deliberately cannot impersonate trusted
+inbox records. The work is to relocate native admission behind registered Relay
+receivers and retain requester returns, under the separately authorized general
+platform decision [0066](decisions/0066-relay-messaging-receiver-and-review-remediation.md).
+Existing incoming/outgoing consumers, external storage and the legacy launcher
+remain until replacements and consumer migrations can be tested.
+Slice 5 and the overall plan are **not complete**.
+
+Sections 1–3 retain the original review's evidence and drift inventory. Their
+`path:line` citations describe the pre-correction documents at source baseline
+`7ca27b48ac496b0027923b34b48d3044bddd8b49`; corrected records now have different
+line numbers and superseded claims are not current guidance. Follow the linked
+replacement decisions for the governing direction.
 
 ## 1. Intent
 
@@ -249,30 +366,47 @@ Only the second and third rows would justify the future permission-system work.
 
 ## 4. How to get there properly
 
-Every slice changes core and needs the owner's explicit authorisation under
-`docs/decisions/0001-integration-boundary.md`.
+**Execution priority, updated by the owner on 13 November 2026:**
+Slice 6 (agent and orchestration publishing), then Slice 7 (delegation's consumer),
+then Slice 8 (SDK parity), then Slice 5 (the A2A rewrite). Slice numbers remain
+stable identifiers, not execution order. Slices 6–8 take priority over A2A;
+the rewrite remains planned and is deferred until those slices are complete.
 
-### Slice 0 — Make the record true (**first real step; amends or supersedes records**)
+Slice 0 corrects documentation only. Later slices that change the platform need
+the owner's explicit authorisation under
+`docs/decisions/0001-integration-boundary.md`; the documentation correction does
+not authorize those implementation changes.
 
-Nothing else should start until future readers find the original intent. No code.
+### Slice 0 — Make the record true (**completed 13 November 2026**)
 
-| Record | Change |
+The original intent is now recorded before implementation work. The following
+documentation corrections are complete; `BoardMessaging` still describes the
+actual board-backed implementation.
+
+| Record | Correction recorded |
 |---|---|
-| `0040` | Supersede with a record titled for what is true: the board is an independent forum; Relay is the messaging substrate. Keep its mechanism-not-policy rules, cardinality measurements and messaging findings. Remove the v0/v1 retirement framing (`0040:25-40`, `0040:100`, `0040:342-343`); correct "five kinds" (`0040:139`) and the 0039 filename (`0040:384`). |
-| `0037` | Amend the reconciliation (`0037:218`, `0037:229-245`): messaging's move is an extraction from the board's transport, not a board replacement. Withdraw the audience blocker (`0037:268-285`): visibility is project-wide. |
-| `0040` (also) | Replace "Mailboxes are not a Relay construct" (`0040:258-260`) and qualify `0040:303`: an agent inbox is a topic; broadcast families keep one topic with many subscribers. |
-| `0008` | Mark superseded by the Slice 5 record; its content becomes input to the rebuild. |
-| `0041` | Reword `0041:104` to "on the board's transport". |
-| `0038` | Status to implemented (`0038:3`); fix the 0039 filename (`0038:7`). |
-| `docs/platform-gaps-todo.md` | Correct D1 (`:375-381`); add the bridge. |
-| `docs/agent-messaging.md`, manuals 03 and 13 | Keep the API description; mark the board-backed transport as current implementation, with Relay as the target (`docs/agent-messaging.md:7-9`). |
-| `board/BoardMessaging.java:31` | Leave until Slice 3 changes the code; a comment must describe what the code does. |
-| The 2026-10-23 cache spec | Add a correction note at `:539-540`. |
+| `0040` | Superseded by [0057](decisions/0057-board-forum-and-relay-messaging-substrate.md). Retains mechanism rules, historical cardinality measurements and messaging findings; removes the board-retirement framing and corrects the current six payload kinds and 0039 filename. |
+| `0037` | Reconciles messaging as extraction from board transport, not board replacement. Withdraws the audience blocker: visibility is project-wide. Separates messaging, outgoing work and delegation. |
+| `0040` (also) | An agent inbox is a topic; broadcast families keep shared topics and independent subscribers. |
+| `0008` | Superseded by [0058](decisions/0058-a2a-rebuild-on-relay.md), the replacement direction for Slice 5. A2A remains; the old plan becomes input to rewriting its implementation outside core. Detailed Slice 5 contracts are still future work. |
+| `0041` | Says "on the board's transport" and withdraws the repeated mailbox-privacy blocker, retaining the eligibility and single-group requirements. |
+| `0038`, `0039` | 0038 is marked implemented with the correct 0039 filename. 0039 separates general-carrier extensibility from its deferred non-project audience vocabulary. |
+| `docs/platform-gaps-todo.md` | Corrects D1 and A2A rewrite scope; adds the bridge and its replies. |
+| `docs/agent-messaging.md`, manuals 03 and 13, `docs/relay.md` | Keep current API behavior and board-backed transport explicit, with the decided Relay target marked unimplemented. |
+| `board/BoardMessaging.java` | Left unchanged by this slice; its comment describes the implementation until Slice 3 changes it. |
+| The 2026-10-23 cache spec | Adds a correction beside the mistaken board/swarm-on-Relay attribution; writer/invalidation auditing still governs cache-domain choice. |
 
-### Slice 1 — The messaging payload contract (**new decision**)
+### Slice 1 — The messaging payload contract (**completed 13 November 2026**)
 
 Internal to the implementation. Relay's envelope, operations and schema do not change, and
 neither does the `message.*` API.
+
+Implemented in `plowshare-server/src/main/java/io/aeyer/plowshare/server/messaging/`:
+`MessagePayload`, `MessagePayloadCodec`, `MessagePublications` and
+`RelayMessagePublications`. See [0059](decisions/0059-typed-messaging-payload-contract.md)
+for the exact wire fields, body/reference variants, trusted binding preconditions,
+publisher checks, byte bounds and uncertainty rules. The capability is staged
+for the later cutover and is not wired into the board-backed sender.
 
 - **Contract.** A typed `MessagePayload`: message ID, sender address, recipient address, body or a
   reference to a body held in messaging's record, `reply_to` (message ID), conversation or
@@ -294,7 +428,12 @@ neither does the `message.*` API.
 - **Tests.** Mocked: field validation, forged sender, foreign publisher skipped, repeat and
   conflicting repeat.
 
-### Slice 2 — The Relay → Board bridge (**new decision**)
+### Slice 2 — The Relay → Board bridge (**completed**)
+
+Implemented through `BoardBridge`, `BoardClosing`, `BoardRelayReceiver` and the
+V242 reply outbox. [0060](decisions/0060-relay-board-bridge-and-authorized-close.md)
+defines the versioned request/reply payloads, explicit reply-topic requirement,
+source-project opening constraint and exact transitive-thread disclosure rule.
 
 - **Changes.** Receivers `board.post` and `board.open` that call the board's own API, and a
   permission-checked `board.close` operation with a matching receiver. Board storage, lock and
@@ -332,7 +471,7 @@ neither does the `message.*` API.
   without swarm access posts but cannot read, a Viewer cannot close and a Contributor can, terminal
   reply once.
 
-### Slice 3 — Messaging on Relay, with one inbox topic per agent (**new decision; supersedes 0040's mailbox guidance**)
+### Slice 3 — Messaging on Relay, with one inbox topic per agent (**implemented; supersedes 0040's mailbox guidance**)
 
 **No API change.** The `message.*` operations, events and lifecycle notices, the `send_message`
 tool and its parameters, and every SDK call keep their names, payloads and behaviour. No client or
@@ -400,18 +539,38 @@ SDK changes. The swap happens behind the existing seam (`agents/SendMessageTool.
   does not delay another; allowance top-up by policy and by approval; a non-member cannot read an
   agent topic. `full-db`: constraints, cutover, concurrent final replies.
 
-### Slice 4 — Topic and group retirement (**new decision**)
+### Slice 4 — Topic and group retirement (**implemented**)
 
-Retirement the owning system can request: `REMOVE_TOPIC` is operator-only and refuses a topic
-with a subscription or retained publication (`0040:296-298`). Add SDK group deletion
-(`docs/relay.md:571`) and the sweep fix in `0040:316-319`. It no longer gates Slice 3.
+Owning systems can request physical retirement after normal publication retention
+and their subscriptions/work drain. Operator `REMOVE_TOPIC` keeps its existing
+empty-topic guard. [0062](decisions/0062-relay-topic-and-group-retirement.md) records
+generation-fenced SDK group deletion, bounded owner cleanup and V245's indexed
+retention discovery. Messaging history and paid evidence survive; this no longer
+gates Slice 3.
 
-### Slice 5 — A2A rethought and rebuilt on Relay (**new decision; supersedes 0008**)
+### Slice 5 — A2A rethought and rebuilt on Relay (**outbound implemented; inbound/core cutover blocked; supersedes 0008**)
 
 **Owner:** A2A should not have modified core; that it did led to the whole API approach, and the
 current implementation "should be entirely rethought". This is a rebuild from fresh requirements,
 not a migration of today's design. Governing rule: an integration that needs core changes is a
 failed integration task (`docs/decisions/0001-integration-boundary.md`). Depends on Slices 1–3.
+A2A remains a feature; the rewrite removes adapter responsibilities from core.
+The replacement direction is recorded in [0058](decisions/0058-a2a-rebuild-on-relay.md);
+[0065](decisions/0065-a2a-relay-adapter-contracts-and-capability-gaps.md) now records
+the detailed outbound contract, implementation and the public capability review.
+The SDK-only Relay outbound worker is implemented under `integrations/a2a`, with
+its own typed dispatch/observation protocol, durable intent journal and explicit
+reconciliation. See [its manual](a2a-relay-outbound.md).
+
+The full rewrite still requires the structural admission relocation authorized
+by [0066](decisions/0066-relay-messaging-receiver-and-review-remediation.md).
+`incoming.receive` already admits authenticated work, `agent.list` provides the
+served-command projection, and message schedules share native admission currently
+typed with `Incoming` DTOs. Registered Relay receivers must reuse that admission
+without weakening private inbox checks, and preserve durable requester returns.
+Inbound `incoming.*`, outgoing consumers, external-lifetime storage and affected
+adapters remain until replacements can be tested and cut over. This slice is
+**not complete**.
 
 - **Shape (owner's direction).** Adapters are SDK consumers of Relay topics through ports. There
   may be several adapters, each with its own topic set, behind one API. Inbound work lands on the
@@ -444,26 +603,44 @@ failed integration task (`docs/decisions/0001-integration-boundary.md`). Depends
 - **Tests.** Adapter tests through the public SDK only; crash windows and no repeated external
   mutation (`0008:268-285`); an independent A2A client.
 
-### Slice 6 — Agents and orchestrations publish (**new decision**)
+### Slice 6 — Agents and orchestrations publish (**implemented**)
 
-**Owner: both.** Agents keep feature tools such as `send_message`, which publish beneath once
-Slice 3 lands (today it writes to no Relay topic), and may also get a granted tool, and scripts a
-journaled command, that publish `TEXT` to a named project topic. Explicit grant per definition and
-topic; event ID from the execution and model call (`0002:39-40`); causation inherited.
+Agents keep feature tools such as `send_message` and may explicitly grant
+`relay_publish`; scripts use that same tool through the existing command journal.
+[0063](decisions/0063-granted-execution-relay-publishing.md) defines exact topic
+grants, current definition/project checks, inherited effect budgets, deterministic
+call identities and V246's retention-independent receipts. Neither models nor
+scripts choose an envelope, account, project or fresh causation root. See
+[Relay publishing](relay.md#agent-and-orchestration-publishing) for configuration.
 
-### Slice 7 — Delegation's consumer (under 0041; needs authorisation)
+### Slice 7 — Delegation's consumer (**implemented under 0041**)
 
-Consume `orchestration.child.completed` under a single leased consumer group (`0041:196-199`),
-remove the in-process path in the same change, and introduce the one eligibility owner.
+Implemented through the built-in `builtin.orchestrations.children` group and the
+shared `TurnEligibility` decision. [0064](decisions/0064-relay-child-completion-and-turn-eligibility.md)
+defines trusted notice selection, retained terminal-attempt recovery, distributed
+ownership, callback-path removal and the parent scheduling hold. V247 captures
+finished, failed, capped and cancelled children without replaying delivered
+history. Detailed configuration and failure behavior are in [Relay](relay.md#child-orchestration-completion).
 
-### Slice 8 — SDK parity
+### Slice 8 — SDK parity (**implemented**)
 
-Java board, swarm and messaging clients; blob helpers for Python, Go and .NET. Each earlier slice
-ships its own SDK changes.
+Java's typed board, swarm and messaging clients cover the existing operations,
+with synchronous/asynchronous calls and shared request options. Immutable records
+validate nested forum ownership, retained swarm selection, instance/reply lifecycle
+and page/receipt correlation; server authorization remains authoritative. Sending
+continues through the granted agent tool API.
 
-Decision records needed: Slice 0 supersedes 0040 and amends 0037, 0038 and 0041; new records for
-Slices 1, 2, 3, 4, 5 (superseding 0008) and 6; Slice 7 proceeds under 0041. The Slice 3 record
-must also settle the allowance under the caps policy (`docs/projects.md:648-650`).
+Python, Go and .NET binary helpers use generated HTTP DTO roots from the owning
+TypeScript graph. They submit once, retain delivery uncertainty on cancellation,
+refuse redirects and validate receipts and byte integrity. The existing HTTP
+endpoints and WS operations retain their contracts. See [SDKs](sdks.md) and
+[binary delivery](relay-blobs.md) for configuration, timeout and ownership details.
+Each earlier slice shipped its own SDK changes.
+
+Decision records: Slice 0 is complete through 0057 and the amendments above;
+0058 records the replacement A2A direction and supersedes 0008. Detailed records
+for Slices 1–3 are 0059–0061; Slice 6 is recorded in 0063; Slice 4 is recorded in 0062. Slice 5 must complete its contracts before
+implementation. Slice 7 proceeds under 0041. The Slice 3 record settles allowance renewal through the existing caps policy.
 
 ## 5. Open questions
 

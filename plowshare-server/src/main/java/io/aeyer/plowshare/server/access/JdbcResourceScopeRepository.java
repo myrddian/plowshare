@@ -29,25 +29,20 @@ public class JdbcResourceScopeRepository implements ResourceScopeRepository {
           case PROPOSAL ->
               "SELECT pr.name FROM proposals p JOIN memories m ON m.id=p.memory_id LEFT JOIN projects pr ON pr.id=m.project_id WHERE p.id=?";
           case TOPIC -> "SELECT project FROM board_topics WHERE id=?";
-          case INSTANCE -> "SELECT project FROM board_message_instances WHERE id=?";
+          case INSTANCE -> "SELECT project FROM message_instances WHERE id=?";
           case ORCHESTRATION -> "SELECT project FROM orchestrations WHERE id=?";
           case ORCHESTRATION_RECEIPT ->
               throw new CallerFault("Receipt scopes require the authenticated account");
           case MESSAGE ->
-              "SELECT i.project FROM board_message_routes r JOIN board_message_instances i ON i.id IN (r.sender,r.recipient) WHERE r.message=?";
+              "SELECT i.project FROM message_routes r JOIN message_instances i ON i.id IN (r.sender,r.recipient) WHERE r.message=?";
           case SCHEDULE ->
               "SELECT p.name FROM schedule_files f JOIN schedule_sources s ON s.id=f.source_id LEFT JOIN projects p ON p.id=s.project_id WHERE f.internal_name=?";
           case TRIGGER ->
               "SELECT COALESCE(t.project,p.name,'personal:'||encode(convert_to(t.defined_by,'UTF8'),'hex')) FROM triggers t LEFT JOIN conversations c ON c.id=t.conversation LEFT JOIN projects p ON p.id=c.project_id WHERE t.name=?";
           case APPROVAL ->
               "SELECT p.name FROM run_approvals a JOIN projects p ON p.id=a.project_id WHERE a.id=?";
-          case OUTGOING ->
-              "SELECT p.name FROM outgoing_work w LEFT JOIN projects p ON p.id=w.project_id WHERE w.id=?";
         };
-    return jdbc.queryForList(
-        sql,
-        String.class,
-        resource.kind() == Kind.OUTGOING ? UUID.fromString(resource.id()) : resource.id());
+    return jdbc.queryForList(sql, String.class, resource.id());
   }
 
   @Override

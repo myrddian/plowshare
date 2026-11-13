@@ -8,11 +8,12 @@ import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.BoundTools;
 import io.aeyer.plowshare.server.agents.ClasspathDefinitions;
 import io.aeyer.plowshare.server.agents.Environments;
-import io.aeyer.plowshare.server.agents.OutgoingTool;
+import io.aeyer.plowshare.server.agents.RelayPublishTool;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -125,13 +126,13 @@ class NothingEnumeratesImagesTest {
    * adapters return document paragraphs, outlines and citation coordinates. None reads {@code
    * ImageStore} or lists image files, so these reads preserve the same reachability boundary.
    *
-   * <p>The outgoing tools read peer aliases and account-owned external-work receipts. They neither
-   * reach the image store nor enumerate local files. They are available for explicit operator
-   * grants and are not granted to shipped agents.
-   *
    * <p>{@code send_message} sends supplied text and returns a routing receipt. It does not inspect
    * image stores or enumerate image ids. Any ids carried in a later reply are data explicitly
    * supplied by that participant.
+   *
+   * <p>{@code relay_publish} publishes supplied TEXT and returns only a broker receipt. It cannot
+   * read topic bodies, image stores or filesystem listings. Topic authority is explicitly granted;
+   * shipped definitions receive no automatic tool or topic grant.
    */
   @Test
   void the_tools_an_agent_may_hold_are_these_and_none_of_them_lists_images() {
@@ -168,10 +169,7 @@ class NothingEnumeratesImagesTest {
             "memory_read",
             "memory_recall",
             "memory_write",
-            "outgoing_cancel",
-            "outgoing_peers",
-            "outgoing_read",
-            "outgoing_send",
+            "relay_publish",
             "result_list",
             "result_read",
             "run",
@@ -196,7 +194,8 @@ class NothingEnumeratesImagesTest {
       declared.addAll(shipped.tools());
     }
     // run is behind a permission flag rather than a declaration, so whether a shipped agent
-    // names it yet does not move this rule. Outgoing tools require explicit operator grants;
+    // names it yet does not move this rule. Relay publishing tools need explicit
+    // grants;
     // the shipped definitions must not acquire them through this inventory update.
     assertEquals(
         allowed.stream()
@@ -204,7 +203,7 @@ class NothingEnumeratesImagesTest {
                 tool ->
                     !tool.equals("run")
                         && !tool.equals("information_write")
-                        && !OutgoingTool.NAMES.contains(tool)
+                        && !tool.equals(RelayPublishTool.NAME)
                         && !tool.equals("send_message"))
             .toList(),
         declared.stream()
@@ -294,7 +293,7 @@ class NothingEnumeratesImagesTest {
         for (String prefix : prefixes) {
           for (String path : mapping.path()) {
             String whole = prefix + path;
-            if (whole.toLowerCase(java.util.Locale.ROOT).contains(word)) {
+            if (whole.toLowerCase(Locale.ROOT).contains(word)) {
               found.add(verbs(mapping) + " " + whole);
             }
           }

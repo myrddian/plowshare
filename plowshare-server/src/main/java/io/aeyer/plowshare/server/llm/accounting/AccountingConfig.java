@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.llm.accounting;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Compaction;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.data.DataLayout;
@@ -34,10 +35,7 @@ public class AccountingConfig {
       UsageScopeRepository scopes, ObjectProvider<UsageExecutionStore> executions) {
     return new UsageOwners() {
       @Override
-      public UsageAttribution in(
-          io.aeyer.plowshare.protocol.Home home,
-          String account,
-          UsageAttribution.Operation operation) {
+      public UsageAttribution in(Home home, String account, UsageAttribution.Operation operation) {
         String project = scopes.project(home);
         return account == null
             ? UsageAttribution.system(project, operation)

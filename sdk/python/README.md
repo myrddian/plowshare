@@ -100,3 +100,17 @@ POSIX files/directories are private (0600/0700); Windows requires a private user
 profile/ACLs. Unicode DNS input must use its explicit ASCII IDNA spelling.
 See [client login](../../docs/client-login.md) and
 [the design decision](../../docs/decisions/0035-python-sdk-shared-login.md).
+
+## Relay binary transfers
+
+`publish_relay_blob(origin, bearer, RelayBlobPublishDto(...), bytes)` and
+`read_relay_blob(origin, bearer, RelayBlobReadDto(...), descriptor)` are async
+helpers exported from `plowshare`; DTOs live in `plowshare.contracts`. They require
+an explicit HTTP(S) origin and caller bearer. Both accept keyword `timeout`
+(default 60 seconds, maximum 300). Original immutable bytes and the caller's
+request UUID must be retained before publishing.
+
+The helpers refuse redirects and replay, check publication scope and descriptor
+integrity, and return verified bytes. A cancelled submitted transfer raises
+`CancelledRequest` with unknown delivery; its bounded HTTP worker closes when
+it finishes. See [binary HTTP delivery](../../docs/relay-blobs.md).

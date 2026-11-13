@@ -99,7 +99,7 @@ await test('lost admission remains uncertain across restart and blocks new effec
   await restarted.adapter.accept(input({ messageId: '200000000000000002' }));
   await restarted.adapter.poll();
   assert.equal(restarted.gateway.submissions.length, 0);
-  assert.equal(restarted.gateway.statuses.length, 0);
+  assert.equal(restarted.gateway.statuses.length, 1);
   assert.equal(restarted.repository.state.records[0]?.admission, 'UNKNOWN');
 });
 
@@ -587,7 +587,7 @@ await test('DM admission and outbound uncertainty survive restart without replay
   );
   await restarted.adapter.poll();
   assert.equal(restarted.gateway.submissions.length, 0);
-  assert.equal(restarted.gateway.statuses.length, 0);
+  assert.equal(restarted.gateway.statuses.length, 1);
   const sending = fixture(serviceDm());
   await sending.adapter.accept(directInput());
   sending.discord.failure = new Error('Lost Discord receipt');

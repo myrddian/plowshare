@@ -88,7 +88,6 @@ public final class BoundTools {
     // that refuses is a refusal this tool answers in words rather than a
     // wiring a deployment declined.
     names.add(SearchTool.NAME);
-    names.addAll(OutgoingTool.NAMES);
     // A read of the server clock, gated by nothing and requiring no scope.
     names.add(GetDateTool.NAME);
     // The bounded persisted-log read, wired from stores ArchiveConfig binds
@@ -98,6 +97,7 @@ public final class BoundTools {
     names.add(ConversationSearchTool.NAME);
     names.add(AgentRunTool.NAME);
     names.add(SendMessageTool.NAME);
+    names.add(RelayPublishTool.NAME);
     // Gated by nothing, unlike the two above. Every run has a transcript by
     // signature, so the tool can always be built -- see
     // AgentsConfigTest.the_runtime_binds_the_memory_tools_delegation_and_

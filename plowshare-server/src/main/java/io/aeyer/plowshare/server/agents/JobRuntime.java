@@ -1,15 +1,35 @@
 package io.aeyer.plowshare.server.agents;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.ContainedProjects;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.access.AccessRequest;
+import io.aeyer.plowshare.server.access.AuthorityAction;
+import io.aeyer.plowshare.server.access.InferenceCalls;
+import io.aeyer.plowshare.server.access.KnowledgeReadScope;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind;
+import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
+import io.aeyer.plowshare.server.applications.ContainedPrincipals;
+import io.aeyer.plowshare.server.approvals.ActiveRunApprovals;
+import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.approvals.RunApproval;
+import io.aeyer.plowshare.server.approvals.RunApprovalStore;
+import io.aeyer.plowshare.server.approvals.RunCallResumption;
+import io.aeyer.plowshare.server.approvals.SuspendedRunCalls;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
+import io.aeyer.plowshare.server.archive.ConversationRecord;
+import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.embedding.QueryEmbeddings;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.files.CodeWorkspaceMonitor;
 import io.aeyer.plowshare.server.files.ProviderRouter;
 import io.aeyer.plowshare.server.files.RunProviders;
 import io.aeyer.plowshare.server.files.SessionGoneException;
+import io.aeyer.plowshare.server.files.WorkspaceCodeMap;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.harness.HarnessRun;
@@ -28,9 +48,13 @@ import io.aeyer.plowshare.server.hooks.ToolPost;
 import io.aeyer.plowshare.server.hooks.ToolPre;
 import io.aeyer.plowshare.server.hooks.script.ScriptLocation;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationActor;
+import io.aeyer.plowshare.server.information.InformationContext;
+import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.dispatch.CallAuthorization;
 import io.aeyer.plowshare.server.llm.dispatch.CallerAbandonedException;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
@@ -44,11 +68,16 @@ import io.aeyer.plowshare.server.llm.dispatch.ModelResponseRejected;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
+import io.aeyer.plowshare.server.relay.RelayPublishing;
 import io.aeyer.plowshare.server.todos.TodoLists;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,12 +85,15 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -151,14 +183,14 @@ import org.slf4j.LoggerFactory;
  * it does not cover.
  */
 public final class JobRuntime {
-  private io.aeyer.plowshare.server.information.InformationAccess informationAccess;
-  private io.aeyer.plowshare.server.information.InformationJobs informationInputs;
+  private InformationAccess informationAccess;
+  private InformationJobs informationInputs;
 
-  public void useInformationInputs(io.aeyer.plowshare.server.information.InformationJobs inputs) {
+  public void useInformationInputs(InformationJobs inputs) {
     this.informationInputs = inputs;
   }
 
-  public void useInformationAccess(io.aeyer.plowshare.server.information.InformationAccess access) {
+  public void useInformationAccess(InformationAccess access) {
     informationAccess = Objects.requireNonNull(access, "access");
   }
 
@@ -206,14 +238,12 @@ public final class JobRuntime {
     };
   }
 
-  private io.aeyer.plowshare.server.access.OperationAuthority operations;
-  private io.aeyer.plowshare.server.access.InferenceCalls inferenceCalls;
+  private OperationAuthority operations;
+  private InferenceCalls inferenceCalls;
 
   /** Runtime with required authority, used by focused policy fixtures. */
   public JobRuntime(
-      io.aeyer.plowshare.server.access.OperationAuthority operations,
-      LlmDispatcher dispatcher,
-      List<AgentTool> tools) {
+      OperationAuthority operations, LlmDispatcher dispatcher, List<AgentTool> tools) {
     this(dispatcher, tools);
     this.operations = Objects.requireNonNull(operations);
   }
@@ -230,17 +260,17 @@ public final class JobRuntime {
       RefusalDetector refusals,
       LongSupplier ticker,
       AgentDelegates delegates,
-      io.aeyer.plowshare.server.access.OperationAuthority operations,
-      io.aeyer.plowshare.server.access.InferenceCalls inferenceCalls) {
+      OperationAuthority operations,
+      InferenceCalls inferenceCalls) {
     this(dispatcher, tools, agents, files, clock, reminding, images, refusals, ticker, delegates);
     this.operations = Objects.requireNonNull(operations);
     this.inferenceCalls = Objects.requireNonNull(inferenceCalls);
   }
 
-  private io.aeyer.plowshare.server.access.SystemOperations.Work systemWork;
+  private SystemOperations.Work systemWork;
 
   /** Internal model-only view; caller provenance never supplies SYSTEM authority. */
-  public JobRuntime forSystemWork(io.aeyer.plowshare.server.access.SystemOperations.Work work) {
+  public JobRuntime forSystemWork(SystemOperations.Work work) {
     Objects.requireNonNull(work).require();
     JobRuntime copy =
         retainedCopy(
@@ -334,9 +364,9 @@ public final class JobRuntime {
   private final Supplier<AgentRegistry> agents;
   private final AgentDelegates delegates;
   private final RunProviders files;
-  private volatile io.aeyer.plowshare.server.files.CodeWorkspaceMonitor codeMonitor;
+  private volatile CodeWorkspaceMonitor codeMonitor;
 
-  public void useCodeMonitor(io.aeyer.plowshare.server.files.CodeWorkspaceMonitor monitor) {
+  public void useCodeMonitor(CodeWorkspaceMonitor monitor) {
     this.codeMonitor = monitor;
   }
 
@@ -500,12 +530,9 @@ public final class JobRuntime {
   private AgentDefinition withAgentRules(
       AgentDefinition definition, Home home, String session, String conversation, String owner) {
     if (skills != null) definition = skills.decorate(conversation, definition);
-    if (definition.nativeOnly()
-        && !io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
-            definition.prompt()))
+    if (definition.nativeOnly() && !ScriptProgram.isScript(definition.prompt()))
       throw new CallerFault("Native-only execution requires a script manifest");
-    if (io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
-        definition.prompt())) return definition;
+    if (ScriptProgram.isScript(definition.prompt())) return definition;
     definition = rulePrompts.apply(definition, home, session, owner);
     if (skills != null) {
       String discovery = skills.discovery(definition, home, session, conversation, owner);
@@ -641,13 +668,12 @@ public final class JobRuntime {
   /**
    * Where run's gate stores the questions it asks and the approvals they become; null asks nobody.
    */
-  private volatile io.aeyer.plowshare.server.approvals.RunApprovalStore approvals;
+  private volatile RunApprovalStore approvals;
 
-  private volatile io.aeyer.plowshare.server.approvals.SuspendedRunCalls suspendedRunCalls;
-  private volatile io.aeyer.plowshare.server.approvals.ActiveRunApprovals activeRunApprovals =
-      new io.aeyer.plowshare.server.approvals.ActiveRunApprovals();
+  private volatile SuspendedRunCalls suspendedRunCalls;
+  private volatile ActiveRunApprovals activeRunApprovals = new ActiveRunApprovals();
 
-  public void useActiveRunApprovals(io.aeyer.plowshare.server.approvals.ActiveRunApprovals active) {
+  public void useActiveRunApprovals(ActiveRunApprovals active) {
     activeRunApprovals = Objects.requireNonNull(active);
   }
 
@@ -655,39 +681,33 @@ public final class JobRuntime {
     return activeRunApprovals.waitingIn(conversation);
   }
 
-  public void useSuspendedRunCalls(io.aeyer.plowshare.server.approvals.SuspendedRunCalls calls) {
+  public void useSuspendedRunCalls(SuspendedRunCalls calls) {
     suspendedRunCalls = Objects.requireNonNull(calls);
   }
 
-  private volatile java.util.function.Function<
-          String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
-      approvalRoots = ignored -> Optional.empty();
-
-  private volatile java.util.function.Function<String, Optional<String>> approvalHandles =
+  private volatile Function<String, Optional<ConversationRecord>> approvalRoots =
       ignored -> Optional.empty();
 
-  private volatile io.aeyer.plowshare.server.approvals.ApprovalDelivery approvalDelivery;
+  private volatile Function<String, Optional<String>> approvalHandles = ignored -> Optional.empty();
 
-  public void useApprovals(io.aeyer.plowshare.server.approvals.RunApprovalStore approvals) {
+  private volatile ApprovalDelivery approvalDelivery;
+
+  public void useApprovals(RunApprovalStore approvals) {
     this.approvals = Objects.requireNonNull(approvals, "approvals");
   }
 
-  public void useApprovalRoots(
-      java.util.function.Function<
-              String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
-          roots) {
+  public void useApprovalRoots(Function<String, Optional<ConversationRecord>> roots) {
     this.approvalRoots = Objects.requireNonNull(roots, "roots");
   }
 
-  public void useApprovalHandles(java.util.function.Function<String, Optional<String>> handles) {
+  public void useApprovalHandles(Function<String, Optional<String>> handles) {
     this.approvalHandles = Objects.requireNonNull(handles, "handles");
   }
 
   /** A log's recorded owner (V61's {@code owner_handle}), read when a turn names no account. */
-  private volatile java.util.function.Function<String, Optional<String>> logOwners =
-      ignored -> Optional.empty();
+  private volatile Function<String, Optional<String>> logOwners = ignored -> Optional.empty();
 
-  public void useLogOwners(java.util.function.Function<String, Optional<String>> owners) {
+  public void useLogOwners(Function<String, Optional<String>> owners) {
     this.logOwners = Objects.requireNonNull(owners, "owners");
   }
 
@@ -699,13 +719,12 @@ public final class JobRuntime {
    * is two facts about the same row and a caller that could be handed one without the other is a
    * caller that could be handed half the rule.
    */
-  private volatile java.util.function.Function<
-          String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
-      logRecords = ignored -> Optional.empty();
+  private volatile Function<String, Optional<ConversationRecord>> logRecords =
+      ignored -> Optional.empty();
 
   /** A contained project's live principal, narrowed from {@code ContainedPrincipals}. */
-  private volatile java.util.function.Function<String, Optional<java.util.UUID>>
-      containedPrincipals = ignored -> Optional.empty();
+  private volatile Function<String, Optional<UUID>> containedPrincipals =
+      ignored -> Optional.empty();
 
   /**
    * Both halves of the contained-run decision, wired together because neither is sound alone.
@@ -722,10 +741,7 @@ public final class JobRuntime {
    * one.
    */
   public void useContainedRuns(
-      java.util.function.Function<
-              String, Optional<io.aeyer.plowshare.server.archive.ConversationRecord>>
-          records,
-      io.aeyer.plowshare.server.applications.ContainedPrincipals principals) {
+      Function<String, Optional<ConversationRecord>> records, ContainedPrincipals principals) {
     Objects.requireNonNull(principals, "principals");
     this.logRecords = Objects.requireNonNull(records, "records");
     this.containedPrincipals = principals::principalOfProject;
@@ -760,13 +776,13 @@ public final class JobRuntime {
    * no second read of either: the record's home is the value compared, the value the principal is
    * resolved from, and the value returned about.
    */
-  private Optional<java.util.UUID> containedPrincipalOf(String conversation, String executing) {
+  private Optional<UUID> containedPrincipalOf(String conversation, String executing) {
     if (conversation == null) return Optional.empty();
     var record = logRecords.apply(conversation).orElse(null);
     if (record == null
-        || record.origin() != io.aeyer.plowshare.server.archive.Origin.CONTAINED
+        || record.origin() != Origin.CONTAINED
         || record.home().isGlobal()
-        || !io.aeyer.plowshare.protocol.ContainedProjects.name(record.home().project())
+        || !ContainedProjects.name(record.home().project())
         || !record.home().project().equals(executing)) return Optional.empty();
     return containedPrincipals.apply(record.home().project());
   }
@@ -815,9 +831,7 @@ public final class JobRuntime {
    */
   InformationActor informationActorFor(String callerHandle, String conversation, Home toolHome) {
     if (callerHandle == null) return null;
-    if (toolHome == null
-        || toolHome.isGlobal()
-        || !io.aeyer.plowshare.protocol.ContainedProjects.name(toolHome.project()))
+    if (toolHome == null || toolHome.isGlobal() || !ContainedProjects.name(toolHome.project()))
       return InformationActor.of(callerHandle);
     var principal = containedPrincipalOf(conversation, toolHome.project());
     if (principal.isPresent())
@@ -914,7 +928,7 @@ public final class JobRuntime {
       SystemModelTasks.requireModelOnly(definition);
   }
 
-  public void useApprovalDelivery(io.aeyer.plowshare.server.approvals.ApprovalDelivery delivery) {
+  public void useApprovalDelivery(ApprovalDelivery delivery) {
     this.approvalDelivery = Objects.requireNonNull(delivery, "delivery");
   }
 
@@ -1756,7 +1770,7 @@ public final class JobRuntime {
       List<Content.Image> images,
       String callerHandle,
       boolean incoming,
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+      OperationAuthority.Admission operation) {
     if (systemWork != null) {
       systemWork.requireTask(home, definition, userPrompt);
       SystemModelTasks.requireModelOnly(definition);
@@ -1853,24 +1867,19 @@ public final class JobRuntime {
   }
 
   /** Validate before opening any delegated log, then bind the exact child before execution. */
-  void requireChild(
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission parent,
-      AgentDefinition callee,
-      Home home) {
+  void requireChild(OperationAuthority.Admission parent, AgentDefinition callee, Home home) {
     if (operations == null) return; // Immutable isolated runtime fixtures only.
     if (systemWork != null
         || parent == null
         || !parent.home().equals(home)
-        || !parent
-            .actions()
-            .contains(io.aeyer.plowshare.server.access.AuthorityAction.CONVERSATION_CREATE)
+        || !parent.actions().contains(AuthorityAction.CONVERSATION_CREATE)
         || !parent.actions().containsAll(OperationExecution.actions(callee)))
       throw new CallerFault("Delegation exceeds its retained parent envelope");
     operations.require(parent);
   }
 
-  io.aeyer.plowshare.server.access.OperationAuthority.Admission childOperation(
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission parent,
+  OperationAuthority.Admission childOperation(
+      OperationAuthority.Admission parent,
       String parentConversation,
       Transcript child,
       AgentDefinition callee,
@@ -1884,7 +1893,7 @@ public final class JobRuntime {
       throw new CallerFault("Delegation requires its own durable child conversation");
     var operation = operations.derive(parent, OperationExecution.childActions(parent, callee));
     operations.bind(
-        new io.aeyer.plowshare.server.access.OperationAuthority.Conversation(
+        new OperationAuthority.Conversation(
             child.conversationId(),
             callee.name(),
             operation,
@@ -1895,10 +1904,7 @@ public final class JobRuntime {
   }
 
   private void requireOperationTool(
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation,
-      Home home,
-      String name,
-      String input) {
+      OperationAuthority.Admission operation, Home home, String name, String input) {
     if (operation == null) return;
     var targets = OperationToolTargets.decode(name, input);
     for (String project : targets.projects())
@@ -1922,7 +1928,7 @@ public final class JobRuntime {
       List<Content.Image> images,
       String callerHandle,
       boolean incoming,
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+      OperationAuthority.Admission operation) {
     // A local approval belongs to its original bridge session. Never redirect its command to the
     // machine/session of the person who happened to click Approve.
     if (suspendedRunCalls != null && transcript.conversationId() != null) {
@@ -1993,8 +1999,7 @@ public final class JobRuntime {
     RuntimeException inFlight = null;
     try {
       outcome =
-          io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
-                  definition.prompt())
+          ScriptProgram.isScript(definition.prompt())
               ? runScript(
                   definition,
                   userPrompt,
@@ -2057,9 +2062,9 @@ public final class JobRuntime {
   }
 
   /** Durable command receipts; configured before orchestration runs are admitted. */
-  private io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore scripts;
+  private ScriptStore scripts;
 
-  public void useScripts(io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore scripts) {
+  public void useScripts(ScriptStore scripts) {
     this.scripts = scripts;
   }
 
@@ -2078,11 +2083,7 @@ public final class JobRuntime {
       transcript.record(LoggedEntry.notice(reason));
       return new Outcome(Ending.UNAVAILABLE, reason, steps, calls, reason);
     }
-    String arguments =
-        new com.fasterxml.jackson.databind.ObjectMapper()
-            .createObjectNode()
-            .put("question", reason)
-            .toString();
+    String arguments = new ObjectMapper().createObjectNode().put("question", reason).toString();
     // This is the harness explaining its own actual refusal, not a script escalating a grant.
     transcript.record(LoggedEntry.notice(reason));
     ask.run(arguments, home);
@@ -2104,12 +2105,11 @@ public final class JobRuntime {
       Rerouting route,
       HarnessRun harnessRun,
       JobWatch watch,
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+      OperationAuthority.Admission operation) {
     String conversation = transcript.conversationId();
     if (scripts == null
         || conversation == null
-        || (transcript.origin() != io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION
-            && transcript.origin() != io.aeyer.plowshare.server.archive.Origin.EVENT))
+        || (transcript.origin() != Origin.ORCHESTRATION && transcript.origin() != Origin.EVENT))
       throw new IllegalStateException(
           "script driver needs a durable orchestration or event conversation");
     // SYSTEM is the usage actor; the admitted log owner still gates source access. It never
@@ -2216,17 +2216,14 @@ public final class JobRuntime {
       if (resuming
           && previous.started()
           && previous.raw() == null
-          && previous.command()
-              instanceof io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool observer
+          && previous.command() instanceof ScriptStore.Tool observer
           && observer.readinessObserver()) {
         scripts.retryReadinessObserver(conversation, previous.sequence());
         previous = scripts.latest(conversation).orElseThrow();
       }
       if (resuming && previous.started() && previous.raw() == null) {
         String recovered =
-            previous.command()
-                        instanceof
-                        io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool delegate
+            previous.command() instanceof ScriptStore.Tool delegate
                     && delegate.name().equals(AgentRunTool.NAME)
                 ? scripts.delegateResult(conversation, previous.sequence()).orElse(null)
                 : null;
@@ -2240,20 +2237,19 @@ public final class JobRuntime {
       }
       int sequence = previous == null ? 0 : previous.sequence() + 1;
       var input =
-          new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Input(
+          new ScriptStore.Input(
               conversation,
               message,
               sequence,
-              java.util.UUID.nameUUIDFromBytes(
-                  (conversation + ":" + sequence)
-                      .getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+              UUID.nameUUIDFromBytes(
+                  (conversation + ":" + sequence).getBytes(StandardCharsets.UTF_8)),
               previous == null ? null : previous.sequence(),
               previous == null ? null : previous.result(),
               todos == null ? List.of() : todos.list(conversation),
               hash);
       var pending = previous;
       if (!resuming) {
-        io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Preparation next;
+        ScriptStore.Preparation next;
         try {
           next =
               repair == null
@@ -2271,8 +2267,7 @@ public final class JobRuntime {
               "conversation=%s project=%s account=%s script=%s"
                   .formatted(
                       conversation, home.isGlobal() ? "(global)" : home.project(), owner, site);
-          if (repair == null
-              && transcript.origin() == io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION) {
+          if (repair == null && transcript.origin() == Origin.ORCHESTRATION) {
             var block = scripts.blockedReport(owner, previous);
             if (block.isPresent()) {
               var refusal = block.get();
@@ -2283,7 +2278,7 @@ public final class JobRuntime {
                   identity,
                   refusal.requestId());
               var diagnostic =
-                  new com.fasterxml.jackson.databind.ObjectMapper()
+                  new ObjectMapper()
                       .createObjectNode()
                       .put("code", "REPORT_SAVE_BLOCKED")
                       .put("command", refusal.sequence())
@@ -2328,20 +2323,18 @@ public final class JobRuntime {
               budget.spent() - callsBefore,
               reason);
         }
-        if (next instanceof io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.NeedsCall)
+        if (next instanceof ScriptStore.NeedsCall)
           return new Outcome(
               Ending.CALL_BUDGET,
               "script needs another model call",
               taken,
               budget.spent() - callsBefore,
               "");
-        pending =
-            ((io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Prepared) next).step();
+        pending = ((ScriptStore.Prepared) next).step();
       }
       taken++;
-      if (pending.command()
-          instanceof io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Finish finish) {
-        if (transcript.origin() != io.aeyer.plowshare.server.archive.Origin.EVENT)
+      if (pending.command() instanceof ScriptStore.Finish finish) {
+        if (transcript.origin() != Origin.EVENT)
           throw new IllegalStateException(
               "orchestration scripts must finish through their stage gates");
         // Pure terminal commands are journaled just like waits; no external effect can be replayed.
@@ -2351,8 +2344,7 @@ public final class JobRuntime {
         transcript.record(LoggedEntry.answer(finish.text(), List.of()));
         return new Outcome(Ending.ANSWERED, finish.text(), taken, budget.spent() - callsBefore, "");
       }
-      if (pending.command()
-          instanceof io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Wait wait) {
+      if (pending.command() instanceof ScriptStore.Wait wait) {
         if (pending.raw() == null) {
           try {
             Thread.sleep(wait.milliseconds());
@@ -2365,8 +2357,7 @@ public final class JobRuntime {
         previous = scripts.latest(conversation).orElseThrow();
         continue;
       }
-      var command =
-          (io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool) pending.command();
+      var command = (ScriptStore.Tool) pending.command();
       String name = command.name();
       if (definition.nativeOnly()
           && (name.equals("agent_run")
@@ -2404,33 +2395,27 @@ public final class JobRuntime {
       String raw = pending.raw();
       if (raw != null
           && pending.arguments() != null
-          && !io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.sameArguments(
-              pending.arguments(), pre.arguments()))
+          && !ScriptStore.sameArguments(pending.arguments(), pre.arguments()))
         throw new IllegalStateException(
             "a hook changed a cached command's arguments; its paid result cannot be reused for a different request");
       if (raw == null) {
         // Preparation checked the original command. Recheck a recovered prepared command or
         // a hook rewrite against the current snapshot before any effect.
-        if (repair != null
-            && (resuming
-                || !io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.sameArguments(
-                    arguments, pre.arguments())))
+        if (repair != null && (resuming || !ScriptStore.sameArguments(arguments, pre.arguments())))
           scripts.requireRepairEffect(
               conversation,
               pending.sequence(),
-              new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool(
-                  name, pre.arguments(), command.readinessObserver()),
+              new ScriptStore.Tool(name, pre.arguments(), command.readinessObserver()),
               input.todos(),
               repair);
         var retainedInputs =
             pending.retryOfReport() == null
-                ? Optional.<Set<java.util.UUID>>empty()
+                ? Optional.<Set<UUID>>empty()
                 : scripts.reportRetryInputs(owner, pending.retryOfReport());
         if (pending.retryOfReport() != null
             && (retainedInputs.isEmpty()
                 || !(tool instanceof InformationTool)
-                || !io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.sameArguments(
-                    arguments, pre.arguments()))) {
+                || !ScriptStore.sameArguments(arguments, pre.arguments()))) {
           String reason =
               "Report save retry blocked: the original receipt or exact reviewed command is unavailable.";
           transcript.record(LoggedEntry.notice(reason));
@@ -2557,7 +2542,7 @@ public final class JobRuntime {
       Rerouting route,
       Pacing pacing,
       HarnessRun harnessRun,
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+      OperationAuthority.Admission operation) {
     // WHAT THIS RUN IS HANDED BEYOND ITS DEFINITION, asked once and before anything is
     // offered, because the answer decides both the tool block and whether the todo notice
     // below is shown. A provider that throws costs the run its extras and nothing else: a
@@ -2864,9 +2849,7 @@ public final class JobRuntime {
             () -> {
               if (operation == null
                   || cancelled.getAsBoolean()
-                  || !operation
-                      .actions()
-                      .contains(io.aeyer.plowshare.server.access.AuthorityAction.READ))
+                  || !operation.actions().contains(AuthorityAction.READ))
                 throw new IllegalStateException("Reminder turn is unavailable");
               operations.requireTargets(operation, home, List.of());
               var spoken = transcript.spokenIn();
@@ -2876,7 +2859,7 @@ public final class JobRuntime {
                   transcript.continuingTurn() == null
                       ? spoken.turnOrdinal()
                       : transcript.continuingTurn();
-              return new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
+              return new QueryEmbeddings.Origin(
                       "memory-reminder:" + spoken.conversationId() + ":" + ordinal,
                       () -> {
                         if (cancelled.getAsBoolean())
@@ -2967,12 +2950,11 @@ public final class JobRuntime {
     }
     List<String> trail = new ArrayList<>();
     if (suspendedRunCalls != null && transcript.conversationId() != null) {
-      var resumption = new io.aeyer.plowshare.server.approvals.RunCallResumption(suspendedRunCalls);
+      var resumption = new RunCallResumption(suspendedRunCalls);
       for (var pending : suspendedRunCalls.pending(transcript.conversationId())) {
         boolean resumed;
         try {
-          if (pending.released()
-              && !io.aeyer.plowshare.server.approvals.RunApproval.ASKED.equals(pending.decision()))
+          if (pending.released() && !RunApproval.ASKED.equals(pending.decision()))
             recordApprovalDecision(pending.approval(), transcript);
           resumed =
               resumption.resume(
@@ -3052,7 +3034,7 @@ public final class JobRuntime {
     // recorded -- and spent at the top of the next pass: the one boundary a fold inside the
     // turn may run at (spec 2026-09-30-fold-at-60-and-80 §1).
     boolean aStepEnded = false;
-    Set<AgentRules.Rule> deliveredFileRules = new java.util.HashSet<>();
+    Set<AgentRules.Rule> deliveredFileRules = new HashSet<>();
 
     while (true) {
       admittedAuthority.run();
@@ -3071,7 +3053,7 @@ public final class JobRuntime {
         automaticLimits.budget(
             transcript.conversationId(), budget, definition, sessionId, transcript);
         automaticLimits.steps(
-            transcript.conversationId(), cap, steps, definition, sessionId, transcript);
+            transcript.conversationId(), cap, steps, definition, sessionId, transcript, budget);
       }
       if (cap.stops(steps)) {
         return capReached(cap, trail, steps, modelCalls);
@@ -3124,7 +3106,7 @@ public final class JobRuntime {
       // Claimed before the call, not after: a run that dies mid-call has
       // spent that call, and a budget that only counted completed calls
       // would let a flapping endpoint be retried without limit.
-      java.util.Optional<Budget.Claim> claimed;
+      Optional<Budget.Claim> claimed;
       try {
         claimed = budget.tryClaim();
       } catch (RuntimeException | Error failed) {
@@ -3212,8 +3194,7 @@ public final class JobRuntime {
                             .withAttribution(usageFor(transcript, definition, steps + 1))
                             .withAuthorization(
                                 operation == null
-                                    ? io.aeyer.plowshare.server.llm.dispatch.CallAuthorization
-                                        .DIRECT
+                                    ? CallAuthorization.DIRECT
                                     : inferenceCalls == null
                                         ? () -> operations.require(operation)
                                         : inferenceCalls.claimed(operation, claimed.orElseThrow()))
@@ -3538,7 +3519,7 @@ public final class JobRuntime {
             automaticLimits.budget(
                 transcript.conversationId(), budget, definition, sessionId, transcript);
             automaticLimits.steps(
-                transcript.conversationId(), cap, steps, definition, sessionId, transcript);
+                transcript.conversationId(), cap, steps, definition, sessionId, transcript, budget);
           }
           boolean lastStep = cap.stops(steps);
           if (lastStep || budget.exhausted()) {
@@ -3859,7 +3840,7 @@ public final class JobRuntime {
                                     + rule.scope()
                                     + "):\n"
                                     + rule.text())
-                        .collect(java.util.stream.Collectors.joining("\n\n"));
+                        .collect(Collectors.joining("\n\n"));
           }
         }
         if (tool == null) {
@@ -3903,9 +3884,8 @@ public final class JobRuntime {
             toolRecords.forEach(r -> transcript.record(LoggedEntry.hook(r)));
             toolRecords.clear();
             String root = question.conversation();
-            var resumption =
-                new io.aeyer.plowshare.server.approvals.RunCallResumption(suspendedRunCalls);
-            var executedAt = new java.util.concurrent.atomic.AtomicReference<Instant>();
+            var resumption = new RunCallResumption(suspendedRunCalls);
+            var executedAt = new AtomicReference<Instant>();
             Optional<String> output;
             try {
               output =
@@ -3960,7 +3940,7 @@ public final class JobRuntime {
                   "The harness cancelled this retained command because its requesting run ended. Nothing ran.";
               approvals.deny(
                   approval,
-                  io.aeyer.plowshare.server.approvals.RunApproval.RUN_ENDED,
+                  RunApproval.RUN_ENDED,
                   "The requesting run was cancelled before execution.");
               suspendedRunCalls.complete(approval, cancelledResult);
               transcript.recordDurably(
@@ -4328,8 +4308,7 @@ public final class JobRuntime {
           throw new IllegalStateException("Command dispatch was cancelled. Nothing ran.");
         watch.toolCalled(definition.name(), call.name());
         trail.add(call.name());
-        result =
-            usable(bound.dispatchBound(java.util.UUID.fromString(call.id()), home), call.name());
+        result = usable(bound.dispatchBound(UUID.fromString(call.id()), home), call.name());
         authorize.run();
         ToolPost after = toolPost(active, context, call.name(), call.arguments(), result);
         after.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
@@ -4383,7 +4362,7 @@ public final class JobRuntime {
    * Execute one retained run through the same authority, environment and hook fences as a new call.
    */
   private String resumeRunCall(
-      io.aeyer.plowshare.server.approvals.SuspendedRunCalls.Call retained,
+      SuspendedRunCalls.Call retained,
       Map<String, AgentTool> offered,
       Home home,
       BooleanSupplier cancelled,
@@ -4395,7 +4374,7 @@ public final class JobRuntime {
       Hooks skillChecks,
       JobWatch watch,
       RunActivity.Call recording,
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+      OperationAuthority.Admission operation) {
     if (cancelled.getAsBoolean())
       return "The retained command was cancelled before execution; nothing ran.";
     AgentTool held = offered.get(RunTool.NAME);
@@ -4604,16 +4583,16 @@ public final class JobRuntime {
       String callerHandle,
       RunHooks runHooks,
       Home toolHome,
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+      OperationAuthority.Admission operation) {
     var runInformation =
         informationAccess == null
             ? null
             : informationAccess.within(
                 operation == null
-                    ? io.aeyer.plowshare.server.access.KnowledgeReadScope.homeOnly(toolHome)
-                    : new io.aeyer.plowshare.server.access.KnowledgeReadScope(
+                    ? KnowledgeReadScope.homeOnly(toolHome)
+                    : new KnowledgeReadScope(
                         operation.home(), operation.globalRead() && !confined));
-    Map<String, AgentTool> live = new java.util.HashMap<>();
+    Map<String, AgentTool> live = new HashMap<>();
     scopedTools
         .tools(toolHome, definition.name(), sessionId, cancelled, callerHandle)
         .forEach(tool -> live.put(tool.schema().name(), tool));
@@ -4641,10 +4620,7 @@ public final class JobRuntime {
     // One ledger of what this run has read, shared by its file tools, for the
     // router's reason: it is the run's, and no instance shared by every job
     // could hold it. FileTools.Reads says what it is for.
-    var codeMap =
-        router == null
-            ? null
-            : new io.aeyer.plowshare.server.files.WorkspaceCodeMap(router, cancelled);
+    var codeMap = router == null ? null : new WorkspaceCodeMap(router, cancelled);
     if (codeMap != null && codeMonitor != null)
       codeMap.observing(
           codeMonitor.observations(
@@ -4661,9 +4637,7 @@ public final class JobRuntime {
                         transcript.conversationId(),
                         runInformation
                             .forRun(codeOwner, home)
-                            .withCorpus(
-                                io.aeyer.plowshare.server.information.InformationContext.Corpus
-                                    .CODE))
+                            .withCorpus(InformationContext.Corpus.CODE))
                     .accept(revision));
     }
     FileTools.Reads reads = new FileTools.Reads(codeMap);
@@ -4810,6 +4784,16 @@ public final class JobRuntime {
         continue;
       }
       if (tool instanceof RelayAgentTool relay) tool = relay.forRun(cancelled);
+      if (tool instanceof RelayPublishTool relay)
+        tool =
+            relay.forRun(
+                definition.name(),
+                sessionId,
+                transcript.origin() == Origin.ORCHESTRATION
+                        || ScriptProgram.isScript(definition.prompt())
+                    ? RelayPublishing.DefinitionKind.ORCHESTRATION
+                    : RelayPublishing.DefinitionKind.AGENT,
+                cancelled);
       // Both of this run's information axes, named once for the four bindings that take
       // them. This is the site where the conversation record is in hand, so it is where
       // the decision of WHICH actor to build belongs; informationActorFor carries the
@@ -4831,10 +4815,8 @@ public final class JobRuntime {
                       ids.stream()
                           .map(
                               id ->
-                                  new io.aeyer.plowshare.server.access.AccessRequest.Resource(
-                                      io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind
-                                          .MEMORY,
-                                      id))
+                                  new AccessRequest.Resource(
+                                      ResourceScopeRepository.Kind.MEMORY, id))
                           .toList());
                 });
       if (tool instanceof MemoryTools.Recall recall)
@@ -4854,9 +4836,7 @@ public final class JobRuntime {
                 () -> {
                   if (operation == null
                       || cancelled.getAsBoolean()
-                      || !operation
-                          .actions()
-                          .contains(io.aeyer.plowshare.server.access.AuthorityAction.READ))
+                      || !operation.actions().contains(AuthorityAction.READ))
                     throw new IllegalStateException("Memory query run is unavailable");
                   operations.requireTargets(operation, toolHome, List.of());
                   if (operation.globalRead())
@@ -4917,10 +4897,7 @@ public final class JobRuntime {
                     throw new IllegalStateException("Memory write run ended");
                 },
                 () -> {
-                  if (operation == null
-                      || !operation
-                          .actions()
-                          .contains(io.aeyer.plowshare.server.access.AuthorityAction.WRITE))
+                  if (operation == null || !operation.actions().contains(AuthorityAction.WRITE))
                     throw new IllegalStateException("Memory write action unavailable");
                   operations.requireTargets(operation, toolHome, List.of());
                   if (informationInputs != null
@@ -5008,7 +4985,7 @@ public final class JobRuntime {
                 || name.equals(BoardTools.READ_NAME)
                 || name.equals(BoardTools.TYPES_NAME)) return delegate;
             return new AgentTool() {
-              public io.aeyer.plowshare.server.llm.dispatch.ToolSchema schema() {
+              public ToolSchema schema() {
                 return delegate.schema();
               }
 
@@ -5958,10 +5935,7 @@ public final class JobRuntime {
     request = request.withAuthorization(originalAuthorization.and(admittedAuthority::run));
     // Bounded answers are disclosed whole after the final check. Delta sinks must not perform
     // database IO while draining a transport, and cannot retract already delivered fragments.
-    Deltas authorized =
-        originalAuthorization == io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.DIRECT
-            ? sink
-            : DISCARDS;
+    Deltas authorized = originalAuthorization == CallAuthorization.DIRECT ? sink : DISCARDS;
     Completion completed =
         slot.pool() == null
             ? dispatcher.stream(request, confined ? DISCARDS : authorized, cancelled)
@@ -6062,7 +6036,7 @@ public final class JobRuntime {
       String arguments,
       Home home,
       HookContext context,
-      java.util.function.BiFunction<HookContext, String, ToolPre> chain) {
+      BiFunction<HookContext, String, ToolPre> chain) {
     try {
       return run.gate(arguments, home, context, chain);
     } catch (RuntimeException broken) {

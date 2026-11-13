@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.cache;
 
+import java.time.Duration;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -13,7 +15,7 @@ public final class ProjectionCaches implements AutoCloseable {
   private final ProjectionChangeSignals signals;
   private final ProjectionCacheProperties properties;
   private final UUID database;
-  private final java.time.Duration notifiedStaleness;
+  private final Duration notifiedStaleness;
   private final ProjectionTelemetry telemetry;
   private final ConcurrentMap<String, VersionedProjectionCache<?>> caches =
       new ConcurrentHashMap<>();
@@ -35,7 +37,7 @@ public final class ProjectionCaches implements AutoCloseable {
       ProjectionVersions versions,
       ProjectionChangeSignals signals,
       ProjectionCacheProperties properties,
-      java.time.Duration notifiedStaleness) {
+      Duration notifiedStaleness) {
     this(versions, signals, properties, notifiedStaleness, ProjectionTelemetry.NONE);
   }
 
@@ -43,13 +45,13 @@ public final class ProjectionCaches implements AutoCloseable {
       ProjectionVersions versions,
       ProjectionChangeSignals signals,
       ProjectionCacheProperties properties,
-      java.time.Duration notifiedStaleness,
+      Duration notifiedStaleness,
       ProjectionTelemetry telemetry) {
-    this.versions = java.util.Objects.requireNonNull(versions);
-    this.signals = java.util.Objects.requireNonNull(signals);
-    this.properties = java.util.Objects.requireNonNull(properties);
+    this.versions = Objects.requireNonNull(versions);
+    this.signals = Objects.requireNonNull(signals);
+    this.properties = Objects.requireNonNull(properties);
     this.notifiedStaleness = notifiedStaleness;
-    this.telemetry = java.util.Objects.requireNonNull(telemetry);
+    this.telemetry = Objects.requireNonNull(telemetry);
     database = versions.databaseIdentity();
   }
 
@@ -72,7 +74,7 @@ public final class ProjectionCaches implements AutoCloseable {
 
   public <T> ProjectionCache<T> create(
       String projection, Set<ProjectionVersions.Domain> domains, Freshness freshness) {
-    java.util.Objects.requireNonNull(freshness);
+    Objects.requireNonNull(freshness);
     var namespace = new SnapshotCache.Namespace(database.toString(), projection);
     if (closed.get()) throw new IllegalStateException("Projection caches closed");
     if (reservations.incrementAndGet() > properties.maxProjections()) {

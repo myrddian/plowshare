@@ -1,9 +1,20 @@
 package io.aeyer.plowshare.server.cache;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
@@ -149,13 +160,10 @@ class ProjectionTelemetryTest {
     var beans = new DefaultListableBeanFactory();
     assertSame(
         ProjectionTelemetry.NONE,
-        configuration.projectionTelemetry(
-            beans.getBeanProvider(io.micrometer.core.instrument.MeterRegistry.class)));
+        configuration.projectionTelemetry(beans.getBeanProvider(MeterRegistry.class)));
 
     beans.registerSingleton("registry", registry);
-    var telemetry =
-        configuration.projectionTelemetry(
-            beans.getBeanProvider(io.micrometer.core.instrument.MeterRegistry.class));
+    var telemetry = configuration.projectionTelemetry(beans.getBeanProvider(MeterRegistry.class));
     telemetry.observeListener(
         mock(ProjectionChangeSignals.class),
         new ProjectionNotificationProperties(

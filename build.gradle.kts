@@ -70,8 +70,10 @@ val personalStarterInstallTest by tasks.registering(Exec::class) {
 }
 val deploymentConfigTest by tasks.registering(Exec::class) {
     group = "verification"
-    description = "Checks persistent image FileStore initialization without Docker or a database."
-    inputs.files("deploy/docker/server-filestores.sh", "deploy/docker/server-entrypoint.sh", "deploy/docker/server.Dockerfile", "deploy/docker/server.Dockerfile.dockerignore", "deploy/docker/tests/test_filestores.py")
+    description = "Checks deployment initialization and adapter configuration without Docker or a database."
+    inputs.files("deploy/docker/server-filestores.sh", "deploy/docker/server-entrypoint.sh", "deploy/docker/server.Dockerfile", "deploy/docker/server.Dockerfile.dockerignore", "deploy/docker/a2a-entrypoint.sh", "deploy/docker/compose.a2a.yaml")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("deploy/docker/tests")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     commandLine("python3", "-B", "-m", "unittest", "discover", "-s", "deploy/docker/tests")
 }
@@ -115,6 +117,20 @@ val databaseTestBoundaryCheck by tasks.registering(Exec::class) {
     inputs.files(fileTree(rootDir) { include("*/src/test/java/**/*.java", "sdk/*/src/test/java/**/*.java", "integrations/*/src/test/java/**/*.java") })
     commandLine("python3", "scripts/check-database-tests.py")
 }
+tasks.register<Exec>("installGitHooks") {
+    group = "build setup"
+    description = "Enables the tracked pre-push formatting gate without replacing custom hooks."
+    workingDir = rootDir
+    commandLine("sh", "scripts/install-git-hooks.sh")
+}
+val gitHooksTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Checks hook installation and push formatting failure propagation in temporary repositories."
+    workingDir = rootDir
+    inputs.files(".githooks/pre-push", "scripts/install-git-hooks.sh", "scripts/test_git_hooks.py")
+    commandLine("python3", "-B", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_git_hooks.py")
+}
+tasks.named("check") { dependsOn(gitHooksTest) }
 tasks.named("check") { dependsOn(serverLaunchTest, personalStarterInstallTest, deploymentConfigTest, manualCheck, clientManifestCheck, legacyCliAuditCheck, databaseTestBoundaryCheck) }
 
 subprojects {

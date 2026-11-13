@@ -1,12 +1,15 @@
 package io.aeyer.plowshare.server.llm.accounting;
 
+import io.aeyer.plowshare.server.llm.counting.PromptCount;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceAccounting;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceCapture;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceObserver;
 import io.aeyer.plowshare.server.llm.dispatch.Lane;
+import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import java.time.Clock;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,8 +44,7 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
   public InferenceObserver begin(
       String pool, String wireModel, String specifier, Lane lane, UsageAttribution owner) {
     if (owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED) {
-      throw new io.aeyer.plowshare.server.llm.dispatch.LlmException(
-          "inference accounting requires explicit request ownership");
+      throw new LlmException("inference accounting requires explicit request ownership");
     }
     var route = prices.routeFor(pool);
     var price = prices.select(route.billingRoute(), wireModel, clock.instant()).orElse(null);
@@ -97,7 +99,7 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
     }
 
     @Override
-    public synchronized void preflight(io.aeyer.plowshare.server.llm.counting.PromptCount count) {
+    public synchronized void preflight(PromptCount count) {
       call.preflight(count);
     }
 
@@ -159,7 +161,7 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
     }
 
     private final class ObservedAttempt implements Attempt {
-      private final java.util.UUID id;
+      private final UUID id;
       private final long startAccountingMillis;
       private final long startedAt = System.nanoTime();
       private UsageObservation usage = UsageObservation.UNKNOWN;
@@ -169,13 +171,13 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
       private Long firstOutputMillis;
       private boolean finished;
 
-      ObservedAttempt(java.util.UUID id, long startAccountingMillis) {
+      ObservedAttempt(UUID id, long startAccountingMillis) {
         this.id = id;
         this.startAccountingMillis = startAccountingMillis;
       }
 
       @Override
-      public java.util.UUID id() {
+      public UUID id() {
         return id;
       }
 

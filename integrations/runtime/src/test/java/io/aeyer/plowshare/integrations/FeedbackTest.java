@@ -1,16 +1,23 @@
 package io.aeyer.plowshare.integrations;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.aeyer.plowshare.protocol.Outgoing;
+import io.aeyer.plowshare.protocol.IntegrationPayload;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.*;
-import java.util.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -30,8 +37,7 @@ export default {onEvent(e,c){
 """;
 
   static class Adapter extends HeldThresholdTest.Adapter {
-    public Result execute(
-        String operation, io.aeyer.plowshare.protocol.IntegrationPayload.Arguments arguments) {
+    public Result execute(String operation, IntegrationPayload.Arguments arguments) {
       super.execute(operation, arguments);
       return IntegrationFixtures.result(
           "COMPLETED",
@@ -89,7 +95,6 @@ export default {onEvent(e,c){
         name,
         "fake",
         "home",
-        name + "-peer",
         new IntegrationFixtures.Settings(),
         Map.of("heat", route),
         Set.of(name),
@@ -322,73 +327,32 @@ export default {onEvent(e,c){
   }
 
   @Test
-  void lost_outgoing_report_retains_correlation_and_recovery_does_not_repeat_the_action()
+  void lost_relay_return_retains_correlation_and_recovery_does_not_repeat_the_action()
       throws Exception {
-    var b = binding("house", true, "pinned", 0);
+    var b = RelayRuntimeFixtures.binding(binding("house", true, "pinned", 0));
     var adapter = new Adapter();
-    UUID id = UUID.randomUUID(), request = UUID.randomUUID();
-    var message =
-        io.aeyer.plowshare.sdk.ExternalPayloadCodec.message(
-            """
-{"parts":[{"data":{"schema":"plowshare-integration/1","binding":"house","operation":"actions.execute","arguments":{"action":"notify","parameters":{}}}}]}
-""");
-    var work =
-        new Outgoing.Work(
-            id,
-            request,
-            "house-peer",
-            "home",
-            null,
-            message,
-            "DISPATCHED",
-            false,
-            null,
-            null,
-            null,
-            null,
-            1,
-            now.get());
-    var gateway =
-        new IntegrationRuntimeTest.FakeGateway() {
-          boolean claimed;
-          io.aeyer.plowshare.protocol.ExternalResult saved;
-
-          public Outgoing.Claimed claim(String project, List<String> peers) {
-            if (claimed) return new Outgoing.Claimed(null, null);
-            claimed = true;
-            return new Outgoing.Claimed(work, "send");
-          }
-
-          public void report(Outgoing.Report report) throws IOException {
-            saved = report.result();
-            throw new IOException("response lost after commit");
-          }
-
-          public Outgoing.Work outgoing(UUID workId) {
-            return new Outgoing.Work(
-                id,
-                request,
-                "house-peer",
-                "home",
-                null,
-                message,
-                "COMPLETED",
-                false,
-                null,
-                null,
-                saved,
-                null,
-                2,
-                now.get());
-          }
-        };
+    var gateway = new RelayRuntimeFixtures.Gateway();
+    gateway.request(
+        "house",
+        """
+        {"schema":"plowshare-integration/1","binding":"house","operation":"actions.execute","arguments":{"action":"notify","parameters":{}}}
+        """);
+    gateway.losePublish = true;
     try (var journal = new Journal(directory, now::get);
         var runtime = runtime(b, adapter, gateway, journal)) {
       runtime.start();
-      assertThrows(IOException.class, runtime::tick);
+      runtime.tick();
       assertEquals(1, adapter.actions);
       assertEquals(1, journal.causeCount());
-      assertEquals("REPORTING", journal.record("outgoing:" + id).path("status").asText());
+      assertEquals(1, runtime.relayAttention().size());
+      assertEquals(
+          "REPORTING",
+          journal.entries().stream()
+              .filter(e -> e.getValue().kind().equals("relay"))
+              .findFirst()
+              .orElseThrow()
+              .getValue()
+              .status());
     }
     try (var journal = new Journal(directory, now::get);
         var runtime = runtime(b, adapter, gateway, journal)) {
@@ -397,6 +361,7 @@ export default {onEvent(e,c){
       adapter.reading("echo", "30", "id");
       runtime.tick();
       assertEquals(1, adapter.actions);
+      assertEquals(1, gateway.publications);
       assertEquals(0, gateway.starts);
       assertEquals(1, journal.state("house").path("script").path("verified").asInt());
     }
@@ -473,12 +438,12 @@ export default {onEvent(e,c){
       remember(journal, b, "action", "context");
     }
     Path file = directory.resolve("journal.json");
-    ObjectNode data = (ObjectNode) Json.MAPPER.readTree(java.nio.file.Files.readString(file));
+    ObjectNode data = (ObjectNode) Json.MAPPER.readTree(Files.readString(file));
     ((ObjectNode) data.path("causes").elements().next()).put("expiresAt", "invalid");
     String corrupt = data.toString();
-    java.nio.file.Files.writeString(file, corrupt);
+    Files.writeString(file, corrupt);
     assertThrows(IOException.class, () -> new Journal(directory));
-    assertEquals(corrupt, java.nio.file.Files.readString(file));
+    assertEquals(corrupt, Files.readString(file));
   }
 
   @Test

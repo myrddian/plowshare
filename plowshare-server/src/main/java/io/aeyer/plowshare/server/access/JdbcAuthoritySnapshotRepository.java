@@ -1,8 +1,22 @@
 package io.aeyer.plowshare.server.access;
 
-import io.aeyer.plowshare.server.access.AuthoritySnapshot.*;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.Account;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.Facts;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.Grant;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.Member;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.Project;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.Role;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.RoleAction;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.Scope;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.ServiceToken;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.TokenScope;
 import java.time.OffsetDateTime;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
