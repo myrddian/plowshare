@@ -2316,7 +2316,8 @@ function renderOverview(value) {
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
   const runs = byId('recent-runs'); runs.replaceChildren();
-  if (!health.runs.length) runs.append(element('p', 'No project investigations yet.', 'empty'));
+  if (health.runs_detail) runs.append(element('p', health.runs_detail, health.runs.length ? 'hint' : 'empty'));
+  else if (!health.runs.length) runs.append(element('p', 'No project investigations yet.', 'empty'));
   for (const run of health.runs) {
     const row = element('div', undefined, 'record');
     const line = element('div', undefined, 'entry-line');

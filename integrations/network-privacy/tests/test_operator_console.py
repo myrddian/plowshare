@@ -18,7 +18,13 @@ from support import CountingCollector, FixturePort, MemoryReceipts, configuratio
 from test_device_assessments import Dossiers, Runs
 
 from plowshare_privacy.advisories import AdvisoryLookup, AdvisoryPage
-from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
+from plowshare_privacy.console import (
+    RUNS_PENDING,
+    RUNS_STALE,
+    RUNS_UNAVAILABLE,
+    FileManualInvestigations,
+    OperatorConsole,
+)
 from plowshare_privacy.console_port import (
     Admission,
     AgentHealth,
@@ -248,6 +254,74 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(health.connected)
         self.assertIn("Plowshare checks are unavailable", health.detail)
         self.assertNotIn("Project read checks passed", health.detail)
+
+    async def test_slow_or_failed_run_listing_does_not_mean_disconnected(
+        self,
+    ) -> None:
+        release = asyncio.Event()
+        calls = 0
+
+        async def slow_runs() -> tuple[RunSummary, ...]:
+            nonlocal calls
+            calls += 1
+            await release.wait()
+            return (RunSummary("orc_one", "DONE", "2026-11-13T07:00:00Z"),)
+
+        with patch.object(self.remote, "runs", new=slow_runs):
+            # Health answers at once while the listing is still being read.
+            health = await asyncio.wait_for(self.console.health(), timeout=1)
+            self.assertTrue(health.connected)
+            self.assertEqual(health.runs, ())
+            self.assertEqual(health.runs_detail, RUNS_PENDING)
+            # A second refresh does not start another read.
+            self.console.cache_until = 0
+            await self.console.health()
+            await asyncio.sleep(0)
+            self.assertEqual(calls, 1)
+            release.set()
+            assert self.console.runs_task is not None
+            await self.console.runs_task
+            self.console.cache_until = 0
+            health = await self.console.health()
+        self.assertEqual([run.id for run in health.runs], ["orc_one"])
+        self.assertIsNone(health.runs_detail)
+        self.assertIsNotNone(health.runs_checked_at)
+
+    async def test_run_listing_failure_keeps_connection_and_last_list(self) -> None:
+        failing = AsyncMock(
+            side_effect=TransportError(
+                Delivery.UNKNOWN, "Request deadline expired; no request was replayed"
+            )
+        )
+        with patch.object(self.remote, "runs", new=failing):
+            await self.console.health()
+            assert self.console.runs_task is not None
+            await self.console.runs_task
+            self.console.cache_until = 0
+            health = await self.console.health()
+        self.assertTrue(health.connected)
+        self.assertIn("Project read checks passed", health.detail)
+        self.assertEqual(health.runs_detail, RUNS_UNAVAILABLE)
+        # A failure is retried after a short delay, not on every refresh.
+        self.assertEqual(failing.await_count, 1)
+
+        listed = (RunSummary("orc_two", "DONE", "2026-11-13T07:00:00Z"),)
+        self.console._runs_due = 0
+        with patch.object(self.remote, "runs", new=AsyncMock(return_value=listed)):
+            self.console.cache_until = 0
+            await self.console.health()
+            assert self.console.runs_task is not None
+            await self.console.runs_task
+        self.console._runs_due = 0
+        with patch.object(self.remote, "runs", new=failing):
+            self.console.cache_until = 0
+            await self.console.health()
+            assert self.console.runs_task is not None
+            await self.console.runs_task
+            self.console.cache_until = 0
+            health = await self.console.health()
+        self.assertEqual(health.runs, listed)
+        self.assertEqual(health.runs_detail, RUNS_STALE)
 
     async def test_expected_findings_keep_original_evidence(self) -> None:
         evidence = self.scan.evidence

@@ -60,6 +60,10 @@ class ConsolePort(Protocol):
     async def investigation_receipt(self, request_id: str) -> Admission: ...
 
 
+# Deadline for the recent-investigation listing (read off the health path).
+RUNS_DEADLINE_SECONDS = 90
+
+
 class SdkConsolePort:
     def __init__(
         self,
@@ -154,9 +158,14 @@ class SdkConsolePort:
         )
 
     async def runs(self) -> tuple[RunSummary, ...]:
+        # The listing has no definition filter, so 25 rows leave room for the
+        # profiling and assessment runs between investigations. Plowshare can
+        # take tens of seconds to list them; the console reads this in the
+        # background, so a long deadline here does not delay health.
         result = (
             await self.client.request(
-                OrchestrationListRequest(project=self.config.project, limit=25)
+                OrchestrationListRequest(project=self.config.project, limit=25),
+                timeout=RUNS_DEADLINE_SECONDS,
             )
         ).require_payload()
         return tuple(
