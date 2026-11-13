@@ -18,6 +18,19 @@ public final class InformationQueueSql {
         + "SELECT revision FROM information_system_processing_revisions())";
   }
 
+  /**
+   * As {@link #processingAuthority()}, with the SYSTEM processing decision supplied by the server
+   * (V241). Only the three fixed literals TRUE, FALSE and NULL are emitted, chosen from a typed
+   * boolean, so no caller value enters the statement text; NULL lets SQL decide as before.
+   */
+  public static String processingAuthority(java.util.Optional<Boolean> decided) {
+    String literal = decided.map(value -> value ? "TRUE" : "FALSE").orElse("NULL");
+    return "processing_authority AS MATERIALIZED ("
+        + "SELECT revision FROM information_system_processing_revisions("
+        + literal
+        + "::boolean))";
+  }
+
   public static String tagging() {
     return """
         r.processing_policy='automatic' AND r.availability='active' AND NOT r.excluded

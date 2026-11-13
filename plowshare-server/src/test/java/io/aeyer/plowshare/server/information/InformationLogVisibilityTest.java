@@ -166,4 +166,80 @@ class InformationLogVisibilityTest {
       assertEquals(0, f.admission.active(ReadAdmission.Work.AUTHORITY));
     }
   }
+
+  private static java.util.function.BooleanSupplier unexpected() {
+    return () -> fail("A current deny set must answer without the targeted predicate");
+  }
+
+  @Test
+  void targetedChecksShareOneDenySetPerAccountWithoutThePredicate() {
+    try (var f = new Fixture()) {
+      for (int check = 0; check < 50; check++) {
+        assertFalse(f.visibility.readable("reader", "restricted", unexpected()));
+        assertTrue(f.visibility.readable("reader", "open", unexpected()));
+      }
+      verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
+      assertTrue(f.visibility.readable("other", "open", unexpected()));
+      verify(f.jdbc, times(2)).queryForList(anyString(), eq(String.class), any(Object[].class));
+      assertEquals(0, f.admission.active(ReadAdmission.Work.AUTHORITY));
+    }
+  }
+
+  @Test
+  void aRevokedDenySetIsReloadedBeforeItAnswers() {
+    try (var f = new Fixture()) {
+      assertTrue(f.visibility.readable("reader", "open", unexpected()));
+      // A grant revocation or new input moves the version: the stored set no longer validates.
+      when(f.versions.current(f.token)).thenReturn(false);
+      var revoked =
+          new ProjectionVersions.Token(
+              f.token.database(),
+              Map.of(
+                  ProjectionVersions.Domain.READABILITY,
+                  2L,
+                  ProjectionVersions.Domain.AUTHORITY,
+                  2L),
+              List.of(),
+              "999999",
+              null,
+              null);
+      when(f.versions.capture(DOMAINS)).thenReturn(Optional.of(revoked));
+      when(f.versions.current(revoked)).thenReturn(true);
+      when(f.jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
+          .thenReturn(List.of("restricted", "open"));
+      assertFalse(f.visibility.readable("reader", "open", unexpected()));
+      verify(f.jdbc, times(2)).queryForList(anyString(), eq(String.class), any(Object[].class));
+    }
+  }
+
+  @Test
+  void unsharedTransactionsOversizedSetsAndMissingAccountsUseThePredicate() {
+    try (var f = new Fixture()) {
+      var predicate = new AtomicInteger();
+      java.util.function.BooleanSupplier authoritative =
+          () -> {
+            predicate.incrementAndGet();
+            return false;
+          };
+      assertFalse(f.visibility.readable(null, "open", authoritative));
+      assertEquals(1, predicate.get());
+      verifyNoInteractions(f.jdbc);
+
+      when(f.versions.capture(DOMAINS)).thenReturn(Optional.empty());
+      assertFalse(f.visibility.readable("reader", "open", authoritative));
+      assertEquals(2, predicate.get(), "A dirty transaction keeps its own statement authority");
+      verifyNoInteractions(f.jdbc);
+
+      when(f.versions.capture(DOMAINS)).thenReturn(Optional.of(f.token));
+      when(f.jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
+          .thenReturn(Collections.nCopies(32769, "blocked"));
+      assertFalse(f.visibility.readable("reader", "open", authoritative));
+      assertFalse(f.visibility.readable("reader", "open", authoritative));
+      assertEquals(4, predicate.get(), "An oversized deny set never becomes a partial allow set");
+      verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
+
+      assertThrows(
+          IllegalArgumentException.class, () -> f.visibility.readable(" ", "open", authoritative));
+    }
+  }
 }
