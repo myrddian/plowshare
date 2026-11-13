@@ -33,17 +33,37 @@ public final class JdbcPassageRepository implements PassageRepository {
   }
 
   @Override
+  /**
+   * The next eight committed sources needing repair: not yet ready, or ready under another
+   * embedding generation. The worker polls this every two seconds and the table holds a row per
+   * content-bearing entry and digest, so both halves must be index probes; written as one {@code
+   * status<>'ready' OR generation IS DISTINCT FROM ?} predicate it read every row on every poll to
+   * return nothing in steady state. Unready rows come from {@code retrieval_pending}. Ready rows of
+   * another generation are the {@code IS NULL}, {@code <} and {@code >} ranges of V239's {@code
+   * retrieval_ready_generation}, which are empty once every source is current. The selected set and
+   * its order are unchanged.
+   */
   public List<Source> pending(String generation) {
     return jdbc.query(
         """
+            WITH due AS (
+              (SELECT source_type,source_id,retry_at FROM retrieval_sources
+                WHERE status IN ('pending','failed')
+                  AND (retry_at<=CURRENT_TIMESTAMP OR (last_error LIKE 'RepairInFlight:%' AND last_error<>?))
+                ORDER BY retry_at,source_type,source_id LIMIT 8)
+              UNION ALL
+              (SELECT source_type,source_id,retry_at FROM retrieval_sources
+                WHERE status='ready' AND (generation IS NULL OR generation<? OR generation>?)
+                  AND (retry_at<=CURRENT_TIMESTAMP OR (last_error LIKE 'RepairInFlight:%' AND last_error<>?))
+                ORDER BY retry_at,source_type,source_id LIMIT 8)
+              ORDER BY retry_at,source_type,source_id LIMIT 8
+            )
             SELECT s.source_type,s.source_id,s.source_hash,CASE WHEN s.generation=? THEN s.next_position ELSE 0 END AS next_position,
                    CASE WHEN s.source_type='entry' THEN e.content ELSE d.summary END AS text
-            FROM retrieval_sources s
+            FROM due JOIN retrieval_sources s USING (source_type,source_id)
             LEFT JOIN entries e ON s.source_type='entry' AND e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal
             LEFT JOIN digests d ON s.source_type='digest' AND d.id=s.source_id
-            WHERE (s.status<>'ready' OR s.generation IS DISTINCT FROM ?)
-              AND (s.retry_at<=CURRENT_TIMESTAMP OR (s.last_error LIKE 'RepairInFlight:%' AND s.last_error<>?))
-            ORDER BY s.retry_at,s.source_type,s.source_id LIMIT 8
+            ORDER BY s.retry_at,s.source_type,s.source_id
             """,
         (r, n) ->
             new Source(
@@ -52,9 +72,11 @@ public final class JdbcPassageRepository implements PassageRepository {
                 r.getString(3),
                 r.getString("text"),
                 r.getInt("next_position")),
+        "RepairInFlight:" + generation,
         generation,
         generation,
-        "RepairInFlight:" + generation);
+        "RepairInFlight:" + generation,
+        generation);
   }
 
   @Override
