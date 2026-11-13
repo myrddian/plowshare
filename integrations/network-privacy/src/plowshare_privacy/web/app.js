@@ -1868,6 +1868,8 @@ function renderRequests(value) {
 function followRequests(value, force = false) {
   const waiting = value?.reference_requests;
   byId('reference-requests').hidden = !waiting?.pending;
+  // Nothing waits: forget what was drawn so a later request always reloads.
+  if (!waiting?.pending) requestsSeen = null;
   if (!waiting?.pending || currentView !== 'settings') return;
   if (!force && requestsSeen === requestsSignature(waiting.products)) return;
   loadRequests().catch(error => notice(error.message, true));
@@ -2453,6 +2455,7 @@ function renderAttention(value) {
   if (unseen.length) items.push(attentionItem(formatCount(unseen.length), 'New open ports',
     `${deviceNames(unseen)} answered on ports outside the usual checks.`, ...reviewAction(unseen)));
   const asked = value.reference_requests;
+  if (asked?.detail) items.push(attentionItem('!', 'Docs requests unavailable', asked.detail, 'Open Settings', () => showView('settings', true)));
   if (asked?.pending) items.push(attentionItem(formatCount(asked.pending), 'Docs requested',
     `Privacy Watch could not answer about ${asked.products.join(', ')}. Add a documentation link or dismiss.`, 'Review', () => {
       showView('settings', true);

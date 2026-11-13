@@ -68,6 +68,11 @@ from .tools import (
 )
 from .worker import ReconciliationRequired, Worker
 
+REQUESTS_UNREADABLE = (
+    "The documentation request list could not be read. Check its file permissions "
+    "or remove it; requests already approved are unaffected."
+)
+
 
 def application(
     worker: Worker,
@@ -789,8 +794,16 @@ def application(
         # opens the review panel.
         if reference_requests is None:
             return None
-        waiting = reference_requests.pending()
-        return {"pending": len(waiting), "products": [r.product for r in waiting]}
+        try:
+            waiting = reference_requests.pending()
+        except (ValueError, OSError):
+            # A bad journal must not take the whole overview down; say why instead.
+            return {"pending": 0, "products": [], "detail": REQUESTS_UNREADABLE}
+        return {
+            "pending": len(waiting),
+            "products": [r.product for r in waiting],
+            "detail": None,
+        }
 
     def request_rows(waiting: tuple[ReferenceRequest, ...]) -> web.Response:
         # ``question`` is the agent's text: the dashboard shows it as text only.
@@ -808,8 +821,14 @@ def application(
             }
         )
 
+    def unreadable() -> web.Response:
+        return web.json_response({"error": REQUESTS_UNREADABLE}, status=500)
+
     async def request_list(request: web.Request) -> web.Response:
-        return request_rows(request_journal().pending())
+        try:
+            return request_rows(request_journal().pending())
+        except (ValueError, OSError):
+            return unreadable()
 
     async def request_approve(request: web.Request) -> web.Response:
         journal = request_journal()
@@ -827,6 +846,8 @@ def application(
             )
         except ValueError as error:
             return web.json_response({"error": str(error.args[0])}, status=400)
+        except OSError:
+            return unreadable()
         return request_rows(journal.pending())
 
     async def request_dismiss(request: web.Request) -> web.Response:
@@ -835,6 +856,8 @@ def application(
             journal.dismiss(request.match_info["request_id"])
         except ValueError as error:
             return web.json_response({"error": str(error.args[0])}, status=400)
+        except OSError:
+            return unreadable()
         return request_rows(journal.pending())
 
     def assistant() -> AskService:

@@ -274,7 +274,8 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         )
         overview = await (await client.get("/api/overview", headers=HEADERS)).json()
         self.assertEqual(
-            {"pending": 1, "products": ["caddy"]}, overview["reference_requests"]
+            {"pending": 1, "products": ["caddy"], "detail": None},
+            overview["reference_requests"],
         )
         approved = await client.post(
             f"{base}/{self.asked.id}/approve", headers=HEADERS, json={"urls": [DOCS]}
@@ -328,6 +329,24 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(400, again.status)
         self.assertIn("already decided", (await again.json())["error"])
+
+    async def test_unreadable_request_journal_leaves_the_overview_working(
+        self,
+    ) -> None:
+        self.requests.journal.path.write_text("{not json")
+        self.requests.journal.path.chmod(0o600)
+        client = await self.client(self.service, self.requests)
+        overview = await client.get("/api/overview", headers=HEADERS)
+        self.assertEqual(200, overview.status)
+        counts = (await overview.json())["reference_requests"]
+        self.assertEqual(0, counts["pending"])
+        self.assertIn("could not be read", counts["detail"])
+        listed = await client.get("/api/reference-requests", headers=HEADERS)
+        self.assertEqual(500, listed.status)
+        self.assertIn("could not be read", (await listed.json())["error"])
+        self.requests.journal.path.chmod(0o644)
+        again = await client.get("/api/overview", headers=HEADERS)
+        self.assertEqual(200, again.status)
 
     async def test_missing_requests_are_not_found(self) -> None:
         client = await self.client(self.service)

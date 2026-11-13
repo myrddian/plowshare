@@ -165,3 +165,27 @@ test('the Ask activity names the documentation request in household words', () =
   context.call = {tool:'network_request_reference'};
   assert.equal(run('askStep(call)'), 'Asked the owner for product documentation');
 });
+
+test('a later request reloads after the waiting list emptied', async () => {
+  const calls = [];
+  const {context, run} = dashboard(async path => {
+    calls.push(path);
+    return {ok:true, status:200, json:async () => ({requests:[ASKED]})};
+  });
+  const waiting = {...overview(null), reference_requests:{pending:1, products:['caddy']}};
+  context.waiting = waiting;
+  context.empty = {...overview(null), reference_requests:{pending:0, products:[]}};
+  run("currentView = 'settings'; followRequests(waiting)");
+  await new Promise(resolve => setImmediate(resolve));
+  run('followRequests(empty)');
+  run('followRequests(waiting)');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(path => path === '/api/reference-requests').length, 2);
+});
+
+test('attention explains an unreadable request journal', () => {
+  const {context, node, run} = dashboard();
+  context.value = {...overview(null), reference_requests:{pending:0, products:[], detail:'could not be read'}};
+  run('renderAttention(value)');
+  assert.match(texts(node('attention-items').children[0]).join(' | '), /Docs requests unavailable \| could not be read/);
+});
