@@ -9,7 +9,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import AbstractSet, Literal
+from typing import AbstractSet, Literal, get_args
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -185,18 +185,10 @@ EvidenceKind = Literal[
     "local_dns",
 ]
 _EVIDENCE_KINDS: dict[str, EvidenceKind] = {
-    kind: kind
-    for kind in (
-        "configured",
-        "neighbour_table",
-        "dhcp_lease",
-        "controller_client",
-        "managed_device",
-        "local_dns",
-    )
+    kind: kind for kind in get_args(EvidenceKind)
 }
 IDENTITY_SOURCES: frozenset[str] = frozenset({"configured", "pihole-v6", "unifi"})
-# Evidence kinds a legacy source may assert; absent provenance maps to the first.
+# Evidence kind implied by a source when a record states none.
 _LEGACY_KIND: dict[str, EvidenceKind] = {
     "configured": "configured",
     "pihole-v6": "neighbour_table",
@@ -243,11 +235,16 @@ class DeviceIdentity:
         mac = mac_address(row["mac"]) if row["mac"] is not None else None
         expected = "mac:" + mac if mac else "ip:" + address
         source = row["source"]
-        if row["device_id"] != expected or source not in IDENTITY_SOURCES:
+        if (
+            row["device_id"] != expected
+            or not isinstance(source, str)
+            or source not in IDENTITY_SOURCES
+        ):
             raise ValueError("Invalid device identity provenance")
         kind = row.get("evidence")
         if kind is not None and (
-            kind not in _EVIDENCE_KINDS
+            not isinstance(kind, str)
+            or kind not in _EVIDENCE_KINDS
             or (kind == "configured") != (source == "configured")
         ):
             raise ValueError("Invalid device evidence kind")

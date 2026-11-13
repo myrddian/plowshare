@@ -165,12 +165,16 @@ class IdentityProvenanceTest(unittest.TestCase):
         self.assertEqual(Evidence.decode(json.loads(encoded)).encode(), encoded)
 
     def test_identity_provenance_is_validated(self) -> None:
-        for device in (
+        invalid: tuple[dict[str, object], ...] = (
             {"evidence": "router"},
             {"service": "a b"},
             {"service": "a" * 65},
             {"evidence": "configured"},
-        ):
+            {"evidence": []},
+            {"evidence": {}},
+            {"source": []},
+        )
+        for device in invalid:
             with self.subTest(device=device), self.assertRaises(ValueError):
                 Evidence.decode(raw_evidence(**device))
 
