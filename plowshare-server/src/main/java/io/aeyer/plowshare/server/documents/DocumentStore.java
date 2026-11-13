@@ -76,7 +76,7 @@ import org.springframework.jdbc.core.RowMapper;
  * them, because their paragraphs are unchanged. That is a re-chunk and a re-embed of the corpus,
  * which is what application.yml says beside both keys.
  */
-public final class DocumentStore {
+public final class DocumentStore implements DocumentSummaries {
   private DualEmbeddings dualEmbeddings;
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {

@@ -500,39 +500,24 @@ class SummariserTest {
 
   // --- the shape of a cascade -----------------------------------------------
 
-  /**
-   * A document smaller than one span costs one call a paragraph and one for each unit above them.
-   *
-   * <p><b>No fold, and that is the design rather than an optimisation.</b> The fold fires when a
-   * tier has more children than fit one call and not otherwise, so a two-paragraph document reaches
-   * its summary through four tiers and no compression at all.
-   */
+  /** Short source blocks pack together and retain their exact text without paragraph inference. */
   @Test
-  void a_short_document_is_a_call_a_paragraph_and_one_for_each_unit_above() {
-    UUID id = corpus("notes.md", "Alpha.\n\nBeta.");
+  void a_short_document_retains_its_text_without_paragraph_model_calls() {
+    UUID id = rawCorpus("notes.md", "Alpha.\n\nBeta.");
 
     Outcome ran = summarise(id, "notes", Budget.of(20));
 
     assertEquals(Ending.ANSWERED, ran.ending(), ran.text());
-    assertEquals(5, transport.calls().size());
+    assertEquals(3, transport.calls().size());
     assertEquals(
-        List.of(
-            "paragraph_summariser",
-            "paragraph_summariser",
-            "section_summariser",
-            "chapter_summariser",
-            "document_summariser"),
+        List.of("section_summariser", "chapter_summariser", "document_summariser"),
         transport.agents());
-    assertEquals(List.of("summary of Alpha.", "summary of Beta."), store.paragraphSummaries(id));
-    // The scripted transport answers "summary of <what it was asked>", so
-    // the stored summaries are a readable record of the whole chain: the
-    // section read the two paragraph summaries and never the paragraphs, and
-    // what reached the document was one chapter summary.
+    assertEquals(List.of("Alpha. Beta."), store.paragraphSummaries(id));
+    // The section reads the lossless short-text label. Only the three upper tiers infer.
     String document = store.find("notes.md").orElseThrow().summary();
     assertTrue(document.contains("1. summary of "), document);
     assertTrue(
-        sectionSummaries(id).get(0).contains("1. summary of Alpha.\n2. summary of" + " Beta."),
-        sectionSummaries(id).toString());
+        sectionSummaries(id).get(0).contains("1. Alpha. Beta."), sectionSummaries(id).toString());
   }
 
   /**
@@ -860,6 +845,10 @@ class SummariserTest {
   // --- fixtures -------------------------------------------------------------
 
   private UUID corpus(String sourceName, String text) {
+    return rawCorpus(sourceName, DocumentFixtures.modelParagraphs(sourceName, text));
+  }
+
+  private UUID rawCorpus(String sourceName, String text) {
     Extracted extracted = TextExtraction.extract(sourceName, text.getBytes(StandardCharsets.UTF_8));
     return store
         .write(

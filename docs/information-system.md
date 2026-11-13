@@ -234,6 +234,23 @@ projection was built with a different configuration, so semantic retrieval ignor
 it until explicit repair. Changed embedding model identity matters even at the
 same vector width. Actual counts are not estimated completion percentages.
 
+Prose processing packs adjacent blocks within each section before creating
+paragraphs. A new paragraph boundary needs at least **80 whitespace-delimited
+words**; a shorter final remainder joins the preceding paragraph. An entire
+section below that size stays one paragraph and is retained verbatim as its
+paragraph label, without a paragraph model call. Explicit section boundaries and
+whole source blocks are preserved. This heuristic is independent of embedding
+token limits, which remain enforced by the configured tokenizers. Code extraction
+does not use prose packing.
+
+HTML extraction retains headings as structural markers and tables as complete
+rows with their captions and column headers, rather than summarising individual
+cells. Original bytes and immutable extracted text remain the evidence source;
+processing paragraphs are derived units, not original line wrapping. Existing
+revisions are not rewritten by this change. Refresh or replace a source to obtain
+the new extraction and paragraph structure; rebuilding summaries alone does not
+repair earlier fragmentation.
+
 The captured processing allowance pays for every preparation chat or embedding
 request, including each dual-model/active-or-staging lane. Compatible cached
 vectors cost no call. One retained budget identity and atomic counter survive

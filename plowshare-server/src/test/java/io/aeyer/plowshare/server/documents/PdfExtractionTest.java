@@ -66,17 +66,9 @@ class PdfExtractionTest {
     assertEquals("A single line.", extracted.text().strip());
   }
 
-  /**
-   * <b>The load-bearing assertion of this whole slice.</b>
-   *
-   * <p>{@link Derivation} splits on blank lines and re-flows what is between them, so the
-   * extraction's blank lines <em>are</em> the paragraph structure. PDFBox's shipped defaults put a
-   * blank line nowhere, which makes a whole document one paragraph; a naive fix puts one after
-   * every line, which makes every line a paragraph. Both destroy the hierarchy this port exists to
-   * build, so what is asserted here is the count a reader would count.
-   */
+  /** PDF paragraph geometry remains in the retained text; short blocks pack only in derivation. */
   @Test
-  void a_multi_paragraph_pdf_derives_the_paragraphs_a_reader_would_count() {
+  void short_pdf_blocks_remain_in_extraction_but_pack_into_one_processing_paragraph() {
     byte[] pdf =
         Pdfs.of(
             List.of(
@@ -86,11 +78,14 @@ class PdfExtractionTest {
     Extracted extracted = TextExtraction.extract("paper.pdf", pdf);
     List<DerivedParagraph> derived = Derivation.derive(extracted, SMALL).paragraphs();
 
-    assertEquals(4, derived.size(), extracted.text());
-    assertEquals(
-        "The first paragraph begins here and runs across two lines of type.",
-        derived.get(0).text());
-    assertEquals("The fourth paragraph opens the second page.", derived.get(3).text());
+    assertEquals(4, extracted.text().strip().split("\\n\\s*\\n").length);
+    assertEquals(1, derived.size(), extracted.text());
+    assertTrue(
+        derived
+            .getFirst()
+            .text()
+            .startsWith("The first paragraph begins here and runs across two lines of type."));
+    assertTrue(derived.getFirst().text().endsWith("The fourth paragraph opens the second page."));
   }
 
   /**
@@ -123,12 +118,13 @@ class PdfExtractionTest {
     Extracted extracted = TextExtraction.extract("paper.pdf", pdf);
     List<DerivedParagraph> derived = Derivation.derive(extracted, SMALL).paragraphs();
 
-    assertEquals(4, derived.size(), extracted.text());
-    assertEquals(
-        "The first paragraph begins here and runs across two lines of type.",
-        derived.get(0).text());
-    assertEquals(
-        "A second paragraph follows it, set off by a wider gap above.", derived.get(1).text());
+    assertEquals(4, extracted.text().strip().split("\\n\\s*\\n").length);
+    assertEquals(1, derived.size(), extracted.text());
+    assertTrue(
+        derived
+            .getFirst()
+            .text()
+            .contains("A second paragraph follows it, set off by a wider gap above."));
   }
 
   /**

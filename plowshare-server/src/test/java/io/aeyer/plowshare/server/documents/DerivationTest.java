@@ -21,11 +21,11 @@ class DerivationTest {
   // --- splitting -----------------------------------------------------------
 
   @Test
-  void a_blank_line_is_a_paragraph_break() {
+  void blank_lines_do_not_split_short_blocks_into_processing_paragraphs() {
     List<DerivedParagraph> paragraphs = derive("First one.\n\nSecond one.\n\n\nThird one.");
 
     assertEquals(
-        List.of("First one.", "Second one.", "Third one."),
+        List.of("First one. Second one. Third one."),
         paragraphs.stream().map(DerivedParagraph::text).toList());
   }
 
@@ -64,7 +64,8 @@ class DerivationTest {
    */
   @Test
   void ordinals_start_at_one_and_are_dense() {
-    List<DerivedParagraph> paragraphs = derive("A.\n\nB.\n\nC.");
+    List<DerivedParagraph> paragraphs =
+        derive(longText("A.") + "\n\n" + longText("B.") + "\n\n" + longText("C."));
 
     assertEquals(List.of(1, 2, 3), paragraphs.stream().map(DerivedParagraph::ordinal).toList());
   }
@@ -90,7 +91,15 @@ class DerivationTest {
    */
   @Test
   void identical_paragraphs_in_one_document_are_told_apart_by_occurrence() {
-    List<DerivedParagraph> paragraphs = derive("Notes\n\nSomething.\n\nNotes\n\nNotes");
+    List<DerivedParagraph> paragraphs =
+        derive(
+            longText("Notes")
+                + "\n\n"
+                + longText("Something.")
+                + "\n\n"
+                + longText("Notes")
+                + "\n\n"
+                + longText("Notes"));
 
     assertEquals(
         List.of(1, 1, 2, 3), paragraphs.stream().map(DerivedParagraph::occurrence).toList());
@@ -105,7 +114,15 @@ class DerivationTest {
    */
   @Test
   void occurrence_is_counted_within_a_hash() {
-    List<DerivedParagraph> paragraphs = derive("Notes\n\nOther\n\nNotes\n\nOther");
+    List<DerivedParagraph> paragraphs =
+        derive(
+            longText("Notes")
+                + "\n\n"
+                + longText("Other")
+                + "\n\n"
+                + longText("Notes")
+                + "\n\n"
+                + longText("Other"));
 
     assertEquals(
         List.of(1, 1, 2, 2), paragraphs.stream().map(DerivedParagraph::occurrence).toList());
@@ -115,7 +132,8 @@ class DerivationTest {
 
   @Test
   void every_paragraph_carries_its_chunks_in_order() {
-    List<DerivedParagraph> paragraphs = derive("Short one.\n\n" + "A sentence. ".repeat(400));
+    List<DerivedParagraph> paragraphs =
+        derive(longText("Short one.") + "\n\n" + "A sentence. ".repeat(400));
 
     assertEquals(1, paragraphs.get(0).chunks().size());
     assertTrue(paragraphs.get(1).chunks().size() > 1);
@@ -137,111 +155,43 @@ class DerivationTest {
     }
   }
 
-  // --- blocks that are not paragraphs ----------------------------------------
-
-  /**
-   * <b>A display equation belongs to the sentence that introduces it.</b>
-   *
-   * <p>{@code split} cuts wherever the extraction left a blank line, and in a PDF that is a
-   * geometric event rather than a paragraph boundary — an equation, a matrix row, a page number and
-   * a line of table data each arrive as their own block. Hand counted, arXiv:2212.12473 has 36–42
-   * paragraphs and this produced 134, of which 69% were not paragraphs at all.
-   */
   @Test
-  void a_block_with_no_words_joins_the_paragraph_above_it() {
-    String text =
-        """
-                The bound is tight for every antichain of this particular shape.
-
-                (1-X)A(X)k = (1-X)
-
-                And the argument continues from there to its conclusion.
-                """;
-
-    List<String> derived = inferred(text);
-
-    assertEquals(2, derived.size(), text);
-    assertTrue(derived.get(0).endsWith("(1-X)A(X)k = (1-X)"), derived.get(0));
+  void inferred_equations_keep_their_preceding_prose_when_packed() {
+    String first = longText("The bound is tight.");
+    String second = longText("And the argument continues.");
+    List<String> paragraphs = inferred(first + "\n\n(1-X)A(X)k = (1-X)\n\n" + second);
+    assertEquals(List.of(first + " (1-X)A(X)k = (1-X)", second), paragraphs);
   }
 
-  /**
-   * <b>Backwards, and the direction is nearly the whole of the fix.</b>
-   *
-   * <p>Measured on that paper against the 41 boundaries between its real units, changing nothing
-   * but which neighbour the block attaches to: joining backwards scores seam F1 <b>0.81</b> and
-   * forwards <b>0.60</b>, at the same unit count. The counts are identical and the segmentations
-   * are not, which is why a count is the wrong thing to tune against.
-   */
   @Test
-  void a_block_that_is_not_a_paragraph_joins_backwards_and_not_forwards() {
-    String text =
-        """
-                The bound is tight for every antichain of this particular shape.
-
-                (1-X)A(X)k = (1-X)
-
-                And the argument continues from there to its conclusion.
-                """;
-
-    List<String> derived = inferred(text);
-
-    assertTrue(
-        derived.get(0).contains("(1-X)A(X)k"),
-        "the equation belongs to the sentence that introduced it: " + derived.get(0));
-    assertEquals("And the argument continues from there to its conclusion.", derived.get(1));
+  void short_authored_text_is_packed_without_changing_the_retained_extraction() {
+    String text = "Yes.\n\nNo.\n\nMaybe.";
+    var extracted = new Extracted("Dialogue", "hash", text, List.of(), Extracted.NOT_CONVERTED);
+    assertEquals(
+        List.of("Yes. No. Maybe."),
+        Derivation.derive(extracted, ShippedChunking.SHIPPED).paragraphs().stream()
+            .map(DerivedParagraph::text)
+            .toList());
+    assertEquals(text, extracted.text());
   }
 
-  /**
-   * <b>And it never happens to a document whose author typed the blank lines.</b>
-   *
-   * <p>The join repairs an inference. In a text file a blank line is a mark somebody typed, and
-   * joining two of those blocks deletes a paragraph they wrote — measured on Frankenstein, where it
-   * would take {@code "Yes."}, a line of dialogue, into the paragraph above it. See {@link
-   * Extracted#paragraphsWereInferred()}.
-   */
   @Test
-  void the_same_text_is_left_alone_when_the_author_typed_the_blank_lines() {
-    String text =
-        """
-                The bound is tight for every antichain of this particular shape.
-
-                (1-X)A(X)k = (1-X)
-
-                And the argument continues from there to its conclusion.
-                """;
-
-    assertEquals(3, authored(text).size(), text);
+  void unspaced_text_is_preserved_and_still_obeys_embedding_token_bounds() {
+    String text = "文".repeat(4000);
+    List<DerivedParagraph> paragraphs = derive(text);
+    assertEquals(1, paragraphs.size());
+    assertEquals(text, paragraphs.getFirst().text());
+    for (var chunk : paragraphs.getFirst().chunks()) {
+      assertTrue(ShippedChunking.SHIPPED.tokens(chunk.text()) <= ShippedChunking.MAX);
+    }
   }
 
-  /**
-   * <b>The word count cannot read every script and must not act as though it can.</b>
-   *
-   * <p>Chinese, Japanese and Thai are written without spaces, so a whole paragraph arrives as one
-   * token — one "word" — and the rule above would fold a document into its first paragraph with
-   * nothing here noticing, because nothing here checks a language. Above the length guard the rule
-   * keeps its hands off whatever it can or cannot read.
-   */
-  @Test
-  void a_long_block_is_left_alone_however_few_words_this_can_find_in_it() {
-    String unspaced = "\u6587".repeat(200);
-    String text = "The bound is tight for every antichain of this shape.\n\n" + unspaced + "\n";
-
-    List<String> derived = inferred(text);
-
-    assertEquals(2, derived.size(), "a script with no spaces is not a fragment");
-    assertEquals(unspaced, derived.get(1));
+  private static String longText(String prefix) {
+    return prefix + " " + ParagraphPackingTest.words(80);
   }
 
-  /** Derived as a PDF is: the blank lines are PDFBox's inference. */
   private static List<String> inferred(String text) {
     return Derivation.derive(text, List.of(), true, ShippedChunking.SHIPPED).paragraphs().stream()
-        .map(DerivedParagraph::text)
-        .toList();
-  }
-
-  /** Derived as a text file is: the blank lines are the author's. */
-  private static List<String> authored(String text) {
-    return Derivation.derive(text, List.of(), false, ShippedChunking.SHIPPED).paragraphs().stream()
         .map(DerivedParagraph::text)
         .toList();
   }

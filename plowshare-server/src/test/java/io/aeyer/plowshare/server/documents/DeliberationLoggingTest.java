@@ -349,7 +349,7 @@ class DeliberationLoggingTest {
                 text.length(),
                 "test",
                 AT,
-                Derivation.derive(extracted, ShippedChunking.SHIPPED))
+                DocumentFixtures.separateBlocks(extracted, ShippedChunking.SHIPPED))
             .documentId();
     jdbc.update("UPDATE documents SET summary = 'What the paper argues.' WHERE id = ?", document);
     jdbc.update(

@@ -266,7 +266,7 @@ class SearchCacheDatabaseTest {
           bytes.length,
           account,
           Instant.now(),
-          Derivation.derive(extracted, ShippedChunking.SHIPPED));
+          DocumentFixtures.separateBlocks(extracted, ShippedChunking.SHIPPED));
       vector[0] = 1;
       for (UUID chunk :
           jdbc.queryForList(

@@ -13,7 +13,8 @@ import java.util.regex.Pattern;
  * <p>Anchor's {@code ingest.SectionDetector}, ported with its constants and the comments that
  * record what each one is for. Four ORed boundary conditions with a hard veto — a chemistry section
  * name, a numbered heading, a numbered subsection, or a short title-cased line followed by prose,
- * with the LP/proof keyword list beating all four.
+ * with the LP/proof keyword list beating those heuristics. Explicit Markdown headings are
+ * authoritative, and fenced code is never scanned for section boundaries.
  *
  * <p>Anchor's own framing of the constant lists: "Anchor's first audience is chemistry; the
  * chemistry-name set lives here as the canonical list. Other domain corpora can extend this later
@@ -93,6 +94,9 @@ public final class SectionDetector {
 
   private static final Pattern NUMBERED_HEADING = Pattern.compile("^\\s*\\d+\\.\\s+[A-Z].{0,80}$");
 
+  /** Explicit source headings, including the structural markers retained by HTML extraction. */
+  private static final Pattern MARKDOWN_HEADING = Pattern.compile("^#{1,6}\\s+(.+?)\\s*#*\\s*$");
+
   /**
    * Multi-level numbered subsection: {@code 3.1. Antichains of fixed diameter} / {@code 3.1 Foo} /
    * {@code 3.10. Bar}. A pattern of its own because {@link #NUMBERED_HEADING} matches only
@@ -150,18 +154,36 @@ public final class SectionDetector {
     }
 
     List<Integer> boundaries = new ArrayList<>();
+    char fence = 0;
+    int fenceLength = 0;
     for (int i = bodyStartLine; i < endLine; i++) {
       String raw = lines[i];
       String trimmed = raw.trim();
+      if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+        char marker = trimmed.charAt(0);
+        int length = 0;
+        while (length < trimmed.length() && trimmed.charAt(length) == marker) length++;
+        if (fence == 0) {
+          fence = marker;
+          fenceLength = length;
+        } else if (fence == marker
+            && length >= fenceLength
+            && trimmed.substring(length).isBlank()) {
+          fence = 0;
+        }
+        continue;
+      }
+      if (fence != 0) continue;
       if (trimmed.isEmpty()) {
         continue;
       }
       String normalised = trimmed.toLowerCase(Locale.ROOT).replaceAll("[^a-z\\s]", "").trim();
+      boolean explicit = MARKDOWN_HEADING.matcher(trimmed).matches();
 
       // The veto is checked first and wins outright: `Minimize` matches
       // TITLE_CASE_HEADING and is over the length floor, so without this
       // it becomes a section title in any LP paper.
-      if (MATH_LP_NON_HEADINGS.contains(normalised)) {
+      if (!explicit && MATH_LP_NON_HEADINGS.contains(normalised)) {
         continue;
       }
 
@@ -174,7 +196,7 @@ public final class SectionDetector {
               && trimmed.length() <= MAX_TITLE_CASE_HEADING_LENGTH
               && nextNonEmptyLooksLikeProse(lines, i + 1, endLine);
 
-      if (chemistryName || numbered || numberedSubsection || titleCase) {
+      if (explicit || chemistryName || numbered || numberedSubsection || titleCase) {
         boundaries.add(i);
       }
     }
@@ -208,8 +230,13 @@ public final class SectionDetector {
       int start = boundaries.get(i);
       int end = (i + 1 < boundaries.size()) ? boundaries.get(i + 1) : endLine;
       String rawLine = lines[start].trim();
+      var markdown = MARKDOWN_HEADING.matcher(rawLine);
       String title =
-          NUMBERED_SUBSECTION.matcher(rawLine).matches() ? trimSubsectionTitle(rawLine) : rawLine;
+          markdown.matches()
+              ? markdown.group(1)
+              : NUMBERED_SUBSECTION.matcher(rawLine).matches()
+                  ? trimSubsectionTitle(rawLine)
+                  : rawLine;
       String key = title.toLowerCase(Locale.ROOT).replaceAll("[^a-z\\s]", "").trim();
       if (EXCLUDED_SECTIONS.contains(key)) {
         // A boundary first, dropped second, and no ordinal consumed —
@@ -263,17 +290,25 @@ public final class SectionDetector {
    * Whether the next line with anything on it reads like body text.
    *
    * <p>The second half of the title-case rule, and what stops a list of capitalised items becoming
-   * a run of empty sections: prose has at least one space and is not shouted.
+   * a run of empty sections. A short model identifier such as {@code Bielik 11B v3.1} is not
+   * evidence of body prose: require a sentence ending or a full 80-word block. Wrapped lines are
+   * considered together, without consuming the caller's input.
    */
   private static boolean nextNonEmptyLooksLikeProse(String[] lines, int from, int end) {
+    StringBuilder body = new StringBuilder();
     for (int j = from; j < end; j++) {
       String trimmed = lines[j].trim();
       if (trimmed.isEmpty()) {
+        if (!body.isEmpty()) break;
         continue;
       }
-      return trimmed.contains(" ") && !trimmed.equals(trimmed.toUpperCase(Locale.ROOT));
+      if (!body.isEmpty()) body.append(' ');
+      body.append(trimmed);
     }
-    return false;
+    String text = body.toString();
+    return text.contains(" ")
+        && !text.equals(text.toUpperCase(Locale.ROOT))
+        && (!ParagraphPacking.isShort(text) || text.matches("(?s).*[.!?。！？]$"));
   }
 
   private static boolean hasText(String[] lines, int from, int to) {

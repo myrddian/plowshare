@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.fetch;
 
-import java.util.LinkedHashSet;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 import org.jsoup.Jsoup;
@@ -9,77 +11,17 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 /**
- * A page reduced to prose: no network, no database, nothing but markup in and an {@link
- * ExtractedPage} out. That is what makes this the first piece of the fetch slice and the easiest
- * one to test — every other class in it either calls out to something or stores something; this one
- * only reads.
+ * Reduce HTML to readable, ordered text without network or persistence access.
  *
- * <h2>Every newline in the output is one this class chose</h2>
+ * <p>Whitespace is collapsed inside each block before blank-line separators are inserted, so a
+ * source line wrap cannot masquerade as a paragraph boundary. Headings retain explicit Markdown
+ * markers for the structure detector. Tables retain captions, headers and complete rows together;
+ * list items and quotations are emitted once rather than again for every nested paragraph tag.
  *
- * <p>{@link #extract} does whitespace collapsing <em>per block, before</em> joining, not on the
- * assembled document afterward. That ordering is the whole point of this class, and it is worth
- * arguing rather than merely stating, because the alternative reads as equivalent and is not.
- *
- * <p>Collapse and join in the other order — build the paragraph text first, <code>
- * String.join("\n\n", blocks)</code>, and normalise the result — and a source line break sitting
- * inside one block's own markup (a hand-wrapped <code>&lt;p&gt;</code> in someone's CMS, a template
- * that indents its output) survives whitespace collapsing exactly as well as the <code>"\n\n"
- * </code> this class inserted between blocks. Nothing downstream can tell the two kinds of newline
- * apart once they are both sitting in the same string, because by then they are both just newlines.
- * Collapse each block on its own <em>first</em>, and the property is structural rather than
- * incidental: every newline that reaches {@link ExtractedPage#text} was inserted by {@link
- * String#join}, because nothing else in this method ever writes one. A later task in this slice
- * quotes a window of that text to a model verbatim — see spec §9 — and it can only do that safely
- * because a line at column zero is never something the page itself was able to forge. {@code
- * a_block_arrives_with_its_own_whitespace_already_collapsed} and {@code
- * blocks_are_separated_by_a_blank_line_so_structure_survives} are the two tests that pin this: the
- * first would still pass under either ordering on simple input, which is exactly why it is not
- * enough on its own to prove the ordering was chosen deliberately — only reading this method
- * settles that.
- *
- * <p>Normalising the whole document in one pass, rather than block by block, fails the same way
- * from the other direction: it has no blocks left to insert separators between, so structure — the
- * fact that a heading and the paragraph under it are different things — is gone before {@link
- * String#join} ever runs.
- *
- * <h2>The six steps, and why each one is here</h2>
- *
- * <ol>
- *   <li>Parse with jsoup, against {@code baseUrl}. The base is unused by anything this class
- *       currently does with the resulting text, but it is what jsoup needs to resolve a relative
- *       {@code href} or {@code src} correctly, and a caller of a page-extraction function is one
- *       that fetched that page from somewhere — the URL is always in hand at the call site, so
- *       there is nothing gained by making this method pretend it might not be.
- *   <li>Strip chrome that is never prose — {@code script}, {@code style}, {@code noscript}, {@code
- *       svg}, {@code nav}, {@code header}, {@code footer}, {@code aside}, {@code form}, {@code
- *       button}, {@code dialog} — before anything else looks at the page, so a scoring step never
- *       gets to credit a sidebar for having a lot of text in it.
- *   <li>Score a content root among the common article-container shapes, preferring whichever
- *       candidate carries the most paragraph text, and fall back to {@code body} when none of them
- *       match. A page that names none of {@code article}, {@code main}, {@code [role=main]}, or one
- *       of the common class-name conventions is still a page an agent asked to read, and returning
- *       nothing because no container happened to be tagged correctly would be a worse failure than
- *       occasionally including a stray line of boilerplate the scoring did not exclude.
- *   <li><b>Walk the block-level tags inside the winner and normalise each one's whitespace on its
- *       own.</b> This is the step argued above.
- *   <li>Collect into a {@link LinkedHashSet} rather than a {@link java.util.List}, so a block
- *       repeated verbatim — the "sign up for our newsletter" paragraph a template stamps into every
- *       article on a site — is kept once, at its first position, instead of once per occurrence.
- *   <li>Join what survives with a blank line between blocks. Two newlines and not one: a single
- *       {@code "\n"} would be indistinguishable from a hard line wrap inside a block that this same
- *       method just finished collapsing away, and this class does not want to reintroduce at the
- *       seam the ambiguity step 4 exists to remove at the block level.
- * </ol>
- *
- * <h2>What "too short to be prose" means here</h2>
- *
- * <p>{@link #MIN_BLOCK_LENGTH} is deliberately small. A block that survives whitespace collapsing
- * to nothing (an empty {@code <p></p>}, or one holding only a non-breaking space) is discarded
- * outright; a block one or two characters long — a bare bullet glyph, a table cell holding only a
- * dash — is discarded as a fragment rather than a sentence. It is not a summariser: a genuinely
- * short heading like a single word is prose and is kept, which is why the threshold sits at the
- * floor of "not obviously noise" rather than anywhere near an editorial judgement about what counts
- * as a real sentence.
+ * <p>Chrome is removed before choosing the article container with the most paragraph text. A page
+ * with no recognised article container falls back to its body. Repeated prose blocks are retained
+ * only at their first occurrence, but table cells and rows are never deduplicated independently:
+ * repeated numbers and empty positions can be meaningful data.
  */
 public final class PageExtractor {
 
@@ -101,17 +43,12 @@ public final class PageExtractor {
           + ".article, .article-body, .entry-content, .post-content, .story-body, "
           + ".main-content";
 
-  /** Block-level tags worth reading as a paragraph of prose on their own. */
-  private static final String BLOCK_SELECTOR = "h1, h2, h3, p, li, blockquote, figcaption, td";
+  /** Containers own their descendants: a table cell or a paragraph inside a list is not a unit. */
+  private static final String BLOCK_SELECTOR =
+      "h1, h2, h3, h4, h5, h6, p, li, blockquote, figcaption, table, dl";
 
   /** Any run of whitespace — space, tab, newline — collapses to one space. */
   private static final Pattern WHITESPACE_RUN = Pattern.compile("\\s+");
-
-  /**
-   * Below this many characters a block is a fragment (an empty tag, a lone glyph) rather than
-   * prose. See the class javadoc for why it is small.
-   */
-  private static final int MIN_BLOCK_LENGTH = 2;
 
   private PageExtractor() {}
 
@@ -134,15 +71,69 @@ public final class PageExtractor {
 
     Element root = contentRoot(document);
 
-    Set<String> blocks = new LinkedHashSet<>();
+    List<String> blocks = new ArrayList<>();
+    Set<String> seenProse = new HashSet<>();
     for (Element block : root.select(BLOCK_SELECTOR)) {
+      if (insideSelectedBlock(block, root)) continue;
       String normalized = normalizeWhitespace(block.text());
-      if (normalized.length() >= MIN_BLOCK_LENGTH) {
+      // Length is not a content filter: even a one-digit value can be meaningful in a table.
+      if (normalized.isBlank()) continue;
+      if (block.tagName().matches("h[1-6]")) {
+        blocks.add("#".repeat(Integer.parseInt(block.tagName().substring(1))) + " " + normalized);
+      } else if (block.tagName().equals("table")) {
+        String table = tableText(block);
+        if (!table.isBlank()) blocks.add(table);
+      } else if (seenProse.add(normalized)) {
         blocks.add(normalized);
       }
     }
 
     return new ExtractedPage(document.title(), String.join("\n\n", blocks));
+  }
+
+  /** Select only the outermost semantic block, avoiding parent/child text duplication. */
+  private static boolean insideSelectedBlock(Element block, Element root) {
+    for (Element parent = block.parent();
+        parent != null && parent != root;
+        parent = parent.parent()) {
+      if (parent.is(BLOCK_SELECTOR)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Keep a table together and label values only when an unambiguous, unspanned header row exists.
+   * Spanned layouts retain ordered cells without inventing column associations. Row separators and
+   * empty positions survive flattening; repeated values are not boilerplate.
+   */
+  private static String tableText(Element table) {
+    List<String> rows = new ArrayList<>();
+    for (Element caption : table.select("caption")) {
+      if (caption.closest("table") == table) rows.add(normalizeWhitespace(caption.text()));
+    }
+    List<String> headers = List.of();
+    for (Element row : table.select("tr")) {
+      if (row.closest("table") != table) continue;
+      List<Element> cells = row.children().stream().filter(cell -> cell.is("th, td")).toList();
+      if (cells.isEmpty()) continue;
+      List<String> values = cells.stream().map(cell -> normalizeWhitespace(cell.text())).toList();
+      boolean spanned =
+          cells.stream().anyMatch(cell -> cell.hasAttr("colspan") || cell.hasAttr("rowspan"));
+      if (cells.stream().allMatch(cell -> cell.tagName().equals("th"))) {
+        headers = spanned ? List.of() : values;
+      } else if (spanned) {
+        // A row span can shift following rows too. Do not resume inferred column labels.
+        headers = List.of();
+      } else if (headers.size() == values.size()) {
+        List<String> labelled = new ArrayList<>();
+        for (int column = 0; column < values.size(); column++) {
+          labelled.add(headers.get(column) + ": " + values.get(column));
+        }
+        values = labelled;
+      }
+      rows.add(String.join(" | ", values));
+    }
+    return String.join("; ", rows);
   }
 
   /**

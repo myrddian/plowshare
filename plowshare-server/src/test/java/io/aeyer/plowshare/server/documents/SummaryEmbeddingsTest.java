@@ -97,7 +97,7 @@ class SummaryEmbeddingsTest {
                 26L,
                 "test",
                 AT,
-                Derivation.derive(extracted, ShippedChunking.SHIPPED))
+                DocumentFixtures.separateBlocks(extracted, ShippedChunking.SHIPPED))
             .documentId();
     store.attachDocumentSummary(id, "what " + sourceName + " argues");
     return id;
