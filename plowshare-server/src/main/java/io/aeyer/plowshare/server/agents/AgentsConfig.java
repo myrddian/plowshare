@@ -3,18 +3,30 @@ package io.aeyer.plowshare.server.agents;
 import io.aeyer.plowshare.protocol.Bubblewrap;
 import io.aeyer.plowshare.protocol.CommandIsolation;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.InferenceCalls;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
+import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.agents.curator.Curator;
+import io.aeyer.plowshare.server.agents.digests.Digester;
+import io.aeyer.plowshare.server.agents.digests.MemoryProperties;
+import io.aeyer.plowshare.server.agents.digests.Navigator;
 import io.aeyer.plowshare.server.agents.learner.Learner;
 import io.aeyer.plowshare.server.agents.learner.Reminder;
 import io.aeyer.plowshare.server.agents.scribe.Scribe;
+import io.aeyer.plowshare.server.api.ContextView;
 import io.aeyer.plowshare.server.api.ConversationsProperties;
 import io.aeyer.plowshare.server.archive.Archive;
+import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.CompactionStore;
 import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.archive.Conversations;
+import io.aeyer.plowshare.server.archive.DigestStore;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.JobLog;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
+import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.archive.PromotionQueue;
 import io.aeyer.plowshare.server.archive.ProposalStore;
@@ -22,6 +34,7 @@ import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.archive.ValidationException;
 import io.aeyer.plowshare.server.auth.AuthProperties;
 import io.aeyer.plowshare.server.data.DataLayout;
+import io.aeyer.plowshare.server.documents.CitationStore;
 import io.aeyer.plowshare.server.documents.Deliberation;
 import io.aeyer.plowshare.server.documents.DocumentStore;
 import io.aeyer.plowshare.server.documents.DocumentsProperties;
@@ -30,18 +43,33 @@ import io.aeyer.plowshare.server.fetch.FetchService;
 import io.aeyer.plowshare.server.files.AbsentPresence;
 import io.aeyer.plowshare.server.files.CommandIsolationProperties;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileStores;
 import io.aeyer.plowshare.server.files.LocalProvider;
 import io.aeyer.plowshare.server.files.RemoteProvider;
 import io.aeyer.plowshare.server.files.RunProviders;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.WorkspaceProperties;
+import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.Hooks;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.information.InformationAccess;
+import io.aeyer.plowshare.server.information.InformationCatalogue;
+import io.aeyer.plowshare.server.information.InformationContentTypes;
+import io.aeyer.plowshare.server.information.InformationContext;
+import io.aeyer.plowshare.server.information.InformationNavigationService;
 import io.aeyer.plowshare.server.llm.LlmProperties;
 import io.aeyer.plowshare.server.llm.SamplingProfiles;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
+import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.outgoing.OutgoingWork;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import io.aeyer.plowshare.server.relay.RelayPublishing;
+import io.aeyer.plowshare.server.relay.tools.RelayToolDefinition;
+import io.aeyer.plowshare.server.relay.tools.RelayToolInvocations;
+import io.aeyer.plowshare.server.relay.tools.RelayToolProperties;
 import io.aeyer.plowshare.server.search.SearchService;
 import io.aeyer.plowshare.server.session.Presence;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
@@ -49,18 +77,26 @@ import io.aeyer.plowshare.server.session.ProjectRoots;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.Session;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.server.todos.TodoBoard;
 import io.aeyer.plowshare.server.union.UnionRouting;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.function.BiPredicate;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -236,7 +272,7 @@ public class AgentsConfig {
       AuthProperties auth,
       ConversationsProperties conversations,
       DataLayout data,
-      io.aeyer.plowshare.server.files.FileStores fileStores) {
+      FileStores fileStores) {
     String token = auth.getTokenFile();
     String exports = conversations.getRetention().getExportDirectory();
     return new ProjectStore(
@@ -308,7 +344,7 @@ public class AgentsConfig {
   @Bean
   public Environments environments(
       ProjectStore projects,
-      io.aeyer.plowshare.server.data.DataLayout data,
+      DataLayout data,
       SessionChannel channel,
       JobRuntime runtime,
       ApplicationResources applicationResources,
@@ -345,7 +381,7 @@ public class AgentsConfig {
       @Qualifier("personalHooks") ObjectProvider<Hooks> personalHooks,
       @Qualifier("projectHooks") ObjectProvider<Hooks> projectHooks,
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks,
-      ObjectProvider<io.aeyer.plowshare.server.harness.Harness> harness,
+      ObjectProvider<Harness> harness,
       ObjectProvider<CallValidator> validator) {
     // NO HARNESS STAGE HERE ANY MORE. MemoryPolicy stood first in this chain and
     // added a volatile line to every bot turn -- "record it with memory_write on
@@ -363,8 +399,7 @@ public class AgentsConfig {
             projectHooks.getIfAvailable(() -> Hooks.NONE),
             localHooks.getIfAvailable(() -> Hooks.NONE));
     runtime.useHooks(hooks);
-    runtime.useHarness(
-        harness.getIfAvailable(() -> io.aeyer.plowshare.server.harness.Harness.NONE));
+    runtime.useHarness(harness.getIfAvailable(() -> Harness.NONE));
     // The call validator (spec 2026-09-28-call-failures §5); none in a context without one.
     runtime.useValidator(validator.getIfAvailable(() -> CallValidator.NONE));
     return hooks;
@@ -501,8 +536,7 @@ public class AgentsConfig {
       CommandIsolation isolation) {
     return (home, grants, sessionId, owner) -> {
       if (!home.isGlobal() && owner != null)
-        members.requireRole(
-            home.project(), owner, io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR);
+        members.requireRole(home.project(), owner, ProjectRole.CONTRIBUTOR);
       // Conversion stays on the server. Source-capable remote clients
       // stream fenced bytes over the file WS; image storage uses the
       // run's Home. Older clients retain their existing text protocol.
@@ -516,7 +550,7 @@ public class AgentsConfig {
             home.isGlobal()
                 ? owner != null && sessions.accountOf(sessionId).filter(owner::equals).isPresent()
                 : owner == null || members.mayWork(home.project(), owner);
-      } catch (io.aeyer.plowshare.server.archive.ArchiveUnavailableException down) {
+      } catch (ArchiveUnavailableException down) {
         permitted = false;
       }
       Optional<String> personalOwner =
@@ -530,10 +564,7 @@ public class AgentsConfig {
                   : presences.serving(home.project()).map(Presence::session);
       boolean separateCheckout =
           !home.isGlobal()
-              && projects
-                  .find(home.project())
-                  .filter(io.aeyer.plowshare.server.archive.ProjectRecord::serverProject)
-                  .isPresent();
+              && projects.find(home.project()).filter(ProjectRecord::serverProject).isPresent();
       if (separateCheckout && permitted) {
         // A server project's local checkout is tied to the asking session, including a standby
         // serving the same folder. Primary routing must not hide that session's own file claim.
@@ -644,11 +675,9 @@ public class AgentsConfig {
   }
 
   /** Configured tools join the real registry before definitions are validated. */
-  private static java.util.List<AgentTool> withRelayTools(
-      java.util.List<AgentTool> builtins,
-      io.aeyer.plowshare.server.relay.tools.RelayToolProperties properties,
-      io.aeyer.plowshare.server.relay.tools.RelayToolInvocations invocations) {
-    var tools = new java.util.ArrayList<>(builtins);
+  private static List<AgentTool> withRelayTools(
+      List<AgentTool> builtins, RelayToolProperties properties, RelayToolInvocations invocations) {
+    var tools = new ArrayList<>(builtins);
     if (invocations != null) tools.add(new RelayInvocationReadTool(invocations));
     if (properties == null || properties.getBindings().isEmpty()) return tools;
     if (invocations == null)
@@ -656,10 +685,8 @@ public class AgentsConfig {
     var grouped =
         properties.getBindings().stream()
             .collect(
-                java.util.stream.Collectors.groupingBy(
-                    io.aeyer.plowshare.server.relay.tools.RelayToolDefinition::name,
-                    java.util.TreeMap::new,
-                    java.util.stream.Collectors.toList()));
+                Collectors.groupingBy(
+                    RelayToolDefinition::name, TreeMap::new, Collectors.toList()));
     grouped.values().forEach(bindings -> tools.add(new RelayAgentTool(bindings, invocations)));
     return tools;
   }
@@ -745,18 +772,16 @@ public class AgentsConfig {
       ConversationStore conversations,
       EntryStore entries,
       RetrievalService corpus,
-      ObjectProvider<io.aeyer.plowshare.server.information.InformationCatalogue> information,
-      ObjectProvider<io.aeyer.plowshare.server.information.InformationContentTypes>
-          informationTypes,
-      ObjectProvider<io.aeyer.plowshare.server.information.InformationNavigationService>
-          informationNavigation,
+      ObjectProvider<InformationCatalogue> information,
+      ObjectProvider<InformationContentTypes> informationTypes,
+      ObjectProvider<InformationNavigationService> informationNavigation,
       DocumentStore documents,
-      io.aeyer.plowshare.server.documents.CitationStore citations,
-      io.aeyer.plowshare.server.archive.TurnStore turns,
-      ObjectProvider<io.aeyer.plowshare.server.archive.Conversations> conversationRules,
+      CitationStore citations,
+      TurnStore turns,
+      ObjectProvider<Conversations> conversationRules,
       ObjectProvider<Callers> contextCallers,
       ObjectProvider<JobRuntime> contextRuntime,
-      ObjectProvider<io.aeyer.plowshare.server.llm.tokens.Tokenizer> contextTokenizer,
+      ObjectProvider<Tokenizer> contextTokenizer,
       ObjectProvider<Compaction> contextCompaction,
       FetchService fetch,
       SearchService search,
@@ -765,18 +790,19 @@ public class AgentsConfig {
       ObjectProvider<Reminding> reminding,
       ObjectProvider<Deliberation> deliberation,
       ObjectProvider<DocumentsProperties> props,
-      ObjectProvider<io.aeyer.plowshare.server.agents.digests.Navigator> navigator,
-      ObjectProvider<io.aeyer.plowshare.server.agents.digests.MemoryProperties> memoryProperties,
+      ObjectProvider<Navigator> navigator,
+      ObjectProvider<MemoryProperties> memoryProperties,
       ObjectProvider<ImageStore> images,
       ObjectProvider<Scribe> scribe,
-      io.aeyer.plowshare.server.todos.TodoBoard todos,
-      ObjectProvider<io.aeyer.plowshare.server.outgoing.OutgoingWork> outgoing,
-      ObjectProvider<io.aeyer.plowshare.server.board.BoardMessaging> messaging,
-      ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolProperties> relayTools,
-      ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolInvocations> relayInvocations,
+      TodoBoard todos,
+      ObjectProvider<OutgoingWork> outgoing,
+      ObjectProvider<MessageService> messaging,
+      RelayPublishing relayPublishing,
+      ObjectProvider<RelayToolProperties> relayTools,
+      ObjectProvider<RelayToolInvocations> relayInvocations,
       ObjectProvider<ScopedTools> scopedTools,
-      io.aeyer.plowshare.server.access.OperationAuthority operations,
-      io.aeyer.plowshare.server.access.InferenceCalls inferenceCalls) {
+      OperationAuthority operations,
+      InferenceCalls inferenceCalls) {
     JobRuntime runtime =
         new JobRuntime(
             dispatcher,
@@ -807,7 +833,7 @@ public class AgentsConfig {
                                       callers.homeOfConversation(conversation),
                                       session,
                                       conversation);
-                          return io.aeyer.plowshare.server.api.ContextView.Prefix.of(
+                          return ContextView.Prefix.of(
                               definition,
                               contextRuntime
                                   .getObject()
@@ -847,7 +873,8 @@ public class AgentsConfig {
                     new OutgoingTool(outgoing::getIfAvailable, "send"),
                     new OutgoingTool(outgoing::getIfAvailable, "read"),
                     new OutgoingTool(outgoing::getIfAvailable, "cancel"),
-                    new OutgoingTool(outgoing::getIfAvailable, "peers")),
+                    new OutgoingTool(outgoing::getIfAvailable, "peers"),
+                    new RelayPublishTool(relayPublishing)),
                 relayTools.getIfAvailable(),
                 relayInvocations.getIfAvailable()),
             agents::getIfAvailable,
@@ -885,7 +912,7 @@ public class AgentsConfig {
               }
 
               @Override
-              public java.util.Optional<AgentDefinition> find(
+              public Optional<AgentDefinition> find(
                   Home home, String session, String account, String name) {
                 return contextCallers.getObject().find(home, session, account, name);
               }
@@ -929,10 +956,7 @@ public class AgentsConfig {
     return new Asking() {
       @Override
       public Outcome ask(
-          java.util.UUID documentId,
-          String question,
-          Budget budget,
-          java.util.function.BooleanSupplier cancelled) {
+          UUID documentId, String question, Budget budget, BooleanSupplier cancelled) {
         Deliberation pass = deliberation.getIfAvailable();
         return pass == null
             ? Asking.NONE.ask(documentId, question, budget, cancelled)
@@ -940,19 +964,13 @@ public class AgentsConfig {
       }
 
       @Override
-      public Asking scoped(
-          io.aeyer.plowshare.server.information.InformationAccess access,
-          io.aeyer.plowshare.server.information.InformationContext context,
-          String session) {
+      public Asking scoped(InformationAccess access, InformationContext context, String session) {
         return scoped(access, context, session, null);
       }
 
       @Override
       public Asking scoped(
-          io.aeyer.plowshare.server.information.InformationAccess access,
-          io.aeyer.plowshare.server.information.InformationContext context,
-          String session,
-          String parent) {
+          InformationAccess access, InformationContext context, String session, String parent) {
         return (document, question, budget, cancelled) -> {
           Deliberation pass = deliberation.getIfAvailable();
           return pass == null
@@ -1126,12 +1144,10 @@ public class AgentsConfig {
 
   /** Connects logical role selection to the same model profiles used by the running harness. */
   @Bean
-  public AgentGuidance agentGuidance(
-      LlmDispatcher dispatcher,
-      ObjectProvider<io.aeyer.plowshare.server.harness.Harness> harnesses) {
-    var harness = harnesses.getIfAvailable(() -> io.aeyer.plowshare.server.harness.Harness.NONE);
+  public AgentGuidance agentGuidance(LlmDispatcher dispatcher, ObjectProvider<Harness> harnesses) {
+    var harness = harnesses.getIfAvailable(() -> Harness.NONE);
     return model -> {
-      Set<String> profiles = new java.util.HashSet<>();
+      Set<String> profiles = new HashSet<>();
       for (String wire : dispatcher.wireModelsFor(model)) profiles.add(harness.profileFor(wire));
       if (profiles.size() > 1)
         throw new IllegalStateException(
@@ -1301,7 +1317,7 @@ public class AgentsConfig {
       SessionRegistry sessions,
       DefinitionChecks checks,
       PresenceRegistry presences,
-      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
+      ObjectProvider<PersonalSpaces> personal,
       ObjectProvider<ProjectConfigurations> configurations,
       ApplicationResources applicationResources,
       GlobalAgentDefinitions globals) {
@@ -1334,7 +1350,7 @@ public class AgentsConfig {
       SessionChannel channel,
       SessionRegistry sessions,
       PresenceRegistry presences,
-      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
+      ObjectProvider<PersonalSpaces> personal,
       ObjectProvider<ProjectConfigurations> configurations,
       ApplicationResources applicationResources) {
     SkillResolver resolver =
@@ -1362,7 +1378,7 @@ public class AgentsConfig {
       SessionRegistry sessions,
       PresenceRegistry presences,
       JobRuntime runtime,
-      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
+      ObjectProvider<PersonalSpaces> personal,
       ApplicationResources applicationResources) {
     AgentRules rules =
         new AgentRules(data, channel, sessionLive(sessions), sessionRoots(projects, presences));
@@ -1377,8 +1393,8 @@ public class AgentsConfig {
     return rules;
   }
 
-  static java.util.function.Function<DefinitionResolver.Caller, Long> personalIds(
-      io.aeyer.plowshare.server.personal.PersonalSpaces personal, SessionRegistry sessions) {
+  static Function<DefinitionResolver.Caller, Long> personalIds(
+      PersonalSpaces personal, SessionRegistry sessions) {
     if (personal == null) return caller -> null;
     return caller -> {
       String handle = caller.handle();
@@ -1420,7 +1436,7 @@ public class AgentsConfig {
       SessionRegistry sessions,
       DefinitionChecks checks,
       PresenceRegistry presences,
-      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
+      ObjectProvider<PersonalSpaces> personal,
       ApplicationResources applicationResources,
       GlobalAgentDefinitions globals) {
     DefinitionSource shipped =
@@ -1743,7 +1759,7 @@ public class AgentsConfig {
       Archive archive,
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
-      io.aeyer.plowshare.server.access.SystemOperations system) {
+      SystemOperations system) {
     return new Scribe(dispatcher, archive, GlobalAgentSnapshots.supply(globals, agents), system);
   }
 
@@ -1764,7 +1780,7 @@ public class AgentsConfig {
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
       Compaction compaction,
-      io.aeyer.plowshare.server.access.SystemOperations system) {
+      SystemOperations system) {
     return new Curator(
         archive,
         proposals,
@@ -1813,8 +1829,8 @@ public class AgentsConfig {
       JobLog jobs,
       JobsProperties properties,
       ObjectProvider<RunEnds> runEnds,
-      io.aeyer.plowshare.server.access.ProjectAuthorization projectAccess,
-      io.aeyer.plowshare.server.access.OperationAuthority operations) {
+      ProjectAuthorization projectAccess,
+      OperationAuthority operations) {
     JobStore store =
         new JobStore(
             runtime,
@@ -1892,9 +1908,9 @@ public class AgentsConfig {
       ObjectProvider<GlobalAgentDefinitions> globals,
       ObjectProvider<Learning> learning,
       ObjectProvider<Citing> citing,
-      ObjectProvider<io.aeyer.plowshare.server.agents.digests.Digester> digester,
-      ObjectProvider<io.aeyer.plowshare.server.llm.tokens.Tokenizer> tokenizer,
-      io.aeyer.plowshare.server.access.SystemOperations system) {
+      ObjectProvider<Digester> digester,
+      ObjectProvider<Tokenizer> tokenizer,
+      SystemOperations system) {
     Compaction compaction =
         new Compaction(
             models,
@@ -1953,8 +1969,8 @@ public class AgentsConfig {
       Scribe scribe,
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
-      ObjectProvider<io.aeyer.plowshare.server.archive.DigestStore> digests,
-      io.aeyer.plowshare.server.access.SystemOperations system) {
+      ObjectProvider<DigestStore> digests,
+      SystemOperations system) {
     return new Learner(
             models,
             entries,

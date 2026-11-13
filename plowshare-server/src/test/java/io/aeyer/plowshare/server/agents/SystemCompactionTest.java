@@ -1,14 +1,60 @@
 package io.aeyer.plowshare.server.agents;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.access.*;
-import io.aeyer.plowshare.server.archive.*;
-import io.aeyer.plowshare.server.llm.dispatch.*;
-import java.util.*;
+import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.AuthorityScope;
+import io.aeyer.plowshare.server.access.BoundSystemOperations;
+import io.aeyer.plowshare.server.access.BuiltInIdentities;
+import io.aeyer.plowshare.server.access.IdentityRepository;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.OperationInference;
+import io.aeyer.plowshare.server.access.ScopedAuthority;
+import io.aeyer.plowshare.server.access.ScopedGrantRepository;
+import io.aeyer.plowshare.server.access.StandardRole;
+import io.aeyer.plowshare.server.access.SystemOperationRecords;
+import io.aeyer.plowshare.server.access.SystemOperations;
+import io.aeyer.plowshare.server.archive.CompactionStore;
+import io.aeyer.plowshare.server.archive.ConversationLifecycle;
+import io.aeyer.plowshare.server.archive.ConversationRecord;
+import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.archive.EntryRecord;
+import io.aeyer.plowshare.server.archive.EntryStore;
+import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.archive.TurnRecord;
+import io.aeyer.plowshare.server.archive.TurnStore;
+import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
+import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
+import io.aeyer.plowshare.server.llm.dispatch.Completion;
+import io.aeyer.plowshare.server.llm.dispatch.InferenceAdmissions;
+import io.aeyer.plowshare.server.llm.dispatch.InferenceBinding;
+import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
+import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -208,8 +254,7 @@ class SystemCompactionTest {
       List<EntryRecord> log = new ArrayList<>();
       log.add(entry(1, 1, EntryKind.UTTERANCE, "current request"));
       for (int step = 0; step < 4; step++) {
-        io.aeyer.plowshare.protocol.ToolCall call =
-            new io.aeyer.plowshare.protocol.ToolCall("call-" + step, "read", "{}");
+        ToolCall call = new ToolCall("call-" + step, "read", "{}");
         history.add(ChatMessage.assistant("working", List.of(call)));
         history.add(ChatMessage.tool(call.id(), "result"));
         log.add(
@@ -296,6 +341,7 @@ class SystemCompactionTest {
     volatile ChatRequest request;
 
     Fixture(Supplier<Budget> allowances) {
+      when(turns.reserve(anyString())).thenReturn(1);
       IdentityRepository identities = mock(IdentityRepository.class);
       ScopedGrantRepository grants = mock(ScopedGrantRepository.class);
       ScopedAuthority authority = mock(ScopedAuthority.class);

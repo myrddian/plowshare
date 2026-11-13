@@ -60,6 +60,13 @@ export interface AdministrativePayloads {
     readonly body: string;
     readonly requestId: string;
   };
+  'board.close': {
+    readonly project: string;
+    readonly topic: string;
+    readonly body: string;
+    readonly cites?: readonly string[];
+    readonly requestId: string;
+  };
   'buffer.purge': Record<string, never>;
   'retention.sweep': Record<string, never>;
   'provider.list': Record<string, never>;

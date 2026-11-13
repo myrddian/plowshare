@@ -1,13 +1,17 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.protocol.RelayLog;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Topic then batch locks serialize issuance/ack with retention. No lock spans an SDK wait. */
@@ -33,8 +37,40 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
       boolean acknowledged) {}
 
   @Override
+  public void rememberPublisher(String account) {
+    RelayPort.identity(account);
+    jdbc.update(
+        "INSERT INTO relay_port_publishers(publisher,account) VALUES(?,?) ON CONFLICT(publisher) DO NOTHING",
+        RelayPort.publisher(account),
+        account);
+  }
+
+  @Override
+  public Optional<String> publisherAccount(String publisher) {
+    RelayPort.identity(publisher);
+    return jdbc
+        .query(
+            "SELECT account FROM relay_port_publishers WHERE publisher=?",
+            (row, number) -> row.getString(1),
+            publisher)
+        .stream()
+        .filter(account -> RelayPort.publisher(account).equals(publisher))
+        .findFirst();
+  }
+
+  @Override
   public RelayPort.Batch consume(
       Relay.TopicKey topic, String account, RelayPort.Consume request, RelayReadBudget budget) {
+    return consumeObserved(topic, account, request, budget, null).batch();
+  }
+
+  @Override
+  public Consumed consumeObserved(
+      Relay.TopicKey topic,
+      String account,
+      RelayPort.Consume request,
+      RelayReadBudget budget,
+      UUID expectedGeneration) {
     Objects.requireNonNull(budget);
     Objects.requireNonNull(request);
     RelayPort.identity(account);
@@ -42,11 +78,16 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
         () -> {
           String scope = lock(topic);
           var key = new Relay.SubscriptionKey(topic, "sdk." + request.group());
-          relay.subscribe(
-              key,
-              request.start() == RelayPort.Start.LATEST
-                  ? Relay.Start.LATEST
-                  : Relay.Start.OLDEST_RETAINED);
+          var subscription =
+              relay.subscribe(
+                  key,
+                  request.start() == RelayPort.Start.LATEST
+                      ? Relay.Start.LATEST
+                      : Relay.Start.OLDEST_RETAINED);
+          if (expectedGeneration != null && !expectedGeneration.equals(subscription.generation()))
+            throw new CallerFault("Relay group changed while waiting");
+          Function<RelayPort.Batch, Consumed> stamp =
+              value -> new Consumed(value, subscription.generation());
           Instant now = now();
           var rows = issued(scope, topic.name(), key.subscriber());
           Issued old = rows.isEmpty() ? null : rows.getFirst();
@@ -63,15 +104,17 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
                   key, ownOutstanding ? 100 : (request.limit() == null ? 100 : request.limit()));
           if (old != null && !old.acknowledged() && old.until().isAfter(now)) {
             if (!old.account().equals(account) || !old.consumer().equals(request.consumerId()))
-              return batch(
-                  request,
-                  RelayPort.Status.BUSY,
-                  null,
-                  0,
-                  read.subscription().seenThrough(),
-                  null,
-                  null,
-                  List.of());
+              return stamp.apply(
+                  batch(
+                      request,
+                      subscription.generation(),
+                      RelayPort.Status.BUSY,
+                      null,
+                      0,
+                      read.subscription().seenThrough(),
+                      null,
+                      null,
+                      List.of()));
             // Repeat the same token and exact boundary. A smaller later limit must not hide records
             // covered by that token. A new retention gap invalidates the original acknowledgement.
             if (read.gap().isEmpty() && old.gap() == null) {
@@ -86,36 +129,50 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
                 throw new CallerFault(
                     "Transport allowance is smaller than the outstanding Relay batch; use segmented transport");
               if (!events.isEmpty())
-                return batch(
-                    request,
-                    RelayPort.Status.DATA,
-                    old.batch(),
-                    old.fence(),
-                    old.through(),
-                    old.until(),
-                    null,
-                    events);
+                return stamp.apply(
+                    batch(
+                        request,
+                        subscription.generation(),
+                        RelayPort.Status.DATA,
+                        old.batch(),
+                        old.fence(),
+                        old.through(),
+                        old.until(),
+                        null,
+                        events));
             } else if (old.gap() != null
                 && read.gap().isPresent()
                 && old.gap() == read.gap().get().throughInclusive())
-              return batch(
-                  request,
-                  RelayPort.Status.GAP,
-                  old.batch(),
-                  old.fence(),
-                  old.through(),
-                  old.until(),
-                  old.gap(),
-                  List.of());
+              return stamp.apply(
+                  batch(
+                      request,
+                      subscription.generation(),
+                      RelayPort.Status.GAP,
+                      old.batch(),
+                      old.fence(),
+                      old.through(),
+                      old.until(),
+                      old.gap(),
+                      List.of()));
           }
           long through = read.subscription().seenThrough();
           Long gap = read.gap().map(Relay.Gap::throughInclusive).orElse(null);
           var events =
               gap == null
                   ? RelayPortEvents.bounded(read.publications(), budget)
-                  : List.<io.aeyer.plowshare.protocol.RelayLog.Event>of();
+                  : List.<RelayLog.Event>of();
           if (gap == null && events.isEmpty())
-            return batch(request, RelayPort.Status.EMPTY, null, 0, through, null, null, events);
+            return stamp.apply(
+                batch(
+                    request,
+                    subscription.generation(),
+                    RelayPort.Status.EMPTY,
+                    null,
+                    0,
+                    through,
+                    null,
+                    null,
+                    events));
           if (!events.isEmpty()) through = Long.parseLong(events.getLast().position());
           String token = UUID.randomUUID().toString();
           long fence = old == null ? 1 : Math.addExact(old.fence(), 1);
@@ -138,16 +195,18 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
               fence,
               through,
               gap,
-              java.sql.Timestamp.from(until));
-          return batch(
-              request,
-              gap == null ? RelayPort.Status.DATA : RelayPort.Status.GAP,
-              token,
-              fence,
-              through,
-              until,
-              gap,
-              events);
+              Timestamp.from(until));
+          return stamp.apply(
+              batch(
+                  request,
+                  subscription.generation(),
+                  gap == null ? RelayPort.Status.DATA : RelayPort.Status.GAP,
+                  token,
+                  fence,
+                  through,
+                  until,
+                  gap,
+                  events));
         });
   }
 
@@ -192,6 +251,109 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
         });
   }
 
+  @Override
+  public RelayPort.GroupDeleted deleteGroup(
+      Relay.TopicKey topic, String account, RelayPort.DeleteGroup request) {
+    Objects.requireNonNull(request);
+    RelayPort.identity(account);
+    return transactions.inTransaction(
+        () -> {
+          String scope = lock(topic);
+          String subscriber = "sdk." + request.group();
+          record Group(UUID generation, long seen, long last) {}
+          var current =
+              jdbc
+                  .query(
+                      """
+          SELECT s.generation,s.seen_through,t.last_position FROM relay_subscriptions s
+          JOIN relay_topics t ON t.scope_key=s.scope_key AND t.name=s.topic
+          WHERE s.scope_key=? AND s.topic=? AND s.subscriber=? FOR UPDATE OF s
+          """,
+                      (row, index) ->
+                          new Group(
+                              row.getObject("generation", UUID.class),
+                              row.getLong("seen_through"),
+                              row.getLong("last_position")),
+                      scope,
+                      topic.name(),
+                      subscriber)
+                  .stream()
+                  .findFirst();
+          if (current.isEmpty())
+            return new RelayPort.GroupDeleted(
+                request.project(), request.topic(), request.group(), request.generation(), false);
+          var group = current.get();
+          if (!group.generation().equals(UUID.fromString(request.generation())))
+            throw new CallerFault("Relay group changed; inspect it again");
+          if (group.seen() < group.last())
+            throw new CallerFault(
+                "Relay group still has unread publications or an unacknowledged gap");
+          // Batch issuance and acknowledgement take this same topic lock. A live delivery remains
+          // protected even when another authorized account requests retirement of the shared group.
+          boolean protectedWork =
+              Boolean.TRUE.equals(
+                  jdbc.queryForObject(
+                      """
+              SELECT EXISTS(SELECT 1 FROM relay_sdk_batches WHERE scope_key=? AND topic=? AND subscriber=? AND NOT acknowledged AND lease_until>clock_timestamp())
+                OR EXISTS(SELECT 1 FROM relay_admissions WHERE scope_key=? AND topic=? AND subscriber=?)
+                OR EXISTS(SELECT 1 FROM relay_consumer_leases WHERE scope_key=? AND topic=? AND subscriber=? AND lease_until>clock_timestamp())
+                OR EXISTS(SELECT 1 FROM relay_native_consumers WHERE scope_key=? AND topic=? AND subscriber=?)
+                OR EXISTS(SELECT 1 FROM relay_approval_gap_recoveries WHERE scope_key=? AND topic=? AND subscriber=?)
+              """,
+                      Boolean.class,
+                      scope,
+                      topic.name(),
+                      subscriber,
+                      scope,
+                      topic.name(),
+                      subscriber,
+                      scope,
+                      topic.name(),
+                      subscriber,
+                      scope,
+                      topic.name(),
+                      subscriber,
+                      scope,
+                      topic.name(),
+                      subscriber));
+          if (protectedWork) throw new CallerFault("Relay group still has live or retained work");
+          int removed =
+              jdbc.update(
+                  "DELETE FROM relay_subscriptions WHERE scope_key=? AND topic=? AND subscriber=? AND generation=?::uuid",
+                  scope,
+                  topic.name(),
+                  subscriber,
+                  request.generation());
+          if (removed != 1)
+            throw new IllegalStateException("Relay group disappeared under its lock");
+          return new RelayPort.GroupDeleted(
+              request.project(), request.topic(), request.group(), request.generation(), true);
+        });
+  }
+
+  @Override
+  public RelayPort.GroupState inspectGroup(
+      Relay.TopicKey topic, String account, RelayPort.GroupQuery query) {
+    Objects.requireNonNull(topic);
+    Objects.requireNonNull(query);
+    RelayPort.identity(account);
+    if (!(topic.scope() instanceof Relay.ProjectScope))
+      throw new CallerFault("SDK groups require project scope");
+    String generation =
+        jdbc
+            .query(
+                "SELECT generation FROM relay_subscriptions WHERE scope_key=? AND topic=? AND subscriber=?",
+                (row, index) -> row.getObject(1, UUID.class).toString(),
+                RelayScopeCodec.write(topic),
+                topic.name(),
+                "sdk." + query.group())
+            .stream()
+            .findFirst()
+            .orElse(null);
+    return new RelayPort.GroupState(
+        query.project(), query.topic(), query.group(), generation, generation != null);
+  }
+
   private String lock(Relay.TopicKey topic) {
     Objects.requireNonNull(topic);
     if (!(topic.scope() instanceof Relay.ProjectScope)) throw refused();
@@ -233,13 +395,14 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
 
   private static RelayPort.Batch batch(
       RelayPort.Consume r,
+      UUID generation,
       RelayPort.Status status,
       String token,
       long fence,
       long through,
       Instant until,
       Long gap,
-      List<io.aeyer.plowshare.protocol.RelayLog.Event> events) {
+      List<RelayLog.Event> events) {
     return new RelayPort.Batch(
         r.project(),
         r.topic(),
@@ -251,6 +414,7 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
         Long.toString(through),
         until,
         gap == null ? null : gap.toString(),
-        events);
+        events,
+        generation.toString());
   }
 }

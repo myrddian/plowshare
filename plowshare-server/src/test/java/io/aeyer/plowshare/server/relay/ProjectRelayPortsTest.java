@@ -1,14 +1,28 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.relay.tools.RelayToolCodec;
+import io.aeyer.plowshare.server.relay.tools.RelayToolDefinition;
+import io.aeyer.plowshare.server.relay.tools.RelayToolProperties;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -59,6 +73,42 @@ class ProjectRelayPortsTest {
    * reaches a topic it did not spell, whoever owns it. The subsystem-specific half, that no
    * configuration can reach the derived name, lives with the name in {@code InformationTopicsTest}.
    */
+  @Test
+  void group_retirement_requires_live_membership_and_the_exact_deployment_egress_grant() {
+    var request = new RelayPort.DeleteGroup("project", "custom.topic", "detectors", id);
+    assertThrows(CallerFault.class, () -> ports.deleteGroup("reviewer", request));
+    when(members.mayWork("project", "reviewer")).thenReturn(true);
+    when(projects.id("project")).thenReturn(7L);
+    assertThrows(CallerFault.class, () -> ports.deleteGroup("reviewer", request));
+    verifyNoInteractions(repository);
+    properties.setBindings(
+        List.of(
+            new RelayPortProperties.Binding(
+                "project",
+                "custom.topic",
+                "reviewer",
+                RelayPortProperties.Direction.EGRESS,
+                List.of("detectors"))));
+    ports.inspectGroup(
+        "reviewer", new RelayPort.GroupQuery("project", "custom.topic", "detectors"));
+    verify(repository)
+        .inspectGroup(
+            new Relay.TopicKey(7, "custom.topic"),
+            "reviewer",
+            new RelayPort.GroupQuery("project", "custom.topic", "detectors"));
+    ports.deleteGroup("reviewer", request);
+    verify(repository).deleteGroup(new Relay.TopicKey(7, "custom.topic"), "reviewer", request);
+    reset(repository);
+    when(members.mayWork("project", "reviewer")).thenReturn(false);
+    assertThrows(CallerFault.class, () -> ports.deleteGroup("reviewer", request));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            ports.inspectGroup(
+                "reviewer", new RelayPort.GroupQuery("project", "custom.topic", "detectors")));
+    verifyNoInteractions(repository);
+  }
+
   @Test
   void a_port_grant_reaches_only_the_topics_it_names() {
     var unconfigured = new RelayPortProperties();
@@ -226,9 +276,9 @@ class ProjectRelayPortsTest {
 
   @Test
   void tool_binding_derives_only_provider_request_egress_and_result_ingress() {
-    var tools = new io.aeyer.plowshare.server.relay.tools.RelayToolProperties();
+    var tools = new RelayToolProperties();
     var binding =
-        new io.aeyer.plowshare.server.relay.tools.RelayToolDefinition(
+        new RelayToolDefinition(
             "project", "scanner", "provider", "network_scope", "Read scope", List.of(), 30);
     tools.setBindings(List.of(binding));
     var scoped = new ProjectRelayPorts(relay, repository, properties, members, projects, 8, tools);
@@ -301,23 +351,23 @@ class ProjectRelayPortsTest {
   @Test
   void provider_result_must_identify_the_bound_request_and_preserve_ancestry() {
     var binding =
-        new io.aeyer.plowshare.server.relay.tools.RelayToolDefinition(
+        new RelayToolDefinition(
             "project", "scanner", "provider", "network_scope", "Read scope", List.of(), 30);
-    var tools = new io.aeyer.plowshare.server.relay.tools.RelayToolProperties();
+    var tools = new RelayToolProperties();
     tools.setBindings(List.of(binding));
     var scoped = new ProjectRelayPorts(relay, repository, properties, members, projects, 8, tools);
     when(members.mayWork("project", "provider")).thenReturn(true);
     when(projects.id("project")).thenReturn(7L);
     var result =
-        new io.aeyer.plowshare.server.relay.tools.RelayToolCodec.Result(
-            io.aeyer.plowshare.server.relay.tools.RelayToolCodec.VERSION,
+        new RelayToolCodec.Result(
+            RelayToolCodec.VERSION,
             id,
             "project",
             "scanner",
             "network_scope",
-            io.aeyer.plowshare.server.relay.tools.RelayToolCodec.State.COMPLETED,
+            RelayToolCodec.State.COMPLETED,
             "scope");
-    var text = io.aeyer.plowshare.server.relay.tools.RelayToolCodec.write(result);
+    var text = RelayToolCodec.write(result);
     assertThrows(
         CallerFault.class,
         () ->
@@ -349,9 +399,7 @@ class ProjectRelayPortsTest {
     scoped.publish(
         "provider",
         new RelayPort.Publish(
-            io.aeyer.plowshare.server.relay.tools.RelayToolCodec.resultRequestId(
-                    UUID.fromString(id))
-                .toString(),
+            RelayToolCodec.resultRequestId(UUID.fromString(id)).toString(),
             "project",
             binding.results(),
             text,

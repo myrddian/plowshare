@@ -13,7 +13,7 @@ try (var client = new WsServerClient(origin, token)) {
 `WsServerClient` implements typed memory, document, information, conversation, job
 and project methods. It connects lazily and is `AutoCloseable`. `AgentClient`,
 `AdministrationClient`, `OrchestrationClient`, `UsageClient`, `IncomingClient` and
-`OutgoingClient`
+`OutgoingClient`, `BoardClient`, `SwarmClient` and `MessagingClient`
 use an existing authenticated `Plowshare` connection. Wire JSON parsing stays inside
 the SDK; application callers consume validated immutable DTOs. Information and
 orchestration input codecs reject unsupported fields and malformed nested values.
@@ -113,3 +113,23 @@ unproven final write retains its lock. Never steal stale locks. Renewal does not
 reconnect or replay application operations. Service credentials stay explicit,
 and application recovery preserves original UUIDs and payloads. See
 [the native auth contract](../../docs/decisions/0036-native-sdk-shared-login.md).
+
+## Forum, swarm and messaging
+
+Construct `BoardClient`, `SwarmClient` and `MessagingClient` with the authenticated
+`client.connection()`. Each operation offers a blocking method plus `...Async`
+with optional `RequestOptions`, sharing the connection's timeout, cancellation
+and admission policy. Requests and results are immutable validated records.
+
+`BoardClient` supports `topics`, `messages`, `open`, `retry`, `post`, `close` and
+`topUp`. `SwarmClient.types` returns retained selections and refused members;
+`status` returns current pools, ready seats and topics. `MessagingClient` supports
+instance listing/open/default/stop/archive and delivery listing/read/cancel.
+Sending remains the granted agent `message.send` tool. Topic detail checks nested
+ownership and retained swarm selection; paged reads verify offsets and requested
+scope. Mutation receipts are correlated before being returned. Current membership,
+close authority and lifecycle transitions remain server decisions.
+
+Keep each `requestId` before calling `open`, `post`, `retry` or `close` and reconcile
+uncertain delivery explicitly. These facades never replay a mutation. Pages are
+bounded at 200 rows; board topics default to 200 and messaging pages to 100.

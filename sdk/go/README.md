@@ -86,3 +86,16 @@ replay refresh. All failed refreshes conservatively require fresh login; a faile
 final write retains its lock. Never steal stale locks. Service credentials stay
 caller-managed and cannot fall back to this store. Retain original mutation UUIDs
 and payloads for explicit application recovery. See [the native auth contract](../../docs/decisions/0036-native-sdk-shared-login.md).
+
+## Relay binary transfers
+
+`NewRelayBlobs(origin, bearer, timeout)` creates the explicit binary HTTP client.
+Call `Close()` when finished. `Publish(ctx, RelayBlobPublishDto, []byte)` returns
+a checked `RelayBlobPublishedDto`; `Read(ctx, RelayBlobReadDto,
+RelayBlobDescriptorDto)` returns verified original bytes. Origin and bearer must
+be explicit; timeout must be positive and at most five minutes.
+
+Transfers never follow redirects, refresh credentials or replay. Retain the
+request UUID and original bytes before publishing. Cancellation after submission
+returns `TransportError` with `Delivery: Unknown`; invalid receipts or bytes use
+`InvalidResponse`. See [binary HTTP delivery](../../docs/relay-blobs.md).

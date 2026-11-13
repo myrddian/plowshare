@@ -10,6 +10,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Incoming;
+import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
@@ -17,7 +19,12 @@ import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import java.util.Optional;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class AgentRunnerTest {
 
@@ -94,12 +101,12 @@ class AgentRunnerTest {
     var callers = mock(Callers.class);
     var turns = mock(Turn.class);
     var jobs = mock(JobStore.class);
-    org.mockito.Mockito.doThrow(new io.aeyer.plowshare.server.faults.CallerFault("WRITE required"))
+    Mockito.doThrow(new CallerFault("WRITE required"))
         .when(callers)
         .requireConversationWork("private-conversation", "service-executor");
     var runner = new AgentRunner(callers, jobs, turns);
-    org.junit.jupiter.api.Assertions.assertThrows(
-        io.aeyer.plowshare.server.faults.CallerFault.class,
+    Assertions.assertThrows(
+        CallerFault.class,
         () ->
             runner.start(
                 new TriggerRecord(
@@ -127,17 +134,16 @@ class AgentRunnerTest {
     var authority = mock(ScheduleDefinitions.Authority.class);
     var source = new ScheduleDefinitionStore.Source(1, "owner", 7L, "project", "workspace");
     var work =
-        new io.aeyer.plowshare.protocol.ScheduledWork(
+        new ScheduledWork(
             1,
             "0 0 9 * * *",
             "UTC",
             false,
-            new io.aeyer.plowshare.protocol.ScheduledWork.Action(
-                "skill", "worker", "review", "exact\narguments", "NEW"),
-            new io.aeyer.plowshare.protocol.ScheduledWork.Target("mailbox", null, null, null, null),
+            new ScheduledWork.Action("skill", "worker", "review", "exact\narguments", "NEW"),
+            new ScheduledWork.Target("mailbox", null, null, null, null),
             null);
     var file =
-        new io.aeyer.plowshare.protocol.ScheduledWork.File(
+        new ScheduledWork.File(
             "daily",
             "project",
             "workspace",
@@ -146,8 +152,8 @@ class AgentRunnerTest {
             work,
             "active",
             null);
-    when(definitions.managed("daily", "owner")).thenReturn(java.util.Optional.of(file));
-    when(definitions.sourceOf("daily", "owner")).thenReturn(java.util.Optional.of(source));
+    when(definitions.managed("daily", "owner")).thenReturn(Optional.of(file));
+    when(definitions.sourceOf("daily", "owner")).thenReturn(Optional.of(source));
     when(definitions.executionSession(source)).thenReturn("live-session");
     var caller = mock(DefinitionResolver.Caller.class);
     var agent = mock(AgentDefinition.class);
@@ -200,20 +206,20 @@ class AgentRunnerTest {
   void a_managed_schedule_cannot_replace_its_registered_execution_account() {
     var definitions = mock(ScheduleDefinitions.class);
     var authority = mock(ScheduleDefinitions.Authority.class);
-    var file = mock(io.aeyer.plowshare.protocol.ScheduledWork.File.class);
-    var definition = mock(io.aeyer.plowshare.protocol.ScheduledWork.class);
+    var file = mock(ScheduledWork.File.class);
+    var definition = mock(ScheduledWork.class);
     when(file.status()).thenReturn("active");
     when(file.definition()).thenReturn(definition);
-    when(definitions.managed("daily", "executor")).thenReturn(java.util.Optional.of(file));
+    when(definitions.managed("daily", "executor")).thenReturn(Optional.of(file));
     when(definitions.sourceOf("daily", "executor"))
         .thenReturn(
-            java.util.Optional.of(
+            Optional.of(
                 new ScheduleDefinitionStore.Source(1, "other-account", 7L, "project", "server")));
     var jobs = mock(JobStore.class);
     var turns = mock(Turn.class);
     var runner = new AgentRunner(mock(Callers.class), jobs, turns);
     runner.useSchedules(() -> definitions, () -> authority, () -> null);
-    org.junit.jupiter.api.Assertions.assertThrows(
+    Assertions.assertThrows(
         IllegalStateException.class,
         () ->
             runner.start(
@@ -238,26 +244,24 @@ class AgentRunnerTest {
   @Test
   void messageAdmissionReturnsAMessageReceiptWithoutInventingAJob() {
     var definitions = mock(ScheduleDefinitions.class);
-    var messages = mock(io.aeyer.plowshare.server.board.BoardMessaging.class);
+    var messages = mock(MessageService.class);
     var jobs = mock(JobStore.class);
     var source = new ScheduleDefinitionStore.Source(1, "owner", 7L, "project", "server");
     var work =
-        new io.aeyer.plowshare.protocol.ScheduledWork(
+        new ScheduledWork(
             1,
             "0 0 9 * * *",
             "UTC",
             false,
-            new io.aeyer.plowshare.protocol.ScheduledWork.Action(
-                "agent", "worker", null, "Review", null),
-            new io.aeyer.plowshare.protocol.ScheduledWork.Target(
-                "message", null, null, "worker", null),
+            new ScheduledWork.Action("agent", "worker", null, "Review", null),
+            new ScheduledWork.Target("message", null, null, "worker", null),
             null);
     var file =
-        new io.aeyer.plowshare.protocol.ScheduledWork.File(
+        new ScheduledWork.File(
             "daily", "project", "server", "schedules/daily.json", "daily", work, "active", null);
-    when(definitions.managed("daily", "owner")).thenReturn(java.util.Optional.of(file));
-    when(definitions.sourceOf("daily", "owner")).thenReturn(java.util.Optional.of(source));
-    var task = mock(io.aeyer.plowshare.protocol.Incoming.Task.class);
+    when(definitions.managed("daily", "owner")).thenReturn(Optional.of(file));
+    when(definitions.sourceOf("daily", "owner")).thenReturn(Optional.of(source));
+    var task = mock(Incoming.Task.class);
     when(task.message()).thenReturn("bdm_delivery");
     when(messages.receiveScheduled("owner", "project", "daily", "firing", work)).thenReturn(task);
     var firing = mock(FiringRecord.class);
@@ -271,23 +275,21 @@ class AgentRunnerTest {
                 "owner"),
             firing,
             "Review",
-            (c, o) ->
-                org.junit.jupiter.api.Assertions.assertTrue(o.text().contains("bdm_delivery")));
-    org.junit.jupiter.api.Assertions.assertEquals(
-        new Dispatcher.Started.Message("bdm_delivery"), receipt);
+            (c, o) -> Assertions.assertTrue(o.text().contains("bdm_delivery")));
+    Assertions.assertEquals(new Dispatcher.Started.Message("bdm_delivery"), receipt);
     verifyNoInteractions(jobs);
   }
 
   @Test
   void anOrphanedFileScheduleCannotFallThroughToLegacyExecution() {
     var definitions = mock(ScheduleDefinitions.class);
-    when(definitions.managed("daily", "owner")).thenReturn(java.util.Optional.empty());
+    when(definitions.managed("daily", "owner")).thenReturn(Optional.empty());
     when(definitions.requiresDefinition("daily", "owner")).thenReturn(true);
     var callers = mock(Callers.class);
     var jobs = mock(JobStore.class);
     var runner = new AgentRunner(callers, jobs, mock(Turn.class));
     runner.useSchedules(() -> definitions, () -> (s, d) -> {}, () -> null);
-    org.junit.jupiter.api.Assertions.assertThrows(
+    Assertions.assertThrows(
         IllegalStateException.class,
         () ->
             runner.start(

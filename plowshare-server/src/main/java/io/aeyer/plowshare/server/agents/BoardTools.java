@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * The board's tools — spec 2026-09-29, the project board and the swarm, §7. Harness extras: a run
@@ -72,7 +73,7 @@ public final class BoardTools {
   }
 
   /** Read the current project catalog before selecting a type for a new topic. */
-  public static AgentTool types(java.util.function.Supplier<String> catalog) {
+  public static AgentTool types(Supplier<String> catalog) {
     return new Tool() {
       @Override
       public ToolSchema schema() {
@@ -93,7 +94,12 @@ public final class BoardTools {
 
   public static List<AgentTool> forMember(Seat seat, TurnEnd end) {
     return List.of(
-        new Read(seat), new Post(seat), new Document(seat), new Pass(seat, end), new Request(seat));
+        new Read(seat),
+        new Post(seat),
+        new Document(seat),
+        new Pass(seat, end),
+        new Request(seat),
+        new Close(seat, end));
   }
 
   public static List<AgentTool> forOpenerSeat(Seat seat, TurnEnd end) {
@@ -404,7 +410,8 @@ public final class BoardTools {
             CLOSE_NAME,
             "Close your topic with its resolution — what is now known, what was assumed,"
                 + " what is still open — citing the messages and documents it rests on."
-                + " The resolution goes back to the conversation you opened it from."
+                + " Requires your execution account's project write permission."
+                + " Existing opener and Relay return routes receive the resolution."
                 + " Ends this turn.",
             ToolArguments.object(
                 fields(

@@ -7,8 +7,8 @@ remain stable.
 
 The implementation order is JavaScript/TypeScript, the Java/JVM SDK, Python,
 C#, then Go. These are clients of Plowshare's `plowshare-v1` WebSocket protocol.
-The A2A adapter is a separate process on the Java SDK. Follow the
-[A2A sending manual](a2a-sending.md) to configure a peer and send work.
+The A2A adapter rewrite is tracked separately in
+[Finishing Relay](relay-finishing.md); SDK parity does not complete that rewrite.
 
 | Language | Package | Runtime | Scope |
 | --- | --- | --- | --- |
@@ -24,6 +24,12 @@ TypeScript and the native SDKs provide typed operation APIs. Raw wire envelopes
 remain private to their owning transports and codecs. Follow the
 [native SDK standard](native-sdk-standards.md) for Python, Go and .NET changes.
 Filesystem/process providers remain separate platform integrations.
+
+Java's `BoardClient`, `SwarmClient` and `MessagingClient` expose typed forum,
+swarm discovery/status and stable messaging lifecycle/inspection operations,
+including async request options. Sending remains the agent tool API. All five
+SDK families also support explicit [Relay binary HTTP transfers](relay-blobs.md);
+Python, Go and .NET use generated HTTP DTOs alongside their WS contracts.
 
 [Segmented SDK transport](decisions/0009-segmented-sdk-message-transport.md) is the
 default on new event connections: the upgrade must select `plowshare-segments-v1`.

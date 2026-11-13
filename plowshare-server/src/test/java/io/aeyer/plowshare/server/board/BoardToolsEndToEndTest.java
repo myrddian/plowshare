@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.board;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
@@ -19,6 +21,7 @@ import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.archive.CompactionStore;
 import io.aeyer.plowshare.server.archive.EntryStore;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.delivery.PersonDelivery;
 import io.aeyer.plowshare.server.events.AccountPushes;
@@ -50,12 +53,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
+import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -90,21 +97,20 @@ class BoardToolsEndToEndTest {
   private static final class Answering implements LlmTransport {
     final AtomicInteger calls = new AtomicInteger();
     final AtomicInteger seatCalls = new AtomicInteger();
-    private final java.util.function.IntSupplier persisted;
+    private final IntSupplier persisted;
 
-    Answering(java.util.function.IntSupplier persisted) {
+    Answering(IntSupplier persisted) {
       this.persisted = persisted;
     }
 
-    final java.util.concurrent.CopyOnWriteArrayList<String> received =
-        new java.util.concurrent.CopyOnWriteArrayList<>();
+    final CopyOnWriteArrayList<String> received = new CopyOnWriteArrayList<>();
 
     private static Completion call(String name, String args) {
       return new Completion(
           "",
           "tool_calls",
           TokenUsage.UNKNOWN,
-          List.of(new ToolCall("call_" + java.util.UUID.randomUUID(), name, args)));
+          List.of(new ToolCall("call_" + UUID.randomUUID(), name, args)));
     }
 
     @Override
@@ -157,9 +163,7 @@ class BoardToolsEndToEndTest {
       if (system.contains("You are the researcher.")) {
         if (results.isEmpty()) return call("board_read", "{}");
         if (results.size() == 1) {
-          var id =
-              java.util.regex.Pattern.compile("bdm_[A-Za-z0-9]+")
-                  .matcher(results.getFirst().content());
+          var id = Pattern.compile("bdm_[A-Za-z0-9]+").matcher(results.getFirst().content());
           if (!id.find())
             throw new IllegalStateException("missing opening in " + results.getFirst().content());
           return call(
@@ -230,7 +234,7 @@ class BoardToolsEndToEndTest {
         new Answering(
             () ->
                 fixture.jdbc.queryForObject(
-                    "SELECT COALESCE(sum(pot_spent), 0) FROM board_topics WHERE parent IS NULL",
+                    "SELECT COALESCE(sum(pot_spent), 0) FROM board_allowance_state WHERE parent IS NULL",
                     Integer.class));
     LlmPool spark =
         new LlmPool(
@@ -304,6 +308,8 @@ class BoardToolsEndToEndTest {
               + ".\n");
     }
     AgentRegistry registry = AgentRegistry.of(agents, Set.of());
+    ProjectMembers members = mock(ProjectMembers.class);
+    when(members.mayWork("payments", "enzo")).thenReturn(true);
     Board board =
         new Board(
             boardStore,
@@ -314,7 +320,7 @@ class BoardToolsEndToEndTest {
             fixture.work,
             () -> 10,
             fixture.clock,
-            org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
+            members);
     BoardPot pot = new BoardPot(boardStore);
     SeatRunner seats =
         new SeatRunner(

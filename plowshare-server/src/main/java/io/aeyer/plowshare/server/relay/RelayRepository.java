@@ -48,7 +48,10 @@ public interface RelayRepository {
   /** Returns retained unread count and expired gap from the same coherent snapshot. */
   Relay.Unread unread(Relay.SubscriptionKey key);
 
-  /** At most 100 topics with an expired oldest record or excess records, oldest first. */
+  /**
+   * At most 100 topics due by retention deadline or count pressure, using bounded indexed metadata
+   * reads.
+   */
   List<Relay.TopicKey> topicsToPrune(Instant now, int limit);
 
   /**

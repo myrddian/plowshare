@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.board;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
@@ -19,6 +21,7 @@ import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.archive.CompactionStore;
 import io.aeyer.plowshare.server.archive.EntryStore;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.delivery.PersonDelivery;
 import io.aeyer.plowshare.server.events.AccountPushes;
@@ -50,12 +53,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -89,24 +96,22 @@ class BoardSubtopicsEndToEndTest {
   /** Answers every call "noted." and counts them. */
   private static final class Answering implements LlmTransport {
     final AtomicInteger calls = new AtomicInteger();
-    final java.util.concurrent.atomic.AtomicReference<String> rootOpening =
-        new java.util.concurrent.atomic.AtomicReference<>();
+    final AtomicReference<String> rootOpening = new AtomicReference<>();
 
     private static String messageId(String text, String kind) {
-      var matcher = java.util.regex.Pattern.compile("(bdm_[A-Za-z0-9]+) · " + kind).matcher(text);
+      var matcher = Pattern.compile("(bdm_[A-Za-z0-9]+) · " + kind).matcher(text);
       if (!matcher.find()) throw new IllegalStateException("missing " + kind + " in " + text);
       return matcher.group(1);
     }
 
-    final java.util.concurrent.CopyOnWriteArrayList<String> received =
-        new java.util.concurrent.CopyOnWriteArrayList<>();
+    final CopyOnWriteArrayList<String> received = new CopyOnWriteArrayList<>();
 
     private static Completion call(String name, String args) {
       return new Completion(
           "",
           "tool_calls",
           TokenUsage.UNKNOWN,
-          List.of(new ToolCall("call_" + java.util.UUID.randomUUID(), name, args)));
+          List.of(new ToolCall("call_" + UUID.randomUUID(), name, args)));
     }
 
     @Override
@@ -164,7 +169,7 @@ class BoardSubtopicsEndToEndTest {
         return new Completion("Waiting for child.", "stop", TokenUsage.UNKNOWN, List.of());
       }
       if (system.contains("You are the researcher.")) {
-        boolean opener = tools.stream().anyMatch(t -> t.name().equals("board_close"));
+        boolean opener = tools.stream().anyMatch(t -> t.name().equals("board_decide"));
         if (results.isEmpty()) return call("board_read", "{}");
         String read = results.getFirst().content();
         if (opener) {
@@ -330,6 +335,8 @@ class BoardSubtopicsEndToEndTest {
               + ".\n");
     }
     AgentRegistry registry = AgentRegistry.of(agents, Set.of());
+    ProjectMembers members = mock(ProjectMembers.class);
+    when(members.mayWork("payments", "enzo")).thenReturn(true);
     Board board =
         new Board(
             boardStore,
@@ -343,7 +350,7 @@ class BoardSubtopicsEndToEndTest {
             fixture.work,
             () -> 10,
             fixture.clock,
-            org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
+            members);
     BoardPot pot = new BoardPot(boardStore);
     SeatRunner seats =
         new SeatRunner(

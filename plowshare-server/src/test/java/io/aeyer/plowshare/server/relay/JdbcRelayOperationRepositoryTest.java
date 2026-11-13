@@ -1,8 +1,10 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.RelayControl;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
@@ -18,7 +20,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -97,9 +102,9 @@ class JdbcRelayOperationRepositoryTest {
             new JdbcRelayPayloadStore(
                 jdbc,
                 transactions,
-                java.time.Duration.ofHours(1),
-                java.time.Duration.ofHours(24),
-                java.time.Duration.ofDays(30)));
+                Duration.ofHours(1),
+                Duration.ofHours(24),
+                Duration.ofDays(30)));
     deliveries = new JdbcRelayDeliveryRepository(jdbc, transactions);
     consumers = new JdbcRelayConsumerRepository(jdbc, transactions, deliveries, broker);
     operations = new JdbcRelayOperationRepository(jdbc, transactions, broker, deliveries);
@@ -160,6 +165,18 @@ class JdbcRelayOperationRepositoryTest {
     var claim = deliveries.claim(subscription, "worker", Duration.ofMinutes(1), now).orElseThrow();
     deliveries.prepareDispatch(claim.claim(), now);
     return deliveries.uncertain(claim.claim(), "dispatch.unknown", now);
+  }
+
+  @Test
+  void owning_retirement_never_cascades_retained_admitted_or_uncertain_work() {
+    uncertain();
+    broker.configureTopic(
+        topic, RelayPayload.Kind.TEXT, new Relay.Policy(Duration.ofSeconds(1), null));
+    broker.prune(topic, Instant.now().plusSeconds(2), 100);
+    assertFalse(new JdbcRelayRetirementRepository(jdbc, transactions).retireOwned(subscription));
+    assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM relay_admissions", Integer.class));
+    assertEquals(
+        "UNCERTAIN", jdbc.queryForObject("SELECT state FROM relay_deliveries", String.class));
   }
 
   @Test

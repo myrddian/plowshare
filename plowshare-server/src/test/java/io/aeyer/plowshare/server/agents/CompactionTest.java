@@ -50,6 +50,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
@@ -61,6 +62,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -279,7 +281,7 @@ class CompactionTest {
     // `user_inbox` a hop past that, through its pre-existing V40 foreign key
     // into `firings`.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     turns = new TurnStore(jdbc);
     compactions = new CompactionStore(jdbc);
@@ -718,8 +720,7 @@ class CompactionTest {
   /** A hook that counts how many times it was rung. */
   private static final class Counting implements Learning {
 
-    private final java.util.concurrent.atomic.AtomicInteger rung =
-        new java.util.concurrent.atomic.AtomicInteger();
+    private final AtomicInteger rung = new AtomicInteger();
 
     @Override
     public void thereIsMaterial() {
@@ -2720,8 +2721,7 @@ class CompactionTest {
     JdbcTemplate refusing =
         new JdbcTemplate(Objects.requireNonNull(jdbc.getDataSource())) {
           @Override
-          public <T> T queryForObject(
-              String sql, org.springframework.jdbc.core.RowMapper<T> mapper, Object... args) {
+          public <T> T queryForObject(String sql, RowMapper<T> mapper, Object... args) {
             if (sql.startsWith("INSERT INTO compactions")) {
               throw new IllegalStateException("the compaction write was refused");
             }

@@ -12,6 +12,8 @@ import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -120,7 +122,7 @@ class TurnStoreTest {
     // key into `board_topics`; and `user_inbox` a hop past that, through its
     // pre-existing V40 foreign key into `firings`.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, system_blocks, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, system_blocks, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     minted.set(0);
     conversations =
         new ConversationStore(
@@ -137,6 +139,54 @@ class TurnStoreTest {
    * <p>This is the whole point of the table. A conversation's spending survives a restart already;
    * a turn that did not would leave a row that had spent its allowance and could not say on what.
    */
+  @Test
+  void concurrent_reservations_keep_reverse_completion_and_interrupted_entries_in_their_own_turns()
+      throws Exception {
+    String conversation = open();
+    try (var threads = Executors.newVirtualThreadPerTaskExecutor()) {
+      var first = threads.submit(() -> turns.reserve(conversation));
+      var second = threads.submit(() -> turns.reserve(conversation));
+      int a = first.get(5, TimeUnit.SECONDS);
+      int b = second.get(5, TimeUnit.SECONDS);
+      assertNotEquals(a, b);
+      int earlier = Math.min(a, b);
+      int later = Math.max(a, b);
+      turns.recordAt(
+          conversation, later, "later", "later answer", Ending.ANSWERED, null, "reviewer", null);
+      turns.recordAt(
+          conversation,
+          earlier,
+          "earlier",
+          "earlier answer",
+          Ending.ANSWERED,
+          null,
+          "sender",
+          null);
+      assertEquals(
+          List.of(1, 2),
+          turns.forConversation(conversation).stream().map(TurnRecord::ordinal).toList());
+      int interrupted = turns.reserve(conversation);
+      assertEquals(3, interrupted);
+      assertEquals(
+          4,
+          turns
+              .record(conversation, "next", "answer", Ending.ANSWERED, null, "sender", null)
+              .ordinal());
+      assertThrows(
+          DataIntegrityViolationException.class,
+          () ->
+              turns.recordAt(
+                  conversation,
+                  earlier,
+                  "duplicate",
+                  "answer",
+                  Ending.ANSWERED,
+                  null,
+                  "sender",
+                  null));
+    }
+  }
+
   @Test
   void a_turn_records_what_was_said_and_what_came_back_and_survives_a_restart() {
     String conversation = open();

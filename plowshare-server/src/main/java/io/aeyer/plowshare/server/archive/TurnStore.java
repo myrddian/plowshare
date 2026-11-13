@@ -30,28 +30,12 @@ import org.springframework.jdbc.core.RowMapper;
  *
  * <h2>The ordinal is this store's to assign</h2>
  *
- * <p>{@link #record} takes no turn number. It computes {@code MAX(ordinal) + 1} over the
- * conversation's own turns inside the INSERT, so a caller cannot write turn three twice, cannot
- * leave a gap, and cannot number one conversation's turn from another conversation's count. The
- * single statement is also what keeps it correct under a concurrent writer, in the sense that
- * matters: two inserts that computed the same number collide on {@code
- * turns_one_per_place_in_a_conversation} rather than both landing.
- *
- * <h2>What this store does not translate, and why</h2>
- *
- * <p>Two constraints can refuse a {@link #record}, and neither is turned into a sentence here.
- * {@code turns_belong_to_a_conversation} fires for an id nothing opened; {@code
- * turns_one_per_place_in_a_conversation} fires for the concurrent second writer above. Both arrive
- * as {@code DataIntegrityViolationException} — the second as its {@code DuplicateKeyException}
- * subclass — and {@code ProposalStore.propose} shows the shape a translation would take.
- *
- * <p>It is declined because the two situations are opposite and only one of them can be reproduced.
- * A single {@code catch} would give the race the missing conversation's sentence, which is the
- * guard-whose-message-describes-a- different-situation this project keeps finding; a pair of
- * clauses would put the message for the race on a branch no fixture can reach, since this store
- * assigns ordinals in sequence and cannot be made to collide with itself. The constraints are
- * named, so Postgres says which rule broke, and that is a truer answer than a sentence written for
- * the wrong one.
+ * <p>Running transcripts reserve a unique ordinal before writing entries. The conversation's
+ * sequence is updated atomically, so different definitions may share history while completing in
+ * either order. Interrupted reservations leave a gap; reusing that number would mix a later
+ * execution with retained evidence from paid work. {@link #recordAt} records the ending at the
+ * reserved place. The primary key still refuses a second ending for the same reservation. {@link
+ * #record} allocates and records in one statement for history writers without a live turn.
  *
  * <p>Framework-free apart from {@link JdbcTemplate}, and wired by {@link ArchiveConfig} rather than
  * annotated, matching {@link ConversationStore}, {@link ProposalStore} and {@link ReasonLog}.
@@ -96,7 +80,7 @@ import org.springframework.jdbc.core.RowMapper;
  * ReasonLog.forMemory} gives about the same situation: a store that can only be written is a table
  * nothing can answer from.
  */
-public final class TurnStore implements TurnHistoryRepository {
+public final class TurnStore implements TurnJournal {
 
   private static final Logger log = LoggerFactory.getLogger(TurnStore.class);
 
@@ -104,28 +88,18 @@ public final class TurnStore implements TurnHistoryRepository {
       "conversation_id, ordinal, utterance, answer, ending, prompt_tokens, agent,"
           + " system_block";
 
-  /*
-   * INSERT ... SELECT and not a read followed by a write. The ordinal is
-   * computed from the same statement that uses it, so there is no window
-   * between deciding a turn's number and writing it — and the aggregate makes
-   * this exactly one row even when the conversation has no turns yet, which is
-   * what COALESCE turns into the 1 that turns_are_numbered_from_one requires.
-   *
-   * The WHERE is the whole of the per-conversation numbering. Without it every
-   * conversation would be numbered from the table's global maximum, which is a
-   * history that still reads in order and whose first turn is number 47.
-   *
-   * RETURNING, so the assigned ordinal comes back without a second read of a
-   * row this statement already has in hand.
-   */
+  // Allocation locks only the conversation sequence within this statement. It holds no lock
+  // across model execution, and RETURNING avoids a second read of the inserted ending.
   private static final String INSERT =
       """
+            WITH assigned AS (
+              UPDATE conversations SET turn_sequence=turn_sequence+1
+              WHERE id=? AND turn_sequence<2147483647 RETURNING turn_sequence
+            )
             INSERT INTO turns
                    (conversation_id, ordinal, utterance, answer, ending, prompt_tokens, agent,
                     system_block)
-            SELECT ?, COALESCE(MAX(ordinal), 0) + 1, ?, ?, ?, ?, ?, ?
-              FROM turns
-             WHERE conversation_id = ?
+            SELECT ?, COALESCE((SELECT turn_sequence FROM assigned),1), ?, ?, ?, ?, ?, ?
             RETURNING %s"""
           .formatted(COLUMNS);
 
@@ -164,6 +138,49 @@ public final class TurnStore implements TurnHistoryRepository {
 
   public TurnStore(JdbcTemplate jdbc) {
     this.jdbc = jdbc;
+  }
+
+  @Override
+  public int reserve(String conversation) {
+    return jdbc.queryForObject(
+        "UPDATE conversations SET turn_sequence=turn_sequence+1 WHERE id=? AND turn_sequence<2147483647 RETURNING turn_sequence",
+        Integer.class,
+        ConversationStore.named(conversation));
+  }
+
+  @Override
+  public TurnRecord recordAt(
+      String conversation,
+      int ordinal,
+      String utterance,
+      String answer,
+      Ending ending,
+      Integer promptTokens,
+      String agent,
+      String systemBlock) {
+    ConversationStore.named(conversation);
+    if (ordinal < 1) throw new IllegalArgumentException("Positive reserved turn required");
+    var written =
+        jdbc.queryForObject(
+            """
+        INSERT INTO turns(conversation_id,ordinal,utterance,answer,ending,prompt_tokens,agent,system_block)
+        SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM conversations WHERE id=? AND turn_sequence>=?)
+        RETURNING %s
+        """
+                .formatted(COLUMNS),
+            ROW_MAPPER,
+            conversation,
+            ordinal,
+            utterance,
+            answer,
+            ending.name(),
+            promptTokens,
+            agent,
+            systemBlock,
+            conversation,
+            ordinal);
+    if (ordinal == 1) nameTheConversation(conversation, utterance);
+    return written;
   }
 
   /**
@@ -229,13 +246,13 @@ public final class TurnStore implements TurnHistoryRepository {
                     INSERT,
                     ROW_MAPPER,
                     conversation,
+                    conversation,
                     utterance,
                     answer,
                     endingName,
                     promptTokens,
                     agent,
-                    systemBlock,
-                    conversation));
+                    systemBlock));
     nameTheConversation(conversation, utterance);
     return written;
   }

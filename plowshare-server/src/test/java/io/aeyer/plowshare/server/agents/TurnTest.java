@@ -69,10 +69,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
@@ -81,6 +83,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -214,7 +219,7 @@ class TurnTest {
     // `user_inbox` a hop past that, through its pre-existing V40 foreign
     // key into `firings`.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_route_bindings, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, message_route_bindings, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     turnRows = new TurnStore(jdbc);
     compactionRows = new CompactionStore(jdbc);
@@ -617,8 +622,7 @@ class TurnTest {
             Origin.ORCHESTRATION, PAYMENTS, "code_implementation", null, Budget.of(ROOMY));
     ConversationRecord child =
         conversations.log(Origin.DELEGATION, PAYMENTS, AGENT, conductor.id(), null);
-    java.util.concurrent.CompletableFuture<Outcome> ended =
-        new java.util.concurrent.CompletableFuture<>();
+    CompletableFuture<Outcome> ended = new CompletableFuture<>();
 
     fixture.turn.speakToDelegate(
         child.id(),
@@ -645,8 +649,8 @@ class TurnTest {
             "SELECT budget_total FROM conversations WHERE id = ?", Integer.class, child.id()));
   }
 
-  @org.junit.jupiter.params.ParameterizedTest
-  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
   void a_seats_resumed_delegate_spends_an_external_lease_and_settles_before_its_callback(
       boolean nested, @TempDir Path dir) throws Exception {
     Fixture fixture = new Fixture(dir, Script.looksThenAnswers());
@@ -657,17 +661,15 @@ class TurnTest {
             : seat;
     ConversationRecord child =
         conversations.log(Origin.DELEGATION, PAYMENTS, AGENT, parent.id(), null);
-    var charges = new java.util.concurrent.atomic.AtomicInteger();
+    var charges = new AtomicInteger();
     Budget lease = Budget.of(ROOMY, charges::incrementAndGet);
-    java.util.concurrent.atomic.AtomicInteger settlements =
-        new java.util.concurrent.atomic.AtomicInteger();
+    AtomicInteger settlements = new AtomicInteger();
     fixture.turn.useDelegatedAllowances(
         owner -> {
           assertEquals(parent.id(), owner.id());
           return new Turn.DelegatedAllowance(lease, settlements::incrementAndGet);
         });
-    java.util.concurrent.CompletableFuture<Outcome> ended =
-        new java.util.concurrent.CompletableFuture<>();
+    CompletableFuture<Outcome> ended = new CompletableFuture<>();
     fixture.turn.speakToDelegate(
         child.id(),
         parent.id(),
@@ -2378,12 +2380,7 @@ class TurnTest {
     // The services wired as the container wires them: one Callers, shared
     // by the two services that take one. The controller builds none of them.
     ProjectStore projects = mock(ProjectStore.class);
-    Callers callers =
-        new Callers(
-            resolver,
-            projects,
-            turn,
-            org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class));
+    Callers callers = new Callers(resolver, projects, turn, Mockito.mock(CallerAccess.class));
     return MockMvcBuilders.standaloneSetup(
             new AgentController(
                 jobs,
@@ -2399,7 +2396,7 @@ class TurnTest {
                     resolver,
                     projects,
                     callers,
-                    io.aeyer.plowshare.server.agents.ApplicationResources.NONE)))
+                    ApplicationResources.NONE)))
         .setControllerAdvice(new ApiExceptionHandler())
         .setMessageConverters(new MappingJackson2HttpMessageConverter(json))
         .build();

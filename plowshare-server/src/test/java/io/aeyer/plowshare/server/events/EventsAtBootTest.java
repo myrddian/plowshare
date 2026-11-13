@@ -9,11 +9,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.server.messaging.MessageInboxWorker;
+import io.aeyer.plowshare.server.relay.RelayInternalWorkers;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 /**
  * Boot recovery and the ticker thread are two switches: a server with the ticker off must still
@@ -23,7 +26,8 @@ class EventsAtBootTest {
 
   private FiringStore firings;
   private Dispatcher dispatcher;
-  private io.aeyer.plowshare.server.relay.RelayInternalWorkers internal;
+  private RelayInternalWorkers internal;
+  private MessageInboxWorker messageInboxes;
   private Ticker ticker;
   private ScheduledExecutorService thread;
   private EventsProperties properties;
@@ -32,7 +36,8 @@ class EventsAtBootTest {
   void mocks() {
     firings = mock(FiringStore.class);
     dispatcher = mock(Dispatcher.class);
-    internal = mock(io.aeyer.plowshare.server.relay.RelayInternalWorkers.class);
+    internal = mock(RelayInternalWorkers.class);
+    messageInboxes = mock(MessageInboxWorker.class);
     ticker = mock(Ticker.class);
     thread = mock(ScheduledExecutorService.class);
     properties = new EventsProperties();
@@ -41,7 +46,7 @@ class EventsAtBootTest {
 
   private void boot() {
     new EventsConfig()
-        .eventsAtBoot(firings, dispatcher, ticker, properties, thread, internal)
+        .eventsAtBoot(firings, dispatcher, ticker, properties, thread, internal, messageInboxes)
         .onApplicationEvent(null);
   }
 
@@ -52,11 +57,12 @@ class EventsAtBootTest {
     verify(firings).abandonUnfinished(any(), any());
     verify(ticker).rollForward(any(), any());
     verify(dispatcher).drain("trigger:morning");
-    var ordered = org.mockito.Mockito.inOrder(firings, ticker, dispatcher, internal);
+    var ordered = Mockito.inOrder(firings, ticker, dispatcher, internal, messageInboxes);
     ordered.verify(firings).abandonUnfinished(any(), any());
     ordered.verify(ticker).rollForward(any(), any());
     ordered.verify(dispatcher).recoverWakes();
     ordered.verify(internal).start();
+    ordered.verify(messageInboxes).start();
     ordered.verify(dispatcher).drain("trigger:morning");
     verifyNoInteractions(thread);
   }

@@ -1,5 +1,10 @@
 # Receive A2A messages in Plowshare
 
+This manual describes the retained implementation. Slice 5 adds a separate
+[Relay outbound worker](a2a-relay-outbound.md); the inbound/core cutover is still
+blocked by the [reviewed public capability gaps](decisions/0065-a2a-relay-adapter-contracts-and-capability-gaps.md).
+Existing SDK operations remain available until their consumers can migrate safely.
+
 Run the separate A2A adapter with a `receive` section selecting one project and one
 exported Plowshare agent. External callers discover that agent's public Agent Card
 and submit authenticated A2A messages to the adapter. The adapter creates durable

@@ -1,10 +1,12 @@
 package io.aeyer.plowshare.server.board;
 
 import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.JobRuntime;
+import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.RunExtras;
@@ -12,25 +14,39 @@ import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
+import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.delivery.PersonDelivery;
 import io.aeyer.plowshare.server.events.Dispatcher;
+import io.aeyer.plowshare.server.events.FiringRecord;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.events.Inbox;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
+import io.aeyer.plowshare.server.messaging.MessageInboxes;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.messaging.MessagingRepository;
+import io.aeyer.plowshare.server.messaging.RelayMessaging;
 import io.aeyer.plowshare.server.swarm.DispatcherPools;
 import io.aeyer.plowshare.server.swarm.SwarmProperties;
 import io.aeyer.plowshare.server.swarm.SwarmScheduler;
 import io.aeyer.plowshare.server.swarm.SwarmScheduling;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -60,8 +76,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * slice test) is a board with {@link LogStages#NONE}, as every other holder of that seam is.
  */
 @Configuration
-@org.springframework.boot.context.properties.EnableConfigurationProperties(
-    MessagingProperties.class)
+@EnableConfigurationProperties(MessagingProperties.class)
 public class BoardConfig {
 
   private static final Logger log = LoggerFactory.getLogger(BoardConfig.class);
@@ -80,8 +95,8 @@ public class BoardConfig {
       DataLayout data,
       DefinitionResolver resolver,
       LlmDispatcher llm,
-      io.aeyer.plowshare.server.archive.ProjectWorkspaces projects,
-      io.aeyer.plowshare.server.agents.ApplicationPolicy applications,
+      ProjectWorkspaces projects,
+      ApplicationPolicy applications,
       Callers callers) {
     return new SwarmDefinitions(
         new ServerSwarmSources(projects, applications, data),
@@ -95,35 +110,34 @@ public class BoardConfig {
   }
 
   @Bean
-  public BoardMessaging boardMessaging(
-      JdbcTemplate jdbc,
+  public MessageService messageService(
+      MessagingRepository repository,
       AllowanceRepository allowances,
-      BoardStore store,
+      MessageInboxes inboxes,
       ConversationStore conversations,
       FiringStore firings,
-      BoardPot pot,
       UnitOfWork work,
       Turn turn,
       Callers callers,
       Dispatcher dispatcher,
-      ObjectProvider<io.aeyer.plowshare.server.information.InformationJobs> information,
+      ObjectProvider<InformationJobs> information,
       ObjectProvider<LogStages> logStages,
-      io.aeyer.plowshare.server.approvals.RunApprovalStore approvals,
-      io.aeyer.plowshare.server.agents.JobStore jobs,
+      RunApprovalStore approvals,
+      JobStore jobs,
       MessagingProperties messagingProperties,
       ProjectMessageRouting routing) {
-    BoardMessaging messaging =
-        new BoardMessaging(
-            new JdbcBoardMessagingRepository(jdbc, allowances),
-            store,
+    RelayMessaging messaging =
+        new RelayMessaging(
+            repository,
+            allowances,
             conversations,
             firings,
-            pot,
+            inboxes,
             work,
-            new BoardMessaging.Voice() {
+            new MessageService.Voice() {
               @Override
               public String speakFrom(
-                  BoardMessaging.Instance instance,
+                  MessageService.Instance instance,
                   AgentDefinition definition,
                   String utterance,
                   Budget lease,
@@ -143,12 +157,16 @@ public class BoardConfig {
                     instance.account());
               }
 
+              public boolean busy(MessageService.Instance instance) {
+                return turn.isMessageSpeaking(instance.conversation(), instance.agent());
+              }
+
               public boolean busy(String conversation) {
                 return turn.isSpeaking(conversation);
               }
 
               public String speak(
-                  BoardMessaging.Instance instance,
+                  MessageService.Instance instance,
                   AgentDefinition definition,
                   String utterance,
                   Budget lease,
@@ -167,7 +185,7 @@ public class BoardConfig {
               }
 
               public String speakCommand(
-                  BoardMessaging.Instance instance,
+                  MessageService.Instance instance,
                   AgentDefinition definition,
                   String utterance,
                   Budget lease,
@@ -186,7 +204,7 @@ public class BoardConfig {
               }
 
               public String continueApproved(
-                  BoardMessaging.Instance instance,
+                  MessageService.Instance instance,
                   AgentDefinition definition,
                   String utterance,
                   String approval,
@@ -206,7 +224,7 @@ public class BoardConfig {
               }
 
               public String resumeDelegate(
-                  BoardMessaging.Instance instance,
+                  MessageService.Instance instance,
                   String child,
                   AgentDefinition definition,
                   String utterance,
@@ -249,7 +267,7 @@ public class BoardConfig {
   }
 
   @Bean(destroyMethod = "close")
-  public MessageMaintenance messageMaintenance(BoardMessaging messaging) {
+  public MessageMaintenance messageMaintenance(MessageService messaging) {
     return new MessageMaintenance(messaging);
   }
 
@@ -273,7 +291,7 @@ public class BoardConfig {
       Dispatcher dispatcher,
       UnitOfWork work,
       SwarmProperties properties,
-      io.aeyer.plowshare.server.archive.ProjectMembers members,
+      ProjectMembers members,
       ObjectProvider<LogStages> logStages) {
     int reserve = properties.getClosingReserve();
     if (reserve < 0 || reserve >= 100) {
@@ -324,7 +342,7 @@ public class BoardConfig {
       Dispatcher dispatcher,
       SwarmProperties properties,
       LlmDispatcher llm,
-      BoardMessaging messaging) {
+      MessageService messaging) {
     if (properties.getWakeCap() < 1) {
       throw new IllegalStateException(
           "plowshare.swarm.wake-cap is "
@@ -362,17 +380,15 @@ public class BoardConfig {
             new DispatcherPools(llm));
     dispatcher.useWakes(
         new Dispatcher.Wakes() {
-          public boolean busy(io.aeyer.plowshare.server.events.FiringRecord wake) {
+          public boolean busy(FiringRecord wake) {
             return messaging.owns(wake) ? messaging.busy(wake) : runner.busy(wake);
           }
 
-          public String start(
-              io.aeyer.plowshare.server.events.FiringRecord wake,
-              java.util.function.BiConsumer<String, Outcome> ended) {
+          public String start(FiringRecord wake, BiConsumer<String, Outcome> ended) {
             return messaging.owns(wake) ? messaging.start(wake, ended) : runner.start(wake, ended);
           }
 
-          public void settled(io.aeyer.plowshare.server.events.FiringRecord wake) {
+          public void settled(FiringRecord wake) {
             if (messaging.owns(wake)) messaging.settled(wake);
             else runner.settled(wake);
           }
@@ -410,7 +426,7 @@ public class BoardConfig {
       JobRuntime runtime,
       ConversationStore conversations,
       LlmDispatcher llm,
-      BoardMessaging messaging) {
+      MessageService messaging) {
     DispatcherPools pools = new DispatcherPools(llm);
     SwarmScheduling scheduling =
         new SwarmScheduling(
@@ -475,8 +491,7 @@ public class BoardConfig {
           return Optional.of(new SwarmScheduler.Share(root.account(), topic.id(), seat.occupant()));
         }
         var row = conversations.find(id);
-        if (row.isEmpty()
-            || row.get().origin() != io.aeyer.plowshare.server.archive.Origin.DELEGATION) {
+        if (row.isEmpty() || row.get().origin() != Origin.DELEGATION) {
           return Optional.empty();
         }
         delegated = true;
@@ -488,7 +503,7 @@ public class BoardConfig {
 
   @Bean
   public BoardRunExtras boardRunExtras(
-      BoardStore store, Board board, ConversationStore conversations, BoardMessaging messaging) {
+      BoardStore store, Board board, ConversationStore conversations, MessageService messaging) {
     return new BoardRunExtras(store, board, conversations, messaging);
   }
 
@@ -515,7 +530,7 @@ public class BoardConfig {
                 callers.requireConversationProject(conversation, account);
                 try {
                   callers.requireWork(turn.homeOf(conversation).project(), account);
-                } catch (io.aeyer.plowshare.server.faults.CallerFault denied) {
+                } catch (CallerFault denied) {
                   throw new Turn.Refused("The recipient cannot execute this delivery");
                 }
                 AgentDefinition definition =
@@ -539,13 +554,13 @@ public class BoardConfig {
    * lost with the runs it interrupted.
    */
   @Bean
-  public org.springframework.beans.factory.InitializingBean boardAtBoot(
+  public InitializingBean boardAtBoot(
       BoardStore store,
       Board board,
       BoardDelivery delivery,
       SwarmProperties properties,
       Dispatcher dispatcher,
-      BoardMessaging messaging) {
+      MessageService messaging) {
     return () ->
         dispatcher.useWakeRecovery(
             () -> {

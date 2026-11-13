@@ -75,9 +75,12 @@ and doing it under time pressure is how a scope model acquires a shape nobody wa
 - **Delivery-time authority must stay hoistable.** Whatever evaluates an audience resolves once per
   delivery batch, not once per publication per account. The information-event fan-out cost 3,996 ms
   for a single event precisely because it asked a permission predicate per candidate account.
-- **Sequence it against extensibility.** Per `0040`, Relay cannot currently be extended from
-  outside — every family pays a core change. Keying topics on substrate scopes and making Relay
-  extensible are related problems, and solving the audience alone leaves the larger one standing.
+- **Keep carrier extensibility separate from audience vocabulary.** A family
+  uses an existing general carrier and owns its codec; it needs no new broker
+  payload kind. [0057](0057-board-forum-and-relay-messaging-substrate.md)
+  supersedes 0040's board-replacement framing and decides project-wide agent
+  inbox visibility. That resolves the former mailbox-audience blocker, not this
+  record's distinct inability to name a genuinely non-project audience.
 
 ## Narrowing: server-administration operations may use the system scope
 

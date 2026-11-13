@@ -1,9 +1,25 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.aeyer.plowshare.protocol.FilterReview;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.sdk.Plowshare;
@@ -21,8 +37,11 @@ import io.aeyer.plowshare.server.security.RelayMessageReview;
 import io.aeyer.plowshare.server.ws.Asking;
 import io.aeyer.plowshare.server.ws.FrameRouter;
 import io.aeyer.plowshare.server.ws.RelayPortFrames;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,7 +54,10 @@ import okhttp3.WebSocketListener;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -112,9 +134,9 @@ class JdbcRelayPortRepositoryTest {
                 new JdbcRelayPayloadStore(
                     jdbc,
                     transactions,
-                    java.time.Duration.ofHours(1),
-                    java.time.Duration.ofHours(24),
-                    java.time.Duration.ofDays(30))),
+                    Duration.ofHours(1),
+                    Duration.ofHours(24),
+                    Duration.ofDays(30))),
             Instant::now);
     ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
     relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
@@ -140,6 +162,123 @@ class JdbcRelayPortRepositoryTest {
     relay.publish(
         topic,
         new Relay.Draft(id, "fixture", Instant.now(), null, null, new RelayPayload.Text("hello")));
+  }
+
+  private String groupGeneration(String group) {
+    return jdbc.queryForObject(
+        "SELECT generation::text FROM relay_subscriptions WHERE scope_key=? AND topic=? AND subscriber=?",
+        String.class,
+        RelayScopeCodec.write(topic),
+        topic.name(),
+        "sdk." + group);
+  }
+
+  @Test
+  void an_empty_group_outside_the_log_inspection_page_can_retire_from_its_consumption_snapshot() {
+    jdbc.update(
+        "INSERT INTO relay_subscriptions(scope_key,topic,subscriber,seen_through,seen_at) SELECT ?,?,'sdk.g'||n,0,clock_timestamp() FROM generate_series(1,1100) n",
+        RelayScopeCodec.write(topic),
+        topic.name());
+    var query = new RelayPort.GroupQuery("fixture", topic.name(), "zz.workers");
+    assertFalse(ports.inspectGroup(topic, "owner", query).exists());
+    var batch =
+        ports.consume(topic, "owner", consume("zz.workers", UUID.randomUUID().toString(), 1));
+    assertEquals(batch.generation(), ports.inspectGroup(topic, "owner", query).generation());
+    assertEquals(RelayPort.Status.EMPTY, batch.status());
+    assertNotNull(batch.generation());
+    assertTrue(
+        ports
+            .deleteGroup(
+                topic,
+                "owner",
+                new RelayPort.DeleteGroup(
+                    "fixture", topic.name(), "zz.workers", batch.generation()))
+            .removed());
+    assertFalse(
+        ports
+            .inspectGroup(
+                topic, "owner", new RelayPort.GroupQuery("fixture", topic.name(), "zz.workers"))
+            .exists());
+    assertEquals(
+        1100,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM relay_subscriptions WHERE scope_key=? AND topic=?",
+            Integer.class,
+            RelayScopeCodec.write(topic),
+            topic.name()));
+  }
+
+  @Test
+  void group_retirement_requires_drained_state_and_fences_old_removal_ack_and_waiters() {
+    String consumer = UUID.randomUUID().toString();
+    publish("one");
+    var batch = ports.consume(topic, "owner", consume("workers", consumer, 1));
+    String generation = batch.generation();
+    assertEquals(groupGeneration("workers"), generation);
+    var deletion = new RelayPort.DeleteGroup("fixture", topic.name(), "workers", generation);
+    assertThrows(CallerFault.class, () -> ports.deleteGroup(topic, "owner", deletion));
+    ports.acknowledge(topic, "owner", ack(batch));
+    assertTrue(ports.deleteGroup(topic, "owner", deletion).removed());
+    assertFalse(ports.deleteGroup(topic, "owner", deletion).removed());
+    assertThrows(
+        CallerFault.class,
+        () ->
+            ports.consumeObserved(
+                topic,
+                "owner",
+                consume("workers", consumer, 1),
+                RelayReadBudget.SEGMENTED,
+                UUID.fromString(generation)));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM relay_subscriptions WHERE subscriber='sdk.workers'",
+            Integer.class));
+    ports.consume(topic, "owner", consume("workers", consumer, 1));
+    assertNotEquals(generation, groupGeneration("workers"));
+    assertThrows(CallerFault.class, () -> ports.deleteGroup(topic, "owner", deletion));
+    assertThrows(CallerFault.class, () -> ports.acknowledge(topic, "owner", ack(batch)));
+  }
+
+  @Test
+  void group_retirement_and_concurrent_publication_cannot_discard_an_unread_record()
+      throws Exception {
+    String consumer = UUID.randomUUID().toString();
+    ports.consume(topic, "owner", consume("workers", consumer, 1));
+    var deletion =
+        new RelayPort.DeleteGroup("fixture", topic.name(), "workers", groupGeneration("workers"));
+    try (var threads = Executors.newVirtualThreadPerTaskExecutor()) {
+      var start = new CountDownLatch(1);
+      var removal =
+          threads.submit(
+              () -> {
+                start.await();
+                try {
+                  return ports.deleteGroup(topic, "owner", deletion).removed();
+                } catch (CallerFault notDrained) {
+                  return false;
+                }
+              });
+      var publication =
+          threads.submit(
+              () -> {
+                start.await();
+                publish("racing");
+                return true;
+              });
+      start.countDown();
+      publication.get(5, TimeUnit.SECONDS);
+      boolean removed = removal.get(5, TimeUnit.SECONDS);
+      assertEquals(1, relay.topic(topic).lastPosition());
+      assertEquals(
+          removed ? 0 : 1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM relay_subscriptions WHERE subscriber='sdk.workers'",
+              Integer.class));
+      assertEquals(
+          RelayPort.Status.DATA,
+          ports.consume(topic, "owner", consume("workers", consumer, 1)).status());
+    }
   }
 
   @Test
@@ -233,9 +372,9 @@ class JdbcRelayPortRepositoryTest {
                 new JdbcRelayPayloadStore(
                     jdbc,
                     transactions,
-                    java.time.Duration.ofHours(1),
-                    java.time.Duration.ofHours(24),
-                    java.time.Duration.ofDays(30)),
+                    Duration.ofHours(1),
+                    Duration.ofHours(24),
+                    Duration.ofDays(30)),
                 new RelayTextLimit(RelayPort.MAX_TEXT_BYTES)),
             Instant::now);
     ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
@@ -343,22 +482,22 @@ class JdbcRelayPortRepositoryTest {
     when(projects.personalOwner("fixture")).thenReturn(Optional.empty());
     var grants = new RelayPortProperties();
     grants.setBindings(
-        java.util.List.of(
+        List.of(
             new RelayPortProperties.Binding(
                 "fixture",
                 topic.name(),
                 "reviewer",
                 RelayPortProperties.Direction.EGRESS,
-                java.util.List.of("detectors")),
+                List.of("detectors")),
             new RelayPortProperties.Binding(
                 "fixture",
                 "checks.responses",
                 "reviewer",
                 RelayPortProperties.Direction.INGRESS,
-                java.util.List.of())));
+                List.of())));
     var filtering = new FilteringProperties();
     filtering.setExternal(
-        java.util.List.of(
+        List.of(
             new FilteringProperties.External(
                 "fixture", "subject", topic.name(), "checks.responses", "reviewer", 15)));
     var filter =
@@ -376,9 +515,9 @@ class JdbcRelayPortRepositoryTest {
             new RelayPortFrames(new ProjectRelayPorts(relay, ports, grants, members, projects, 8))
                 .frames());
     var json =
-        com.fasterxml.jackson.databind.json.JsonMapper.builder()
-            .addModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
-            .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+        JsonMapper.builder()
+            .addModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .build();
     // This fixture authenticates the upgrade as reviewer. Production AuthFilter/session wiring
     // is outside this test; real frame validation, membership/grants and repositories run below.
@@ -395,7 +534,7 @@ class JdbcRelayPortRepositoryTest {
                         var outcome = router.route(text, new Asking("fixture-session", "reviewer"));
                         socket.send(
                             json.writeValueAsString(
-                                java.util.Map.of(
+                                Map.of(
                                     "id",
                                     frame.path("id").textValue(),
                                     "type",
@@ -404,7 +543,7 @@ class JdbcRelayPortRepositoryTest {
                                     "plowshare-v1",
                                     "payload",
                                     outcome)));
-                      } catch (java.io.IOException invalid) {
+                      } catch (IOException invalid) {
                         throw new AssertionError(invalid);
                       }
                     }
@@ -424,7 +563,8 @@ class JdbcRelayPortRepositoryTest {
               UUID.randomUUID().toString(),
               Duration.ofSeconds(5),
               null,
-              Plowshare.TransportMode.LEGACY)) {
+              Plowshare.TransportMode.LEGACY,
+              Plowshare.DispatchMode.ORDERED)) {
         var sdk = new RelayClient(connection);
         var consumption =
             new RelayPort.Consume(
@@ -472,6 +612,15 @@ class JdbcRelayPortRepositoryTest {
                         100,
                         0))
                 .status());
+        var inspection = new RelayPort.GroupQuery("fixture", topic.name(), "detectors");
+        assertEquals(batch.generation(), sdk.inspectGroup(inspection).generation());
+        assertTrue(
+            sdk.deleteGroup(
+                    new RelayPort.DeleteGroup(
+                        "fixture", topic.name(), "detectors", batch.generation()))
+                .removed());
+        assertFalse(sdk.inspectGroup(inspection).exists());
+        assertThrows(IOException.class, () -> sdk.acknowledge(ack(batch)));
       }
     }
   }
@@ -492,13 +641,10 @@ class JdbcRelayPortRepositoryTest {
     var request = consume("detectors", UUID.randomUUID().toString(), 100);
     var first = ports.consume(topic, "reviewer", request, RelayReadBudget.LEGACY);
     assertEquals(2, first.events().size());
-    var mapper =
-        com.fasterxml.jackson.databind.json.JsonMapper.builder()
-            .addModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
-            .build();
+    var mapper = JsonMapper.builder().addModule(new JavaTimeModule()).build();
     assertTrue(
         mapper.writeValueAsBytes(
-                    java.util.Map.of(
+                    Map.of(
                         "id",
                         "fixture",
                         "type",
@@ -506,7 +652,7 @@ class JdbcRelayPortRepositoryTest {
                         "protocol_version",
                         "plowshare-v1",
                         "payload",
-                        java.util.Map.of("code", "OK", "payload", first)))
+                        Map.of("code", "OK", "payload", first)))
                 .length
             < 1024 * 1024);
     assertEquals(first, ports.consume(topic, "reviewer", request, RelayReadBudget.LEGACY));
@@ -528,11 +674,7 @@ class JdbcRelayPortRepositoryTest {
             jdbc,
             transactions,
             new JdbcRelayPayloadStore(
-                jdbc,
-                transactions,
-                java.time.Duration.ofHours(1),
-                java.time.Duration.ofHours(24),
-                java.time.Duration.ofDays(30)))
+                jdbc, transactions, Duration.ofHours(1), Duration.ofHours(24), Duration.ofDays(30)))
         .prune(topic, Instant.now(), 100);
     var gap = ports.consume(topic, "reviewer", request);
     assertEquals(RelayPort.Status.GAP, gap.status());

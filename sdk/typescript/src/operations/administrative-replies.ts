@@ -316,6 +316,11 @@ export interface BoardPosted {
   readonly requestId: string;
   readonly message: BoardMessage;
 }
+export interface BoardClosed {
+  readonly requestId: string;
+  readonly topic: BoardTopic;
+  readonly message: BoardMessage;
+}
 export interface AdministrativeReplies {
   'approval.list': ApprovalListed;
   'approval.answer': ApprovalAnswered;
@@ -324,6 +329,7 @@ export interface AdministrativeReplies {
   'board.open': BoardOpened;
   'board.retry': BoardRetried;
   'board.post': BoardPosted;
+  'board.close': BoardClosed;
   'buffer.purge': BufferPurgeReport;
   'retention.sweep': SweepReport;
   'provider.list': readonly ProviderRegistration[];
@@ -609,6 +615,11 @@ const readers = {
     message: isBoardMessage,
   }),
   'board.post': record({ requestId: named, message: isBoardMessage }),
+  'board.close': record({
+    requestId: named,
+    topic: boardTopicCheck,
+    message: isBoardMessage,
+  }),
   'buffer.purge': record({ fetchedPages: count, resultSets: count }),
   'retention.sweep': record({
     marked: count,

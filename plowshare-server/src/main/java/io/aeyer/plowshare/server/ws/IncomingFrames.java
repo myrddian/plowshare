@@ -3,7 +3,13 @@ package io.aeyer.plowshare.server.ws;
 import io.aeyer.plowshare.protocol.Incoming;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.CallerAccess;
-import io.aeyer.plowshare.server.board.BoardMessaging;
+import io.aeyer.plowshare.server.agents.Callers;
+import io.aeyer.plowshare.server.agents.CommandCatalog;
+import io.aeyer.plowshare.server.agents.OrchestrationResolver;
+import io.aeyer.plowshare.server.agents.SkillResolver;
+import io.aeyer.plowshare.server.board.Board;
+import io.aeyer.plowshare.server.board.IncomingRequests;
+import io.aeyer.plowshare.server.messaging.MessageService;
 import java.util.Map;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -11,19 +17,18 @@ import org.springframework.stereotype.Component;
 /** Protocol-neutral adapter ingress. The bridge owns external-client authentication. */
 @Component
 public final class IncomingFrames implements FrameArea {
-  private final ObjectProvider<BoardMessaging> messages;
+  private final ObjectProvider<MessageService> messages;
   private final CallerAccess access;
-  private final io.aeyer.plowshare.server.agents.Callers callers;
-  private final io.aeyer.plowshare.server.agents.SkillResolver skills;
-  private final ObjectProvider<io.aeyer.plowshare.server.agents.OrchestrationResolver>
-      orchestrations;
+  private final Callers callers;
+  private final SkillResolver skills;
+  private final ObjectProvider<OrchestrationResolver> orchestrations;
 
   public IncomingFrames(
-      ObjectProvider<BoardMessaging> messages,
+      ObjectProvider<MessageService> messages,
       CallerAccess access,
-      io.aeyer.plowshare.server.agents.Callers callers,
-      io.aeyer.plowshare.server.agents.SkillResolver skills,
-      ObjectProvider<io.aeyer.plowshare.server.agents.OrchestrationResolver> orchestrations) {
+      Callers callers,
+      SkillResolver skills,
+      ObjectProvider<OrchestrationResolver> orchestrations) {
     this.messages = messages;
     this.access = access;
     this.callers = callers;
@@ -63,7 +68,7 @@ public final class IncomingFrames implements FrameArea {
     var definition = callers.requireAgent(name, caller);
     var procedures = orchestrations.getIfAvailable();
     var commands =
-        io.aeyer.plowshare.server.agents.CommandCatalog.of(
+        CommandCatalog.of(
             definition,
             skills.forCaller(caller),
             procedures == null ? Map.of() : procedures.forCaller(caller));
@@ -91,31 +96,29 @@ public final class IncomingFrames implements FrameArea {
   }
 
   private Outcome receive(Map<String, Object> payload, Asking asking) {
-    var body =
-        io.aeyer.plowshare.server.board.IncomingRequests.read(payload, Incoming.Receive.class);
+    var body = IncomingRequests.read(payload, Incoming.Receive.class);
     String account = owner(asking, FrameTypes.INCOMING_RECEIVE, body.project());
     if (body.project() == null || body.project().isBlank())
-      throw new io.aeyer.plowshare.server.board.Board.Refused("A project is required for ingress.");
+      throw new Board.Refused("A project is required for ingress.");
     var caller = callers.callerFor(body.project(), null);
     var definition = callers.requireAgent(body.agent(), caller);
     if (body.command() != null) {
       var procedures = orchestrations.getIfAvailable();
       var catalog =
-          io.aeyer.plowshare.server.agents.CommandCatalog.of(
+          CommandCatalog.of(
               definition,
               skills.forCaller(caller),
               procedures == null ? Map.of() : procedures.forCaller(caller));
       String name = body.command().split(" ", 2)[0];
       if (catalog.stream().noneMatch(command -> command.command().equals(name)))
-        throw new io.aeyer.plowshare.server.board.Board.Refused(
-            "The incoming command is not granted to this agent.");
+        throw new Board.Refused("The incoming command is not granted to this agent.");
     }
     return Outcome.ok(messages.getObject().receive(account, body));
   }
 
   private Outcome read(Map<String, Object> payload, Asking asking, boolean cancel) {
     String type = cancel ? FrameTypes.INCOMING_CANCEL : FrameTypes.INCOMING_STATUS;
-    var body = io.aeyer.plowshare.server.board.IncomingRequests.read(payload, Incoming.Id.class);
+    var body = IncomingRequests.read(payload, Incoming.Id.class);
     String account = owner(asking, type, body.project());
     return Outcome.ok(
         cancel

@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.board;
 
+import io.aeyer.plowshare.server.messaging.MessageService;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -22,7 +24,7 @@ public final class RoutingConfiguration {
       for (var file : routeFiles)
         if (file.contains("\\")
             || file.contains(":")
-            || java.util.Arrays.stream(file.split("/", -1))
+            || Arrays.stream(file.split("/", -1))
                 .anyMatch(part -> part.isEmpty() || part.equals(".") || part.equals("..")))
           throw new Board.Refused(
               "Route files must be relative paths inside the project workspace.");
@@ -55,8 +57,8 @@ public final class RoutingConfiguration {
             "Choose conversation or retainConversation for a named route, not both.");
     }
 
-    public BoardMessaging.Address address() {
-      return new BoardMessaging.Address(
+    public MessageService.Address address() {
+      return new MessageService.Address(
           project, agent, conversation, Boolean.TRUE.equals(retainConversation));
     }
   }

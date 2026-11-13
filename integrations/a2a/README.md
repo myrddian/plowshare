@@ -1,5 +1,12 @@
 # Plowshare A2A adapter
 
+The Slice 5 rewrite has an SDK-only [Relay outbound worker](../../docs/a2a-relay-outbound.md),
+launched as `plowshare-a2a-relay`. Its dispatch journal and remote protocol state
+live in the adapter. Inbound cutover remains blocked by the exact public messaging
+admission/catalog gaps in [ADR 0065](../../docs/decisions/0065-a2a-relay-adapter-contracts-and-capability-gaps.md).
+The existing launcher and consumers below remain available pending that cutover.
+This is partial Slice 5 implementation, not removal of A2A or completion of its rewrite.
+
 For setup, CLI/SDK examples, follow-ups, cancellation and recovery, use the
 [A2A sending manual](../../docs/a2a-sending.md).
 

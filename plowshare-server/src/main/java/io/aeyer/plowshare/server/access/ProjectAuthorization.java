@@ -1,11 +1,20 @@
 package io.aeyer.plowshare.server.access;
 
+import io.aeyer.plowshare.protocol.HostedToolScopes;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.auth.AdminStore;
+import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
-import java.util.*;
+import io.aeyer.plowshare.server.requests.RequestProjects;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Resolves resource IDs to their durable scope before granting project operations. */
@@ -14,11 +23,10 @@ public class ProjectAuthorization {
   private final ResourceScopeRepository resources;
   private final ProjectMembers members;
   private final AdminStore accounts;
-  private io.aeyer.plowshare.server.requests.RequestProjects requestProjects =
-      io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY;
+  private RequestProjects requestProjects = RequestProjects.EXPLICIT_ONLY;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  public void useRequestProjects(io.aeyer.plowshare.server.requests.RequestProjects projects) {
+  @Autowired
+  public void useRequestProjects(RequestProjects projects) {
     requestProjects = Objects.requireNonNull(projects);
   }
 
@@ -274,6 +282,8 @@ public class ProjectAuthorization {
                 "relay.publish",
                 "relay.consume",
                 "relay.ack",
+                "relay.group.delete",
+                "relay.group.inspect",
                 "project.member.add",
                 "project.member.remove",
                 "project.member.role",
@@ -323,15 +333,13 @@ public class ProjectAuthorization {
    * Current effective project roles resolved once for this output selection, including Application
    * ceilings.
    */
-  public java.util.Set<String> readableProjects(
-      java.util.Collection<String> projects, String account) {
+  public Set<String> readableProjects(Collection<String> projects, String account) {
     return projectRoles(projects, account).keySet();
   }
 
-  public java.util.Map<String, ProjectRole> projectRoles(
-      java.util.Collection<String> projects, String account) {
-    var candidates = projects.stream().filter(java.util.Objects::nonNull).distinct().toList();
-    return candidates.isEmpty() ? java.util.Map.of() : members.roles(candidates, account);
+  public Map<String, ProjectRole> projectRoles(Collection<String> projects, String account) {
+    var candidates = projects.stream().filter(Objects::nonNull).distinct().toList();
+    return candidates.isEmpty() ? Map.of() : members.roles(candidates, account);
   }
 
   public boolean readable(String project, String account) {
@@ -356,11 +364,11 @@ public class ProjectAuthorization {
     if (account == null) throw new CallerFault("This operation needs an authenticated account");
     // Only these closed worker frames delegate project authorization to their typed route service.
     // They grant neither ordinary Relay access nor Personal/project membership.
-    if (io.aeyer.plowshare.protocol.HostedToolScopes.WORKER_OPERATIONS.contains(operation)) {
+    if (HostedToolScopes.WORKER_OPERATIONS.contains(operation)) {
       if (!accounts.isEnabled(account)) throw new CallerFault("Active executor required");
       return;
     }
-    boolean service = io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account);
+    boolean service = ServiceCredentials.principal(account);
     if (Set.of("proc.list", "proc.inspect", "proc.calls", "proc.tools", "proc.queues")
         .contains(operation)) {
       // These are metadata inventory filters, not content/execution targets. The specialist

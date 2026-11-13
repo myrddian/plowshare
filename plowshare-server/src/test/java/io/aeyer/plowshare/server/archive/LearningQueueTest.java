@@ -13,12 +13,14 @@ import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Speaker;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -88,7 +90,7 @@ class LearningQueueTest {
     // its pre-existing V40 foreign key into firings. Postgres refuses to
     // truncate conversations unless every one of these goes with it.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     entries = new EntryStore(jdbc);
     conversation = conversations.open(PAYMENTS, Budget.of(20)).id();
@@ -476,14 +478,14 @@ class LearningQueueTest {
     return String.join(
         "\n",
         jdbc.execute(
-            (org.springframework.jdbc.core.ConnectionCallback<List<String>>)
+            (ConnectionCallback<List<String>>)
                 connection -> {
                   try (var off = connection.createStatement()) {
                     off.execute("SET enable_seqscan = off");
                   }
                   try (var explained = connection.prepareStatement("EXPLAIN " + sql)) {
                     explained.setInt(1, PLENTY);
-                    List<String> lines = new java.util.ArrayList<>();
+                    List<String> lines = new ArrayList<>();
                     try (var rows = explained.executeQuery()) {
                       while (rows.next()) {
                         lines.add(rows.getString(1));

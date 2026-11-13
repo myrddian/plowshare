@@ -98,6 +98,7 @@ public final class BoundTools {
     names.add(ConversationSearchTool.NAME);
     names.add(AgentRunTool.NAME);
     names.add(SendMessageTool.NAME);
+    names.add(RelayPublishTool.NAME);
     // Gated by nothing, unlike the two above. Every run has a transcript by
     // signature, so the tool can always be built -- see
     // AgentsConfigTest.the_runtime_binds_the_memory_tools_delegation_and_

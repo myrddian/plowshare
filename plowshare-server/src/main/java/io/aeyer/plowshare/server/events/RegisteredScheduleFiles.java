@@ -4,6 +4,7 @@ import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.protocol.Window;
+import io.aeyer.plowshare.server.agents.ApplicationResources;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
@@ -11,9 +12,15 @@ import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Uses registered Application schedules, the External data tier or its authenticated file channel.
@@ -21,11 +28,9 @@ import java.util.*;
  */
 public final class RegisteredScheduleFiles implements ScheduleFiles {
   private static final int MAX_FILES = 256, MAX_BYTES = 65536, TOTAL_BYTES = 1048576;
-  private io.aeyer.plowshare.server.agents.ApplicationResources resources =
-      io.aeyer.plowshare.server.agents.ApplicationResources.NONE;
+  private ApplicationResources resources = ApplicationResources.NONE;
 
-  public void useApplicationResources(
-      io.aeyer.plowshare.server.agents.ApplicationResources resources) {
+  public void useApplicationResources(ApplicationResources resources) {
     this.resources = resources;
   }
 

@@ -1,16 +1,19 @@
 package io.aeyer.plowshare.server.board;
 
+import io.aeyer.plowshare.server.messaging.MessageService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationListener;
 
 /** Bounded deadline sweep. It never retries inference or mutating agent tools. */
 public final class MessageMaintenance
-    implements AutoCloseable,
-        org.springframework.context.ApplicationListener<
-            org.springframework.boot.context.event.ApplicationReadyEvent> {
-  private static final org.slf4j.Logger LOG =
-      org.slf4j.LoggerFactory.getLogger(MessageMaintenance.class);
+    implements AutoCloseable, ApplicationListener<ApplicationReadyEvent> {
+  private static final Logger LOG = LoggerFactory.getLogger(MessageMaintenance.class);
   private final ScheduledExecutorService thread =
       Executors.newSingleThreadScheduledExecutor(
           r -> {
@@ -18,17 +21,15 @@ public final class MessageMaintenance
             timer.setDaemon(true);
             return timer;
           });
-  private final BoardMessaging messages;
-  private final java.util.concurrent.atomic.AtomicBoolean started =
-      new java.util.concurrent.atomic.AtomicBoolean();
+  private final MessageService messages;
+  private final AtomicBoolean started = new AtomicBoolean();
 
-  public MessageMaintenance(BoardMessaging messages) {
+  public MessageMaintenance(MessageService messages) {
     this.messages = messages;
   }
 
   @Override
-  public void onApplicationEvent(
-      org.springframework.boot.context.event.ApplicationReadyEvent ready) {
+  public void onApplicationEvent(ApplicationReadyEvent ready) {
     if (!started.compareAndSet(false, true)) return;
     thread.scheduleWithFixedDelay(
         () -> {

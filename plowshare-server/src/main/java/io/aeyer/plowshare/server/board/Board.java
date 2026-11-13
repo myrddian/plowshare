@@ -4,11 +4,16 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.events.EventPayload;
 import io.aeyer.plowshare.server.events.FiringRecord;
 import io.aeyer.plowshare.server.events.FiringStore;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +23,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.IntSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,12 +34,12 @@ import org.slf4j.LoggerFactory;
  * the seat it may create; the wakes are drained once that commits. Nothing here runs a model:
  * {@code SeatRunner} turns a wake into a turn.
  */
-public final class Board {
+public final class Board implements BoardForum {
 
   private static final Logger log = LoggerFactory.getLogger(Board.class);
 
   /** A board refusal: the message is a sentence for whoever asked. */
-  public static final class Refused extends io.aeyer.plowshare.server.faults.CallerFault {
+  public static final class Refused extends CallerFault {
 
     private static final long serialVersionUID = 1L;
 
@@ -92,7 +98,7 @@ public final class Board {
   /** A seat conversation created in a transaction, told to the log stages after it commits. */
   private record Seated(String conversation, Home home, String agent, boolean bot) {}
 
-  private final io.aeyer.plowshare.server.archive.ProjectMembers members;
+  private final ProjectMembers members;
   private final BoardStore store;
   private final SwarmCatalog swarms;
   private final ConversationStore conversations;
@@ -111,9 +117,9 @@ public final class Board {
   private volatile LogStages logStages = LogStages.NONE;
   private volatile IntSupplier maxDepth = () -> 2;
   private volatile Runnable notices = () -> {};
-  private volatile java.util.function.Predicate<String> running = topic -> false;
+  private volatile Predicate<String> running = topic -> false;
 
-  public void useRunning(java.util.function.Predicate<String> running) {
+  public void useRunning(Predicate<String> running) {
     this.running = running;
   }
 
@@ -134,7 +140,7 @@ public final class Board {
       UnitOfWork work,
       IntSupplier closingReserve,
       Supplier<Instant> clock,
-      io.aeyer.plowshare.server.archive.ProjectMembers members) {
+      ProjectMembers members) {
     this.members = Objects.requireNonNull(members);
     this.store = Objects.requireNonNull(store, "store");
     this.swarms = Objects.requireNonNull(swarms, "swarms");
@@ -401,10 +407,7 @@ public final class Board {
               BoardTopic topic = lockedOpenTopic(topicId);
               if (store.messagingTopic(topic.id()))
                 throw new Refused("Private message instances use their own lifecycle controls");
-              members.requireRole(
-                  topic.project(),
-                  account,
-                  io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR);
+              members.requireRole(topic.project(), account, ProjectRole.CONTRIBUTOR);
               if (!members(topic).contains(member)) {
                 throw new Refused("Choose a member of this project's swarm.");
               }
@@ -543,10 +546,7 @@ public final class Board {
       if (queuedCap == null) {
         var pending = firings.oldestWaiting(target).filter(f -> topic.id().equals(f.topic()));
         if (pending.isPresent()) {
-          Integer requested =
-              ((io.aeyer.plowshare.server.events.EventPayload.Seat) pending.get().data())
-                  .wake()
-                  .maxTurns();
+          Integer requested = ((EventPayload.Seat) pending.get().data()).wake().maxTurns();
           if (requested != null) queuedCap = Math.max(queuedCap == null ? 0 : queuedCap, requested);
         }
       }
@@ -567,7 +567,7 @@ public final class Board {
   /** A member who opens a child sits as @opener there, never twice under its own name. */
   private List<WakeRules.Wake> normalize(
       BoardTopic topic, BoardMessage message, List<WakeRules.Wake> named) {
-    Map<String, WakeRules.Reason> unique = new java.util.LinkedHashMap<>();
+    Map<String, WakeRules.Reason> unique = new LinkedHashMap<>();
     for (WakeRules.Wake wake : named) {
       String occupant =
           !BoardTopic.BY_PERSON.equals(topic.openerKind()) && topic.opener().equals(wake.occupant())
@@ -639,9 +639,8 @@ public final class Board {
     }
   }
 
-  private static io.aeyer.plowshare.server.events.EventPayload data(
-      WakeRules.Wake wake, BoardMessage message, Integer maxTurns) {
-    return new io.aeyer.plowshare.server.events.EventPayload.Seat(
+  private static EventPayload data(WakeRules.Wake wake, BoardMessage message, Integer maxTurns) {
+    return new EventPayload.Seat(
         new SeatWake(wake.reason().wire(), message.id(), message.author(), maxTurns));
   }
 
@@ -756,19 +755,33 @@ public final class Board {
    *     message on this topic
    */
   public Closed close(Close request) {
+    return close(request, openTopic(request.topic()));
+  }
+
+  /** A model seat closes under its bound execution account's project write permission. */
+  public Closed closeForAccount(Close request, String account) {
     BoardTopic topic = openTopic(request.topic());
+    if (account == null || !members.mayWork(topic.project(), account))
+      throw new Refused("Closing a board topic requires project write permission");
+    return close(request, topic);
+  }
+
+  @Override
+  public Closed close(Close request, BoardTopic topic) {
+    Objects.requireNonNull(topic, "topic");
+    if (!request.topic().equals(topic.id()))
+      throw new Refused("Closing topic differs from its snapshot");
     requireText(request.body(), "resolution");
+    var citationTopics = store.citationTopics(request.cites());
     for (String cited : request.cites()) {
-      BoardMessage message =
-          store
-              .message(cited)
-              .orElseThrow(() -> new Refused("there is no message " + cited + " to cite"));
-      if (!message.topic().equals(topic.id())) {
+      String citedTopic = citationTopics.get(cited);
+      if (citedTopic == null) throw new Refused("there is no message " + cited + " to cite");
+      if (!citedTopic.equals(topic.id())) {
         throw new Refused(
             "message "
                 + cited
                 + " is on topic "
-                + message.topic()
+                + citedTopic
                 + "; a resolution cites what was said on its own topic");
       }
     }
@@ -998,8 +1011,7 @@ public final class Board {
     BoardTopic selected = openTopic(topicId);
     if (store.messagingTopic(selected.id()))
       throw new Refused("Private message instances use their own lifecycle controls");
-    members.requireRole(
-        selected.project(), account, io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR);
+    members.requireRole(selected.project(), account, ProjectRole.CONTRIBUTOR);
     String rootId = selected.root();
     List<Seated> seated = new ArrayList<>();
     Set<String> targets = new LinkedHashSet<>();

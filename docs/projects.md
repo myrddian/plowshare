@@ -647,7 +647,9 @@ automatic grants; capacity already granted remains available. Legacy YAML uses
 
 This setting covers execution steps and model-call budgets. Command approvals,
 cancellation, failed-check/stuck decisions, time-limit policy and separately funded
-board/message leases keep their existing controls. Finite `autoContinue` remains
+board leases keep their existing controls. Messaging renews its own per-message
+allowance under this policy, without raising the shared history conversation’s
+allowance. Approval continuations retain the same message accounting source. Finite `autoContinue` remains
 available for orchestration caps when automatic increases are off. Grants never
 reset spending or lift a ceiling entirely; integer accounting bounds still stop
 further growth. Each approved model-call chunk permits additional model use.

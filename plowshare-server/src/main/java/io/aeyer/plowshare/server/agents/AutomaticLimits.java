@@ -47,9 +47,13 @@ public final class AutomaticLimits {
   }
 
   private ProjectCaps policy(ConversationRecord owner, String session) {
+    return policy(owner, session, false);
+  }
+
+  private ProjectCaps policy(ConversationRecord owner, String session, boolean message) {
     if (owner == null
         || owner.origin() == Origin.ORCHESTRATION
-        || owner.origin() == Origin.BOARD
+        || owner.origin() == Origin.BOARD && !message
         || owner.home().isGlobal()) return ProjectCaps.NONE;
     return caps.apply(owner.home().project(), session);
   }
@@ -62,12 +66,17 @@ public final class AutomaticLimits {
       Transcript transcript) {
     if (!budget.exhausted()) return false;
     var owner = owner(conversation);
-    var policy = policy(owner, session);
+    var policy = policy(owner, session, budget.isMessageOwned());
     if (!policy.increasesAutomatically()) return false;
     int chunk =
         policy.budget().value() == null ? definition.maxModelCalls() : policy.budget().value();
     boolean increased =
-        budget.increaseIfExhausted(chunk, total -> grant.commit(owner.id(), total, budget.spent()));
+        budget.increaseIfExhausted(
+            chunk,
+            total -> {
+              if (budget.isMessageOwned()) budget.increaseMessageTo(total);
+              else grant.commit(owner.id(), total, budget.spent());
+            });
     if (increased)
       transcript.record(
           LoggedEntry.diagnostic(
@@ -86,8 +95,21 @@ public final class AutomaticLimits {
       AgentDefinition definition,
       String session,
       Transcript transcript) {
+    return steps(conversation, cap, taken, definition, session, transcript, null);
+  }
+
+  /** Message execution uses its own allowance while retaining the existing project step policy. */
+  public boolean steps(
+      String conversation,
+      TurnCap cap,
+      int taken,
+      AgentDefinition definition,
+      String session,
+      Transcript transcript,
+      Budget allowance) {
     if (!cap.stops(taken)) return false;
-    var policy = policy(owner(conversation), session);
+    var policy =
+        policy(owner(conversation), session, allowance != null && allowance.isMessageOwned());
     if (!policy.increasesAutomatically() || taken == Integer.MAX_VALUE) return false;
     int chunk = policy.steps().value() == null ? definition.maxTurns() : policy.steps().value();
     int next = (int) Math.min(Integer.MAX_VALUE, (long) taken + chunk);

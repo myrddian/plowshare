@@ -1,15 +1,24 @@
 package io.aeyer.plowshare.server.events;
 
-import io.aeyer.plowshare.server.agents.*;
-import io.aeyer.plowshare.server.archive.*;
-import io.aeyer.plowshare.server.board.*;
+import io.aeyer.plowshare.server.agents.ApplicationResources;
+import io.aeyer.plowshare.server.agents.Callers;
+import io.aeyer.plowshare.server.agents.OrchestrationResolver;
+import io.aeyer.plowshare.server.agents.SkillResolver;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.board.ProjectMessageRouting;
 import io.aeyer.plowshare.server.cache.ProjectionCaches;
 import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.SessionChannel;
-import io.aeyer.plowshare.server.session.*;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.session.PresenceRegistry;
+import io.aeyer.plowshare.server.session.SessionRegistry;
+import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Composition only. Files and repositories expose typed contracts to scheduling logic. */
@@ -29,8 +38,8 @@ public class ScheduleDefinitionConfig {
         schedules,
         triggers,
         firings,
-        caches.create("schedule-file-v1", java.util.Set.of(Domain.SCHEDULES, Domain.AUTHORITY)),
-        caches.create("schedule-files-v1", java.util.Set.of(Domain.SCHEDULES, Domain.AUTHORITY)));
+        caches.create("schedule-file-v1", Set.of(Domain.SCHEDULES, Domain.AUTHORITY)),
+        caches.create("schedule-files-v1", Set.of(Domain.SCHEDULES, Domain.AUTHORITY)));
   }
 
   @Bean
@@ -52,7 +61,7 @@ public class ScheduleDefinitionConfig {
       SkillResolver skills,
       ObjectProvider<OrchestrationResolver> orchestrations,
       ProjectMessageRouting routing,
-      ObjectProvider<BoardMessaging> messages) {
+      ObjectProvider<MessageService> messages) {
     return (source, definition) ->
         new ScheduleActionAuthority(
                 files,

@@ -169,6 +169,14 @@ export function constrain(graph) {
         );
       if (k === 'requestId') add(v, { pattern: uuid });
     }
+    // Operation-specific bounds follow generic defaults so narrower identities stay narrow.
+    if (op === 'board.close') {
+      field(s, 'topic', {pattern:'^bdt_[A-Za-z0-9]+$', minLength:5, maxLength:256});
+      field(s, 'body', {...text(16000,1),maxUtf8Bytes:64000,nonblank:true});
+      field(s, 'requestId', {pattern:uuid});
+      field(s, 'project', {...identity,maxLength:256});
+      if(s.properties?.cites)s.properties.cites={type:'array',maxItems:200,items:{type:'string',pattern:'^bdm_[A-Za-z0-9]+$',minLength:5,maxLength:256}};
+    }
     if (op === 'orchestration.repair') {
       const checkpoint = nested(s, 'checkpoint');
       const digest = { pattern: '^sha256:[a-f0-9]{64}$' };
@@ -499,7 +507,7 @@ export function constrain(graph) {
       field(shape,'project',{...identity,maxLength:256});
       for(const k of ['topic','parentTopic']) field(shape,k,{...portName,maxLength:1024});
       field(shape,'group',{...portName,maxLength:140});
-      for(const k of ['consumerId','requestId','batchId']) field(shape,k,canonicalUuid);
+      for(const k of ['consumerId','requestId','batchId','generation']) field(shape,k,canonicalUuid);
       for(const k of ['position','through','expiredThrough','fence']) field(shape,k,decimal);
       field(shape,'position',{disallow:['0']}); field(shape,'fence',{disallow:['0']});
       for(const k of ['occurredAt','publishedAt','expiresAt']) field(shape,k,instant);
@@ -517,6 +525,17 @@ export function constrain(graph) {
       rules(reply,{eq:[eq('status','DATA'),present('events')]},{eq:[eq('status','GAP'),present('expiredThrough')]});
     }
   }
+  for (const shape of [resolve(graph,graph.inputs['relay.group.delete']),resolve(graph,graph.results['relay.group.delete'])]) {
+    field(shape,'project',{...identity,maxLength:256});
+    field(shape,'topic',{...portName,maxLength:1024});
+    field(shape,'group',{...portName,maxLength:140});
+    field(shape,'generation',canonicalUuid);
+  }
+  for(const shape of [resolve(graph,graph.inputs['relay.group.inspect']),resolve(graph,graph.results['relay.group.inspect'])]) {
+    field(shape,'project',{...identity,maxLength:256});field(shape,'topic',{...portName,maxLength:1024});
+    field(shape,'group',{...portName,maxLength:140});field(shape,'generation',canonicalUuid);
+  }
+  rules(resolve(graph,graph.results['relay.group.inspect']),{eq:[present('generation'),eq('exists',true)]});
   const claim = resolve(graph, graph.results['outgoing.claim']);
   rules(
     claim,
@@ -833,5 +852,28 @@ export function constrain(graph) {
   const toolRead=resolve(graph,graph.inputs['tool.invocation.read']);
   field(toolRead,'project',{...identity,maxLength:256}); field(toolRead,'invocation',canonicalUuid);
   annotatePush(push);
+  // Binary HTTP uses the same DTO graph without inventing WebSocket operations.
+  for (const [name, ref] of Object.entries(graph.http ?? {})) {
+    const s = resolve(graph, ref);
+    for (const row of [s, nested(s, 'publication')].filter(Boolean)) {
+      field(row, 'requestId', canonicalUuid);
+      field(row, 'eventId', canonicalUuid);
+      field(row, 'project', { ...identity, maxLength: 256 });
+      for (const key of ['topic', 'parentTopic'])
+        field(row, key, { ...portName, maxLength: 1024 });
+      field(row, 'group', { ...portName, maxLength: 140 });
+      for (const key of ['correlationId', 'parentEventId'])
+        field(row, key, { ...identity, maxLength: 256 });
+      for (const key of ['occurredAt', 'publishedAt']) field(row, key, {...instant,pattern:'^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,9})?(?:Z|[+-]\\d\\d:\\d\\d)$'});
+      field(row, 'position', { ...decimal, disallow: ['0'] });
+      field(row, 'mediaType', {
+        maxLength: 255,
+        pattern:
+          '^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$',
+      });
+    }
+    if (name === 'RelayBlobPublish')
+      rules(s, { eq: [present('parentTopic'), present('parentEventId')] });
+  }
   return graph;
 }

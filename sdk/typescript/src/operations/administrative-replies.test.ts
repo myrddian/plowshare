@@ -381,6 +381,7 @@ describe('complete administrative WS replies', () => {
       ['BoardRetried', 'server/ws/BoardPostingFrames', 'RetryReceipt', []],
       ['BoardPosted', 'server/ws/BoardPostingFrames', 'Receipt', []],
       ['BoardOpened', 'server/ws/BoardPostingFrames', 'OpenReceipt', []],
+      ['BoardClosed', 'server/board/BoardClosing', 'Receipt', []],
       [
         'BoardTopic',
         'server/board/BoardTopic',

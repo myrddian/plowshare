@@ -1,5 +1,10 @@
 # Send an A2A message from Plowshare
 
+This manual describes the retained implementation. Slice 5 adds a separate
+[Relay outbound worker](a2a-relay-outbound.md); the inbound/core cutover is still
+blocked by the [reviewed public capability gaps](decisions/0065-a2a-relay-adapter-contracts-and-capability-gaps.md).
+Existing SDK operations remain available until their consumers can migrate safely.
+
 Configure and run the outgoing adapter, then grant the outgoing tools to the
 Plowshare agent that will use it. That agent calls `outgoing_peers` to discover
 remote Agent Cards and `outgoing_send` to send a message to a selected peer.

@@ -12,7 +12,9 @@ import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.EntryRecord;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.Origin;
+import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,7 +73,7 @@ class LearningWindowTest {
     // its pre-existing V40 foreign key into firings. Postgres refuses to
     // truncate conversations unless every one of these goes with it.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     entries = new EntryStore(jdbc);
   }
@@ -244,14 +246,12 @@ class LearningWindowTest {
     conversations.moveTo(root, ConversationLifecycle.ARCHIVED);
 
     LearningWindow first = LearningWindow.next(entries, conversations).orElseThrow();
-    entries.markLearned(first.conversationId(), first.ordinals(), java.time.Instant.now());
+    entries.markLearned(first.conversationId(), first.ordinals(), Instant.now());
 
     LearningWindow second = LearningWindow.next(entries, conversations).orElseThrow();
-    entries.markLearned(second.conversationId(), second.ordinals(), java.time.Instant.now());
+    entries.markLearned(second.conversationId(), second.ordinals(), Instant.now());
 
-    assertEquals(
-        java.util.Set.of(root, child),
-        java.util.Set.of(first.conversationId(), second.conversationId()));
+    assertEquals(Set.of(root, child), Set.of(first.conversationId(), second.conversationId()));
     assertTrue(LearningWindow.next(entries, conversations).isEmpty());
   }
 
@@ -317,7 +317,7 @@ class LearningWindowTest {
   void a_window_already_given_is_not_offered_again() {
     String conversation = folded(PAYMENTS, "we roll back on red");
     LearningWindow window = LearningWindow.next(entries, conversations).orElseThrow();
-    entries.markLearned(conversation, window.ordinals(), java.time.Instant.now());
+    entries.markLearned(conversation, window.ordinals(), Instant.now());
 
     assertTrue(LearningWindow.next(entries, conversations).isEmpty());
   }

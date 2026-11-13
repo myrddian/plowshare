@@ -1,12 +1,15 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.events.EventPayload;
 import io.aeyer.plowshare.server.events.FiringStore;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
@@ -51,8 +54,9 @@ public final class JdbcRelayNativeRepository implements RelayNativeRepository {
           var found =
               jdbc.query(
                   """
-          SELECT t.account,p.id AS project_id FROM firings f JOIN board_topics t ON t.id=f.topic
-          JOIN projects p ON p.name=t.project WHERE f.id=? AND f.target=? AND f.status='queued'
+          SELECT coalesce(t.account,i.account) AS account,p.id AS project_id FROM firings f
+          LEFT JOIN board_topics t ON t.id=f.topic LEFT JOIN message_instances i ON i.id=f.message_instance
+          JOIN projects p ON p.name=coalesce(t.project,i.project) WHERE f.id=? AND f.target=? AND f.status='queued'
           AND jsonb_exists(f.data,'direct_message')=?
           """,
                   (row, index) ->
@@ -87,12 +91,12 @@ public final class JdbcRelayNativeRepository implements RelayNativeRepository {
 
   @Override
   public boolean routes(String target) {
-    io.aeyer.plowshare.server.events.EventPayload.identity(target, "wake target");
+    EventPayload.identity(target, "wake target");
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
             """
         SELECT EXISTS(SELECT 1 FROM relay_native_consumers WHERE target=?)
-          OR EXISTS(SELECT 1 FROM firings WHERE target=? AND topic IS NOT NULL AND status='queued')
+          OR EXISTS(SELECT 1 FROM firings WHERE target=? AND (topic IS NOT NULL OR message_instance IS NOT NULL) AND status='queued')
         """,
             Boolean.class,
             target,
@@ -194,7 +198,7 @@ public final class JdbcRelayNativeRepository implements RelayNativeRepository {
           WHERE id=? AND target=? AND status='queued'
           AND NOT EXISTS(SELECT 1 FROM firings WHERE target=? AND status='started' AND finished_at IS NULL)
           """,
-                      OffsetDateTime.ofInstant(at, java.time.ZoneOffset.UTC),
+                      OffsetDateTime.ofInstant(at, ZoneOffset.UTC),
                       firing,
                       actual.target(),
                       actual.target())
@@ -205,7 +209,7 @@ public final class JdbcRelayNativeRepository implements RelayNativeRepository {
   }
 
   @Override
-  public int prune(java.time.Duration retention, int limit) {
+  public int prune(Duration retention, int limit) {
     new Relay.Policy(retention, null);
     RelayValues.limit(limit, 1000);
     return transactions.inTransaction(
@@ -233,7 +237,7 @@ public final class JdbcRelayNativeRepository implements RelayNativeRepository {
             LEFT JOIN relay_native_consumers n USING(scope_key,topic,subscriber)
             WHERE s.scope_key='system' AND s.topic IN ('message.wake.requested','board.wake.requested')
               AND s.subscriber LIKE 'builtin.wakes.%'
-              AND (n.target IS NULL OR NOT EXISTS(SELECT 1 FROM conversations c WHERE c.id=substring(n.target FROM 14)))
+              AND (n.target IS NULL OR NOT EXISTS(SELECT 1 FROM conversations c WHERE c.id=split_part(substring(n.target FROM 14),':instance:',1)))
               AND NOT EXISTS(SELECT 1 FROM relay_consumer_leases l WHERE l.scope_key=s.scope_key
                 AND l.topic=s.topic AND l.subscriber=s.subscriber AND l.lease_until>clock_timestamp())
               AND (n.target IS NULL OR NOT EXISTS(SELECT 1 FROM firings f WHERE f.target=n.target

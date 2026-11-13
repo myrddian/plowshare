@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.board;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,7 +25,7 @@ public class JdbcBoardPostRepository implements BoardPostRepository {
     Objects.requireNonNull(action);
     try {
       return JSON.writeValueAsString(action);
-    } catch (java.io.IOException invalid) {
+    } catch (IOException invalid) {
       throw new IllegalStateException("unencodable board action", invalid);
     }
   }
@@ -33,16 +34,22 @@ public class JdbcBoardPostRepository implements BoardPostRepository {
   public Optional<String> lockAndRead(String account, UUID request, Action action) {
     Objects.requireNonNull(account);
     Objects.requireNonNull(request);
-    String identity = identity(action);
     jdbc.queryForObject(
         "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
         Boolean.class,
         account + ":" + request);
+    return find(account, request, action);
+  }
+
+  @Override
+  public Optional<String> find(String account, UUID request, Action action) {
+    Objects.requireNonNull(account);
+    Objects.requireNonNull(request);
     var receipts =
         jdbc.query(
             "SELECT message_id,payload=CAST(? AS jsonb) AS matches FROM board_post_receipts WHERE account=? AND request_id=?",
             (row, n) -> new Receipt(row.getString(1), row.getBoolean(2)),
-            identity,
+            identity(action),
             account,
             request);
     if (receipts.isEmpty()) return Optional.empty();

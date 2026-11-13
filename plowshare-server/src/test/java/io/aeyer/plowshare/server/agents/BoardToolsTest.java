@@ -73,7 +73,13 @@ class BoardToolsTest {
   void a_member_gets_read_post_document_and_pass_and_the_opener_close_instead_of_pass() {
     FakeSeat seat = new FakeSeat();
     assertEquals(
-        List.of("board_read", "board_post", "board_document", "board_pass", "board_request_topic"),
+        List.of(
+            "board_read",
+            "board_post",
+            "board_document",
+            "board_pass",
+            "board_request_topic",
+            "board_close"),
         BoardTools.forMember(seat, new TurnEnd()).stream().map(t -> t.schema().name()).toList());
     assertEquals(
         List.of("board_read", "board_post", "board_document", "board_close", "board_decide"),

@@ -1,21 +1,25 @@
 package io.aeyer.plowshare.server.agents;
 
+import io.aeyer.plowshare.protocol.ContainedProjects;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.archive.ArchiveException;
 import io.aeyer.plowshare.server.archive.ConversationLifecycle;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.archive.TurnHistoryRepository;
 import io.aeyer.plowshare.server.archive.TurnRecord;
-import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -94,7 +98,7 @@ public final class Turn {
 
   private final JobStore jobs;
   private final ConversationStore conversations;
-  private final TurnStore turns;
+  private final TurnHistoryRepository turns;
   private final Compaction compaction;
 
   /**
@@ -106,6 +110,18 @@ public final class Turn {
    * of the process. The refusal names the conversation, which is what a person asked about.
    */
   private final Set<String> speaking = ConcurrentHashMap.newKeySet();
+
+  private final ConcurrentMap<String, Set<String>> messageRuns = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, String> ordinaryKeys = new ConcurrentHashMap<>();
+
+  private static String messageKey(String conversation, String agent) {
+    return conversation + "\u0000message:" + agent;
+  }
+
+  /** Other definitions sharing this history do not hold this instance's execution slot. */
+  public boolean isMessageSpeaking(String conversation, String agent) {
+    return speaking.contains(messageKey(conversation, agent));
+  }
 
   /**
    * Told every time a turn or a resume in some conversation ends, after that conversation is free
@@ -120,19 +136,36 @@ public final class Turn {
   /** A continuation of a delegation whose parent owns an external allowance (board seats). */
   public record DelegatedAllowance(Budget budget, Runnable settled) {}
 
-  private volatile java.util.function.Function<ConversationRecord, DelegatedAllowance>
-      delegatedAllowances =
-          row -> {
-            throw new Refused("this parent has no live allowance for a delegated continuation");
-          };
+  private volatile Function<ConversationRecord, DelegatedAllowance> delegatedAllowances =
+      row -> {
+        throw new Refused("this parent has no live allowance for a delegated continuation");
+      };
 
-  public void useDelegatedAllowances(
-      java.util.function.Function<ConversationRecord, DelegatedAllowance> allowances) {
+  public void useDelegatedAllowances(Function<ConversationRecord, DelegatedAllowance> allowances) {
     delegatedAllowances = Objects.requireNonNull(allowances, "allowances");
   }
 
   public boolean isSpeaking(String conversation) {
-    return speaking.contains(conversation);
+    return speaking.contains(conversation) || messageRuns.containsKey(conversation);
+  }
+
+  private boolean claimExecution(String conversation, String agent, boolean message) {
+    String key = messageKey(conversation, agent);
+    if (!message && !speaking.add(conversation)) return false;
+    if (!speaking.add(key)) {
+      if (!message) speaking.remove(conversation);
+      return false;
+    }
+    if (message)
+      messageRuns.compute(
+          conversation,
+          (history, keys) -> {
+            if (keys == null) keys = ConcurrentHashMap.newKeySet();
+            keys.add(key);
+            return keys;
+          });
+    else ordinaryKeys.put(conversation, key);
+    return true;
   }
 
   /** Tell {@code listener} each time a conversation can take another turn. */
@@ -150,7 +183,21 @@ public final class Turn {
    * leave every other one waiting.
    */
   private void free(String conversation) {
-    speaking.remove(conversation);
+    free(conversation, conversation);
+  }
+
+  private void free(String key, String conversation) {
+    if (key.equals(conversation)) {
+      String definitionKey = ordinaryKeys.remove(conversation);
+      if (definitionKey != null) speaking.remove(definitionKey);
+    } else
+      messageRuns.computeIfPresent(
+          conversation,
+          (id, keys) -> {
+            keys.remove(key);
+            return keys.isEmpty() ? null : keys;
+          });
+    speaking.remove(key);
     for (Consumer<String> listener : freed) {
       try {
         listener.accept(conversation);
@@ -173,7 +220,10 @@ public final class Turn {
   }
 
   public Turn(
-      JobStore jobs, ConversationStore conversations, TurnStore turns, Compaction compaction) {
+      JobStore jobs,
+      ConversationStore conversations,
+      TurnHistoryRepository turns,
+      Compaction compaction) {
     this.jobs = Objects.requireNonNull(jobs, "jobs");
     this.conversations = Objects.requireNonNull(conversations, "conversations");
     this.turns = Objects.requireNonNull(turns, "turns");
@@ -1015,9 +1065,10 @@ public final class Turn {
    * @param speaker who is speaking — every door names one, so the utterance {@link JobRuntime}
    *     records carries it on the turn's transcript rather than through {@link JobStore#submit}
    * @param given a lease the caller hands this turn to spend instead of the conversation's own
-   *     allowance — only {@link #speakToSeat} passes one, because a seat's row holds none (its
-   *     wakes spend the root topic's pot, spec 2026-09-29 §4). When non-null nothing is granted and
-   *     nothing is written back to the row: the board settles the lease.
+   *     allowance — {@link #speakToSeat} and message handling pass one, because a seat's row holds
+   *     none (its wakes spend the root topic's pot, spec 2026-09-29 §4). When non-null nothing is
+   *     written back to the conversation row. Board settles its lease; messaging spends and renews
+   *     its independently bound canonical allowance.
    */
   private String speak(
       String conversation,
@@ -1114,10 +1165,12 @@ public final class Turn {
             .find(conversation)
             .orElseThrow(() -> new ArchiveException("no conversation has the id " + conversation));
     String id = record.id();
+    String execution =
+        given != null && given.isMessageOwned() ? messageKey(id, definition.name()) : id;
 
     // Claimed before the budget is read, not after: two utterances arriving
     // together must not both get past a check on the same row.
-    if (!speaking.add(id)) {
+    if (!claimExecution(id, definition.name(), !execution.equals(id))) {
       throw new Refused(
           "conversation "
               + id
@@ -1170,12 +1223,11 @@ public final class Turn {
       boolean savingRetainedReport =
           budget.exhausted()
               && record.origin() == Origin.ORCHESTRATION
-              && io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
-                  definition.prompt())
+              && ScriptProgram.isScript(definition.prompt())
               && pendingReportRetry.test(id);
       boolean automaticBudgetGrant =
           admission == null
-              && given == null
+              && (given == null || given.isMessageOwned())
               && !savingRetainedReport
               && budget.durable()
               && !definition.nativeOnly()
@@ -1232,7 +1284,7 @@ public final class Turn {
               // parent's.
               transcript.closed(utterance, outcome);
             } finally {
-              free(id);
+              free(execution, id);
               try {
                 alsoEnded.accept(outcome);
               } catch (RuntimeException broken) {
@@ -1273,7 +1325,7 @@ public final class Turn {
       return job;
     } finally {
       if (!started) {
-        free(id);
+        free(execution, id);
       }
     }
   }
@@ -1370,7 +1422,7 @@ public final class Turn {
     // Claimed before anything is read, on speak's reasoning exactly: two
     // grants arriving together must not both get past a check on the same
     // row and start two runs continuing the same turn.
-    if (!speaking.add(id)) {
+    if (!claimExecution(id, definition.name(), false)) {
       throw new Refused(
           "conversation "
               + id
@@ -1565,7 +1617,7 @@ public final class Turn {
   private static void requireContainedLog(ConversationRecord record) {
     if (record.origin() != Origin.CONTAINED
         || record.home().isGlobal()
-        || !io.aeyer.plowshare.protocol.ContainedProjects.name(record.home().project())) {
+        || !ContainedProjects.name(record.home().project())) {
       throw new Refused(
           "conversation "
               + record.id()

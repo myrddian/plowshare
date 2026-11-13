@@ -1,8 +1,10 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Envelope;
+import io.aeyer.plowshare.server.search.QueryKey;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /** Validated transport scheduling metadata. It never admits domain authority. */
 record DispatchPolicy(Kind kind, List<Resource> resources) {
@@ -194,18 +196,20 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
       return new DispatchPolicy(Kind.OBSERVER, List.of());
     if (request.actingFor() != null)
       return resource("acting", connection, request.actingFor().context().toString());
+    if (type.equals("relay.group.inspect")) return new DispatchPolicy(Kind.FINITE, List.of());
     if (independentRead(type)) return new DispatchPolicy(Kind.FINITE, List.of());
     if (type.equals("web.search")) {
       Object query = payload.get("query");
       Object max = payload.get("max");
       return query instanceof String text && max instanceof Integer limit && limit > 0
-          ? resource(
-              "search-results", "server", io.aeyer.plowshare.server.search.QueryKey.of(text, limit))
+          ? resource("search-results", "server", QueryKey.of(text, limit))
           : barrier();
     }
     if (type.equals("document.search") || type.equals("information.search"))
       return new DispatchPolicy(Kind.FINITE, List.of());
-    if (type.equals("relay.publish") || type.equals("relay.ack")) {
+    if (type.equals("relay.publish")
+        || type.equals("relay.ack")
+        || type.equals("relay.group.delete")) {
       Object project = payload.get("project");
       Object topic = payload.get("topic");
       Object group = payload.get("group");
@@ -243,7 +247,7 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
 
   private static DispatchPolicy uuidResource(String family, String scope, String identity) {
     try {
-      return resource(family, scope, java.util.UUID.fromString(identity).toString());
+      return resource(family, scope, UUID.fromString(identity).toString());
     } catch (IllegalArgumentException malformed) {
       return barrier();
     }

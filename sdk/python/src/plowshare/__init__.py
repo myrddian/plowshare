@@ -19,6 +19,7 @@ from .credentials import (
     configuration_directory,
     connection_key,
 )
+from .relay_blobs import publish_relay_blob, read_relay_blob
 from .tool_journal import SqliteToolJournal
 from .tools import (
     Parameter,
@@ -36,6 +37,8 @@ from .tools import (
 
 __all__ = [
     "ActingSelection",
+    "publish_relay_blob",
+    "read_relay_blob",
     "Authentication",
     "AuthenticationError",
     "AuthenticationUnavailable",

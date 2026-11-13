@@ -511,6 +511,7 @@ public final class FrameTypes {
   public static final String BOARD_TOPUP = "board.topup";
   public static final String BOARD_POST = "board.post";
   public static final String BOARD_OPEN = "board.open";
+  public static final String BOARD_CLOSE = "board.close";
 
   /** Human member recovery, with a stable request identity and one-wake step limit. */
   public static final String BOARD_RETRY = "board.retry";
@@ -791,6 +792,9 @@ public final class FrameTypes {
   public static final String RELAY_PUBLISH = "relay.publish";
   public static final String RELAY_CONSUME = "relay.consume";
   public static final String RELAY_ACK = "relay.ack";
+
+  public static final String RELAY_GROUP_DELETE = "relay.group.delete";
+  public static final String RELAY_GROUP_INSPECT = "relay.group.inspect";
 
   public static final String ORCHESTRATION_START = "orchestration.start";
 

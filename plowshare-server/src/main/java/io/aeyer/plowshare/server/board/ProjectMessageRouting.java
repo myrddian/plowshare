@@ -1,9 +1,13 @@
 package io.aeyer.plowshare.server.board;
 
+import io.aeyer.plowshare.protocol.ContainedProjects;
+import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageService;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -14,11 +18,13 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Server workspace policy, re-read for each new message; a checkout cannot grant server access. */
 @Component
-public final class ProjectMessageRouting implements BoardMessaging.Routing {
+public final class ProjectMessageRouting implements MessageService.Routing {
   private static final int FILE_BYTES = 65536;
   private final ProjectStore projects;
   private final ProjectMembers members;
@@ -29,7 +35,7 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
     this(projects, members, new MessagingProperties(), null);
   }
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public ProjectMessageRouting(
       ProjectStore projects,
       ProjectMembers members,
@@ -42,19 +48,19 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
   }
 
   private record Policy(
-      List<String> acceptFrom, List<String> sendTo, Map<String, BoardMessaging.Address> routes) {
+      List<String> acceptFrom, List<String> sendTo, Map<String, MessageService.Address> routes) {
     static final Policy CLOSED = new Policy(List.of(), List.of(), Map.of());
   }
 
   @Override
-  public BoardMessaging.Address resolve(
+  public MessageService.Address resolve(
       String account, String source, String project, String to, String route) {
     if (route == null)
-      return new BoardMessaging.Address(
+      return new MessageService.Address(
           PersonalSpaces.resolveAddress(project == null ? source : project, account), to);
-    BoardMessaging.Address address = policy(source).routes().get(route);
+    MessageService.Address address = policy(source).routes().get(route);
     if (address == null) throw new Board.Refused("No configured route with that name.");
-    return new BoardMessaging.Address(
+    return new MessageService.Address(
         PersonalSpaces.resolveAddress(address.project(), account),
         address.to(),
         address.conversation(),
@@ -69,8 +75,7 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
   @Override
   public void require(String account, String source, String destination) {
     if (!members.mayWork(source, account))
-      throw new io.aeyer.plowshare.server.faults.CallerFault(
-          "This account needs CONTRIBUTOR access to send project messages");
+      throw new CallerFault("This account needs CONTRIBUTOR access to send project messages");
     // ADR 0042, list (c). Messaging is a narrowing of the existing Relay and Application scoping
     // and not a forwarding surface: a child cannot message anything its container cannot, and
     // there is no path here by which a request is re-proved against containment and then
@@ -82,8 +87,7 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
     // messaging endpoint at all in this slice, its own included, because nothing executes a child
     // yet and admitting the self-addressed case would be an endpoint nobody mediates. It is also
     // ahead of the route policy, so the refusal names containment rather than an absent route.
-    if (io.aeyer.plowshare.protocol.ContainedProjects.name(source)
-        || io.aeyer.plowshare.protocol.ContainedProjects.name(destination))
+    if (ContainedProjects.name(source) || ContainedProjects.name(destination))
       throw new Board.Refused(
           "A contained Application's project is not a messaging endpoint; every edge in or out"
               + " belongs to its container.");
@@ -122,8 +126,7 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
   private Policy policy(String project) {
     if (ClientProjects.privateProject(project)) return Policy.CLOSED;
     var recorded = projects.find(project);
-    var personalRoot =
-        personal == null ? java.util.Optional.<Path>empty() : personal.workspace(project);
+    var personalRoot = personal == null ? Optional.<Path>empty() : personal.workspace(project);
     if (recorded.isEmpty() && personalRoot.isEmpty()) return Policy.CLOSED;
     ProjectRecord row = recorded.orElse(null);
     try {
@@ -146,7 +149,7 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
         throw new Board.Refused("Invalid project routing manifest identity or version.");
       var routing = manifest.routing();
       if (routing == null) return Policy.CLOSED;
-      Map<String, BoardMessaging.Address> routes = new LinkedHashMap<>();
+      Map<String, MessageService.Address> routes = new LinkedHashMap<>();
       int bytes = text.getBytes(StandardCharsets.UTF_8).length;
       for (String file : routing.routeFiles()) {
         String contents = read(row, root, file, false);
@@ -182,10 +185,8 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
     // retaining all explicit/mandatory exclusions; ordinary route files use the normal fence.
     var fence =
         optional
-            ? io.aeyer.plowshare.protocol.FileAccess.of(List.of(path), exclusions)
-            : row == null
-                ? io.aeyer.plowshare.protocol.FileAccess.of(List.of(root), exclusions)
-                : row.reach(exclusions);
+            ? FileAccess.of(List.of(path), exclusions)
+            : row == null ? FileAccess.of(List.of(root), exclusions) : row.reach(exclusions);
     if (!fence.permits(path))
       throw new Board.Refused("Project routing file is outside the permitted workspace.");
     if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))

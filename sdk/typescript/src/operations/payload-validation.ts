@@ -361,6 +361,8 @@ export const SHAPES: Record<
     ['project', 'topic', 'group', 'consumerId', 'start'],
     ['limit', 'waitMs'],
   ],
+  'relay.group.inspect': [['project', 'topic', 'group'], []],
+  'relay.group.delete': [['project', 'topic', 'group', 'generation'], []],
   'relay.ack': [
     ['project', 'topic', 'group', 'consumerId', 'batchId', 'fence'],
     ['expiredThrough'],
@@ -939,6 +941,7 @@ export const SHAPES: Record<
   ],
   'board.retry': [['project', 'topic', 'member', 'requestId', 'maxTurns'], []],
   'board.post': [['project', 'topic', 'body', 'requestId'], []],
+  'board.close': [['project', 'topic', 'body', 'requestId'], ['cites']],
   'provider.list': [[], []],
   'provider.deregister': [['provider'], []],
   'inbox.list': [[], ['unread', 'offset', 'limit']],
@@ -1190,6 +1193,53 @@ export function commandProblem(
   if (type.startsWith('tool.scope.')) return problem(type, body);
   if (type === 'board.open' && 'swarm' in body && !swarmName(body['swarm']))
     return 'Choose a valid named swarm type';
+  if (type === 'board.close') {
+    const project = body['project'],
+      topic = body['topic'],
+      text = body['body'],
+      cites = body['cites'];
+    if (
+      typeof project !== 'string' ||
+      !project ||
+      project.length > 256 ||
+      project.trim() !== project ||
+      Array.from(project).some((c) => {
+        const point = c.codePointAt(0);
+        return (
+          point !== undefined &&
+          (point < 32 ||
+            (point >= 127 && point <= 159) ||
+            point === 0x2028 ||
+            point === 0x2029)
+        );
+      })
+    )
+      return 'Closing requires a bounded project identity';
+    if (
+      typeof topic !== 'string' ||
+      topic.length > 256 ||
+      !/^bdt_[A-Za-z0-9]+$/.test(topic) ||
+      typeof text !== 'string' ||
+      !text.trim() ||
+      text.length > 16000 ||
+      text.includes('\0') ||
+      Array.from(text).some((c) => {
+        const point = c.codePointAt(0);
+        return point !== undefined && point >= 0xd800 && point <= 0xdfff;
+      }) ||
+      utf8Length(text) > 64000 ||
+      (cites !== undefined &&
+        (!isList(cites) ||
+          cites.length > 200 ||
+          cites.some(
+            (value) =>
+              typeof value !== 'string' ||
+              value.length > 256 ||
+              !/^bdm_[A-Za-z0-9]+$/.test(value),
+          )))
+    )
+      return 'Closing requires a bounded resolution, topic identity and message citations';
+  }
   // Relay positions are decimal strings, rather than the legacy numeric paging fields.
   if (type.startsWith('relay.')) return relayPayloadProblem(type, body);
   if (
@@ -1199,6 +1249,7 @@ export function commandProblem(
     type === 'orchestration.repair' ||
     type === 'board.post' ||
     type === 'board.open' ||
+    type === 'board.close' ||
     type === 'board.retry' ||
     type === 'outgoing.send' ||
     type === 'message.instance.open'
@@ -1416,6 +1467,7 @@ export function commandProblem(
   ]) {
     if (!(key in body)) continue;
     const value = body[key];
+    if (type === 'board.close' && key === 'cites') continue; // Validated above with board identity and size bounds.
     if (type === 'document.detail' && key === 'scope') continue; // Validated structured Information scope above.
     if (key === 'choices') continue; // JSON value; the server owns the question's structure.
     if (key === 'data') {

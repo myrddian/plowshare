@@ -5,8 +5,13 @@ import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.relay.tools.RelayToolAuthority;
+import io.aeyer.plowshare.server.relay.tools.RelayToolProperties;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Configured project ports derive publisher identity from authentication. System ingress is absent.
@@ -19,7 +24,7 @@ public final class ProjectRelayPorts implements RelayPorts {
   private final ProjectWorkspaces projects;
   private final int maxDepth;
   private final RelayPublicationSignals signals;
-  private final io.aeyer.plowshare.server.relay.tools.RelayToolAuthority tools;
+  private final RelayToolAuthority tools;
 
   public ProjectRelayPorts(
       Relay relay,
@@ -28,14 +33,7 @@ public final class ProjectRelayPorts implements RelayPorts {
       ProjectMembers members,
       ProjectWorkspaces projects,
       int maxDepth) {
-    this(
-        relay,
-        repository,
-        properties,
-        members,
-        projects,
-        maxDepth,
-        new io.aeyer.plowshare.server.relay.tools.RelayToolProperties());
+    this(relay, repository, properties, members, projects, maxDepth, new RelayToolProperties());
   }
 
   public ProjectRelayPorts(
@@ -45,7 +43,7 @@ public final class ProjectRelayPorts implements RelayPorts {
       ProjectMembers members,
       ProjectWorkspaces projects,
       int maxDepth,
-      io.aeyer.plowshare.server.relay.tools.RelayToolAuthority tools) {
+      RelayToolAuthority tools) {
     this(
         relay,
         repository,
@@ -67,7 +65,7 @@ public final class ProjectRelayPorts implements RelayPorts {
       ProjectMembers members,
       ProjectWorkspaces projects,
       int maxDepth,
-      io.aeyer.plowshare.server.relay.tools.RelayToolAuthority tools,
+      RelayToolAuthority tools,
       RelayPublicationSignals signals) {
     this.signals = Objects.requireNonNull(signals);
     this.tools = Objects.requireNonNull(tools);
@@ -87,6 +85,11 @@ public final class ProjectRelayPorts implements RelayPorts {
       RelayPortProperties.Direction direction,
       String group) {
     return require(account, project, topic, direction, group, true);
+  }
+
+  @Override
+  public Relay.TopicKey authorizePublisher(String account, String project, String topic) {
+    return require(account, project, topic, RelayPortProperties.Direction.INGRESS, null);
   }
 
   private Relay.TopicKey require(
@@ -168,6 +171,7 @@ public final class ProjectRelayPorts implements RelayPorts {
             RelayPortProperties.Direction.INGRESS,
             null);
     if (!topic.equals(current)) throw new CallerFault("Relay publication project changed");
+    repository.rememberPublisher(account);
     relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     Instant occurred = RelayValues.time(request.occurredAt());
     var publication =
@@ -198,12 +202,11 @@ public final class ProjectRelayPorts implements RelayPorts {
   @Override
   public RelayPort.Batch observe(
       String account, RelayPort.Consume request, RelayReadBudget budget, Runnable validity) {
-    java.util.Objects.requireNonNull(budget);
-    java.util.Objects.requireNonNull(validity).run();
+    Objects.requireNonNull(budget);
+    Objects.requireNonNull(validity).run();
     long deadline =
         System.nanoTime()
-            + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(
-                request.waitMs() == null ? 0 : request.waitMs());
+            + TimeUnit.MILLISECONDS.toNanos(request.waitMs() == null ? 0 : request.waitMs());
     var selected =
         require(
             account,
@@ -216,9 +219,12 @@ public final class ProjectRelayPorts implements RelayPorts {
     // This is only an in-memory waiter address; it creates no durable subscriber or cursor.
     try (var waiting = signals.listen(new Relay.SubscriptionKey(selected, "port.wait"))) {
       var topic = selected;
+      UUID generation = null;
       while (true) {
         validity.run();
-        var batch = repository.consume(topic, account, request, budget);
+        var consumed = repository.consumeObserved(topic, account, request, budget, generation);
+        generation = consumed.generation();
+        var batch = consumed.batch();
         validity.run();
         long remaining = deadline - System.nanoTime();
         if (batch.status() != RelayPort.Status.EMPTY || remaining <= 0) return batch;
@@ -227,9 +233,9 @@ public final class ProjectRelayPorts implements RelayPorts {
           // authorizes delivery; every subsequent read repeats current port/membership checks.
           long interval =
               Math.min(
-                  java.time.Duration.ofSeconds(1).toNanos(),
-                  signals.reconciliationWait(java.time.Duration.ofMillis(100)).toNanos());
-          waiting.await(java.time.Duration.ofNanos(Math.min(remaining, interval)));
+                  Duration.ofSeconds(1).toNanos(),
+                  signals.reconciliationWait(Duration.ofMillis(100)).toNanos());
+          waiting.await(Duration.ofNanos(Math.min(remaining, interval)));
           topic =
               require(
                   account,
@@ -257,5 +263,24 @@ public final class ProjectRelayPorts implements RelayPorts {
             request.group()),
         account,
         request);
+  }
+
+  private Relay.TopicKey sdkGroup(String account, String project, String topic, String group) {
+    // Tool providers retain their own lifecycle, including when they hold a dynamic port grant.
+    if (topic.startsWith("tool."))
+      throw new CallerFault("Relay tool groups have their own lifecycle");
+    return require(account, project, topic, RelayPortProperties.Direction.EGRESS, group, false);
+  }
+
+  @Override
+  public RelayPort.GroupDeleted deleteGroup(String account, RelayPort.DeleteGroup request) {
+    return repository.deleteGroup(
+        sdkGroup(account, request.project(), request.topic(), request.group()), account, request);
+  }
+
+  @Override
+  public RelayPort.GroupState inspectGroup(String account, RelayPort.GroupQuery query) {
+    return repository.inspectGroup(
+        sdkGroup(account, query.project(), query.topic(), query.group()), account, query);
   }
 }

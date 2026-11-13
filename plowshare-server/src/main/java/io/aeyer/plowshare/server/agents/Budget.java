@@ -4,8 +4,13 @@ import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.allowances.AllowanceSnapshot;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 
 /**
  * How many model calls a run — and everything it delegates to — may still make.
@@ -87,26 +92,43 @@ public final class Budget {
    */
   private volatile Integer limit;
 
-  private final java.util.UUID identity;
+  private final UUID identity;
 
   /** Immutable evidence of one successful claim, including its ceiling at claim time. */
-  public record Claim(java.util.UUID budget, int ordinal, Integer limit, String conversation) {
-    public Claim(java.util.UUID budget, int ordinal, Integer limit) {
+  public record Claim(UUID budget, int ordinal, Integer limit, String conversation) {
+    public Claim(UUID budget, int ordinal, Integer limit) {
       this(budget, ordinal, limit, null);
     }
   }
 
-  private java.util.function.Supplier<java.util.Optional<Claim>> durableClaim;
-  private java.util.function.Consumer<Integer> durableLimit;
-  private java.util.function.Supplier<AllowanceSnapshot> durableSnapshot;
+  private Supplier<Optional<Claim>> durableClaim;
+  private Consumer<Integer> durableLimit;
+  private Supplier<AllowanceSnapshot> durableSnapshot;
   private boolean windowed;
+  private boolean messageOwned;
+
+  /**
+   * Identifies a retained message source; automatic renewal must update this source, not history.
+   */
+  public void messageOwned() {
+    messageOwned = true;
+  }
+
+  public boolean isMessageOwned() {
+    return messageOwned;
+  }
+
+  /** Commits a policy-authorized message ceiling while retaining every prior canonical claim. */
+  public void increaseMessageTo(int total) {
+    if (!messageOwned || durableLimit == null)
+      throw new IllegalStateException("No owned message allowance");
+    durableLimit.accept(total);
+  }
+
   private int lastSourceOrdinal;
 
   /** A wake's finite scheduling window draws claims from the root's canonical allowance. */
-  public static Budget boardLease(
-      java.util.UUID source,
-      int window,
-      java.util.function.Supplier<java.util.Optional<Claim>> claim) {
+  public static Budget boardLease(UUID source, int window, Supplier<Optional<Claim>> claim) {
     if (window < 1) throw new IllegalArgumentException("Positive wake window required");
     Budget lease = new Budget(window, null, Objects.requireNonNull(source));
     lease.windowed = true;
@@ -114,7 +136,7 @@ public final class Budget {
     return lease;
   }
 
-  public java.util.UUID identity() {
+  public UUID identity() {
     return identity;
   }
 
@@ -128,17 +150,15 @@ public final class Budget {
   }
 
   /** Binds canonical spending independently of the input/history conversation. */
-  public void bindAllowance(
-      java.util.function.Supplier<java.util.Optional<Claim>> claim,
-      java.util.function.Consumer<Integer> ceiling) {
+  public void bindAllowance(Supplier<Optional<Claim>> claim, Consumer<Integer> ceiling) {
     bindAllowance(claim, ceiling, null);
   }
 
   /** Refresh exhausted local snapshots before the existing automatic-increase policy decides. */
   public void bindAllowance(
-      java.util.function.Supplier<java.util.Optional<Claim>> claim,
-      java.util.function.Consumer<Integer> ceiling,
-      java.util.function.Supplier<AllowanceSnapshot> snapshot) {
+      Supplier<Optional<Claim>> claim,
+      Consumer<Integer> ceiling,
+      Supplier<AllowanceSnapshot> snapshot) {
     claiming.lock();
     try {
       durableClaim = Objects.requireNonNull(claim);
@@ -153,7 +173,7 @@ public final class Budget {
     return durableClaim != null;
   }
 
-  public static Budget restored(java.util.UUID id, Integer limit, int spent) {
+  public static Budget restored(UUID id, Integer limit, int spent) {
     if (spent < 0 || limit != null && limit < 0)
       throw new IllegalArgumentException("Invalid retained conversation allowance");
     Budget budget = new Budget(limit, null, id);
@@ -170,10 +190,10 @@ public final class Budget {
   }
 
   private Budget(Integer limit, Runnable charge) {
-    this(limit, charge, java.util.UUID.randomUUID());
+    this(limit, charge, UUID.randomUUID());
   }
 
-  private Budget(Integer limit, Runnable charge, java.util.UUID identity) {
+  private Budget(Integer limit, Runnable charge, UUID identity) {
     this.identity = Objects.requireNonNull(identity);
     this.limit = limit;
     this.charge = charge;
@@ -333,12 +353,12 @@ public final class Budget {
   }
 
   /** Claims once under the same lock as operator changes and durable charges. */
-  public java.util.Optional<Claim> tryClaim() {
+  public Optional<Claim> tryClaim() {
     claiming.lock();
     try {
       if (durableClaim != null) {
-        if (windowed && spent.get() >= limit) return java.util.Optional.empty();
-        java.util.Optional<Claim> claimed = durableClaim.get();
+        if (windowed && spent.get() >= limit) return Optional.empty();
+        Optional<Claim> claimed = durableClaim.get();
         if (claimed.isPresent()) {
           Claim claim = claimed.get();
           if (windowed) {
@@ -362,20 +382,20 @@ public final class Budget {
         return claimed;
       }
       Integer ceiling = limit;
-      if (ceiling != null && spent.get() >= ceiling) return java.util.Optional.empty();
+      if (ceiling != null && spent.get() >= ceiling) return Optional.empty();
       if (spent.get() == Integer.MAX_VALUE)
         throw new IllegalStateException("Model allowance counter exhausted");
       if (charge != null) charge.run();
       Claim claim = new Claim(identity, spent.get() + 1, ceiling);
       spent.incrementAndGet();
-      return java.util.Optional.of(claim);
+      return Optional.of(claim);
     } finally {
       claiming.unlock();
     }
   }
 
   /** The harness grants a finite chunk only at exhaustion, committing before the ceiling moves. */
-  boolean increaseIfExhausted(int chunk, java.util.function.IntConsumer commit) {
+  boolean increaseIfExhausted(int chunk, IntConsumer commit) {
     if (chunk < 1) throw new IllegalArgumentException("positive increase required");
     claiming.lock();
     try {

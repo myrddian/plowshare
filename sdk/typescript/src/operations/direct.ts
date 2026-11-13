@@ -248,6 +248,8 @@ export const VALIDATED_OPERATIONS: readonly Operation[] = [
   'relay.publish',
   'relay.consume',
   'relay.ack',
+  'relay.group.delete',
+  'relay.group.inspect',
   'relay.process',
   'relay.topics',
   'relay.log',
@@ -397,7 +399,9 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
   if (
     asked.type === 'relay.publish' ||
     asked.type === 'relay.consume' ||
-    asked.type === 'relay.ack'
+    asked.type === 'relay.ack' ||
+    asked.type === 'relay.group.delete' ||
+    asked.type === 'relay.group.inspect'
   ) {
     if (outcome.code !== 'OK') return { kind: 'refused', outcome };
     try {
@@ -415,6 +419,16 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
           batch.group === asked.payload.group &&
           batch.consumerId === asked.payload.consumerId &&
           batch.events.length <= (asked.payload.limit ?? 100);
+      }
+      if (asked.type === 'relay.group.inspect')
+        matches &&=
+          decodeReply('relay.group.inspect', outcome.payload).group ===
+          asked.payload.group;
+      if (asked.type === 'relay.group.delete') {
+        const deleted = decodeReply('relay.group.delete', outcome.payload);
+        matches &&=
+          deleted.group === asked.payload.group &&
+          deleted.generation === asked.payload.generation;
       }
       if (asked.type === 'relay.ack') {
         const ack = decodeReply('relay.ack', outcome.payload);

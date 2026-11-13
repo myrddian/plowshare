@@ -1,11 +1,18 @@
 package io.aeyer.plowshare.server.board;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.archive.ArchiveConfig;
 import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.events.JdbcFiringStore;
+import io.aeyer.plowshare.server.messaging.MessageInboxes;
+import io.aeyer.plowshare.server.testing.AuthorityFixtures;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,7 +28,7 @@ final class BoardFixture {
 
   /** Everything a board test writes, and everything that references it. */
   static final String TRUNCATE =
-      "TRUNCATE TABLE firings, board_seats, board_messages,"
+      "TRUNCATE TABLE relay_topics,relay_payloads,relay_source_events,firings, board_seats, board_messages,"
           + " board_topics, user_inbox, triggers, schedules, digests, digest_children,"
           + " digest_memories, digest_spans, digest_revisions, memory_provenance,"
           + " conversations, turns, compactions, entries, citations, orchestrations,"
@@ -36,17 +43,16 @@ final class BoardFixture {
   final FiringStore firings;
   final BoardStore store;
   final List<String> drained = new ArrayList<>();
+  final List<MessageInboxes> messageInboxes = new ArrayList<>();
 
   /** Strictly advancing, so minted ids sort by arrival (DispatcherTest's reason). */
   final Supplier<Instant> clock;
 
   BoardFixture(DriverManagerDataSource source) {
     jdbc = new JdbcTemplate(source);
-    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(jdbc, TRUNCATE);
+    AuthorityFixtures.truncate(jdbc, TRUNCATE);
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
-    work =
-        new io.aeyer.plowshare.server.archive.ArchiveConfig()
-            .unitOfWork(new DataSourceTransactionManager(source));
+    work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
     AtomicLong ticks = new AtomicLong();
     Instant start = Instant.parse("2026-09-30T09:00:00Z");
     clock = () -> start.plusMillis(ticks.getAndIncrement());
@@ -56,6 +62,8 @@ final class BoardFixture {
   }
 
   Board board(SwarmDefinitions.SwarmDefinition swarm) {
+    ProjectMembers members = mock(ProjectMembers.class);
+    when(members.mayWork("payments", "enzo")).thenReturn(true);
     return new Board(
         store,
         project -> List.of(swarm),
@@ -65,7 +73,7 @@ final class BoardFixture {
         work,
         () -> 10,
         clock,
-        org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class));
+        members);
   }
 
   /** A topic a bot opened from its person's conversation in the project "payments". */

@@ -25,6 +25,7 @@ import io.aeyer.plowshare.server.agents.BoundTools;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
+import io.aeyer.plowshare.server.agents.ShippedDefinitions;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.scribe.Scribe;
 import io.aeyer.plowshare.server.archive.Archive;
@@ -45,6 +46,7 @@ import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.nio.file.Path;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -126,7 +128,7 @@ class LearnerTest {
     // its pre-existing V40 foreign key into firings. Postgres refuses to
     // truncate conversations unless every one of these goes with it.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     entries = new EntryStore(jdbc);
     conversation = conversations.open(PAYMENTS, Budget.of(20)).id();
@@ -448,9 +450,7 @@ class LearnerTest {
   }
 
   private static AgentDefinition shipped() {
-    return io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(
-            BoundTools.boundByThisServer())
-        .get(Learner.AGENT);
+    return ShippedDefinitions.registry(BoundTools.boundByThisServer()).get(Learner.AGENT);
   }
 
   // --- the fixture ---------------------------------------------------------------
@@ -513,10 +513,10 @@ class LearnerTest {
   }
 
   private Instant learnedAt(int ordinal) {
-    java.sql.Timestamp stamped =
+    Timestamp stamped =
         jdbc.queryForObject(
             "SELECT learned_at FROM entries WHERE conversation_id = ? AND ordinal = ?",
-            java.sql.Timestamp.class,
+            Timestamp.class,
             conversation,
             ordinal);
     return stamped == null ? null : stamped.toInstant();

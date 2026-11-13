@@ -1,6 +1,11 @@
 package io.aeyer.plowshare.protocol;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -25,11 +30,10 @@ public final class RelayPort {
 
   public static String hash(String text) {
     try {
-      return java.util.HexFormat.of()
+      return HexFormat.of()
           .formatHex(
-              java.security.MessageDigest.getInstance("SHA-256")
-                  .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-    } catch (java.security.NoSuchAlgorithmException unavailable) {
+              MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
+    } catch (NoSuchAlgorithmException unavailable) {
       throw new IllegalStateException("SHA-256 unavailable", unavailable);
     }
   }
@@ -100,7 +104,11 @@ public final class RelayPort {
     BUSY
   }
 
-  /** Same group shares a cursor; a different consumer cannot take an unexpired batch. */
+  /**
+   * Same group shares a cursor; a different consumer cannot take an unexpired batch. Generation
+   * identifies that cursor's incarnation, never acknowledgement authority. It is nullable only for
+   * compatibility with older responses; current consumption returns it even for empty/busy reads.
+   */
   public record Consume(
       String project,
       String topic,
@@ -132,8 +140,38 @@ public final class RelayPort {
       String through,
       Instant expiresAt,
       String expiredThrough,
-      List<RelayLog.Event> events) {
+      List<RelayLog.Event> events,
+      String generation) {
+    /** Retains source compatibility with servers/fixtures predating group retirement. */
+    public Batch(
+        String project,
+        String topic,
+        String group,
+        String consumerId,
+        Status status,
+        String batchId,
+        String fence,
+        String through,
+        Instant expiresAt,
+        String expiredThrough,
+        List<RelayLog.Event> events) {
+      this(
+          project,
+          topic,
+          group,
+          consumerId,
+          status,
+          batchId,
+          fence,
+          through,
+          expiresAt,
+          expiredThrough,
+          events,
+          null);
+    }
+
     public Batch {
+      if (generation != null) uuid(generation);
       identity(project);
       RelayPort.topic(topic);
       RelayPort.group(group);
@@ -158,6 +196,56 @@ public final class RelayPort {
         if (position <= previous || position > decimal(through)) throw invalid();
         previous = position;
       }
+    }
+  }
+
+  /** Exact read-only group selection; inspection never registers a cursor or issues a batch. */
+  public record GroupQuery(String project, String topic, String group) {
+    public GroupQuery {
+      identity(project);
+      RelayPort.topic(topic);
+      RelayPort.group(group);
+    }
+  }
+
+  /**
+   * Observed current incarnation, including absence; not an acknowledgement or mutation receipt.
+   */
+  public record GroupState(
+      String project,
+      String topic,
+      String group,
+      @JsonProperty(required = true) String generation,
+      boolean exists) {
+    public GroupState {
+      identity(project);
+      RelayPort.topic(topic);
+      RelayPort.group(group);
+      if (generation != null) uuid(generation);
+      if (exists != (generation != null)) throw invalid();
+    }
+  }
+
+  /**
+   * Explicit retirement of an inspected SDK cursor. A recreated group's UUID fences stale removal.
+   */
+  public record DeleteGroup(String project, String topic, String group, String generation) {
+    public DeleteGroup {
+      identity(project);
+      RelayPort.topic(topic);
+      RelayPort.group(group);
+      uuid(generation);
+    }
+  }
+
+  /** Removed is false when the group was already absent; no cursor is created by this operation. */
+  public record GroupDeleted(
+      String project, String topic, String group, String generation, boolean removed) {
+    public GroupDeleted {
+      identity(project);
+      RelayPort.topic(topic);
+      RelayPort.group(group);
+      uuid(generation);
     }
   }
 

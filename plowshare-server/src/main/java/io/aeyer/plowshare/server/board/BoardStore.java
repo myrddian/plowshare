@@ -1,6 +1,11 @@
 package io.aeyer.plowshare.server.board;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.MemoryIds;
+import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.allowances.AllowanceSnapshot;
@@ -15,9 +20,12 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -27,7 +35,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Every statement against the board's tables — spec 2026-09-29 §4. Plain JdbcTemplate, as {@code
  * OrchestrationStore} is; each state change is a guarded UPDATE that says whether it won.
  */
-public class BoardStore {
+public class BoardStore implements BoardRecords {
 
   public static final String TOPIC_PREFIX = "bdt_";
   public static final String MESSAGE_PREFIX = "bdm_";
@@ -153,7 +161,7 @@ public class BoardStore {
   public boolean messagingTopic(String id) {
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM board_message_instances WHERE topic = ?)",
+            "SELECT EXISTS (SELECT 1 FROM message_instances WHERE former_topic = ?)",
             Boolean.class,
             id));
   }
@@ -169,7 +177,7 @@ public class BoardStore {
             + ","
             + " (SELECT count(*) FROM board_messages m WHERE m.topic = t.id) AS messages,"
             + " (SELECT count(*) FROM board_messages m WHERE m.topic = t.id AND m.kind = 'document') AS documents"
-            + " FROM board_allowance_state t WHERE NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = t.id)"
+            + " FROM board_allowance_state t WHERE NOT EXISTS (SELECT 1 FROM message_instances i WHERE i.former_topic = t.id)"
             + " AND (account = ? OR project = ?::text) AND (?::text IS NULL OR project = ?)"
             + " AND (NOT ? OR closed_at IS NULL) ORDER BY (closed_at IS NOT NULL), opened_at DESC, id"
             + " OFFSET ? LIMIT ?",
@@ -202,7 +210,7 @@ public class BoardStore {
             + " LEFT JOIN LATERAL (SELECT status, job_id, reason, finished_at FROM firings"
             + " WHERE topic = s.topic AND target = 'conversation:' || s.conversation"
             + " ORDER BY (status = 'started' AND finished_at IS NULL) DESC, arrived_at DESC, id DESC LIMIT 1) f ON TRUE"
-            + " WHERE NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = t.id)"
+            + " WHERE NOT EXISTS (SELECT 1 FROM message_instances i WHERE i.former_topic = t.id)"
             + " AND (t.account = ? OR t.id = ?::text) AND (?::text IS NULL OR t.id = ?)"
             + " AND (NOT ? OR t.closed_at IS NULL) ORDER BY t.opened_at, s.occupant COLLATE \"C\"",
         (rs, n) ->
@@ -248,26 +256,26 @@ public class BoardStore {
 
   /** Root policy snapshot; IDs stay internal rather than becoming a public board mutation API. */
   public AllowanceSnapshot allowance(String root) {
-    java.util.UUID id =
+    UUID id =
         jdbc.queryForObject(
             "SELECT allowance_id FROM board_topics WHERE id=? AND parent IS NULL",
-            java.util.UUID.class,
+            UUID.class,
             root);
     return allowances.find(new AllowanceId(id)).orElseThrow();
   }
 
   /** Short independent transaction: validate open lifecycle, then claim the common counter. */
-  public Optional<io.aeyer.plowshare.server.agents.Budget.Claim> claim(String root, int reserve) {
+  public Optional<Budget.Claim> claim(String root, int reserve) {
     TransactionTemplate spending =
         new TransactionTemplate(
             new DataSourceTransactionManager(Objects.requireNonNull(jdbc.getDataSource())));
     spending.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     return spending.execute(
         status -> {
-          List<java.util.UUID> sources =
+          List<UUID> sources =
               jdbc.query(
                   "SELECT allowance_id FROM board_topics WHERE id=? AND parent IS NULL AND state<>'closed' FOR UPDATE",
-                  (r, n) -> r.getObject(1, java.util.UUID.class),
+                  (r, n) -> r.getObject(1, UUID.class),
                   root);
           if (sources.isEmpty()) return Optional.empty();
           return allowances.claim(new AllowanceId(sources.getFirst()), reserve);
@@ -348,7 +356,7 @@ public class BoardStore {
         "SELECT "
             + TOPIC_COLUMNS
             + " FROM board_allowance_state WHERE closed_at IS"
-            + " NULL AND NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = board_allowance_state.id)"
+            + " NULL AND NOT EXISTS (SELECT 1 FROM message_instances i WHERE i.former_topic = board_allowance_state.id)"
             + " ORDER BY opened_at, id",
         BoardStore::topicRow);
   }
@@ -430,10 +438,9 @@ public class BoardStore {
   }
 
   public void topup(String root, int total, int reserve) {
-    org.springframework.transaction.support.TransactionTemplate transaction =
-        new org.springframework.transaction.support.TransactionTemplate(
-            new org.springframework.jdbc.datasource.DataSourceTransactionManager(
-                Objects.requireNonNull(jdbc.getDataSource())));
+    TransactionTemplate transaction =
+        new TransactionTemplate(
+            new DataSourceTransactionManager(Objects.requireNonNull(jdbc.getDataSource())));
     transaction.executeWithoutResult(
         status -> {
           // lockTopic already returns the snapshot protected by the retained row lock.
@@ -606,6 +613,24 @@ public class BoardStore {
             id)
         .stream()
         .findFirst();
+  }
+
+  /** Resolves citation scope in one bounded query without loading message bodies. */
+  public Map<String, String> citationTopics(List<String> ids) {
+    if (ids.isEmpty()) return Map.of();
+    if (ids.size() > 200) throw new Board.Refused("At most 200 board citations");
+    return jdbc
+        .query(
+            connection -> {
+              var statement =
+                  connection.prepareStatement(
+                      "SELECT id,topic FROM board_messages WHERE id=ANY(?)");
+              statement.setArray(1, connection.createArrayOf("text", ids.toArray()));
+              return statement;
+            },
+            (row, number) -> Map.entry(row.getString("id"), row.getString("topic")))
+        .stream()
+        .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 
   /**
@@ -837,16 +862,16 @@ public class BoardStore {
     return rs.wasNull() ? null : value;
   }
 
-  private static final com.fasterxml.jackson.databind.ObjectMapper SWARM_JSON =
-      new com.fasterxml.jackson.databind.ObjectMapper()
-          .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  private static final ObjectMapper SWARM_JSON =
+      new ObjectMapper()
+          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
   private static String encodeSwarm(SwarmSelection selection) {
     if (selection == null) return null;
     try {
       return SWARM_JSON.writeValueAsString(selection);
-    } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
+    } catch (JsonProcessingException failed) {
       throw new IllegalStateException("The swarm selection could not be encoded", failed);
     }
   }
@@ -855,7 +880,7 @@ public class BoardStore {
     if (value == null) return null;
     try {
       return SWARM_JSON.readValue(value, SwarmSelection.class);
-    } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
+    } catch (JsonProcessingException failed) {
       throw new IllegalStateException("The retained swarm selection is invalid", failed);
     }
   }

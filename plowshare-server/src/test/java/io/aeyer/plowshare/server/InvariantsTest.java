@@ -68,53 +68,13 @@ import org.junit.jupiter.api.io.TempDir;
  * #the_guard_can_see_the_files_it_asserts_over()} requires every one of the four needles to match
  * somewhere the invariant deliberately allows.
  *
- * <h2>The {@code OkHttpClient} count's scope, because it was unwritten</h2>
+ * <h2>The HTTP client inventory's scope</h2>
  *
- * <p>"Exactly seven" is a {@code main}-only claim, and there is more than one wider answer. Over
- * every tracked {@code .java} file the same import is also held by the tests that drive the real
- * client against a real server, which legitimately need one. Over the <b>whole tracked tree</b> it
- * is higher again: the slice plans quote the import in prose, and no {@code .java} scan reads a
- * Markdown file. All three are correct answers to "how many", differing only by a scope that until
- * now lived in an operator's head, so a bare "seven" told a reader nothing they could check.
- *
- * <p><b>This paragraph has gone stale twice, and holds no count of the tree at all as a result.</b>
- * It first said "five" for the whole tracked tree where the answer was six — the same fault the
- * paragraph is about, committed inside it. The numbers were then computed in the assertion message
- * and the sentence above kept its <em>own</em> copies anyway, so "five, the two extra being
- * EndToEndTest and FileChannelTest" was wrong again within the slice that wrote it.
- *
- * <p><b>And the correction that removed those copies left one of its own behind</b>: a count of the
- * holders <em>outside</em> {@code main}, sitting in the sentence that says no count here survives.
- * It was accurate when written and is still accurate now — which is the point. A correct number in
- * a paragraph arguing that this file keeps none is simply the next one to go stale, and it would
- * have gone stale silently, because nothing computes it and nothing asserts it. It is gone for the
- * same reason the others are.
- *
- * <p><b>Measured, by tripping this assertion on purpose:</b> the message computes every wider
- * number and lists every file, so the rule here is to say nothing that the failure does not already
- * say better. The one number this file still writes down is the invariant's own — <b>seven, in
- * {@code main}</b> — because that is the thing being asserted rather than a fact about the tree,
- * and changing it is changing the rule. It was three until the search feature added {@code
- * RemoteSearchProvider}, {@code SearchConfig} and {@code SearchRegistrar}, sharing one client
- * between them — {@code HTTP_CLIENT_HOLDERS}' own javadoc carries the argument for why three files
- * around one shared client is not the same claim as three separate files each configuring their
- * own, which is what this invariant exists to catch. It went to seven when the fetch slice added
- * {@code BuiltinFetcher}, which is not a repeat of that same argument: it is built to take an
- * injected client rather than configure one of its own, the same shape the search three already
- * use, and {@code FetchConfig#pageFetcher} is what hands it the search package's one client, in
- * {@code fetch}'s own configuration class rather than in {@code SearchConfig} — see {@code
- * HTTP_CLIENT_HOLDERS}' own javadoc, updated again, for why a fourth class of endpoint (an
- * arbitrary origin an agent names at request time, rather than one this server or an operator
- * already knew) is the shape of that seventh holder's claim, and for why the wiring landing in a
- * class this test does not name — {@code FetchConfig} carried it three commits later, not {@code
- * SearchConfig}. This paragraph and the two it points to predicted the wiring rather than reporting
- * it, and then went stale the moment the prediction was overtaken and nothing came back to correct
- * the prose. Fixed here rather than left as the tripwire it had become.
- *
- * <p>{@link #an_http_client_is_held_by_declared_files_in_main()} therefore names its scope in the
- * assertion message and <b>computes</b> every wider number beside it, rather than this javadoc
- * keeping a copy of any of them. It also asserts the seven by name and not by count, so a swap —
- * one holder deleted, a different file gaining the import — cannot net out to seven and pass.
+ * <p>The guard names allowed holders across core, SDK and integration main sources, rather than
+ * keeping a numerical count that can survive a swap of one holder for another. The assertion
+ * computes wider test/documentation counts separately. The A2A holder is the external adapter's
+ * existing, explicitly configured HTTP boundary; expanding its wildcard import makes that ownership
+ * visible without introducing a new core HTTP client.
  *
  * <h2>What this does not cover</h2>
  *
@@ -407,6 +367,7 @@ class InvariantsTest {
 
   private static final List<String> HTTP_CLIENT_HOLDERS =
       List.of(
+          "A2aClient.java",
           "BuiltinFetcher.java",
           "OpenAiTransport.java",
           "RemoteSearchProvider.java",

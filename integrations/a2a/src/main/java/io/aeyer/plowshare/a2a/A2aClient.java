@@ -1,31 +1,47 @@
 package io.aeyer.plowshare.a2a;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aeyer.plowshare.a2a.relay.RemotePeer;
+import io.aeyer.plowshare.protocol.AgentCard;
+import io.aeyer.plowshare.protocol.ExternalMessage;
+import io.aeyer.plowshare.sdk.AgentCardCodec;
+import io.aeyer.plowshare.sdk.ExternalPayloadCodec;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.*;
-import okhttp3.*;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
+import okhttp3.HttpUrl;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 /**
  * A2A 1.0 JSON-RPC sender. Explicit peer URLs and credentials belong to the adapter. Remote
  * messages and artifacts are validated shared DTOs; no local filesystem is advertised.
  */
-public final class A2aClient implements AutoCloseable {
+public final class A2aClient implements RemotePeer {
   public static final class InvalidMessage extends IOException {
     InvalidMessage(String message) {
       super(message);
     }
   }
 
-  public record Observation(
-      String state,
-      String task,
-      String context,
-      io.aeyer.plowshare.protocol.ExternalResult result,
-      String error) {}
-
-  private static final ObjectMapper JSON = new ObjectMapper();
+  private static final ObjectMapper JSON =
+      new ObjectMapper()
+          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   private static final Set<String> STATES =
       Set.of(
           "SUBMITTED",
@@ -40,7 +56,7 @@ public final class A2aClient implements AutoCloseable {
   private final HttpUrl endpoint;
   private final HttpUrl cardUrl;
   private final String bearer;
-  private io.aeyer.plowshare.protocol.AgentCard cachedCard;
+  private AgentCard cachedCard;
   private long cardExpires;
   private String cardEtag;
   private String cardModified;
@@ -83,7 +99,7 @@ public final class A2aClient implements AutoCloseable {
             .retryOnConnectionFailure(false)
             .addNetworkInterceptor(
                 chain -> {
-                  var sent = chain.request().tag(java.util.concurrent.atomic.AtomicBoolean.class);
+                  var sent = chain.request().tag(AtomicBoolean.class);
                   if (sent != null && !sent.compareAndSet(false, true))
                     throw new IOException("A2A request replay is disabled");
                   return chain.proceed(chain.request());
@@ -95,7 +111,7 @@ public final class A2aClient implements AutoCloseable {
    * Fetch the public card before advertising/claiming, with bounded conditional caching. Bearer
    * credentials are sent to a card URL only on the configured RPC origin.
    */
-  public synchronized io.aeyer.plowshare.protocol.AgentCard agentCard() throws IOException {
+  public synchronized AgentCard agentCard() throws IOException {
     long now = System.currentTimeMillis();
     if (cachedCard != null && now < cardExpires) return cachedCard;
     var request =
@@ -103,9 +119,7 @@ public final class A2aClient implements AutoCloseable {
             .url(cardUrl)
             .header("Accept", "application/json")
             .header("A2A-Version", "1.0")
-            .tag(
-                java.util.concurrent.atomic.AtomicBoolean.class,
-                new java.util.concurrent.atomic.AtomicBoolean());
+            .tag(AtomicBoolean.class, new AtomicBoolean());
     if (cardEtag != null) request.header("If-None-Match", cardEtag);
     else if (cardModified != null) request.header("If-Modified-Since", cardModified);
     if (bearer != null
@@ -114,7 +128,7 @@ public final class A2aClient implements AutoCloseable {
         && endpoint.host().equals(cardUrl.host())
         && endpoint.port() == cardUrl.port()) request.header("Authorization", "Bearer " + bearer);
     try (Response response = http.newCall(request.build()).execute()) {
-      io.aeyer.plowshare.protocol.AgentCard card;
+      AgentCard card;
       if (response.code() == 304 && cachedCard != null) card = cachedCard;
       else {
         if (!response.isSuccessful() || response.body() == null)
@@ -126,19 +140,16 @@ public final class A2aClient implements AutoCloseable {
           bytes = input.readNBytes(64 * 1024 + 1);
         }
         if (bytes.length > 64 * 1024) throw new IOException("A2A Agent Card exceeds 64 KiB");
-        JsonNode value = JSON.readTree(bytes);
+        JsonNode value = readJson(bytes);
         AgentCards.validate(value, endpoint);
-        card =
-            io.aeyer.plowshare.sdk.AgentCardCodec.read(
-                new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+        card = AgentCardCodec.read(new String(bytes, StandardCharsets.UTF_8));
       }
       String cache =
           response
               .header("Cache-Control", response.code() == 304 ? cardCacheControl : "")
               .toLowerCase(Locale.ROOT);
       long seconds = 300;
-      var age =
-          java.util.regex.Pattern.compile("(?:^|[,\\s])max-age\\s*=\\s*\"?(\\d+)").matcher(cache);
+      var age = Pattern.compile("(?:^|[,\\s])max-age\\s*=\\s*\"?(\\d+)").matcher(cache);
       if (age.find()) {
         try {
           seconds = Math.min(300, Long.parseLong(age.group(1)));
@@ -167,12 +178,11 @@ public final class A2aClient implements AutoCloseable {
     }
   }
 
-  public Observation send(UUID identity, io.aeyer.plowshare.protocol.ExternalMessage content)
-      throws IOException {
+  public Observation send(UUID identity, ExternalMessage content) throws IOException {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(content, "content");
     var outgoing = JSON.valueToTree(content);
-    var message = (com.fasterxml.jackson.databind.node.ObjectNode) outgoing;
+    var message = (ObjectNode) outgoing;
     // Adapter-controlled ids/role preserve the outbox identity across observation recovery.
     message.put("messageId", identity.toString());
     message.put("role", "ROLE_USER");
@@ -202,9 +212,7 @@ public final class A2aClient implements AutoCloseable {
         new Request.Builder()
             .url(endpoint)
             .header("A2A-Version", "1.0")
-            .tag(
-                java.util.concurrent.atomic.AtomicBoolean.class,
-                new java.util.concurrent.atomic.AtomicBoolean())
+            .tag(AtomicBoolean.class, new AtomicBoolean())
             .post(RequestBody.create(body, MediaType.get("application/json")));
     if (JSON.valueToTree(params).path("message").path("metadata").has("plowshareCommand"))
       request.header("A2A-Extensions", Receiver.COMMAND_EXTENSION);
@@ -218,7 +226,7 @@ public final class A2aClient implements AutoCloseable {
       try (var input = response.body().byteStream()) {
         byte[] bytes = input.readNBytes(1024 * 1024 + 1);
         if (bytes.length > 1024 * 1024) throw new IOException("A2A response exceeds 1 MiB");
-        JsonNode frame = JSON.readTree(bytes);
+        JsonNode frame = readJson(bytes);
         if (frame == null
             || !frame.isObject()
             || !frame.path("jsonrpc").asText().equals("2.0")
@@ -251,7 +259,7 @@ public final class A2aClient implements AutoCloseable {
         "COMPLETED",
         null,
         optional(message, "contextId"),
-        io.aeyer.plowshare.sdk.ExternalPayloadCodec.result(result.toString()),
+        ExternalPayloadCodec.result(result.toString()),
         null);
   }
 
@@ -272,9 +280,16 @@ public final class A2aClient implements AutoCloseable {
         state.equals("SUBMITTED") ? "WORKING" : state,
         task.get("id").asText(),
         optional(task, "contextId"),
-        io.aeyer.plowshare.sdk.ExternalPayloadCodec.result(
-            JSON.writeValueAsString(Map.of("task", task))),
+        ExternalPayloadCodec.result(JSON.writeValueAsString(Map.of("task", task))),
         null);
+  }
+
+  private static JsonNode readJson(byte[] bytes) throws IOException {
+    try {
+      return JSON.readTree(bytes);
+    } catch (IOException malformed) {
+      throw new IOException("Malformed A2A JSON response; remote outcome is unconfirmed");
+    }
   }
 
   private static String optional(JsonNode value, String key) throws IOException {
