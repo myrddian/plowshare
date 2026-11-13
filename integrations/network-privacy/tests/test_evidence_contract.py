@@ -11,8 +11,10 @@ from uuid import uuid4
 
 from support import CountingCollector, configuration
 
+from plowshare_privacy.collection import changes
 from plowshare_privacy.contracts import (
     IDENTITY_SOURCES,
+    AddressAssignment,
     DeviceIdentity,
     Evidence,
     evidence_kind,
@@ -207,3 +209,150 @@ class IdentityProvenanceTest(unittest.TestCase):
             evidence_kind(replace(decoded["unifi"], evidence="managed_device")),
             "managed_device",
         )
+
+
+ASSIGNED = "192.0.2.12"
+ASSIGNED_MAC = "aa:bb:cc:dd:ee:ff"
+
+
+def raw_assignment(**fields: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "address": ASSIGNED,
+        "mac": ASSIGNED_MAC,
+        "mode": "dhcp_dynamic",
+        "basis": "dhcp_lease",
+        "services": ["home-dns"],
+        "expires_at": STAMP,
+    }
+    row.update(fields)
+    return row
+
+
+def with_addressing(*assignments: dict[str, object]) -> dict[str, object]:
+    raw = raw_evidence()
+    snapshot = raw["snapshot"]
+    assert isinstance(snapshot, dict)
+    snapshot["addressing"] = list(assignments)
+    return raw
+
+
+class AddressingContractTest(unittest.TestCase):
+    def test_snapshot_without_addressing_encodes_exactly_as_before(self) -> None:
+        raw = raw_evidence()
+        evidence = Evidence.decode(raw)
+        self.assertEqual(evidence.snapshot.addressing, ())
+        encoded = evidence.encode()
+        self.assertEqual(
+            encoded, json.dumps(raw, separators=(",", ":"), allow_nan=False)
+        )
+        self.assertNotIn('"addressing"', encoded)
+
+    def test_addressing_round_trips_and_validates(self) -> None:
+        raw = with_addressing(
+            raw_assignment(),
+            raw_assignment(
+                address="192.0.2.13",
+                mode="static",
+                basis="outside_dhcp_range",
+                expires_at=None,
+            ),
+            raw_assignment(
+                address="192.0.2.14",
+                mac=None,
+                mode="unknown",
+                basis=None,
+                services=[],
+                expires_at=None,
+            ),
+        )
+        evidence = Evidence.decode(raw)
+        self.assertEqual(
+            evidence.snapshot.addressing[0],
+            AddressAssignment(
+                ASSIGNED,
+                ASSIGNED_MAC,
+                "dhcp_dynamic",
+                "dhcp_lease",
+                ("home-dns",),
+                STAMP,
+            ),
+        )
+        encoded = evidence.encode()
+        self.assertEqual(
+            encoded, json.dumps(raw, separators=(",", ":"), allow_nan=False)
+        )
+        self.assertEqual(Evidence.decode(json.loads(encoded)), evidence)
+        invalid: tuple[dict[str, object], ...] = (
+            raw_assignment(mode="leased"),
+            raw_assignment(mode="static"),
+            raw_assignment(mode="dhcp_reserved", expires_at=None),
+            raw_assignment(mode="unknown"),
+            raw_assignment(basis=None),
+            raw_assignment(basis="dhcp_reservation", mode="dhcp_dynamic"),
+            raw_assignment(mode="static", basis="dhcp_lease", expires_at=None),
+            raw_assignment(mode="static", basis="outside_dhcp_range", expires_at=STAMP),
+            raw_assignment(mac=None),
+            raw_assignment(mac="not-a-mac"),
+            raw_assignment(services=[]),
+            raw_assignment(services=["a b"]),
+            raw_assignment(services=["home-dns", "home-dns"]),
+            raw_assignment(expires_at="yesterday"),
+            raw_assignment(address="not-an-address"),
+            {**raw_assignment(), "extra": 1},
+        )
+        for assignment in invalid:
+            with self.subTest(assignment=assignment), self.assertRaises(ValueError):
+                Evidence.decode(with_addressing(assignment))
+        with self.assertRaises(ValueError):
+            Evidence.decode(with_addressing(raw_assignment(), raw_assignment()))
+
+    def test_assignment_change_is_reported(self) -> None:
+        def evidence(
+            mode: str, basis: str | None, mac: str | None = ASSIGNED_MAC
+        ) -> Evidence:
+            return Evidence.decode(
+                with_addressing(
+                    raw_assignment(
+                        mode=mode,
+                        basis=basis,
+                        mac=mac,
+                        services=[] if mode == "unknown" else ["home-dns"],
+                        expires_at=None,
+                    )
+                )
+            )
+
+        reserved = evidence("dhcp_reserved", "dhcp_reservation")
+        static = evidence("static", "no_lease_or_reservation")
+        line = "Address assignment at 192.0.2.12 changed: dhcp_reserved -> static"
+        self.assertEqual(
+            changes(reserved, static.snapshot, reserved.scope, ()), (line,)
+        )
+        self.assertEqual(changes(static, static.snapshot, static.scope, ()), ())
+        unknown = evidence("unknown", None)
+        self.assertEqual(changes(reserved, unknown.snapshot, reserved.scope, ()), ())
+        self.assertEqual(changes(unknown, static.snapshot, unknown.scope, ()), ())
+        moved = evidence("static", "outside_dhcp_range", mac="aa:bb:cc:dd:ee:00")
+        self.assertEqual(changes(reserved, moved.snapshot, reserved.scope, ()), ())
+        gap = ("addressing_partial: example gap",)
+        self.assertNotIn(line, changes(reserved, static.snapshot, reserved.scope, gap))
+        self.assertNotIn(
+            line,
+            changes(
+                replace(reserved, issues=gap), static.snapshot, reserved.scope, gap
+            ),
+        )
+        # Device association lines come first, DNS lines after.
+        current = replace(
+            static.snapshot,
+            devices=(
+                replace(
+                    static.snapshot.devices[0],
+                    mac="aa:bb:cc:dd:ee:01",
+                    device_id="mac:aa:bb:cc:dd:ee:01",
+                ),
+            ),
+        )
+        listed = changes(reserved, current, reserved.scope, ())
+        self.assertEqual(listed[-1], line)
+        self.assertTrue(listed[0].startswith("Device association at 192.0.2.10"))

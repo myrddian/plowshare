@@ -20,6 +20,7 @@ from typing import Protocol
 
 import aiohttp
 
+from .addressing import AddressingSample
 from .contracts import (
     Capability,
     DeviceIdentity,
@@ -44,6 +45,8 @@ class DeviceData:
     dns: tuple[DnsObservation, ...]
     window: DnsWindow | None
     issues: tuple[str, ...]
+    # Addressing facts from the same session, when addressing is enabled.
+    addressing: AddressingSample | None = None
 
 
 class DeviceDataSource(Protocol):

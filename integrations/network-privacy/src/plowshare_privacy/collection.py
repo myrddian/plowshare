@@ -11,8 +11,10 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Protocol
 
+from .addressing import AddressingSample, assign_addresses
 from .connectors import REGISTRY
 from .contracts import (
+    AddressAssignment,
     Capability,
     CollectionPlan,
     ConnectorKind,
@@ -121,6 +123,24 @@ def changes(
             difference.append(
                 f"Device association at {device.address} changed: {old.mac} -> {device.mac}; compare address observations, not a presumed physical device."
             )
+    # Only two known modes for the same MAC are comparable, and any addressing
+    # gap or conflict in either collection makes the modes incomparable.
+    if not any(
+        issue.startswith("addressing_") for issue in (*previous.issues, *issues)
+    ):
+        old_modes = {item.address: item for item in previous.snapshot.addressing}
+        for item in current.addressing:
+            prior = old_modes.get(item.address)
+            if (
+                prior is not None
+                and item.mac is not None
+                and prior.mac == item.mac
+                and "unknown" not in (prior.mode, item.mode)
+                and prior.mode != item.mode
+            ):
+                difference.append(
+                    f"Address assignment at {item.address} changed: {prior.mode} -> {item.mode}"
+                )
     # Query counts and absence are not compared: exports may cover different windows.
     if not any(issue.startswith("dns_") for issue in (*previous.issues, *issues)):
         known = {(item.device, item.domain) for item in previous.snapshot.dns}
@@ -139,6 +159,10 @@ def changes(
 # reader yet bind nothing.
 _TAGGED_CAPABILITIES: frozenset[Capability] = frozenset(
     {"network_table", "dns_queries", "controller_clients", "traffic_counters"}
+)
+# Any of these enabled on a service turns on the Addressing bucket.
+_ADDRESSING_CAPABILITIES: frozenset[Capability] = frozenset(
+    {"dhcp_leases", "dhcp_reservations", "dhcp_scope"}
 )
 
 
@@ -301,6 +325,17 @@ class NetworkCollector:
         dns = self.sources.dns_activity
         return dns is not None and any(
             bound.service == dns.service for bound in self.sources.device_reads
+        )
+
+    def _reads_addressing(self) -> bool:
+        """Whether any configured service enables an addressing capability.
+
+        Without one the collector reads no addressing facts and the snapshot's
+        ``addressing`` stays empty, so evidence text is unchanged.
+        """
+        return any(
+            service.capabilities & _ADDRESSING_CAPABILITIES
+            for service in self.plan.sources
         )
 
     def _infrastructure(self, identity: DeviceIdentity) -> bool:
@@ -578,6 +613,8 @@ class NetworkCollector:
             window = None
             # Per kind, so a conflict can name the services that disagreed.
             samples: list[tuple[ConnectorKind, IdentitySample]] = []
+            # Device reads carry addressing facts with their session's other rows.
+            addressing: list[AddressingSample] = []
             if self.sources.device_reads:
                 dns_rows: list[DnsObservation] = []
                 windows: list[DnsWindow] = []
@@ -600,6 +637,8 @@ class NetworkCollector:
                         dns_rows.extend(enriched.dns)
                         if enriched.window is not None:
                             windows.append(enriched.window)
+                        if enriched.addressing is not None:
+                            addressing.append(enriched.addressing)
                         issues.extend(enriched.issues)
                     samples.append((bound.kind, IdentitySample(tuple(table))))
                 if len(dns_rows) > MAX_DNS_ROWS:
@@ -653,12 +692,25 @@ class NetworkCollector:
                 if address in merge.conflicts
             ):
                 issues.append(_conflict_issue(kinds))
+            assignments: tuple[AddressAssignment, ...] = ()
+            addressing_issues: tuple[str, ...] = ()
+            if self._reads_addressing():
+                for reader in self.sources.addressing:
+                    addressing.append(
+                        await reader.reader.addressing(self.plan.targets, observed)
+                    )
+                # Decided against the final identities, after conflicts reverted
+                # disputed addresses to their configured (MAC-less) records.
+                assignments, addressing_issues = assign_addresses(
+                    addressing, devices, self.plan.targets, observed
+                )
             snapshot = Snapshot(
                 imported.observed_at if imported else observed,
                 tuple(observations),
                 dns,
                 tuple(devices.values()),
                 window,
+                assignments,
             )
             if self.plan.observations_file is None and not self._reads_dns():
                 issues.append("dns_unavailable: no DNS observation source configured")
@@ -666,6 +718,8 @@ class NetworkCollector:
                 issues.append(
                     "tcp_incomplete: some probes timed out or were unreachable"
                 )
+            # Addressing issues come last, so other issue text keeps its order.
+            issues.extend(item for item in addressing_issues if item not in issues)
         scope = scope_fingerprint(self.plan)
         evidence = Evidence(
             scan_id,

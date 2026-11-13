@@ -310,4 +310,5 @@ def bind(plan: CollectionPlan) -> SourceSet:
         traffic=traffic[0] if traffic else None,
         product=products[0] if products else None,
         managed=tuple(m for s in sets for m in s.managed),
+        addressing=tuple(b for s in sets for b in s.addressing),
     )

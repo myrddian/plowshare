@@ -326,6 +326,92 @@ class DnsWindow:
         return cls("pihole-v6", start, end, read, available, row["complete"])
 
 
+AssignmentMode = Literal["dhcp_dynamic", "dhcp_reserved", "static", "unknown"]
+AssignmentBasis = Literal[
+    "dhcp_lease",
+    "dhcp_reservation",
+    "controller_fixed_ip",
+    "inside_dhcp_range",
+    "outside_dhcp_range",
+    "no_lease_or_reservation",
+]
+_ASSIGNMENT_MODES: dict[str, AssignmentMode] = {
+    mode: mode for mode in get_args(AssignmentMode)
+}
+_ASSIGNMENT_BASES: dict[str, AssignmentBasis] = {
+    basis: basis for basis in get_args(AssignmentBasis)
+}
+# The bases each mode may rest on; ``unknown`` rests on none.
+MODE_BASES: Mapping[AssignmentMode, frozenset[AssignmentBasis]] = MappingProxyType(
+    {
+        "dhcp_reserved": frozenset({"dhcp_reservation", "controller_fixed_ip"}),
+        "dhcp_dynamic": frozenset({"dhcp_lease", "inside_dhcp_range"}),
+        "static": frozenset({"outside_dhcp_range", "no_lease_or_reservation"}),
+        "unknown": frozenset(),
+    }
+)
+
+
+@dataclass(frozen=True)
+class AddressAssignment:
+    """How one selected address was assigned to the MAC holding it.
+
+    Decided by ``addressing.assign_addresses``. A known mode names the MAC, the
+    basis it rests on and the services whose facts decided it; ``unknown`` has
+    no basis. ``expires_at`` is a lease's expiry and appears only with the
+    ``dhcp_lease`` basis (``None`` there means the lease does not expire).
+    """
+
+    address: str
+    mac: str | None
+    mode: AssignmentMode
+    basis: AssignmentBasis | None
+    services: tuple[str, ...]
+    expires_at: str | None
+
+    @classmethod
+    def decode(cls, value: object) -> AddressAssignment:
+        row = object_fields(
+            value, {"address", "mac", "mode", "basis", "services", "expires_at"}
+        )
+        address = str(ipaddress.ip_address(text(row["address"])))
+        mac = mac_address(row["mac"]) if row["mac"] is not None else None
+        mode = (
+            _ASSIGNMENT_MODES.get(row["mode"]) if isinstance(row["mode"], str) else None
+        )
+        basis = (
+            _ASSIGNMENT_BASES.get(row["basis"])
+            if isinstance(row["basis"], str)
+            else None
+        )
+        if mode is None or (row["basis"] is not None and basis is None):
+            raise ValueError("Unsupported address assignment mode or basis")
+        if (basis is None) != (mode == "unknown") or (
+            basis is not None and basis not in MODE_BASES[mode]
+        ):
+            raise ValueError("Address assignment basis does not fit its mode")
+        services = tuple(
+            _service_name(item) for item in items(row["services"], MAX_SERVICES)
+        )
+        if len(set(services)) != len(services):
+            raise ValueError("Duplicate address assignment service")
+        if mode != "unknown" and (mac is None or not services):
+            raise ValueError("A known address assignment needs a MAC and a service")
+        expires_at = (
+            timestamp(row["expires_at"]) if row["expires_at"] is not None else None
+        )
+        if expires_at is not None and basis != "dhcp_lease":
+            raise ValueError("Only a DHCP lease assignment has an expiry")
+        return cls(address, mac, mode, basis, services, expires_at)
+
+
+def _service_name(value: object) -> str:
+    service = identifier(value)
+    if len(service) > 64:
+        raise ValueError("Invalid service name")
+    return service
+
+
 @dataclass(frozen=True)
 class Snapshot:
     """A bounded export/fixture. DNS queries are observations, not proof of payload exfiltration."""
@@ -335,11 +421,16 @@ class Snapshot:
     dns: tuple[DnsObservation, ...]
     devices: tuple[DeviceIdentity, ...] = ()
     dns_window: DnsWindow | None = None
+    # One per selected address with an identity record, in target order;
+    # empty (and omitted from encoded evidence) unless addressing is enabled.
+    addressing: tuple[AddressAssignment, ...] = ()
 
     @classmethod
     def decode(cls, value: object) -> Snapshot:
         row = object_fields(
-            value, {"version", "observed_at", "tcp", "dns"}, {"devices", "dns_window"}
+            value,
+            {"version", "observed_at", "tcp", "dns"},
+            {"devices", "dns_window", "addressing"},
         )
         integer(row["version"], 1, 1)
         tcp = tuple(
@@ -363,7 +454,13 @@ class Snapshot:
             if row.get("dns_window") is not None
             else None
         )
-        return cls(timestamp(row["observed_at"]), tcp, dns, devices, window)
+        addressing = tuple(
+            AddressAssignment.decode(item)
+            for item in items(row.get("addressing", []), MAX_TARGETS)
+        )
+        if len({item.address for item in addressing}) != len(addressing):
+            raise ValueError("Duplicate address assignment")
+        return cls(timestamp(row["observed_at"]), tcp, dns, devices, window, addressing)
 
 
 _PRIVATE_IPV4 = tuple(
@@ -1093,7 +1190,11 @@ class Evidence:
         row = asdict(self)
         if self.baseline is None:
             row.pop("baseline")
-        enriched = bool(self.snapshot.devices) or self.snapshot.dns_window is not None
+        enriched = (
+            bool(self.snapshot.devices)
+            or self.snapshot.dns_window is not None
+            or bool(self.snapshot.addressing)
+        )
         if not self.snapshot.devices:
             row["snapshot"].pop("devices")
         for device in row["snapshot"].get("devices", ()):
@@ -1102,6 +1203,8 @@ class Evidence:
                     del device[key]
         if self.snapshot.dns_window is None:
             row["snapshot"].pop("dns_window")
+        if not self.snapshot.addressing:
+            row["snapshot"].pop("addressing")
         return json.dumps(
             row,
             indent=None if enriched else 2,
@@ -1134,7 +1237,9 @@ class Evidence:
         if mode not in ("tcp", "fixture"):
             raise ValueError("Invalid evidence mode")
         snapshot = object_fields(
-            row["snapshot"], {"observed_at", "tcp", "dns"}, {"devices", "dns_window"}
+            row["snapshot"],
+            {"observed_at", "tcp", "dns"},
+            {"devices", "dns_window", "addressing"},
         )
         snapshot["version"] = 1
         return cls(

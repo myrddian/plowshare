@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeVar
 
+from .addressing import AddressingSample
 from .contracts import ConnectorKind
 from .dns_activity import QuerySample
 from .identity_source import (
@@ -47,6 +48,14 @@ class TrafficReader(Protocol):
     ) -> tuple[tuple[TrafficCounter, ...], tuple[str, ...]]: ...
 
 
+class AddressingReader(Protocol):
+    """Addressing facts (leases, reservations, scopes) for ``targets``; gaps are issues."""
+
+    async def addressing(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> AddressingSample: ...
+
+
 R = TypeVar("R", covariant=True)
 
 
@@ -71,6 +80,8 @@ class SourceSet:
     product: ManagedProductLookup | None = None
     # Adopted inventories, consulted by ``recently_managed``.
     managed: tuple[ManagedInventory, ...] = ()
+    # Addressing facts read outside a device-read session.
+    addressing: tuple[Bound[AddressingReader], ...] = ()
 
     @property
     def confirms_identity(self) -> bool:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import ipaddress
+import json
 import os
 import tempfile
 import unittest
@@ -16,11 +18,13 @@ from support import legacy_sources
 from test_pihole import ADDRESS, MAC, PiHoleServerCase
 
 from plowshare_privacy import collection, connectors, contracts
+from plowshare_privacy.addressing import AddressingSample, DhcpScope, Lease
 from plowshare_privacy.collection import NetworkCollector
 from plowshare_privacy.connectors import REGISTRY, bind
 from plowshare_privacy.contracts import (
     IDENTITY_SOURCES,
     KIND_CAPABILITIES,
+    AddressAssignment,
     Capability,
     CollectionPlan,
     DeviceIdentity,
@@ -32,13 +36,14 @@ from plowshare_privacy.contracts import (
 )
 from plowshare_privacy.identity_source import DeviceIdentitySource, IdentitySample
 from plowshare_privacy.pihole import DeviceData, DeviceDataSource, PiHoleV6
-from plowshare_privacy.source_set import Bound, SourceSet
+from plowshare_privacy.source_set import AddressingReader, Bound, SourceSet
 from plowshare_privacy.unifi import UniFiNetwork
 
 SITE = "00000000-0000-4000-8000-000000000001"
 FIRST = "192.0.2.10"
 SECOND = "192.0.2.11"
 OTHER_MAC = "00:11:22:33:44:66"
+THIRD_MAC = "00:11:22:33:44:77"
 ENVIRONMENT = {"PIHOLE_PASSWORD": "fixture-password", "UNIFI_KEY": "fixture-key"}
 PIHOLE = PiHolePlan.decode(
     {
@@ -436,6 +441,30 @@ class _Table:
         )
 
 
+class _AddressedTable(_Table):
+    """A network-table read whose session also returns addressing facts."""
+
+    def __init__(self, sample: AddressingSample, *devices: DeviceIdentity) -> None:
+        super().__init__(*devices)
+        self.sample = sample
+
+    async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
+        data = await super().read(targets, observed_at)
+        return replace(data, addressing=self.sample)
+
+
+class _Addressing:
+    def __init__(self, sample: AddressingSample) -> None:
+        self.sample = sample
+        self.calls: list[tuple[str, ...]] = []
+
+    async def addressing(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> AddressingSample:
+        self.calls.append(targets)
+        return self.sample
+
+
 class _Identities:
     def __init__(self, *devices: DeviceIdentity) -> None:
         self.devices = devices
@@ -528,6 +557,100 @@ class CollectorSourcesTest(unittest.IsolatedAsyncioTestCase):
             (FIRST,), utc_now()
         )
         self.assertEqual([d.hostname for d in confirmed.devices], ["client"])
+
+    async def test_collector_records_addressing_only_when_enabled(self) -> None:
+        gap = "addressing_partial: example connector gap"
+        lease = AddressingSample(
+            leases=(Lease(FIRST, MAC, "table", "2999-01-01T00:00:00Z", "home-dns"),)
+        )
+        scope = AddressingSample(
+            scopes=(
+                DhcpScope(
+                    "home-dns",
+                    ipaddress.IPv4Network("192.0.2.0/24"),
+                    "192.0.2.100",
+                    "192.0.2.200",
+                    True,
+                    "complete",
+                ),
+            ),
+            issues=(gap,),
+        )
+
+        async def collect(
+            enabled: CollectionPlan, *identities: DeviceIdentity
+        ) -> tuple[contracts.Evidence, _Addressing]:
+            reader = _Addressing(scope)
+            table = _AddressedTable(
+                lease,
+                _record(FIRST, MAC, "pihole-v6", "table"),
+                _record(SECOND, OTHER_MAC, "pihole-v6", "other"),
+            )
+            sources = SourceSet(
+                device_reads=(Bound[DeviceDataSource]("home-dns", "pihole", table),),
+                identity=tuple(
+                    Bound[DeviceIdentitySource]("controller", "unifi", _Identities(i))
+                    for i in identities
+                ),
+                addressing=(Bound[AddressingReader]("home-dns", "pihole", reader),),
+            )
+            with patch(
+                "plowshare_privacy.collection.asyncio.open_connection",
+                side_effect=TimeoutError,
+            ):
+                evidence = await NetworkCollector("fixture", enabled, sources).collect(
+                    SITE, "fixture:event", None, None
+                )
+            return evidence, reader
+
+        # Without an addressing capability nothing is read and evidence is unchanged.
+        evidence, reader = await collect(plan(pihole("network_table")))
+        self.assertEqual(evidence.snapshot.addressing, ())
+        self.assertEqual(reader.calls, [])
+        self.assertNotIn('"addressing"', evidence.encode())
+        self.assertNotIn(gap, evidence.issues)
+
+        evidence, reader = await collect(plan(pihole("network_table", "dhcp_leases")))
+        self.assertEqual(reader.calls, [(FIRST, SECOND)])
+        self.assertEqual(
+            evidence.snapshot.addressing,
+            (
+                AddressAssignment(
+                    FIRST,
+                    MAC,
+                    "dhcp_dynamic",
+                    "dhcp_lease",
+                    ("home-dns",),
+                    "2999-01-01T00:00:00Z",
+                ),
+                AddressAssignment(
+                    SECOND,
+                    OTHER_MAC,
+                    "static",
+                    "outside_dhcp_range",
+                    ("home-dns",),
+                    None,
+                ),
+            ),
+        )
+        self.assertEqual(evidence.issues[-1], gap)
+        self.assertEqual(
+            contracts.Evidence.decode(json.loads(evidence.encode())), evidence
+        )
+
+        # A disputed identity reverts to its MAC-less configured record: unknown.
+        evidence, _ = await collect(
+            plan(
+                pihole("network_table", "dhcp_leases"),
+                unifi(UNIFI, "controller_clients"),
+            ),
+            _record(FIRST, THIRD_MAC, "unifi", "client"),
+        )
+        self.assertEqual(
+            evidence.snapshot.addressing[0],
+            AddressAssignment(FIRST, None, "unknown", None, (), None),
+        )
+        self.assertEqual(evidence.snapshot.addressing[1].mode, "static")
 
     def test_configured_service_requires_a_binding(self) -> None:
         with self.assertRaisesRegex(ValueError, "no bound reader"):
