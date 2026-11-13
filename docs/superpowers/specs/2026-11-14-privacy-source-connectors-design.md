@@ -415,6 +415,26 @@ part of the receipt journal's identity.
   reservation list and range fields), `dhcp/leases` and `config/dns/hosts`
   against a real instance and Pi-hole's API documentation, including how a
   lease for a reserved address is reported.
+  Checked against FTL's OpenAPI spec (`src/api/docs/content/specs/config.yaml`
+  and `dhcp.yaml`) and the setting descriptions in `src/config/config.c`, not
+  against a live instance:
+  - `GET config/dhcp` returns a subset of `GET config`:
+    `{"config": {"dhcp": {active, start, end, router, netmask, leaseTime,
+    ipv6, rapidCommit, multiDNS, logging, ignoreUnknownClients, hosts}},
+    "took"}`. `start`, `end`, `router` and `netmask` are IPv4 strings or `""`;
+    an empty netmask means "taken from the interface", which a read cannot see,
+    so the scope is then not decodable.
+  - A `dhcp.hosts` entry is a dnsmasq `dhcp-host` string, documented as
+    `[<hwaddr>][,id:<client_id>|*][,set:<tag>][,tag:<tag>][,<ipaddr>][,<hostname>][,<lease_time>][,ignore]`,
+    with examples `"MAC,IP"`, `"MAC,IP,NAME"` and `"MAC,IP,NAME,24h"`. The
+    plan assumed `"MAC,IP[,NAME]"`; the reader accepts exactly
+    `MAC,IPv4[,NAME[,LEASE_TIME]]` and reports every other form as
+    `addressing_partial`.
+  - `GET dhcp/leases` returns `leases[].{expires, name, hwaddr, ip, clientid}`.
+    `expires` is documented only as "0 = infinite lease, never expires"; it is
+    not documented as `0` for a reserved address (a reserved host gets its own
+    or the default lease time), so a reservation cannot be inferred from it.
+  - `config.dns.hosts[]` is `"IP HOSTNAME [HOSTNAME ...]"`, as assumed.
 - Confirm that the UniFi API key can read the legacy client fixed-IP fields
   and network DHCP settings (`stat/sta`, `rest/networkconf`) read-only.
 - Whether the Java side (`NetworkDeviceAssessmentTest` and the dossier port)

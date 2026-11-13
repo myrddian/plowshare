@@ -4,6 +4,11 @@ One collection owns one short-lived session. Only selected client addresses ente
 returned evidence; network-table associations are bounded and freshness checked.
 No Pi-hole settings, blocking rules or DHCP leases are changed. POST/DELETE are
 used only to open/close this adapter's session, and are never replayed.
+
+DHCP settings (``GET config/dhcp``) are read once per collection session, and
+only when ``dhcp_scope`` or ``dhcp_reservations`` is enabled. They are decoded
+here into ``DhcpScope`` and ``Reservation`` facts; raw settings never leave this
+module.
 """
 
 from __future__ import annotations
@@ -14,13 +19,13 @@ import math
 import os
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Protocol
 
 import aiohttp
 
-from .addressing import AddressingSample
+from .addressing import AddressingSample, DhcpScope, Reservation
 from .contracts import (
     Capability,
     DeviceIdentity,
@@ -29,6 +34,7 @@ from .contracts import (
     PiHolePlan,
     integer,
     items,
+    mac_address,
     object_fields,
     parse_json,
     text,
@@ -53,6 +59,75 @@ class DeviceDataSource(Protocol):
     """Return bounded observations for the selected addresses, with explicit coverage gaps."""
 
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData: ...
+
+
+@dataclass(frozen=True)
+class PiHoleDhcp:
+    """What one ``config/dhcp`` read established.
+
+    ``active=None`` means the settings could not be read (``issues`` says so);
+    ``False`` means this Pi-hole does not serve DHCP, which is not an issue and
+    yields no scope or reservations. ``scope`` and ``reservations`` are decoded
+    only for the enabled ``dhcp_scope`` / ``dhcp_reservations`` capabilities.
+    """
+
+    active: bool | None
+    scope: DhcpScope | None
+    reservations: tuple[Reservation, ...]
+    issues: tuple[str, ...]
+
+
+DHCP_UNAVAILABLE = "addressing_unavailable: Pi-hole DHCP settings could not be read"
+DHCP_INVALID_RESERVATION = (
+    "addressing_partial: Pi-hole returned an invalid DHCP reservation"
+)
+DHCP_INVALID_RANGE = "addressing_partial: Pi-hole returned an invalid DHCP range"
+DHCP_RESERVATION_LIMIT = "addressing_partial: Pi-hole DHCP reservation limit reached"
+# Pi-hole returns the whole ``dhcp.hosts`` list; at most this many are decoded.
+MAX_RESERVATIONS = 512
+# The capabilities answered from ``config/dhcp``.
+_DHCP_SETTINGS: frozenset[Capability] = frozenset({"dhcp_scope", "dhcp_reservations"})
+# Optional trailing ``dhcp.hosts`` fields accepted after MAC and address: a
+# hostname and a lease time ("24h", "infinite").
+_HOST_FIELD = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252}[A-Za-z0-9])?")
+
+
+def _ipv4(value: object) -> ipaddress.IPv4Address:
+    """A dotted-quad IPv4 address; raises ValueError for anything else."""
+    return ipaddress.IPv4Address(text(value, 15))
+
+
+def _dhcp_network(router: object, netmask: object) -> ipaddress.IPv4Network:
+    """The network of ``router``/``netmask``.
+
+    The netmask must be a contiguous, nonzero netmask (Pi-hole reports an empty
+    or zero netmask when it is left to interface discovery, which this read
+    cannot see); a hostmask is not accepted.
+    """
+    gateway, mask = _ipv4(router), int(_ipv4(netmask))
+    hosts = ~mask & 0xFFFFFFFF
+    if gateway.is_unspecified or mask == 0 or hosts & (hosts + 1):
+        raise ValueError("Invalid Pi-hole DHCP network")
+    return ipaddress.IPv4Network((gateway, 32 - hosts.bit_length()), strict=False)
+
+
+def _reservation(entry: object) -> tuple[str, str]:
+    """``(address, mac)`` of one ``dhcp.hosts`` entry.
+
+    Pi-hole stores these as dnsmasq ``dhcp-host`` strings. Only the plain form
+    ``MAC,IPv4[,NAME[,LEASE_TIME]]`` names one device and one address; client
+    ids, tags, several MACs, ``ignore`` and IPv6 forms raise ValueError, since
+    what they reserve cannot be stated exactly.
+    """
+    fields = text(entry, 512).split(",")
+    if not 2 <= len(fields) <= 4:
+        raise ValueError("Unsupported Pi-hole DHCP reservation")
+    mac = mac_address(fields[0])
+    address = str(_ipv4(fields[1]))
+    for extra in fields[2:]:
+        if not _HOST_FIELD.fullmatch(extra) or extra.lower() == "ignore":
+            raise ValueError("Unsupported Pi-hole DHCP reservation")
+    return address, mac
 
 
 class PiHoleUnavailable(ValueError):
@@ -122,6 +197,10 @@ _BLOCKED_STATUSES = frozenset(
 )
 
 
+_CLEANUP_FAILED = (
+    "pihole_session_cleanup_failed: the API session may remain until expiry"
+)
+
 # What a ``collection.pihole`` key has always read; direct callers keep it.
 _DEFAULT_CAPABILITIES: frozenset[Capability] = frozenset(
     {"network_table", "dns_queries"}
@@ -131,9 +210,11 @@ _DEFAULT_CAPABILITIES: frozenset[Capability] = frozenset(
 class PiHoleV6:
     """One Pi-hole service, reading only its enabled capabilities.
 
-    Without ``network_table`` no ``network/devices`` request is made, and
-    without ``dns_queries`` no ``queries`` request is made; a read that needs
-    neither opens no session. ``service`` names the configured service.
+    Without ``network_table`` no ``network/devices`` request is made, without
+    ``dns_queries`` no ``queries`` request is made, and without ``dhcp_scope``
+    or ``dhcp_reservations`` no ``config/dhcp`` request is made; a read that
+    needs none of them opens no session. ``service`` names the configured
+    service and is recorded on its addressing facts.
     """
 
     def __init__(
@@ -371,8 +452,133 @@ class PiHoleV6:
         )
 
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
-        sample, _, _ = await self._read(targets, observed_at, queries=True)
+        """The full collection read; it alone carries addressing facts."""
+        sample, _, _ = await self._read(
+            targets, observed_at, queries=True, addressing=True
+        )
         return sample
+
+    async def _authenticate(self, session: aiohttp.ClientSession) -> str:
+        """Open this adapter's API session and return its id (never replayed)."""
+        auth = object_fields(
+            await self._request(session, "POST", "auth"), {"session"}, {"took"}
+        )
+        accepted = object_fields(
+            auth["session"],
+            {"valid", "sid"},
+            {"totp", "csrf", "validity", "message"},
+        )
+        if accepted["valid"] is not True:
+            raise PiHoleUnavailable(
+                "authentication refused; use a Pi-hole application password"
+            )
+        return text(accepted["sid"], 256)
+
+    def _session(self) -> aiohttp.ClientSession:
+        """A client without cookies or proxy settings, bounded by the plan's timeout."""
+        return aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=self.plan.timeout),
+            cookie_jar=aiohttp.DummyCookieJar(),
+            trust_env=False,
+        )
+
+    async def offered(self) -> PiHoleDhcp:
+        """Whether this Pi-hole serves DHCP, in its own session, for a connection test.
+
+        No targets are selected, so no reservation is kept. Failures are
+        ``active=None`` with fixed-text issues.
+        """
+        issues: list[str] = []
+        result = PiHoleDhcp(None, None, (), (DHCP_UNAVAILABLE,))
+        sid: str | None = None
+        async with self._session() as session:
+            try:
+                sid = await self._authenticate(session)
+                result = await self._dhcp(session, sid, ())
+            except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
+                pass
+            finally:
+                if sid is not None and not await self._close(session, sid):
+                    issues.append(_CLEANUP_FAILED)
+        return replace(result, issues=(*result.issues, *issues))
+
+    async def _close(self, session: aiohttp.ClientSession, sid: str) -> bool:
+        """Close the API session; False when it may remain until expiry."""
+        try:
+            await self._request(session, "DELETE", "auth", sid=sid)
+        except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
+            return False
+        return True
+
+    async def _dhcp(
+        self, session: aiohttp.ClientSession, sid: str, targets: tuple[str, ...]
+    ) -> PiHoleDhcp:
+        """One ``GET config/dhcp``, decoded for the enabled DHCP capabilities.
+
+        The settings object must hold a boolean ``active``, or the read is a gap
+        (``addressing_unavailable``). With DHCP active, the scope is built from
+        ``router``/``netmask`` and ``start``-``end``: undecodable range settings
+        give no scope, and a range outside the network or reversed gives an
+        incomplete one, both with ``addressing_partial``. Its lease table is
+        ``incomplete``: no lease read establishes it. Reservations are kept only
+        for ``targets``; at most ``MAX_RESERVATIONS`` entries are decoded and an
+        entry not in the plain form is skipped with ``addressing_partial``.
+        """
+        try:
+            raw = await self._request(session, "GET", "config/dhcp", sid=sid)
+            if not isinstance(raw, dict) or not isinstance(raw.get("config"), dict):
+                raise ValueError("Expected Pi-hole configuration")
+            settings = raw["config"].get("dhcp")
+            if (
+                not isinstance(settings, dict)
+                or type(settings.get("active")) is not bool
+            ):
+                raise ValueError("Expected Pi-hole DHCP settings")
+        except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
+            return PiHoleDhcp(None, None, (), (DHCP_UNAVAILABLE,))
+        if settings["active"] is False:
+            return PiHoleDhcp(False, None, (), ())
+        issues: list[str] = []
+        scope: DhcpScope | None = None
+        if "dhcp_scope" in self.capabilities:
+            try:
+                network = _dhcp_network(settings.get("router"), settings.get("netmask"))
+                start, end = _ipv4(settings.get("start")), _ipv4(settings.get("end"))
+            except ValueError:
+                issues.append(DHCP_INVALID_RANGE)
+            else:
+                valid = start in network and end in network and start <= end
+                if not valid:
+                    issues.append(DHCP_INVALID_RANGE)
+                scope = DhcpScope(
+                    self.service, network, str(start), str(end), valid, "incomplete"
+                )
+        reservations: list[Reservation] = []
+        if "dhcp_reservations" in self.capabilities:
+            hosts = settings.get("hosts")
+            if not isinstance(hosts, list):
+                issues.append(DHCP_INVALID_RESERVATION)
+                hosts = []
+            if len(hosts) > MAX_RESERVATIONS:
+                issues.append(DHCP_RESERVATION_LIMIT)
+            watched = frozenset(targets)
+            for entry in hosts[:MAX_RESERVATIONS]:
+                try:
+                    address, mac = _reservation(entry)
+                except ValueError:
+                    if DHCP_INVALID_RESERVATION not in issues:
+                        issues.append(DHCP_INVALID_RESERVATION)
+                    continue
+                if address in watched:
+                    reservations.append(
+                        Reservation(address, mac, "dhcp_reservation", self.service)
+                    )
+        return PiHoleDhcp(
+            True,
+            scope,
+            tuple(dict.fromkeys(reservations)),
+            tuple(dict.fromkeys(issues)),
+        )
 
     async def identify(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
         """Operator-only identity checks; no DNS history is fetched or retained."""
@@ -404,6 +610,7 @@ class PiHoleV6:
         *,
         queries: bool,
         since: str | None = None,
+        addressing: bool = False,
     ) -> tuple[DeviceData, frozenset[str], tuple[QuerySample, ...]]:
         limit = BATCH_SIZE if queries and since is None else MAX_TARGETS
         if len(targets) > limit or len(set(targets)) != len(targets):
@@ -423,33 +630,19 @@ class PiHoleV6:
         # never reported as a gap.
         table = since is None and "network_table" in self.capabilities
         queries = queries and "dns_queries" in self.capabilities
+        dhcp_settings = addressing and bool(self.capabilities & _DHCP_SETTINGS)
+        dhcp: PiHoleDhcp | None = None
         samples: tuple[QuerySample, ...] = ()
         identity = IdentitySample()
         dns: tuple[DnsObservation, ...] = ()
         window: DnsWindow | None = None
         issues: set[str] = set()
         sid: str | None = None
-        if not table and not queries:
+        if not table and not queries and not dhcp_settings:
             return DeviceData((), (), None, ()), frozenset(), ()
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=self.plan.timeout),
-            cookie_jar=aiohttp.DummyCookieJar(),
-            trust_env=False,
-        ) as session:
+        async with self._session() as session:
             try:
-                auth = object_fields(
-                    await self._request(session, "POST", "auth"), {"session"}, {"took"}
-                )
-                accepted = object_fields(
-                    auth["session"],
-                    {"valid", "sid"},
-                    {"totp", "csrf", "validity", "message"},
-                )
-                if accepted["valid"] is not True:
-                    raise PiHoleUnavailable(
-                        "authentication refused; use a Pi-hole application password"
-                    )
-                sid = text(accepted["sid"], 256)
+                sid = await self._authenticate(session)
                 if table:
                     try:
                         identity = self._devices(
@@ -476,6 +669,8 @@ class PiHoleV6:
                         issues.add(
                             "identity_unavailable: Pi-hole device records could not be read or validated"
                         )
+                if dhcp_settings:
+                    dhcp = await self._dhcp(session, sid, targets)
                 if queries:
                     semaphore = asyncio.Semaphore(4)
 
@@ -553,20 +748,21 @@ class PiHoleV6:
                         "dns_unavailable: Pi-hole authentication or connection failed"
                     )
             finally:
-                if sid is not None:
-                    try:
-                        await self._request(session, "DELETE", "auth", sid=sid)
-                    except (
-                        PiHoleUnavailable,
-                        ValueError,
-                        aiohttp.ClientError,
-                        TimeoutError,
-                    ):
-                        issues.add(
-                            "pihole_session_cleanup_failed: the API session may remain until expiry"
-                        )
+                if sid is not None and not await self._close(session, sid):
+                    issues.add(_CLEANUP_FAILED)
+        addressing_sample: AddressingSample | None = None
+        if dhcp_settings:
+            # A session that failed before the settings read is a gap too.
+            read = dhcp or PiHoleDhcp(None, None, (), (DHCP_UNAVAILABLE,))
+            addressing_sample = AddressingSample(
+                reservations=read.reservations,
+                scopes=(read.scope,) if read.scope is not None else (),
+                issues=read.issues,
+            )
         return (
-            DeviceData(identity.devices, dns, window, tuple(sorted(issues))),
+            DeviceData(
+                identity.devices, dns, window, tuple(sorted(issues)), addressing_sample
+            ),
             identity.ambiguous_addresses,
             samples,
         )

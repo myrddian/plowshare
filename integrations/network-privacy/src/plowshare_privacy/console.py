@@ -34,7 +34,7 @@ from .device_inventory import DeviceInventory
 from .discovery import DeviceDiscovery
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Finding, OperatorStore, findings
-from .pihole import PiHoleV6
+from .pihole import DHCP_UNAVAILABLE, PiHoleV6
 from .private_files import replace_private
 from .worker import Worker
 
@@ -51,13 +51,16 @@ class PiHoleCheck:
     """A saved configuration is independent of connection test and activation.
 
     ``connected=None`` means no test was requested; ``pending`` only describes
-    applying saved settings, never whether they were durably saved.
+    applying saved settings, never whether they were durably saved. ``dhcp`` is
+    set only by a connection test: whether this Pi-hole serves DHCP, or
+    ``None`` when it was not tested or could not be checked.
     """
 
     connected: bool | None
     saved: bool
     issues: tuple[str, ...]
     pending: bool = False
+    dhcp: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -486,7 +489,18 @@ class OperatorConsole:
                 or "session" in issue
                 for issue in result.issues
             )
-            return PiHoleCheck(connected, False, result.issues)
+            # Its own read-only session. A DHCP read gap is shown as
+            # ``dhcp=None``; other issues (a session left open) are kept.
+            offered = await source.offered()
+            issues = tuple(
+                dict.fromkeys(
+                    (
+                        *result.issues,
+                        *(i for i in offered.issues if i != DHCP_UNAVAILABLE),
+                    )
+                )
+            )
+            return PiHoleCheck(connected, False, issues, dhcp=offered.active)
 
     async def moved_devices(self) -> tuple[DeviceMove, ...]:
         plan = self.worker.config.collection.pihole

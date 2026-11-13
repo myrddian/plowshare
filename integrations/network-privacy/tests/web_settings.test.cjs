@@ -152,6 +152,24 @@ test('failed optional test leaves the saved indicator intact', async () => {
   assert.match(node('pihole-detail').textContent, /Connection test failed/);
 });
 
+test('a connection test says whether this Pi-hole offers DHCP', async () => {
+  const {context, node} = await dashboard();
+  for (const [dhcp, text] of [[false, 'DHCP: off on this Pi-hole'], [true, 'DHCP: on'], [null, 'DHCP: could not be checked']]) {
+    node('pihole-password').value = 'fixture-secret';
+    context.fetch = async () => ({ok:true, json:async () => ({saved:false, connected:true, pending:false, issues:[], dhcp})});
+    await vm.runInContext('piholeConnection(false)', context);
+    assert.ok(node('pihole-detail').textContent.includes(text), text);
+    for (const other of ['DHCP: off', 'DHCP: on', 'DHCP: could not']) {
+      if (!text.startsWith(other)) assert.ok(!node('pihole-detail').textContent.includes(other), other);
+    }
+  }
+  // Saving does not test the connection, so it says nothing about DHCP.
+  context.fetch = async () => ({ok:true, json:async () => ({saved:true, connected:null, pending:false, issues:[], dhcp:null})});
+  vm.runInContext('refresh = async () => {}', context);
+  await vm.runInContext('piholeConnection(true)', context);
+  assert.doesNotMatch(node('pihole-detail').textContent, /DHCP/);
+});
+
 test('unknown save outcome does not claim the password was saved', async () => {
   const {context, node} = await dashboard();
   node('pihole-password').value = 'fixture-secret';

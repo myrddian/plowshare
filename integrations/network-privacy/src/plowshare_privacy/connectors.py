@@ -109,9 +109,15 @@ def _unifi_credentials(settings: PiHolePlan | UniFiPlan) -> tuple[str, ...]:
     return (_unifi_settings(settings).api_key_environment,)
 
 
+# A Pi-hole device read serves these; DHCP facts ride on its session.
+_PIHOLE_DEVICE_READ: frozenset[Capability] = frozenset(
+    {"network_table", "dns_queries", "dhcp_scope", "dhcp_reservations", "dhcp_leases"}
+)
+
+
 def _bind_pihole(service: ServicePlan) -> SourceSet:
     enabled = service.capabilities
-    if not enabled & {"network_table", "dns_queries"}:
+    if not enabled & _PIHOLE_DEVICE_READ:
         return SourceSet()
     pihole = PiHoleV6(
         _pihole_settings(service.settings),

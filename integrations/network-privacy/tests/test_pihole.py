@@ -68,10 +68,32 @@ class PiHoleServerCase(unittest.IsolatedAsyncioTestCase):
         self.calls: list[tuple[str, str]] = []
         self.query_clients: list[str] = []
         self.stolen = False
+        # ``GET config/dhcp``; another status answers with an error carrying the secret.
+        self.dhcp_status = 200
+        self.dhcp_settings: object = {
+            "config": {
+                "dhcp": {
+                    "active": True,
+                    "start": "192.0.2.100",
+                    "end": "192.0.2.200",
+                    "router": "192.0.2.1",
+                    "netmask": "255.255.255.0",
+                    "leaseTime": "24h",
+                    "ipv6": False,
+                    "rapidCommit": False,
+                    "multiDNS": False,
+                    "logging": False,
+                    "ignoreUnknownClients": False,
+                    "hosts": [],
+                }
+            },
+            "took": 0.01,
+        }
         app = web.Application()
         app.router.add_route("*", "/api/auth", self.auth)
         app.router.add_get("/api/network/devices", self.devices)
         app.router.add_get("/api/queries", self.queries)
+        app.router.add_get("/api/config/dhcp", self.dhcp)
         app.router.add_route("*", "/stolen", self.stolen_request)
         self.server = TestServer(app)
         await self.server.start_server()
@@ -116,6 +138,16 @@ class PiHoleServerCase(unittest.IsolatedAsyncioTestCase):
                 "took": 0.01,
             }
         )
+
+    async def dhcp(self, request: web.Request) -> web.Response:
+        self.calls.append((request.method, request.path))
+        self.assertEqual(request.headers.get("X-FTL-SID"), SID)
+        self.assertEqual(dict(request.query), {})
+        if self.dhcp_status != 200:
+            return web.json_response(
+                {"error": {"message": SECRET}}, status=self.dhcp_status
+            )
+        return web.json_response(self.dhcp_settings)
 
     def device(self, address: str, mac: str = MAC) -> dict[str, object]:
         return {

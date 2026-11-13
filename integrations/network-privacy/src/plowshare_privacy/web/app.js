@@ -2594,7 +2594,8 @@ async function piholeConnection(save) {
   try {
     const result = await api('/api/pihole', {method:'POST', body:JSON.stringify({origin:byId('pihole-origin').value.trim(),password,save})});
     const message = result.saved ? 'Pi-hole connection and password saved on this collector. Connection was not tested.' + (result.pending ? ' Saved settings are waiting to apply; existing work keeps its original configuration.' : '') : result.connected ? 'Connection test passed. Your password was not saved; enter it again and choose Save connection to save it.' : 'Connection test failed. Your saved settings are unchanged.';
-    byId('pihole-detail').textContent = `${message} ${result.issues.join(' ')} The password field was cleared for privacy.`;
+    const dhcp = result.saved ? '' : result.dhcp === true ? ' DHCP: on.' : result.dhcp === false ? ' DHCP: off on this Pi-hole.' : ' DHCP: could not be checked.';
+    byId('pihole-detail').textContent = `${message}${dhcp} ${result.issues.join(' ')} The password field was cleared for privacy.`;
     if (result.saved) {
       renderPiHoleSaved({...piholeSaved, password_source:'file', password_environment:null}, result.pending); settingsLoaded = false;
       // A later health/read failure cannot undo the confirmed save response.

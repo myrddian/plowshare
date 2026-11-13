@@ -61,7 +61,7 @@ from plowshare_privacy.operator_state import (
     Preferences,
     findings,
 )
-from plowshare_privacy.pihole import DeviceData
+from plowshare_privacy.pihole import DeviceData, PiHoleDhcp
 from plowshare_privacy.presence import PresenceView, Sighting
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
@@ -829,10 +829,14 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
                     (), (), None, ("Pi-hole authentication or connection failed",)
                 )
             )
+            source.return_value.offered = AsyncMock(
+                return_value=PiHoleDhcp(None, None, (), ("fixture gap",))
+            )
             tested = await self.console.connect_pihole(
                 "http://pihole.invalid", "bad-secret", False
             )
         self.assertFalse(tested.connected)
+        self.assertIsNone(tested.dhcp)
         self.assertFalse(tested.saved)
         self.assertEqual(credential.read_bytes(), before)
         self.assertEqual(tuple(self.root.glob("pihole-*.password")), (credential,))
@@ -873,12 +877,38 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
                     (), (), None, ("No fresh identity association",)
                 )
             )
+            source.return_value.offered = AsyncMock(
+                return_value=PiHoleDhcp(False, None, (), ())
+            )
             tested = await self.console.connect_pihole(
                 "http://pihole.invalid", "fixture-secret", False
             )
         self.assertTrue(tested.connected)
         self.assertFalse(tested.saved)
+        self.assertIs(tested.dhcp, False)
         self.assertEqual(tuple(self.root.glob("pihole-*.password")), ())
+
+    async def test_pihole_test_reports_whether_dhcp_is_offered(self) -> None:
+        for active in (True, False, None):
+            with self.subTest(active=active):
+                with patch("plowshare_privacy.console.PiHoleV6") as source:
+                    source.return_value.identify = AsyncMock(
+                        return_value=DeviceData((), (), None, ())
+                    )
+                    source.return_value.offered = AsyncMock(
+                        return_value=PiHoleDhcp(active, None, (), ())
+                    )
+                    tested = await self.console.connect_pihole(
+                        "http://pihole.invalid", "fixture-secret", False
+                    )
+                self.assertIs(tested.dhcp, active)
+                source.return_value.offered.assert_awaited_once_with()
+
+    async def test_pihole_save_does_not_report_dhcp(self) -> None:
+        saved = await self.console.connect_pihole(
+            "http://pihole.invalid", "fixture-secret", True
+        )
+        self.assertIsNone(saved.dhcp)
 
     async def test_device_assessment_routes_check_access_inventory_and_state(
         self,

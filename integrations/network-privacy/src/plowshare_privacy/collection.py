@@ -232,11 +232,15 @@ class NetworkCollector:
                 *sources.device_reads,
                 *sources.identity,
                 *sources.presence,
+                *sources.addressing,
                 *(b for b in (sources.dns_activity, sources.traffic) if b is not None),
             )
         }
+        # A service enabling a readable or addressing capability must have a
+        # bound reader (addressing rides on a device read or its own binding).
+        required = _TAGGED_CAPABILITIES | _ADDRESSING_CAPABILITIES
         for service in plan.sources:
-            if service.capabilities & _TAGGED_CAPABILITIES and service.id not in tagged:
+            if service.capabilities & required and service.id not in tagged:
                 raise ValueError(
                     "Configured service " + service.id + " has no bound reader"
                 )
