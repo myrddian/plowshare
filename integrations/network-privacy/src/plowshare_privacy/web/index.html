@@ -369,13 +369,25 @@
 
       <section id="view-ask" role="tabpanel" aria-labelledby="tab-ask" hidden>
         <div class="workspace ask-workspace">
-          <section class="panel">
-            <div class="panel-heading"><h2>Conversation</h2><span>With Privacy Watch</span></div>
-            <div id="ask-conversation" class="ask-conversation" role="log" aria-live="polite" tabindex="0" aria-label="Conversation with Privacy Watch"></div>
-            <form id="ask-form" class="form-grid ask-form">
-              <label>Your question<textarea id="ask-input" rows="3" maxlength="4000" aria-describedby="ask-hint"></textarea></label>
+          <section class="panel ask-panel">
+            <div class="panel-heading"><h2>Conversation</h2><span id="ask-state" class="ask-state">Ready</span></div>
+            <div class="ask-log-frame">
+              <div id="ask-conversation" class="ask-conversation" role="log" aria-live="polite" tabindex="0" aria-label="Conversation with Privacy Watch"></div>
+              <button id="ask-jump" class="secondary ask-jump" type="button" hidden>New reply</button>
+            </div>
+            <div id="ask-working" class="ask-working" role="status" hidden>
+              <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span id="ask-working-text" class="ask-working-text"></span>
+              <span id="ask-working-time" class="ask-working-time"></span>
+            </div>
+            <form id="ask-form" class="ask-form">
+              <label for="ask-input" class="ask-label">Your question</label>
+              <textarea id="ask-input" rows="3" maxlength="4000" placeholder="Ask about a device, a finding or what changed…" aria-describedby="ask-hint ask-keys"></textarea>
               <p id="ask-hint" role="status" class="hint"></p>
-              <div class="actions"><button id="ask-send" type="submit">Ask</button></div>
+              <div class="ask-composer-foot">
+                <span id="ask-keys" class="hint">Enter sends. Shift+Enter adds a line.</span>
+                <button id="ask-send" type="submit">Ask</button>
+              </div>
             </form>
           </section>
           <div class="stack">

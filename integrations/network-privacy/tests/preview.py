@@ -34,6 +34,7 @@ from test_privacy_issues import IssueDocuments
 from test_privacy_issues import fields as issue_fields
 
 from plowshare_privacy.ask import (
+    AskCall,
     AskConflict,
     AskEntry,
     AskService,
@@ -399,20 +400,49 @@ class PreviewAsk:
 
     The conversation is scripted: a plain answer, a tool result (never shown),
     a JSON-looking reply (shown folded), one piece of work waiting and one
-    done. Asking appends the question and a canned answer ``ANSWER_AFTER``
-    seconds later, which is when the next browser refresh reads it; the answer
-    arrives unread. A question that mentions the allowance ends instead in a
+    done. Asking takes ``SEND_DELAY`` seconds, appends the question, then
+    plays ``STEPS`` (a device-list call, its result and a hand-off to the
+    analyst) so the working row has something to name, and a canned answer
+    ``ANSWER_AFTER`` seconds later; the answer arrives unread. A question that mentions the allowance ends instead in a
     paused state, and ``top_up`` clears it.
     """
 
-    ANSWER_AFTER = 3.0
+    SEND_DELAY = 0.8
+    ANSWER_AFTER = 9.0
+    # (seconds after the question, author, kind, tool call or answered call id)
+    STEPS = (
+        (
+            1.5,
+            "agent",
+            "answer",
+            AskCall("preview-devices", "network_devices", None, None),
+            None,
+        ),
+        (3.5, "tool", "tool_result", None, "preview-devices"),
+        (
+            5.5,
+            "agent",
+            "answer",
+            AskCall(
+                "preview-analyst",
+                "send_message",
+                "privacy_analyst",
+                "Check the new lookups",
+            ),
+            None,
+        ),
+        (7.0, "tool", "tool_result", None, "preview-analyst"),
+    )
 
     def __init__(self) -> None:
         self.settings = AskSettings()
         now = datetime.now(timezone.utc)
 
         def stamp(minutes: int) -> str:
-            return (now - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            # Minutes before startup for the script; zero means the real now,
+            # so a new question's time starts the working timer correctly.
+            at = datetime.now(timezone.utc) if minutes == 0 else now
+            return (at - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         self._stamp = stamp
         self._entries: list[AskEntry] = [
@@ -469,11 +499,34 @@ class PreviewAsk:
         self._paused = False
         self._unread = True
         self._due: float | None = None
+        self._started: float | None = None
+        self._played = 0
         self._outcome = "answered"
 
     def _settle(self) -> None:
+        if self._started is not None:
+            elapsed = time.monotonic() - self._started
+            while (
+                self._played < len(self.STEPS)
+                and self.STEPS[self._played][0] <= elapsed
+            ):
+                _, author, kind, call, answers = self.STEPS[self._played]
+                self._entries.append(
+                    AskEntry(
+                        len(self._entries),
+                        author,  # type: ignore[arg-type]
+                        "" if call else '{"status": "ok"}',
+                        self._stamp(0),
+                        kind,
+                        calls=(call,) if call else (),
+                        answers=answers,
+                        tool=None if call else "network_devices",
+                    )
+                )
+                self._played += 1
         if self._due is None or time.monotonic() < self._due:
             return
+        self._started = None
         self._due = None
         if self._outcome == "paused":
             self._state, self._paused = "capped", True
@@ -517,11 +570,13 @@ class PreviewAsk:
                 "The assistant is still working. Ask again when it has finished."
             )
         self._paused = False
+        await asyncio.sleep(self.SEND_DELAY)
         self._entries.append(
             AskEntry(len(self._entries), "user", question, self._stamp(0), "question")
         )
         self._state = "running"
         self._outcome = "paused" if "allowance" in question.lower() else "answered"
+        self._started, self._played = time.monotonic(), 0
         self._due = time.monotonic() + self.ANSWER_AFTER
         return self.view()
 

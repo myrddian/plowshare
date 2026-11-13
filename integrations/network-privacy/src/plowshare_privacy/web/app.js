@@ -50,6 +50,12 @@ let askSending = false;
 let askSettingsLoaded = false;
 let askTopUpCalls = null;
 let askEpoch = 0;
+// The question on its way to the collector, shown at once so pressing Ask is
+// never silent; when the last reading was taken; and when the turn on screen
+// was first seen working, for its timer when the reading has no question time.
+let askPending = null;
+let askReadAt = 0;
+let askWorkingSince = null;
 const byId = (name) => document.getElementById(name);
 
 const views = {
@@ -514,10 +520,11 @@ byId('disconnect').addEventListener('click', async () => {
   setSignalFilter('all');
   selectedDevice = null; deviceSupplemental = null; deepScanPane = null; deepScanBusy = null; setHouseholdZone('UTC');
   askConversation = null; askSignature = null; askReading = false; askSending = false; askSettingsLoaded = false; askTopUpCalls = null; askEpoch++;
+  askPending = null; askReadAt = 0; askWorkingSince = null;
   for (const id of ['ask-conversation','ask-waiting','ask-done','ask-pause']) byId(id).replaceChildren();
   for (const id of ['ask-input','ask-max-calls','ask-max-turns','ask-top-up']) byId(id).value = '';
   for (const id of ['ask-hint','ask-settings-detail']) byId(id).textContent = '';
-  for (const id of ['ask-badge','tab-ask','ask-pause','ask-group']) byId(id).hidden = true;
+  for (const id of ['ask-badge','tab-ask','ask-pause','ask-group','ask-working','ask-jump']) byId(id).hidden = true;
   byId('deep-scan-group').hidden = true; byId('deep-scan-limit').value = ''; byId('deep-scan-limit').disabled = false; byId('deep-scan-save').disabled = false; byId('deep-scan-detail').textContent = ''; byId('deep-scan-detail').className = 'hint';
   byId('household-zone').hidden = true; byId('zone-input').value = '';
   for (const id of deviceParts) byId(id).replaceChildren();
@@ -1848,15 +1855,15 @@ function askEntryNode(entry) {
   } else node.append(PrivacyMarkdown.render(entry.text));
   return node;
 }
-function askWorkNode(item) {
-  const node = element('div', undefined, 'record');
+function askWorkNode(item, waiting) {
+  const node = element('div', undefined, waiting ? 'record ask-handed' : 'record');
   node.append(element('h4', askName(item.target)));
   if (item.about) node.append(element('p', item.about, 'hint'));
   node.append(element('small', item.since ? `Since ${formatWhen(item.since)}` : 'Since: not recorded'));
   return node;
 }
-function askWorkList(container, items, empty) {
-  container.replaceChildren(...(items.length ? items.map(askWorkNode) : [element('p', empty, 'empty')]));
+function askWorkList(container, items, empty, waiting = false) {
+  container.replaceChildren(...(items.length ? items.map(item => askWorkNode(item, waiting)) : [element('p', empty, 'empty')]));
 }
 async function topUpAsk() {
   const mine = askEpoch;
@@ -1876,36 +1883,118 @@ function applyAskForm() {
   const view = askConversation;
   const state = view?.turn_state ?? 'idle';
   const unavailable = view ? !view.available : latestStatus ? !latestStatus.ask_available : false;
-  const blocked = unavailable || askActive(state) || askSending;
-  byId('ask-input').disabled = blocked;
-  byId('ask-send').disabled = blocked;
+  const working = askActive(state) || askSending;
+  // The box stays open while a turn runs so the next question can be drafted;
+  // only sending waits for the turn to finish.
+  byId('ask-input').disabled = unavailable;
+  byId('ask-send').disabled = unavailable || working;
   markBusy(byId('ask-send'), askSending);
+  const label = byId('ask-state');
+  label.textContent = unavailable ? 'Unavailable' : askSending || state === 'sending' ? 'Sending' : askActive(state) ? 'Working'
+    : view?.paused ? 'Paused' : state === 'failed' ? 'Stopped' : state === 'unconfirmed' ? 'Not confirmed' : 'Ready';
+  label.className = `ask-state${working ? ' working' : state === 'failed' ? ' failed' : ''}`;
   const hint = byId('ask-hint');
+  // While it works, the working row says so; the hint carries only a problem.
   hint.className = state === 'failed' || (askActive(state) && view?.detail) ? 'notice error' : 'hint';
   hint.textContent = unavailable ? view?.detail || latestStatus?.ask_detail || 'Ask is not enabled on this collector.'
-    : askActive(state) ? view?.detail || 'Privacy Watch is still working on your last question'
+    : askActive(state) ? view?.detail || ''
     : state === 'unconfirmed' ? 'Not confirmed as sent. Ask again if you still need it.'
     : view?.detail || '';
+  renderAskWorking();
+}
+// What the assistant is doing now, in household words, read from the tool
+// calls the reading already carries. The newest call without a result is the
+// step in hand; a result after it means the assistant is weighing it.
+const askSteps = {
+  network_devices:'Reading the device list', network_device:'Looking at a device',
+  network_evidence:'Reading scan evidence', network_destinations:'Reading DNS destinations',
+  network_scope:'Checking what the collector watches', network_scan_list:'Checking recent scans',
+  network_scan_status:'Checking a scan', network_scan:'Requesting a scan',
+  network_request_deep_scan:'Asking for a deep scan', network_request_assessment:'Asking for an assessment',
+  network_note_profile:'Noting what a device is', network_record_issue:'Recording a finding',
+};
+function askStep(call) {
+  if (call.tool === 'send_message') return call.target ? `Asking ${askName(call.target).replace(/^The /, 'the ')}` : 'Sending a message';
+  if (call.tool.startsWith('orchestrate_')) return `Starting ${askName(call.target || call.tool).toLowerCase()}`;
+  if (Object.hasOwn(askSteps, call.tool)) return askSteps[call.tool];
+  const words = call.tool.replace(/[_\-.\s]+/g, ' ').trim();
+  return words ? `Using ${words}` : 'Working';
+}
+function askDoing(view) {
+  if (askSending || view?.turn_state === 'sending') return 'Sending your question';
+  const entries = view?.entries || [];
+  let start = entries.length;
+  while (start > 0 && entries[start - 1].author !== 'user') start--;
+  const turn = entries.slice(start);
+  const answered = new Set(turn.filter(entry => entry.answers).map(entry => entry.answers));
+  for (let index = turn.length - 1; index >= 0; index--) {
+    const entry = turn[index];
+    if (entry.author === 'tool') return 'Weighing what it found';
+    if (entry.calls?.length) {
+      const open = entry.calls.filter(call => !answered.has(call.id));
+      return askStep((open.length ? open : entry.calls).at(-1));
+    }
+  }
+  return 'Thinking';
+}
+// The question the working turn answers started the clock; a reading without
+// its time falls back to when this page first saw the turn working.
+function askStartedAt(view) {
+  if (askPending) return askPending.at;
+  const question = [...(view?.entries || [])].reverse().find(entry => entry.author === 'user');
+  const at = question?.at ? Date.parse(question.at) : NaN;
+  return Number.isNaN(at) ? askWorkingSince : at;
+}
+function askElapsed(ms) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+function renderAskWorking() {
+  const view = askConversation;
+  const working = askSending || askActive(view?.turn_state ?? 'idle');
+  if (!working) askWorkingSince = null;
+  else if (askWorkingSince === null) askWorkingSince = Date.now();
+  const row = byId('ask-working');
+  row.hidden = !working;
+  if (!working) return;
+  byId('ask-working-text').textContent = askDoing(view);
+  const started = askStartedAt(view);
+  byId('ask-working-time').textContent = started ? askElapsed(Date.now() - started) : '';
+}
+// A question the collector has not yet confirmed: the user's words, marked as
+// on their way. It is never part of the reading and goes when the reply lands.
+function askPendingNode(pending) {
+  const node = element('article', undefined, 'ask-entry ask-question ask-pending');
+  const head = element('p', undefined, 'ask-entry-head');
+  head.append(element('span', 'You', 'status-line'), element('small', 'Sending…'));
+  node.append(head, element('p', pending.text, 'ask-text'));
+  return node;
 }
 function renderAsk() {
   applyAskForm();
   const view = askConversation;
+  const log = byId('ask-conversation');
   if (!view) {
     // Ask unavailable has nothing to read: say why instead of waiting.
     const unavailable = latestStatus && !latestStatus.ask_available;
-    byId('ask-conversation').replaceChildren(element('p', unavailable ? latestStatus.ask_detail || 'Ask is not enabled on this collector.' : 'Reading the conversation…', 'empty'));
+    const nodes = askPending ? [askPendingNode(askPending)] : [element('p', unavailable ? latestStatus.ask_detail || 'Ask is not enabled on this collector.' : 'Reading the conversation…', 'empty')];
+    log.replaceChildren(...nodes);
     askSignature = null;
     return;
   }
-  const signature = JSON.stringify(view);
+  const signature = JSON.stringify([view, askPending]);
   if (signature === askSignature) return;
+  const before = log.children?.length ?? 0;
   askSignature = signature;
-  const log = byId('ask-conversation');
   const atEnd = !(log.scrollHeight > log.clientHeight) || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
   const nodes = view.entries.map(askEntryNode).filter(Boolean);
+  if (askPending) nodes.push(askPendingNode(askPending));
   log.replaceChildren(...(nodes.length ? nodes : [element('p', 'No conversation yet. Ask what Privacy Watch has seen on your network, or what it would look at next.', 'empty')]));
-  if (atEnd) log.scrollTop = log.scrollHeight;
-  askWorkList(byId('ask-waiting'), view.waiting, 'Nothing is waiting on anyone.');
+  // Follow the conversation when the reader is at its end; otherwise say a
+  // reply arrived instead of pulling them away from what they are reading.
+  if (atEnd) {log.scrollTop = log.scrollHeight; byId('ask-jump').hidden = true;}
+  else if (nodes.length > before) byId('ask-jump').hidden = false;
+  askWorkList(byId('ask-waiting'), view.waiting, 'Nothing is waiting on anyone.', true);
   askWorkList(byId('ask-done'), view.done, 'Nothing has finished yet.');
   renderAskPause(view);
 }
@@ -1929,28 +2018,64 @@ async function readAsk() {
   if (!overview?.ask) {renderAsk(); return;}
   const mine = askEpoch;
   askReading = true;
+  askReadAt = Date.now();
   try {
     const view = await api('/api/ask');
     if (mine === askEpoch) acceptAsk(view);
   } finally {if (mine === askEpoch) askReading = false;}
 }
+// One second tick for the open Ask tab: it moves the working timer and, while
+// a turn runs, reads the conversation every ASK_FOLLOW_MS instead of waiting
+// for the dashboard's five-second refresh. It reads nothing when the tab is
+// hidden, closed or idle, so it adds no load outside a running turn.
+const ASK_FOLLOW_MS = 1500;
+function followAsk() {
+  if (currentView !== 'ask' || document.hidden || !(bearer || authenticated)) return;
+  renderAskWorking();
+  if (!askActive(askConversation?.turn_state ?? 'idle') || askReading) return;
+  if (Date.now() - askReadAt >= ASK_FOLLOW_MS) readAsk().catch(error => notice(error.message, true));
+}
+setInterval(followAsk, 1000);
+byId('ask-conversation').addEventListener('scroll', () => {
+  const log = byId('ask-conversation');
+  if (log.scrollHeight - log.scrollTop - log.clientHeight < 48) byId('ask-jump').hidden = true;
+});
+byId('ask-jump').addEventListener('click', () => {
+  const log = byId('ask-conversation');
+  log.scrollTop = log.scrollHeight;
+  byId('ask-jump').hidden = true;
+});
+// Enter sends and Shift+Enter starts a new line. Text being composed through
+// an input method is never sent mid-word.
+byId('ask-input').addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  if (!byId('ask-send').disabled) byId('ask-form').requestSubmit?.();
+});
 byId('ask-form').addEventListener('submit', async event => {
   event.preventDefault();
   const question = byId('ask-input').value;
-  if (!question.trim() || askSending || byId('ask-input').disabled) return;
+  if (!question.trim() || askSending || byId('ask-send').disabled) return;
   const mine = askEpoch;
-  askSending = true; applyAskForm();
+  // The question shows at once and leaves the box, so the next one can be
+  // drafted. Sent once: if the outcome is unknown the words go back in the
+  // box (unless a new draft is there), and the next reading says whether the
+  // collector has the question.
+  askSending = true; askPending = {text:question, at:Date.now()};
+  byId('ask-input').value = '';
+  renderAsk();
   try {
-    // Sent once. If the outcome is unknown the draft stays, and the next
-    // reading says whether the collector has the question.
     const view = await api('/api/ask', {method:'POST', body:JSON.stringify({question})});
     if (mine !== askEpoch) return;
-    byId('ask-input').value = '';
+    askPending = null;
     acceptAsk(view);
   } catch (error) {
-    if (mine === askEpoch) notice(error.message, true);
+    if (mine !== askEpoch) return;
+    askPending = null;
+    if (!byId('ask-input').value.trim()) byId('ask-input').value = question;
+    notice(error.message, true);
   } finally {
-    if (mine === askEpoch) {askSending = false; applyAskForm();}
+    if (mine === askEpoch) {askSending = false; renderAsk();}
   }
 });
 function renderAskSettings(settings) {

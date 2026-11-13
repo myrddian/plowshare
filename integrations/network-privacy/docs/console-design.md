@@ -114,9 +114,12 @@ of framed disclosure panels.
    "Not measured" is written differently from zero ("No DNS profile" versus
    `0`).
 2. **One bold object.** The Overview altarpiece (three leaves and a base strip)
-   is the only ornate element and the only place with motion: the wings open
-   once when the dashboard first appears. Nothing else animates, and
-   `prefers-reduced-motion` removes it.
+   is the only ornate element: its wings open once when the dashboard first
+   appears. The only other motion stands for work in progress in Ask: the
+   working row's three small gilt diamonds, the conversation state marker
+   while a turn runs and the marker on each hand-off still waiting. Each one
+   always sits next to words that say what is happening. Nothing else
+   animates, and `prefers-reduced-motion` stills all of it.
 3. **Angles are structure.** A cut corner means "this is a framed container or
    a control". A filled triangle means "a limit of the evidence" or "this
    expands". A hollow diamond marks the cyan visibility gap. No shape is
