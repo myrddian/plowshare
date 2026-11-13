@@ -159,7 +159,8 @@ await DrainChecks.RunAsync();
 
 ToolSchemaChecks.Run();
 
-using(var hosted=JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("PLOWSHARE_SDK_DTO_FIXTURES"))!,"hosted-scope-correlations.json"))))
+foreach(var correlations in new[]{"hosted-scope-correlations.json","relay-group-correlations.json"})
+using(var hosted=JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("PLOWSHARE_SDK_DTO_FIXTURES"))!,correlations))))
 {
  foreach(var row in hosted.RootElement.EnumerateArray()){
   bool accepted=true;try{Codec.CorrelateDeployment(row.GetProperty("operation").GetString()!,row.GetProperty("request"),row.GetProperty("reply"));}catch(JsonException){accepted=false;}
@@ -171,3 +172,5 @@ using(var hosted=JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirect
  }
 }
 await AuthChecks.RunAsync();
+
+await RelayBlobChecks.RunAsync();

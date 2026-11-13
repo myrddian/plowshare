@@ -1,7 +1,13 @@
 package io.aeyer.plowshare.server.access;
 
-import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.*;
-import static org.junit.jupiter.api.Assertions.*;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.CONVERSATION;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.JOB;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.ORCHESTRATION;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.ORCHESTRATION_RECEIPT;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.List;
@@ -106,9 +112,6 @@ class AccessRequestDecoderTest {
     assertThrows(
         CallerFault.class,
         () -> AccessRequestDecoder.decode("schedule.pause", Map.of("paused", "false")));
-    assertThrows(
-        CallerFault.class,
-        () -> AccessRequestDecoder.decode("outgoing.status", Map.of("id", "not-a-uuid")));
   }
 
   @Test

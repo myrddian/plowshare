@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -167,7 +168,7 @@ class InformationLogVisibilityTest {
     }
   }
 
-  private static java.util.function.BooleanSupplier unexpected() {
+  private static BooleanSupplier unexpected() {
     return () -> fail("A current deny set must answer without the targeted predicate");
   }
 
@@ -216,7 +217,7 @@ class InformationLogVisibilityTest {
   void unsharedTransactionsOversizedSetsAndMissingAccountsUseThePredicate() {
     try (var f = new Fixture()) {
       var predicate = new AtomicInteger();
-      java.util.function.BooleanSupplier authoritative =
+      BooleanSupplier authoritative =
           () -> {
             predicate.incrementAndGet();
             return false;

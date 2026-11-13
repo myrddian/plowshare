@@ -1,11 +1,15 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -102,13 +106,21 @@ class RelayScopeMigrationTest {
             new JdbcRelayPayloadStore(
                 jdbc,
                 transactions,
-                java.time.Duration.ofHours(1),
-                java.time.Duration.ofHours(24),
-                java.time.Duration.ofDays(30)));
+                Duration.ofHours(1),
+                Duration.ofHours(24),
+                Duration.ofDays(30)));
     var deliveries = new JdbcRelayDeliveryRepository(jdbc, transactions);
     var project = new Relay.TopicKey(projectId, "release.observed");
     var subscription = new Relay.SubscriptionKey(project, "notices");
     assertEquals(1, broker.topic(project).lastPosition());
+    assertEquals(
+        at.plusSeconds(345600),
+        jdbc.queryForObject(
+                "SELECT prune_at FROM relay_topics WHERE scope_key=? AND name=?",
+                OffsetDateTime.class,
+                RelayScopeCodec.write(project),
+                project.name())
+            .toInstant());
     assertEquals(1, broker.read(subscription, 1).subscription().seenThrough());
     assertEquals(payload, broker.retained(project, "original").orElseThrow().event().payload());
     var admission =
@@ -135,7 +147,7 @@ class RelayScopeMigrationTest {
     assertTrue(broker.read(systemSubscriber, 1).gap().isPresent());
     assertTrue(broker.retained(project, "original").isPresent());
 
-    for (String invalid : java.util.List.of("project:0", "project:01", "unknown"))
+    for (String invalid : List.of("project:0", "project:01", "unknown"))
       assertThrows(
           DataIntegrityViolationException.class,
           () ->

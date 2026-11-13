@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 
 import io.aeyer.plowshare.server.access.ApplicationGrantLineage;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -33,9 +34,7 @@ class JdbcJobInformationRepositoryWiringTest {
       if (constructors.length < 2) continue;
       boolean named = false;
       for (var constructor : constructors)
-        named |=
-            constructor.isAnnotationPresent(
-                org.springframework.beans.factory.annotation.Autowired.class);
+        named |= constructor.isAnnotationPresent(Autowired.class);
       if (!named) throw new AssertionError(type.getName() + " has no @Autowired constructor");
     }
   }

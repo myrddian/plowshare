@@ -1,11 +1,16 @@
 package io.aeyer.plowshare.server.cache;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anySet;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -67,7 +72,7 @@ class ProjectionDeliveryProbeTest {
     @SuppressWarnings("unchecked")
     public Set<ProjectionVersions.Domain> poll(Duration timeout) {
       try {
-        var changed = new java.util.HashSet<ProjectionVersions.Domain>();
+        var changed = new HashSet<ProjectionVersions.Domain>();
         Object first = delivered.poll(timeout.toMillis(), TimeUnit.MILLISECONDS);
         for (Object next = first; next != null; next = delivered.poll()) {
           if (next instanceof Long sequence) answered = Math.max(answered, sequence);

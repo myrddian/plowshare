@@ -29,8 +29,6 @@ from plowshare_privacy.contracts import (
     timestamp,
     uuid,
 )
-from plowshare_privacy.peer import SdkOutgoingPort, result_message
-from plowshare_privacy.peer_journal import PeerReceipt
 from plowshare_privacy.ports import SdkPrivacyPort
 from plowshare_privacy.worker import Worker
 
@@ -145,121 +143,6 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaisesRegex(ValueError, "foreign"):
                         await SdkPrivacyPort(client, config).reports()
             self.assertEqual(operations, ["information.list", "information.status"] * 2)
-
-    async def test_outgoing_peer_advertises_claims_and_reports_over_public_sdk(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as folder:
-            config = replace(
-                configuration(Path(folder)), outgoing_peer="privacy-scanner"
-            )
-            identity = str(uuid4())
-            receipt = PeerReceipt(identity, 1, "ready", "COMPLETED", '{"results":[]}')
-            value: dict[str, object] = {
-                "id": identity,
-                "requestId": str(uuid4()),
-                "project": config.project,
-                "peer": config.outgoing_peer,
-                "conversation": None,
-                "createdAt": "2026-01-01T00:00:00Z",
-                "error": None,
-                "remoteContext": None,
-                "remoteTask": None,
-                "result": None,
-                "revision": 1,
-                "state": "DISPATCHED",
-                "cancelRequested": False,
-                "message": {
-                    "parts": [
-                        {
-                            "data": {
-                                "schema": "plowshare-integration/1",
-                                "binding": config.collector,
-                                "operation": "actions.execute",
-                                "arguments": {
-                                    "action": "network.scan",
-                                    "parameters": {},
-                                },
-                            }
-                        }
-                    ]
-                },
-            }
-            requests: list[str] = []
-
-            async def handle(socket: ServerConnection) -> None:
-                async for source in socket:
-                    frame = object_fields(
-                        parse_json(source),
-                        {"id", "type", "protocol_version", "payload"},
-                    )
-                    operation = text(frame["type"])
-                    payload = frame["payload"]
-                    if not isinstance(payload, dict):
-                        raise AssertionError("Expected request payload")
-                    requests.append(operation)
-                    result: object
-                    if operation == "outgoing.advertise":
-                        self.assertEqual(payload["project"], config.project)
-                        self.assertEqual(payload["peers"], [config.outgoing_peer])
-                        self.assertIn("agentCards", payload)
-                        result = None
-                    elif operation == "outgoing.claim":
-                        result = {"action": "send", "work": value}
-                    elif operation == "outgoing.report":
-                        self.assertEqual(payload["id"], identity)
-                        self.assertEqual(payload["revision"], 1)
-                        value.update(
-                            result=payload["result"], state=payload["state"], revision=2
-                        )
-                        result = value
-                    elif operation == "outgoing.status":
-                        result = value
-                    else:
-                        raise AssertionError("Unexpected operation")
-                    await socket.send(
-                        json.dumps(
-                            {
-                                "id": frame["id"],
-                                "type": operation,
-                                "protocol_version": PROTOCOL_VERSION,
-                                "payload": {
-                                    "code": "OK",
-                                    "said": None,
-                                    "payload": result,
-                                },
-                            }
-                        )
-                    )
-
-            async with serve(handle, "127.0.0.1", 0) as server:
-                port = server.sockets[0].getsockname()[1]
-                config = replace(config, origin=f"http://127.0.0.1:{port}")
-                # This local fixture implements the legacy JSON envelope explicitly.
-                async with await Client.connect(
-                    config.origin,
-                    "fixture-token",
-                    timeout=2,
-                    legacy_transport=True,
-                    dispatch_mode="ordered",
-                ) as client:
-                    outgoing = SdkOutgoingPort(client, config)
-                    await outgoing.advertise()
-                    claimed = await outgoing.claim()
-                    self.assertEqual(claimed.action, "send")
-                    self.assertIsNotNone(claimed.work)
-                    reported = await outgoing.report(receipt)
-                    self.assertEqual(reported.result, result_message(receipt))
-                    self.assertEqual(await outgoing.status(identity), reported)
-                    self.assertEqual(
-                        requests,
-                        [
-                            "outgoing.advertise",
-                            "outgoing.claim",
-                            "outgoing.report",
-                            "outgoing.status",
-                        ],
-                    )
 
     async def test_schedule_to_retained_evidence_and_completion_over_public_sdk(
         self,

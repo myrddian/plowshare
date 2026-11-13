@@ -146,8 +146,13 @@ await test('v1 guild journals migrate without changing conversation, task or rec
     version: 1,
     records: [{ ...original, destination: oldDestination }],
   };
-  const migrated = decodeState(legacy, config, PRINCIPAL, BOT);
-  assert.equal(migrated.version, 2);
+  assert.throws(
+    () => decodeState(legacy, config, PRINCIPAL, BOT),
+    /verified server channel/,
+  );
+  const adopted = { ...config, legacyStateMigration: true };
+  const migrated = decodeState(legacy, adopted, PRINCIPAL, BOT);
+  assert.equal(migrated.version, 3);
   assert.deepEqual(migrated.contexts, state.contexts);
   assert.deepEqual(migrated.records, state.records);
   const gateway = new FakeGateway();
@@ -160,7 +165,7 @@ await test('v1 guild journals migrate without changing conversation, task or rec
   assert.equal(gateway.submissions[0]?.context, original.contextId);
   const interrupted = decodeState(
     { ...legacy, records: [{ ...legacy.records[0], admission: 'ADMITTING' }] },
-    config,
+    adopted,
     PRINCIPAL,
     BOT,
   );

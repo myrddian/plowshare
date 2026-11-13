@@ -6,7 +6,7 @@ import type {
   DiscordInput,
   Destination,
   Gateway,
-  IncomingTask,
+  MessageTask,
   NotificationRoute,
   RecordEntry,
   StateRepository,
@@ -14,6 +14,7 @@ import type {
 import { chunks } from './render.ts';
 import { snowflake } from './config.ts';
 import { uuid } from './state.ts';
+import { MessagingRefusal } from './messaging-codec.ts';
 
 export function digest(...parts: readonly string[]): string {
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -23,11 +24,12 @@ function noticeKey(route: NotificationRoute): string {
   // turn a retained uncertain attempt into a new event eligible for another send.
   return digest(route.project, route.topic, route.group);
 }
-function terminal(task: IncomingTask): boolean {
+function terminal(task: MessageTask): boolean {
   return ['COMPLETED', 'FAILED', 'CANCELED'].includes(task.state);
 }
 function outcome(error: unknown): RecordEntry['admission'] {
-  if (error instanceof Refusal) return 'REFUSED';
+  if (error instanceof Refusal || error instanceof MessagingRefusal)
+    return 'REFUSED';
   if (error instanceof ConnectionFault && error.delivery === 'NOT_SUBMITTED')
     return 'NOT_SUBMITTED';
   return 'UNKNOWN';
@@ -136,25 +138,30 @@ export class DiscordAdapter {
     );
     record.seenReplies.push(key);
   }
-  private check(task: IncomingTask, record: RecordEntry): void {
+  private check(task: MessageTask, record: RecordEntry): void {
     uuid(task.id);
     uuid(task.context);
     if (
       task.agent !== record.bot ||
       (record.taskId !== null && task.id !== record.taskId) ||
-      (record.contextId !== null && task.context !== record.contextId)
+      (record.kind === 'ASK' && task.requestId !== record.requestId) ||
+      (record.contextId !== null && task.context !== record.contextId) ||
+      (record.nativeHeader !== null &&
+        (task.message !== record.nativeHeader.message ||
+          task.createdAt !== record.nativeHeader.createdAt ||
+          task.requestId !== record.nativeHeader.requestId ||
+          BigInt(task.revision) < BigInt(record.nativeHeader.revision)))
     )
       throw new Error('Foreign incoming task receipt');
   }
   private reference(record: RecordEntry) {
-    if (record.taskId === null)
-      throw new Error(
-        'Incoming task ID is unavailable; cannot reconcile by request UUID',
-      );
     return {
       project: record.project,
       client: record.client,
+      agent: record.bot,
       id: record.taskId,
+      requestId: record.requestId,
+      cursor: record.replyCursor,
     };
   }
 
@@ -241,6 +248,9 @@ export class DiscordAdapter {
       client: `discord_${digest(botId, input.kind === 'guild' ? input.guildId : 'dm', input.userId).slice(0, 32)}`,
       contextKey,
       requestId: randomUUID(),
+      nativeHeader: null,
+      lastRevision: '0',
+      replyCursor: null,
       replyTo: input.messageId,
       notification: null,
       admission: 'ADMITTING',
@@ -275,7 +285,7 @@ export class DiscordAdapter {
     }
     // Save admission intent before the SDK call. A crash here must never repeat the effect.
     await this.repository.save();
-    let task: IncomingTask;
+    let task: MessageTask;
     try {
       if (kind === 'ASK') {
         task = await this.gateway.receive({
@@ -321,26 +331,85 @@ export class DiscordAdapter {
         'control',
         `Task ${task.id}: ${task.state}${task.ending === null ? '' : ` (${task.ending})`}.`,
       );
+      this.retireTraversal(record, task);
     }
     await this.repository.save();
   }
-  private observe(record: RecordEntry, task: IncomingTask): void {
+  private observe(record: RecordEntry, task: MessageTask): void {
     this.check(task, record);
+    const observed = {
+      ...record,
+      outputs: [...record.outputs],
+      seenReplies: [...record.seenReplies],
+    };
+    if (BigInt(task.revision) < BigInt(observed.lastRevision))
+      throw new Error('Messaging snapshot regressed');
+    observed.lastRevision = task.revision;
+    observed.replyCursor = task.cursor;
     for (const reply of task.replies)
-      this.prepare(record, reply.id, reply.body);
+      this.prepare(observed, reply.id, reply.body);
     if (task.state === 'INPUT_REQUIRED')
       this.prepare(
-        record,
+        observed,
         'approval',
         'This task is waiting for approval in Plowshare. Discord chat does not approve it.',
       );
-    record.finished = terminal(task);
-    if (record.finished && !task.replies.some((r) => r.finalReply))
+    observed.finished = terminal(task);
+
+    if (observed.finished && !task.replies.some((r) => r.finalReply))
       this.prepare(
-        record,
+        observed,
         'terminal',
         `Task ${task.id}: ${task.state}${task.ending === null ? '' : ` (${task.ending})`}.`,
       );
+    this.retireTraversal(observed, task);
+    record.nativeHeader = observed.nativeHeader;
+    record.lastRevision = observed.lastRevision;
+    record.replyCursor = observed.replyCursor;
+    record.finished = observed.finished;
+    record.outputs.splice(0, record.outputs.length, ...observed.outputs);
+    record.seenReplies.splice(
+      0,
+      record.seenReplies.length,
+      ...observed.seenReplies,
+    );
+  }
+  private retireTraversal(record: RecordEntry, task: MessageTask): void {
+    const rows = this.repository.state.messageTraversals;
+    const index = rows.findIndex(
+      (row) =>
+        row.project === record.project &&
+        row.agent === record.bot &&
+        row.client === record.client &&
+        row.header.id === task.id,
+    );
+    const { replies: _replies, cursor: _cursor, ...header } = task;
+    if (index < 0) {
+      record.nativeHeader = header;
+      record.lastRevision = task.revision;
+      record.replyCursor = task.cursor;
+      return;
+    }
+    const retained = rows[index];
+    if (
+      retained === undefined ||
+      retained.next !== null ||
+      retained.resume !== task.cursor ||
+      retained.header.context !== task.context ||
+      retained.header.requestId !== task.requestId ||
+      retained.header.message !== task.message ||
+      retained.header.createdAt !== task.createdAt ||
+      retained.header.revision !== task.revision
+    )
+      throw new Error(
+        'Messaging traversal result differs from observed output',
+      );
+    // Output preparation and the final FOLLOW cursor share the caller's next atomic save. Never
+    // delete a completed result in the gateway, where a crash could lose it before observation.
+    record.nativeHeader = header;
+    record.replyCursor = task.cursor;
+    record.lastRevision = task.revision;
+    rows.splice(index, 1);
   }
   private async deliver(record: RecordEntry): Promise<void> {
     if (
@@ -388,17 +457,49 @@ export class DiscordAdapter {
           'admission',
           'A previous request has uncertain delivery. It has not been repeated. An operator must inspect its retained receipt.',
         );
-        if (record.kind === 'CANCEL' && record.taskId !== null) {
+        if (record.kind === 'ASK') {
+          try {
+            const recovered = await this.gateway.status(this.reference(record));
+            this.check(recovered, record);
+            record.admission = 'ACCEPTED';
+            record.taskId = recovered.id;
+            record.contextId = recovered.context;
+            if (
+              !this.repository.state.contexts.some(
+                (context) => context.key === record.contextKey,
+              )
+            )
+              this.repository.state.contexts.push({
+                key: record.contextKey,
+                contextId: recovered.context,
+              });
+            this.observe(record, recovered);
+            await this.repository.save();
+          } catch (error) {
+            // Absence/foreign scope is deliberately indistinguishable and cannot establish that
+            // the original mutation was unsubmitted. Keep its uncertainty and never resubmit it.
+            if (!(
+              error instanceof MessagingRefusal &&
+              error.code === 'NOT_ACCESSIBLE'
+            ))
+              throw error;
+          }
+        } else if (
+          (record.kind === 'CANCEL' || record.kind === 'STATUS') &&
+          record.taskId !== null
+        ) {
           const task = await this.gateway.status(this.reference(record));
           this.check(task, record);
-          if (terminal(task)) {
+          if (record.kind === 'STATUS' || terminal(task)) {
             record.finished = true;
             this.prepare(
               record,
               'resolved',
-              `Task ${task.id}: ${task.state}. Cancellation was not repeated.`,
+              `Task ${task.id}: ${task.state}.${record.kind === 'CANCEL' ? ' Cancellation was not repeated.' : ''}`,
             );
           }
+          this.retireTraversal(record, task);
+          await this.repository.save();
         }
         if (needsNotice || record.finished) await this.repository.save();
       }
@@ -465,6 +566,9 @@ export class DiscordAdapter {
           client: 'discord_notifications',
           contextKey: key,
           requestId: randomUUID(),
+          nativeHeader: null,
+          lastRevision: '0',
+          replyCursor: null,
           replyTo: null,
           notification: route,
           admission: 'ACCEPTED',

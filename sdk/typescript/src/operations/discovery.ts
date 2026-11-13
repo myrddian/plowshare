@@ -50,8 +50,6 @@ const MUTATIONS = new Set<string>([
   'message.instance.archive',
   'message.cancel',
   ...JOB_SUBMISSIONS,
-  'outgoing.send',
-  'outgoing.cancel',
   'memory.write',
   'memory.invalidate',
   'memory.reembed',
@@ -175,8 +173,7 @@ export function effectiveScope(asked: Request): unknown {
     (payload['id'] ?? payload['root']) != null
   )
     return { kind: 'orchestration', id: payload['id'] ?? payload['root'] };
-  if (asked.type.startsWith('outgoing.') && payload['id'] != null)
-    return { kind: 'outgoing', id: payload['id'] };
+
   if (payload['instance'] != null)
     return { kind: 'message-instance', id: payload['instance'] };
   if (payload['message'] != null)
@@ -225,11 +222,6 @@ const examples: Record<string, unknown> = {
   'admin.account.create': { handle: 'sam', serverAdmin: false },
   'admin.account.update': { handle: 'sam', enabled: false },
   'admin.audit': { limit: 25 },
-  'outgoing.send': {
-    requestId: '00000000-0000-0000-0000-000000000001',
-    peer: 'research',
-    message: { parts: [{ text: 'Research this question' }] },
-  },
   'information.acquire': {
     scope: { kind: 'personal' },
     requestId: '00000000-0000-0000-0000-000000000001',

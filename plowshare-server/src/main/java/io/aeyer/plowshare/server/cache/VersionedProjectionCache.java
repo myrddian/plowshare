@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.cache;
 
+import java.sql.Connection;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
@@ -260,7 +262,7 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
       return null;
     if (!callerHasNoOwnWrites()) return null;
     var token = entry.token();
-    var now = java.time.Instant.now();
+    var now = Instant.now();
     if (token.windowStart() != null && now.isBefore(token.windowStart().plus(margin))) return null;
     if (token.validUntil() != null && !now.plus(margin).isBefore(token.validUntil())) return null;
     var request =
@@ -293,7 +295,7 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
     if (!TransactionSynchronizationManager.isActualTransactionActive()) return true;
     if (!TransactionSynchronizationManager.isCurrentTransactionReadOnly()) return false;
     Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
-    return isolation == null || isolation == java.sql.Connection.TRANSACTION_READ_COMMITTED;
+    return isolation == null || isolation == Connection.TRANSACTION_READ_COMMITTED;
   }
 
   public void close() {

@@ -51,8 +51,7 @@ from .journal import FileReceipts
 from .monitor import FileMonitorSettings
 from .native_tools import DECLARATIONS, CataloguedProvider, registered
 from .operator_state import FileOperatorStore
-from .peer import IntegrationPeer, SdkOutgoingPort
-from .peer_journal import FilePeerReceipts
+from .peer_journal import require_settled_legacy_peer
 from .ports import SdkPrivacyPort
 from .presence import PresenceHistory, PresenceView, PresenceWatch
 from .profile_port import SdkProfilePort
@@ -192,6 +191,9 @@ async def execute(args: argparse.Namespace) -> None:
             )
             return
         with FileReceipts(config) as receipts, ExitStack() as stores:
+            # Old work IDs are not native invocation IDs. Refuse unresolved evidence before
+            # catalogue publication, intake or collection; never migrate it by replaying effects.
+            require_settled_legacy_peer(receipts)
             operator_store = (
                 FileOperatorStore(Path(args.config).parent)
                 if getattr(args, "dashboard_settings", False)
@@ -205,7 +207,7 @@ async def execute(args: argparse.Namespace) -> None:
                 operator_store,
                 PresenceWatch(PresenceHistory(config.state_directory)),
             )
-            # The record and request services are composed before the tool
+            # The record and request services are composed before the native tool
             # provider, whose assistant tools use them (see assistant_tools).
             issues = (
                 PrivacyIssues(
@@ -305,8 +307,8 @@ async def execute(args: argparse.Namespace) -> None:
             def assistant_tools() -> WorkerTools:
                 """The native provider's tools, with the assistant's services.
 
-                The peer keeps the read and scan tools only; only the native
-                provider serves the assistant's request and record tools.
+                The native provider serves both retained scan reads and the
+                assistant's request and record tools through the public SDK.
                 """
                 return WorkerTools(
                     worker,
@@ -317,24 +319,10 @@ async def execute(args: argparse.Namespace) -> None:
                     references=reference_requests,
                 )
 
-            peer = (
-                IntegrationPeer(
-                    config,
-                    SdkOutgoingPort(client, config),
-                    WorkerTools(worker),
-                    FilePeerReceipts(config, receipts),
-                )
-                if config.outgoing_peer is not None
-                else None
-            )
-            external: ExternalRequests | None = peer
+            external: ExternalRequests | None = None
             native: ToolProvider | None = None
             native_journal: SqliteToolJournal | None = None
             if args.tool_provider is not None:
-                if peer is not None:
-                    raise ValueError(
-                        "Choose either native tools or the outgoing compatibility peer"
-                    )
                 native_journal = stores.enter_context(
                     open_tool_journal(
                         config.state_directory / "relay-tools",
@@ -362,8 +350,6 @@ async def execute(args: argparse.Namespace) -> None:
                 return
             if args.command == "reconcile":
                 await worker.reconcile()
-                if peer is not None:
-                    await peer.reconcile()
                 if native is not None:
                     await native.reconcile()
                 print("Retained evidence reconciled; no mutation was replayed.")
@@ -447,8 +433,6 @@ async def execute(args: argparse.Namespace) -> None:
                             dossiers.port = SdkDossierPort(
                                 replacement, worker.config, worker.port
                             )
-                        if peer is not None:
-                            peer.port = SdkOutgoingPort(replacement, worker.config)
                         if native_journal is not None:
                             native = ToolProvider(
                                 replacement,
@@ -467,8 +451,6 @@ async def execute(args: argparse.Namespace) -> None:
                             )
                         await old.close()
                     await worker.reconcile()
-                    if peer is not None:
-                        await peer.reconcile()
                     if native is not None:
                         await native.reconcile()
                     topics = await worker.port.available_topics()

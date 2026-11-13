@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.cache;
 
 import com.zaxxer.hikari.HikariDataSource;
+import io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace;
+import io.aeyer.plowshare.server.pool.TracedDataSource;
 import javax.sql.DataSource;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -69,8 +71,7 @@ public class ProjectionCacheConfiguration {
       JdbcTemplate jdbc, VersionConnections authoritative, ProjectionCacheProperties properties) {
     return new JdbcProjectionVersions(
         jdbc,
-        new io.aeyer.plowshare.server.pool.TracedDataSource(
-            authoritative.source(), new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace()),
+        new TracedDataSource(authoritative.source(), new JfrJdbcExecutionTrace()),
         properties.maxPendingTransactions());
   }
 
@@ -88,9 +89,7 @@ public class ProjectionCacheConfiguration {
             connections.source().getPassword());
     notificationSource.setDriverClassName(connections.source().getDriverClassName());
     notificationSource.setConnectionProperties(connections.source().getDataSourceProperties());
-    var traced =
-        new io.aeyer.plowshare.server.pool.TracedDataSource(
-            notificationSource, new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace());
+    var traced = new TracedDataSource(notificationSource, new JfrJdbcExecutionTrace());
     int observers = properties.maxProjections() + 2; // Relay wakeups and information invalidation.
     if (!notified.enabled())
       return new ListeningProjectionChangeSignals(

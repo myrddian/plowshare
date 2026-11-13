@@ -2,11 +2,16 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.access.AccessRequestDecoder;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import io.aeyer.plowshare.server.archive.JobLog;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
+import io.aeyer.plowshare.server.information.InformationContext;
+import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
@@ -18,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -205,7 +211,7 @@ public final class JobStore
     this.runEnds = Objects.requireNonNull(ends, "ends");
   }
 
-  private io.aeyer.plowshare.server.access.OperationAuthority operations;
+  private OperationAuthority operations;
 
   /** Harness continuation uses retained execution identity, never conversation custody. */
   public String retainedExecutor(String conversation) {
@@ -213,17 +219,13 @@ public final class JobStore
     var bound =
         operations
             .conversation(conversation)
-            .orElseThrow(
-                () ->
-                    new io.aeyer.plowshare.server.faults.CallerFault(
-                        "Missing retained execution lineage"));
+            .orElseThrow(() -> new CallerFault("Missing retained execution lineage"));
     operations.require(bound.admission());
     return bound.admission().executor();
   }
 
   /** Focused execution fixture with mandatory operation authority. */
-  public JobStore(
-      io.aeyer.plowshare.server.access.OperationAuthority operations, JobRuntime runtime) {
+  public JobStore(OperationAuthority operations, JobRuntime runtime) {
     this(runtime);
     this.operations = Objects.requireNonNull(operations);
   }
@@ -235,7 +237,7 @@ public final class JobStore
       Compaction logs,
       JobLog rows,
       Duration heartbeat,
-      io.aeyer.plowshare.server.access.OperationAuthority operations) {
+      OperationAuthority operations) {
     this(runtime, events, logs, rows, heartbeat);
     this.operations = Objects.requireNonNull(operations);
   }
@@ -763,7 +765,8 @@ public final class JobStore
         null);
   }
 
-  private String submit(
+  /** Submits an owning native causal turn after its exact reservation was retained. */
+  public String submit(
       AgentDefinition definition,
       String userPrompt,
       Home home,
@@ -846,6 +849,13 @@ public final class JobStore
     Objects.requireNonNull(ended, "ended");
     Objects.requireNonNull(userPrompt, "userPrompt");
     Objects.requireNonNull(home, "home");
+    RelayCausation transcriptSource = transcript.causation();
+    if (transcriptSource != null && causation != null && !transcriptSource.equals(causation))
+      throw new IllegalArgumentException("Job source differs from its reserved transcript");
+    RelayCausation effectiveCausation = causation == null ? transcriptSource : causation;
+    // A delegated causal transcript carries its parent's exact turn source. Retain the child's
+    // reservation before registering its job; storage failure cannot start unbound paid work.
+    if (transcriptSource != null) transcript.reserveCausalSource();
     // Blank as well as null, and refused here rather than several seconds
     // later on a virtual thread. JobRuntime.run refuses it too, but by then
     // a job id has been handed back and a caller is polling something that
@@ -947,7 +957,7 @@ public final class JobStore
           }
           transcript.startedAs(id);
         },
-        causation,
+        effectiveCausation,
         callerHandle == null
             ? Optional.ofNullable(transcript.usage())
                 .map(UsageAttribution::accountHandle)
@@ -1059,25 +1069,22 @@ public final class JobStore
    *     the caller that describes the work
    * @param ended what to tell before the ending is published; see {@link #finish}
    */
-  private io.aeyer.plowshare.server.information.InformationJobs informationJobs;
+  private InformationJobs informationJobs;
 
-  public void useInformationJobs(io.aeyer.plowshare.server.information.InformationJobs policies) {
+  public void useInformationJobs(InformationJobs policies) {
     informationJobs = policies;
   }
 
-  private io.aeyer.plowshare.server.access.ProjectAuthorization projectAccess;
+  private ProjectAuthorization projectAccess;
 
-  public void useProjectAccess(io.aeyer.plowshare.server.access.ProjectAuthorization access) {
+  public void useProjectAccess(ProjectAuthorization access) {
     projectAccess = access;
   }
 
   public Job getFor(String id, String account) {
     if (projectAccess != null)
       projectAccess.require(
-          "job.status",
-          io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-              "job.status", Map.of("job", id)),
-          account);
+          "job.status", AccessRequestDecoder.decode("job.status", Map.of("job", id)), account);
     Job job = get(id);
     if (informationJobs != null) {
       informationJobs.require(id, account);
@@ -1099,8 +1106,7 @@ public final class JobStore
                 projectAccess == null
                     || projectAccess.allowed(
                         "job.status",
-                        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                            "job.status", Map.of("job", job.id())),
+                        AccessRequestDecoder.decode("job.status", Map.of("job", job.id())),
                         account))
         .filter(
             job ->
@@ -1113,8 +1119,8 @@ public final class JobStore
   public String submitInformation(
       String name,
       Home home,
-      io.aeyer.plowshare.server.information.InformationContext context,
-      List<java.util.UUID> inputs,
+      InformationContext context,
+      List<UUID> inputs,
       Function<BooleanSupplier, Outcome> work) {
     if (informationJobs == null)
       throw new IllegalStateException("information job policies are not bound");

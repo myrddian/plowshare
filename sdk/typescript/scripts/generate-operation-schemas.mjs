@@ -15,6 +15,7 @@ const sources = consoleMode
         resolve(root, 'src/operations/direct.ts'),
         resolve(root, 'src/operations/replies.ts'),
         resolve(root, 'src/operations/push.ts'),
+        resolve(root, 'src/operations/relay-blobs.ts'),
       ];
 const program = ts.createProgram(sources, {
   strict: true,
@@ -175,11 +176,27 @@ if (consoleMode) {
       );
       return schema(checker.getTypeAtLocation(declaration));
     })(),
+    http: Object.fromEntries(
+      [
+        'RelayBlobPublish',
+        'RelayBlobRead',
+        'RelayBlobPublished',
+        'RelayBlobDescriptor',
+      ].map((name) => {
+        const source = program.getSourceFile(
+          resolve(root, 'src/operations/relay-blobs.ts'),
+        );
+        const declaration = source.statements.find(
+          (s) => ts.isInterfaceDeclaration(s) && s.name.text === name,
+        );
+        return [name, schema(checker.getTypeAtLocation(declaration))];
+      }),
+    ),
     $defs: definitions,
   };
   output =
     '// Generated from Payloads and Replies; run node scripts/generate-operation-schemas.mjs.\n' +
-    "import type { Schema } from './schema.ts'\nexport const OPERATION_SCHEMAS: { inputs: Record<string, Schema>; results: Record<string, Schema>; pushes: Schema; $defs: Record<string, Schema> } = " +
+    "import type { Schema } from './schema.ts'\nexport const OPERATION_SCHEMAS: { inputs: Record<string, Schema>; results: Record<string, Schema>; pushes: Schema; http: Record<string, Schema>; $defs: Record<string, Schema> } = " +
     '{\n' +
     Object.entries(result)
       .map(([name, values]) =>

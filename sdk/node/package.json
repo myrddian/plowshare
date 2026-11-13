@@ -14,7 +14,7 @@
     "build/sync/*.d.ts"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/build-javascript-sdk.mjs node",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepack": "pnpm build"
   },

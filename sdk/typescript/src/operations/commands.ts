@@ -69,8 +69,6 @@ export function parseCommand(line: string, project?: string | null): Parsed {
       type === 'conversation.list' ||
       type === 'conversation.latest') &&
     (SCOPED.includes(type) ||
-      type === 'outgoing.send' ||
-      type === 'outgoing.peers' ||
       ((type === 'agent.run' || type === 'trigger.define') &&
         body['conversation'] == null) ||
       (type === 'approval.list' &&

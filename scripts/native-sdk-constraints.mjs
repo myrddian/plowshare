@@ -169,6 +169,14 @@ export function constrain(graph) {
         );
       if (k === 'requestId') add(v, { pattern: uuid });
     }
+    // Operation-specific bounds follow generic defaults so narrower identities stay narrow.
+    if (op === 'board.close') {
+      field(s, 'topic', {pattern:'^bdt_[A-Za-z0-9]+$', minLength:5, maxLength:256});
+      field(s, 'body', {...text(16000,1),maxUtf8Bytes:64000,nonblank:true});
+      field(s, 'requestId', {pattern:uuid});
+      field(s, 'project', {...identity,maxLength:256});
+      if(s.properties?.cites)s.properties.cites={type:'array',maxItems:200,items:{type:'string',pattern:'^bdm_[A-Za-z0-9]+$',minLength:5,maxLength:256}};
+    }
     if (op === 'orchestration.repair') {
       const checkpoint = nested(s, 'checkpoint');
       const digest = { pattern: '^sha256:[a-f0-9]{64}$' };
@@ -176,42 +184,6 @@ export function constrain(graph) {
       field(checkpoint, 'sourceHash', digest);
       field(checkpoint, 'replacementHash', digest);
       rules(s, not({ eq: [g('checkpoint.sourceHash'), g('checkpoint.replacementHash')] }));
-    }
-    if (op === 'outgoing.report') {
-      field(s, 'revision', integer(0, 9007199254740991));
-      field(s, 'error', text(2000));
-      rules(
-        s,
-        implies(
-          or(
-            eq('state', 'WORKING'),
-            eq('state', 'INPUT_REQUIRED'),
-            eq('state', 'AUTH_REQUIRED'),
-          ),
-          present('remoteTask'),
-        ),
-        implies(
-          present('result.task'),
-          and(
-            { eq: [g('result.task.id'), g('remoteTask')] },
-            { eq: [g('result.task.contextId'), g('remoteContext')] },
-          ),
-        ),
-      );
-    }
-    if (op === 'outgoing.claim' || op === 'outgoing.advertise')
-      field(s, 'peers', {
-        minItems: 1,
-        maxItems: 32,
-        uniqueItems: true,
-        element: identity,
-      });
-    if (op === 'incoming.receive') {
-      field(s, 'body', text(65536));
-      field(s, 'command', {
-        pattern:
-          '^/(skill|orchestration):[a-zA-Z0-9_.-]+(?: --mode=(INHERITED|SUMMARISED|NEW|DIRECT))?$',
-      });
     }
     if (op === 'admin.audit') field(s, 'limit', { maximum: 100 });
     if (op.startsWith('admin.service.token.'))
@@ -499,7 +471,7 @@ export function constrain(graph) {
       field(shape,'project',{...identity,maxLength:256});
       for(const k of ['topic','parentTopic']) field(shape,k,{...portName,maxLength:1024});
       field(shape,'group',{...portName,maxLength:140});
-      for(const k of ['consumerId','requestId','batchId']) field(shape,k,canonicalUuid);
+      for(const k of ['consumerId','requestId','batchId','generation']) field(shape,k,canonicalUuid);
       for(const k of ['position','through','expiredThrough','fence']) field(shape,k,decimal);
       field(shape,'position',{disallow:['0']}); field(shape,'fence',{disallow:['0']});
       for(const k of ['occurredAt','publishedAt','expiresAt']) field(shape,k,instant);
@@ -517,19 +489,17 @@ export function constrain(graph) {
       rules(reply,{eq:[eq('status','DATA'),present('events')]},{eq:[eq('status','GAP'),present('expiredThrough')]});
     }
   }
-  const claim = resolve(graph, graph.results['outgoing.claim']);
-  rules(
-    claim,
-    { eq: [{ present: 'work' }, { present: 'action' }] },
-    implies(
-      eq('action', 'send'),
-      and(eq('work.state', 'DISPATCHED'), absent('work.remoteTask')),
-    ),
-    implies(
-      and(present('action'), not(eq('action', 'send'))),
-      present('work.remoteTask'),
-    ),
-  );
+  for (const shape of [resolve(graph,graph.inputs['relay.group.delete']),resolve(graph,graph.results['relay.group.delete'])]) {
+    field(shape,'project',{...identity,maxLength:256});
+    field(shape,'topic',{...portName,maxLength:1024});
+    field(shape,'group',{...portName,maxLength:140});
+    field(shape,'generation',canonicalUuid);
+  }
+  for(const shape of [resolve(graph,graph.inputs['relay.group.inspect']),resolve(graph,graph.results['relay.group.inspect'])]) {
+    field(shape,'project',{...identity,maxLength:256});field(shape,'topic',{...portName,maxLength:1024});
+    field(shape,'group',{...portName,maxLength:140});field(shape,'generation',canonicalUuid);
+  }
+  rules(resolve(graph,graph.results['relay.group.inspect']),{eq:[present('generation'),eq('exists',true)]});
   // Constraints owned by shared domain shapes apply to both requests and responses.
   for (const s of Object.values(graph.$defs)) {
     if (!s.properties) continue;
@@ -647,16 +617,6 @@ export function constrain(graph) {
       field(s, 'depth', integer(-1, 32));
       rules(s, { eq: [{ gt: [g('depth'), 0] }, present('parentId')] });
     }
-    if (title === 'ExternalMessage') {
-      field(s, 'parts', { minItems: 1, maxItems: 256 });
-      for (const k of ['messageId', 'contextId', 'taskId'])
-        field(s, k, identity);
-      field(s, 'extensions', {
-        maxItems: 32,
-        uniqueItems: true,
-        element: { ...identity, pattern: '^[a-zA-Z][a-zA-Z0-9+.-]*:[^\\s]+$' },
-      });
-    }
     if (p.text && (p.url || p.raw || p.data || p.kind))
       field(s, 'text', text(262144));
     if (p.text && p.kind && p.schedule && p.emits && p.fireAt)
@@ -685,8 +645,6 @@ export function constrain(graph) {
         maxLength: 256,
         pattern: '^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$',
       });
-    if (title === 'IntegrationRequest')
-      field(s, 'binding', { ...identity, maxLength: 256 });
     if (p.entities)
       field(s, 'entities', {
         minItems: 1,
@@ -700,16 +658,6 @@ export function constrain(graph) {
         keyPattern: '^[A-Za-z_][A-Za-z0-9_]{0,255}$',
         values: { maxLength: 4096, noNul: true, safePrecision: true },
       });
-    if (title === 'ExternalMetadata') {
-      field(s, 'plowshareCommand', {
-        pattern:
-          '^/(skill|orchestration):[a-zA-Z0-9_.-]+(?: --mode=(INHERITED|SUMMARISED|NEW|DIRECT))?$',
-      });
-      field(s, 'plowshareEnding', {
-        pattern:
-          '^(?:ANSWERED|TURN_CAP|CALL_BUDGET|CANCELLED|STUCK|UNAVAILABLE|SUB_AGENT_FAILED|SESSION_GONE|AWAITING)?$',
-      });
-    }
     if (title?.startsWith('Portable')) {
       for(const key of ['resource','revision','id','source','target','pinnedRevision','foreignResource','foreignRevision','foreignVersion','localVersion','localRevision','expectedRevision','bundle']) if(p[key] && stringShape(p[key])) field(s,key,canonicalUuid);
       for(const key of ['manifestHash','contentHash','textHash','sourceHash']) field(s,key,{pattern:'^[a-f0-9]{64}$',maxLength:64});
@@ -741,28 +689,6 @@ export function constrain(graph) {
     }
     if(title==='DocumentRelationship' || p.kind && p.relation) field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
     if(title==='SavedNavigationView') field(s,'label',{...identity,maxLength:120});
-    if (title === 'IncomingSource') {
-      const parts = resolve(graph, s.properties.parts);
-      const part = resolve(graph, parts.items);
-      field(part, 'text', text(65536));
-      field(s, 'parts', { minItems: 1, maxItems: 256 });
-      field(s, 'messageId', { ...identity, maxLength: 256 });
-      field(s, 'referenceTaskIds', {
-        maxItems: 256,
-        uniqueItems: true,
-        element: identity,
-      });
-    }
-    if (title === 'AgentCard') {
-      for (const k of ['name', 'version']) field(s, k, identity);
-      field(s, 'description', text(32768));
-      field(s, 'skills', { maxItems: 256 });
-    }
-    if (title === 'ExternalTask') {
-      for (const k of ['id', 'contextId']) field(s, k, identity);
-      field(s, 'history', { maxItems: 256 });
-      field(s, 'artifacts', { maxItems: 256 });
-    }
     if (p.timestamp) field(s, 'timestamp', { timestamp: true });
     if (p.claim && p.objective && p.rationale) {
       for (const k of ['id', 'claim', 'objective', 'rationale'])
@@ -773,8 +699,6 @@ export function constrain(graph) {
     if (p.stage && p.outcome && p.text)
       for (const k of ['stage', 'outcome', 'text'])
         field(s, k, { ...text(32768, 1), nonblank: true });
-    if (title === 'OutgoingWork')
-      field(s, 'revision', integer(0, 9007199254740991));
     if (title === 'JobEvent') {
       s.required = [
         ...new Set([...(s.required ?? []), 'agent', 'steps', 'modelCalls']),
@@ -833,5 +757,28 @@ export function constrain(graph) {
   const toolRead=resolve(graph,graph.inputs['tool.invocation.read']);
   field(toolRead,'project',{...identity,maxLength:256}); field(toolRead,'invocation',canonicalUuid);
   annotatePush(push);
+  // Binary HTTP uses the same DTO graph without inventing WebSocket operations.
+  for (const [name, ref] of Object.entries(graph.http ?? {})) {
+    const s = resolve(graph, ref);
+    for (const row of [s, nested(s, 'publication')].filter(Boolean)) {
+      field(row, 'requestId', canonicalUuid);
+      field(row, 'eventId', canonicalUuid);
+      field(row, 'project', { ...identity, maxLength: 256 });
+      for (const key of ['topic', 'parentTopic'])
+        field(row, key, { ...portName, maxLength: 1024 });
+      field(row, 'group', { ...portName, maxLength: 140 });
+      for (const key of ['correlationId', 'parentEventId'])
+        field(row, key, { ...identity, maxLength: 256 });
+      for (const key of ['occurredAt', 'publishedAt']) field(row, key, {...instant,pattern:'^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,9})?(?:Z|[+-]\\d\\d:\\d\\d)$'});
+      field(row, 'position', { ...decimal, disallow: ['0'] });
+      field(row, 'mediaType', {
+        maxLength: 255,
+        pattern:
+          '^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$',
+      });
+    }
+    if (name === 'RelayBlobPublish')
+      rules(s, { eq: [present('parentTopic'), present('parentEventId')] });
+  }
   return graph;
 }

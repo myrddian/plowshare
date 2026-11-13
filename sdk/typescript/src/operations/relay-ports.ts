@@ -31,12 +31,33 @@ export interface RelayAckRequest {
   readonly fence: string;
   readonly expiredThrough?: string | null;
 }
+/** Delete only an inspected, drained SDK group. Generation comes from consumption or relay.log subscribers. */
+export interface RelayDeleteGroupRequest {
+  readonly project: string;
+  readonly topic: string;
+  readonly group: string;
+  readonly generation: string;
+}
+export interface RelayGroupDeleted extends RelayDeleteGroupRequest {
+  readonly removed: boolean;
+}
+export interface RelayInspectGroupRequest {
+  readonly project: string;
+  readonly topic: string;
+  readonly group: string;
+}
+export interface RelayGroupState extends RelayInspectGroupRequest {
+  readonly generation: string | null;
+  readonly exists: boolean;
+}
 export interface RelayBatch {
   readonly project: string;
   readonly topic: string;
   readonly group: string;
   readonly consumerId: string;
   readonly status: 'DATA' | 'EMPTY' | 'GAP' | 'BUSY';
+  /** Cursor incarnation; optional for compatibility with older servers. */
+  readonly generation?: string | null;
   readonly batchId: string | null;
   readonly fence: string | null;
   readonly through: string;
@@ -48,6 +69,8 @@ export interface RelayPortPayloads {
   'relay.publish': RelayPublishRequest;
   'relay.consume': RelayConsumeRequest;
   'relay.ack': RelayAckRequest;
+  'relay.group.delete': RelayDeleteGroupRequest;
+  'relay.group.inspect': RelayInspectGroupRequest;
 }
 export interface RelayPortReplies {
   'relay.publish': {
@@ -58,6 +81,8 @@ export interface RelayPortReplies {
     readonly publishedAt: string;
   };
   'relay.consume': RelayBatch;
+  'relay.group.delete': RelayGroupDeleted;
+  'relay.group.inspect': RelayGroupState;
   'relay.ack': {
     readonly project: string;
     readonly topic: string;
@@ -114,7 +139,13 @@ const instant = (v: unknown): boolean =>
   /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(v) &&
   Number.isFinite(Date.parse(v));
 export const isRelayPort = (type: string): boolean =>
-  ['relay.publish', 'relay.consume', 'relay.ack'].includes(type);
+  [
+    'relay.publish',
+    'relay.consume',
+    'relay.ack',
+    'relay.group.delete',
+    'relay.group.inspect',
+  ].includes(type);
 export function relayPortProblem(
   type: string,
   p: Record<string, unknown>,
@@ -122,6 +153,13 @@ export function relayPortProblem(
   if (!isRelayPort(type)) return;
   if (!identity(p['project']) || !name(p['topic'], 1024))
     return 'Invalid Relay port scope';
+  if (type === 'relay.group.inspect')
+    return name(p['group'], 140) ? undefined : 'Invalid Relay group inspection';
+  if (type === 'relay.group.delete') {
+    return name(p['group'], 140) && uuid(p['generation'])
+      ? undefined
+      : 'Invalid Relay group retirement';
+  }
   if (type === 'relay.publish') {
     if (
       !uuid(p['requestId']) ||
@@ -176,6 +214,31 @@ export function validateRelayPortReply(type: string, value: unknown): void {
     fail();
   const p = value as Record<string, unknown>;
   if (!identity(p['project']) || !name(p['topic'], 1024)) fail();
+  if (type === 'relay.group.inspect') {
+    if (
+      !name(p['group'], 140) ||
+      typeof p['exists'] !== 'boolean' ||
+      !(p['generation'] === null || uuid(p['generation'])) ||
+      p['exists'] !== (p['generation'] !== null)
+    )
+      fail();
+    return;
+  }
+  if (type === 'relay.group.delete') {
+    if (
+      !name(p['group'], 140) ||
+      !uuid(p['generation']) ||
+      typeof p['removed'] !== 'boolean'
+    )
+      fail();
+    return;
+  }
+  if (
+    type === 'relay.consume' &&
+    p['generation'] != null &&
+    !uuid(p['generation'])
+  )
+    fail();
   if (type === 'relay.publish') {
     if (
       !uuid(p['requestId']) ||

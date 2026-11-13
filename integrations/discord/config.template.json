@@ -3,7 +3,9 @@
   "serviceTokenEnvironment": "PLOWSHARE_DISCORD_SERVICE_TOKEN",
   "discordTokenEnvironment": "DISCORD_BOT_TOKEN",
   "stateDirectory": "/absolute/path/to/private/discord-state",
-  "allowedUserIds": ["100000000000000003"],
+  "allowedUserIds": [
+    "100000000000000003"
+  ],
   "routes": [
     {
       "guildId": "100000000000000001",
@@ -14,8 +16,18 @@
     }
   ],
   "notifications": [],
-  "dm": {"mode": "disabled"},
+  "dm": {
+    "mode": "disabled"
+  },
   "pollMs": 2000,
   "requestTimeoutMs": 30000,
-  "maxRecords": 500
+  "maxRecords": 500,
+  "messaging": [
+    {
+      "project": "discord",
+      "bot": "discord_assistant",
+      "requests": "discord.requests",
+      "replies": "discord.replies"
+    }
+  ]
 }

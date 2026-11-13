@@ -65,6 +65,25 @@ func TestOmittedAndExplicitNull(t *testing.T) {
 	}
 }
 
+func TestBoardClosePreservesValidUnicodeAndRejectsInvalidRawJSON(t *testing.T) {
+	for _, body := range []string{`"\ud83d\ude00"`, `"\\ud800"`, `"�"`} {
+		request := []byte(`{"project":"fixture","topic":"bdt_Fixture","body":` + body + `,"requestId":"11111111-1111-1111-1111-111111111111"}`)
+		if _, err := project(catalog.Inputs["board.close"], request, true); err != nil {
+			t.Fatal("valid Unicode refused", err)
+		}
+	}
+	for _, request := range [][]byte{
+		[]byte(`{"project":"fixture","topic":"bdt_Fixture","body":"\ud83d","requestId":"11111111-1111-1111-1111-111111111111"}`),
+		[]byte(`{"project":"fixture","topic":"bdt_Fixture","body":"\ude00","requestId":"11111111-1111-1111-1111-111111111111"}`),
+		[]byte("{\"body\":\"\xff\"}"),
+		[]byte(`{} {}`),
+	} {
+		if _, err := project(catalog.Inputs["board.close"], request, true); err == nil {
+			t.Fatal("malformed JSON accepted")
+		}
+	}
+}
+
 func TestDeploymentReceiptCoordinates(t *testing.T) {
 	asked := []byte(`{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","revision":"22222222-2222-2222-2222-222222222222"}`)
 	valid := []byte(`{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","release":{"revision":"22222222-2222-2222-2222-222222222222"}}`)
@@ -313,6 +332,20 @@ func TestHostedCoordinatesAndSecretDiagnostics(t *testing.T) {
 	if err = json.Unmarshal(data, &cases); err != nil {
 		t.Fatal(err)
 	}
+	groupData, err := os.ReadFile(filepath.Join(filepath.Dir(os.Getenv("PLOWSHARE_SDK_DTO_FIXTURES")), "relay-group-correlations.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groupCases []struct {
+		Operation string          `json:"operation"`
+		Request   json.RawMessage `json:"request"`
+		Reply     json.RawMessage `json:"reply"`
+		Valid     bool            `json:"valid"`
+	}
+	if err = json.Unmarshal(groupData, &groupCases); err != nil {
+		t.Fatal(err)
+	}
+	cases = append(cases, groupCases...)
 	for _, row := range cases {
 		if deploymentMatches(row.Operation, row.Request, row.Reply) != row.Valid {
 			t.Fatalf("Hosted coordinate mismatch: %s", row.Operation)

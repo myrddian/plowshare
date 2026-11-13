@@ -1,12 +1,43 @@
 package io.aeyer.plowshare.integrations;
 
-import io.aeyer.plowshare.integrations.IntegrationContracts.*;
-import io.aeyer.plowshare.protocol.IntegrationPayload.*;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Action;
+import io.aeyer.plowshare.integrations.IntegrationContracts.BindingState;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Completion;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Draft;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Effect;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Entry;
+import io.aeyer.plowshare.integrations.IntegrationContracts.EventEnvelope;
+import io.aeyer.plowshare.integrations.IntegrationContracts.EventEvidence;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Held;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Hold;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Pipeline;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Read;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ReadResult;
+import io.aeyer.plowshare.integrations.IntegrationContracts.RouteState;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ScriptContext;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ScriptOutput;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ScriptState;
+import io.aeyer.plowshare.integrations.IntegrationContracts.StateChanged;
+import io.aeyer.plowshare.protocol.IntegrationPayload;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Arguments;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Reading;
+import io.aeyer.plowshare.protocol.IntegrationPayload.TextParameter;
 import io.aeyer.plowshare.protocol.Orchestration;
-import io.aeyer.plowshare.protocol.Outgoing;
+import io.aeyer.plowshare.protocol.RelayLog;
+import io.aeyer.plowshare.protocol.RelayPort;
 import java.io.IOException;
-import java.time.*;
-import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
@@ -22,6 +53,7 @@ public final class IntegrationRuntime implements AutoCloseable {
   private final String session = UUID.randomUUID().toString();
   private long lastHoldClock = Long.MIN_VALUE;
   private volatile IOException intakeFailure;
+  private final Map<String, String> relayAttention = new LinkedHashMap<>();
 
   public IntegrationRuntime(
       Configuration config,
@@ -42,6 +74,7 @@ public final class IntegrationRuntime implements AutoCloseable {
 
   public void start() throws IOException {
     journal.verifyDtos();
+    journal.requireRequestCutover();
     for (var entry : adapters.entrySet())
       entry.getValue().start(observation -> accept(entry.getKey(), observation));
   }
@@ -79,7 +112,7 @@ public final class IntegrationRuntime implements AutoCloseable {
     journal.verifyDtos();
     journal.expireCauses(clock.get().getEpochSecond());
     journal.maintain(config.retention());
-    recoverOutgoing();
+    journal.requireRequestCutover();
     for (var adapter : adapters.values()) adapter.maintain();
     for (var e : journal.entries())
       if (e.getValue().kind().equals("handler") && e.getValue().status().equals("QUEUED"))
@@ -92,11 +125,21 @@ public final class IntegrationRuntime implements AutoCloseable {
       if (e.getValue().kind().equals("effect")) dispatch(e.getKey(), e.getValue());
     followRuns();
     for (var b : config.bindings().values()) {
-      gateway.advertise(b.project(), List.of(b.peer()));
-      var claimed = gateway.claim(b.project(), List.of(b.peer()));
-      if (claimed.work() != null) outgoing(b, claimed);
+      if (b.relay() == null) continue;
+      try {
+        relayTick(b);
+        relayAttention.remove(b.name());
+      } catch (IOException | IllegalArgumentException failed) {
+        // Failure evidence remains in the binding's cursor/intent. Never let one deferred
+        // destination prevent another binding's bounded pass, or log request/credential text.
+        relayAttention.put(b.name(), "Relay binding requires retained-evidence inspection");
+      }
     }
     journal.maintain(config.retention());
+  }
+
+  public synchronized Map<String, String> relayAttention() {
+    return Map.copyOf(relayAttention);
   }
 
   private Map<String, Map<String, Reading>> snapshots(Configuration.Binding b) {
@@ -446,79 +489,285 @@ public final class IntegrationRuntime implements AutoCloseable {
     }
   }
 
-  private void recoverOutgoing() throws IOException {
-    for (var entry : journal.entries()) {
-      Entry record = entry.getValue();
-      if (!record.kind().equals("outgoing")
-          || !Set.of("DISPATCHED", "REPORTING").contains(record.status())) continue;
-      var work = gateway.outgoing(UUID.fromString(entry.getKey().substring("outgoing:".length())));
-      var b = config.bindings().get(record.binding());
-      if (b == null || !b.project().equals(work.project()) || !b.peer().equals(work.peer()))
-        throw new IOException("foreign outgoing recovery record");
-      if (record.state() != null
-          && record.state().equals(work.state())
-          && Objects.equals(record.result(), work.result())) {
-        Draft done = record.draft();
-        done.status = "DONE";
-        journal.writeEntry(entry.getKey(), done.build());
-      } else
-        throw new IOException(
-            "stranded outgoing claim; inspect delivery before replacing session; nothing was replayed");
+  private void relayTick(Configuration.Binding binding) throws IOException {
+    var policy = binding.relay();
+    for (var row : journal.entries()) {
+      var retained = row.getValue();
+      if (retained.kind().equals("relay")
+          && retained.binding().equals(binding.name())
+          && !retained.status().equals("DONE")) {
+        if (!retained.fingerprint().equals(binding.fingerprint()))
+          throw new IOException("Pending Relay work belongs to another binding configuration");
+        processRelay(binding, row.getKey(), retained);
+        return;
+      }
+    }
+    var checkpoint = journal.relayCheckpoint(binding.name()).orElse(null);
+    if (checkpoint != null && !checkpoint.fingerprint().equals(binding.fingerprint()))
+      throw new IOException("Relay binding configuration differs from its retained cursor");
+    String after = checkpoint == null ? "0" : checkpoint.position();
+    var page = log(binding.project(), policy.requests(), policy.requestGeneration(), after);
+    if (page.gapThrough() != null)
+      throw new IOException("Relay request retention gap requires explicit inspection");
+    Map<String, Entry> captured = new LinkedHashMap<>();
+    for (var event : page.events()) {
+      if (!policy.producers().contains(event.publisher())) continue;
+      UUID source;
+      try {
+        source = UUID.fromString(event.eventId());
+        if (!source.toString().equals(event.eventId()) || !event.payload().kind().equals("TEXT"))
+          throw new IllegalArgumentException();
+      } catch (IllegalArgumentException invalid) {
+        throw new IOException("Configured producer supplied unsupported source evidence");
+      }
+      var evidence =
+          new RelayRequests.Source(
+              binding.project(),
+              policy.requests(),
+              policy.requestGeneration(),
+              source,
+              event.position(),
+              event.publisher(),
+              event.occurredAt(),
+              event.payload().text(),
+              event.causation());
+      IntegrationPayload.Request command = null;
+      try {
+        var decoded = IntegrationCodec.read(evidence.text(), IntegrationPayload.Request.class);
+        if (!decoded.binding().equals(binding.name())) throw new IllegalArgumentException();
+        command = decoded;
+      } catch (IOException | IllegalArgumentException invalid) {
+        // Retain the complete source before recording a safe, explicit refusal. No adapter runs.
+      }
+      Draft record = new Draft();
+      record.kind = "relay";
+      record.binding = binding.name();
+      record.fingerprint = binding.fingerprint();
+      record.status = "QUEUED";
+      record.relay = new RelayRequests.Delivery(evidence, command, null, null);
+      captured.put(relayId(binding, source), record.build());
+    }
+    journal.captureRelay(
+        binding.name(),
+        checkpoint,
+        new RelayRequests.Checkpoint(binding.fingerprint(), page.next()),
+        captured);
+    // Limit each pass to one retained request per binding. A pending/unknown return stops only
+    // this binding's request execution, preserving source order and fairness across bindings.
+    for (var row : journal.entries()) {
+      Entry record = row.getValue();
+      if (!record.kind().equals("relay")
+          || !record.binding().equals(binding.name())
+          || record.status().equals("DONE")) continue;
+      if (!record.fingerprint().equals(binding.fingerprint()))
+        throw new IOException("Pending Relay work belongs to another binding configuration");
+      processRelay(binding, row.getKey(), record);
+      break;
     }
   }
 
-  private void outgoing(Configuration.Binding b, Outgoing.Claimed claimed) throws IOException {
-    var work = claimed.work();
-    if (!"send".equals(claimed.action())
-        || !b.project().equals(work.project())
-        || !b.peer().equals(work.peer())) throw new IOException("unexpected outgoing claim");
-    String id = "outgoing:" + work.id();
-    Draft record = new Draft();
-    record.kind = "outgoing";
-    record.binding = b.name();
-    record.fingerprint = b.fingerprint();
-    record.status = "DISPATCHED";
-    record.revision = work.revision();
-    journal.writeEntry(id, record.build());
-    IntegrationAdapter.Result result;
-    boolean action = false;
-    try {
-      var parts = work.message().parts();
-      if (parts.size() != 1 || parts.getFirst().data() == null)
-        throw new IllegalArgumentException("one registered integration part required");
-      var body = parts.getFirst().data();
-      if (!body.binding().equals(b.name()))
-        throw new IllegalArgumentException("integration binding mismatch");
-      String operation = body.operation();
-      action = operation.equals("actions.execute");
-      adapters.get(b.name()).validate(operation, body.arguments());
-      if (action) journal.checkCauseCapacity(b, clock.get().getEpochSecond());
-      result = adapters.get(b.name()).execute(operation, body.arguments());
-    } catch (IllegalArgumentException refused) {
-      result =
-          IntegrationAdapter.Result.diagnostic(
-              "REJECTED", "integration request refused by binding policy");
-    } catch (IOException | RuntimeException failed) {
-      result =
-          IntegrationAdapter.Result.diagnostic("UNKNOWN", "external operation outcome unconfirmed");
-    }
-    record.state = result.state();
-    record.result = result.data();
-    record.status = "REPORTING";
-    if (action)
-      journal.completeActionEntry(id, record.build(), b, result, clock.get().getEpochSecond());
-    else journal.writeEntry(id, record.build());
-    try {
-      gateway.report(
-          new Outgoing.Report(
-              work.id(), work.revision(), result.state(), null, null, result.data(), null));
-    } catch (IOException failure) {
-      throw new IOException(
-          "outgoing report unconfirmed; inspect durable status before replacing session");
-    }
-    record.status = "DONE";
-    journal.writeEntry(id, record.build());
+  private static String relayId(Configuration.Binding binding, UUID source) {
+    return "relay:" + Json.identity(binding.project() + "\n" + binding.name() + "\n" + source);
   }
+
+  private RelayLog.Page log(String project, String topic, UUID generation, String after)
+      throws IOException {
+    return log(project, topic, generation, after, 100);
+  }
+
+  private RelayLog.Page metadata(String project, String topic, UUID generation) throws IOException {
+    // The public SDK has no exact-topic metadata-only operation. One event is the smallest log
+    // projection; these fresh incarnation checks must not fetch and discard a whole body page.
+    return log(project, topic, generation, "0", 1);
+  }
+
+  private RelayLog.Page log(String project, String topic, UUID generation, String after, int limit)
+      throws IOException {
+    var page = gateway.log(new RelayLog.Query(project, false, topic, after, limit));
+    if (!page.scope().project().equals(project)
+        || page.scope().system()
+        || !page.topic().name().equals(topic)
+        || !page.topic().kind().equals("TEXT")
+        || !generation.toString().equals(page.topic().generation())
+        || !page.after().equals(after))
+      throw new IOException("Relay log differs from its pinned destination");
+    return page;
+  }
+
+  private void processRelay(Configuration.Binding binding, String id, Entry saved)
+      throws IOException {
+    requireRelayBinding(binding, saved.relay());
+    Draft record = saved.draft();
+    if (record.status.equals("REPORTING")) {
+      reconcileRelay(binding, id, record);
+      return;
+    }
+    if (record.status.equals("DISPATCHED")) {
+      record.state = "UNKNOWN";
+      record.result =
+          IntegrationAdapter.Result.diagnostic(
+                  "UNKNOWN", "Interrupted execution; inspect retained external effect evidence")
+              .data();
+      record.status = "QUEUED";
+    } else if (record.status.equals("QUEUED") && record.state == null) {
+      IntegrationAdapter.Result result;
+      boolean action = false;
+      try {
+        var command = record.relay.request();
+        if (command == null) throw new IllegalArgumentException();
+        var ancestry = record.relay.source().causation();
+        if (ancestry == null
+            || ancestry.depth() < 0
+            || ancestry.depth() >= binding.relay().maxDepth()) throw new IllegalArgumentException();
+        adapters.get(binding.name()).validate(command.operation(), command.arguments());
+        action = command.operation().equals("actions.execute");
+        if (action) journal.checkCauseCapacity(binding, clock.get().getEpochSecond());
+      } catch (IllegalArgumentException denied) {
+        result =
+            IntegrationAdapter.Result.diagnostic("REJECTED", "Request refused by binding policy");
+        record.state = result.state();
+        record.result = result.data();
+        journal.writeEntry(id, record.build());
+        prepareRelayReturn(binding, id, record);
+        return;
+      }
+      record.status = "DISPATCHED";
+      // Pin both live incarnations before crossing the physical-effect boundary. The source may
+      // have expired after capture; native return ancestry is independently retained server-side.
+      metadata(binding.project(), binding.relay().requests(), binding.relay().requestGeneration());
+      metadata(binding.project(), binding.relay().returns(), binding.relay().returnGeneration());
+      journal.writeEntry(id, record.build());
+      try {
+        var command = record.relay.request();
+        result = adapters.get(binding.name()).execute(command.operation(), command.arguments());
+      } catch (IOException | RuntimeException uncertain) {
+        result =
+            IntegrationAdapter.Result.diagnostic(
+                "UNKNOWN", "External operation outcome unconfirmed");
+      }
+      record.state = result.state();
+      record.result = result.data();
+      record.status = "QUEUED";
+      if (action)
+        journal.completeActionEntry(
+            id, record.build(), binding, result, clock.get().getEpochSecond());
+      else journal.writeEntry(id, record.build());
+    }
+    prepareRelayReturn(binding, id, record);
+  }
+
+  private void prepareRelayReturn(Configuration.Binding binding, String id, Draft record)
+      throws IOException {
+    var policy = binding.relay();
+    // Capture the return-topic head before publication. Absence after uncertainty is never proof
+    // of no submission; the retained boundary only bounds read-only reconciliation.
+    var head = metadata(binding.project(), policy.returns(), policy.returnGeneration());
+    String body =
+        IntegrationCodec.write(
+            new RelayOutcome(
+                "plowshare-integration-result/1", record.state, record.state, record.result, null));
+    if (body.getBytes(StandardCharsets.UTF_8).length > policy.maxReturnBytes())
+      body =
+          IntegrationCodec.write(
+              new RelayOutcome(
+                  "plowshare-integration-result/1",
+                  "REJECTED",
+                  record.state,
+                  null,
+                  "RESULT_TOO_LARGE: inspect the complete retained adapter evidence"));
+    UUID mutation = Json.identity("integration-return/1\n" + id);
+    String text =
+        IntegrationCodec.write(
+            new NativeReturn(
+                "plowshare-message-return/1", mutation, record.relay.source().event(), body, true));
+    var publication =
+        new RelayPort.Publish(
+            mutation.toString(),
+            binding.project(),
+            policy.returns(),
+            text,
+            clock.get().truncatedTo(ChronoUnit.MICROS),
+            record.relay.source().event().toString(),
+            null,
+            null);
+    record.relay =
+        new RelayRequests.Delivery(
+            record.relay.source(), record.relay.request(), publication, head.topic().through());
+    record.status = "REPORTING";
+    journal.writeEntry(id, record.build());
+    var receipt = gateway.publish(publication);
+    if (!receipt.requestId().equals(publication.requestId())
+        || !receipt.project().equals(binding.project())
+        || !receipt.topic().equals(policy.returns()))
+      throw new IOException("Relay result acknowledgement differs from retained intent");
+    // Public publication has no atomic expected-generation parameter. A changed incarnation here
+    // remains uncertain and cannot be accepted as delivery to the retained native requester.
+    log(binding.project(), policy.returns(), policy.returnGeneration(), receipt.position(), 1);
+    reconcileRelay(binding, id, record);
+  }
+
+  private void reconcileRelay(Configuration.Binding binding, String id, Draft record)
+      throws IOException {
+    requireRelayBinding(binding, record.relay);
+    var expected = record.relay.publication();
+    String after = record.relay.returnAfter();
+    for (int pages = 0; pages < 32; pages++) {
+      var page =
+          log(
+              binding.project(),
+              binding.relay().returns(),
+              binding.relay().returnGeneration(),
+              after);
+      if (page.gapThrough() != null)
+        throw new IOException("Relay result evidence expired; publication was not replayed");
+      for (var event : page.events()) {
+        if (!event.eventId().equals(expected.requestId())) continue;
+        if (!event.publisher().equals(binding.relay().publisher())
+            || !event.payload().kind().equals("TEXT")
+            || !event.payload().text().equals(expected.text())
+            || !Objects.equals(event.correlationId(), expected.correlationId())
+            || !Objects.equals(event.causationId(), expected.parentEventId())
+            || !event.occurredAt().equals(expected.occurredAt()))
+          throw new IOException("Retained Relay result conflicts with publication evidence");
+        record.status = "DONE";
+        journal.writeEntry(id, record.build());
+        return;
+      }
+      if (page.next().equals(after)) break;
+      // A validated no-match page is read-only progress, never evidence that publication failed.
+      // Retain it before reading another page so interruption cannot repeatedly scan the prefix.
+      record.relay =
+          new RelayRequests.Delivery(
+              record.relay.source(), record.relay.request(), expected, page.next());
+      journal.writeEntry(id, record.build());
+      after = page.next();
+      if (after.equals(page.topic().through())) break;
+    }
+    throw new IOException(
+        "Relay result remains unconfirmed; no effect or publication was replayed");
+  }
+
+  /** Static owning consistency of retained evidence, before any request/recovery transport I/O. */
+  private static void requireRelayBinding(
+      Configuration.Binding binding, RelayRequests.Delivery retained) throws IOException {
+    var source = retained.source();
+    var policy = binding.relay();
+    var publication = retained.publication();
+    if (!source.project().equals(binding.project())
+        || !source.topic().equals(policy.requests())
+        || !source.generation().equals(policy.requestGeneration())
+        || !policy.producers().contains(source.publisher())
+        || publication != null
+            && (!publication.project().equals(binding.project())
+                || !publication.topic().equals(policy.returns())))
+      throw new IOException("Retained Relay request differs from its configured binding");
+  }
+
+  private record RelayOutcome(
+      String schema, String state, String effectState, IntegrationResult result, String refusal) {}
+
+  private record NativeReturn(
+      String schema, UUID requestId, UUID sourceEvent, String body, boolean finalReply) {}
 
   @Override
   public void close() {

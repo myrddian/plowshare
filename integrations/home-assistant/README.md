@@ -90,21 +90,45 @@ events remain available to JS for verification; their pipeline starts and held i
 or ambiguous context does not justify a match. Context correlation and physical
 verification remain separate evidence.
 
-Model calls use this existing outgoing message:
+Direct supported native-message or account-owned TURN model calls use
+`relay_publish` with the configured `ha.requests` topic and this TEXT:
 
 ```json
-{"parts":[{"data":{"schema":"plowshare-integration/1","binding":"house","operation":"actions.execute","arguments":{"action":"evening_scene","parameters":{}}}}]}
+{"schema":"plowshare-integration/1","binding":"house","operation":"actions.execute","arguments":{"action":"evening_scene","parameters":{}}}
 ```
 
-Retain each intended request UUID and work ID. Follow existing work using
-outgoing_read/outgoing.status. Replacing an uncertain action with a fresh UUID can
-repeat a physical effect. No HA remote task is invented to bypass claim fencing.
+The server retains the exact native requester before export. Finish the current
+turn while the result is pending; the configured `message.return` route delivers
+an ordinary correlated reply. Never infer remote completion from publication
+acceptance, repeat an uncertain action, or change its identity to obtain another
+attempt. Native allowances, approval blocks and cancellation remain authoritative.
+The return body distinguishes delivery `state`, actual `effectState`, full typed
+`result` and explicit `refusal`. A completed action acknowledgement remains separate
+from observed physical verification.
+
+`examples/config.json` contains deliberate publisher/generation placeholders.
+Replace them with authorized inspected values. Configure the server's exact
+execution publish grant, adapter return INGRESS grant and
+[native export policy](../../docs/messaging-relay-exports.md) with the same project,
+request/return topics, channel and adapter account. Add a project Relay subscription
+on the return topic whose branch is `{name: 'ha-return', receiver: 'message.return'}`.
+See the [runtime contract](../runtime/README.md) for byte/depth limits, journal
+recovery, independent binding progress and the public generation-conditional
+publication limitation. No SDK check grants server authority.
 
 ## Application and pipeline
 
 The example declarative route starts investigate_office_heat through the configured
-house_coordinator agent and sends its completed result through send_report. Adapt
-the [Application example](examples/application):
+house_coordinator agent using its already captured authorized reading as input.
+The runtime sends its completed result through send_report.
+
+The initial native export proof supports TURN and MESSAGE sources. A currently
+running ORCHESTRATION source cannot issue a fresh export and await an adapter
+result. The example conductor reuses its captured input, records omitted evidence
+and finishes through the normal orchestration lifecycle. Direct supported questions
+separately exercise fresh reads and later correlated native replies.
+
+Adapt the [Application example](examples/application):
 
 - Root `agents/` and `orchestrations/` contain the runtime definitions.
 - Root `skills/house-evidence` contains the skill package. Skill execution remains
@@ -114,7 +138,7 @@ The deployed Application root supplies these resources without a connected clien
 Validate and deploy the complete source through CLI or Desktop Application deployment,
 or register externally deployed source with DISJOINT placement. These examples
 request selected reads and grant pipeline starts. Actions available through the
-outbox are constrained by the operator's selected binding policy. The orchestration
+explicit Relay request topic are constrained by the operator's selected binding policy. The orchestration
 returns its report and the external runtime delivers the notification.
 
 ## First installation and live acceptance
@@ -169,11 +193,13 @@ an oversized report fails validation visibly instead of silently truncating it.
 ## Validation
 
 The protocol fixtures cover both WebSocket transports, scripted event-to-pipeline
-delivery, outbox reads, reconnect snapshots, policy refusal and lost acknowledgment.
+delivery, correlated Relay reads, reconnect snapshots, policy refusal and lost acknowledgment.
 `HarnessPipelineTest` also boots the actual Plowshare server against migrated
 PostgreSQL, installs the Application examples, and uses authenticated SDK sessions and
-the real model/tool harness. A deterministic model transport issues `outgoing_peers`,
-`outgoing_send` and `outgoing_read`; the returned HA evidence drives the report.
+the real model/tool harness. A deterministic model transport publishes a direct
+TURN request through `relay_publish` and consumes its native correlated return.
+Event-started conductors reuse their supplied authorized reading, complete staged
+work and deliver one notification through the existing runtime completion action.
 Available and unavailable sensors remain distinct. Declarative and JS event routes
 each run the real conductor, finish its stages and send one configured notification.
 Only HA and inference are simulated in these harness tests; they use no live devices.

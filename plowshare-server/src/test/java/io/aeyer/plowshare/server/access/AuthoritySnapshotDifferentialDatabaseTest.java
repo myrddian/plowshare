@@ -1,17 +1,28 @@
 package io.aeyer.plowshare.server.access;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.archive.CachedProjectMembers;
 import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.testing.AuthorityFixtures;
+import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -132,14 +143,13 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     var live = new HashMap<UUID, Integer>();
     jdbc.query(
         "SELECT id,depth FROM authority_live_grants()",
-        (org.springframework.jdbc.core.RowCallbackHandler)
-            row -> live.put(row.getObject(1, UUID.class), row.getInt(2)));
+        (RowCallbackHandler) row -> live.put(row.getObject(1, UUID.class), row.getInt(2)));
     assertEquals(live, snapshot.liveGrants(), state + ": authority_live_grants");
     assertEquals(
         jdbc.queryForObject(SYSTEM_PROCESSING, Boolean.class),
         snapshot.systemProcessingAuthorized(),
         state + ": system processing grant");
-    var targets = new java.util.ArrayList<String>(projects);
+    var targets = new ArrayList<String>(projects);
     targets.add(null);
     targets.add("no-such-project");
     for (String project : targets)
@@ -241,7 +251,7 @@ class AuthoritySnapshotDifferentialDatabaseTest {
             + " AND recipient.legacy_handle='carol' AND role.name='READER'";
     // alice manages 'two' so she can delegate there.
     member("two", "alice", "MANAGER");
-    jdbc.update(issue, java.sql.Timestamp.from(Instant.now().plusSeconds(3600)));
+    jdbc.update(issue, Timestamp.from(Instant.now().plusSeconds(3600)));
     parity("delegated with expiry");
     assertTrue(snapshot().authorityProjectRole("two", "carol").isPresent());
     // Grants change only by one versioned revocation.
@@ -252,11 +262,11 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     // Grants are immutable, so expiry is observed by waiting it out. Comparing only after the
     // instant has passed keeps the snapshot and the SQL calls on the same side of it; in service,
     // the version token's expiry window gives the same guarantee.
-    jdbc.update(issue, java.sql.Timestamp.from(Instant.now().plusMillis(300)));
+    jdbc.update(issue, Timestamp.from(Instant.now().plusMillis(300)));
     Instant expires =
         jdbc.queryForObject(
                 "SELECT max(expires_at) FROM authority_grants WHERE provenance='ROLE' AND revoked_at IS NULL",
-                java.sql.Timestamp.class)
+                Timestamp.class)
             .toInstant();
     while (Instant.now().isBefore(expires.plusMillis(50))) Thread.sleep(10);
     parity("delegation expired");

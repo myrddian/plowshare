@@ -2545,7 +2545,6 @@ function renderSystem(system, health) {
   fact(deployment, 'Collector', plan.collector, 'data');
   fact(deployment, 'Relay topics', `Requests on ${plan.request_topic}, results on ${plan.result_topic}`);
   fact(deployment, 'Relay group', plan.group, 'data');
-  fact(deployment, 'Outgoing peer', plan.outgoing_peer || 'None');
   fact(deployment, 'Time zone', plan.time_zone ? `${plan.time_zone}, for every date shown and the daily limits` : 'UTC: not set. Choose one under Settings › Household time zone', plan.time_zone ? 'data' : undefined);
   fact(deployment, 'Port checks', `${plural(plan.probe_timeout_seconds, 'second', 'seconds')} timeout, ${formatCount(plan.probe_concurrency)} at a time`);
   for (const item of plan.credentials) credentialFact(deployment, item.purpose, item);

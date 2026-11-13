@@ -1,7 +1,7 @@
 package io.aeyer.plowshare.server.events;
 
-import io.aeyer.plowshare.server.board.MessageWake;
 import io.aeyer.plowshare.server.board.SeatWake;
+import io.aeyer.plowshare.server.messaging.MessageWake;
 import java.time.Instant;
 import java.util.Objects;
 

@@ -1,21 +1,59 @@
 package io.aeyer.plowshare.server.relay;
 
-import static io.aeyer.plowshare.server.relay.RelayDispatchFixtures.*;
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static io.aeyer.plowshare.server.relay.RelayDispatchFixtures.ACCESS;
+import static io.aeyer.plowshare.server.relay.RelayDispatchFixtures.SUB;
+import static io.aeyer.plowshare.server.relay.RelayDispatchFixtures.delivery;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
-import io.aeyer.plowshare.server.agents.*;
+import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.EventRuns;
+import io.aeyer.plowshare.server.agents.JobStore;
+import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
+import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.agents.WorkCallers;
+import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
-import io.aeyer.plowshare.server.board.BoardMessaging;
-import io.aeyer.plowshare.server.orchestrations.*;
-import io.aeyer.plowshare.server.session.*;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.llm.dispatch.Sampling;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.orchestrations.GrantedOrchestrations;
+import io.aeyer.plowshare.server.orchestrations.OrchestrationRecord;
+import io.aeyer.plowshare.server.orchestrations.OrchestrationStarts;
+import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
+import io.aeyer.plowshare.server.session.Presence;
+import io.aeyer.plowshare.server.session.ProjectPresences;
+import io.aeyer.plowshare.server.session.SessionOwners;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 class WorkRelayReceiverTest {
@@ -29,7 +67,7 @@ class WorkRelayReceiverTest {
   private final ProjectWorkspaces projects = mock(ProjectWorkspaces.class);
   private final ProjectPresences presences = mock(ProjectPresences.class);
   private final SessionOwners sessions = mock(SessionOwners.class);
-  private final BoardMessaging.Routing routing = mock(BoardMessaging.Routing.class);
+  private final MessageService.Routing routing = mock(MessageService.Routing.class);
   private final RelayForwardingHistory history = mock(RelayForwardingHistory.class);
   private AgentDefinition agent;
 
@@ -48,9 +86,7 @@ class WorkRelayReceiverTest {
     when(projects.id("project")).thenReturn(9L);
     when(projects.find("project"))
         .thenReturn(
-            Optional.of(
-                new io.aeyer.plowshare.server.archive.ProjectRecord(
-                    "project", java.nio.file.Path.of("/fixture"), List.of(), List.of())));
+            Optional.of(new ProjectRecord("project", Path.of("/fixture"), List.of(), List.of())));
     when(callers.requireAgent(eq("worker"), any())).thenReturn(agent);
     when(callers.requireAgent(eq("reviewer"), any())).thenReturn(definition("reviewer"));
     when(executions.begin(any())).thenReturn(true);
@@ -63,8 +99,8 @@ class WorkRelayReceiverTest {
         name,
         "fixture",
         "fast",
-        io.aeyer.plowshare.server.llm.dispatch.Sampling.Intent.DEFAULT,
-        io.aeyer.plowshare.server.llm.dispatch.Sampling.NONE,
+        Sampling.Intent.DEFAULT,
+        Sampling.NONE,
         List.of("probe"),
         List.of(),
         List.of(),
@@ -168,11 +204,11 @@ class WorkRelayReceiverTest {
           new Relay.Publication(
               SUB.topic(),
               1,
-              java.time.Instant.EPOCH,
+              Instant.EPOCH,
               new Relay.Draft(
                   "review-event",
                   "reviewer",
-                  java.time.Instant.EPOCH,
+                  Instant.EPOCH,
                   null,
                   cause.parentId(),
                   new RelayPayload.Text("held review"),
@@ -301,15 +337,9 @@ class WorkRelayReceiverTest {
             Optional.of(
                 new RelayExecutions.Accepted(
                     new RelayDeliveries.Receipt("job", "private-job"), "private-conversation")));
-    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("WRITE revoked"))
-        .when(callers)
-        .requireWork("project", "operator");
-    assertThrows(
-        io.aeyer.plowshare.server.faults.CallerFault.class,
-        () -> receiver("agent.run").dispatch(request));
-    assertThrows(
-        io.aeyer.plowshare.server.faults.CallerFault.class,
-        () -> receiver("agent.run").inspect(request));
+    doThrow(new CallerFault("WRITE revoked")).when(callers).requireWork("project", "operator");
+    assertThrows(CallerFault.class, () -> receiver("agent.run").dispatch(request));
+    assertThrows(CallerFault.class, () -> receiver("agent.run").inspect(request));
     verifyNoInteractions(executions, jobs, starts);
   }
 
@@ -411,9 +441,8 @@ class WorkRelayReceiverTest {
             any(), any(), any(), eq("remote-session"), any(), any(), any(), any(), any(), any());
   }
 
-  @org.junit.jupiter.params.ParameterizedTest
-  @org.junit.jupiter.params.provider.ValueSource(
-      strings = {"self", "two-agents", "cross-project", "mixed"})
+  @ParameterizedTest
+  @ValueSource(strings = {"self", "two-agents", "cross-project", "mixed"})
   void lifecycle_feedback_and_mixed_chains_share_one_limit_across_receiver_restarts(String mode) {
     when(projects.id("other")).thenReturn(10L);
     var availableProject = projects.find("project");
@@ -424,16 +453,15 @@ class WorkRelayReceiverTest {
         .thenReturn(
             new Relay.Topic(
                 forwarded, RelayPayload.Kind.LIFECYCLE, Relay.Policy.systemDefault(), 0, 0));
-    var publication = new java.util.concurrent.atomic.AtomicReference<Relay.Publication>();
+    var publication = new AtomicReference<Relay.Publication>();
     when(relay.publish(eq(forwarded), any()))
         .thenAnswer(
             call -> {
-              var result =
-                  new Relay.Publication(forwarded, 1, java.time.Instant.EPOCH, call.getArgument(1));
+              var result = new Relay.Publication(forwarded, 1, Instant.EPOCH, call.getArgument(1));
               publication.set(result);
               return result;
             });
-    var submitted = new java.util.concurrent.atomic.AtomicReference<RelayCausation>();
+    var submitted = new AtomicReference<RelayCausation>();
     when(jobs.submitEvent(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenAnswer(
             call -> {
@@ -525,11 +553,11 @@ class WorkRelayReceiverTest {
     return new Relay.Publication(
         SUB.topic(),
         1,
-        java.time.Instant.EPOCH,
+        Instant.EPOCH,
         new Relay.Draft(
             id,
             "system.source",
-            java.time.Instant.EPOCH,
+            Instant.EPOCH,
             null,
             cause == null ? null : cause.parentId(),
             new RelayPayload.Lifecycle("job.ended", "job_fixture", "ANSWERED", agent, null),
@@ -539,7 +567,7 @@ class WorkRelayReceiverTest {
   @Test
   void
       missing_or_unknown_ancestry_refuses_work_and_uncertain_receipts_are_read_only_beyond_the_limit() {
-    for (var cause : java.util.Arrays.asList(null, RelayCausation.unknown("legacy"))) {
+    for (var cause : Arrays.asList(null, RelayCausation.unknown("legacy"))) {
       var missing =
           request(
               "agent.run",

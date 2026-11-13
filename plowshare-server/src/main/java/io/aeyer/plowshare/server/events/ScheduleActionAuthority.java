@@ -1,10 +1,16 @@
 package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.protocol.ScheduledWork;
-import io.aeyer.plowshare.server.agents.*;
-import io.aeyer.plowshare.server.board.BoardMessaging;
+import io.aeyer.plowshare.server.agents.Callers;
+import io.aeyer.plowshare.server.agents.CommandCatalog;
+import io.aeyer.plowshare.server.agents.DefinitionResolver;
+import io.aeyer.plowshare.server.agents.OrchestrationResolver;
+import io.aeyer.plowshare.server.agents.SkillResolver;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /** Reuses caller catalogs and messaging route policy; JSON cannot grant a command or a project. */
 public final class ScheduleActionAuthority implements ScheduleDefinitions.Authority {
@@ -12,16 +18,16 @@ public final class ScheduleActionAuthority implements ScheduleDefinitions.Author
   private final Callers callers;
   private final SkillResolver skills;
   private final OrchestrationResolver orchestrations;
-  private final BoardMessaging.Routing routing;
-  private final java.util.function.Supplier<BoardMessaging> messages;
+  private final MessageService.Routing routing;
+  private final Supplier<MessageService> messages;
 
   public ScheduleActionAuthority(
       ScheduleFiles files,
       Callers callers,
       SkillResolver skills,
       OrchestrationResolver orchestrations,
-      BoardMessaging.Routing routing,
-      java.util.function.Supplier<BoardMessaging> messages) {
+      MessageService.Routing routing,
+      Supplier<MessageService> messages) {
     this.files = files;
     this.callers = callers;
     this.skills = skills;
@@ -72,7 +78,7 @@ public final class ScheduleActionAuthority implements ScheduleDefinitions.Author
       caller =
           callers.callerFor(
               project,
-              java.util.Objects.equals(project, source.project()) ? session : null,
+              Objects.equals(project, source.project()) ? session : null,
               source.account());
     }
     var agent = callers.requireAgent(definition.action().agent(), caller);
@@ -82,7 +88,7 @@ public final class ScheduleActionAuthority implements ScheduleDefinitions.Author
         CommandCatalog.of(
             agent,
             skills.forCaller(caller),
-            orchestrations == null ? java.util.Map.of() : orchestrations.forCaller(caller));
+            orchestrations == null ? Map.of() : orchestrations.forCaller(caller));
     var command =
         catalog.stream()
             .filter(c -> c.kind().equals(action.kind()) && c.name().equals(action.name()))

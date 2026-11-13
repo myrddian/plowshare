@@ -15,7 +15,7 @@ export type Stage = 'prompt.pre' | 'prompt.post' | 'tool.pre' | 'tool.post' | 's
 export type Mode = 'volatile' | 'durable'
 
 /** Which door a log came through. A `turn` log is a conversation: the only one a person talks in. */
-export type Origin = 'memory' | 'turn' | 'delegation' | 'curator' | 'submission' | 'event' | 'orchestration' | 'contained' | 'board'
+export type Origin = 'memory' | 'turn' | 'delegation' | 'curator' | 'submission' | 'event' | 'orchestration' | 'contained' | 'board' | 'message'
 
 /** What every run stage knows about the run. Absent, not null, when a value does not apply. */
 export interface Context {

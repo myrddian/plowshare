@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.events;
 
+import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.JobStore;
@@ -7,10 +8,16 @@ import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.agents.TurnEligibility;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.requests.RequestedHome;
 import io.aeyer.plowshare.server.requests.RequestedTurnCap;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** The production Runner: the same doors a person's run goes through, with no session. */
 public final class AgentRunner implements Dispatcher.Runner {
@@ -25,22 +32,22 @@ public final class AgentRunner implements Dispatcher.Runner {
     this.turns = Objects.requireNonNull(turns, "turns");
   }
 
-  private io.aeyer.plowshare.server.personal.PersonalSpaces personal;
+  private PersonalSpaces personal;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  public void usePersonalSpaces(io.aeyer.plowshare.server.personal.PersonalSpaces personal) {
+  @Autowired
+  public void usePersonalSpaces(PersonalSpaces personal) {
     this.personal = personal;
   }
 
-  private java.util.function.Supplier<ScheduleDefinitions> definitions;
-  private java.util.function.Supplier<ScheduleDefinitions.Authority> scheduleAuthority;
-  private java.util.function.Supplier<io.aeyer.plowshare.server.board.BoardMessaging> messages;
+  private Supplier<ScheduleDefinitions> definitions;
+  private Supplier<ScheduleDefinitions.Authority> scheduleAuthority;
+  private Supplier<MessageService> messages;
 
   /** Installed at composition; ordinary event triggers retain the same path. */
   public void useSchedules(
-      java.util.function.Supplier<ScheduleDefinitions> definitions,
-      java.util.function.Supplier<ScheduleDefinitions.Authority> authority,
-      java.util.function.Supplier<io.aeyer.plowshare.server.board.BoardMessaging> messages) {
+      Supplier<ScheduleDefinitions> definitions,
+      Supplier<ScheduleDefinitions.Authority> authority,
+      Supplier<MessageService> messages) {
     this.definitions = definitions;
     this.scheduleAuthority = authority;
     this.messages = messages;
@@ -55,7 +62,7 @@ public final class AgentRunner implements Dispatcher.Runner {
     var configured = definitions == null ? null : definitions.get();
     var managed =
         configured == null
-            ? java.util.Optional.<io.aeyer.plowshare.protocol.ScheduledWork.File>empty()
+            ? Optional.<ScheduledWork.File>empty()
             : configured.managed(trigger.name(), trigger.definedBy());
     if (managed.isEmpty()) {
       if (configured != null && configured.requiresDefinition(trigger.name(), trigger.definedBy()))
@@ -107,7 +114,11 @@ public final class AgentRunner implements Dispatcher.Runner {
 
   @Override
   public boolean busy(TriggerRecord trigger) {
-    return trigger.conversation() != null && turns.isSpeaking(trigger.conversation());
+    return !TurnEligibility.decide(
+            TurnEligibility.Reason.READY,
+            () -> trigger.conversation() != null && turns.isSpeaking(trigger.conversation()),
+            () -> false)
+        .eligible();
   }
 
   @Override

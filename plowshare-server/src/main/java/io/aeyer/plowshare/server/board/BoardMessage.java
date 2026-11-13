@@ -22,6 +22,10 @@ public record BoardMessage(
   public static final String BY_MEMBER = "member";
   public static final String BY_OPENER = "opener";
   public static final String BY_PERSON = "person";
+
+  /** A proven execution speaking without forum membership or a seat. */
+  public static final String BY_AGENT = "agent";
+
   public static final String BY_HARNESS = "harness";
 
   public static final String POST = "post";
@@ -36,7 +40,7 @@ public record BoardMessage(
     mentions = List.copyOf(mentions);
   }
 
-  /** The seat whose author wrote this, or {@code null} when a person or the harness did. */
+  /** The author's forum seat, or {@code null} for people, nonseat agents and harness notices. */
   public String authorOccupant() {
     return switch (authorKind) {
       case BY_MEMBER -> author;

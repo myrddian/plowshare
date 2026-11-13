@@ -1,18 +1,44 @@
 package io.aeyer.plowshare.integrations.ha;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.*;
-import io.aeyer.plowshare.integrations.*;
-import io.aeyer.plowshare.integrations.IntegrationContracts.*;
-import io.aeyer.plowshare.protocol.ExternalResult.IntegrationResult;
-import io.aeyer.plowshare.protocol.IntegrationPayload.*;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aeyer.plowshare.integrations.AdapterConfiguration;
+import io.aeyer.plowshare.integrations.IntegrationAdapter;
+import io.aeyer.plowshare.integrations.IntegrationCodec;
+import io.aeyer.plowshare.integrations.IntegrationContracts.EventEnvelope;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Gap;
+import io.aeyer.plowshare.integrations.IntegrationContracts.StateChanged;
+import io.aeyer.plowshare.integrations.IntegrationResult;
+import io.aeyer.plowshare.integrations.Json;
+import io.aeyer.plowshare.protocol.IntegrationPayload;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Arguments;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Reading;
 import java.io.IOException;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import okhttp3.*;
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
 
 /** HA protocol implementation only. The integration runtime owns routing and receipts. */
 public final class HomeAssistantAdapter implements IntegrationAdapter {
@@ -83,13 +109,13 @@ public final class HomeAssistantAdapter implements IntegrationAdapter {
     CompletableFuture<Void> authenticated = new CompletableFuture<>();
     WebSocket made =
         http.newWebSocket(
-            new okhttp3.Request.Builder().url(endpoint).build(),
+            new Request.Builder().url(endpoint).build(),
             new WebSocketListener() {
               @Override
               public void onMessage(WebSocket ws, String text) {
                 if (!epoch.equals(connectionEpoch) || closed) return;
                 try {
-                  if (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_FRAME)
+                  if (text.getBytes(StandardCharsets.UTF_8).length > MAX_FRAME)
                     throw new IOException("HA frame exceeds limit");
                   JsonNode frame = Json.MAPPER.readTree(text);
                   String type = frame.path("type").asText();
@@ -278,8 +304,7 @@ public final class HomeAssistantAdapter implements IntegrationAdapter {
   @Override
   public void validate(String operation, Arguments arguments) {
     // Shared Request validates the discriminated operation shape before alias authorization.
-    new io.aeyer.plowshare.protocol.IntegrationPayload.Request(
-        "plowshare-integration/1", "validation", operation, arguments);
+    new IntegrationPayload.Request("plowshare-integration/1", "validation", operation, arguments);
     if (operation.equals("states.read")) {
       for (String alias : arguments.entities())
         if (!entities.containsKey(alias))

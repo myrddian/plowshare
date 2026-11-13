@@ -1,38 +1,45 @@
 # All events and messaging publish through Relay
 
-Status: accepted. Information events and `event.fire` have moved; `message.*` / outgoing has not,
-and is now blocked on a reason this record did not know about. Delegation is named in this record's
-own need statement but was never inventoried; see the reconciliation with
-`0041-waiting-is-turn-eligibility.md` at the end.
+Status: accepted; amended 13 November 2026 by
+[0057](0057-board-forum-and-relay-messaging-substrate.md), during Slice 0 of
+[Finishing Relay](../relay-finishing.md). Information events and `event.fire`
+have moved; messaging bodies and outgoing delivery have not. The former
+account-private audience blocker is withdrawn: agent topics are project-readable.
+The board remains an independent forum. Delegation is partially on Relay; its
+remaining consumer and eligibility work are described in 0041.
 
 ## Need and boundary
 
 Relay is the platform's durable delivery substrate: a per-topic append log
-(`relay_publications`, keyed `(project_id, topic, position)`) with consumer leases, admissions, gap
+(`relay_publications`, keyed `(scope_key, topic, position)`) with consumer leases, admissions, gap
 recoveries and publication notifications. Events, messages and delegations are meant to be
 wrappers over it — one mechanism for all of this work, because it *is* all the same work: append a
 durable record in order, decide who receives it, hand it over once, acknowledge it, recover what
 was missed.
 
-When this record was written that was implemented for exactly one of four families. Three now are;
-the table below carries both states, because the gap is the point of the record.
+When this record was written, schedules were on Relay; information events and
+`event.fire` have since moved. Messaging and outgoing delivery are separate
+families, and delegation was omitted from the original inventory. The table
+separates those responsibilities.
 
 | family | on Relay | state as written | now |
 |---|---|---|---|
 | schedules (`ScheduledPublication`) | **yes** | `RelayScheduledPublication` is the only implementation and `EventsConfig` wires it unconditionally — no flag, no second path | unchanged; topic name derived by its owner (V190, V191) |
 | `information.events` | **now yes** | `information_events` (one global `BIGSERIAL`), `information_event_recipients`, an installation-wide advisory fence, and its own cursor | moved in V188, carried on the general message in V189; `information_events` is `DROP`ped (`V188:96`), so the clean break this record demanded actually happened |
 | `event.fire` | **now yes** | `EventFireHandler` → `Intake` → `TriggerStore`, `FiringStore`, `Dispatcher`. No relay reference. | publishes through `RelayEventPublication`, consumed by the existing firing inbox; authority unit is the installation, scope `SystemScope.SERVER` |
-| `message.*` / outgoing | no | `outgoing_work`, `outgoing_peers`, `message_external_tasks`. The `outgoing` package has no relay reference. | unchanged — `server/outgoing/` still holds zero Relay references — and now known to be *blocked*, not merely unstarted |
+| `message.*` bodies | no | `BoardMessaging` stores bodies as board posts and routes through `board_message_*` records | unchanged; extraction behind the stable messaging API is planned, with one Relay inbox per agent |
+| outgoing delivery | no | `outgoing_work` and `outgoing_peers`, with adapter claims and reports | unchanged; A2A remains a feature but its implementation is to be rewritten under 0058 because adapter responsibilities entered core |
 | **delegation** | **partial** | not inventoried — named in the need statement above and then omitted | inbound external root starts, pinned destinations, idempotency and receipts (V121), the effect-depth bound and nested causation (V127), and lifecycle notices out (V124) are all on Relay, shipped 2026-10-06. The delegation mechanics are not: `startNested` is reached only from the agent tool, the report that wakes a parent travels `Delivery` → `ParentVoice` in process, and `orchestration.child.completed` is published with no consumer. See 0041's table |
 
-Each of the three that are not on Relay re-implements some part of what Relay already owns, and
-each re-implements it differently. That is the cost this record is about: not one slow query, but
-four delivery mechanisms where the design calls for one.
+The unfinished delivery paths duplicate parts of Relay's mechanism. Owning
+lifecycle records above the broker still have a purpose; moving delivery does
+not remove those records or make the board forum a replacement target.
 
 ### What the duplication costs, measured
 
-`information.events` is the worst case and is why this is urgent rather than tidy-up.
-`JdbcInformationCatalogueRepository.event()` takes `pg_advisory_xact_lock('information-event-order',
+These are historical measurements of the pre-V188 implementation, retained to
+explain the decision rather than describe the current runtime. At that time,
+`JdbcInformationCatalogueRepository.event()` took `pg_advisory_xact_lock('information-event-order',
 0)` — a single key for the whole installation — and then, still holding it, computes the recipient
 fan-out by asking `information_readable` once per admin and once per admin-project pair. Measured
 on the live installation with 13 admins:
@@ -64,7 +71,12 @@ question — the question is why there is a second log at all.
 wrappers over `Relay.publish` and Relay subscriptions. No family carries its own ordering fence,
 its own position space, its own consumption cursor, or its own recipient computation.
 
-Concretely, no delivery path outside `relay/` may:
+These rules govern delivery families moving onto Relay, not the board forum's
+own post ordering, threads, seats or storage. The board stays independent; a
+bridge calls its API. Owning systems retain lifecycle and recovery state above
+the broker.
+
+Concretely, no parallel delivery log outside `relay/` may:
 
 - take a lock to order records — Relay's topic row lock is the ordering mechanism;
 - allocate positions from a global sequence, or read records with a `position > cursor` scan;
@@ -92,8 +104,10 @@ removes the fan-out: a scope's subscribers are the accounts that may read the sc
 scope is already the unit the read predicates resolve (`information_root_readable`,
 `knowledge_readable_selection`), so no new authority concept is introduced.
 
-`event.fire` and `message.*` each need the same decision made against their own authority unit
-before they move; this record does not pre-empt them beyond the rule above.
+`event.fire` uses the system scope for its server-administration authority.
+Messaging uses one inbox topic per (account, project, definition name), readable
+project-wide under the existing Relay scope policy, as decided in 0057. Instances
+and conversations remain routing within messaging, not topic boundaries.
 
 Relay scopes are `Relay.ProjectScope(projectId)` or `Relay.SystemScope.SERVER`
 (`RelayScopeCodec`), so `authority_scopes.kind` for the revision's home scope maps as:
@@ -106,15 +120,15 @@ Relay scopes are `Relay.ProjectScope(projectId)` or `Relay.SystemScope.SERVER`
 | GLOBAL_KNOWLEDGE | none exists; see the blockers below |
 | ADMINISTRATION, RESTRICTED | fail loudly; no fallback topic |
 
-### Blocked on two Relay authority changes
+### Authority dependencies and their current status
 
 Recorded separately because their surfaces differ:
 
-- **`0038-relay-read-tier-subscribers-project-scoped.md`.** Relay gates consumption on
-  `members.mayWork` (CONTRIBUTOR and above) because consuming takes a lease and a lease is a write,
-  while information read authority admits VIEWER. Without it, moving information events onto
-  project topics would silently narrow who receives them. It unblocks PROJECT, PERSONAL and
-  ACCOUNT_KNOWLEDGE — under the V185 alias, every information resource on the installation.
+- **`0038-relay-read-tier-subscribers-project-scoped.md` — implemented (V187).**
+  Read-tier subscribers use `members.mayUse` and account-namespaced groups, so
+  information-event delivery does not narrow its audience to contributors.
+  Work-tier ports, publishing and receiver dispatch retain their work checks.
+  PROJECT, PERSONAL and ACCOUNT_KNOWLEDGE map to project scopes under V185.
 - **`0039-relay-audiences-beyond-a-project.md`.** GLOBAL_KNOWLEDGE has no project, and
   `SystemScope.SERVER` is the internal worker scope, so global-read content has no expressible
   audience. Deferred: the case is reachable but currently empty. Until it lands, this
@@ -128,9 +142,14 @@ Recorded separately because their surfaces differ:
    measured at 3,996 ms per event. Publisher, consumer and table removal were one change.
 2. ~~`event.fire`~~ — **done**. `Intake` kept triggers and firings directly; no ordering fence, so
    this was reshaping rather than unblocking.
-3. `message.*` / outgoing — largest surface, and external peers make its delivery contract the most
-   exposed. **Now known to be blocked**: see the 0041 reconciliation below. Delegation goes before
-   it.
+3. Messaging extraction — preserve `message.*` and `send_message` while moving
+   bodies off board transport, following the payload, bridge and messaging slices
+   in Finishing Relay. The project audience is decided; there is no mailbox-privacy
+   blocker or audience-based requirement for delegation to precede it.
+4. A2A rewrite — retain the feature and rebuild its implementation outside core
+   under 0058, after the earlier contracts. Delegation's consumer proceeds
+   independently under 0041; its single leased group and eligibility requirements
+   remain.
 
 The reason for the order is the measured cost, not risk appetite. A system that takes fourteen
 seconds to open a document does not scale, and no amount of preserved behaviour from the mechanism
@@ -138,20 +157,23 @@ causing it is worth keeping.
 
 ### Consequences accepted
 
-- **Historical visibility follows subscription.** Today information-event recipients are frozen at
+- **Historical visibility follows subscription.** Before V188, information-event recipients were frozen at
   emit time and read back by sequence. Under Relay, who receives a publication follows the
   subscription at publication time, so an account that gains read access later does not
   retroactively receive earlier events. This is Relay's existing semantics for every other
   publication and is accepted rather than special-cased.
-- **The substrate is replaced, not shadowed, and the break is clean.** Publisher and consumer move
-  in one change and the old tables are dropped with it. A dual-write release was considered and
+- **The information-event cutover replaced its log without shadowing it.** Publisher and consumer moved
+  in one change and the old tables were dropped with it. A dual-write release was considered and
   rejected: it keeps the fence, the global sequence and the cursor alive for a release, which is
   the substrate this record exists to remove, and it buys only the continuity of in-flight cursors
-  over one deployment. No installation is being migrated, so there is nothing for a compatibility
-  layer to serve — existing `information_events` rows are instance history, not a contract, and a
+  over one deployment. That cutover was planned without an installation migration,
+  so no compatibility layer was retained — existing `information_events` rows were
+  instance history, not a contract, and a
   shim for their shape is cruft with no reader. Retaining a subscriber inbox is justified only by a
   functional need, such as topic expiration losing input a consumer still requires, which is why
-  the schedules migration kept firing records. It is never justified as backward compatibility.
+  the schedules migration kept firing records. Messaging's future clean break must
+  move existing messages and threads, outstanding ones included, under 0057;
+  the information-event history decision is not permission to discard them.
 - **Set-equality with the old fan-out is explicitly NOT a requirement.** It cannot be: frozen
   emit-time recipients and subscription-time delivery are different semantics, and demanding both
   would re-impose the design being removed. What must hold instead is the authorization invariant
@@ -188,106 +210,61 @@ All three are rejected on the same ground: they invest in substrates that should
   `NotificationRelayPublicationSignals`; the only `NOTIFY` channel today is
   `plowshare_projection_changes`, for the projection cache.
 
-## Records this one must be read with
+## Reconciliation recorded in Slice 0
 
-Two were missed when this record was written, and both change how it should be executed.
+### Board and messaging: 0057 supersedes 0040's replacement framing
 
-- **`0008-relay-external-work-and-a2a-mapping.md`** already decided that the outgoing family moves
-  onto Relay, in eight slices (EW01–EW08), with status "architecture direction agreed;
-  implementation planned". None shipped — `server/outgoing/` contains no Relay reference. This
-  record was written without knowledge of 0008. They are reconciled below rather than left to
-  collide.
+[0057](0057-board-forum-and-relay-messaging-substrate.md) corrects the earlier
+reading of the board/Relay lineage. Messaging is being extracted from the
+board's transport, not finishing a replacement of the board. The forum keeps
+its storage and sequence; the bridge posts through its owning API.
 
-### Reconciling 0008 and this record
+Two implementation findings from 0040 remain relevant:
 
-They do not conflict; they sit at different altitudes. **0008 is the specific plan for the
-external-work and A2A family**; this record is the general rule for every family. Where both speak,
-0008's slices are the more detailed instruction for that family and should be followed; this record
-constrains *how*, and 0040 constrains what Relay may be asked to do.
+- Messaging's send path has a per-mailbox advisory lock and a global board
+  message sequence, not Relay's topic-row append lock or a consumption cursor.
+  Moving delivery to Relay improves its ordering.
+- `BoardMessaging` still owns board posts and `board_message_*` records. Its
+  one-handling-request and one-running-target invariants must survive extraction;
+  a timed Relay consumer lease does not replace them.
 
-0008 was recorded on 2026-10-09 against snapshot `35ffa6e0` and instructs that "implementation must
-recheck current main and reconcile changes before proceeding". That recheck is now overdue, and
-these are the changes it has to absorb:
+### A2A: 0058 supersedes 0008's EW01–EW08 plan
 
-| since 0008's snapshot | what EW01–EW08 must absorb |
-|---|---|
-| Read-tier subscribers (0038, V187) | EW01/EW03's authorization decisions: consumption is `mayUse`, not `mayWork`, and a reader's consumer group is namespaced per account |
-| Information events on Relay (V188), then on the general message (V189) | EW01 need not re-derive the carrier: **no new payload kind**, a codec owned by the consuming system, content opaque to the broker |
-| Relay is mechanism, not policy (0040) | EW01's "payload references and authorization decisions": publish only what the topic's whole audience may see, and verify your own publishers rather than asking the broker to |
-| Topic names are private to the owning system (0040) | the external-work topic is not a shared literal |
-| Messaging still lives in `server/board/` on the v0 substrate (0040) | EW04's "migrate existing work" is larger than 0008 assumed — it is finishing a v0→v1 replacement, not porting a module |
-| No non-project Relay audience exists (0039) | a dependency 0008 does not name: if an external peer's audience is not a project, EW03 is blocked on 0039 |
+A2A stays as a feature. Its implementation needs a rewrite because adapter
+responsibilities went into Plowshare core. [0058](0058-a2a-rebuild-on-relay.md)
+records the replacement direction for Slice 5; the retired
+[0008](0008-relay-external-work-and-a2a-mapping.md) is requirements and recovery
+evidence, not a plan to keep extending that core surface. Adapters consume public
+SDK Relay ports under [0001](0001-integration-boundary.md); any missing platform
+capability needs its own decision and authorization.
 
-Two further notes for whoever picks this up:
+The already-implemented read tier, opaque general carrier and consumer-owned
+codec remain available. Preserve the mechanism-not-policy rule and private
+family topic derivation. A project's inbox audience requires no new Relay scope;
+0039 remains the separate vocabulary gap for genuinely non-project audiences.
 
-- 0008's subject is the integration whose core growth `0001-integration-boundary.md` forbids. EW01's
-  audit should establish what A2A put into core and whether it belongs there, rather than treating
-  the current surface as the baseline to preserve.
-- The ordering in this record — information events, then `event.fire`, then messaging — stands, and
-  0008's slices are the inside of the third step. Nothing in 0008 needs to precede the first two.
-- **`0040-relay-is-the-boards-substrate-rebuilt.md`** records the lineage this record assumed away.
-  The Board substrate is Relay v0 and Relay is v1, built fresh in parallel rather than by
-  retrofitting the Board; board and messaging were to be rebuilt on v1 and never were. So the
-  messaging work named below is **finishing a replacement**, not migrating a foreign system.
+### Delegation and the withdrawn audience blocker
 
-Two corrections to this record's own framing follow from 0040:
+0041 correctly separates arrival, turn eligibility and wait legality. Delegation
+already has Relay-started external roots, pinned destinations, idempotent
+receipts, effect-depth bounds, nested causation and lifecycle publications.
+`orchestration.child.completed` still has no consumer; the parent report travels
+`Delivery` → `ParentVoice.speak` in process, and the tool owns internal child
+starts. Completing the move needs a consumer and an eligibility owner, not
+another publisher.
 
-- **Messaging's ordering is weaker than Relay's.** An earlier version of this note claimed it was
-  "already Relay's mechanism — a topic-row `FOR UPDATE` then an insert, with per-topic cursors".
-  That was false. The messaging send path takes no topic lock, `board_messages.seq` is a global
-  `GENERATED ALWAYS AS IDENTITY` sequence, and messaging reads no cursor at all; it serialises on a
-  per-mailbox advisory lock. See 0040. Moving it onto Relay would therefore **improve** its
-  ordering. It still has no recipient fan-out, and nothing has been measured failing, so it is not
-  urgent in the way information events were — but it must not be described as already sound.
-- **Messaging still lives in `server/board/`**, on `board_messages` and `board_message_*` tables,
-  not in a separately extracted module. The rule below still holds; the size of the move is larger
-  than this record implied.
+The former instruction to do delegation first because message bodies are
+account-private is withdrawn. Agent inbox visibility is project-wide under 0057.
+Current conversation and `message.*` API reads retain their checks; the future
+Relay publication is readable by the project's members. That is the decided
+message audience, not an authority gap analogous to GLOBAL_KNOWLEDGE.
 
-### Reconciling 0041 and this record
-
-`0041-waiting-is-turn-eligibility.md` changes two things here.
-
-**Delegation was never inventoried.** This record's own need statement says "Events, messages *and
-delegations* are meant to be wrappers over it", and then the four-family table and the order of work
-omit delegation entirely. That omission is why a sender-side wait was specified against messaging:
-with delegation absent from the inventory, the synchronous construct looked like something messaging
-had to grow, rather than something delegation already owns. Delegation is the fifth family, and it
-is further along than this record's ordering implies: inbound external root starts, pinned
-destinations, idempotency and receipts (V121), the Relay effect-depth bound, nested causation (V127)
-and the lifecycle outbox (V124) all shipped on 2026-10-06 in "Bound lifecycle feedback across
-Relay-started work".
-
-What it is *not* is finished, and the unfinished part is easy to mistake for finished.
-`orchestration.child.completed` is published as a `Lifecycle` notice carrying its parent, and
-nothing consumes it: the report that actually wakes a parent still travels `Delivery` →
-`ParentVoice.speak` in process, and `startNested` is reached only from the agent tool. So Relay
-carries delegation's notices as an observation feed beside the in-process delivery that does the
-work — two paths for one fact. Completing it is a consumer and the eligibility owner, not a
-publisher.
-
-**The ordering no longer holds, and messaging is blocked rather than merely last.** This record says
-the sequence "information events, then `event.fire`, then messaging" stands. Two of those are done,
-and the third cannot proceed on this record's own terms: a message body is account-private mailbox
-content, and publishing it at project scope would expose it through `relay.log`
-(`RelayPortEvents.java:64` renders a `Text` payload's text). That is not a sequencing preference but
-an authority problem, and it is the kind of thing this record's rule about publishing only what a
-topic's whole audience may see already forbids.
-
-Delegation does not share it. `orchestration.status`, `.record` and `.receipt` are already in a
-project-scoped read set (`ProjectAuthorization.java:115-119`), so delegation moves a **notice** and
-not a body — `RelayPayload.Lifecycle`, with the text left in `orchestration_messages`. Verified
-against the consuming code: `Delivery` composes its utterance from a freshly re-read record
-(`Delivery.java:475-480`) and `ParentVoice.speak` receives an already-composed string, so a
-reference-only notice is the input that path is written for.
-
-So the revised order for what remains is **delegation, then `message.*` / outgoing**, with
-messaging's move gated on an audience for account-private content that does not exist yet — the same
-shape of gap as `0039-relay-audiences-beyond-a-project.md`, against a different authority unit.
-
-One requirement carries over from 0041 and belongs in any delegation slice: `Delivery`'s in-flight
-guard is an in-process `ConcurrentHashMap` keyset (`Delivery.java:116`), not a database claim, so
-delegation's notices must be consumed under a single leased consumer group or that guard must become
-durable first.
+Delegation can use Relay directly without first moving through messaging. Its
+reference-only `Lifecycle` notice remains appropriate: the owning record holds
+the request/report text and delivery composes from a fresh read. `Delivery`'s
+in-flight guard is still process-local, so consuming its notices requires a single
+leased consumer group or a separately designed durable claim. None of this puts
+eligibility or wait legality into Relay.
 
 ## Scope note
 

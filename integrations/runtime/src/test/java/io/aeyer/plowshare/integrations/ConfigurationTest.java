@@ -1,9 +1,14 @@
 package io.aeyer.plowshare.integrations;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.nio.file.*;
-import org.junit.jupiter.api.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class ConfigurationTest {
@@ -12,9 +17,31 @@ class ConfigurationTest {
   private String config() {
     return """
 {"version":1,"plowshare":"http://localhost:8091","tokenEnv":"PLOWSHARE_TOKEN","journal":"private-journal",
- "bindings":{"house":{"adapter":"fake","project":"home","peer":"ha-house","configuration":{},
+ "bindings":{"house":{"adapter":"fake","project":"home","relay":{"requests":"house.requests","requestGeneration":"11111111-1111-4111-8111-111111111111","returns":"house.returns","returnGeneration":"22222222-2222-4222-8222-222222222222","channel":"house","publisher":"sdk:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","producers":["execution:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"maxDepth":8,"maxReturnBytes":65536},"configuration":{},
  "routes":{"heat":{"entity":"temperature","above":28,"unit":"°C","definition":"investigate","agent":"coordinator","request":"Explain the observations"}}}}}
 """;
+  }
+
+  @Test
+  void relay_pins_are_explicit_and_legacy_peer_or_permissive_shapes_are_refused() throws Exception {
+    Path file = directory.resolve("config.json");
+    for (String invalid :
+        new String[] {
+          config().replace("\"configuration\":{}", "\"peer\":\"retired\",\"configuration\":{}"),
+          config().replace("\"maxDepth\":8", "\"maxDepth\":0"),
+          config().replace("\"maxDepth\":8", "\"maxDepth\":33"),
+          config().replace("\"maxReturnBytes\":65536", "\"maxReturnBytes\":1"),
+          config()
+              .replace(
+                  "\"requestGeneration\":\"11111111-1111-4111-8111-111111111111\"",
+                  "\"requestGeneration\":null"),
+          config().replace("\"channel\":\"house\"", "\"channel\":\"house\",\"instance\":\"forged\"")
+        }) {
+      Files.writeString(file, invalid);
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> Configuration.read(file, IntegrationFixtures.factories()));
+    }
   }
 
   @Test

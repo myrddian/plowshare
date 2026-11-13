@@ -1,14 +1,76 @@
 import type {
-  Payloads,
-  Replies,
   RelayBatch,
   RelayAckRequest,
   RelayConsumeRequest,
 } from 'plowshare-client-node';
 
-export type IncomingTask = Replies['incoming.status'];
-export type Submission = Payloads['incoming.receive'];
-export type TaskReference = Payloads['incoming.status'];
+/** Adapter-owned projection of the generic messaging task contract. */
+export interface MessageTask {
+  readonly id: string;
+  readonly requestId: string;
+  readonly cursor: string | null;
+  readonly context: string;
+  readonly agent: string;
+  readonly message: string;
+  readonly state:
+    | 'SUBMITTED'
+    | 'WORKING'
+    | 'INPUT_REQUIRED'
+    | 'COMPLETED'
+    | 'FAILED'
+    | 'CANCELED';
+  readonly ending: string | null;
+  readonly replies: readonly {
+    readonly id: string;
+    readonly body: string;
+    readonly finalReply: boolean;
+    readonly generated: boolean;
+    readonly ending: string | null;
+    readonly postedAt: string;
+  }[];
+  readonly createdAt: string;
+  readonly revision: string;
+}
+export type MessageHeader = Omit<MessageTask, 'replies' | 'cursor'>;
+/** Fixed-head read progress; retained until outputs and final FOLLOW cursor commit together. */
+export interface MessageTraversal {
+  readonly project: string;
+  readonly agent: string;
+  readonly requests: string;
+  readonly replies: string;
+  readonly client: string;
+  readonly header: MessageHeader;
+  readonly parts: readonly {
+    readonly reply: MessageTask['replies'][number];
+    readonly complete: boolean;
+  }[];
+  readonly next: string | null;
+  readonly resume: string | null;
+  readonly terminalFollowed: boolean;
+}
+export interface Submission {
+  readonly project: string;
+  readonly agent: string;
+  readonly client: string;
+  readonly requestId: string;
+  readonly context: string | null;
+  readonly body: string;
+}
+export interface TaskReference {
+  readonly project: string;
+  readonly client: string;
+  readonly agent: string;
+  readonly id: string | null;
+  readonly requestId?: string;
+  readonly cursor?: string | null;
+}
+/** Topics are operator pins. No Discord message may select these destinations. */
+export interface MessagingBinding {
+  readonly project: string;
+  readonly bot: string;
+  readonly requests: string;
+  readonly replies: string;
+}
 
 export interface Route {
   readonly guildId: string;
@@ -43,6 +105,8 @@ export interface Configuration {
   readonly requestTimeoutMs: number;
   readonly maxRecords: number;
   readonly dm: DirectMessagePolicy;
+  readonly messaging: readonly MessagingBinding[];
+  readonly legacyStateMigration: boolean;
 }
 /** Only native Discord events, decoded by the platform boundary, enter routing. */
 export type DiscordInput = Destination & {
@@ -56,9 +120,9 @@ export type DiscordInput = Destination & {
 export interface Gateway {
   identity(): Promise<string>;
   catalog(route: BotTarget): Promise<void>;
-  receive(request: Submission): Promise<IncomingTask>;
-  status(reference: TaskReference): Promise<IncomingTask>;
-  cancel(reference: TaskReference): Promise<IncomingTask>;
+  receive(request: Submission): Promise<MessageTask>;
+  status(reference: TaskReference): Promise<MessageTask>;
+  cancel(reference: TaskReference): Promise<MessageTask>;
   consume(request: RelayConsumeRequest): Promise<RelayBatch>;
   acknowledge(request: RelayAckRequest): Promise<void>;
 }
@@ -101,6 +165,9 @@ export interface RecordEntry {
   readonly client: string;
   readonly contextKey: string;
   readonly requestId: string;
+  nativeHeader: MessageHeader | null;
+  lastRevision: string;
+  replyCursor: string | null;
   readonly replyTo: string | null;
   readonly notification: NotificationRoute | null;
   admission: Admission;
@@ -116,7 +183,14 @@ export interface ContextBinding {
 }
 /** Private delivery coordinates and receipts; credentials and inbound prompts are never retained. */
 export interface State {
-  readonly version: 2;
+  readonly version: 3;
+  readonly messaging: string;
+  readonly messageTraversals: MessageTraversal[];
+  readonly relayGenerations: {
+    readonly project: string;
+    readonly topic: string;
+    readonly generation: string;
+  }[];
   readonly origin: string;
   readonly principal: string;
   readonly discordBotId: string;

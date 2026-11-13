@@ -1,14 +1,19 @@
 package io.aeyer.plowshare.server.events;
 
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.*;
-import com.fasterxml.jackson.databind.cfg.*;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.type.LogicalType;
-import io.aeyer.plowshare.server.board.MessageWake;
 import io.aeyer.plowshare.server.board.SeatWake;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageWake;
 import java.io.IOException;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -86,7 +91,7 @@ public final class EventPayloadCodec {
       }
       if (fireAt != null) throw new IllegalArgumentException("fire time requires a schedule");
       return manualValue(value);
-    } catch (IOException | IllegalArgumentException | java.time.DateTimeException invalid) {
+    } catch (IOException | IllegalArgumentException | DateTimeException invalid) {
       // Parser causes can contain payload excerpts; persistence diagnostics use fixed codes only.
       throw new IllegalArgumentException("unsupported or invalid persisted event DTO");
     }

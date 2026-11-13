@@ -4,6 +4,17 @@ Status: standing intent, and a correction to two framings made while investigati
 change is proposed here. It exists because "an agent waits for an answer" has been implemented
 twice, in two different layers, and a third implementation was written and not landed.
 
+Amended 13 November 2026 during Slice 0 of [Finishing Relay](../relay-finishing.md).
+[0057](0057-board-forum-and-relay-messaging-substrate.md) withdraws this record's
+mailbox-audience blocker; the arrival/eligibility/legality separation and
+delegation consumer requirements remain.
+
+Implementation amendment, 13 November 2026: Slice 7 follows
+[0064](0064-relay-child-completion-and-turn-eligibility.md). The child completion
+consumer and shared eligibility decision supersede the implementation-gap inventory
+below; its source citations remain historical evidence. Wait legality stays with
+delegation, and questions retain their distinct delivery path.
+
 ## What a wait actually is
 
 A waiting agent is a conversation that **takes no turn until a particular thing arrives, and whose
@@ -84,9 +95,10 @@ owning system    →  legality: may this wait be taken at all?
 ```
 
 Arrival is already Relay's for two families — `schedule.due` and `event.fire` both publish to a
-topic and are consumed by the firing inbox. Messaging's own move onto Relay remains blocked for an
-unrelated reason: a message body cannot be published at project scope without `relay.log` exposing
-account-private mailboxes.
+topic and are consumed by the firing inbox. Messaging bodies are still on the
+board's transport. Their move is implementation work, not blocked on mailbox
+privacy: agent inbox topics are project-readable under the existing Relay policy,
+as decided in 0057.
 
 **Legality stays with the owning system, and Relay cannot take it.** Relay has no way to know that
 A waiting on B closes a cycle in messaging's mailbox graph, or that delegation's tree makes that
@@ -101,13 +113,14 @@ So the following belong to their owners permanently, not to the substrate: the c
 ## How delegation should be implemented
 
 Delegation was long intended to be rebuilt on messaging, keeping its API. **That intermediate step
-should be skipped.** Delegation goes to Relay directly, because messaging is itself still on v0 and
-is blocked from moving, and routing delegation through it would put delegation behind a blocker it
-does not share.
+should be skipped.** Delegation goes to Relay directly, because messaging is
+itself still on the board's transport and need not become an intermediate
+dependency for delegation's consumer. Its extraction is separate work; neither
+move is gated on an unresolved mailbox audience.
 
-**Messaging's blocker is not delegation's.** Messaging cannot publish at project scope because a
-message body is account-private mailbox content and `relay.log` would expose it
-(`RelayPortEvents.java:64` renders a `Text` payload's text). Delegation has no equivalent exposure:
+**Each family owns its payload.** Messaging will publish to project-readable
+agent topics under 0057. Its current account-owned conversation and API checks
+do not define a new privacy category for Relay. Delegation's
 `orchestration.status`, `orchestration.record` and `orchestration.receipt` are already in a
 project-scoped read set (`ProjectAuthorization.java:115-119`), so an orchestration's state and
 records are project-readable today. Delegation therefore needs to move a **notice**, not a body —
@@ -154,7 +167,7 @@ So the remaining conversion is:
   `StallSweep`, `Started.waiting()`'s asked-for-versus-happened distinction: all policy, all
   delegation's.
 - **Messaging is untouched**, and stays asynchronous with no sender-side wait on its tool surface.
-  Its own move to Relay remains blocked on the mailbox-privacy problem, independently of this.
+  Its own move to Relay is separate implementation work under 0057.
 
 The consequence worth stating plainly: **delegation needs no cycle check**, because you may only
 wait on a child you just created, in a tree capped at depth 2. A substrate-level waiter would have
@@ -217,16 +230,14 @@ unrelated concept.
 
 ## Records this one must be read with
 
-- **`0037-events-and-messaging-on-relay.md`** is the general rule for moving a delivery family onto
-  Relay, and its order of work is amended there by this record: delegation precedes
-  `message.*` / outgoing, because messaging is blocked on an audience for account-private content
-  and delegation is not. 0037 names delegation in its need statement and omits it from its
-  inventory; that omission is why a synchronous construct was specified against messaging in the
-  first place.
-- **`0040-relay-is-the-boards-substrate-rebuilt.md`** supplies the rule this record applies: Relay
-  is the mechanism, not the policy. A waiter in Relay would have been policy in the substrate.
-- **`0039-relay-audiences-beyond-a-project.md`** is the same shape of gap as messaging's blocker —
-  content with no expressible audience — against a different authority unit.
+- **[0037](0037-events-and-messaging-on-relay.md)** is the general delivery rule.
+  Its inventory now includes delegation. There is no audience-based requirement
+  for delegation to precede messaging; its consumer can proceed independently.
+- **[0057](0057-board-forum-and-relay-messaging-substrate.md)** supersedes 0040
+  and withdraws the former mailbox-privacy blocker. Relay is mechanism, not
+  policy; a waiter in Relay would still put turn scheduling in the substrate.
+- **[0039](0039-relay-audiences-beyond-a-project.md)** concerns genuinely
+  non-project audiences. It is not a dependency for project-readable agent topics.
 
 ## Corrections recorded
 

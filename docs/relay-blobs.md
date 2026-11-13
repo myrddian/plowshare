@@ -69,13 +69,34 @@ alone grants no access. Range requests are refused. The response is a download
 attachment with `application/octet-stream`, private no-store caching, `nosniff`
 and `X-Plowshare-Blob-Sha256` / `X-Plowshare-Blob-Media-Type` headers.
 
-Java `ServerClient.publishRelayBlob` / `readRelayBlob` and Node
-`publishRelayBlob` / `readRelayBlob` provide explicit binary HTTP helpers. Node
-requires the deployment origin and bearer; Java uses its configured authenticated
-client. They refuse redirects and automatic replay, bound receipt/download size
-and verify receipt identity plus downloaded length/digest. All SDKs gain validated
-descriptors through generated consume/log DTOs; binary HTTP authoring helpers in
-other native SDKs are separate work.
+All SDKs expose validated BLOB descriptors through consume/log DTOs. Explicit
+binary HTTP helpers are available without extending the WebSocket envelope:
+
+| SDK | Publish / read | Contracts |
+| --- | --- | --- |
+| Java | `ServerClient.publishRelayBlob` / `readRelayBlob` | `RelayBlob.Publish`, `Read`, `Descriptor`, `Published` |
+| Node | `publishRelayBlob` / `readRelayBlob` | `RelayBlobPublish`, `RelayBlobRead`, `RelayBlobDescriptor`, `RelayBlobPublished` |
+| Python | `await publish_relay_blob(...)` / `await read_relay_blob(...)` | generated `RelayBlobPublishDto`, `RelayBlobReadDto`, `RelayBlobDescriptorDto`, `RelayBlobPublishedDto` |
+| Go | `RelayBlobs.Publish` / `Read` | the same generated `...Dto` structs |
+| .NET | `RelayBlobs.PublishAsync` / `ReadAsync` | the same generated `...Dto` records |
+
+Node and native helpers require an explicit HTTP(S) origin and caller bearer;
+Java uses its configured authenticated client. Python and .NET default to a
+60-second transfer timeout; Go requires an explicit positive timeout. Native
+helpers accept timeouts up to five minutes. They refuse redirects and automatic
+replay, bound receipts to 16 KiB and uploads/downloads to 50 MiB, correlate the
+publication UUID/project/topic and verify the descriptor's media type, length and
+SHA-256 digest. Optional integrity headers must agree when present. Response
+fields added by a future server are ignored after validation and projection.
+Native HTTP contracts are generated from the TypeScript graph alongside the WS
+contracts, with no additional registered operation.
+
+Go callers close `RelayBlobs` to release idle connections; .NET callers dispose
+it. Python's helpers use a bounded standard-library HTTP worker without another
+runtime dependency. Cancellation ends the async wait; the worker closes its
+connection when it finishes. Cancellation or timeout after submission leaves
+publication delivery unknown and does not cancel server work. None of these
+helpers refreshes credentials or reconnects a WebSocket.
 
 Keep the original request UUID, metadata and bytes until reconciled. An identical
 retained retry returns the original receipt without allocating another position

@@ -1,9 +1,11 @@
 package io.aeyer.plowshare.sdk;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.aeyer.plowshare.protocol.RelayControl;
 import io.aeyer.plowshare.protocol.RelayLog;
+import io.aeyer.plowshare.protocol.RelayPort;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -20,6 +22,43 @@ class RelayClientTest {
       {"name":"schedule.due","kind":"SCHEDULE_DUE","retentionSeconds":"345600",
        "maxRecords":null,"through":"9007199254740993","expiredThrough":"9007199254740992"}
       """;
+
+  @Test
+  void foreign_group_retirement_is_refused_after_one_submission() throws Exception {
+    var request =
+        new RelayPort.DeleteGroup(
+            "project", "event", "workers", "11111111-1111-1111-1111-111111111111");
+    var received = new AtomicInteger();
+    try (var server = new MockWebServer()) {
+      server.enqueue(
+          new MockResponse()
+              .withWebSocketUpgrade(
+                  new WebSocketListener() {
+                    @Override
+                    public void onMessage(WebSocket socket, String text) {
+                      received.incrementAndGet();
+                      try {
+                        String id = SdkJson.mapper().readTree(text).path("id").textValue();
+                        socket.send(
+                            """
+                {"id":"%s","type":"relay.group.delete","protocol_version":"plowshare-v1",
+                 "payload":{"code":"OK","payload":{"project":"project","topic":"event","group":"workers",
+                   "generation":"22222222-2222-2222-2222-222222222222","removed":true}}}
+                """
+                                .formatted(id));
+                      } catch (IOException invalid) {
+                        throw new AssertionError(invalid);
+                      }
+                    }
+                  }));
+      try (var connection =
+          LegacyFixture.connect(
+              server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
+        assertThrows(IOException.class, () -> new RelayClient(connection).deleteGroup(request));
+        assertEquals(1, received.get());
+      }
+    }
+  }
 
   @Test
   void strict_reply_decoding_preserves_positions_and_refuses_corrupted_semantics()

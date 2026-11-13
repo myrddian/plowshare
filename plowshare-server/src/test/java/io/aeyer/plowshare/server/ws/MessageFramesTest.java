@@ -1,30 +1,40 @@
 package io.aeyer.plowshare.server.ws;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.agents.CallerAccess;
-import io.aeyer.plowshare.server.board.BoardMessaging;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageService;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class MessageFramesTest {
-  private BoardMessaging messages;
+  private MessageService messages;
   private CallerAccess access;
   private MessageFrames frames;
   private final Asking asking = new Asking("session", "enzo");
 
   @BeforeEach
   void setup() {
-    messages = mock(BoardMessaging.class);
+    messages = mock(MessageService.class);
     access = mock(CallerAccess.class);
     frames = new MessageFrames(messages, access);
     when(messages.owned("ins_one", "enzo"))
         .thenReturn(
-            new BoardMessaging.Instance(
-                "ins_one", "enzo", "p", "reviewer", "cnv_one", "hidden_topic", "persistent", true));
+            new MessageService.Instance(
+                "ins_one", "enzo", "p", "reviewer", "cnv_one", "persistent", true));
   }
 
   @Test
@@ -49,10 +59,10 @@ class MessageFramesTest {
     verify(messages).makeDefault("ins_one", "enzo");
     when(messages.route("bdm_one"))
         .thenReturn(
-            java.util.Optional.of(
-                new BoardMessaging.Route(
-                    "bdm_one", "ins_one", "foreign", null, true, false, false, null, false)));
-    doThrow(new CallerFault("Foreign instance")).when(messages).owned("foreign", "enzo");
+            Optional.of(
+                new MessageService.Route(
+                    "bdm_one", "ins_one", "ins_foreign", null, true, false, false, null, false)));
+    doThrow(new CallerFault("Foreign instance")).when(messages).owned("ins_foreign", "enzo");
     assertThrows(CallerFault.class, () -> frames.cancel(Map.of("message", "bdm_one"), asking));
     verify(messages, never()).cancel(any(), any());
   }

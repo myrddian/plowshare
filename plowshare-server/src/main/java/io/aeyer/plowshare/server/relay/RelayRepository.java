@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.relay;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Specialist persistence contract. Each operation is atomic, joins an owning domain transaction
@@ -21,6 +22,10 @@ public interface RelayRepository {
 
   /** Allocates and appends in one transaction; see {@link Relay#publish} for identity semantics. */
   Relay.Publication append(Relay.TopicKey key, Relay.Draft draft, Instant publishedAt);
+
+  /** Atomic generation-fenced append, preserving the ordinary payload-before-topic lock order. */
+  Relay.AppendResult append(
+      Relay.TopicKey key, UUID expectedGeneration, Relay.Draft draft, Instant publishedAt);
 
   /** Coherent read of a retained scoped event; absence is inconclusive after log retention. */
   Optional<Relay.Publication> retained(Relay.TopicKey key, String eventId);
@@ -48,7 +53,10 @@ public interface RelayRepository {
   /** Returns retained unread count and expired gap from the same coherent snapshot. */
   Relay.Unread unread(Relay.SubscriptionKey key);
 
-  /** At most 100 topics with an expired oldest record or excess records, oldest first. */
+  /**
+   * At most 100 topics due by retention deadline or count pressure, using bounded indexed metadata
+   * reads.
+   */
   List<Relay.TopicKey> topicsToPrune(Instant now, int limit);
 
   /**

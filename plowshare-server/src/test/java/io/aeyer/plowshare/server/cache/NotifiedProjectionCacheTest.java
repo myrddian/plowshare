@@ -1,10 +1,16 @@
 package io.aeyer.plowshare.server.cache;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -160,7 +166,7 @@ class NotifiedProjectionCacheTest {
         f.read();
         verify(f.versions, times(2)).capture(DOMAINS);
         TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
-            java.sql.Connection.TRANSACTION_REPEATABLE_READ);
+            Connection.TRANSACTION_REPEATABLE_READ);
         f.fresh();
         f.read();
         verify(f.versions, times(3)).capture(DOMAINS);

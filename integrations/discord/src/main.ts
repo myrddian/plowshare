@@ -111,12 +111,18 @@ async function main(): Promise<void> {
           timeoutMs: config.requestTimeoutMs,
         });
         try {
-          const gateway = new SdkGateway(client);
-          const principal = await gateway.identity();
+          const identityGateway = new SdkGateway(client);
+          const principal = await identityGateway.identity();
           if (repository === undefined)
             repository = await FileState.open(config, principal, botId);
           if (repository.state.principal !== principal)
             throw new Error('Authenticated service principal changed');
+          const gateway = new SdkGateway(
+            client,
+            config.messaging,
+            repository,
+            config.requestTimeoutMs,
+          );
           for (const route of botTargets(config)) await gateway.catalog(route);
           const active = new DiscordAdapter(
             config,

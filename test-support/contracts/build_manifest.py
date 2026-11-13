@@ -280,7 +280,7 @@ def inventory():
         builders[frame] = [{"source": usage_source, "function": "UsageClient / UsageWatch socket-owned view lifecycle"}]
     response_families = {}
     for family, name, expected_types, expected_operations in [
-        ("administrative", "AdministrativeReplies", 34, 36),
+        ("administrative", "AdministrativeReplies", 35, 37),
         ("conversation", "ConversationReplies", 42, 86),
         ("inspection", "InspectionReplies", 14, 8),
         ("information", "InformationReplies", 70, 68),
@@ -315,8 +315,7 @@ def inventory():
     response_operations.update(re.findall(r"^\s*'([^']+)':", read("sdk/typescript/src/operations/tool-scopes.ts"), re.M))
     for family in response_families.values():
         response_operations.update(family["operations"])
-    adapter_replies = {"incoming.catalog", "incoming.receive", "incoming.status", "incoming.cancel"}
-    assert adapter_replies <= set(bound_frames) and adapter_replies <= response_operations
+    assert not any(frame.startswith(("incoming.", "outgoing.")) for frame in typed_frames), "retired external-work operation remains registered"
     assert response_operations == typed_frames, "typed SDK response coverage is incomplete"
     response_operations -= set(bound_frames)
     assert response_operations == one_shot_frames, f"one-shot WS response coverage is incomplete: missing={sorted(one_shot_frames-response_operations)} extra={sorted(response_operations-one_shot_frames)}"

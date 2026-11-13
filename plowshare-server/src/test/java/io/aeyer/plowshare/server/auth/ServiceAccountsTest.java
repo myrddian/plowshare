@@ -1,24 +1,58 @@
 package io.aeyer.plowshare.server.auth;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.AccessRequest;
+import io.aeyer.plowshare.server.access.AccessRequestDecoder;
 import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
+import io.aeyer.plowshare.server.access.JdbcResourceScopeRepository;
 import io.aeyer.plowshare.server.access.ProjectAuthorization;
-import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.archive.ArchiveConfig;
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRole;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.faults.CallerFault;
-import io.aeyer.plowshare.server.ws.*;
-import java.time.*;
-import java.util.*;
+import io.aeyer.plowshare.server.information.InformationAccess;
+import io.aeyer.plowshare.server.information.InformationContext;
+import io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import io.aeyer.plowshare.server.reads.ReadCapacityConfiguration;
+import io.aeyer.plowshare.server.testing.AuthorityFixtures;
+import io.aeyer.plowshare.server.ws.EventChannelHandler;
+import io.aeyer.plowshare.server.ws.SocketAuthorization;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.*;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.socket.WebSocketSession;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.*;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Tag("full-db")
 @Testcontainers
@@ -47,27 +81,23 @@ class ServiceAccountsTest {
 
   @BeforeEach
   void setup() {
-    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
-        jdbc, "TRUNCATE projects,admins CASCADE");
+    AuthorityFixtures.truncate(jdbc, "TRUNCATE projects,admins CASCADE");
     context = new AnnotationConfigApplicationContext();
     context.registerBean(JdbcTemplate.class, () -> jdbc);
     context.register(ServerAdministrationTest.Transactions.class);
     context.registerBean(
-        org.springframework.transaction.PlatformTransactionManager.class,
-        () -> new DataSourceTransactionManager(source));
+        PlatformTransactionManager.class, () -> new DataSourceTransactionManager(source));
     context.register(
         AdminStore.class,
-        io.aeyer.plowshare.server.archive.JdbcProjectMembers.class,
+        JdbcProjectMembers.class,
         ServiceAccounts.class,
         SocketAuthorization.class,
         StoredSessionAuthority.class,
-        io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class);
+        ReadCapacityConfiguration.class);
     context.register(JdbcServiceAccountRepository.class);
     context.registerBean(
-        io.aeyer.plowshare.server.archive.UnitOfWork.class,
-        () ->
-            new io.aeyer.plowshare.server.archive.ArchiveConfig()
-                .unitOfWork(new DataSourceTransactionManager(source)));
+        UnitOfWork.class,
+        () -> new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source)));
     context.refresh();
     accounts = context.getBean(AdminStore.class);
     members = context.getBean(ProjectMembers.class);
@@ -150,13 +180,10 @@ class ServiceAccountsTest {
     assertFalse(accounts.byHandle("ha-integration").orElseThrow().interactive());
     assertFalse(accounts.isServerAdmin("ha-integration"));
     var personal =
-        new io.aeyer.plowshare.server.personal.PersonalSpaces(
-            new io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository(jdbc),
-            new io.aeyer.plowshare.server.archive.ArchiveConfig()
-                .unitOfWork(
-                    new org.springframework.jdbc.datasource.DataSourceTransactionManager(
-                        jdbc.getDataSource())),
-            io.aeyer.plowshare.server.data.DataLayout.NONE);
+        new PersonalSpaces(
+            new JdbcPersonalSpaceRepository(jdbc),
+            new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(jdbc.getDataSource())),
+            DataLayout.NONE);
     assertThrows(CallerFault.class, () -> personal.ensure("ha-integration"));
     assertTrue(personal.id("ha-integration").isEmpty());
     assertThrows(CallerFault.class, () -> tokens.issuePair("ha-integration", false));
@@ -167,15 +194,12 @@ class ServiceAccountsTest {
             accounts,
             new PasswordHasher(),
             new LoginAttempts(Clock.systemUTC(), 10, Duration.ofMinutes(5)));
-    var mvc =
-        org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller)
-            .build();
+    var mvc = MockMvcBuilders.standaloneSetup(controller).build();
     try {
       assertEquals(
           401,
           mvc.perform(
-                  org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
-                          "/v1/auth/login")
+                  MockMvcRequestBuilders.post("/v1/auth/login")
                       .contentType("application/json")
                       .content("{\"handle\":\"ha-integration\",\"password\":\"irrelevant\"}"))
               .andReturn()
@@ -185,7 +209,7 @@ class ServiceAccountsTest {
       throw new AssertionError(failed);
     }
     assertThrows(
-        org.springframework.dao.DataIntegrityViolationException.class,
+        DataIntegrityViolationException.class,
         () -> jdbc.update("UPDATE admins SET server_admin=TRUE WHERE handle='ha-integration'"));
     assertThrows(CallerFault.class, () -> services.create("regular", "another"));
     assertThrows(CallerFault.class, () -> services.list("regular"));
@@ -213,9 +237,7 @@ class ServiceAccountsTest {
             "SELECT information_project_readable((SELECT id FROM projects WHERE name='other'),?)",
             Boolean.class,
             principal));
-    var information =
-        new io.aeyer.plowshare.server.information.InformationAccess(
-            new EffectiveProjectPermissions(members));
+    var information = new InformationAccess(new EffectiveProjectPermissions(members));
     var context = information.forRun(principal, Home.of("automation"));
     assertFalse(context.selection().includeGlobal());
     information.requireSelection(context);
@@ -226,100 +248,76 @@ class ServiceAccountsTest {
     assertEquals(
         "automation",
         information
-            .resolve(
-                principal,
-                io.aeyer.plowshare.server.information.InformationContext.Selection.project(
-                    "automation"))
+            .resolve(principal, InformationContext.Selection.project("automation"))
             .selection()
             .project());
     assertThrows(
         CallerFault.class,
-        () ->
-            information.resolve(
-                principal,
-                io.aeyer.plowshare.server.information.InformationContext.Selection.personal()));
+        () -> information.resolve(principal, InformationContext.Selection.personal()));
     assertThrows(
         CallerFault.class,
-        () ->
-            information.resolve(
-                principal,
-                io.aeyer.plowshare.server.information.InformationContext.Selection.project(
-                    "other")));
-    var policy =
-        new ProjectAuthorization(
-            new io.aeyer.plowshare.server.access.JdbcResourceScopeRepository(jdbc),
-            members,
-            accounts);
+        () -> information.resolve(principal, InformationContext.Selection.project("other")));
+    var policy = new ProjectAuthorization(new JdbcResourceScopeRepository(jdbc), members, accounts);
     policy.require(
         "agent.list",
-        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-            "agent.list", Map.of("project", "automation")),
+        AccessRequestDecoder.decode("agent.list", Map.of("project", "automation")),
         principal);
     policy.require(
-        "incoming.catalog",
-        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-            "incoming.catalog", Map.of("project", "automation")),
+        "relay.log",
+        AccessRequestDecoder.decode("relay.log", Map.of("project", "automation")),
         principal);
     policy.require(
-        "incoming.status",
-        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-            "incoming.status", Map.of("project", "automation")),
+        "message.instances",
+        AccessRequestDecoder.decode("message.instances", Map.of("project", "automation")),
         principal);
     assertThrows(
         CallerFault.class,
         () ->
             policy.require(
-                "incoming.receive",
-                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                    "incoming.receive", Map.of("project", "automation")),
+                "relay.publish",
+                AccessRequestDecoder.decode("relay.publish", Map.of("project", "automation")),
                 principal));
     assertThrows(
         CallerFault.class,
         () ->
             policy.require(
-                "incoming.catalog",
-                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                    "incoming.catalog", Map.of("project", "other")),
+                "relay.log",
+                AccessRequestDecoder.decode("relay.log", Map.of("project", "other")),
                 principal));
     assertThrows(
         CallerFault.class,
         () ->
             policy.require(
                 "agent.run",
-                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                    "agent.run", Map.of("project", "automation")),
+                AccessRequestDecoder.decode("agent.run", Map.of("project", "automation")),
                 principal));
     assertThrows(
         CallerFault.class,
         () ->
             policy.require(
                 "agent.list",
-                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                    "agent.list", Map.of("project", "other")),
+                AccessRequestDecoder.decode("agent.list", Map.of("project", "other")),
                 principal));
     assertThrows(
         CallerFault.class,
         () ->
             policy.require(
                 "conversation.open",
-                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                    "conversation.open", Map.of()),
+                AccessRequestDecoder.decode("conversation.open", Map.of()),
                 principal));
     assertThrows(
         CallerFault.class,
         () ->
             policy.require(
                 "provider.list",
-                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                    "provider.list", Map.of("project", "automation")),
+                AccessRequestDecoder.decode("provider.list", Map.of("project", "automation")),
                 principal));
     assertThrows(
         CallerFault.class,
         () ->
             policy.require(
                 "admin.accounts",
-                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                    "admin.accounts", Map.of()),
+                AccessRequestDecoder.decode("admin.accounts", Map.of()),
                 principal));
   }
 
@@ -329,14 +327,8 @@ class ServiceAccountsTest {
     String principal = issued.token().principal();
     assertTrue(members.mayWork("automation", principal));
     assertFalse(members.mayWork("other", principal));
-    new ProjectAuthorization(
-            new io.aeyer.plowshare.server.access.JdbcResourceScopeRepository(jdbc),
-            members,
-            accounts)
-        .require(
-            "incoming.receive",
-            io.aeyer.plowshare.server.access.AccessRequest.project("automation"),
-            principal);
+    new ProjectAuthorization(new JdbcResourceScopeRepository(jdbc), members, accounts)
+        .require("relay.publish", AccessRequest.project("automation"), principal);
     members.assign("automation", "ha-integration", ProjectRole.VIEWER, "owner", false);
     assertEquals(ProjectRole.VIEWER, members.role("automation", principal).orElseThrow());
     assertFalse(members.mayWork("automation", principal));

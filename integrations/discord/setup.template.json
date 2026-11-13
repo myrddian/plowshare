@@ -28,9 +28,19 @@
       }
     ],
     "notifications": [],
-    "dm": {"mode": "disabled"},
+    "dm": {
+      "mode": "disabled"
+    },
     "pollMs": 2000,
     "requestTimeoutMs": 30000,
-    "maxRecords": 500
+    "maxRecords": 500,
+    "messaging": [
+      {
+        "project": "discord",
+        "bot": "discord_assistant",
+        "requests": "discord.requests",
+        "replies": "discord.replies"
+      }
+    ]
   }
 }

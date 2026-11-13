@@ -7,12 +7,14 @@ import static org.mockito.Mockito.*;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.protocol.transport.*;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -231,14 +233,13 @@ class ConcurrentEventChannelTest {
             return handleAsync(payload, asking).toCompletableFuture().join();
           }
 
-          public java.util.concurrent.CompletionStage<Outcome> handleAsync(
-              Map<String, Object> payload, Asking asking) {
+          public CompletionStage<Outcome> handleAsync(Map<String, Object> payload, Asking asking) {
             executions.incrementAndGet();
             entered.complete(null);
             return result;
           }
         };
-    var authority = mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class);
+    var authority = mock(ProjectAuthorization.class);
     var revoked = new AtomicBoolean();
     // Configure the mock before concurrent calls; changing stubs during delivery races Mockito.
     doAnswer(
@@ -298,13 +299,12 @@ class ConcurrentEventChannelTest {
             return handleAsync(payload, asking).toCompletableFuture().join();
           }
 
-          public java.util.concurrent.CompletionStage<Outcome> handleAsync(
-              Map<String, Object> payload, Asking asking) {
+          public CompletionStage<Outcome> handleAsync(Map<String, Object> payload, Asking asking) {
             entered.complete(null);
             return result;
           }
         };
-    var authority = mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class);
+    var authority = mock(ProjectAuthorization.class);
     var checking = new CompletableFuture<Void>();
     var release = new CompletableFuture<Void>();
     var interrupted = new CompletableFuture<Boolean>();
@@ -366,8 +366,7 @@ class ConcurrentEventChannelTest {
             throw new AssertionError();
           }
 
-          public java.util.concurrent.CompletionStage<Outcome> handleAsync(
-              Map<String, Object> payload, Asking asking) {
+          public CompletionStage<Outcome> handleAsync(Map<String, Object> payload, Asking asking) {
             int slot = (Integer) payload.get("slot");
             if (slot == 0) firstEntered.complete(null);
             return answers.get(slot);

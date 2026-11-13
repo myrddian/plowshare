@@ -4,7 +4,18 @@ import io.aeyer.plowshare.server.access.ScopedGrantRepository.Binding;
 import io.aeyer.plowshare.server.access.ScopedGrantRepository.Coverage;
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Immutable typed copy of the installation's authority tables, with Java evaluations of the SQL
@@ -267,7 +278,7 @@ public final class AuthoritySnapshot {
     for (var row : facts.roleActions())
       if (row.profile().equals("DEFAULT"))
         actions
-            .computeIfAbsent(row.role() + ":" + row.version(), key -> new java.util.HashSet<>())
+            .computeIfAbsent(row.role() + ":" + row.version(), key -> new HashSet<>())
             .add(row.action());
     for (UUID id : live.keySet()) {
       var grant = grants.get(id);

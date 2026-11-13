@@ -10,6 +10,9 @@ import io.aeyer.plowshare.protocol.Orchestration.Structure;
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.information.InformationLogSql;
+import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.relay.RelayCausationCodec;
 import io.aeyer.plowshare.server.todos.StageRules;
 import java.sql.ResultSet;
@@ -31,10 +34,12 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.SqlArrayValue;
 
 /**
  * The orchestrations this server is running, and the questions each has asked — {@code
@@ -210,14 +215,11 @@ public class OrchestrationStore {
         null);
   }
 
-  public record StartReceipt(java.util.UUID requestId, String id, boolean created) {}
+  public record StartReceipt(UUID requestId, String id, boolean created) {}
 
   /** Called inside the start transaction: receipt and run commit together. */
   public StartReceipt receiveStart(
-      String account,
-      java.util.UUID requestId,
-      String payload,
-      Supplier<OrchestrationRecord> insert) {
+      String account, UUID requestId, String payload, Supplier<OrchestrationRecord> insert) {
     jdbc.queryForObject(
         "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
         Boolean.class,
@@ -231,8 +233,7 @@ public class OrchestrationStore {
             requestId);
     if (!prior.isEmpty()) {
       if (!Boolean.TRUE.equals(prior.getFirst().get("matches"))) {
-        throw new io.aeyer.plowshare.server.faults.CallerFault(
-            "requestId was already used for a different orchestration start");
+        throw new CallerFault("requestId was already used for a different orchestration start");
       }
       return new StartReceipt(requestId, (String) prior.getFirst().get("run_id"), false);
     }
@@ -247,7 +248,7 @@ public class OrchestrationStore {
     return new StartReceipt(requestId, run.id(), true);
   }
 
-  public Optional<StartReceipt> startReceipt(String account, java.util.UUID requestId) {
+  public Optional<StartReceipt> startReceipt(String account, UUID requestId) {
     return jdbc
         .query(
             "SELECT run_id FROM orchestration_start_receipts" + " WHERE account=? AND request_id=?",
@@ -1217,7 +1218,7 @@ public class OrchestrationStore {
                 + " AND NOT EXISTS (SELECT 1 FROM orchestrations child"
                 + " WHERE child.parent = current.id AND child.ended_at IS NULL"
                 + " AND (child.state <> ? OR child.pending_cap IN ("
-                + String.join(", ", java.util.Collections.nCopies(personOnly.size(), "?"))
+                + String.join(", ", Collections.nCopies(personOnly.size(), "?"))
                 + ")))",
             parameters.toArray())
         == 1;
@@ -1275,7 +1276,7 @@ public class OrchestrationStore {
         rs -> {
           marked.put(rs.getString("id"), instant(rs, "stalled_since"));
         },
-        new org.springframework.jdbc.support.SqlArrayValue("text", ids.toArray()));
+        new SqlArrayValue("text", ids.toArray()));
     return Map.copyOf(marked);
   }
 
@@ -1298,6 +1299,40 @@ public class OrchestrationStore {
     return jdbc.query(
         SELECT_ORCHESTRATIONS + " WHERE parent = ?" + " ORDER BY created_at DESC, id DESC",
         ORCHESTRATION_ROW_MAPPER,
+        parent);
+  }
+
+  /**
+   * One scheduling snapshot. A pending report preempts nudges; live children are hydrated only when
+   * no such hold exists, for the question-nudge rules that actually consume them.
+   */
+  public record ChildTurnSnapshot(boolean pendingReport, List<OrchestrationRecord> live) {
+    public ChildTurnSnapshot {
+      live = List.copyOf(live);
+    }
+  }
+
+  public ChildTurnSnapshot childTurnSnapshot(String parent) {
+    return jdbc.query(
+        """
+        SELECT pending.has_report,child.* FROM
+          (SELECT EXISTS(SELECT 1 FROM orchestrations
+             WHERE parent=? AND ended_at IS NOT NULL AND result_delivered_at IS NULL) AS has_report) pending
+        LEFT JOIN LATERAL (
+        """
+            + SELECT_ORCHESTRATIONS
+            + " WHERE parent=? AND ended_at IS NULL AND NOT pending.has_report ORDER BY created_at DESC,id DESC) child ON true",
+        rows -> {
+          var live = new ArrayList<OrchestrationRecord>();
+          boolean pending = false;
+          while (rows.next()) {
+            pending = rows.getBoolean("has_report");
+            if (rows.getString("id") != null)
+              live.add(ORCHESTRATION_ROW_MAPPER.mapRow(rows, live.size()));
+          }
+          return new ChildTurnSnapshot(pending, live);
+        },
+        parent,
         parent);
   }
 
@@ -1335,12 +1370,10 @@ public class OrchestrationStore {
    */
   private boolean informationProtected;
 
-  private io.aeyer.plowshare.server.information.InformationLogVisibility visibility =
-      io.aeyer.plowshare.server.information.InformationLogVisibility.direct();
+  private InformationLogVisibility visibility = InformationLogVisibility.direct();
 
-  public OrchestrationStore useVisibility(
-      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
-    this.visibility = java.util.Objects.requireNonNull(visibility);
+  public OrchestrationStore useVisibility(InformationLogVisibility visibility) {
+    this.visibility = Objects.requireNonNull(visibility);
     return this;
   }
 
@@ -1355,12 +1388,7 @@ public class OrchestrationStore {
     }
     if (informationProtected)
       return visibility.read(handle, facts -> byCaller(handle, project, state, limit, facts));
-    return byCaller(
-        handle,
-        project,
-        state,
-        limit,
-        io.aeyer.plowshare.server.information.InformationLogVisibility.Facts.authoritative());
+    return byCaller(handle, project, state, limit, InformationLogVisibility.Facts.authoritative());
   }
 
   private List<OrchestrationRecord> byCaller(
@@ -1368,13 +1396,12 @@ public class OrchestrationStore {
       String project,
       OrchestrationState state,
       int limit,
-      io.aeyer.plowshare.server.information.InformationLogVisibility.Facts facts) {
+      InformationLogVisibility.Facts facts) {
     StringBuilder sql = new StringBuilder(SELECT_ORCHESTRATIONS).append(" WHERE caller_handle = ?");
     List<Object> params = new ArrayList<>();
     params.add(handle);
     if (informationProtected) {
-      var filter =
-          io.aeyer.plowshare.server.information.InformationLogSql.visible("id", handle, facts);
+      var filter = InformationLogSql.visible("id", handle, facts);
       sql.append(" AND ").append(filter.sql());
       params.addAll(filter.arguments());
     }

@@ -1,11 +1,13 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.Redemption;
 import io.aeyer.plowshare.server.archive.StoredResults;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
+import io.aeyer.plowshare.server.llm.dispatch.Content;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -22,6 +24,16 @@ public record AttributedTranscript(
     Objects.requireNonNull(delegate);
     Objects.requireNonNull(usage);
     Objects.requireNonNull(parentUsage);
+  }
+
+  @Override
+  public RelayCausation causation() {
+    return delegate.causation();
+  }
+
+  @Override
+  public void reserveCausalSource() {
+    delegate.reserveCausalSource();
   }
 
   @Override
@@ -45,8 +57,7 @@ public record AttributedTranscript(
   }
 
   @Override
-  public List<io.aeyer.plowshare.server.llm.dispatch.Content.StoredImage> recordToolResult(
-      LoggedEntry entry) {
+  public List<Content.StoredImage> recordToolResult(LoggedEntry entry) {
     return delegate.recordToolResult(entry);
   }
 

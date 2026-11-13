@@ -6,10 +6,13 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Unit represents a protocol null (including operations without a reply body).
@@ -29,6 +32,7 @@ var catalog struct {
 	Inputs      map[string]shape `json:"inputs"`
 	Results     map[string]shape `json:"results"`
 	Pushes      shape            `json:"pushes"`
+	HTTP        map[string]shape `json:"http"`
 	Definitions map[string]shape `json:"$defs"`
 }
 
@@ -61,13 +65,65 @@ func parse(data []byte) (any, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
+	// encoding/json replaces malformed UTF-8 and lone escaped surrogates with U+FFFD.
+	// Reject those at the raw boundary, before replacement could pass DTO validation.
+	if !validJSONUnicode(data) {
+		return nil, contractError
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
 		return nil, err
 	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return nil, contractError
+	}
 	return value, nil
+}
+
+func validJSONUnicode(data []byte) bool {
+	if !utf8.Valid(data) {
+		return false
+	}
+	quoted := false
+	for index := 0; index < len(data); index++ {
+		if data[index] == '"' {
+			quoted = !quoted
+		} else if quoted && data[index] == '\\' {
+			index++
+			if index >= len(data) {
+				return false
+			}
+			if data[index] != 'u' {
+				continue
+			}
+			unit, ok := jsonCodeUnit(data, index+1)
+			if !ok || unit >= 0xdc00 && unit <= 0xdfff {
+				return false
+			}
+			index += 4
+			if unit >= 0xd800 && unit <= 0xdbff {
+				if index+2 >= len(data) || data[index+1] != '\\' || data[index+2] != 'u' {
+					return false
+				}
+				low, ok := jsonCodeUnit(data, index+3)
+				if !ok || low < 0xdc00 || low > 0xdfff {
+					return false
+				}
+				index += 6
+			}
+		}
+	}
+	return true
+}
+
+func jsonCodeUnit(data []byte, start int) (uint64, bool) {
+	if start+4 > len(data) {
+		return 0, false
+	}
+	value, err := strconv.ParseUint(string(data[start:start+4]), 16, 16)
+	return value, err == nil
 }
 
 var contractError = errors.New("value does not match the owned protocol contract")
@@ -284,6 +340,17 @@ func decodePush(data []byte) (ServerPush, error) {
 
 // Transport boundary correlation supplements schema validation for retained deployment receipts.
 func deploymentMatches(operation string, request, reply []byte) bool {
+	if operation == "relay.group.delete" || operation == "relay.group.inspect" {
+		type coordinates struct {
+			Project    string `json:"project"`
+			Topic      string `json:"topic"`
+			Group      string `json:"group"`
+			Generation string `json:"generation"`
+		}
+		var asked, answered coordinates
+		return json.Unmarshal(request, &asked) == nil && json.Unmarshal(reply, &answered) == nil && asked.Project == answered.Project && asked.Topic == answered.Topic && asked.Group == answered.Group && (operation == "relay.group.inspect" || asked.Generation != "" && asked.Generation == answered.Generation)
+	}
+
 	if operation == "tool.invocation.read" {
 		var asked struct {
 			Invocation string `json:"invocation"`

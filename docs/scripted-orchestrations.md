@@ -162,6 +162,35 @@ service verification mechanisms and their prerequisites. `may-return-to` can onl
 name earlier stages. The script must implement any corresponding state rollback;
 a manifest permission alone does not rewrite its JSON state.
 
+## Publishing to Relay
+
+A script may include `relay_publish` in its manifest's `tools` and emit:
+
+```javascript
+return {
+  state: {pending: 'publication'},
+  command: {
+    tool: 'relay_publish',
+    arguments: {topic: 'research.findings', text: 'Finding ready for review.'},
+  },
+};
+```
+
+The operator must install the exact project/definition/topic grant described in
+[Relay publishing](relay.md#agent-and-orchestration-publishing). Current project
+and definition authority are checked at execution. This command also works in a
+native-only script without a model call. The harness supplies scope, publisher,
+call identity and retained causation; do not pass `input.requestId`, a project or
+an envelope in its arguments.
+
+On success the judged result is a JSON string containing `eventId`, `topic`,
+decimal-string `position` and ISO-8601 `publishedAt`. Tool refusals remain prose;
+validate the result shape before recording success in script state. The command
+journal retains the raw receipt before post-processing. Recovery can finish a
+cached receipt without publishing again. An interrupted started command with no
+journal receipt remains uncertain and is not automatically replayed. Never emit
+a new command simply to repeat that uncertain publication.
+
 ## Native-only scripts
 
 A deterministic script can declare `'native-only': true` and

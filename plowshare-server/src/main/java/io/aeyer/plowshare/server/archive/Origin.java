@@ -119,7 +119,12 @@ public enum Origin {
    * place on one topic, woken turn by turn. It spends the root topic's pot, so its row holds no
    * allowance, the same shape as a delegation's; unlike a delegation it is a root.
    */
-  BOARD("board");
+  BOARD("board"),
+
+  /**
+   * One messaging participant's retained context; its allowance belongs to the message instance.
+   */
+  MESSAGE("message");
 
   private final String wireName;
 

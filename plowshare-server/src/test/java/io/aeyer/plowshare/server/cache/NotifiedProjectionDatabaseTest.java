@@ -1,12 +1,16 @@
 package io.aeyer.plowshare.server.cache;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.time.Duration;
+import java.util.EnumSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -57,7 +61,7 @@ class NotifiedProjectionDatabaseTest {
       jdbc.update("INSERT INTO admins(handle,password_hash) VALUES(?,'x')", handle);
       assertTrue(mine.heartbeat(1));
 
-      var seen = java.util.EnumSet.noneOf(ProjectionVersions.Domain.class);
+      var seen = EnumSet.noneOf(ProjectionVersions.Domain.class);
       long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
       while (mine.heartbeatsReceived() < 1) {
         assertTrue(System.nanoTime() < deadline, "The probe must be echoed");
@@ -102,7 +106,7 @@ class NotifiedProjectionDatabaseTest {
       }
       var loads = new AtomicInteger();
       var key = new SnapshotCache.Key("enabled", handle);
-      java.util.function.Supplier<Boolean> read =
+      Supplier<Boolean> read =
           () ->
               cache.read(
                   key,

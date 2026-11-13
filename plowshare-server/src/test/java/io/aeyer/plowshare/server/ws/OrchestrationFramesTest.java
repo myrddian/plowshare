@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -548,7 +549,7 @@ class OrchestrationFramesTest {
             store, orchestrations, cancel, todos, providerOf(resolver), projects);
     frame.useInformationInputs(inputs);
     List<OrchestrationRecord> page =
-        java.util.stream.IntStream.range(0, 25)
+        IntStream.range(0, 25)
             .mapToObj(i -> run("orc_" + i, "enzo", OrchestrationState.FINISHED))
             .toList();
     List<String> ids = page.stream().map(OrchestrationRecord::id).toList();

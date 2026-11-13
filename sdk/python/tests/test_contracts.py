@@ -49,7 +49,9 @@ class ContractsTest(unittest.TestCase):
         path = Path(os.environ["PLOWSHARE_SDK_DTO_FIXTURES"]).with_name(
             "hosted-scope-correlations.json"
         )
-        cases = json.loads(path.read_text())
+        cases = json.loads(path.read_text()) + json.loads(
+            path.with_name("relay-group-correlations.json").read_text()
+        )
         for row in cases:
             result = decode_reply(row["operation"], row["reply"])
             self.assertEqual(
@@ -176,17 +178,17 @@ class ContractsTest(unittest.TestCase):
             },
         )
         # null is the one absence the shape allows: it leaves the agent's own turn cap.
-        self.assertIsNone(
-            encode_request(
-                contracts.ApplicationChildRunRequest(
-                    conversation="c",
-                    child=child,
-                    agent="worker",
-                    task="do it",
-                    max_turns=None,
-                )
-            )[1]["maxTurns"]
+        _, uncapped = encode_request(
+            contracts.ApplicationChildRunRequest(
+                conversation="c",
+                child=child,
+                agent="worker",
+                task="do it",
+                max_turns=None,
+            )
         )
+        assert isinstance(uncapped, dict)
+        self.assertIsNone(uncapped["maxTurns"])
         # The turn cap and the agent name ARE bounded by the generated schema, so this SDK
         # refuses them without the TypeScript gate's help: maxTurns carries
         # integer/minimum/maximum and agent carries minLength/maxLength/pattern/trimmed.
@@ -215,14 +217,13 @@ class ContractsTest(unittest.TestCase):
         # `task` is a bare string shape and is the one request-side bound that is
         # TypeScript-only, so a blank task reaches the wire from here. Asserted rather than
         # described, so ADR 0042's "one of three" is checkable.
-        self.assertEqual(
-            "",
-            encode_request(
-                contracts.ApplicationChildRunRequest(
-                    conversation="c", child=child, agent="worker", task="", max_turns=3
-                )
-            )[1]["task"],
+        _, blank_task = encode_request(
+            contracts.ApplicationChildRunRequest(
+                conversation="c", child=child, agent="worker", task="", max_turns=3
+            )
         )
+        assert isinstance(blank_task, dict)
+        self.assertEqual("", blank_task["task"])
         running = {
             "child": child,
             "job": "job_1",
@@ -242,9 +243,12 @@ class ContractsTest(unittest.TestCase):
                 "application.child.run", {**asked, "child": foreign}, started
             )
         )
-        for bad in ({**running, "job": None}, {k: v for k, v in running.items() if k != "conversation"}):
+        for bad_reply in (
+            {**running, "job": None},
+            {k: v for k, v in running.items() if k != "conversation"},
+        ):
             with self.assertRaises(ValueError):
-                decode_reply("application.child.run", bad)
+                decode_reply("application.child.run", bad_reply)
 
         operation, wire = encode_request(
             contracts.ApplicationChildCancelRequest(conversation="c", child=child)
@@ -252,7 +256,9 @@ class ContractsTest(unittest.TestCase):
         self.assertEqual(operation, "application.child.cancel")
         self.assertEqual(wire, asked)
         cancelled = decode_reply("application.child.cancel", {"child": child})
-        self.assertTrue(deployment_matches("application.child.cancel", asked, cancelled))
+        self.assertTrue(
+            deployment_matches("application.child.cancel", asked, cancelled)
+        )
         self.assertFalse(
             deployment_matches(
                 "application.child.cancel", {**asked, "child": foreign}, cancelled

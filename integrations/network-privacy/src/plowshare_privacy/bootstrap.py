@@ -530,7 +530,7 @@ async def resolve_schedule(setup: Setup, client: SetupClient) -> bool:
             "schedule",
             "collection",
         },
-        {"outgoingPeer", "timeZone"},
+        {"timeZone"},
     )
     row["schedule"] = matches[0].internal_name
     replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
@@ -747,7 +747,7 @@ def connect_pihole(setup: Setup, origin: str, application_password: str) -> None
             "schedule",
             "collection",
         },
-        {"outgoingPeer", "timeZone"},
+        {"timeZone"},
     )
     plan = object_fields(
         row["collection"],

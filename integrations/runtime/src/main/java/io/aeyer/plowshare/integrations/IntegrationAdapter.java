@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.integrations;
 
-import io.aeyer.plowshare.protocol.ExternalResult.IntegrationResult;
 import io.aeyer.plowshare.protocol.IntegrationPayload.Arguments;
 import io.aeyer.plowshare.protocol.IntegrationPayload.Reading;
 import java.io.IOException;

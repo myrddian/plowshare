@@ -3,6 +3,9 @@ package io.aeyer.plowshare.server.relay;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -11,8 +14,8 @@ import java.util.function.Supplier;
 public final class DurableRelay implements Relay {
   private final RelayRepository repository;
   private final Supplier<Instant> clock;
-  private final java.util.function.Function<TopicKey, Optional<Policy>> systemPolicies;
-  private final java.util.function.Consumer<Relay.TopicKey> committed;
+  private final Function<TopicKey, Optional<Policy>> systemPolicies;
+  private final Consumer<Relay.TopicKey> committed;
 
   public DurableRelay(RelayRepository repository, Supplier<Instant> clock) {
     this(repository, clock, topic -> {});
@@ -20,9 +23,7 @@ public final class DurableRelay implements Relay {
 
   /** The composition-supplied callback must defer hints until any enclosing transaction commits. */
   public DurableRelay(
-      RelayRepository repository,
-      Supplier<Instant> clock,
-      java.util.function.Consumer<Relay.TopicKey> committed) {
+      RelayRepository repository, Supplier<Instant> clock, Consumer<Relay.TopicKey> committed) {
     this(repository, clock, committed, topic -> Optional.empty());
   }
 
@@ -30,8 +31,8 @@ public final class DurableRelay implements Relay {
   public DurableRelay(
       RelayRepository repository,
       Supplier<Instant> clock,
-      java.util.function.Consumer<TopicKey> committed,
-      java.util.function.Function<TopicKey, Optional<Policy>> systemPolicies) {
+      Consumer<TopicKey> committed,
+      Function<TopicKey, Optional<Policy>> systemPolicies) {
     this.systemPolicies = Objects.requireNonNull(systemPolicies);
     this.committed = Objects.requireNonNull(committed);
     this.repository = Objects.requireNonNull(repository, "repository");
@@ -65,6 +66,20 @@ public final class DurableRelay implements Relay {
             RelayValues.time(clock.get()));
     committed.accept(key);
     return publication;
+  }
+
+  @Override
+  public AppendResult publish(TopicKey key, UUID expectedGeneration, Draft draft) {
+    var result =
+        Objects.requireNonNull(
+            repository.append(
+                Objects.requireNonNull(key, "key"),
+                Objects.requireNonNull(expectedGeneration, "expectedGeneration"),
+                Objects.requireNonNull(draft, "draft"),
+                RelayValues.time(clock.get())),
+            "append outcome");
+    if (result instanceof Appended) committed.accept(key);
+    return result;
   }
 
   @Override

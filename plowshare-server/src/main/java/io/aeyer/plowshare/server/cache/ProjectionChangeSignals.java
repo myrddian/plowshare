@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.cache;
 
+import java.util.OptionalLong;
 import java.util.Set;
 
 /**
@@ -42,8 +43,8 @@ public interface ProjectionChangeSignals extends AutoCloseable {
    * is at most {@code now - deliveredThrough} behind the database. Empty while not ready, before
    * the first answered probe, or when this listener does not probe.
    */
-  default java.util.OptionalLong deliveredThrough() {
-    return java.util.OptionalLong.empty();
+  default OptionalLong deliveredThrough() {
+    return OptionalLong.empty();
   }
 
   @Override

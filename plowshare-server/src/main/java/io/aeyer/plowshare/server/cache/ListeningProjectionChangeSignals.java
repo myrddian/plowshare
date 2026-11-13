@@ -1,8 +1,10 @@
 package io.aeyer.plowshare.server.cache;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -118,14 +120,13 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   }
 
   @Override
-  public java.util.OptionalLong deliveredThrough() {
+  public OptionalLong deliveredThrough() {
     long generation = deliveredGeneration;
     long nanos = deliveredNanos;
     synchronized (lock) {
-      if (closed || !state.ready() || state.generation() != generation)
-        return java.util.OptionalLong.empty();
+      if (closed || !state.ready() || state.generation() != generation) return OptionalLong.empty();
     }
-    return java.util.OptionalLong.of(nanos);
+    return OptionalLong.of(nanos);
   }
 
   @Override
@@ -233,7 +234,7 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
     synchronized (lock) {
       generation = state.generation();
     }
-    var sent = new java.util.ArrayDeque<long[]>();
+    var sent = new ArrayDeque<long[]>();
     long sequence = 0;
     long interval = heartbeat.toNanos();
     long timeout = heartbeatTimeout.toNanos();

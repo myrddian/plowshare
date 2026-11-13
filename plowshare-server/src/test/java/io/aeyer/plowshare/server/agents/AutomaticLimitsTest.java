@@ -1,12 +1,24 @@
 package io.aeyer.plowshare.server.agents;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.Mockito.calls;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.archive.*;
-import java.util.*;
-import java.util.concurrent.*;
+import io.aeyer.plowshare.server.archive.ConversationRecord;
+import io.aeyer.plowshare.server.archive.Origin;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +46,37 @@ class AutomaticLimitsTest {
 
   final AgentDefinition definition = mock(AgentDefinition.class);
   final Transcript log = mock(Transcript.class);
+
+  @Test
+  void messages_renew_their_own_allowance_and_steps_without_raising_the_conversation_budget() {
+    var budget = Budget.resumed(2, 2);
+    budget.messageOwned();
+    List<Integer> grants = new ArrayList<>();
+    budget.bindAllowance(Optional::empty, grants::add);
+    var limits =
+        new AutomaticLimits(
+            (p, s) -> enabled(true),
+            id -> Optional.of(owner("message", Origin.MESSAGE, null, null)),
+            (id, total, spent) -> fail("Message renewal must not grant the conversation"));
+    assertTrue(limits.budget("message", budget, definition, null, log));
+    assertEquals(List.of(4), grants);
+    assertEquals(4, budget.limit());
+    assertEquals(2, budget.spent());
+    var cap = TurnCap.of(2);
+    assertTrue(limits.steps("message", cap, 2, definition, null, log, budget));
+    assertEquals(4, cap.turns());
+    var failed = Budget.resumed(2, 2);
+    failed.messageOwned();
+    failed.bindAllowance(
+        Optional::empty,
+        total -> {
+          throw new IllegalStateException("unavailable");
+        });
+    assertThrows(
+        IllegalStateException.class, () -> limits.budget("message", failed, definition, null, log));
+    assertEquals(2, failed.limit());
+    assertEquals(2, failed.spent());
+  }
 
   @Test
   void grants_are_finite_shared_and_committed_before_the_ceiling_moves() {

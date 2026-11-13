@@ -4,10 +4,14 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.AuthorityIds;
+import io.aeyer.plowshare.server.access.GrantRecipient;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.agents.digests.*;
 import io.aeyer.plowshare.server.documents.Chunking;
 import io.aeyer.plowshare.server.llm.*;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer;
 import java.time.Instant;
 import java.util.*;
@@ -404,16 +408,13 @@ class ConversationRetrievalTest {
     var operation = mock(DigestModel.Operation.class);
     when(model.operation(anyString(), any(), any())).thenReturn(operation);
     when(model.operation(anyString(), any(), any(), any())).thenReturn(operation);
-    when(operation.usage())
-        .thenReturn(io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY);
+    when(operation.usage()).thenReturn(UsageAttribution.LEGACY);
     // Mirrors Operation.query without embedding admission: capture under the LEGACY usage.
     when(operation.query(any(), anyString()))
         .thenAnswer(
             i ->
                 i.<PassageIndex>getArgument(0)
-                    .capture(
-                        i.<String>getArgument(1),
-                        io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY));
+                    .capture(i.<String>getArgument(1), UsageAttribution.LEGACY));
     when(operation.call(anyString(), anyString(), anyString(), any(), any()))
         .thenAnswer(
             i -> {
@@ -461,16 +462,13 @@ class ConversationRetrievalTest {
     var operation = mock(DigestModel.Operation.class);
     when(model.operation(anyString(), any(), any())).thenReturn(operation);
     when(model.operation(anyString(), any(), any(), any())).thenReturn(operation);
-    when(operation.usage())
-        .thenReturn(io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY);
+    when(operation.usage()).thenReturn(UsageAttribution.LEGACY);
     // Mirrors Operation.query without embedding admission: capture under the LEGACY usage.
     when(operation.query(any(), anyString()))
         .thenAnswer(
             i ->
                 i.<PassageIndex>getArgument(0)
-                    .capture(
-                        i.<String>getArgument(1),
-                        io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY));
+                    .capture(i.<String>getArgument(1), UsageAttribution.LEGACY));
     when(operation.call(anyString(), anyString(), anyString(), any(), any()))
         .thenAnswer(
             i -> {
@@ -533,24 +531,20 @@ class ConversationRetrievalTest {
   }
 
   /** An authority that admits exactly the definition's ordinary actions in the fixture project. */
-  private io.aeyer.plowshare.server.access.OperationAuthority admitting(
-      String executor, AgentDefinition definition) {
-    var account = new io.aeyer.plowshare.server.access.AuthorityIds.AccountId(UUID.randomUUID());
+  private OperationAuthority admitting(String executor, AgentDefinition definition) {
+    var account = new AuthorityIds.AccountId(UUID.randomUUID());
     var admission =
-        new io.aeyer.plowshare.server.access.OperationAuthority.Admission(
+        new OperationAuthority.Admission(
             UUID.randomUUID(),
             executor,
             account,
-            new io.aeyer.plowshare.server.access.AuthorityIds.ScopeId(UUID.randomUUID()),
+            new AuthorityIds.ScopeId(UUID.randomUUID()),
             project,
-            new io.aeyer.plowshare.server.access.GrantRecipient(account, Optional.empty()),
+            new GrantRecipient(account, Optional.empty()),
             OperationExecution.actions(definition).stream()
-                .map(
-                    action ->
-                        new io.aeyer.plowshare.server.access.OperationAuthority.Support(
-                            action, UUID.randomUUID()))
+                .map(action -> new OperationAuthority.Support(action, UUID.randomUUID()))
                 .toList());
-    var operations = mock(io.aeyer.plowshare.server.access.OperationAuthority.class);
+    var operations = mock(OperationAuthority.class);
     when(operations.admit(eq(executor), any(), any())).thenReturn(admission);
     return operations;
   }

@@ -15,7 +15,13 @@ import io.aeyer.plowshare.server.agents.CompletionOutcome;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.Invocation;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
+import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
+import io.aeyer.plowshare.server.hooks.HookRecord;
+import io.aeyer.plowshare.server.hooks.Stage;
+import io.aeyer.plowshare.server.hooks.Tier;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import java.time.Duration;
 import java.time.Instant;
@@ -32,8 +38,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.function.ToLongFunction;
 import java.util.stream.IntStream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -94,12 +103,7 @@ class EntryStoreTest {
   void restarted_reads_keep_distinct_jobs_on_one_continued_turn_and_unknown_legacy_entries() {
     var jobs = new JdbcJobLog(jdbc);
     jobs.started("job_initial", "worker", PAYMENTS, THEN, conversation, null);
-    jobs.ended(
-        "job_initial",
-        io.aeyer.plowshare.server.agents.Outcome.Ending.ANSWERED,
-        1,
-        1,
-        THEN.plusSeconds(1));
+    jobs.ended("job_initial", Outcome.Ending.ANSWERED, 1, 1, THEN.plusSeconds(1));
     assertEquals(
         conversation, new JdbcJobLog(jdbc).find("job_initial").orElseThrow().conversation());
     entries.append(
@@ -141,7 +145,7 @@ class EntryStoreTest {
     // All dependent projections live in this disposable container; reset newer foreign-key
     // dependants too (including embedding staging and job conversation links).
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE message_route_bindings, message_external_tasks, message_external_contexts, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     entries = new EntryStore(jdbc);
     conversation = conversations.open(PAYMENTS, Budget.of(20)).id();
@@ -149,10 +153,10 @@ class EntryStoreTest {
 
   @Test
   void boundedTranscriptProjectionPreservesForwardTailAndOversizedText() {
-    var maximum = new java.util.concurrent.atomic.AtomicLong(2_000_000);
-    var bypasses = new java.util.concurrent.atomic.AtomicInteger();
+    var maximum = new AtomicLong(2_000_000);
+    var bypasses = new AtomicInteger();
     var cache =
-        new io.aeyer.plowshare.server.cache.ProjectionCache<EntryPage>() {
+        new ProjectionCache<EntryPage>() {
           public boolean enabled() {
             return true;
           }
@@ -162,11 +166,11 @@ class EntryStoreTest {
           }
 
           public EntryPage read(
-              io.aeyer.plowshare.server.cache.SnapshotCache.Key key,
+              SnapshotCache.Key key,
               boolean cacheable,
               Supplier<EntryPage> bounded,
               Supplier<EntryPage> direct,
-              java.util.function.ToLongFunction<EntryPage> weight) {
+              ToLongFunction<EntryPage> weight) {
             if (!cacheable) return direct.get();
             try {
               return bounded.get();
@@ -1135,7 +1139,7 @@ class EntryStoreTest {
         entries.redeem(other, mine.handle()).isEmpty(),
         "a handle read a result out of a conversation it does not belong to");
     assertTrue(
-        entries.redeem(conversation, java.util.UUID.randomUUID()).isEmpty(),
+        entries.redeem(conversation, UUID.randomUUID()).isEmpty(),
         "a handle nothing was written under answered with something");
   }
 
@@ -2051,9 +2055,7 @@ class EntryStoreTest {
       case SUMMARY -> LoggedEntry.summary("they talked about the deploy");
       case TURN_SUMMARY -> LoggedEntry.turnSummary("it read three files and found the key");
       case NOTICE -> LoggedEntry.notice("an inbox item arrived");
-      case ATTEMPT_FAILED ->
-          LoggedEntry.attemptFailed(
-              io.aeyer.plowshare.server.agents.Outcome.Ending.SESSION_GONE, "it went away");
+      case ATTEMPT_FAILED -> LoggedEntry.attemptFailed(Outcome.Ending.SESSION_GONE, "it went away");
       case RUNTIME_NOTE -> LoggedEntry.runtimeNote("[Runtime note] you keep doing that");
       case PLAN -> new LoggedEntry(EntryKind.PLAN, "step one: read the file", null, List.of());
       case DIAGNOSTIC ->
@@ -2069,13 +2071,13 @@ class EntryStoreTest {
                   "the answer opens with a refusal phrase"));
       case HOOK ->
           LoggedEntry.hook(
-              new io.aeyer.plowshare.server.hooks.HookRecord(
+              new HookRecord(
                   "no-secrets-in-writes",
                   "10-secrets.ts",
-                  io.aeyer.plowshare.server.hooks.Tier.PROJECT,
-                  io.aeyer.plowshare.server.hooks.Stage.TOOL_PRE,
+                  Tier.PROJECT,
+                  Stage.TOOL_PRE,
                   "file_write",
-                  io.aeyer.plowshare.server.hooks.HookRecord.DENY,
+                  HookRecord.DENY,
                   "a private key",
                   null,
                   null,

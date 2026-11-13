@@ -6,11 +6,14 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** The firings table, which is the queue. Every transition is a guarded UPDATE. */
 public class JdbcFiringStore implements FiringStore {
@@ -20,9 +23,41 @@ public class JdbcFiringStore implements FiringStore {
   private static final String COLUMNS =
       "id, event, data::text AS data, schedule, fire_at,"
           + " trigger, target, status, superseded_by, reason, job_id, arrived_at, started_at,"
-          + " finished_at, topic";
+          + " finished_at, COALESCE(topic,message_instance) AS topic";
 
   private final JdbcTemplate jdbc;
+
+  @Override
+  public Optional<FiringRecord> oweMessage(
+      String instance, String target, EventPayload.Message data, Instant at) {
+    return oweMessage(instance, target, data, at, null);
+  }
+
+  @Override
+  public Optional<FiringRecord> oweMessage(
+      String instance, String target, EventPayload.Message data, Instant at, Long position) {
+    if (position != null && position < 1)
+      throw new IllegalArgumentException("Positive publication position required");
+    EventPayload.identity(instance, "message instance");
+    EventPayload.identity(target, "message target");
+    if (!instance.startsWith("ins_") || !target.startsWith("conversation:"))
+      throw new IllegalArgumentException("Invalid message wake owner");
+    EventPayloadCodec.require(WAKE_EVENT, instance, null, null, data);
+    return jdbc
+        .query(
+            "INSERT INTO firings(id,event,data,target,status,arrived_at,message_instance,message_position) VALUES(?,?,?::jsonb,?,'queued',?,?,?) RETURNING "
+                + COLUMNS,
+            JdbcFiringStore::row,
+            MemoryIds.mint(PREFIX, at),
+            WAKE_EVENT,
+            EventPayloadCodec.write(data),
+            target,
+            ts(at),
+            instance,
+            position)
+        .stream()
+        .findFirst();
+  }
 
   public JdbcFiringStore(JdbcTemplate jdbc) {
     this.jdbc = jdbc;
@@ -35,7 +70,7 @@ public class JdbcFiringStore implements FiringStore {
     long scanned = 0;
     long invalid = 0;
     String after = null;
-    var problems = new java.util.ArrayList<EventCompatibility.Problem>();
+    var problems = new ArrayList<EventCompatibility.Problem>();
     while (true) {
       var page =
           jdbc.query(
@@ -94,7 +129,7 @@ public class JdbcFiringStore implements FiringStore {
       TriggerRecord trigger,
       Instant at,
       Supplier<String> ids) {
-    java.util.Objects.requireNonNull(at, "arrival time");
+    Objects.requireNonNull(at, "arrival time");
     EventPayloadCodec.require(event, null, schedule, fireAt, data);
     // ON CONFLICT keeps a duplicate tick or ID from aborting the owning scheduler transaction.
     // Catching a PostgreSQL uniqueness exception and continuing would leave that transaction
@@ -132,11 +167,10 @@ public class JdbcFiringStore implements FiringStore {
 
   @Override
   public void lockScheduledQueues(List<String> triggers) {
-    if (!org.springframework.transaction.support.TransactionSynchronizationManager
-        .isActualTransactionActive())
+    if (!TransactionSynchronizationManager.isActualTransactionActive())
       throw new IllegalStateException("scheduled queue admission requires an owning transaction");
     var names =
-        java.util.Objects.requireNonNull(triggers).stream()
+        Objects.requireNonNull(triggers).stream()
             .map(name -> EventPayload.identity(name, "trigger queue"))
             .distinct()
             .sorted()
@@ -174,7 +208,7 @@ public class JdbcFiringStore implements FiringStore {
   public Optional<FiringRecord> owe(String topic, String target, EventPayload data, Instant at) {
     EventPayload.identity(topic, "wake topic");
     EventPayload.identity(target, "wake target");
-    java.util.Objects.requireNonNull(at, "arrival time");
+    Objects.requireNonNull(at, "arrival time");
     if (!target.startsWith("conversation:")
         || target.length() == "conversation:".length()
         || !(data instanceof EventPayload.Seat || data instanceof EventPayload.Message))
@@ -264,7 +298,7 @@ public class JdbcFiringStore implements FiringStore {
             "SELECT "
                 + COLUMNS
                 + " FROM firings WHERE target = ? AND status = 'queued'"
-                + " ORDER BY jsonb_exists(data, 'message_continuation') DESC, arrived_at, id LIMIT 1",
+                + " ORDER BY jsonb_exists(data, 'message_continuation') DESC, message_position ASC NULLS LAST, arrived_at, id LIMIT 1",
             JdbcFiringStore::row,
             target)
         .stream()
@@ -375,7 +409,7 @@ public class JdbcFiringStore implements FiringStore {
             + " FROM firings"
             + " WHERE (CAST(? AS TEXT) IS NULL OR trigger = ?)"
             + " AND (CAST(? AS TEXT) IS NULL OR status = ?)"
-            + " AND NOT EXISTS (SELECT 1 FROM board_message_instances i WHERE i.topic = firings.topic)"
+            + " AND message_instance IS NULL"
             + " ORDER BY arrived_at DESC, id DESC OFFSET ? LIMIT ?",
         JdbcFiringStore::row,
         trigger,

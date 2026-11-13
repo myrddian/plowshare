@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.documents;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,8 +17,7 @@ final class DocumentFixtures {
 
   /** Model-call fixtures need full prose units, rather than the literal short-text fast path. */
   static String modelParagraphs(String sourceName, String text) {
-    var extracted =
-        TextExtraction.extract(sourceName, text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var extracted = TextExtraction.extract(sourceName, text.getBytes(StandardCharsets.UTF_8));
     var fixture = separateBlocks(extracted, ShippedChunking.SHIPPED);
     String result = text;
     for (String paragraph :
@@ -46,8 +47,7 @@ final class DocumentFixtures {
         List<DerivedParagraph> paragraphs = new ArrayList<>();
         String body =
             String.join(
-                "\n",
-                java.util.Arrays.copyOfRange(lines, section.bodyStartLine(), section.endLine()));
+                "\n", Arrays.copyOfRange(lines, section.bodyStartLine(), section.endLine()));
         for (String block : body.split("\n\\s*\n")) {
           String text = block.strip().replaceAll("\\s+", " ");
           if (text.isEmpty()) continue;

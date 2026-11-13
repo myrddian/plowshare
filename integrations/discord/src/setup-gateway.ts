@@ -18,7 +18,7 @@ export async function verifyServiceCredential(
     timeoutMs: config.requestTimeoutMs,
   });
   try {
-    const gateway = new SdkGateway(client);
+    const gateway = new SdkGateway(client, config.messaging);
     if ((await gateway.identity()) !== principal)
       throw new SetupProblem(
         'Credential authenticated as another service principal',
