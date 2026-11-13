@@ -20,6 +20,7 @@ from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
 from plowshare_privacy.discovery import LocalDeviceDiscovery
 from plowshare_privacy.operator_state import FileOperatorStore
 from plowshare_privacy.reference_library import ReferenceJournal, ReferenceLibrary
+from plowshare_privacy.reference_requests import ReferenceRequests
 from plowshare_privacy.reference_service import (
     JOURNAL_UNREADABLE,
     ReferenceService,
@@ -30,6 +31,7 @@ from plowshare_privacy.worker import Worker
 
 TOKEN = "dashboard-fixture-bearer-123456"
 HEADERS = {"Authorization": "Bearer " + TOKEN}
+DOCS = "https://docs.example.test/caddy-admin"
 
 
 async def _recover(*_: object) -> None:
@@ -64,14 +66,24 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         library = ReferenceLibrary(ReferenceJournal(self.root), self.port)
         library.plan_seed((ENTRY, SECOND))
         self.service = ReferenceService(library)
+        self.requests = ReferenceRequests(self.root, library)
+        self.asked = self.requests.request(
+            "caddy", "Which port is the admin API on?", None, str(uuid4())
+        )
 
     async def client(
-        self, service: ReferenceService | None
+        self,
+        service: ReferenceService | None,
+        requests: ReferenceRequests | None = None,
     ) -> TestClient[web.Request, web.Application]:
         client = TestClient(
             TestServer(
                 application(
-                    self.worker, TOKEN, console=self.console, references=service
+                    self.worker,
+                    TOKEN,
+                    console=self.console,
+                    references=service,
+                    reference_requests=requests,
                 )
             )
         )
@@ -246,6 +258,84 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         client = await self.client(None)
         overview = await (await client.get("/api/overview", headers=HEADERS)).json()
         self.assertIsNone(overview["references"])
+
+    async def test_approve_requires_dashboard_key(self) -> None:
+        client = await self.client(self.service, self.requests)
+        base = "/api/reference-requests"
+        self.assertEqual(401, (await client.get(base)).status)
+        for action, body in (("approve", {"urls": [DOCS]}), ("dismiss", {})):
+            denied = await client.post(f"{base}/{self.asked.id}/{action}", json=body)
+            self.assertEqual(401, denied.status)
+        self.assertEqual("pending", self.requests.pending()[0].state)
+        listed = await (await client.get(base, headers=HEADERS)).json()
+        self.assertEqual(
+            [("caddy", "Which port is the admin API on?")],
+            [(r["product"], r["question"]) for r in listed["requests"]],
+        )
+        overview = await (await client.get("/api/overview", headers=HEADERS)).json()
+        self.assertEqual(
+            {"pending": 1, "products": ["caddy"]}, overview["reference_requests"]
+        )
+        approved = await client.post(
+            f"{base}/{self.asked.id}/approve", headers=HEADERS, json={"urls": [DOCS]}
+        )
+        self.assertEqual(200, approved.status)
+        self.assertEqual([], (await approved.json())["requests"])
+        self.assertIn(DOCS, [r.url for r in self.service.library.view()])
+
+    async def test_approve_rejects_http_and_duplicate_urls(self) -> None:
+        client = await self.client(self.service, self.requests)
+        path = f"/api/reference-requests/{self.asked.id}/approve"
+        for urls, message in (
+            (["http://docs.example.test/a"], "https"),
+            ([DOCS, DOCS], "new and unique"),
+            ([URL], "new and unique"),
+            ([], "one to five"),
+            ([f"https://docs.example.test/{n}" for n in range(6)], "one to five"),
+        ):
+            response = await client.post(path, headers=HEADERS, json={"urls": urls})
+            self.assertEqual(400, response.status, urls)
+            self.assertIn(message, (await response.json())["error"].lower())
+        for body in ({"urls": "x"}, {"urls": [5]}, {}, {"urls": [DOCS], "x": 1}):
+            bad = await client.post(path, headers=HEADERS, json=body)
+            self.assertEqual(400, bad.status, body)
+        self.assertEqual(1, len(self.requests.pending()))
+        unknown = await client.post(
+            f"/api/reference-requests/{uuid4()}/approve",
+            headers=HEADERS,
+            json={"urls": [DOCS]},
+        )
+        self.assertEqual(400, unknown.status)
+        self.assertIn("Unknown", (await unknown.json())["error"])
+
+    async def test_dismiss_then_list_excludes_it(self) -> None:
+        client = await self.client(self.service, self.requests)
+        response = await client.post(
+            f"/api/reference-requests/{self.asked.id}/dismiss",
+            headers=HEADERS,
+            json={},
+        )
+        self.assertEqual(200, response.status)
+        self.assertEqual([], (await response.json())["requests"])
+        listed = await (
+            await client.get("/api/reference-requests", headers=HEADERS)
+        ).json()
+        self.assertEqual([], listed["requests"])
+        again = await client.post(
+            f"/api/reference-requests/{self.asked.id}/dismiss",
+            headers=HEADERS,
+            json={},
+        )
+        self.assertEqual(400, again.status)
+        self.assertIn("already decided", (await again.json())["error"])
+
+    async def test_missing_requests_are_not_found(self) -> None:
+        client = await self.client(self.service)
+        self.assertEqual(
+            404, (await client.get("/api/reference-requests", headers=HEADERS)).status
+        )
+        overview = await (await client.get("/api/overview", headers=HEADERS)).json()
+        self.assertIsNone(overview["reference_requests"])
 
 
 if __name__ == "__main__":

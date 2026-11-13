@@ -54,6 +54,7 @@ from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
 from .profile_research import DAILY_LIMIT as RESEARCH_DAILY_LIMIT
 from .profile_research import ResearchReview, admitted_today
+from .reference_requests import ReferenceRequest, ReferenceRequests
 from .reference_service import PHASE_LABELS, ReferenceService
 from .schedule_editor import ScheduleManagement
 from .system_view import describe
@@ -87,6 +88,7 @@ def application(
     deep_scans_detail: str | None = None,
     references: ReferenceService | None = None,
     references_detail: str | None = None,
+    reference_requests: ReferenceRequests | None = None,
     ask: AskService | None = None,
     ask_detail: str | None = None,
     advisory_origin: str | None = None,
@@ -250,6 +252,7 @@ def application(
                 "references": asdict(references.counts())
                 if references is not None
                 else None,
+                "reference_requests": request_counts(),
                 "ask": ask_overview(),
             }
         )
@@ -776,6 +779,64 @@ def application(
             )
         return reference_rows(service)
 
+    def request_journal() -> ReferenceRequests:
+        if reference_requests is None:
+            raise web.HTTPNotFound(text="Documentation requests are not enabled")
+        return reference_requests
+
+    def request_counts() -> dict[str, object] | None:
+        # Counts and product names only; the list itself is read when the owner
+        # opens the review panel.
+        if reference_requests is None:
+            return None
+        waiting = reference_requests.pending()
+        return {"pending": len(waiting), "products": [r.product for r in waiting]}
+
+    def request_rows(waiting: tuple[ReferenceRequest, ...]) -> web.Response:
+        # ``question`` is the agent's text: the dashboard shows it as text only.
+        return web.json_response(
+            {
+                "requests": [
+                    {
+                        "id": r.id,
+                        "product": r.product,
+                        "question": r.question,
+                        "created_at": r.created_at,
+                    }
+                    for r in waiting
+                ]
+            }
+        )
+
+    async def request_list(request: web.Request) -> web.Response:
+        return request_rows(request_journal().pending())
+
+    async def request_approve(request: web.Request) -> web.Response:
+        journal = request_journal()
+        try:
+            urls = object_fields(parse_json(await request.read()), {"urls"})["urls"]
+            # The journal enforces the count and each link's rules; here only the
+            # shape. A huge list is already bounded by the request body limit.
+            if not isinstance(urls, list) or not all(isinstance(u, str) for u in urls):
+                raise ValueError("Each reference link must be text")
+            # Approving only queues receipts in the journal; the library's loop
+            # does the fetching later, so no SDK call can happen here.
+            journal.approve(
+                request.match_info["request_id"],
+                tuple(url for url in urls if isinstance(url, str)),
+            )
+        except ValueError as error:
+            return web.json_response({"error": str(error.args[0])}, status=400)
+        return request_rows(journal.pending())
+
+    async def request_dismiss(request: web.Request) -> web.Response:
+        journal = request_journal()
+        try:
+            journal.dismiss(request.match_info["request_id"])
+        except ValueError as error:
+            return web.json_response({"error": str(error.args[0])}, status=400)
+        return request_rows(journal.pending())
+
     def assistant() -> AskService:
         if ask is None:
             raise web.HTTPNotFound(text="Ask is not enabled")
@@ -1249,6 +1310,9 @@ def application(
     app.router.add_post("/api/devices/{device_id}/deep-scan/cancel", deep_scan_cancel)
     app.router.add_get("/api/references", reference_list)
     app.router.add_post("/api/references/retry", reference_retry)
+    app.router.add_get("/api/reference-requests", request_list)
+    app.router.add_post("/api/reference-requests/{request_id}/approve", request_approve)
+    app.router.add_post("/api/reference-requests/{request_id}/dismiss", request_dismiss)
     app.router.add_get("/api/ask", ask_view)
     app.router.add_post("/api/ask", ask_send)
     app.router.add_post("/api/ask/top-up", ask_top_up)

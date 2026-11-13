@@ -87,3 +87,81 @@ test('the list is fetched when Settings is shown, not on every overview refresh'
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.filter(path => path === '/api/references').length, 1);
 });
+
+const ASKED = {id:'7f0c2c1e-9a53-4f55-8d2f-2f2a5d1f6a10', product:'caddy', question:'Which <b>port</b> is the admin API on?', created_at:'2026-11-14T10:00:00Z'};
+const textareas = node => [...(node.tag === 'textarea' ? [node] : []), ...(node.children || []).flatMap(textareas)];
+
+test('attention shows docs requested', () => {
+  const {context, node, run} = dashboard();
+  const band = value => {context.value = value; run('renderAttention(value)'); return node('attention-items').children.map(item => texts(item).join(' | '));};
+  assert.deepEqual(band({...overview(null), reference_requests:{pending:0, products:[]}}), []);
+  assert.deepEqual(band({...overview(null), reference_requests:null}), []);
+  const lines = band({...overview(null), reference_requests:{pending:2, products:['caddy', 'synology']}});
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0], '2 | Docs requested | Privacy Watch could not answer about caddy, synology. Add a documentation link or dismiss. | Review');
+});
+
+test('request review never renders agent text as markup', () => {
+  const {node, run} = dashboard();
+  run('renderRequests({requests:[' + JSON.stringify(ASKED) + ']})');
+  assert.equal(node('reference-requests').hidden, false);
+  const card = node('reference-request-list').children[0];
+  assert.ok(texts(card).includes('Which <b>port</b> is the admin API on?'));
+  assert.deepEqual(buttons(card).map(button => button.textContent), ['Approve', 'Dismiss']);
+  run('renderRequests({requests:[]})');
+  assert.equal(node('reference-requests').hidden, true);
+});
+
+test('approve posts trimmed urls', async () => {
+  const calls = [];
+  const {node, run} = dashboard(async (path, options = {}) => {
+    calls.push([path, options.method, options.body]);
+    return {ok:true, status:200, json:async () => ({requests:[]})};
+  });
+  run('renderRequests({requests:[' + JSON.stringify(ASKED) + ']})');
+  const card = node('reference-request-list').children[0];
+  const [area] = textareas(card);
+  area.value = '  https://docs.example.test/a  \n\n https://docs.example.test/b\r\n';
+  buttons(card)[0].listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls.filter(call => call[0].startsWith('/api/reference-requests')), [[`/api/reference-requests/${ASKED.id}/approve`, 'POST', JSON.stringify({urls:['https://docs.example.test/a', 'https://docs.example.test/b']})]]);
+  assert.equal(node('reference-requests').hidden, true);
+});
+
+test('dismiss posts without links', async () => {
+  const calls = [];
+  const {node, run} = dashboard(async (path, options = {}) => {
+    calls.push([path, options.method]);
+    return {ok:true, status:200, json:async () => ({requests:[]})};
+  });
+  run('renderRequests({requests:[' + JSON.stringify(ASKED) + ']})');
+  buttons(node('reference-request-list').children[0])[1].listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls.filter(call => call[0].startsWith('/api/reference-requests')), [[`/api/reference-requests/${ASKED.id}/dismiss`, 'POST']]);
+});
+
+test('the request list is fetched when needed, not on every overview refresh', async () => {
+  const calls = [];
+  const {context, run} = dashboard(async path => {
+    calls.push(path);
+    return {ok:true, status:200, json:async () => ({requests:[ASKED]})};
+  });
+  const value = {...overview(null), reference_requests:{pending:1, products:['caddy']}};
+  context.value = value;
+  run("overview = value; currentView = 'overview'; followRequests(value)");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(path => path === '/api/reference-requests').length, 0);
+  run("showView('settings')");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(path => path === '/api/reference-requests').length, 1);
+  // A refresh with the same waiting requests does not read or redraw them.
+  run('followRequests(value)');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(path => path === '/api/reference-requests').length, 1);
+});
+
+test('the Ask activity names the documentation request in household words', () => {
+  const {context, run} = dashboard();
+  context.call = {tool:'network_request_reference'};
+  assert.equal(run('askStep(call)'), 'Asked the owner for product documentation');
+});

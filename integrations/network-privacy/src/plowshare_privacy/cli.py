@@ -257,11 +257,15 @@ async def execute(args: argparse.Namespace) -> None:
                 SdkReferencePort(client, project_scope(config.project)),
             )
             # The agent's requests for missing docs; disabled with the library.
-            reference_requests = (
-                AssistantReferenceRequests(
-                    ReferenceRequests(config.state_directory, references.library)
-                )
+            # The dashboard and the agent share one instance over the journal.
+            request_journal = (
+                ReferenceRequests(config.state_directory, references.library)
                 if references is not None
+                else None
+            )
+            reference_requests = (
+                AssistantReferenceRequests(request_journal)
+                if request_journal is not None
                 else None
             )
             # The household's Ask conversation. An unreadable journal disables it
@@ -581,6 +585,7 @@ async def execute(args: argparse.Namespace) -> None:
                     deep_scans_detail=deep_scans_detail,
                     references=references,
                     references_detail=references_detail,
+                    reference_requests=request_journal,
                     ask=ask,
                     ask_detail=ask_detail,
                     advisory_origin=advisory_origin,
