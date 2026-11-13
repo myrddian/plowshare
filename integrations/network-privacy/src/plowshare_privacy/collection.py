@@ -17,8 +17,11 @@ from .contracts import (
     DnsObservation,
     DnsWindow,
     Evidence,
+    PiHolePlan,
+    ServicePlan,
     Snapshot,
     TcpObservation,
+    legacy_capabilities,
     load_json,
     private_ipv4,
     utc_now,
@@ -43,6 +46,25 @@ class Collector(Protocol):
     ) -> Evidence: ...
 
 
+def _scope_settings(service: ServicePlan) -> dict[str, object]:
+    """The settings of ``service`` that define what a collection covers."""
+    settings = service.settings
+    values = asdict(settings)
+    if isinstance(settings, PiHolePlan):
+        values["password_file"] = (
+            str(settings.password_file) if settings.password_file else None
+        )
+        return values
+    values["ca_file"] = str(settings.ca_file) if settings.ca_file else None
+    if settings.certificate_sha256 is None:
+        values.pop("certificate_sha256")
+    # A controller alias enriches identity evidence without changing probe scope.
+    values.pop("gateway")
+    # Byte counters are local presence data and never change scope.
+    values.pop("traffic_site")
+    return values
+
+
 def scope_fingerprint(plan: CollectionPlan) -> str:
     values = asdict(plan)
     # Local presence sampling does not change full collection evidence or receipts.
@@ -54,28 +76,32 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
         values.pop("enabled")
     if not plan.labels:
         values.pop("labels")
-    # Services keep the encoding of the former ``pihole``/``unifi`` fields, so
-    # an untouched configuration keeps its fingerprint and journal identity.
-    # Task 3 generalises this to non-legacy ``sources``; until then every
-    # service uses the legacy keys (one service per kind is enforced).
+    # ``traffic_counters`` reads local presence data, like quick checks, so it
+    # never changes full collection evidence or the receipt journal identity.
     values.pop("sources")
-    if plan.pihole is not None:
-        values["pihole"] = asdict(plan.pihole)
-        values["pihole"]["password_file"] = (
-            str(plan.pihole.password_file) if plan.pihole.password_file else None
+    scoped = [(s, s.capabilities - {"traffic_counters"}) for s in plan.sources]
+    if all(
+        caps == legacy_capabilities(s.kind, s.settings) - {"traffic_counters"}
+        for s, caps in scoped
+    ):
+        # Services that read exactly what the former ``pihole``/``unifi`` keys
+        # read keep those keys, so an untouched configuration keeps its
+        # fingerprint and journal identity.
+        for s, _ in scoped:
+            values[s.kind] = _scope_settings(s)
+    else:
+        # Ids are labels; only what is read, and from where, defines scope.
+        values["sources"] = sorted(
+            (
+                {
+                    "kind": s.kind,
+                    "capabilities": sorted(caps),
+                    "settings": _scope_settings(s),
+                }
+                for s, caps in scoped
+            ),
+            key=lambda row: json.dumps(row, sort_keys=True),
         )
-    if plan.unifi is not None:
-        values["unifi"] = asdict(plan.unifi)
-        values["unifi"]["ca_file"] = (
-            str(plan.unifi.ca_file) if plan.unifi.ca_file else None
-        )
-        if plan.unifi.certificate_sha256 is None:
-            values["unifi"].pop("certificate_sha256")
-        # A controller alias enriches identity evidence without changing probe scope.
-        values["unifi"].pop("gateway")
-        # Byte counters are local presence data, like quick checks; they never
-        # change full collection evidence or the receipt journal identity.
-        values["unifi"].pop("traffic_site")
     values["observations_file"] = (
         str(plan.observations_file) if plan.observations_file else None
     )
