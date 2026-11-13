@@ -75,6 +75,9 @@ class Health:
     checklist: tuple[str, ...]
     credential_expires_at: str | None
     unifi: str = "Optional: not configured"
+    # When ``runs`` was last read, and why it is not current (None when it is).
+    runs_checked_at: str | None = None
+    runs_detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,6 +167,21 @@ class FileManualInvestigations:
         return self._entries
 
 
+# How often the recent-investigation list is re-read after a success, and how
+# soon after a failure. The listing is display-only, so it may be minutes old.
+RUNS_REFRESH_SECONDS = 300.0
+RUNS_RETRY_SECONDS = 60.0
+RUNS_PENDING = "Reading recent investigations from Plowshare."
+RUNS_UNAVAILABLE = (
+    "Recent investigations could not be read from Plowshare; collection is "
+    "unaffected and the list is retried shortly."
+)
+RUNS_STALE = (
+    "Recent investigations could not be re-read from Plowshare; showing the "
+    "list read earlier."
+)
+
+
 class OperatorConsole:
     def __init__(
         self,
@@ -190,6 +208,14 @@ class OperatorConsole:
         self.cached: Health | None = None
         self.cache_until = 0.0
         self.journal = journal
+        # Recent investigations are read off the health path: Plowshare's run
+        # listing can be slow, and a slow listing must neither hold the health
+        # lock nor make a reachable server read as disconnected.
+        self._runs: tuple[RunSummary, ...] = ()
+        self._runs_checked_at: str | None = None
+        self._runs_detail: str | None = RUNS_PENDING
+        self._runs_due = 0.0
+        self.runs_task: asyncio.Task[None] | None = None
 
     @property
     def manual(self) -> tuple[ManualInvestigation, ...]:
@@ -216,6 +242,34 @@ class OperatorConsole:
         # The worker owns the shared projection; agent read tools reuse it too.
         return self.worker.device_inventory()
 
+    def _refresh_runs(self) -> None:
+        """Start one background read of recent investigations when it is due.
+
+        At most one read runs at a time. Health never waits for it; a finished
+        read appears when the 20-second health cache next expires.
+        """
+        if self.runs_task is not None and not self.runs_task.done():
+            return
+        if time.monotonic() < self._runs_due:
+            return
+        self.runs_task = asyncio.create_task(self._read_runs())
+
+    async def _read_runs(self) -> None:
+        try:
+            runs = await self.port.runs()
+        except (Refusal, TransportError, ValueError, TimeoutError):
+            self._runs_detail = (
+                RUNS_STALE if self._runs_checked_at is not None else RUNS_UNAVAILABLE
+            )
+            self._runs_due = time.monotonic() + RUNS_RETRY_SECONDS
+        else:
+            self._runs, self._runs_checked_at, self._runs_detail = (
+                runs,
+                utc_now(),
+                None,
+            )
+            self._runs_due = time.monotonic() + RUNS_REFRESH_SECONDS
+
     async def health(self) -> Health:
         async with self.health_lock:
             if self.cached and time.monotonic() < self.cache_until:
@@ -231,7 +285,6 @@ class OperatorConsole:
             try:
                 schedule = await self.port.schedule()
                 agents = await self.port.agents()
-                runs = await self.port.runs()
                 if schedule is None:
                     detail = (
                         "Project read checks passed; no active scan schedule was found "
@@ -242,6 +295,8 @@ class OperatorConsole:
                     False,
                     "Plowshare checks are unavailable. Local evidence is preserved; check connection and service-account grants.",
                 )
+            self._refresh_runs()
+            runs = self._runs
             completed = [
                 item
                 for item in self.worker.receipts.all()
@@ -328,6 +383,8 @@ class OperatorConsole:
                 tuple(checklist),
                 self.credential_expires_at,
                 unifi,
+                self._runs_checked_at,
+                self._runs_detail,
             )
             self.cache_until = time.monotonic() + 20
             return self.cached

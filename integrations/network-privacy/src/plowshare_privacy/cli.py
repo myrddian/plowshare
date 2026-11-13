@@ -628,7 +628,14 @@ async def execute(args: argparse.Namespace) -> None:
             finally:
                 stop.set()
                 await stop_tasks(
-                    (ask_task, deep_scan_task, assessment_task, research_task, task)
+                    (
+                        ask_task,
+                        deep_scan_task,
+                        assessment_task,
+                        research_task,
+                        task,
+                        console.runs_task if console is not None else None,
+                    )
                 )
                 await runner.cleanup()
                 if owns_handoff:
