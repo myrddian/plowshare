@@ -30,10 +30,12 @@ the owner would dismiss that request.
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Literal
+from urllib.parse import urlsplit
 
 from .contracts import (
     items,
@@ -54,6 +56,31 @@ MAX_URLS = 5
 SUPPRESSION = timedelta(days=30)
 MAX_LEDGER_BYTES = 256 * 1024
 UNAVAILABLE = "Documentation requests are unavailable on this collector right now."
+
+
+# The longest host-and-path shown in an owner page's title; the whole title
+# stays well inside the library's 200-character limit with a 48-character slug.
+MAX_TITLE_LOCATION = 96
+
+
+def owner_title(product: str, url: str) -> str:
+    """Title an owner-approved page by its product and where it lives.
+
+    Citations then tell an owner's pages apart, as in
+    ``caddy documentation \u2014 caddyserver.com/docs/api``. Only the host
+    (lower-cased) and path are used; query and fragment are dropped, as are
+    control and format characters (bidirectional overrides included), and the
+    location is cut to ``MAX_TITLE_LOCATION`` characters with an ellipsis.
+    ``url`` must already have passed ``reference_url``.
+    """
+    parts = urlsplit(url)
+    location = (parts.hostname or "") + parts.path.rstrip("/")
+    location = "".join(
+        c for c in location if not unicodedata.category(c).startswith("C")
+    )
+    if len(location) > MAX_TITLE_LOCATION:
+        location = location[: MAX_TITLE_LOCATION - 1] + "\u2026"
+    return f"{product} documentation \u2014 {location}"
 
 
 def _parsed(stamp: str) -> datetime:
@@ -277,7 +304,7 @@ class ReferenceRequests:
         # leave only some of them queued.
         for url in checked:
             self.library.add_owner(
-                current.product, f"{current.product} documentation", url
+                current.product, owner_title(current.product, url), url
             )
         return self._decide(ledger, index, "filled", checked)
 

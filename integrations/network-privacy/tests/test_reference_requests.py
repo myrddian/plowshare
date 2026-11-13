@@ -94,11 +94,38 @@ class ReferenceRequestsTest(unittest.TestCase):
         self.assertEqual([r.url for r in receipts], [URL, OTHER])
         self.assertEqual({r.origin for r in receipts}, {"owner"})
         self.assertEqual({r.product for r in receipts}, {"acme-cam"})
-        self.assertEqual(receipts[0].title, "acme-cam documentation")
+        self.assertEqual(
+            [r.title for r in receipts],
+            [
+                "acme-cam documentation \u2014 docs.example.test/cam/manual",
+                "acme-cam documentation \u2014 docs.example.test/cam/ports",
+            ],
+        )
         self.assertEqual(self.requests.pending(), ())
         # The decision survives a restart.
         self.assertEqual(
             self.open().request("acme-cam", QUESTION, None, request.id), done
+        )
+
+    def test_approved_title_is_bounded_and_sanitized(self) -> None:
+        request = self.ask()
+        long = "https://Docs.Example.TEST/" + "\u202e" + "a" * 1800 + "?q=1#top"
+        self.requests.approve(request.id, (long,))
+        (receipt,) = self.library.view()
+        self.assertTrue(
+            receipt.title.startswith(
+                "acme-cam documentation \u2014 docs.example.test/a"
+            )
+        )
+        self.assertNotIn("\u202e", receipt.title)
+        self.assertNotIn("?", receipt.title)
+        self.assertTrue(receipt.title.endswith("\u2026"))
+        self.assertLessEqual(len(receipt.title), 200)
+        bare = self.ask("bare-cam")
+        self.requests.approve(bare.id, ("https://bare.example.test",))
+        self.assertEqual(
+            "bare-cam documentation \u2014 bare.example.test",
+            self.library.view()[-1].title,
         )
 
     def test_approve_rejects_http_and_duplicate_urls(self) -> None:
