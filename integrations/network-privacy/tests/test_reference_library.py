@@ -44,6 +44,7 @@ class Ticket:
     revision_id: str | None = None
     error: str | None = None
     gate: str | None = None
+    created_at: str = NOW
 
     def dto(self) -> InformationAcquisitionDto:
         return InformationAcquisitionDto(
@@ -53,6 +54,7 @@ class Ticket:
             state=self.state,
             revision_id=self.revision_id,
             error=self.error,
+            created_at=self.created_at,
             pre_gate=(
                 InformationGateDto(denied=self.gate, notes=(), records=())
                 if self.gate is not None
@@ -83,6 +85,8 @@ class FakePort:
     acquire_fault: Exception | None = None
     acquire_lands: bool = True
     tags_fault: Exception | None = None
+    # The server's clock, stamped on each new ticket's ``created_at``.
+    now: str = NOW
 
     async def acquire(
         self, url: str, name: str, request_id: str
@@ -91,7 +95,7 @@ class FakePort:
         fault, self.acquire_fault = self.acquire_fault, None
         if fault is not None and not self.acquire_lands:
             raise fault
-        ticket = Ticket(str(uuid4()), url, name)
+        ticket = Ticket(str(uuid4()), url, name, created_at=self.now)
         self.tickets.append(ticket)
         if fault is not None:
             raise fault
@@ -299,6 +303,93 @@ class LibraryTest(unittest.IsolatedAsyncioTestCase):
         self.library.schedule_refresh(datetime(2027, 3, 1, tzinfo=timezone.utc))
         first_name = self.port.acquires[0][1]
         self.assertEqual(first_name, self.open().view()[0].resource_name)
+
+    async def test_uncertain_refresh_never_adopts_a_ticket_older_than_the_attempt(
+        self,
+    ) -> None:
+        old = await self.tagged()
+        name = self.port.acquires[0][1]
+        # More earlier refreshes than ``superseded`` keeps: the oldest ids have
+        # dropped off, but their succeeded tickets still share the URL and name.
+        for day in range(40):
+            stale = Ticket(
+                str(uuid4()),
+                URL,
+                name,
+                "succeeded",
+                str(uuid4()),
+                created_at=f"2026-12-{1 + day % 28:02d}T00:00:00Z",
+            )
+            self.port.tickets.append(stale)
+        journal = ReferenceJournal(self.root)
+        ledger = journal.read()
+        kept = tuple(t.id for t in self.port.tickets[-32:])
+        journal.save(
+            replace(
+                ledger,
+                receipts=(
+                    replace(ledger.receipts[0], superseded=kept, resource_name=name),
+                ),
+            )
+        )
+        self.assertEqual(32, len(self.receipt().superseded))
+        self.library.schedule_refresh(datetime(2027, 3, 1, tzinfo=timezone.utc))
+        self.assertEqual(32, len(self.receipt().superseded))
+        self.port.acquire_fault = TransportError(Delivery.UNKNOWN, "lost")
+        self.port.acquire_lands = False
+        with self.assertRaises(TransportError):
+            await self.library.advance()
+        await self.library.advance()
+        unresolved = self.receipt()
+        self.assertEqual(
+            ("submitted", None, old),
+            (unresolved.phase, unresolved.acquisition_id, unresolved.revision_id),
+        )
+        self.assertIn("not been found", unresolved.error or "")
+        # The owner's Retry lands; that ticket, created after the attempt began
+        # (within the clock-skew allowance), is the one adopted.
+        self.port.now = "2027-03-01T00:00:00Z"
+        await self.library.retry(URL)
+        await self.library.advance()
+        self.assertEqual(self.port.tickets[-1].id, self.receipt().acquisition_id)
+
+    async def test_blocked_requeue_revises_the_same_resource(self) -> None:
+        self.library.plan_seed((ENTRY,))
+        await self.library.advance()
+        held = self.port.tickets[0]
+        held.state, held.gate = "blocked", "Post-gate review"
+        await self.library.advance()
+        await self.library.retry(URL)
+        requeued = self.receipt()
+        self.assertEqual(held.name, requeued.resource_name)
+        self.assertEqual(NOW, requeued.attempt_started_at)
+        await self.library.advance()
+        self.assertEqual(held.name, self.port.acquires[-1][1])
+        self.assertNotEqual(self.port.acquires[0][2], self.port.acquires[-1][2])
+
+    async def test_typed_head_refusal_says_the_previous_revision_stays(
+        self,
+    ) -> None:
+        old = await self.tagged()
+        self.library.schedule_refresh(datetime(2027, 3, 1, tzinfo=timezone.utc))
+        self.port.acquire_fault = Refusal("INVALID", "INFORMATION_TYPING_REQUIRED")
+        self.port.acquire_lands = False
+        await self.library.advance()
+        refused = self.receipt()
+        self.assertEqual(("failed", old), (refused.phase, refused.revision_id))
+        self.assertIn("previous revision", refused.error or "")
+        # The same reason on the fetched ticket reads the same way.
+        await self.library.retry(URL)
+        await self.library.advance()
+        ticket = self.port.tickets[-1]
+        ticket.state, ticket.error = "failed", "INFORMATION_TYPING_REQUIRED"
+        await self.library.advance()
+        self.assertIn("stay in the Library", self.receipt().error or "")
+        # A first fetch has no previous revision, so it keeps the server reason.
+        self.library.plan_seed((ENTRY, SECOND))
+        self.port.acquire_fault = Refusal("INVALID", "INFORMATION_TYPING_REQUIRED")
+        await self.library.advance()
+        self.assertIn("INFORMATION_TYPING_REQUIRED", self.receipt(OTHER).error or "")
 
     async def test_seed_entry_reaches_tagged(self) -> None:
         self.library.plan_seed((ENTRY,))

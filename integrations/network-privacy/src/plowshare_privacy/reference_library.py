@@ -29,8 +29,14 @@ Phase machine. ``advance`` moves every receipt at most one step, in journal orde
   resource's existing name (``resource_name``) to add a revision to that
   resource rather than create a second one. Matching needs that exact URL and
   name, also skips every ticket this receipt already used (``superseded``), and
-  the newest ``created_at`` wins among the rest, which is what separates a
-  refresh's attempts. A ticket observed by its id must still
+  the newest ``created_at`` wins among the rest. ``superseded`` is bounded, so a
+  requeue also records ``attempt_started_at`` and only tickets created no
+  earlier than that, less ``CLOCK_SKEW`` (the collector's clock against the
+  server's), can match; a ticket without a readable ``created_at`` then never
+  matches. Together these separate a refresh's attempts even after many
+  refreshes. A blocked attempt that is requeued also keeps its name: a post-gate
+  block has already retained the bytes in a resource, so the next attempt
+  revises that resource instead of leaving it orphaned. A ticket observed by its id must still
   show this receipt's URL and name, or the receipt fails with a fixed message. If no ticket is found the
   receipt stays ``submitted``; only the owner's Retry re-sends that acquire, with
   the same request id, which the server treats as an idempotent replay.
@@ -121,6 +127,10 @@ MAX_TITLE = 200
 MAX_ERROR = 1000
 # "Reference: " + a bounded title + " · " + 8 hex, with room to spare.
 MAX_SOURCE_NAME = 256
+# How far the server's ticket ``created_at`` may trail the collector's clock at
+# requeue and still match an uncertainly delivered attempt. Refreshes are at
+# least a day apart, so an older attempt's ticket is always outside it.
+CLOCK_SKEW = timedelta(minutes=10)
 # Ticket ids a receipt has moved past; the oldest is dropped beyond this bound,
 # which only matters after that many owner retries or refreshes of one page.
 MAX_SUPERSEDED = 32
@@ -149,6 +159,12 @@ _UNEXPLAINED = "The acquisition failed without a server explanation."
 _FOREIGN = (
     "The Library's acquisition ticket does not match this reference's link or "
     "name. Inspect the source in the Library before retrying."
+)
+_TYPING_REQUIRED = "INFORMATION_TYPING_REQUIRED"
+_TYPED_REFRESH = (
+    "The Library source now uses typed content, which this collector does not "
+    "send, so the refresh was refused and Retry is refused the same way. The "
+    "previous revision and its tags stay in the Library and searchable."
 )
 _BROKEN = (
     "The Library sent a reply for this reference that the collector could not "
@@ -213,6 +229,9 @@ class ReferenceReceipt:
     ``resource_name`` is the source name of the Library resource that holds
     ``revision_id``, recorded when a refresh is scheduled so every later attempt
     targets that resource; it is absent until the first refresh.
+    ``attempt_started_at`` is when the current attempt was requeued; an
+    uncertainly delivered acquire only matches tickets created after it (less
+    ``CLOCK_SKEW``). It is absent for a first attempt, whose name is unique.
     """
 
     url: str
@@ -231,6 +250,7 @@ class ReferenceReceipt:
     superseded: tuple[str, ...] = ()
     untag_failed: bool = False
     resource_name: str | None = None
+    attempt_started_at: str | None = None
 
     def __post_init__(self) -> None:
         reference_url(self.url)
@@ -248,6 +268,7 @@ class ReferenceReceipt:
         _optional(self.error, _error)
         _optional(self.fetched_at, timestamp)
         _optional(self.resource_name, _resource_name)
+        _optional(self.attempt_started_at, timestamp)
         if any(
             type(flag) is not bool
             for flag in (self.retired, self.retired_tagged, self.untag_failed)
@@ -296,7 +317,7 @@ class ReferenceReceipt:
                 "untag_failed",
             },
             # Absent from journals written before refresh existed.
-            {"resource_name"},
+            {"resource_name", "attempt_started_at"},
         )
         retired, retired_tagged = row["retired"], row["retired_tagged"]
         untag_failed = row["untag_failed"]
@@ -323,6 +344,7 @@ class ReferenceReceipt:
             tuple(uuid(t) for t in items(row["superseded"], MAX_SUPERSEDED)),
             untag_failed,
             _optional(row.get("resource_name"), _resource_name),
+            _optional(row.get("attempt_started_at"), timestamp),
         )
 
 
@@ -507,8 +529,12 @@ class ReferenceLibrary:
         so the acquire adds a revision to it (see the module doc).
         """
         ledger = self.journal.read()
+        started = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         receipts = tuple(
-            replace(_requeued(receipt), resource_name=_source_name(receipt))
+            replace(
+                _requeued(receipt, started),
+                resource_name=_source_name(receipt),
+            )
             if _refresh_due(receipt, now, ledger.refresh_days)
             else receipt
             for receipt in ledger.receipts
@@ -567,8 +593,18 @@ class ReferenceLibrary:
                 raise ValueError(
                     "Only a failed, blocked or unresolved reference can be retried"
                 )
-            if receipt.phase == "blocked" or receipt.acquisition_id is None:
-                self._store(_requeued(receipt))
+            if receipt.phase == "blocked":
+                # The same name, so a post-gate block's retained resource is
+                # revised rather than orphaned (see the module doc).
+                self._store(
+                    replace(
+                        _requeued(receipt, self.clock()),
+                        resource_name=_source_name(receipt),
+                    )
+                )
+                return
+            if receipt.acquisition_id is None:
+                self._store(_requeued(receipt, self.clock()))
                 return
             ticket = next(
                 (
@@ -579,7 +615,7 @@ class ReferenceLibrary:
                 None,
             )
             if ticket is None:
-                self._store(_requeued(receipt))
+                self._store(_requeued(receipt, self.clock()))
                 return
             if not _owns(receipt, ticket):
                 self._store(_failed(receipt, _FOREIGN))
@@ -631,7 +667,12 @@ class ReferenceLibrary:
                 receipt.url, _source_name(receipt), receipt.request_id
             )
         except Refusal as error:
-            self._store(_failed(receipt, _refused(error, "information.acquire")))
+            message = (
+                _TYPED_REFRESH
+                if _typed_refresh(receipt, error.code, error.said)
+                else _refused(error, "information.acquire")
+            )
+            self._store(_failed(receipt, message))
             return
         except TransportError as error:
             if error.delivery == Delivery.NOT_SUBMITTED:
@@ -652,7 +693,8 @@ class ReferenceLibrary:
 
         The public acquisition DTO carries no request id, so an uncertainly
         delivered acquire is matched by URL and the source name this receipt sends,
-        never to a ticket this receipt already superseded; among the rest the
+        never to a ticket this receipt already superseded nor to one created
+        before the attempt started (less ``CLOCK_SKEW``); among the rest the
         newest ``created_at`` wins (the listing order breaks ties). This collector
         is the only writer of these names in its project.
         """
@@ -663,6 +705,7 @@ class ReferenceLibrary:
                 if t.url == receipt.url
                 and t.source_name == _source_name(receipt)
                 and t.id not in receipt.superseded
+                and _created(t) >= _attempt_floor(receipt)
             )
             if ticket is None:
                 self._store(replace(receipt, error=_UNRESOLVED))
@@ -687,7 +730,9 @@ class ReferenceLibrary:
                 receipt,
                 phase="failed",
                 acquisition_id=acquisition,
-                error=_server_text(ticket.error, _UNEXPLAINED),
+                error=_TYPED_REFRESH
+                if _typed_refresh(receipt, ticket.error)
+                else _server_text(ticket.error, _UNEXPLAINED),
             )
         elif ticket.state == "succeeded" and isinstance(ticket.revision_id, str):
             current = replace(
@@ -843,8 +888,12 @@ def _revived(receipt: ReferenceReceipt) -> ReferenceReceipt:
     )
 
 
-def _requeued(receipt: ReferenceReceipt) -> ReferenceReceipt:
-    """Back to ``queued`` for a new acquisition, its old ticket superseded."""
+def _requeued(receipt: ReferenceReceipt, started: str) -> ReferenceReceipt:
+    """Back to ``queued`` for a new acquisition, its old ticket superseded.
+
+    ``started`` (a timestamp from the collector's clock) bounds which tickets an
+    uncertain delivery of the new attempt may match.
+    """
     superseded = receipt.superseded
     if receipt.acquisition_id is not None:
         superseded = (*superseded, receipt.acquisition_id)[-MAX_SUPERSEDED:]
@@ -855,7 +904,16 @@ def _requeued(receipt: ReferenceReceipt) -> ReferenceReceipt:
         acquisition_id=None,
         error=None,
         superseded=superseded,
+        attempt_started_at=started,
     )
+
+
+def _attempt_floor(receipt: ReferenceReceipt) -> datetime:
+    """The earliest ``created_at`` a ticket of the current attempt can have."""
+    if receipt.attempt_started_at is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    started = datetime.fromisoformat(receipt.attempt_started_at.replace("Z", "+00:00"))
+    return started - CLOCK_SKEW
 
 
 def _created(ticket: InformationAcquisitionDto) -> datetime:
@@ -904,6 +962,18 @@ def _owns(receipt: ReferenceReceipt, ticket: InformationAcquisitionDto) -> bool:
     name = ticket.source_name
     return ticket.url == receipt.url and (
         not isinstance(name, str) or name == _source_name(receipt)
+    )
+
+
+def _typed_refresh(receipt: ReferenceReceipt, *reasons: object) -> bool:
+    """A refresh the server refused because its resource's head is now typed.
+
+    The server raises ``INFORMATION_TYPING_REQUIRED`` when an untyped revision is
+    added to a typed resource, at submission or when the fetched bytes are
+    admitted. Only a receipt with a previous revision is a refresh.
+    """
+    return receipt.revision_id is not None and any(
+        isinstance(reason, str) and _TYPING_REQUIRED in reason for reason in reasons
     )
 
 
