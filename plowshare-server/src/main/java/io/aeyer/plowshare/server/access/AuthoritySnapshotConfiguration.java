@@ -34,6 +34,24 @@ public class AuthoritySnapshotConfiguration {
         admission);
   }
 
+  /**
+   * SYSTEM processing decided from the snapshot, so worker polls stop re-deriving it from live
+   * grants. No snapshot for this caller leaves the decision in SQL.
+   */
+  @Bean
+  public io.aeyer.plowshare.server.information.SystemProcessingAuthority systemProcessingAuthority(
+      AuthoritySnapshots snapshots) {
+    return new io.aeyer.plowshare.server.information.SystemProcessingAuthority() {
+      public java.util.Optional<Boolean> processing() {
+        return snapshots.current().map(AuthoritySnapshot::systemProcessingAuthorized);
+      }
+
+      public java.util.Optional<Boolean> scopeValid(String project) {
+        return snapshots.current().map(snapshot -> snapshot.systemScopeValid(project));
+      }
+    };
+  }
+
   /** The stored members that {@code ApplicationProjectMembers} wraps with manifest limits. */
   @Bean
   public ProjectMembers cachedProjectMembers(

@@ -109,6 +109,22 @@ class AuthoritySnapshotDifferentialDatabaseTest {
         jdbc.queryForObject("SELECT " + function + "(?,?)", String.class, project, account));
   }
 
+  /** {@code EXISTS(SELECT 1 FROM intrinsic)} exactly as V236 and V241 write it. */
+  private static final String SYSTEM_PROCESSING =
+      """
+      WITH live AS MATERIALIZED (SELECT id FROM authority_live_grants()),
+      intrinsic AS MATERIALIZED (
+       SELECT g.id FROM authority_grants g JOIN live ON live.id=g.id
+       JOIN authority_roles role ON role.id=g.role_id
+       JOIN authority_role_actions a ON a.role_id=role.id AND a.role_version=g.role_version
+        AND a.profile='DEFAULT'
+       WHERE NOT role.assignable AND role.intrinsic_account=g.subject_account
+        AND g.coverage='ALL_SCOPES' AND g.subject_agent IS NULL
+       GROUP BY g.id
+       HAVING count(*) FILTER(WHERE a.action IN ('READ','WRITE','CONVERSATION_CREATE','RUN_MODEL'))=4)
+      SELECT EXISTS(SELECT 1 FROM intrinsic)
+      """;
+
   /** Every snapshot method and every cached membership read against its SQL source. */
   private void parity(String state) {
     var snapshot = snapshot();
@@ -119,6 +135,18 @@ class AuthoritySnapshotDifferentialDatabaseTest {
         (org.springframework.jdbc.core.RowCallbackHandler)
             row -> live.put(row.getObject(1, UUID.class), row.getInt(2)));
     assertEquals(live, snapshot.liveGrants(), state + ": authority_live_grants");
+    assertEquals(
+        jdbc.queryForObject(SYSTEM_PROCESSING, Boolean.class),
+        snapshot.systemProcessingAuthorized(),
+        state + ": system processing grant");
+    var targets = new java.util.ArrayList<String>(projects);
+    targets.add(null);
+    targets.add("no-such-project");
+    for (String project : targets)
+      assertEquals(
+          jdbc.queryForObject("SELECT information_system_scope_valid(?)", Boolean.class, project),
+          snapshot.systemScopeValid(project),
+          state + ": information_system_scope_valid " + project);
     for (String handle : handles) {
       assertEquals(
           jdbc.queryForObject("SELECT account_active(?)", Boolean.class, handle),
@@ -241,6 +269,43 @@ class AuthoritySnapshotDifferentialDatabaseTest {
         "DELETE FROM project_members WHERE handle='alice' AND project_id=(SELECT id FROM projects WHERE name='two')");
     parity("issuer removed");
     assertTrue(snapshot().authorityProjectRole("two", "carol").isEmpty());
+  }
+
+  /**
+   * The root policy, built-in roles and BUILTIN account are immutable, so SYSTEM processing stays
+   * authorized on a valid installation; parity covers it in every fixture state. The decided V241
+   * overload agrees with the SQL-decided one and, given a decision, never walks live grants.
+   */
+  @Test
+  void theDecidedOverloadMatchesSqlAndSkipsTheGrantWalk() {
+    assertTrue(snapshot().systemProcessingAuthorized(), "Migrations install SYSTEM processing");
+    parity("system processing");
+    String revisions = "SELECT count(*) FROM information_system_processing_revisions(%s)";
+    assertEquals(
+        jdbc.queryForObject(revisions.formatted(""), Long.class),
+        jdbc.queryForObject(revisions.formatted("NULL::boolean"), Long.class));
+    assertEquals(0L, jdbc.queryForObject(revisions.formatted("FALSE"), Long.class));
+    // EXPLAIN shows only a Function Scan for a SQL function, so count the reads of admins that
+    // account_active performs inside authority_live_grants, within one transaction.
+    assertTrue(adminReads("NULL::boolean") > 0, "The SQL-decided call walks live grants");
+    assertEquals(0L, adminReads("TRUE"), "A decided call must not evaluate live grants");
+  }
+
+  /** Scans of admins caused by one call, from this transaction's own statistics. */
+  private long adminReads(String argument) {
+    String reads =
+        "SELECT coalesce(seq_scan,0)+coalesce(idx_scan,0) FROM pg_stat_xact_user_tables"
+            + " WHERE relname='admins'";
+    jdbc.execute("BEGIN");
+    try {
+      long before = jdbc.queryForObject(reads, Long.class);
+      jdbc.queryForObject(
+          "SELECT count(*) FROM information_system_processing_revisions(" + argument + ")",
+          Long.class);
+      return jdbc.queryForObject(reads, Long.class) - before;
+    } finally {
+      jdbc.execute("ROLLBACK");
+    }
   }
 
   @Test

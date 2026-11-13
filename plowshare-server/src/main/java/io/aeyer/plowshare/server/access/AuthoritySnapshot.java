@@ -42,12 +42,27 @@ public final class AuthoritySnapshot {
   }
 
   /** One {@code authority_scopes} row. */
-  public record Scope(UUID id, String kind, Optional<UUID> account, Optional<Long> project) {
+  public record Scope(
+      UUID id,
+      String kind,
+      Optional<UUID> account,
+      Optional<Long> project,
+      Optional<String> builtin) {
     public Scope {
       Objects.requireNonNull(id);
       Objects.requireNonNull(kind);
       Objects.requireNonNull(account);
       Objects.requireNonNull(project);
+      Objects.requireNonNull(builtin);
+    }
+  }
+
+  /** One {@code authority_role_actions} row. */
+  public record RoleAction(UUID role, int version, String profile, String action) {
+    public RoleAction {
+      Objects.requireNonNull(role);
+      Objects.requireNonNull(profile);
+      Objects.requireNonNull(action);
     }
   }
 
@@ -111,7 +126,34 @@ public final class AuthoritySnapshot {
       List<ServiceToken> tokens,
       List<TokenScope> tokenScopes,
       List<Member> members,
-      List<Grant> grants) {
+      List<Grant> grants,
+      List<RoleAction> roleActions) {
+    /** Facts without role actions: every system-processing decision is then false. */
+    public Facts(
+        Instant at,
+        List<Account> accounts,
+        Map<UUID, String> authorityAccounts,
+        List<Role> roles,
+        List<Scope> scopes,
+        List<Project> projects,
+        List<ServiceToken> tokens,
+        List<TokenScope> tokenScopes,
+        List<Member> members,
+        List<Grant> grants) {
+      this(
+          at,
+          accounts,
+          authorityAccounts,
+          roles,
+          scopes,
+          projects,
+          tokens,
+          tokenScopes,
+          members,
+          grants,
+          List.of());
+    }
+
     public Facts {
       Objects.requireNonNull(at);
       accounts = List.copyOf(accounts);
@@ -123,6 +165,7 @@ public final class AuthoritySnapshot {
       tokenScopes = List.copyOf(tokenScopes);
       members = List.copyOf(members);
       grants = List.copyOf(grants);
+      roleActions = List.copyOf(roleActions);
     }
 
     /** Approximate retained bytes, for the cache's weight budget. */
@@ -136,7 +179,8 @@ public final class AuthoritySnapshot {
                   + projects.size()
                   + tokens.size()
                   + tokenScopes.size()
-                  + members.size())
+                  + members.size()
+                  + roleActions.size())
           + 1024L * grants.size();
     }
   }
@@ -156,6 +200,7 @@ public final class AuthoritySnapshot {
   private final Map<Long, Map<String, Member>> members = new HashMap<>();
   private final Map<UUID, Grant> grants = new HashMap<>();
   private final Map<UUID, Integer> live;
+  private final boolean systemProcessing;
 
   public AuthoritySnapshot(Facts facts) {
     this.facts = Objects.requireNonNull(facts);
@@ -184,6 +229,60 @@ public final class AuthoritySnapshot {
                     .put(member.handle(), member));
     facts.grants().forEach(grant -> grants.put(grant.binding().id(), grant));
     live = Collections.unmodifiableMap(liveGrants());
+    systemProcessing = intrinsicProcessingGrant();
+  }
+
+  /** The actions a SYSTEM processing grant's role must carry under the DEFAULT profile. */
+  private static final Set<String> PROCESSING_ACTIONS =
+      Set.of("READ", "WRITE", "CONVERSATION_CREATE", "RUN_MODEL");
+
+  /**
+   * {@code EXISTS(SELECT 1 FROM intrinsic)} of {@code information_system_processing_revisions}
+   * (V236), the same grant test as {@code information_system_scope_valid} (V161): a live grant of a
+   * non-assignable role to that role's own intrinsic account, covering all scopes with no agent,
+   * whose role version carries all four processing actions under the DEFAULT profile.
+   */
+  public boolean systemProcessingAuthorized() {
+    return systemProcessing;
+  }
+
+  /**
+   * {@code information_system_scope_valid(project)} (V161): processing is authorized and the target
+   * scope exists, the GLOBAL_KNOWLEDGE builtin for a null project, otherwise one bound to the
+   * project of that name. An unknown project name has no scope.
+   */
+  public boolean systemScopeValid(String project) {
+    if (!systemProcessing) return false;
+    if (project == null)
+      return facts.scopes().stream()
+          .anyMatch(scope -> scope.builtin().equals(Optional.of("GLOBAL_KNOWLEDGE")));
+    var named = projectsByName.get(project);
+    if (named == null) return false;
+    return facts.scopes().stream()
+        .anyMatch(scope -> scope.project().equals(Optional.of(named.id())));
+  }
+
+  private boolean intrinsicProcessingGrant() {
+    var actions = new HashMap<String, Set<String>>();
+    for (var row : facts.roleActions())
+      if (row.profile().equals("DEFAULT"))
+        actions
+            .computeIfAbsent(row.role() + ":" + row.version(), key -> new java.util.HashSet<>())
+            .add(row.action());
+    for (UUID id : live.keySet()) {
+      var grant = grants.get(id);
+      var binding = grant.binding();
+      var role = roles.get(grant.role());
+      if (role == null
+          || role.assignable()
+          || !role.intrinsicAccount().equals(Optional.of(binding.recipient().account().value()))
+          || binding.coverage() != Coverage.ALL_SCOPES
+          || binding.recipient().agent().isPresent()) continue;
+      if (actions
+          .getOrDefault(role.id() + ":" + binding.roleVersion(), Set.of())
+          .containsAll(PROCESSING_ACTIONS)) return true;
+    }
+    return false;
   }
 
   public Facts facts() {

@@ -174,6 +174,30 @@ expiries inside the bound still use the version fence. `NotifiedProjectionDataba
 checks commit-order echoes and a revocation reaching a trusted cache within the
 bound on real PostgreSQL.
 
+## SYSTEM processing decided once
+
+After trusted authority checks, `admins` was still scanned about 56 times a second
+on BETA. The information worker's claim and sweep statements begin with
+`information_system_processing_revisions()`, which starts from
+`authority_live_grants()` and evaluates `account_active()` for every grant on
+every poll. `information_system_scope_valid` repeats the same grant test once per
+owner and project. Both answers are installation-wide facts; on a valid
+installation the SYSTEM root policy, built-in roles and BUILTIN account are
+immutable, so they never change.
+
+`AuthoritySnapshot` now decides both, mirroring V236 and V161 clause by clause,
+and the worker passes the decision to V241's
+`information_system_processing_revisions(system_authorized)`. With a decision,
+the live-grant CTEs never execute; with NULL, SQL decides exactly as before. A
+transaction that cannot use the snapshot passes NULL. The zero-argument function
+remains for older binaries during a rolling upgrade. Per-revision retained-input
+and target-scope predicates are unchanged. The PROC audit view still uses the
+SQL-decided form.
+
+`AuthoritySnapshotDifferentialDatabaseTest` compares both decisions with their
+SQL functions in every fixture state and asserts that a decided call reads
+`admins` zero times.
+
 ## Regression provenance and validation
 
 The per-row document guard and unconditional retrieval dispatch originate in

@@ -52,13 +52,14 @@ public final class JdbcAuthoritySnapshotRepository implements AuthoritySnapshotR
                     row.getBoolean(4)));
     var scopes =
         rows(
-            "SELECT id,kind,account_id,project_id FROM authority_scopes ORDER BY id",
+            "SELECT id,kind,account_id,project_id,builtin FROM authority_scopes ORDER BY id",
             (row, n) ->
                 new Scope(
                     row.getObject(1, UUID.class),
                     row.getString(2),
                     Optional.ofNullable(row.getObject(3, UUID.class)),
-                    Optional.ofNullable(row.getObject(4, Long.class))));
+                    Optional.ofNullable(row.getObject(4, Long.class)),
+                    Optional.ofNullable(row.getString(5))));
     var projects =
         rows(
             "SELECT id,name,personal_owner FROM projects ORDER BY id",
@@ -92,6 +93,16 @@ public final class JdbcAuthoritySnapshotRepository implements AuthoritySnapshotR
             (row, n) ->
                 new Grant(
                     JdbcScopedGrantRepository.read(row), row.getObject("role_id", UUID.class)));
+    var roleActions =
+        rows(
+            "SELECT role_id,role_version,profile,action FROM authority_role_actions"
+                + " ORDER BY role_id,role_version,profile,action",
+            (row, n) ->
+                new RoleAction(
+                    row.getObject(1, UUID.class),
+                    row.getInt(2),
+                    row.getString(3),
+                    row.getString(4)));
     if (Objects.isNull(at)
         || accounts.isEmpty()
         || authorityAccounts.isEmpty()
@@ -101,7 +112,8 @@ public final class JdbcAuthoritySnapshotRepository implements AuthoritySnapshotR
         || tokens.isEmpty()
         || tokenScopes.isEmpty()
         || members.isEmpty()
-        || grants.isEmpty()) return Optional.empty();
+        || grants.isEmpty()
+        || roleActions.isEmpty()) return Optional.empty();
     var handles = new HashMap<UUID, String>();
     authorityAccounts.get().forEach(entry -> handles.put(entry.getKey(), entry.getValue()));
     return Optional.of(
@@ -115,7 +127,8 @@ public final class JdbcAuthoritySnapshotRepository implements AuthoritySnapshotR
             tokens.get(),
             tokenScopes.get(),
             members.get(),
-            grants.get()));
+            grants.get(),
+            roleActions.get()));
   }
 
   /** Empty when the table has more than {@code limit} rows. */

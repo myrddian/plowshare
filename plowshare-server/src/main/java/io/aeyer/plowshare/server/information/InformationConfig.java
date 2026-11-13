@@ -395,6 +395,7 @@ public class InformationConfig {
   @Bean(destroyMethod = "close")
   public InformationLifecycle informationLifecycle(
       JdbcTemplate jdbc,
+      ObjectProvider<SystemProcessingAuthority> systemProcessingProvider,
       AllowanceRepository allowances,
       io.aeyer.plowshare.server.archive.ProjectMembers members,
       UnitOfWork work,
@@ -434,8 +435,11 @@ public class InformationConfig {
                 GlobalAgentSnapshots.supply(globals, agents).get(),
                 dual,
                 counters));
+    // Absent in narrow test contexts: the worker then keeps every authority decision in SQL.
+    var systemProcessing = systemProcessingProvider.getIfAvailable(SystemProcessingAuthority::sql);
     var processing =
-        new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members, allowances);
+        new JdbcInformationProcessingRepository(
+            jdbc, Clock.systemUTC(), members, allowances, systemProcessing);
     var processor =
         InformationLifecycle.processing(
             processing,
