@@ -247,6 +247,69 @@ class AssignAddressesTest(unittest.TestCase):
         )
         self.assertEqual(issues, (HOLDER_CONFLICT,))
 
+    def test_reservation_for_other_mac_blocks_scope_inference(self) -> None:
+        for start in (FIRST, "192.0.2.100"):
+            with self.subTest(inside=start == FIRST):
+                assignments, issues = assign(
+                    AddressingSample(
+                        reservations=(
+                            Reservation(
+                                FIRST, OTHER_MAC, "dhcp_reservation", "home-dns"
+                            ),
+                        ),
+                        scopes=(scope(start=start),),
+                    )
+                )
+                self.assertEqual(
+                    assignments[0],
+                    AddressAssignment(FIRST, MAC, "unknown", None, (), None),
+                )
+                self.assertEqual(issues, (HOLDER_CONFLICT,))
+
+    def test_lease_for_other_mac_blocks_scope_inference(self) -> None:
+        assignments, issues = assign(
+            AddressingSample(
+                leases=(Lease(FIRST, OTHER_MAC, None, LATER, "home-dns"),),
+                scopes=(scope(start=FIRST),),
+            )
+        )
+        self.assertEqual(
+            assignments[0], AddressAssignment(FIRST, MAC, "unknown", None, (), None)
+        )
+        self.assertEqual(issues, ())
+
+    def test_fact_macs_match_case_insensitively(self) -> None:
+        assignments, issues = assign(
+            AddressingSample(
+                reservations=(
+                    Reservation(FIRST, MAC.upper(), "dhcp_reservation", "home-dns"),
+                ),
+            ),
+            AddressingSample(
+                reservations=(
+                    Reservation(FIRST, MAC, "controller_fixed_ip", "controller"),
+                ),
+            ),
+        )
+        self.assertEqual(
+            (assignments[0].mode, assignments[0].mac), ("dhcp_reserved", MAC)
+        )
+        self.assertEqual(issues, ())
+        assignments, _ = assign(
+            AddressingSample(leases=(Lease(FIRST, MAC.upper(), None, LATER, "d"),))
+        )
+        self.assertEqual(assignments[0].mode, "dhcp_dynamic")
+
+    def test_timestamps_without_offset_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            assign(
+                AddressingSample(
+                    leases=(Lease(FIRST, MAC, None, "2026-01-02T00:00:00", "d"),)
+                )
+            )
+        with self.assertRaises(ValueError):
+            assign_addresses((), {}, (FIRST,), "2026-01-01T12:00:00")
+
     def test_disagreeing_configured_sources_are_unknown_with_conflict(self) -> None:
         assignments, issues = assign(
             AddressingSample(

@@ -24,12 +24,14 @@ a confirmed MAC it applies, in order:
 Invariant: ``static`` is never a default. It is only ever concluded from a
 complete scope (plus, inside the range, a completely read lease table); any
 missing, incomplete or contradictory evidence yields ``unknown``. In the same
-spirit, rule 3 does not apply while any active lease (for whatever MAC) holds
-the address: a lease table showing the address in use is not evidence of a
-static assignment.
+spirit, rule 3 does not apply while an active lease or a configured
+reservation/fixed IP for a different MAC exists at the address: either fact
+contradicts the bases ``no_lease_or_reservation`` and ``outside_dhcp_range``.
 
-Conflicts: a reservation for a different MAC from the holder raises
-``addressing_conflict`` and the holder is still assessed by the rules above;
+MACs are compared case-insensitively. Conflicts: a reservation for a
+different MAC from the holder raises ``addressing_conflict``; the holder is
+still assessed by rules 1-2 (its own lease) but rule 3 is blocked, so without
+a lease of its own it is ``unknown``;
 configured sources (reservations or fixed IPs) naming different MACs for one
 address make it ``unknown`` with ``addressing_conflict``. An address whose
 identity has no MAC is ``unknown``.
@@ -47,6 +49,7 @@ from .contracts import (
     AssignmentBasis,
     AssignmentMode,
     DeviceIdentity,
+    timestamp,
 )
 
 HOLDER_CONFLICT = (
@@ -142,25 +145,28 @@ def assign_addresses(
         if identity is None:
             continue
         configured = [item for item in reservations if item.address == address]
-        if len({item.mac for item in configured}) > 1:
+        if len({item.mac.lower() for item in configured}) > 1:
             issues.append(CONFIGURED_CONFLICT)
             assignments.append(_unknown(address, identity.mac))
             continue
-        mac = identity.mac
-        if mac is None:
+        if identity.mac is None:
             assignments.append(_unknown(address, None))
             continue
-        if configured and configured[0].mac != mac:
+        mac = identity.mac.lower()
+        configured_other = bool(configured) and configured[0].mac.lower() != mac
+        if configured_other:
             issues.append(HOLDER_CONFLICT)
-        held = [item for item in configured if item.mac == mac]
+        held = [item for item in configured if item.mac.lower() == mac]
         if held:
             assignments.append(
                 _known(address, mac, "dhcp_reserved", held[0].basis, held)
             )
             continue
         leased = [item for item in active if item.address == address]
-        own = [item for item in leased if item.mac == mac]
+        own = [item for item in leased if item.mac.lower() == mac]
         if own:
+            # Several matching leases (one per service) keep the first one's
+            # expiry, in sample order.
             assignments.append(
                 AddressAssignment(
                     address,
@@ -172,7 +178,8 @@ def assign_addresses(
                 )
             )
             continue
-        decided = None if leased else _by_scope(address, scopes)
+        # Another MAC's lease or reservation contradicts every scope basis.
+        decided = None if leased or configured_other else _by_scope(address, scopes)
         assignments.append(
             _unknown(address, mac)
             if decided is None
@@ -219,4 +226,5 @@ def _services(facts: Sequence[Lease | Reservation | DhcpScope]) -> tuple[str, ..
 
 
 def _instant(stamp: str) -> float:
-    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    """Seconds since the epoch; raises ValueError for a timestamp without an offset."""
+    return datetime.fromisoformat(timestamp(stamp).replace("Z", "+00:00")).timestamp()

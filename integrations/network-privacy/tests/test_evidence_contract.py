@@ -16,6 +16,7 @@ from plowshare_privacy.contracts import (
     IDENTITY_SOURCES,
     AddressAssignment,
     DeviceIdentity,
+    DnsObservation,
     Evidence,
     evidence_kind,
 )
@@ -342,6 +343,11 @@ class AddressingContractTest(unittest.TestCase):
                 replace(reserved, issues=gap), static.snapshot, reserved.scope, gap
             ),
         )
+        # A gap in the previous collection alone also blocks the comparison.
+        self.assertNotIn(
+            line,
+            changes(replace(reserved, issues=gap), static.snapshot, reserved.scope, ()),
+        )
         # Device association lines come first, DNS lines after.
         current = replace(
             static.snapshot,
@@ -352,7 +358,10 @@ class AddressingContractTest(unittest.TestCase):
                     device_id="mac:aa:bb:cc:dd:ee:01",
                 ),
             ),
+            dns=(DnsObservation("mac:aa:bb:cc:dd:ee:02", "example.com", 1),),
         )
         listed = changes(reserved, current, reserved.scope, ())
-        self.assertEqual(listed[-1], line)
+        self.assertEqual(len(listed), 3)
         self.assertTrue(listed[0].startswith("Device association at 192.0.2.10"))
+        self.assertEqual(listed[1], line)
+        self.assertTrue(listed[2].startswith("New observed DNS destination"))
