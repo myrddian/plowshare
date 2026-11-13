@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -17,12 +18,12 @@ from plowshare.contracts import (
     ContextSnapshotDto,
     ContextSnapshotDtoToolsItemDto,
     ConversationContextSnapshotRequest,
-    ConversationListRequest,
     ConversationViewDto,
     OrchestrationReceiptRequest,
     OrchestrationReceiptResultDto,
     OrchestrationStartRequest,
     OrchestrationStartResultDto,
+    ProjectionMessageDto,
     ScheduleFileDto,
     ScheduleFilesRequest,
     ScheduleListRequest,
@@ -32,6 +33,7 @@ from support import configuration
 
 from plowshare_privacy.console_port import SdkConsolePort
 from plowshare_privacy.journal import Receipt
+from plowshare_privacy.native_tools import ASSISTANT_TOOLS
 
 
 class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
@@ -175,65 +177,109 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    async def test_agent_visibility_uses_projected_registry_not_declared_grants(
+    def assistant_port(self) -> SdkConsolePort:
+        return SdkConsolePort(self.client, self.config, lambda: self.conversation.id)
+
+    def assistant_snapshot(
+        self, conversation: str = "cnv_fixture", agent: str = "privacy_assistant"
+    ) -> ContextSnapshotDto:
+        message = ProjectionMessageDto(
+            parts=(),
+            role="user",
+            tool_call_id=None,
+            tool_calls=(),
+        )
+        return replace(
+            self.snapshot, conversation=conversation, agent=agent, messages=(message,)
+        )
+
+    async def test_agent_visibility_is_project_scoped_and_reads_no_messages(
         self,
     ) -> None:
+        assistant = replace(self.coordinator, name="privacy_assistant")
         self.client.request.side_effect = [
             Reply(
                 "OK",
                 None,
-                (self.coordinator, replace(self.coordinator, name="another-agent")),
+                (
+                    self.coordinator,
+                    assistant,
+                    replace(self.coordinator, name="another-agent"),
+                ),
             ),
-            Reply(
-                "OK",
-                None,
-                (replace(self.conversation, project="foreign"), self.conversation),
-            ),
-            Reply("OK", None, self.snapshot),
+            Reply("OK", None, self.assistant_snapshot()),
         ]
-        result = await self.port.agents()
+        result = await self.assistant_port().agents()
         requests = [call.args[0] for call in self.client.request.call_args_list]
         self.assertIsInstance(requests[0], AgentListRequest)
         self.assertEqual(requests[0].project, self.config.project)
-        self.assertIsInstance(requests[1], ConversationListRequest)
-        self.assertEqual(requests[1].project, self.config.project)
-        self.assertIsInstance(requests[2], ConversationContextSnapshotRequest)
-        self.assertEqual(requests[2].conversation, self.conversation.id)
-        self.assertIs(requests[2].measure, False)
+        self.assertIsInstance(requests[1], ConversationContextSnapshotRequest)
+        self.assertEqual(requests[1].conversation, self.conversation.id)
+        self.assertEqual(requests[1].agent, "privacy_assistant")
+        self.assertIs(requests[1].measure, False)
+        self.assertEqual(self.client.request.await_count, 2)
         self.assertEqual(result.tools, ("network_evidence",))
-        self.assertIn("network_scan", result.missing_tools)
+        self.assertIn("network_devices", result.missing_tools)
+        self.assertNotIn("network_scan", result.missing_tools)
+        self.assertEqual(result.tool_visibility, "projected")
+        self.assertEqual(result.served, ("privacy_assistant", "privacy_coordinator"))
         self.assertIn("privacy_reviewer", result.unavailable)
         self.assertNotIn("another-agent", result.served)
-        self.assertEqual(result.tool_visibility, "projected")
+        # Only tool names survive; no message content is carried out.
+        self.assertFalse(hasattr(result, "messages"))
+        self.assertNotIn("user", repr(result))
 
-    async def test_no_context_does_not_report_dynamic_tools_missing(self) -> None:
+    async def test_a_healthy_assistant_reports_nothing_missing(self) -> None:
+        assistant = replace(self.coordinator, name="privacy_assistant")
+        full = replace(
+            self.assistant_snapshot(),
+            tools=tuple(
+                ContextSnapshotDtoToolsItemDto(
+                    name=name, description="fixture", parameters={}
+                )
+                for name in sorted(ASSISTANT_TOOLS)
+            ),
+        )
         self.client.request.side_effect = [
-            Reply("OK", None, (self.coordinator,)),
-            Reply("OK", None, ()),
+            Reply("OK", None, (assistant,)),
+            Reply("OK", None, full),
         ]
-        result = await self.port.agents()
-        self.assertEqual(result.tool_visibility, "awaiting_context")
-        self.assertEqual(result.tools, ())
+        result = await self.assistant_port().agents()
         self.assertEqual(result.missing_tools, ())
-        self.assertEqual(self.client.request.await_count, 2)
+        self.assertEqual(len(result.tools), 10)
 
-    async def test_foreign_conversation_does_not_become_projection_anchor(self) -> None:
-        self.client.request.side_effect = [
-            Reply("OK", None, (self.coordinator,)),
-            Reply("OK", None, (replace(self.conversation, project="foreign"),)),
-        ]
-        result = await self.port.agents()
-        self.assertEqual(result.tool_visibility, "awaiting_context")
-        self.assertEqual(self.client.request.await_count, 2)
+    def test_the_expected_tools_are_the_assistant_scope_grants(self) -> None:
+        manifest = json.loads(
+            (
+                Path(__file__).parent.parent / "network-privacy-watch/plowshare.json"
+            ).read_text()
+        )
+        grants = next(
+            scope["grants"]
+            for scope in manifest["toolScopes"]
+            if scope["scope"] == "network_assistant"
+        )
+        self.assertEqual(set(grants), ASSISTANT_TOOLS)
 
-    async def test_foreign_projection_is_refused(self) -> None:
-        self.client.request.side_effect = [
-            Reply("OK", None, (self.coordinator,)),
-            Reply("OK", None, (self.conversation,)),
-            Reply("OK", None, replace(self.snapshot, conversation="cnv_foreign")),
-        ]
-        with self.assertRaises(ValueError):
-            await self.port.agents()
+    async def test_unserved_assistant_is_listed_missing(self) -> None:
+        self.client.request.side_effect = [Reply("OK", None, (self.coordinator,))]
+        result = await self.assistant_port().agents()
+        self.assertEqual(result.tool_visibility, "assistant_unserved")
+        self.assertIn("privacy_assistant", result.unavailable)
+        self.assertEqual(self.client.request.await_count, 1)
+
+    async def test_foreign_conversation_or_agent_projection_is_refused(self) -> None:
+        assistant = replace(self.coordinator, name="privacy_assistant")
+        for snapshot in (
+            self.assistant_snapshot(conversation="cnv_foreign"),
+            self.assistant_snapshot(agent="privacy_coordinator"),
+        ):
+            self.client.request.side_effect = [
+                Reply("OK", None, (assistant,)),
+                Reply("OK", None, snapshot),
+            ]
+            with self.assertRaises(ValueError):
+                await self.assistant_port().agents()
 
     async def test_start_preserves_opaque_run_identity(self) -> None:
         from support import CountingCollector

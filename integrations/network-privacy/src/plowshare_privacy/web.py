@@ -19,6 +19,7 @@ from plowshare.contracts import InformationRevisionDto
 from plowshare.tools import ToolAttention
 
 from .advisories import AdvisoryLookup, AdvisoryUnavailable, public_model
+from .ask import AskConflict, AskService, AskSettings, question_text
 from .console import OperatorConsole
 from .contracts import (
     household_zone,
@@ -56,6 +57,7 @@ from .profile_research import ResearchReview, admitted_today
 from .schedule_editor import ScheduleManagement
 from .system_view import describe
 from .tools import (
+    AGENT_ONLY,
     DEFINITIONS,
     PrivacyTools,
     WorkerTools,
@@ -82,6 +84,8 @@ def application(
     assessments: AssessmentControl | None = None,
     deep_scans: DeepScanner | None = None,
     deep_scans_detail: str | None = None,
+    ask: AskService | None = None,
+    ask_detail: str | None = None,
     advisory_origin: str | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
@@ -132,7 +136,12 @@ def application(
                 raise web.HTTPUnsupportedMediaType(text="JSON is required")
         try:
             response = await handler(request)
-        except (SettingsBusy, ReconciliationRequired, AssessmentConflict) as error:
+        except (
+            SettingsBusy,
+            ReconciliationRequired,
+            AssessmentConflict,
+            AskConflict,
+        ) as error:
             response = web.json_response({"error": str(error)}, status=409)
         except UnknownDevice as error:
             response = web.json_response({"error": str(error)}, status=404)
@@ -181,6 +190,18 @@ def application(
             raise web.HTTPNotFound(text="Operator console is not configured")
         return console
 
+    def ask_overview() -> dict[str, object] | None:
+        """The Ask tab's badge state; reading it never marks the chat read."""
+        if ask is None:
+            return None
+        view = ask.view()
+        return {
+            "unread": view.unread,
+            "paused": view.paused,
+            "turn_state": view.turn_state,
+            "detail": view.detail,
+        }
+
     async def overview(request: web.Request) -> web.Response:
         value = operator()
         health = await value.health()
@@ -223,6 +244,7 @@ def application(
                 }
                 if deep_scans is not None
                 else None,
+                "ask": ask_overview(),
             }
         )
 
@@ -688,6 +710,49 @@ def application(
         service.set_automatic_limit(limit)
         return deep_scan_settings_view(service)
 
+    def assistant() -> AskService:
+        if ask is None:
+            raise web.HTTPNotFound(text="Ask is not enabled")
+        return ask
+
+    # The service's own refusals (busy, journal, top-up not offered) are
+    # AskConflict and reach the 409 mapping with their text. Bad input is
+    # checked here, before the service, so its reason is the operator's
+    # message rather than the generic invalid-request text.
+    def ask_invalid(error: ValueError) -> web.Response:
+        return web.json_response({"error": str(error)}, status=400)
+
+    async def ask_view(request: web.Request) -> web.Response:
+        service = assistant()
+        service.mark_read()
+        return web.json_response(asdict(service.view()))
+
+    async def ask_send(request: web.Request) -> web.Response:
+        service = assistant()
+        row = object_fields(parse_json(await request.read()), {"question"})
+        try:
+            question = question_text(row["question"])
+        except ValueError as error:
+            return ask_invalid(error)
+        return web.json_response(asdict(await service.ask(question)))
+
+    async def ask_top_up(request: web.Request) -> web.Response:
+        service = assistant()
+        object_fields(parse_json(await request.read()), set())
+        return web.json_response(asdict(await service.top_up()))
+
+    async def ask_settings(request: web.Request) -> web.Response:
+        return web.json_response(asdict(assistant().settings))
+
+    async def save_ask_settings(request: web.Request) -> web.Response:
+        service = assistant()
+        try:
+            settings = AskSettings.decode(parse_json(await request.read()))
+        except ValueError as error:
+            return ask_invalid(error)
+        service.set_settings(settings)
+        return web.json_response(asdict(service.settings))
+
     async def profile_advisories(request: web.Request) -> web.Response:
         if advisories is None:
             raise web.HTTPNotFound(text="Advisory lookup is not configured")
@@ -825,6 +890,8 @@ def application(
         # Schemas describe this HTTP boundary; raw dictionaries do not enter the provider.
         result: list[dict[str, object]] = []
         for definition in DEFINITIONS:
+            if definition.name in AGENT_ONLY:
+                continue
             properties: dict[str, object] = {}
             if definition.parameter == "device_id":
                 properties["device_id"] = {
@@ -869,6 +936,12 @@ def application(
         return web.json_response(result)
 
     async def call_tool(request: web.Request) -> web.Response:
+        if request.match_info["name"] in AGENT_ONLY:
+            # They need the harness invocation identity and services this
+            # boundary does not have; the dashboard has its own controls.
+            raise web.HTTPNotFound(
+                text="This tool is offered to the assistant agent only; use the dashboard's own controls."
+            )
         call = decode_call(request.match_info["name"], parse_json(await request.read()))
         result = await provider.execute(call)
         status = 200
@@ -935,6 +1008,10 @@ def application(
                 "deep_scans_detail": deep_scans.detail
                 if deep_scans is not None
                 else deep_scans_detail,
+                "ask_available": ask is not None and ask.view().available,
+                # Why Ask is off: an unreadable journal at start-up, or the
+                # running service's own detail.
+                "ask_detail": ask.view().detail if ask is not None else ask_detail,
                 "state": worker.state,
                 "detail": worker.detail,
                 "requests": [
@@ -1102,6 +1179,11 @@ def application(
     app.router.add_get("/api/devices/{device_id}/deep-scan", deep_scan_view)
     app.router.add_post("/api/devices/{device_id}/deep-scan/request", deep_scan_request)
     app.router.add_post("/api/devices/{device_id}/deep-scan/cancel", deep_scan_cancel)
+    app.router.add_get("/api/ask", ask_view)
+    app.router.add_post("/api/ask", ask_send)
+    app.router.add_post("/api/ask/top-up", ask_top_up)
+    app.router.add_get("/api/ask/settings", ask_settings)
+    app.router.add_post("/api/ask/settings", save_ask_settings)
     app.router.add_get("/api/deep-scans", deep_scan_settings)
     app.router.add_post("/api/deep-scans", save_deep_scan_settings)
     app.router.add_get("/api/profiles", profile_list)

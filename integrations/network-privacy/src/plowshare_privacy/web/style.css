@@ -283,6 +283,24 @@ footer { display: flex; justify-content: space-between; gap: var(--s3); padding-
 @keyframes wing-right { from { transform: perspective(1400px) rotateY(62deg); opacity: .15; } }
 .triptych.unveil .leaf-left { transform-origin: right center; animation: wing-left .8s cubic-bezier(.2, .7, .2, 1) both; }
 .triptych.unveil .leaf-right { transform-origin: left center; animation: wing-right .8s cubic-bezier(.2, .7, .2, 1) both; }
+/* Ask: the reading pane scrolls inside its panel so the question box stays in reach. */
+.workspace.ask-workspace { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+.ask-workspace .stack > .panel { margin-bottom: var(--s5); }
+.ask-conversation { max-height: min(60vh, 640px); min-height: 160px; overflow-y: auto; padding: var(--s3) var(--inset); }
+.ask-entry { padding: var(--s3) 0; border-bottom: var(--rule-row); }
+.ask-entry:last-child { border-bottom: 0; }
+.ask-entry-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s3); margin: 0; }
+.ask-entry .markdown-body, .ask-entry .ask-text { margin: var(--s1) 0 0; font-size: var(--text-md); }
+.ask-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-question .ask-text { color: var(--parchment); }
+.ask-answer { border-left: 2px solid var(--brass); padding-left: var(--s3); }
+.ask-form { max-width: none; padding: var(--s3) var(--inset) var(--s4); border-top: var(--rule); }
+.ask-form textarea { width: 100%; }
+.ask-badge { margin-left: var(--s1); color: var(--gilt); }
+.ask-workspace .entries > .record { padding-left: var(--inset); padding-right: var(--inset); }
+.ask-workspace .entries > .empty { padding: var(--s3) var(--inset); }
+.ask-workspace .record h4 { overflow-wrap: anywhere; }
+
 @media (prefers-reduced-motion: reduce) { .triptych.unveil .leaf { animation: none; } }
 
 .register { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 0 var(--s6); margin-bottom: var(--s6); }
@@ -552,7 +570,7 @@ details > .hint { display: flex; flex-wrap: wrap; justify-content: space-between
   .view-nav { gap: 0; justify-content: space-between; }
   .view-nav button { font-size: var(--text-name); }
   .view-heading { padding: var(--s5) 0 var(--s4); }
-  .triptych, .register, .overview-grid, .workspace, .discover-form, #profile-form, #issue-form .mitigation { grid-template-columns: minmax(0, 1fr); }
+  .triptych, .register, .overview-grid, .workspace, .workspace.ask-workspace, .discover-form, #profile-form, #issue-form .mitigation { grid-template-columns: minmax(0, 1fr); }
   .panel-body > .facts { grid-template-columns: 124px minmax(0, 1fr); }
   .leaf-centre, .leaf-left, .leaf-right, .leaf-base { grid-column: 1; grid-row: auto; }
   .leaf { padding: var(--s5) var(--inset) var(--s4); --cut: 18px; }

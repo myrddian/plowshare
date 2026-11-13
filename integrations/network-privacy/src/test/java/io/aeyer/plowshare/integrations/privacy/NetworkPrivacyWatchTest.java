@@ -22,6 +22,7 @@ class NetworkPrivacyWatchTest {
           "memory_recall",
           "memory_read",
           "agent_run",
+          "send_message",
           "outgoing_peers",
           "outgoing_send",
           "outgoing_read",
@@ -197,7 +198,8 @@ class NetworkPrivacyWatchTest {
             "privacy_analyst",
             "privacy_reviewer",
             "privacy_device_profiler",
-            "privacy_device_assessor"),
+            "privacy_device_assessor",
+            "privacy_assistant"),
         agents.names());
     assertTrue(agents.get("privacy_coordinator").calls().contains("privacy_device_assessor"));
     for (String name :
@@ -243,6 +245,64 @@ class NetworkPrivacyWatchTest {
     // the orchestration allowance.
     assertTrue(manifest.path("max-model-calls").asInt() <= 32);
     assertEquals(1, manifest.path("max-returns").asInt());
+  }
+
+  @Test
+  void the_assistant_is_exported_async_and_has_no_admin_or_write_grants() throws Exception {
+    var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
+    var assistant = agents.get("privacy_assistant");
+    assertTrue(assistant.exported());
+    assertEquals(
+        Set.of("information_read", "memory_recall", "memory_read", "send_message"),
+        Set.copyOf(assistant.tools()));
+    assertEquals(4, assistant.tools().size());
+    assertFalse(assistant.tools().contains("agent_run"));
+    assertTrue(assistant.calls().isEmpty());
+    assertEquals(Set.of("investigate_network"), Set.copyOf(assistant.orchestrations()));
+    assertTrue(assistant.maxModelCalls() > 0);
+    assertTrue(assistant.maxTurns() > 0);
+    var text = Files.readString(application.resolve("agents/privacy_assistant.md"));
+    assertTrue(text.contains("max-model-calls:"));
+    assertTrue(text.contains("max-turns:"));
+    assertFalse(text.contains("agent_run,") || text.contains("agent_run]"));
+    assertFalse(text.contains("\ncalls:"));
+
+    var manifest =
+        new ObjectMapper().readTree(Files.readString(application.resolve("plowshare.json")));
+    var grants = new java.util.ArrayList<String>();
+    manifest
+        .path("toolGrants")
+        .forEach(
+            grant -> {
+              if (grant.path("agent").asText().equals("privacy_assistant")) {
+                grants.add(grant.path("toolScope").asText());
+              }
+            });
+    assertEquals(java.util.List.of("network_assistant"), grants);
+    var allowed =
+        Set.of(
+            "network_scope",
+            "network_scan_list",
+            "network_evidence",
+            "network_destinations",
+            "network_devices",
+            "network_device",
+            "network_request_deep_scan",
+            "network_request_assessment",
+            "network_note_profile",
+            "network_record_issue");
+    var scopes = new java.util.ArrayList<String>();
+    manifest
+        .path("toolScopes")
+        .forEach(
+            scope -> {
+              if (scope.path("scope").asText().equals("network_assistant")) {
+                scope.path("grants").forEach(g -> scopes.add(g.asText()));
+              }
+            });
+    assertEquals(allowed, Set.copyOf(scopes));
+    assertEquals(allowed.size(), scopes.size());
+    assertFalse(scopes.contains("network_scan"));
   }
 
   private static java.util.List<String> json(com.fasterxml.jackson.databind.JsonNode array) {

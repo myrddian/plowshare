@@ -166,7 +166,7 @@ class NativeToolsTest(unittest.IsolatedAsyncioTestCase):
                 tool.declaration.validate({"targets": "192.0.2.1"})
             with self.assertRaises(ValueError):
                 tool.declaration.validate({"request_id": str(uuid4())})
-            self.assertEqual(8, len(DECLARATIONS))
+            self.assertEqual(12, len(DECLARATIONS))
             self.assertEqual(
                 {
                     "network_scope",
@@ -177,6 +177,10 @@ class NativeToolsTest(unittest.IsolatedAsyncioTestCase):
                     "network_destinations",
                     "network_devices",
                     "network_device",
+                    "network_request_deep_scan",
+                    "network_request_assessment",
+                    "network_note_profile",
+                    "network_record_issue",
                 },
                 {tool.name for tool in DECLARATIONS},
             )

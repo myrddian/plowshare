@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import signal
 from contextlib import AsyncExitStack, ExitStack
@@ -12,7 +13,7 @@ from dataclasses import asdict
 from functools import partial
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Iterable
 from uuid import uuid4
 
 from aiohttp import web
@@ -28,6 +29,7 @@ from plowshare.tool_journal import SqliteToolJournal
 from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
 from .advisories import NvdAdvisories
+from .ask import compose_ask
 from .assessment_port import SdkAssessmentPort
 from .collection import NetworkCollector
 from .collector_factory import configured_collector
@@ -62,6 +64,27 @@ from .tool_journal_upgrade import open_tool_journal
 from .tools import WorkerTools
 from .web import application
 from .worker import ActiveRequests, ExternalRequests, ReconciliationRequired, Worker
+
+
+async def stop_tasks(tasks: Iterable[asyncio.Task[None] | None]) -> None:
+    """Cancel every task, then await every one.
+
+    A task that ended with an error is logged and does not stop the others
+    from being awaited, so shutdown always reaches its cleanup.
+    """
+    running = [value for value in tasks if value is not None]
+    for value in running:
+        value.cancel()
+    for value in running:
+        try:
+            await value
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            _log.exception("A background task failed")
+
+
+_log = logging.getLogger(__name__)
 
 
 def credential(name: str) -> str:
@@ -179,79 +202,8 @@ async def execute(args: argparse.Namespace) -> None:
                 operator_store,
                 PresenceWatch(PresenceHistory(config.state_directory)),
             )
-            peer = (
-                IntegrationPeer(
-                    config,
-                    SdkOutgoingPort(client, config),
-                    WorkerTools(worker),
-                    FilePeerReceipts(config, receipts),
-                )
-                if config.outgoing_peer is not None
-                else None
-            )
-            external: ExternalRequests | None = peer
-            native: ToolProvider | None = None
-            native_journal: SqliteToolJournal | None = None
-            if args.tool_provider is not None:
-                if peer is not None:
-                    raise ValueError(
-                        "Choose either native tools or the outgoing compatibility peer"
-                    )
-                native_journal = stores.enter_context(
-                    open_tool_journal(
-                        config.state_directory / "relay-tools",
-                        config.project,
-                        args.tool_provider,
-                        args.tool_account,
-                    )
-                )
-                native = ToolProvider(
-                    client,
-                    project=config.project,
-                    provider=args.tool_provider,
-                    account=args.tool_account,
-                    tools=registered(WorkerTools(worker)),
-                    journal=native_journal,
-                )
-                external = CataloguedProvider(
-                    native, config.state_directory, args.tool_catalog_renew_seconds
-                )
-            if args.command == "once":
-                if external is not None:
-                    await external.poll()
-                await worker.poll()
-                print(json.dumps([asdict(item) for item in receipts.all()]))
-                return
-            if args.command == "reconcile":
-                await worker.reconcile()
-                if peer is not None:
-                    await peer.reconcile()
-                if native is not None:
-                    await native.reconcile()
-                print("Retained evidence reconciled; no mutation was replayed.")
-                return
-            active_requests = ActiveRequests(external) if external is not None else None
-            stop = asyncio.Event()
-            loop = asyncio.get_running_loop()
-            for name in (signal.SIGINT, signal.SIGTERM):
-                try:
-                    loop.add_signal_handler(name, stop.set)
-                except NotImplementedError:
-                    pass  # Windows retains asyncio.run's normal Ctrl-C cancellation.
-            instance = str(uuid4())
-            handoff = Path(args.config).parent / "dashboard-runtime.json"
-            owns_handoff = False
-            settings = (
-                FileMonitorSettings(Path(args.config), worker, receipts)
-                if operator_store
-                else None
-            )
-            discovery = (
-                LocalDeviceDiscovery(Path(args.config).parent)
-                if operator_store
-                else None
-            )
-
+            # The record and request services are composed before the tool
+            # provider, whose assistant tools use them (see assistant_tools).
             issues = (
                 PrivacyIssues(
                     SdkIssuePort(client, config, worker.port),
@@ -295,6 +247,18 @@ async def execute(args: argparse.Namespace) -> None:
             deep_scans, deep_scans_detail = compose_scanner(
                 worker, config.state_directory, operator_store is not None
             )
+            # The household's Ask conversation. An unreadable journal disables it
+            # only; collection starts and /api/status says why.
+            ask, ask_detail = compose_ask(
+                config.state_directory,
+                lambda: client,
+                config,
+                operator_store is not None,
+            )
+
+            def assistant_conversation() -> str | None:
+                return ask.conversation if ask is not None else None
+
             assessments = (
                 DeviceAssessments(
                     AssessmentJournal(config.state_directory),
@@ -314,6 +278,93 @@ async def execute(args: argparse.Namespace) -> None:
                     else lambda device: None,
                 )
                 if dossiers is not None
+                else None
+            )
+
+            def assistant_tools() -> WorkerTools:
+                """The native provider's tools, with the assistant's services.
+
+                The peer keeps the read and scan tools only; only the native
+                provider serves the assistant's request and record tools.
+                """
+                return WorkerTools(
+                    worker,
+                    deep_scans=deep_scans,
+                    assessments=assessments,
+                    profiles=profiles,
+                    issues=issues,
+                )
+
+            peer = (
+                IntegrationPeer(
+                    config,
+                    SdkOutgoingPort(client, config),
+                    WorkerTools(worker),
+                    FilePeerReceipts(config, receipts),
+                )
+                if config.outgoing_peer is not None
+                else None
+            )
+            external: ExternalRequests | None = peer
+            native: ToolProvider | None = None
+            native_journal: SqliteToolJournal | None = None
+            if args.tool_provider is not None:
+                if peer is not None:
+                    raise ValueError(
+                        "Choose either native tools or the outgoing compatibility peer"
+                    )
+                native_journal = stores.enter_context(
+                    open_tool_journal(
+                        config.state_directory / "relay-tools",
+                        config.project,
+                        args.tool_provider,
+                        args.tool_account,
+                    )
+                )
+                native = ToolProvider(
+                    client,
+                    project=config.project,
+                    provider=args.tool_provider,
+                    account=args.tool_account,
+                    tools=registered(assistant_tools()),
+                    journal=native_journal,
+                )
+                external = CataloguedProvider(
+                    native, config.state_directory, args.tool_catalog_renew_seconds
+                )
+            if args.command == "once":
+                if external is not None:
+                    await external.poll()
+                await worker.poll()
+                print(json.dumps([asdict(item) for item in receipts.all()]))
+                return
+            if args.command == "reconcile":
+                await worker.reconcile()
+                if peer is not None:
+                    await peer.reconcile()
+                if native is not None:
+                    await native.reconcile()
+                print("Retained evidence reconciled; no mutation was replayed.")
+                return
+            active_requests = ActiveRequests(external) if external is not None else None
+            stop = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            for name in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(name, stop.set)
+                except NotImplementedError:
+                    pass  # Windows retains asyncio.run's normal Ctrl-C cancellation.
+            instance = str(uuid4())
+            handoff = Path(args.config).parent / "dashboard-runtime.json"
+            owns_handoff = False
+            settings = (
+                FileMonitorSettings(Path(args.config), worker, receipts)
+                if operator_store
+                else None
+            )
+            discovery = (
+                LocalDeviceDiscovery(Path(args.config).parent)
+                if operator_store
                 else None
             )
 
@@ -363,7 +414,9 @@ async def execute(args: argparse.Namespace) -> None:
                                 replacement, worker.config, worker.port
                             )
                         if console is not None:
-                            console.port = SdkConsolePort(replacement, worker.config)
+                            console.port = SdkConsolePort(
+                                replacement, worker.config, assistant_conversation
+                            )
                         if dossiers is not None:
                             dossiers.port = SdkDossierPort(
                                 replacement, worker.config, worker.port
@@ -376,7 +429,7 @@ async def execute(args: argparse.Namespace) -> None:
                                 project=worker.config.project,
                                 provider=args.tool_provider,
                                 account=args.tool_account,
-                                tools=registered(WorkerTools(worker)),
+                                tools=registered(assistant_tools()),
                                 journal=native_journal,
                             )
                             if active_requests is None:
@@ -412,7 +465,7 @@ async def execute(args: argparse.Namespace) -> None:
                 OperatorConsole(
                     Path(args.config).parent,
                     worker,
-                    SdkConsolePort(client, config),
+                    SdkConsolePort(client, config, assistant_conversation),
                     settings,
                     discovery,
                     operator_store,
@@ -504,6 +557,8 @@ async def execute(args: argparse.Namespace) -> None:
                     assessments=assessments,
                     deep_scans=deep_scans,
                     deep_scans_detail=deep_scans_detail,
+                    ask=ask,
+                    ask_detail=ask_detail,
                     advisory_origin=advisory_origin,
                     schedule_editor=ScheduleEditor(
                         Path(args.config).parent, schedule_runtime
@@ -518,6 +573,7 @@ async def execute(args: argparse.Namespace) -> None:
             research_task: asyncio.Task[None] | None = None
             assessment_task: asyncio.Task[None] | None = None
             deep_scan_task: asyncio.Task[None] | None = None
+            ask_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
                 await site.start()
@@ -566,18 +622,14 @@ async def execute(args: argparse.Namespace) -> None:
                     assessment_task = asyncio.create_task(assessments.run(stop))
                 if deep_scans is not None:
                     deep_scan_task = asyncio.create_task(deep_scans.run(stop))
+                if ask is not None:
+                    ask_task = asyncio.create_task(ask.run(stop))
                 await stop.wait()
             finally:
                 stop.set()
-                for running in (deep_scan_task, assessment_task, research_task, task):
-                    if running is not None:
-                        running.cancel()
-                for running in (deep_scan_task, assessment_task, research_task, task):
-                    if running is not None:
-                        try:
-                            await running
-                        except asyncio.CancelledError:
-                            pass
+                await stop_tasks(
+                    (ask_task, deep_scan_task, assessment_task, research_task, task)
+                )
                 await runner.cleanup()
                 if owns_handoff:
                     handoff.unlink(missing_ok=True)

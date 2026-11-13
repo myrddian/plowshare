@@ -18,6 +18,7 @@ from support import configuration as collector_configuration
 from plowshare_privacy.journal import FileReceipts
 from plowshare_privacy.native_tools import DECLARATIONS
 from plowshare_privacy.tool_journal_upgrade import (
+    DEVICE_DECLARATIONS,
     LEGACY_DECLARATIONS,
     PAGED_DECLARATIONS,
     open_tool_journal,
@@ -28,6 +29,8 @@ from plowshare_privacy.tool_journal_upgrade import (
 # changes, existing paged journals refuse to open: freeze the old declarations
 # instead of editing them.
 PAGED_BINDING = "c2374bb551061811a7287459a45aa0a0cdbe83002e134de0effc09bdba3c55a6"
+# The eight-tool device binding, frozen the same way.
+DEVICE_BINDING = "4f96e9bae4283288546bf98b39386e13f2043d54054cc70a5444272794f753ea"
 
 
 def receipt() -> ToolReceipt:
@@ -183,7 +186,7 @@ class DeviceToolTransitionTest(unittest.TestCase):
             hashlib.sha256(configuration.encode()).hexdigest(), PAGED_BINDING
         )
         self.assertEqual(
-            {tool.name for tool in DECLARATIONS}
+            {tool.name for tool in DEVICE_DECLARATIONS}
             - {tool.name for tool in PAGED_DECLARATIONS},
             {"network_devices", "network_device"},
         )
@@ -245,10 +248,91 @@ class DeviceToolTransitionTest(unittest.TestCase):
                 with open_tool_journal(directory, "fixture", "scanner", "owner"):
                     self.fail("changed paged history admitted")
 
-    def test_fresh_install_opens_only_the_device_journal(self) -> None:
+    def test_fresh_install_opens_only_the_newest_journal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary).resolve() / "relay-tools"
             with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
                 self.assertEqual(current.all(), ())
             self.assertFalse((directory.parent / "relay-tools-paged").exists())
-            self.assertTrue((directory.parent / "relay-tools-devices").is_dir())
+            self.assertFalse((directory.parent / "relay-tools-devices").exists())
+            self.assertTrue((directory.parent / "relay-tools-assistant").is_dir())
+
+
+class AssistantToolTransitionTest(unittest.TestCase):
+    def test_device_binding_is_frozen_and_assistant_tools_are_the_only_additions(
+        self,
+    ) -> None:
+        configuration = deployment_config(
+            "fixture", "scanner", "owner", DEVICE_DECLARATIONS
+        )
+        self.assertEqual(
+            hashlib.sha256(configuration.encode()).hexdigest(), DEVICE_BINDING
+        )
+        self.assertEqual(
+            {tool.name for tool in DECLARATIONS}
+            - {tool.name for tool in DEVICE_DECLARATIONS},
+            {
+                "network_request_deep_scan",
+                "network_request_assessment",
+                "network_note_profile",
+                "network_record_issue",
+            },
+        )
+
+    def test_device_history_moves_to_the_assistant_journal_without_replay(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "relay-tools"
+            devices = directory.parent / "relay-tools-devices"
+            # A deployment whose fresh install ran the eight-tool collector.
+            with SqliteToolJournal(
+                devices,
+                configuration=deployment_config(
+                    "fixture", "scanner", "owner", DEVICE_DECLARATIONS
+                ),
+            ) as store:
+                item = receipt()
+                for stage in receipt_stages(item):
+                    store.save(stage)
+                retained = store.all()
+            # The marker that fresh install wrote when it opened the journal.
+            (devices / "transition.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "source": None,
+                        "target": DEVICE_BINDING,
+                        "receipts": 0,
+                        "digest": hashlib.sha256(b"[]").hexdigest(),
+                    }
+                )
+            )
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(current.all(), retained)
+            marker = json.loads(
+                (directory.parent / "relay-tools-assistant/transition.json").read_text()
+            )
+            self.assertEqual(marker["receipts"], 1)
+            self.assertFalse((directory.parent / "relay-tools-paged").exists())
+            with SqliteToolJournal(
+                devices,
+                configuration=deployment_config(
+                    "fixture", "scanner", "owner", DEVICE_DECLARATIONS
+                ),
+            ) as store:
+                store.save(receipt_stages(receipt())[0])
+            with self.assertRaisesRegex(ValueError, "Foreign tool transition"):
+                with open_tool_journal(directory, "fixture", "scanner", "owner"):
+                    self.fail("changed device history admitted")
+
+    def test_unreviewed_write_additions_are_still_refused(self) -> None:
+        from plowshare.tools import ToolDeclaration
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "relay-tools"
+            extra = (*DECLARATIONS, ToolDeclaration("network_unreviewed", "x"))
+            with patch("plowshare_privacy.tool_journal_upgrade.DECLARATIONS", extra):
+                with self.assertRaisesRegex(ValueError, "Tool identity changed"):
+                    with open_tool_journal(directory, "fixture", "scanner", "owner"):
+                        self.fail("unreviewed tool admitted")
