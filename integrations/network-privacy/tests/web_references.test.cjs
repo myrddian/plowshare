@@ -71,3 +71,19 @@ test('retry button posts url', async () => {
   assert.deepEqual(calls.find(call => call[0] === '/api/references/retry'), ['/api/references/retry', 'POST', JSON.stringify({url:URL})]);
   assert.equal(buttons(node('reference-list').children[0]).length, 0);
 });
+
+test('the list is fetched when Settings is shown, not on every overview refresh', async () => {
+  const calls = [];
+  const {context, run} = dashboard(async path => {
+    calls.push(path);
+    return {ok:true, status:200, json:async () => ({references:[row('tagged')], error:null})};
+  });
+  context.value = overview({failed:0, blocked:0});
+  // An overview refresh on another tab only reports counts.
+  run("overview = value; currentView = 'overview'; followReferences(value)");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(path => path === '/api/references').length, 0);
+  run("showView('settings')");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(path => path === '/api/references').length, 1);
+});

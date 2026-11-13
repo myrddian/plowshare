@@ -61,11 +61,14 @@ class ReferenceService:
     def open(cls, root: Path, port: ReferencePort) -> ReferenceService:
         """Build the service and queue the shipped seed once.
 
-        A journal or seed that cannot be read raises ``ValueError`` and stops
-        start-up, as other private journals do.
+        The packaged seed is validated first and an invalid seed raises
+        ``ValueError``, which stops start-up. A journal that cannot be read or
+        written raises ``ValueError`` or ``OSError``; ``open_references`` turns
+        that into a disabled feature instead.
         """
+        seed = load_seed()
         library = ReferenceLibrary(ReferenceJournal(root), port)
-        library.plan_seed(load_seed())
+        library.plan_seed(seed)
         return cls(library)
 
     def view(self) -> tuple[ReferenceReceipt, ...]:
@@ -101,3 +104,27 @@ class ReferenceService:
                 await asyncio.wait_for(stop.wait(), POLL_SECONDS)
             except TimeoutError:
                 continue
+
+
+JOURNAL_UNREADABLE = (
+    "Reference documents need attention: their journal could not be read."
+)
+
+
+def open_references(
+    root: Path, port: ReferencePort
+) -> tuple[ReferenceService | None, str | None]:
+    """Open the service, or report why its journal cannot be used.
+
+    An unreadable, linked, non-private or invalid journal disables the reference
+    library only; collection starts and ``/api/status`` shows the detail. Nothing
+    is deleted or rewritten. An invalid packaged seed is a build defect and still
+    raises, so it stops start-up.
+    """
+    seed = load_seed()
+    try:
+        library = ReferenceLibrary(ReferenceJournal(root), port)
+        library.plan_seed(seed)
+    except (OSError, ValueError):
+        return None, JOURNAL_UNREADABLE
+    return ReferenceService(library), None

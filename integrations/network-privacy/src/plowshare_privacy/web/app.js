@@ -117,6 +117,7 @@ function showView(name, focusHeading = false) {
   if (focusHeading) byId('page-title').focus({preventScroll:true});
   recordLocation();
   // Reading the conversation marks it read, so it is read only while it is shown.
+  if (name === 'settings') followReferences(overview);
   if (name === 'ask') {renderAsk(); readAsk().catch(error => notice(error.message, true));}
 }
 for (const name of Object.keys(views)) {
@@ -1820,6 +1821,12 @@ function renderReferences(value) {
   }));
   byId('reference-detail').textContent = value.error || '';
 }
+// The list is read only while Settings is open (and by Retry, which returns
+// the rows); the overview's counts are all the other tabs need.
+function followReferences(value) {
+  byId('reference-library').hidden = !value?.references;
+  if (value?.references && currentView === 'settings') loadReferences().catch(error => {byId('reference-detail').textContent = error.message;});
+}
 async function loadReferences() {
   renderReferences(await api('/api/references'));
 }
@@ -2516,8 +2523,7 @@ function renderOverview(value) {
   renderAttention(value);
   renderBackgroundUsage(value);
   renderDeepScanGroup(value);
-  if (value.references) loadReferences().catch(error => {byId('reference-detail').textContent = error.message;});
-  else byId('reference-library').hidden = true;
+  followReferences(value);
   const nextDeviceSignature = JSON.stringify([value.devices, value.candidates, value.assessments?.summaries || null]);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;

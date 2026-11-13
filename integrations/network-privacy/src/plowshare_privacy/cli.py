@@ -59,7 +59,7 @@ from .profile_port import SdkProfilePort
 from .profile_research import ProfileResearch, ResearchJournal, reviewed_model
 from .profile_research_port import SdkResearchPort
 from .reference_port import SdkReferencePort
-from .reference_service import ReferenceService, project_scope
+from .reference_service import open_references, project_scope
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
 from .tool_journal_upgrade import open_tool_journal
@@ -251,7 +251,7 @@ async def execute(args: argparse.Namespace) -> None:
             )
             # Vendor documentation for the assistant. The seed is queued once here;
             # the loop below fetches it and nothing retries without the owner.
-            references = ReferenceService.open(
+            references, references_detail = open_references(
                 config.state_directory,
                 SdkReferencePort(client, project_scope(config.project)),
             )
@@ -425,9 +425,10 @@ async def execute(args: argparse.Namespace) -> None:
                             console.port = SdkConsolePort(
                                 replacement, worker.config, assistant_conversation
                             )
-                        references.library.port = SdkReferencePort(
-                            replacement, project_scope(worker.config.project)
-                        )
+                        if references is not None:
+                            references.library.port = SdkReferencePort(
+                                replacement, project_scope(worker.config.project)
+                            )
                         if dossiers is not None:
                             dossiers.port = SdkDossierPort(
                                 replacement, worker.config, worker.port
@@ -569,6 +570,7 @@ async def execute(args: argparse.Namespace) -> None:
                     deep_scans=deep_scans,
                     deep_scans_detail=deep_scans_detail,
                     references=references,
+                    references_detail=references_detail,
                     ask=ask,
                     ask_detail=ask_detail,
                     advisory_origin=advisory_origin,
@@ -635,7 +637,8 @@ async def execute(args: argparse.Namespace) -> None:
                     assessment_task = asyncio.create_task(assessments.run(stop))
                 if deep_scans is not None:
                     deep_scan_task = asyncio.create_task(deep_scans.run(stop))
-                reference_task = asyncio.create_task(references.run(stop))
+                if references is not None:
+                    reference_task = asyncio.create_task(references.run(stop))
                 if ask is not None:
                     ask_task = asyncio.create_task(ask.run(stop))
                 await stop.wait()

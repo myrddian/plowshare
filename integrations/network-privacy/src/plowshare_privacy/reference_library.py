@@ -485,9 +485,15 @@ class ReferenceLibrary:
             if receipt is None:
                 raise LookupError("Unknown device reference")
             # An owner retry also re-arms a failed removal of ``device-reference``.
+            untag_retry = receipt.untag_failed
             receipt = replace(receipt, untag_failed=False)
             if receipt.phase == "submitted":
                 await self._acquire(receipt)
+                return
+            if untag_retry and receipt.phase not in {"failed", "blocked"}:
+                # A retired receipt whose tag removal failed: clearing the flag
+                # lets the next pass remove the tag again.
+                self._store(receipt)
                 return
             if receipt.phase not in {"failed", "blocked"}:
                 raise ValueError(

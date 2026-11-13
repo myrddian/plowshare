@@ -86,6 +86,7 @@ def application(
     deep_scans: DeepScanner | None = None,
     deep_scans_detail: str | None = None,
     references: ReferenceService | None = None,
+    references_detail: str | None = None,
     ask: AskService | None = None,
     ask_detail: str | None = None,
     advisory_origin: str | None = None,
@@ -757,6 +758,22 @@ def application(
             # The library's own refusals (unknown reference, wrong phase) say why;
             # the generic ValueError mapping would hide it.
             return web.json_response({"error": str(error.args[0])}, status=400)
+        except Refusal as error:
+            return web.json_response(
+                {
+                    "error": "The Library refused the retry: "
+                    + refusal_detail(error, "reference retry")
+                },
+                status=409,
+            )
+        except TransportError:
+            return web.json_response(
+                {
+                    "error": "The Plowshare connection did not answer. "
+                    "Nothing was lost; choose Retry again once it is back."
+                },
+                status=502,
+            )
         return reference_rows(service)
 
     def assistant() -> AskService:
@@ -1057,6 +1074,8 @@ def application(
                 "deep_scans_detail": deep_scans.detail
                 if deep_scans is not None
                 else deep_scans_detail,
+                # Why the reference library is off: an unreadable journal.
+                "references_detail": references_detail,
                 "ask_available": ask is not None and ask.view().available,
                 # Why Ask is off: an unreadable journal at start-up, or the
                 # running service's own detail.
