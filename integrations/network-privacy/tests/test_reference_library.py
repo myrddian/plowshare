@@ -158,7 +158,13 @@ class LibraryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("queued", "seed"), (queued.phase, queued.origin))
         await self.library.advance()
         self.assertEqual(
-            [(URL, "Reference: Caddy admin API", queued.request_id)],
+            [
+                (
+                    URL,
+                    f"Reference: Caddy admin API · {queued.request_id[:8]}",
+                    queued.request_id,
+                )
+            ],
             self.port.acquires,
         )
         self.assertEqual("awaiting", self.receipt().phase)
@@ -273,7 +279,8 @@ class LibraryTest(unittest.IsolatedAsyncioTestCase):
         self.library.plan_seed((ENTRY,))
         self.library.plan_seed(())
         await self.library.advance()
-        self.assertEqual(failed, self.receipt())
+        # Dropped from the seed it is retired, but it stays failed and unsent.
+        self.assertEqual(replace(failed, retired=True), self.receipt())
         self.assertEqual(1, len(self.port.acquires))
 
     async def test_retry_only_from_failed_or_blocked(self) -> None:
@@ -409,16 +416,147 @@ class LibraryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("tagged", complete), self.phase_and_revision(OTHER))
         self.assertEqual(2, len(self.port.tag_calls))
 
-        # A non-integral tags version is a broken reply, not a version.
+        # A non-integral tags version is a broken reply: that receipt fails alone.
         third = OTHER + "/x"
         self.library.plan_seed((ENTRY, SECOND, replace(SECOND, url=third)))
         await self.library.advance()
         odd = self.port.finish(2, (), 2.5)
         await self.library.advance()
         self.assertEqual(("retained", odd), self.phase_and_revision(third))
-        with self.assertRaises(ValueError):
-            await self.library.advance()
+        await self.library.advance()
+        broken = self.receipt(third)
+        self.assertEqual(("failed", odd), (broken.phase, broken.revision_id))
+        self.assertIn("could not accept", broken.error or "")
         self.assertEqual(2, len(self.port.tag_calls))
+
+    async def test_broken_receipt_fails_alone_and_the_pass_continues(self) -> None:
+        self.library.plan_seed((ENTRY, SECOND))
+        await self.library.advance()
+        # The first receipt's ticket vanishes from the listing; the second's
+        # completes. Both are handled in the same pass.
+        missing = self.port.tickets.pop(0)
+        revision = self.port.finish(0)
+        await self.library.advance()
+        lost = self.receipt()
+        self.assertEqual(("failed", missing.id), (lost.phase, lost.acquisition_id))
+        self.assertIn("could not accept", lost.error or "")
+        self.assertEqual(("retained", revision), self.phase_and_revision(OTHER))
+        await self.library.advance()
+        self.assertEqual("tagged", self.receipt(OTHER).phase)
+        # Retry of a ticket the listing no longer shows requeues a new acquisition.
+        await self.library.retry(URL)
+        requeued = self.receipt()
+        self.assertEqual(
+            ("queued", (missing.id,)), (requeued.phase, requeued.superseded)
+        )
+
+    async def test_uncertain_acquire_never_matches_an_older_ticket(self) -> None:
+        self.library.plan_seed((ENTRY,))
+        await self.library.advance()
+        held = self.port.tickets[0]
+        held.state, held.gate = "blocked", "Allowance"
+        await self.library.advance()
+        await self.library.retry(URL)
+        self.assertEqual((held.id,), self.receipt().superseded)
+        # The new acquire is lost before it reaches the server.
+        self.port.acquire_fault = TransportError(Delivery.UNKNOWN, "lost")
+        self.port.acquire_lands = False
+        with self.assertRaises(TransportError):
+            await self.library.advance()
+        # The old held ticket has the same URL but the old attempt's name.
+        held.state, held.gate = "succeeded", None
+        self.port.revisions[str(uuid4())] = Revision()
+        for _ in range(2):
+            await self.library.advance()
+        unresolved = self.receipt()
+        self.assertEqual(
+            ("submitted", None, None),
+            (unresolved.phase, unresolved.acquisition_id, unresolved.revision_id),
+        )
+        self.assertIn("not been found", unresolved.error or "")
+
+        # The owner's retry re-sends that acquire with the same request id.
+        await self.library.retry(URL)
+        replayed = self.receipt()
+        self.assertEqual(self.port.acquires[-2], self.port.acquires[-1])
+        self.assertEqual(replayed.request_id, self.port.acquires[-1][2])
+        self.assertEqual(
+            ("awaiting", self.port.tickets[-1].id),
+            (replayed.phase, replayed.acquisition_id),
+        )
+
+    async def test_foreign_ticket_is_not_adopted(self) -> None:
+        self.library.plan_seed((ENTRY, SECOND))
+        await self.library.advance()
+        self.port.tickets[0].url = "https://elsewhere.test/page"
+        self.port.finish(0)
+        await self.library.advance()
+        foreign = self.receipt()
+        self.assertEqual(("failed", None), (foreign.phase, foreign.revision_id))
+        self.assertIn("does not match", foreign.error or "")
+
+        # Retry checks the ticket's name before trusting its state.
+        self.port.tickets[1].state, self.port.tickets[1].error = "failed", "x"
+        await self.library.advance()
+        self.port.tickets[1].name = "Reference: something else"
+        await self.library.retry(OTHER)
+        self.assertIn("does not match", self.receipt(OTHER).error or "")
+        self.assertEqual([], self.port.retries)
+
+    async def test_refusal_prose_is_sanitized(self) -> None:
+        self.library.plan_seed((ENTRY,))
+        self.port.acquire_fault = Refusal("FORBIDDEN", "bad\x01 news\x7f here")
+        self.port.acquire_lands = False
+        await self.library.advance()
+        error = self.receipt().error or ""
+        self.assertEqual("failed", self.receipt().phase)
+        self.assertFalse(any(ord(c) < 32 or ord(c) == 127 for c in error))
+        self.assertIn("bad news here", error)
+
+    async def test_retired_failed_receipt_is_untagged_once(self) -> None:
+        self.library.plan_seed((ENTRY, SECOND))
+        await self.library.advance()
+        first = self.port.finish(0, ("vendor",))
+        second = self.port.finish(1)
+        await self.library.advance()
+        await self.library.advance()
+        # A refresh of the first later failed; its tagged revision is still known.
+        journal = ReferenceJournal(self.root)
+        ledger = journal.read()
+        journal.save(
+            replace(
+                ledger,
+                receipts=(
+                    replace(ledger.receipts[0], phase="failed", error="Refresh failed"),
+                    ledger.receipts[1],
+                ),
+            )
+        )
+        self.library.plan_seed(())
+        self.port.tags_fault = None
+        await self.library.advance()
+        untagged = self.receipt()
+        self.assertEqual(("failed", True), (untagged.phase, untagged.retired_tagged))
+        self.assertEqual(
+            ("vendor", "caddy", "admin-api"), self.port.revisions[first].tags
+        )
+        self.assertTrue(self.receipt(OTHER).retired_tagged)
+
+        # A refused removal is not attempted again until the owner retries.
+        self.library.plan_seed((SECOND,))
+        self.assertEqual("retained", self.receipt(OTHER).phase)
+        await self.library.advance()
+        self.library.plan_seed(())
+        self.port.tags_fault = Refusal("CONFLICT", "Tags changed")
+        await self.library.advance()
+        refused = self.receipt(OTHER)
+        self.assertEqual(("failed", True), (refused.phase, refused.untag_failed))
+        calls = len(self.port.tag_calls)
+        await self.library.advance()
+        self.assertEqual(calls, len(self.port.tag_calls))
+        await self.library.retry(OTHER)
+        await self.library.advance()
+        self.assertNotIn("device-reference", self.port.revisions[second].tags)
 
     async def test_tags_refusal_is_failed_and_retry_resumes_tagging(self) -> None:
         self.library.plan_seed((ENTRY,))
