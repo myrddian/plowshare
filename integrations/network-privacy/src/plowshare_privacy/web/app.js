@@ -522,6 +522,7 @@ byId('disconnect').addEventListener('click', async () => {
   askConversation = null; askSignature = null; askReading = false; askSending = false; askSettingsLoaded = false; askTopUpCalls = null; askEpoch++;
   askPending = null; askReadAt = 0; askWorkingSince = null;
   for (const id of ['ask-conversation','ask-waiting','ask-done','ask-pause']) byId(id).replaceChildren();
+  setAskDrawer(false); renderAskHanded(null);
   for (const id of ['ask-input','ask-max-calls','ask-max-turns','ask-top-up']) byId(id).value = '';
   for (const id of ['ask-hint','ask-settings-detail']) byId(id).textContent = '';
   for (const id of ['ask-badge','tab-ask','ask-pause','ask-group','ask-working','ask-jump']) byId(id).hidden = true;
@@ -1996,6 +1997,7 @@ function renderAsk() {
   else if (nodes.length > before) byId('ask-jump').hidden = false;
   askWorkList(byId('ask-waiting'), view.waiting, 'Nothing is waiting on anyone.', true);
   askWorkList(byId('ask-done'), view.done, 'Nothing has finished yet.');
+  renderAskHanded(view);
   renderAskPause(view);
 }
 function renderAskBadge(ask) {
@@ -2039,6 +2041,30 @@ setInterval(followAsk, 1000);
 byId('ask-conversation').addEventListener('scroll', () => {
   const log = byId('ask-conversation');
   if (log.scrollHeight - log.scrollTop - log.clientHeight < 48) byId('ask-jump').hidden = true;
+});
+// Waiting on and Done live in a drawer beside the conversation. Its button
+// counts the work still waiting and carries the waiting marker while any is.
+function renderAskHanded(view) {
+  const waiting = view?.waiting?.length ?? 0;
+  const button = byId('ask-handed');
+  button.textContent = waiting ? `Handed off · ${waiting}` : 'Handed off';
+  button.className = waiting ? 'quiet ask-handed-toggle waiting' : 'quiet ask-handed-toggle';
+}
+// Opening moves focus into the drawer so Escape reaches it; closing from the
+// keyboard or the Close button returns focus to the button that opened it.
+function setAskDrawer(open, returnFocus = false) {
+  byId('ask-drawer').hidden = !open;
+  byId('ask-handed').setAttribute('aria-expanded', String(open));
+  if (open) byId('ask-drawer').focus();
+  else if (returnFocus) byId('ask-handed').focus();
+}
+setAskDrawer(false);
+byId('ask-handed').addEventListener('click', () => setAskDrawer(byId('ask-drawer').hidden));
+byId('ask-drawer-close').addEventListener('click', () => setAskDrawer(false, true));
+byId('ask-drawer').addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  setAskDrawer(false, true);
 });
 byId('ask-jump').addEventListener('click', () => {
   const log = byId('ask-conversation');

@@ -117,7 +117,8 @@ of framed disclosure panels.
    is the only ornate element: its wings open once when the dashboard first
    appears. The only other motion stands for work in progress in Ask: the
    working row's three small gilt diamonds, the conversation state marker
-   while a turn runs and the marker on each hand-off still waiting. Each one
+   while a turn runs and the marker on each hand-off still waiting (in the
+   drawer and on its button). Each one
    always sits next to words that say what is happening. Nothing else
    animates, and `prefers-reduced-motion` stills all of it.
 3. **Angles are structure.** A cut corner means "this is a framed container or
@@ -281,3 +282,10 @@ in `style.css`; a one-off value is a defect.
   issues or change settings, so those stay on the dashboard. Top up is offered
   only at the moment the allowance runs out, behind a confirmation that states
   its cost, and an unconfirmed send is reported and never repeated.
+- **Ask fills the window.** It is the one tab without the 1320px cap: the
+  conversation takes everything below the tabs and scrolls on its own, read in
+  a centred 760px column. Answer tables may widen past the column, framed, up
+  to the window width. The question box sits in flow at the bottom, so it never
+  covers the last message, with a fade that makes it read as floating; the
+  working row, the paused notice and the "New reply" chip sit just above it.
+  Handed-off work opens in a drawer on the right from the "Handed off" button.
