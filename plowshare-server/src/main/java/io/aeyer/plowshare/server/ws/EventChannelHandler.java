@@ -1460,6 +1460,14 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
     private final AtomicBoolean overrun = new AtomicBoolean();
     private volatile Thread drain;
+
+    /**
+     * Orders {@link #stop}'s interrupt against the drain thread's disclosure check, which reads the
+     * database and must not be interrupted mid-query. Guards {@link #checkingDisclosure}.
+     */
+    private final Object interruptGuard = new Object();
+
+    private boolean checkingDisclosure;
     private EventRequests requests;
     private volatile ConcurrentRequests.Connection concurrent;
     private volatile boolean domainSeen;
@@ -1552,9 +1560,16 @@ public final class EventChannelHandler extends TextWebSocketHandler
       }
       Thread thread = drain;
       if (thread != null) {
-        // The interrupt is the whole of it — the thread is parked in
-        // take() and the flag alone would never be read again.
-        thread.interrupt();
+        // The interrupt wakes a thread parked in acquire() and abandons a write
+        // wedged on a client that stopped reading. It must not land while the
+        // thread runs a reply's disclosure check: that reads project roles over
+        // JDBC, and interrupting a virtual thread in a socket read closes its
+        // Postgres connection ("Closed by interrupt", SQLSTATE 08006), which
+        // Hikari then evicts. A check in progress finishes normally instead,
+        // and the drain loop sees the cleared flag as soon as it returns.
+        synchronized (interruptGuard) {
+          if (!checkingDisclosure) thread.interrupt();
+        }
       }
     }
 
@@ -1805,7 +1820,23 @@ public final class EventChannelHandler extends TextWebSocketHandler
         }
         try {
           if (!running || !socket.isOpen()) return;
-          if (next instanceof Reply reply) reply.disclosure().run();
+          if (next instanceof Reply reply) {
+            // Checked under the guard: stop() clears the flag before it
+            // interrupts, so a check that starts here cannot carry a pending
+            // interrupt into its database read.
+            synchronized (interruptGuard) {
+              if (!running) return;
+              checkingDisclosure = true;
+            }
+            try {
+              reply.disclosure().run();
+            } finally {
+              synchronized (interruptGuard) {
+                checkingDisclosure = false;
+              }
+            }
+            if (!running) return;
+          }
           if (next instanceof Reply reply) reply.started().run();
           long writeStarted = System.nanoTime();
           if (next instanceof Reply reply)
