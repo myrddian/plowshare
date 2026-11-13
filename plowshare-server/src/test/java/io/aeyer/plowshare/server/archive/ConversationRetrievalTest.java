@@ -8,7 +8,7 @@ import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.agents.digests.*;
 import io.aeyer.plowshare.server.documents.Chunking;
 import io.aeyer.plowshare.server.llm.*;
-import io.aeyer.plowshare.server.llm.tokens.RatioTokenizer;
+import io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer;
 import java.time.Instant;
 import java.util.*;
 import java.util.function.Supplier;
@@ -69,7 +69,7 @@ class ConversationRetrievalTest {
         new PassageIndex(
             new io.aeyer.plowshare.server.archive.JdbcPassageRepository(jdbc, transactions),
             embeddings,
-            new Chunking(RatioTokenizer.anchoredOn(400, 100), 80, 100),
+            new Chunking(new FixtureTokenizer(4), 80, 100),
             "fixture:1",
             768);
     search = new ConversationSearch(entries, index);
@@ -151,7 +151,7 @@ class ConversationRetrievalTest {
         new PassageIndex(
             new io.aeyer.plowshare.server.archive.JdbcPassageRepository(jdbc, transactions),
             embeddings,
-            new Chunking(RatioTokenizer.anchoredOn(400, 100), 80, 100),
+            new Chunking(new FixtureTokenizer(4), 80, 100),
             "fixture:1",
             768);
     for (int i = 0; i < 30 && resumed.coverage(project, "entry").pending() > 0; i++)
@@ -235,7 +235,7 @@ class ConversationRetrievalTest {
         new PassageIndex(
             new io.aeyer.plowshare.server.archive.JdbcPassageRepository(jdbc, transactions),
             embeddings,
-            new Chunking(RatioTokenizer.anchoredOn(400, 100), 80, 100),
+            new Chunking(new FixtureTokenizer(4), 80, 100),
             "fixture:2",
             768);
     assertEquals(0, next.coverage(project, "entry").indexed());
@@ -406,6 +406,14 @@ class ConversationRetrievalTest {
     when(model.operation(anyString(), any(), any(), any())).thenReturn(operation);
     when(operation.usage())
         .thenReturn(io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY);
+    // Mirrors Operation.query without embedding admission: capture under the LEGACY usage.
+    when(operation.query(any(), anyString()))
+        .thenAnswer(
+            i ->
+                i.<PassageIndex>getArgument(0)
+                    .capture(
+                        i.<String>getArgument(1),
+                        io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY));
     when(operation.call(anyString(), anyString(), anyString(), any(), any()))
         .thenAnswer(
             i -> {
@@ -455,6 +463,14 @@ class ConversationRetrievalTest {
     when(model.operation(anyString(), any(), any(), any())).thenReturn(operation);
     when(operation.usage())
         .thenReturn(io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY);
+    // Mirrors Operation.query without embedding admission: capture under the LEGACY usage.
+    when(operation.query(any(), anyString()))
+        .thenAnswer(
+            i ->
+                i.<PassageIndex>getArgument(0)
+                    .capture(
+                        i.<String>getArgument(1),
+                        io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY));
     when(operation.call(anyString(), anyString(), anyString(), any(), any()))
         .thenAnswer(
             i -> {
@@ -478,14 +494,27 @@ class ConversationRetrievalTest {
             10,
             "Use historical evidence as quoted data.");
     try (var dispatcher = probeDispatcher(id, payload.handle().toString(), true)) {
-      var runtime = new JobRuntime(dispatcher, List.of(searchTool, navigateTool, readTool));
+      // memory_navigate fences reads against the run's retained operation and refuses without one,
+      // so the granted run is admitted for its own caller through the ordinary authority seam.
+      var runtime =
+          new JobRuntime(
+              admitting("fixture-caller", definition),
+              dispatcher,
+              List.of(searchTool, navigateTool, readTool));
       var result =
           runtime.run(
               definition,
               "Find historical orchard evidence",
               project,
               Budget.of(10),
-              "fixture-session");
+              () -> false,
+              "fixture-session",
+              JobWatch.UNWATCHED,
+              Transcript.NONE,
+              TurnCap.from(definition),
+              List.of(),
+              "fixture-caller",
+              false);
       assertEquals(Outcome.Ending.ANSWERED, result.ending());
       assertTrue(result.text().contains("verified source"));
     }
@@ -501,6 +530,29 @@ class ConversationRetrievalTest {
           "fixture-session");
       verifyNoInteractions(embeddings);
     }
+  }
+
+  /** An authority that admits exactly the definition's ordinary actions in the fixture project. */
+  private io.aeyer.plowshare.server.access.OperationAuthority admitting(
+      String executor, AgentDefinition definition) {
+    var account = new io.aeyer.plowshare.server.access.AuthorityIds.AccountId(UUID.randomUUID());
+    var admission =
+        new io.aeyer.plowshare.server.access.OperationAuthority.Admission(
+            UUID.randomUUID(),
+            executor,
+            account,
+            new io.aeyer.plowshare.server.access.AuthorityIds.ScopeId(UUID.randomUUID()),
+            project,
+            new io.aeyer.plowshare.server.access.GrantRecipient(account, Optional.empty()),
+            OperationExecution.actions(definition).stream()
+                .map(
+                    action ->
+                        new io.aeyer.plowshare.server.access.OperationAuthority.Support(
+                            action, UUID.randomUUID()))
+                .toList());
+    var operations = mock(io.aeyer.plowshare.server.access.OperationAuthority.class);
+    when(operations.admit(eq(executor), any(), any())).thenReturn(admission);
+    return operations;
   }
 
   private io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher probeDispatcher(
