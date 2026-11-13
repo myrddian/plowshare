@@ -19,7 +19,14 @@ from plowshare.contracts import (
 )
 
 from plowshare_privacy.collection import NetworkCollector
-from plowshare_privacy.contracts import CollectionPlan, Configuration, Evidence
+from plowshare_privacy.contracts import (
+    CollectionPlan,
+    Configuration,
+    Evidence,
+    PiHolePlan,
+    ServicePlan,
+    UniFiPlan,
+)
 from plowshare_privacy.journal import Publication, Receipt
 from plowshare_privacy.ports import evidence_name
 
@@ -43,6 +50,21 @@ def configuration(directory: Path) -> Configuration:
         "scheduled-example",
         CollectionPlan("fixture", (), (), 1, 1, snapshot, 0),
     )
+
+
+def with_sources(
+    plan: CollectionPlan,
+    *,
+    pihole: PiHolePlan | None = None,
+    unifi: UniFiPlan | None = None,
+) -> CollectionPlan:
+    """Configure ``plan`` with legacy services, as the old pihole/unifi keys decode."""
+    sources: list[ServicePlan] = []
+    if pihole is not None:
+        sources.append(ServicePlan.legacy_service("pihole", pihole))
+    if unifi is not None:
+        sources.append(ServicePlan.legacy_service("unifi", unifi))
+    return replace(plan, sources=tuple(sources))
 
 
 def event(

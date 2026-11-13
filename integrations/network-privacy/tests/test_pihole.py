@@ -16,7 +16,13 @@ from uuid import uuid4
 
 from aiohttp import web
 from aiohttp.test_utils import TestServer
-from support import EXAMPLES, FixturePort, MemoryReceipts, configuration
+from support import (
+    EXAMPLES,
+    FixturePort,
+    MemoryReceipts,
+    configuration,
+    with_sources,
+)
 
 from plowshare_privacy.collection import NetworkCollector, changes, scope_fingerprint
 from plowshare_privacy.collector_factory import configured_collector
@@ -446,15 +452,17 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         listener = await asyncio.start_server(accept, "127.0.0.1", 0)
         self.addAsyncCleanup(listener.wait_closed)
         self.addCleanup(listener.close)
-        plan = CollectionPlan(
-            "tcp",
-            (ADDRESS,),
-            (listener.sockets[0].getsockname()[1],),
-            1,
-            1,
-            None,
-            0,
-            labels=(DeviceLabel(ADDRESS, "Living room TV"),),
+        plan = with_sources(
+            CollectionPlan(
+                "tcp",
+                (ADDRESS,),
+                (listener.sockets[0].getsockname()[1],),
+                1,
+                1,
+                None,
+                0,
+                labels=(DeviceLabel(ADDRESS, "Living room TV"),),
+            ),
             pihole=self.plan,
         )
         original = asyncio.open_connection
@@ -570,8 +578,7 @@ class PiHoleConfigurationTest(unittest.TestCase):
             old.pop("device_descriptions")
             old.pop("enabled")
             old.pop("labels")
-            old.pop("pihole")
-            old.pop("unifi")
+            old.pop("sources")
             old["observations_file"] = str(plan.observations_file)
             self.assertEqual(
                 scope_fingerprint(plan),

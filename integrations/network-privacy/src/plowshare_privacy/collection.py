@@ -54,15 +54,18 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
         values.pop("enabled")
     if not plan.labels:
         values.pop("labels")
-    if plan.pihole is None:
-        values.pop("pihole")
-    else:
+    # Services keep the encoding of the former ``pihole``/``unifi`` fields, so
+    # an untouched configuration keeps its fingerprint and journal identity.
+    # Task 3 generalises this to non-legacy ``sources``; until then every
+    # service uses the legacy keys (one service per kind is enforced).
+    values.pop("sources")
+    if plan.pihole is not None:
+        values["pihole"] = asdict(plan.pihole)
         values["pihole"]["password_file"] = (
             str(plan.pihole.password_file) if plan.pihole.password_file else None
         )
-    if plan.unifi is None:
-        values.pop("unifi")
-    else:
+    if plan.unifi is not None:
+        values["unifi"] = asdict(plan.unifi)
         values["unifi"]["ca_file"] = (
             str(plan.unifi.ca_file) if plan.unifi.ca_file else None
         )

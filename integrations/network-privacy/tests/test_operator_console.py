@@ -14,7 +14,14 @@ from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
 from plowshare import Delivery, Refusal, TransportError
-from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
+from support import (
+    CountingCollector,
+    FixturePort,
+    MemoryReceipts,
+    configuration,
+    event,
+    with_sources,
+)
 from test_device_assessments import Dossiers, Runs
 
 from plowshare_privacy.advisories import AdvisoryLookup, AdvisoryPage
@@ -748,8 +755,9 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.worker.config = replace(
             self.config,
-            collection=replace(
-                self.config.collection, targets=(old,), ports=(443,), pihole=plan
+            collection=with_sources(
+                replace(self.config.collection, targets=(old,), ports=(443,)),
+                pihole=plan,
             ),
         )
         settings = AsyncMock(spec=Settings)

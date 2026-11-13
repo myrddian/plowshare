@@ -9,7 +9,8 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import AbstractSet, Literal, get_args
+from types import MappingProxyType
+from typing import AbstractSet, Literal, Mapping, get_args
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -593,6 +594,137 @@ class UniFiPlan:
         )
 
 
+Capability = Literal[
+    "network_table",
+    "dns_queries",
+    "dhcp_leases",
+    "dhcp_reservations",
+    "dhcp_scope",
+    "local_dns_names",
+    "controller_clients",
+    "managed_inventory",
+    "traffic_counters",
+]
+_CAPABILITIES: dict[str, Capability] = {name: name for name in get_args(Capability)}
+# These add new evidence, so they stay off until the operator names them: on an
+# upgraded configuration and whenever a service omits ``capabilities``.
+OPT_IN_CAPABILITIES: frozenset[Capability] = frozenset(
+    {"dhcp_leases", "dhcp_reservations", "dhcp_scope", "local_dns_names"}
+)
+ConnectorKind = Literal["pihole", "unifi"]
+_KINDS: dict[str, ConnectorKind] = {name: name for name in get_args(ConnectorKind)}
+# What each kind of service can offer. Enabling anything else is a decode error.
+KIND_CAPABILITIES: Mapping[ConnectorKind, frozenset[Capability]] = MappingProxyType(
+    {
+        "pihole": frozenset(
+            {
+                "network_table",
+                "dns_queries",
+                "dhcp_leases",
+                "dhcp_reservations",
+                "dhcp_scope",
+                "local_dns_names",
+            }
+        ),
+        "unifi": frozenset(
+            {
+                "controller_clients",
+                "managed_inventory",
+                "traffic_counters",
+                "dhcp_reservations",
+                "dhcp_scope",
+            }
+        ),
+    }
+)
+# UniFi DHCP reads address the legacy site by name, so they require trafficSite.
+_UNIFI_SITE_CAPABILITIES: frozenset[Capability] = frozenset(
+    {"dhcp_reservations", "dhcp_scope"}
+)
+MAX_SERVICES = 16
+
+
+def legacy_capabilities(
+    kind: ConnectorKind, settings: PiHolePlan | UniFiPlan
+) -> frozenset[Capability]:
+    """What a ``collection.pihole`` / ``collection.unifi`` key has always read."""
+    if kind == "pihole":
+        return frozenset({"network_table", "dns_queries"})
+    base: frozenset[Capability] = frozenset({"controller_clients", "managed_inventory"})
+    if isinstance(settings, UniFiPlan) and settings.traffic_site is not None:
+        return base | {"traffic_counters"}
+    return base
+
+
+@dataclass(frozen=True)
+class ServicePlan:
+    """One configured external service and the capabilities enabled on it.
+
+    ``legacy`` marks a service decoded from the old ``pihole``/``unifi`` keys,
+    whose scope fingerprint keeps its historical encoding.
+    """
+
+    kind: ConnectorKind
+    id: str
+    capabilities: frozenset[Capability]
+    settings: PiHolePlan | UniFiPlan
+    legacy: bool = False
+
+    def __post_init__(self) -> None:
+        expected = PiHolePlan if self.kind == "pihole" else UniFiPlan
+        if not isinstance(self.settings, expected):
+            raise ValueError("Service settings do not match the service kind")
+        if not self.capabilities <= KIND_CAPABILITIES[self.kind]:
+            raise ValueError("Service enables a capability its kind does not offer")
+        if (
+            isinstance(self.settings, UniFiPlan)
+            and self.settings.traffic_site is None
+            and self.capabilities & _UNIFI_SITE_CAPABILITIES
+        ):
+            raise ValueError("UniFi DHCP capabilities require trafficSite")
+
+    @classmethod
+    def legacy_service(
+        cls, kind: ConnectorKind, settings: PiHolePlan | UniFiPlan
+    ) -> ServicePlan:
+        return cls(kind, kind, legacy_capabilities(kind, settings), settings, True)
+
+    @classmethod
+    def decode(cls, value: object) -> ServicePlan:
+        row = object_fields(value, {"kind", "id", "settings"}, {"capabilities"})
+        kind = _KINDS.get(row["kind"]) if isinstance(row["kind"], str) else None
+        if kind is None:
+            raise ValueError("Unsupported service kind")
+        settings: PiHolePlan | UniFiPlan = (
+            PiHolePlan.decode(row["settings"])
+            if kind == "pihole"
+            else UniFiPlan.decode(row["settings"])
+        )
+        if "capabilities" not in row:
+            capabilities = KIND_CAPABILITIES[kind] - OPT_IN_CAPABILITIES
+        else:
+            names = items(row["capabilities"], len(_CAPABILITIES))
+            enabled = [
+                _CAPABILITIES.get(name) if isinstance(name, str) else None
+                for name in names
+            ]
+            if None in enabled or len(set(enabled)) != len(enabled):
+                raise ValueError("Service capabilities must be unique known names")
+            capabilities = frozenset(name for name in enabled if name is not None)
+        return cls(kind, identifier(row["id"]), capabilities, settings)
+
+
+def _validate_sources(sources: tuple[ServicePlan, ...]) -> None:
+    """Rules across services that hold until multi-service support (stage 3)."""
+    if len({source.id for source in sources}) != len(sources):
+        raise ValueError("Service ids must be unique")
+    for capability in ("dns_queries", "traffic_counters"):
+        if sum(capability in source.capabilities for source in sources) > 1:
+            raise ValueError("Enable " + capability + " on at most one service")
+    if len({source.kind for source in sources}) != len(sources):
+        raise ValueError("Configure one service per kind until multi-service support")
+
+
 @dataclass(frozen=True)
 class CollectionPlan:
     mode: Literal["tcp", "fixture"]
@@ -604,13 +736,61 @@ class CollectionPlan:
     max_observation_age: int
     enabled: bool = True
     labels: tuple[DeviceLabel, ...] = ()
-    pihole: PiHolePlan | None = None
-    unifi: UniFiPlan | None = None
+    # The configured external services, in configuration order. Decode allows
+    # at most one service per kind in this stage.
+    sources: tuple[ServicePlan, ...] = ()
     quick_scan: bool = False
     dns_profiles: bool = False
     # Ask confirmed devices to describe themselves after quick checks
     # (unicast SSDP/mDNS); see device_facts. Local presence work only.
     device_descriptions: bool = False
+
+    @property
+    def pihole(self) -> PiHolePlan | None:
+        """Settings of the single Pi-hole service, if configured.
+
+        Stage-1 accessor kept for existing callers; the stage-3 plan removes it
+        once the collector reads ``sources`` through the connector registry.
+        """
+        for source in self.sources:
+            if isinstance(source.settings, PiHolePlan):
+                return source.settings
+        return None
+
+    @property
+    def unifi(self) -> UniFiPlan | None:
+        """Settings of the single UniFi service, if configured.
+
+        Stage-1 accessor kept for existing callers; the stage-3 plan removes it
+        once the collector reads ``sources`` through the connector registry.
+        """
+        for source in self.sources:
+            if isinstance(source.settings, UniFiPlan):
+                return source.settings
+        return None
+
+
+def _collection_sources(plan: Mapping[str, object]) -> tuple[ServicePlan, ...]:
+    """Decode ``sources``, or the legacy ``pihole``/``unifi`` keys, never both."""
+    if "sources" in plan:
+        if "pihole" in plan or "unifi" in plan:
+            raise ValueError("Configure services in sources or pihole/unifi, not both")
+        sources = tuple(
+            ServicePlan.decode(entry) for entry in items(plan["sources"], MAX_SERVICES)
+        )
+    else:
+        legacy: list[ServicePlan] = []
+        if "pihole" in plan:
+            legacy.append(
+                ServicePlan.legacy_service("pihole", PiHolePlan.decode(plan["pihole"]))
+            )
+        if "unifi" in plan:
+            legacy.append(
+                ServicePlan.legacy_service("unifi", UniFiPlan.decode(plan["unifi"]))
+            )
+        sources = tuple(legacy)
+    _validate_sources(sources)
+    return sources
 
 
 def household_day(stamp: str, zone: str) -> date:
@@ -726,6 +906,7 @@ class Configuration:
                 "deviceLabels",
                 "pihole",
                 "unifi",
+                "sources",
                 "quickScan",
                 "dnsProfiles",
                 "deviceDescriptions",
@@ -789,20 +970,25 @@ class Configuration:
                 if observations
                 else 0
             )
-            pihole = PiHolePlan.decode(plan["pihole"]) if "pihole" in plan else None
+            sources = _collection_sources(plan)
+            dns = any("dns_queries" in source.capabilities for source in sources)
             dns_profiles = plan.get("dnsProfiles", False)
             if type(dns_profiles) is not bool:
                 raise ValueError("DNS activity profiles must be a boolean")
-            if dns_profiles and (not quick_scan or pihole is None):
+            if dns_profiles and (
+                not quick_scan or not any(source.kind == "pihole" for source in sources)
+            ):
                 raise ValueError(
                     "DNS activity profiles require quick presence checks and Pi-hole"
                 )
+            if dns_profiles and not dns:
+                raise ValueError("DNS activity profiles require dns_queries on Pi-hole")
             device_descriptions = plan.get("deviceDescriptions", False)
             if type(device_descriptions) is not bool:
                 raise ValueError("Device descriptions must be a boolean")
             if device_descriptions and not quick_scan:
                 raise ValueError("Device descriptions require quick presence checks")
-            if pihole is not None and observations is not None:
+            if dns and observations is not None:
                 raise ValueError("Choose either Pi-hole or a DNS observation file")
             collection = CollectionPlan(
                 "tcp",
@@ -814,8 +1000,7 @@ class Configuration:
                 age,
                 enabled,
                 device_labels(plan.get("deviceLabels", {}), targets),
-                pihole,
-                UniFiPlan.decode(plan["unifi"]) if "unifi" in plan else None,
+                sources,
                 quick_scan,
                 dns_profiles,
                 device_descriptions,

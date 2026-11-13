@@ -4,7 +4,7 @@ import unittest
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from support import configuration
+from support import configuration, with_sources
 
 from plowshare_privacy.contracts import PiHolePlan, UniFiPlan
 from plowshare_privacy.system_view import describe
@@ -30,7 +30,7 @@ class SystemViewTest(unittest.TestCase):
     def test_names_credentials_and_reports_presence_without_values(self) -> None:
         config = replace(
             self.config,
-            collection=replace(self.config.collection, pihole=PIHOLE, unifi=UNIFI),
+            collection=with_sources(self.config.collection, pihole=PIHOLE, unifi=UNIFI),
         )
         environment = {"PLOWSHARE_TOKEN": "secret-service-value", "UNIFI_KEY": " "}
         view = describe(config, None, environment, lambda path: True)
@@ -53,7 +53,7 @@ class SystemViewTest(unittest.TestCase):
     def test_reports_a_missing_password_file_and_byte_counters(self) -> None:
         config = replace(
             self.config,
-            collection=replace(
+            collection=with_sources(
                 self.config.collection,
                 pihole=PIHOLE,
                 unifi=replace(UNIFI, traffic_site="default", ca_file=Path("/ca.pem")),
