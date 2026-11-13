@@ -1814,7 +1814,10 @@ function renderReferences(value) {
     row.append(line, element('p', item.product + (item.retired ? ' · Retired from the shipped list' : ''), 'hint'));
     if (item.error) row.append(element('p', item.error, 'notice error'));
     if (item.untag_failed) row.append(element('p', 'Removing it from search failed.', 'notice error'));
-    if (item.phase === 'failed' || item.phase === 'blocked' || item.untag_failed) {
+    // A ``submitted`` row with an error is an uncertain acquire whose ticket was
+    // never found; Retry replays it with the same request id. One without an
+    // error is still in flight and is left alone.
+    if (item.phase === 'failed' || item.phase === 'blocked' || item.untag_failed || (item.phase === 'submitted' && item.error)) {
       row.append(actionButton('Retry', 'secondary', () => retryReference(item.url)));
     }
     return row;
@@ -2480,7 +2483,11 @@ function renderAttention(value) {
       showView('settings', true);
       byId('reference-requests').scrollIntoView?.({block:'start'});
     }));
-  const stuck = (value.references?.failed || 0) + (value.references?.blocked || 0);
+  // An unusable reference journal: reported by the overview while running, or
+  // by /api/status when it could not be opened at startup.
+  const referenceProblem = value.references?.detail || (!value.references && latestStatus?.references_detail) || null;
+  if (referenceProblem) items.push(attentionItem('!', 'Reference docs unavailable', referenceProblem, 'Open Settings', () => showView('settings', true)));
+  const stuck = (value.references?.failed || 0) + (value.references?.blocked || 0) + (value.references?.unresolved || 0);
   if (stuck) items.push(attentionItem(formatCount(stuck), 'Reference docs need a check',
     'Some vendor documentation could not be fetched or is held. Retry it from the Reference library.', 'Open Settings', () => showView('settings', true)));
   const drafts = latestStatus?.profile_drafts_waiting || 0;

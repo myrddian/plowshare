@@ -56,7 +56,7 @@ from .profile_research import DAILY_LIMIT as RESEARCH_DAILY_LIMIT
 from .profile_research import ResearchReview, admitted_today
 from .reference_library import MAX_REFRESH_DAYS
 from .reference_requests import ReferenceRequest, ReferenceRequests
-from .reference_service import PHASE_LABELS, ReferenceService
+from .reference_service import JOURNAL_UNREADABLE, PHASE_LABELS, ReferenceService
 from .schedule_editor import ScheduleManagement
 from .system_view import describe
 from .tools import (
@@ -255,9 +255,7 @@ def application(
                 }
                 if deep_scans is not None
                 else None,
-                "references": asdict(references.counts())
-                if references is not None
-                else None,
+                "references": reference_counts(),
                 "reference_requests": request_counts(),
                 "ask": ask_overview(),
             }
@@ -803,6 +801,22 @@ def application(
                 status=502,
             )
         return reference_rows(service)
+
+    def reference_counts() -> dict[str, object] | None:
+        # Counts only; the rows are read when the owner opens Settings.
+        if references is None:
+            return None
+        try:
+            counts = references.counts()
+        except (ValueError, OSError):
+            # A bad journal must not take the whole overview down; say why instead.
+            return {
+                "failed": 0,
+                "blocked": 0,
+                "unresolved": 0,
+                "detail": JOURNAL_UNREADABLE,
+            }
+        return {**asdict(counts), "detail": None}
 
     def request_journal() -> ReferenceRequests:
         if reference_requests is None:

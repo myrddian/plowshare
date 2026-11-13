@@ -20,7 +20,7 @@ from plowshare.contracts import (
     SelectionDtoScopeVariant3Dto,
 )
 
-from plowshare_privacy.reference_port import SdkReferencePort
+from plowshare_privacy.reference_port import MAX_PAGES, SdkReferencePort
 
 SCOPE = SelectionDtoScopeVariant3Dto(
     kind="project", project="project-1", include_global=False
@@ -89,6 +89,18 @@ class ReferencePortTest(unittest.IsolatedAsyncioTestCase):
                 InformationAcquisitionsRequest(scope=SCOPE, offset=100, limit=100),
             ],
         )
+
+    async def test_acquisitions_stop_at_the_page_cap(self) -> None:
+        full = tuple(acquisition(f"a{n}") for n in range(100))
+        client = FakeClient(*([full] * (MAX_PAGES + 1)))
+        with self.assertRaisesRegex(ValueError, "Too many acquisitions"):
+            await port(client).acquisitions()
+        self.assertEqual(len(client.requests), MAX_PAGES)
+
+    async def test_acquisitions_reject_an_oversized_page(self) -> None:
+        oversized = tuple(acquisition(f"a{n}") for n in range(101))
+        with self.assertRaisesRegex(ValueError, "longer than requested"):
+            await port(FakeClient(oversized)).acquisitions()
 
     async def test_revision_reads_status_with_tags_version(self) -> None:
         revision = InformationRevisionDto(

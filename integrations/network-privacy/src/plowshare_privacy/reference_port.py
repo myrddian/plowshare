@@ -17,6 +17,10 @@ from plowshare.contracts import (
 )
 
 PAGE_SIZE = 100
+# The most pages one listing reads: 5,000 acquisitions. The collector creates
+# a handful per product, so a server still returning full pages past this is
+# misbehaving; the listing fails instead of looping forever.
+MAX_PAGES = 50
 
 
 class ReferencePort(Protocol):
@@ -55,21 +59,26 @@ class SdkReferencePort(ReferencePort):
         return ticket
 
     async def acquisitions(self) -> tuple[InformationAcquisitionDto, ...]:
-        """Every acquisition in scope; a short page marks the end."""
+        """Every acquisition in scope; a short page marks the end.
+
+        At most ``MAX_PAGES`` pages are read. A page longer than requested, or a
+        listing still full after the last allowed page, raises ``ValueError``.
+        """
         found: list[InformationAcquisitionDto] = []
-        offset = 0
-        while True:
+        for number in range(MAX_PAGES):
             page = (
                 await self.client.request(
                     InformationAcquisitionsRequest(
-                        scope=self.scope, offset=offset, limit=PAGE_SIZE
+                        scope=self.scope, offset=number * PAGE_SIZE, limit=PAGE_SIZE
                     )
                 )
             ).require_payload()
+            if len(page) > PAGE_SIZE:
+                raise ValueError("Acquisition page longer than requested")
             found.extend(page)
             if len(page) < PAGE_SIZE:
                 return tuple(found)
-            offset += PAGE_SIZE
+        raise ValueError("Too many acquisitions to list")
 
     async def revision(self, revision_id: str) -> InformationRevisionDto:
         """Read one revision's tags and tags version via `information.status`.

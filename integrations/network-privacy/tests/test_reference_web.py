@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from dataclasses import replace
@@ -13,6 +14,7 @@ from uuid import uuid4
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from plowshare import Delivery, Refusal, TransportError
+from plowshare.contracts import InformationAcquisitionDto
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration
 from test_operator_console import ConsoleFixture, Settings
 from test_reference_library import ENTRY, OTHER, SECOND, URL, FakePort
@@ -24,6 +26,7 @@ from plowshare_privacy.reference_library import ReferenceJournal, ReferenceLibra
 from plowshare_privacy.reference_requests import ReferenceRequests
 from plowshare_privacy.reference_service import (
     JOURNAL_UNREADABLE,
+    REFERENCES_FAILED,
     ReferenceService,
     open_references,
 )
@@ -142,7 +145,10 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("failed", failed["phase"])
         self.assertIn("Fetching is disabled", failed["error"])
         overview = await (await client.get("/api/overview", headers=HEADERS)).json()
-        self.assertEqual({"failed": 1, "blocked": 0}, overview["references"])
+        self.assertEqual(
+            {"failed": 1, "blocked": 0, "unresolved": 0, "detail": None},
+            overview["references"],
+        )
         response = await client.post(
             "/api/references/retry", headers=HEADERS, json={"url": URL}
         )
@@ -150,7 +156,10 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         again = (await response.json())["references"][0]
         self.assertEqual("queued", again["phase"])
         overview = await (await client.get("/api/overview", headers=HEADERS)).json()
-        self.assertEqual({"failed": 0, "blocked": 0}, overview["references"])
+        self.assertEqual(
+            {"failed": 0, "blocked": 0, "unresolved": 0, "detail": None},
+            overview["references"],
+        )
 
     async def test_transport_error_is_recorded_not_raised(self) -> None:
         self.port.acquire_fault = TransportError(Delivery.NOT_SUBMITTED, "offline")
@@ -158,6 +167,92 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("TransportError", self.service.error or "")
         await self.service.poll()
         self.assertIsNone(self.service.error)
+
+    async def test_loop_survives_any_failure_and_shows_it(self) -> None:
+        await self.service.poll()
+        broken = Refusal("FORBIDDEN", "Listing is disabled")
+        listing = self.port.acquisitions
+        calls = 0
+
+        async def refuse() -> tuple[InformationAcquisitionDto, ...]:
+            nonlocal calls
+            calls += 1
+            if calls <= 2:
+                raise broken
+            return await listing()
+
+        self.port.acquisitions = refuse  # type: ignore[method-assign]
+        stop = asyncio.Event()
+        with patch("plowshare_privacy.reference_service.POLL_SECONDS", 0.01):
+            loop = asyncio.create_task(self.service.run(stop))
+            for _ in range(200):
+                if self.service.error:
+                    break
+                await asyncio.sleep(0.005)
+            self.assertEqual(REFERENCES_FAILED, self.service.error)
+            self.assertFalse(loop.done())
+            for _ in range(200):
+                if calls > 2 and self.service.error is None:
+                    break
+                await asyncio.sleep(0.005)
+            self.assertIsNone(self.service.error)
+            self.assertFalse(loop.done())
+            stop.set()
+            await loop
+
+    async def test_journal_failure_in_a_pass_is_shown_and_loop_continues(
+        self,
+    ) -> None:
+        stop = asyncio.Event()
+        with (
+            patch.object(
+                self.service.library,
+                "schedule_refresh",
+                side_effect=[OSError("disk"), None, None, None, None, None],
+            ),
+            patch("plowshare_privacy.reference_service.POLL_SECONDS", 0.01),
+        ):
+            loop = asyncio.create_task(self.service.run(stop))
+            for _ in range(200):
+                if self.service.error:
+                    break
+                await asyncio.sleep(0.005)
+            self.assertEqual(REFERENCES_FAILED, self.service.error)
+            self.assertFalse(loop.done())
+            stop.set()
+            await loop
+
+    async def test_uncertain_delivery_counts_as_needing_attention(self) -> None:
+        self.port.acquire_fault = TransportError(Delivery.UNKNOWN, "lost")
+        self.port.acquire_lands = False
+        await self.service.poll()
+        await self.service.poll()
+        unresolved = next(r for r in self.service.view() if r.url == URL)
+        self.assertEqual("submitted", unresolved.phase)
+        self.assertIsNotNone(unresolved.error)
+        counts = self.service.counts()
+        self.assertEqual((0, 0, 1), (counts.failed, counts.blocked, counts.unresolved))
+        client = await self.client(self.service)
+        response = await client.post(
+            "/api/references/retry", headers=HEADERS, json={"url": URL}
+        )
+        self.assertEqual(200, response.status, await response.text())
+        self.assertEqual(0, self.service.counts().unresolved)
+
+    async def test_unreadable_references_journal_leaves_the_overview_working(
+        self,
+    ) -> None:
+        path = self.root / "references.json"
+        path.chmod(0o644)
+        client = await self.client(self.service)
+        overview = await client.get("/api/overview", headers=HEADERS)
+        self.assertEqual(200, overview.status, await overview.text())
+        counts = (await overview.json())["references"]
+        self.assertEqual(0, counts["failed"])
+        self.assertEqual(JOURNAL_UNREADABLE, counts["detail"])
+        path.chmod(0o600)
+        again = await (await client.get("/api/overview", headers=HEADERS)).json()
+        self.assertIsNone(again["references"]["detail"])
 
     async def test_retry_reports_a_connection_or_library_failure(self) -> None:
         await self.fail_first()

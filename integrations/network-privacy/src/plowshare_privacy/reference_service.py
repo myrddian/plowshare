@@ -6,10 +6,14 @@ error, and summarises receipts for the dashboard's attention band.
 
 Each pass first requeues the references due for their periodic refresh
 (``schedule_refresh``), then advances. The pass runs on the deep-scan cadence.
-``advance`` re-raises only ``TransportError``; the loop records that once and
-keeps going, so connection loss neither crashes the collector nor retries a
-receipt by itself. A receipt that failed or was blocked stays that way until
-the owner presses Retry.
+``advance`` re-raises ``TransportError``; ``poll`` records that as a waiting
+connection. Any other failure of a pass (a refused or contract-breaking
+acquisition listing, an unreadable or unwritable journal) is caught by ``run``,
+which records a fixed owner-facing ``error`` and keeps looping, as the deep scan
+loop does. Neither crashes the collector nor retries a receipt by itself: the
+next pass re-reads the journal and continues where it stopped. A receipt that
+failed or was blocked, or whose uncertain acquire was never found, stays that
+way until the owner presses Retry.
 """
 
 from __future__ import annotations
@@ -50,10 +54,16 @@ def project_scope(project: str) -> SelectionDtoScopeVariant3Dto:
 
 @dataclass(frozen=True)
 class ReferenceCounts:
-    """Receipts needing the owner's attention. Retired seed entries are not counted."""
+    """Receipts needing the owner's attention. Retired seed entries are not counted.
+
+    ``unresolved`` is a ``submitted`` receipt with an error: its acquire's delivery
+    was uncertain and no matching ticket was found, so only the owner's Retry (an
+    idempotent replay with the same request id) moves it on.
+    """
 
     failed: int
     blocked: int
+    unresolved: int
 
 
 class ReferenceService:
@@ -66,20 +76,6 @@ class ReferenceService:
         self.now = now
         self.error: str | None = None
 
-    @classmethod
-    def open(cls, root: Path, port: ReferencePort) -> ReferenceService:
-        """Build the service and queue the shipped seed once.
-
-        The packaged seed is validated first and an invalid seed raises
-        ``ValueError``, which stops start-up. A journal that cannot be read or
-        written raises ``ValueError`` or ``OSError``; ``open_references`` turns
-        that into a disabled feature instead.
-        """
-        seed = load_seed()
-        library = ReferenceLibrary(ReferenceJournal(root), port)
-        library.plan_seed(seed)
-        return cls(library)
-
     def view(self) -> tuple[ReferenceReceipt, ...]:
         return self.library.view()
 
@@ -88,6 +84,9 @@ class ReferenceService:
         return ReferenceCounts(
             failed=sum(r.phase == "failed" for r in live),
             blocked=sum(r.phase == "blocked" for r in live),
+            unresolved=sum(
+                r.phase == "submitted" and r.error is not None for r in live
+            ),
         )
 
     async def retry(self, url: str) -> None:
@@ -118,13 +117,29 @@ class ReferenceService:
             self.error = None
 
     async def run(self, stop: asyncio.Event) -> None:
+        """Poll every ``POLL_SECONDS`` until ``stop``; no failure ends the loop.
+
+        A failed pass leaves the journal as its last save wrote it, so the next
+        pass resumes from there; nothing is re-sent by the loop beyond what
+        ``advance`` would send anyway. The error stays until a clean pass.
+        """
         while not stop.is_set():
-            await self.poll()
+            try:
+                await self.poll()
+            except Exception:
+                # Shown as fixed text: a refusal's or OS error's own words may
+                # carry server text or local paths the dashboard must not show.
+                self.error = REFERENCES_FAILED
             try:
                 await asyncio.wait_for(stop.wait(), POLL_SECONDS)
             except TimeoutError:
                 continue
 
+
+REFERENCES_FAILED = (
+    "Reference documents need attention: the last pass failed. Fetched and queued "
+    "references were kept; it tries again on the next pass."
+)
 
 JOURNAL_UNREADABLE = (
     "Reference documents need attention: their journal could not be read."

@@ -58,6 +58,28 @@ test('reference rows never render server text as markup and retry only failed or
   assert.equal(node('reference-detail').textContent, 'Waiting <i>');
 });
 
+test('attention counts unresolved deliveries and shows an unusable library', () => {
+  const {context, node, run} = dashboard();
+  const band = value => {context.value = value; run('renderAttention(value)'); return node('attention-items').children.map(item => texts(item).join(' | '));};
+  let lines = band(overview({failed:0, blocked:0, unresolved:1, detail:null}));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^1 \| Reference docs need a check/);
+  lines = band(overview({failed:0, blocked:0, unresolved:0, detail:'Reference documents need attention: their journal could not be read.'}));
+  assert.deepEqual(lines, ['! | Reference docs unavailable | Reference documents need attention: their journal could not be read. | Open Settings']);
+  // At startup an unreadable journal leaves no service; /api/status says why.
+  run("latestStatus = {references_detail:'Reference documents need attention: their journal could not be read.'}");
+  lines = band(overview(null));
+  assert.deepEqual(lines, ['! | Reference docs unavailable | Reference documents need attention: their journal could not be read. | Open Settings']);
+  run('latestStatus = null');
+  assert.deepEqual(band(overview(null)), []);
+});
+
+test('an unresolved delivery offers Retry; an in-flight one does not', () => {
+  const {node, run} = dashboard();
+  run("renderReferences({references:[" + [row('submitted', {error:'The acquisition request’s delivery was uncertain.'}), row('submitted'), row('awaiting')].map(JSON.stringify).join(',') + "], error:null})");
+  assert.deepEqual(node('reference-list').children.map(item => buttons(item).length), [1, 0, 0]);
+});
+
 test('retry button posts url', async () => {
   const calls = [];
   const {node, run} = dashboard(async (path, options = {}) => {
