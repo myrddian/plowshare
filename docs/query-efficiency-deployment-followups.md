@@ -147,6 +147,33 @@ owner disablement, ceilings, membership removal, delegated revocation and expiry
 and issuer removal. A changed authority function must change its Java mirror in
 the same change, or that test fails.
 
+## Notification-trusted authority
+
+On BETA the snapshot removed 85–92% of authority-table reads, but every check still
+issued three small statements: caller eligibility, version capture and the hit's
+version validation. Authority changes are rare and act on a human timescale, so
+the authority snapshot and targeted log checks now trust database notifications
+for repeat reads (see the bounded exception in the
+[cache design](query-efficiency-and-cache-design.md)). A trusted check issues no
+SQL. A committed revocation, role change or account disable takes effect within
+`plowshare.projection-cache.notified.staleness`, 2 s by default, not instantly.
+
+**Why the listener needed probes.** The listener only read its socket. A
+connection lost without a reset, as after a VM pause or a dropped NAT entry, made
+every poll return empty indefinitely: no notification, no error and no recovery.
+The per-read version fence hid this. The listener now sends itself a probe every
+500 ms on a session with a network timeout. An answered probe proves delivery, and
+a probe unanswered for 3 s ends the session. Silent loss therefore recovers in
+about the timeout plus the reconnect delay, and trusted hits stop as soon as
+proof is older than the staleness bound. Probes run whenever
+`plowshare.projection-cache.notified.enabled` is true, the default, including for
+caches that stay versioned. Setting it to false restores the previous behavior.
+
+Writes in the caller's own transaction, transactions above READ COMMITTED and
+expiries inside the bound still use the version fence. `NotifiedProjectionDatabaseTest`
+checks commit-order echoes and a revocation reaching a trusted cache within the
+bound on real PostgreSQL.
+
 ## Regression provenance and validation
 
 The per-row document guard and unconditional retrieval dispatch originate in

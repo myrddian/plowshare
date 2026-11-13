@@ -35,6 +35,17 @@ public interface ProjectionChangeSignals extends AutoCloseable {
 
   boolean healthy();
 
+  /**
+   * {@link System#nanoTime()} at which the newest answered delivery probe was sent, within the
+   * current ready state. Every change committed before that instant has already been passed to
+   * {@link Observer#changed}, so a value whose watched domains have not changed since it was stored
+   * is at most {@code now - deliveredThrough} behind the database. Empty while not ready, before
+   * the first answered probe, or when this listener does not probe.
+   */
+  default java.util.OptionalLong deliveredThrough() {
+    return java.util.OptionalLong.empty();
+  }
+
   @Override
   void close();
 }

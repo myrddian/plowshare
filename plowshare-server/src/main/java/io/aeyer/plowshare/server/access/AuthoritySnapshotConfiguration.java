@@ -24,7 +24,12 @@ public class AuthoritySnapshotConfiguration {
   public AuthoritySnapshots authoritySnapshots(
       JdbcTemplate jdbc, ProjectionCaches caches, ReadAdmission admission) {
     return new CachedAuthoritySnapshots(
-        caches.create("authority-snapshot-v1", Set.of(ProjectionVersions.Domain.AUTHORITY)),
+        // Authority changes are rare and an admin acts on a seconds scale: trust notifications for
+        // repeat checks, within plowshare.projection-cache.notified.staleness.
+        caches.create(
+            "authority-snapshot-v1",
+            Set.of(ProjectionVersions.Domain.AUTHORITY),
+            io.aeyer.plowshare.server.cache.ProjectionCaches.Freshness.NOTIFIED),
         new JdbcAuthoritySnapshotRepository(jdbc, ROW_LIMIT),
         admission);
   }

@@ -19,7 +19,9 @@ public class InformationVisibilityConfiguration {
         jdbc,
         caches.create(
             "information-log-visibility-v1",
-            Set.of(ProjectionVersions.Domain.READABILITY, ProjectionVersions.Domain.AUTHORITY)),
+            Set.of(ProjectionVersions.Domain.READABILITY, ProjectionVersions.Domain.AUTHORITY),
+            // Targeted log checks only; feed reads keep their own per-read version fence.
+            io.aeyer.plowshare.server.cache.ProjectionCaches.Freshness.NOTIFIED),
         versions,
         admission);
   }
