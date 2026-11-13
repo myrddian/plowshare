@@ -19,7 +19,9 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
   /**
    * Uses {@code visibility} for targeted log checks, so job listings and per-turn rechecks reuse
    * the account's current deny set instead of re-walking ancestry and retained inputs per call.
+   * Component scanning constructs this class, so Spring must be told which constructor to use.
    */
+  @org.springframework.beans.factory.annotation.Autowired
   public JdbcJobInformationRepository(JdbcTemplate jdbc, InformationLogVisibility visibility) {
     this.jdbc = jdbc;
     this.visibility = java.util.Objects.requireNonNull(visibility);
