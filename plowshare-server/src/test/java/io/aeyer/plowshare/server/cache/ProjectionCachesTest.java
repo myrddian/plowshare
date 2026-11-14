@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.zaxxer.hikari.HikariDataSource;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
@@ -122,7 +123,7 @@ class ProjectionCachesTest {
     database.setUsername("generic-fixture");
     database.setPassword("generic-fixture-password");
     var configuration = new ProjectionCacheConfiguration();
-    try (var primary = new com.zaxxer.hikari.HikariDataSource()) {
+    try (var primary = new HikariDataSource()) {
       primary.setJdbcUrl("jdbc:postgresql://primary.example.invalid/actual-fixture");
       primary.setUsername("actual-fixture");
       primary.setPassword("actual-fixture-password");
@@ -155,7 +156,7 @@ class ProjectionCachesTest {
     database.setUrl("jdbc:postgresql://database.example.invalid/projection-fixture");
     var beans = new StaticListableBeanFactory();
     beans.addBean("registry", new SimpleMeterRegistry());
-    try (var primary = new com.zaxxer.hikari.HikariDataSource()) {
+    try (var primary = new HikariDataSource()) {
       primary.setJdbcUrl("jdbc:postgresql://primary.example.invalid/actual-fixture");
       primary.setDriverClassName("org.postgresql.Driver");
       try (var connections =

@@ -15,6 +15,7 @@ import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.events.SpeakerHandles;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.pool.OperationStatements;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
@@ -25,6 +26,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -885,6 +887,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
             Code.CAPACITY_EXHAUSTED, "Request queue is full; nothing was started, retry later"));
   }
 
+  @SuppressWarnings("try")
   private java.util.concurrent.CompletionStage<Void> routeConcurrent(
       WebSocketSession socket,
       Delivery delivery,
@@ -914,15 +917,21 @@ public final class EventChannelHandler extends TextWebSocketHandler
                     || socketAuthorization != null && !socketAuthorization.current(socket))
                   throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
               });
-      var answer =
-          ConcurrentDispatch.TYPE.equals(type)
-              ? java.util.concurrent.CompletableFuture.completedFuture(
-                  Outcome.ok(
-                      new ConcurrentDispatch.Selected(
-                          ConcurrentDispatch.MODE,
-                          advertisedRequestDepth(),
-                          ConcurrentDispatch.MAX_ID_BYTES)))
-              : router().routeAsync(frame, asking);
+      CompletionStage<Outcome> answer;
+      // One socket request, counted on this request's own virtual thread (ConcurrentRequests starts
+      // one per request). Only the synchronous part of the handler is counted; work a handler
+      // completes on another thread is not part of this scope.
+      try (var ignored = OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
+        answer =
+            ConcurrentDispatch.TYPE.equals(type)
+                ? java.util.concurrent.CompletableFuture.completedFuture(
+                    Outcome.ok(
+                        new ConcurrentDispatch.Selected(
+                            ConcurrentDispatch.MODE,
+                            advertisedRequestDepth(),
+                            ConcurrentDispatch.MAX_ID_BYTES)))
+                : router().routeAsync(frame, asking);
+      }
       return answer.thenAccept(
           outcome -> {
             if (!delivery.running || !socket.isOpen()) {
@@ -949,6 +958,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
   }
 
   /** Recheck authority at execution, because a queued operation may outlive its account session. */
+  @SuppressWarnings("try")
   private void routeFrame(WebSocketSession socket, Delivery delivery, String frame) {
     if (!socket.isOpen() || !delivery.running) return;
     if (socketAuthorization != null && !socketAuthorization.current(socket)) return;
@@ -967,7 +977,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
                 throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
             });
     Outcome outcome;
-    try {
+    // One socket request, counted on this thread, which runs it to completion here.
+    try (var ignored = OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
       outcome = router().route(frame, asking);
     } catch (RuntimeException unexpected) {
       // A SAFETY NET, NOT A SECOND MAPPING. FrameRouter already turns

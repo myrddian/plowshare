@@ -200,13 +200,14 @@ hands out.
 
 ### Statement and authority-check meters
 
-Always registered when a meter registry exists (it is, with actuator); absent otherwise.
+Present only when a meter registry exists (it does, with actuator). Each `plowshare.jdbc.statements` timer registers on the first statement of its `pool`, `method` and `outcome` combination, so a combination that has never occurred (for example `outcome=failed`) is absent rather than zero; the two authority counters register every outcome at startup, so they read zero until used.
 
 | Meter | Type | Tags | What it shows |
 | --- | --- | --- | --- |
 | `plowshare.jdbc.statements` | timer | `pool`, `method`, `outcome` | Every physical JDBC execute (a batch is one) and its duration. `pool` is `main`, `projection-versions` or `listen`; `method` is the JDBC execute method; `outcome` is `ok` or `failed`. |
 | `plowshare.authority.admission.checks` | counter | `outcome` | How each operation admission recheck was answered: `verified_hit` (remembered, no walk), `walked` (walked and recorded), `transaction_walk` (caller's transaction may hold writes, never reused), `no_snapshot_walk` (no usable authority snapshot, never reused), `refused` (the walk threw; never recorded). |
 | `plowshare.authority.session.checks` | counter | `outcome` | How each socket session was decided: `snapshot` (accepted from memory), `sql` (accepted by the stored authority), `refused` (the final answer was not current). |
+| `plowshare.operation.statements` | distribution summary (percentile histogram) | `kind` | JDBC statements one operation executed, recorded when it ends. `kind` is `tool_call`, `job_step` or `socket_request`; a job step includes its tool calls. Counted per thread: work a tool hands to another thread, or a concurrent socket handler completes elsewhere, is not in its operation. Registered with the first statement meter, zero until used. |
 
 The SQL text, its hash, identities and project or topic names are never tags, so each
 set is constant whatever the traffic; statement attribution stays in the opt-in JFR

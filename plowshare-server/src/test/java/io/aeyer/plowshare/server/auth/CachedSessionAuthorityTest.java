@@ -17,6 +17,7 @@ import io.aeyer.plowshare.server.access.AuthoritySnapshot;
 import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.auth.SessionAuthority.Session;
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -53,12 +54,14 @@ class CachedSessionAuthorityTest {
   @Test
   void countsSnapshotAndSqlAnswers() {
     var counts =
-        new java.util.EnumMap<AuthorityCheckTelemetry.SessionOutcome, Integer>(
+        new EnumMap<AuthorityCheckTelemetry.SessionOutcome, Integer>(
             AuthorityCheckTelemetry.SessionOutcome.class);
     AuthorityCheckTelemetry telemetry =
         new AuthorityCheckTelemetry() {
+          @Override
           public void admission(AdmissionOutcome outcome) {}
 
+          @Override
           public void session(SessionOutcome outcome) {
             counts.merge(outcome, 1, Integer::sum);
           }

@@ -22,6 +22,7 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.information.AccountKnowledgePermissions;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -130,14 +131,16 @@ class VerifiedAdmissionsTest {
   @Test
   void countsEachOutcome() {
     var counts =
-        new java.util.EnumMap<AuthorityCheckTelemetry.AdmissionOutcome, Integer>(
+        new EnumMap<AuthorityCheckTelemetry.AdmissionOutcome, Integer>(
             AuthorityCheckTelemetry.AdmissionOutcome.class);
     AuthorityCheckTelemetry telemetry =
         new AuthorityCheckTelemetry() {
+          @Override
           public void admission(AdmissionOutcome outcome) {
             counts.merge(outcome, 1, Integer::sum);
           }
 
+          @Override
           public void session(SessionOutcome outcome) {}
         };
     var counted = new BoundedVerifiedAdmissions(snapshot::get, BOUND, 8, clock::get, telemetry);
