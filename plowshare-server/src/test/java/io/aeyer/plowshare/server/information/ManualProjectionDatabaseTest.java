@@ -145,8 +145,8 @@ class ManualProjectionDatabaseTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(1),
             128,
-            12,
-            4));
+            4,
+            1L << 40));
   }
 
   private JdbcInformationCatalogueRepository catalogue(

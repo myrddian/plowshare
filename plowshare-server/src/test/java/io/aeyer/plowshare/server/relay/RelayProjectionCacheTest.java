@@ -110,8 +110,8 @@ class RelayProjectionCacheTest {
         Duration.ofMillis(10),
         Duration.ofMillis(10),
         128,
-        8,
-        2);
+        2,
+        1L << 40);
   }
 
   private static final class Fixture implements AutoCloseable {

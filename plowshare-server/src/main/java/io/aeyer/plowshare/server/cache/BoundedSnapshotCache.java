@@ -38,7 +38,7 @@ import java.util.concurrent.TimeoutException;
  * Consequently eviction/recreation cannot resurrect an older fill, and there is no unbounded
  * tombstone map for absent keys.
  */
-public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
+public final class BoundedSnapshotCache<T> implements SnapshotCache<T>, ResidentBudget.Line {
   private record Identity(Key key, SourceVersion version) {}
 
   private record Infrastructure(ExecutorService executor, ScheduledThreadPoolExecutor timer) {}
@@ -157,6 +157,8 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
   private Entry first;
   private Entry last;
   private long residentWeight;
+  // Shared across every projection line; null for a standalone cache. Set once before use.
+  private volatile ResidentBudget budget;
   private long loadingWeight;
   private int waiterCount;
   private int links;
@@ -316,7 +318,11 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
     }
     Flight selected = flight;
     try {
-      schedule(waiter);
+      // An elected inline loader runs on this thread and has finished before readInline returns,
+      // so its own waiter needs no deadline. Arming one would let the timer abandon the flight
+      // when a slow load outlives it, discarding a value that would serve the next request; the
+      // caller's deadline is decided by its owner after the load instead.
+      if (!(dispatch && inline)) schedule(waiter);
       if (dispatch) {
         if (inline) load(selected, loader);
         else executor.execute(() -> load(selected, loader));
@@ -557,6 +563,7 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
           var entry = new Entry(flight.request, snapshot);
           entries.put(entry.identity, entry);
           residentWeight += weight;
+          if (budget != null) budget.added(weight);
           links += entry.links;
           residentLinks += entry.links;
           register(entry);
@@ -565,6 +572,9 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
       } else loadFailures++;
       for (Waiter waiter : List.copyOf(flight.waiting)) settle(waiter, snapshot, error, actions);
     }
+    // Outside this line's lock: the shared budget may evict from any line, one lock at a time.
+    var shared = budget;
+    if (shared != null) shared.rebalance();
     run(actions);
   }
 
@@ -623,6 +633,7 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
     unlink(entry);
     unregister(entry);
     residentWeight -= entry.snapshot.weight();
+    if (budget != null) budget.removed(entry.snapshot.weight());
     links -= entry.links;
     residentLinks -= entry.links;
   }
@@ -718,6 +729,35 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
     }
   }
 
+  /** Joins the shared budget once, before the line serves reads. */
+  void attach(ResidentBudget shared) {
+    Objects.requireNonNull(shared);
+    synchronized (lock) {
+      if (budget != null) throw new IllegalStateException("Line already has a budget");
+      budget = shared;
+      shared.added(residentWeight);
+    }
+    shared.register(this);
+  }
+
+  @Override
+  public long resident() {
+    synchronized (lock) {
+      return residentWeight;
+    }
+  }
+
+  @Override
+  public long evictColdest() {
+    synchronized (lock) {
+      if (last == null) return 0;
+      long weight = last.snapshot.weight();
+      remove(last);
+      evictions++;
+      return weight;
+    }
+  }
+
   @Override
   public void close() {
     var actions = new ArrayList<Runnable>();
@@ -728,6 +768,8 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
         clear(Failure.CLOSED, actions);
       }
     }
+    var shared = budget;
+    if (shared != null) shared.unregister(this);
     try {
       run(actions);
     } finally {

@@ -1,7 +1,8 @@
 # Item-level cache invalidation and shared read data
 
-Status: proposed design, not implemented. It extends the
-[query and cache strategy](query-efficiency-and-cache-design.md) and the
+Status: slices 0, 1 and 2 implemented (see [Slice 0 status](#slice-0-status),
+[Slice 1 status](#slice-1-status) and [Slice 2 status](#slice-2-status)); later slices proposed. It
+extends the [query and cache strategy](query-efficiency-and-cache-design.md) and the
 [deployment follow-ups](query-efficiency-deployment-followups.md). The current projection caches,
 FETCH lane and notification freshness stay in place until each slice below replaces them. An
 independent review of the first draft is reflected throughout; its corrections are summarised in
@@ -98,6 +99,33 @@ items changed.
 - **Trusted-hit bookkeeping** is keyed by item, so one change no longer clears the trusted map. The
   map's 256-entry limit is sized per projection.
 
+### Slice 0 status
+
+Implemented: migration `V257__item_projection_versions.sql`, `ProjectionItemVersions`,
+`ItemProjectionCache` (`ProjectionCaches.createItemScoped`), keyed delivery on
+`plowshare_item_changes`, the `contained_principals` AUTHORITY trigger, the single read deadline
+(`plowshare.projection-cache.timeout`, now 2 s) and the job runtime's bounded retry of its per-step
+log check (`BusyReadRetry`). No existing projection was moved to item scope.
+
+- **Domain.** Only READABILITY is item-tracked. Its domain counter, writer record and domain hint
+  are unchanged, so domain-scoped projections behave as before.
+- **Addresses.** `conversation:<root>` (each root of the changed log's ancestry under
+  `information_log_readable`'s edges, old and new endpoints), `revision:<id>`, `resource:<id>`,
+  `scope:<id>`, and `*` for the fallback. Platform and project navigation policies and
+  `information_document_policies` have no address and take the fallback.
+- **Bounds.** More than 1,024 rows in a statement, more than 256 logs in an ancestry walk, more than
+  64 items in a transaction, or `TRUNCATE` bump `*`.
+- **Counters move at commit.** Triggers accumulate items in a transaction-local setting; a deferred
+  constraint trigger bumps them in one sorted statement just before commit, so item rows are never
+  held for a transaction's lifetime and flushes cannot deadlock on them. Values come from one
+  sequence and are never reused. Because the rows are transactional, a versioned check needs no
+  pending-transaction evidence.
+- **Items are declared before the load**, as `SnapshotCache.Request` requires. Slice 1 resolves
+  this without recording discovered items: it caches one fact per item, whose item is known before
+  its load, and walks the closure over those facts.
+- **Not done.** Counter rows are never pruned (open question above); nothing yet sizes the
+  trusted map per projection.
+
 ## Slice 1: targeted readability from shared data
 
 - **Shared data.** Revisions, resources, scopes, root and navigation policies, dependency closures,
@@ -118,6 +146,59 @@ items changed.
 - **Prerequisite.** `contained_principals` has no version trigger, so a direct principal revocation
   would never invalidate a cached copy. Slice 0's migration adds it.
 
+### Slice 1 status
+
+Implemented: `InformationCatalogueRepository.readable` answers from shared facts and the authority
+snapshot (`CachedKnowledgeReadability`, `KnowledgeReadability`), and runs its SQL statement only
+when that declines. No migration; no catalogue list, facet, readiness or log-visibility read moved.
+
+- **Facts.** One item-scoped, versioned projection, `knowledge-facts-v1` (22 of the 24 allowed
+  projections are now in use, so the limit is unchanged). Each fact depends on exactly its own item
+  and is loaded with one indexed statement (`JdbcKnowledgeFactRepository`) through the projection's
+  FETCH slots:
+  - `revision:<id>`: resource, availability, whether `information_revision_allowances` has the
+    row, typed content and `explicit_only` (both immutable once the revision commits, V143/V144),
+    inputs (`information_inputs`) and linked projects (`information_links`);
+  - `resource:<id>`: home scope, root policy (audience, `private_only`, privacy principal), the
+    navigation policy converted to a typed `ownerOnly` at the repository boundary (platform and
+    project policies move `*`), the navigation head, and the reference obligations it is the
+    source of;
+  - absent and oversized rows (more than 1,024 edges of one kind) are cached as such.
+- **Deviation: scopes.** Scope kind, builtin, account, project, container ancestry, project names,
+  personal owners and contained principals come from the authority snapshot, not from `scope:<id>`
+  facts: `authority_scopes`, `projects` and `contained_principals` move the AUTHORITY version, and
+  V257's `scope:<id>` only tracks a resource's home scope, so a `scope:<id>` fact would not be
+  invalidated by a scope change. The snapshot gained `authority_accounts.builtin`,
+  `authority_scopes.container` and `contained_principals`, and Java mirrors of
+  `knowledge_read_authority`, `information_global_read_member`, `contained_knowledge_actor`,
+  `contained_scope_readable`, `contained_scope_ancestors` and `contained_scope_in_home`.
+- **Consistency.** An evaluation reads its facts unconfirmed
+  (`ItemProjectionCache.readUnconfirmed`: a stored fact costs no SQL, a missing one is captured
+  and loaded) and then confirms every item it read with one statement
+  (`ProjectionItemVersions.staleItems`). An empty result proves no fact changed after its load, so
+  data-side writes (availability, quarantine, `private_only`, policies, inputs, links, heads) are
+  seen as soon as they commit, on any process. A stale item is invalidated alone and the check
+  falls back to SQL. The authority half keeps the snapshot's notification-trusted contract: a
+  membership, grant, token or principal change may take up to the staleness bound (2 s) to apply.
+  A warm check therefore issues one statement and no permission SQL.
+- **Fallback to SQL.** A caller in a transaction that may hold its own writes (anything but none or
+  a read-only READ COMMITTED one); no authority snapshot; the fact cache not serving (listener not
+  ready, ineligible caller, refused load); an oversized fact; more facts than the projection's
+  entry limit in one evaluation; or a failed confirmation. A closure past 1,024 nodes is answered
+  `false` in Java, exactly as SQL does, when the walk fits the fact budget.
+- **Rules.** All arms of the targeted check are mirrored; none is left on SQL. The targeted check
+  binds no related resource, kind or heads filter and includes excluded revisions, so those
+  `knowledge_readable_candidates` arms do not apply. `information_readable_input_selections` (V235)
+  is log visibility (slice 2) and is not on this path. V256 added discovery routines only.
+- **Evidence.** `KnowledgeReadabilityDifferentialDatabaseTest` compares Java with the SQL statement
+  for 10 actors (users with and without roles, a server administrator, a service owner and its
+  token principal, a contained principal, its upper-case spelling, an unknown UUID and handle) ×
+  16 selections × 7 ceilings × typed view on and off (2,240 contexts), over 32–33 revisions, in 11
+  fixture states (801,920 comparisons), plus closures of exactly 1,024 and 1,025 nodes and a
+  41-revision mixed chain in four more states (1,440 comparisons).
+  `KnowledgeReadabilityInvalidationDatabaseTest` covers item invalidation and the confirmation;
+  `CachedKnowledgeReadabilityTest` covers each fallback with mocked repositories.
+
 ## Slice 2: log visibility per log
 
 The cached item becomes the verdict for one account and one log tree, not the account's whole deny
@@ -132,6 +213,66 @@ set:
   coalesced across accounts asking about the same tree.
 
 This replaces the per-account deny set whose reload ended the PROD job.
+
+### Slice 2 status
+
+Implemented: `InformationLogVisibility.readable` (the targeted check behind
+`JdbcJobInformationRepository.logAllowed` and `EntryStore`'s transcript guard) answers from
+per-tree facts, slice 1's knowledge facts and the authority snapshot (`CachedLogReadability`,
+`LogReadability`), and runs `information_log_readable` only when that declines. Migration
+`V258__log_tree_edge_addresses.sql`.
+
+- **Deviation: the item is the tree, not the verdict.** The design named an item
+  `log-readable(account, root)`. The cached value is instead the tree's facts with no account,
+  `LogTreeFact` under `conversation:<root>` in one item-scoped, versioned projection,
+  `log-tree-facts-v1` (23 of the 24 allowed projections are now in use). Verdicts are computed per
+  check in Java, so accounts share one fill per tree and no per-account entry exists to invalidate.
+- **Tree facts.** Every log reachable from the root down the four edges of V235's descendants CTE
+  (`snapshot_cache_log_children`, V258, the inverse of V257's `snapshot_cache_log_parents`), each
+  with all of its parents (inside the tree or not), its quarantine row and its retained inputs
+  (`revision_id`, `scope`, `project_name`, `include_shared`; `owner_handle` is attribution and not
+  read, since V235). One statement (`JdbcLogTreeFactRepository`) through the projection's FETCH
+  slots; more than 1,024 logs, 8,192 inputs or a log id over 4,096 characters is cached as
+  oversized and answered by SQL. V258 adds the index the caller edge's downward step needs.
+- **Roots.** A log's ancestry lies in the trees of its roots, which are resolved with V257's own
+  walk (`snapshot_cache_log_roots`) and remembered per log in a bounded map. The map is a hint: the
+  evaluation walks the ancestry over the loaded trees and, when a visited log is in none of them,
+  resolves once more and otherwise goes to SQL.
+- **Correction to V257's addresses.** V257 walks a changed edge's endpoints after the change, so
+  when an edge gives a former root a parent (an orchestration attaching an existing conductor to a
+  caller or parent run, a conversation inserted under another), only the new roots were named and
+  the old root's cached tree stayed confirmable. V258 also names the child endpoint of every new
+  edge (`conversation:<child>`). Without it the differential test serves a stale `true` after such
+  a join. `ItemProjectionVersionsDatabaseTest` now expects the new child's own item to move once.
+- **Rules.** `information_log_readable` (V235; V240 only set `jit=off`; V256 added discovery
+  routines only; V257 and V258 change triggers, not the rule), `information_readable_input_selections`
+  (V235: its `selections` join and prune, `facts.readable` with general membership required,
+  `general_readable` without V229's contained-home conjunct, the 1,024-node `accepted` bound and the
+  selection arms, compared literally) on slice 1's facts (`KnowledgeReadability.retainedInputs`).
+  Input attribution plays no part (V235 removed V186's owner equality). A NULL account reads no
+  retained input; the entry point still sends a NULL account or log to SQL. Nothing is left on SQL
+  for a rule reason.
+- **Consistency.** As slice 1: trees and facts are read unconfirmed and every item one check read
+  is confirmed with one `staleItems` statement; a stale item is invalidated alone and the check
+  goes to SQL. Authority keeps the snapshot's notification-trusted 2 s bound, which the deny set's
+  NOTIFIED projection also had.
+- **Fallback to SQL.** A writing caller transaction; no authority snapshot; unaddressable roots
+  (an ancestry over 256 logs, a cycle without a root, an id outside the item grammar) or more than
+  16 of them; a cache that cannot serve; an oversized tree; a retained input the slice 1 rule cannot
+  serve (oversized fact, spent fact budget); roots that still do not cover the log after a fresh
+  resolution; a failed confirmation.
+- **Collection reads keep the deny set.** `read(account, reader)` feeds `NOT IN (deny set)` filters
+  over arbitrary pages of conversations, orchestrations and inbox items before ordering and LIMIT
+  (`EntryStore`, `OrchestrationStore`, `JdbcInboxStore`), so the logs a read will touch are not
+  known in advance; deriving the set from trees would load every tree. Those reads keep
+  `information-log-visibility-v1` (per account, READABILITY and AUTHORITY, its fence after the
+  consumer) unchanged. Targeted checks no longer load it.
+- **Evidence.** `LogReadabilityDifferentialDatabaseTest` compares Java with
+  `information_log_readable` for 11 accounts (including NULL) × 39–41 logs in 16 fixture states
+  (6,941 comparisons), and the cached check, persisting across states with no notifications, served
+  12,248 answers, all equal to SQL. `LogReadabilityInvalidationDatabaseTest` covers per-tree
+  invalidation, the confirmation and writing transactions; `CachedLogReadabilityTest` covers each
+  fallback with mocks.
 
 ## Capacity and waits
 
@@ -170,8 +311,9 @@ two-process test shows a write on one process invalidating the item on the other
 
 - Shared data reaches the cache through typed repository interfaces and DTOs; nothing outside a
   repository receives a `JdbcTemplate`.
-- About 21 of the 24 allowed projection caches (`plowshare.projection-cache.max-projections`) are in
-  use, so each slice states the projections it adds or removes and raises the limit if needed.
+- Each projection is one cache line; the number of lines is not limited. Memory is the only
+  control: `resident-bytes` per line and `total-resident-bytes` across lines (see
+  `ResidentBudget`). The earlier `max-projections` count cap was removed.
 - Each slice names its migrations and the `full-db` tests its change requires.
 
 ## Order

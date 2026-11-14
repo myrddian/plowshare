@@ -139,6 +139,9 @@ unchanged.
   `max-projections` rises from 20 to 24. An installation that sets a lower value
   fails at startup with "Projection cache capacity exceeded". Per-cache budgets are
   unchanged; the snapshot itself holds a few kilobytes on deployed installations.
+  The count cap was later removed: every projection is one cache line, and
+  `total-resident-bytes` bounds their memory together
+  ([item-level invalidation](query-efficiency-item-invalidation-design.md)).
 
 `AuthoritySnapshotDifferentialDatabaseTest` compares every method with its SQL
 function after each of 20 fixture states. These cover account enablement, server

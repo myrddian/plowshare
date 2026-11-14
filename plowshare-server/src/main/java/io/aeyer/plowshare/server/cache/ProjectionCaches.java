@@ -7,11 +7,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /** Composition-owned typed cache factory; no repository or SQL is exposed to domain services. */
 public final class ProjectionCaches implements AutoCloseable {
   private final ProjectionVersions versions;
+  private final ProjectionItemVersions itemVersions;
   private final ProjectionChangeSignals signals;
   private final ProjectionCacheProperties properties;
   private final UUID database;
@@ -19,7 +19,8 @@ public final class ProjectionCaches implements AutoCloseable {
   private final ProjectionTelemetry telemetry;
   private final ConcurrentMap<String, VersionedProjectionCache<?>> caches =
       new ConcurrentHashMap<>();
-  private final AtomicInteger reservations = new AtomicInteger();
+  // One memory budget shared by every line; the number of lines is never limited.
+  private final ResidentBudget budget;
   private final AtomicBoolean closed = new AtomicBoolean();
 
   public ProjectionCaches(
@@ -47,11 +48,26 @@ public final class ProjectionCaches implements AutoCloseable {
       ProjectionCacheProperties properties,
       Duration notifiedStaleness,
       ProjectionTelemetry telemetry) {
+    this(versions, null, signals, properties, notifiedStaleness, telemetry);
+  }
+
+  /**
+   * {@code itemVersions} enables {@link #createItemScoped}; null leaves only domain-scoped caches.
+   */
+  public ProjectionCaches(
+      ProjectionVersions versions,
+      ProjectionItemVersions itemVersions,
+      ProjectionChangeSignals signals,
+      ProjectionCacheProperties properties,
+      Duration notifiedStaleness,
+      ProjectionTelemetry telemetry) {
     this.versions = Objects.requireNonNull(versions);
+    this.itemVersions = itemVersions;
     this.signals = Objects.requireNonNull(signals);
     this.properties = Objects.requireNonNull(properties);
     this.notifiedStaleness = notifiedStaleness;
     this.telemetry = Objects.requireNonNull(telemetry);
+    budget = new ResidentBudget(properties.totalResidentBytes());
     database = versions.databaseIdentity();
   }
 
@@ -74,43 +90,71 @@ public final class ProjectionCaches implements AutoCloseable {
 
   public <T> ProjectionCache<T> create(
       String projection, Set<ProjectionVersions.Domain> domains, Freshness freshness) {
+    return register(
+        projection,
+        freshness,
+        (SnapshotCache<VersionedProjectionCache.Versioned<T>> backing, Duration staleness) ->
+            new VersionedProjectionCache<>(
+                backing,
+                versions,
+                signals,
+                domains,
+                properties.maxValueBytes(),
+                staleness,
+                properties.timeout()));
+  }
+
+  /**
+   * An item-scoped projection: entries name the items they read and a write invalidates only the
+   * entries of the items it changed. {@code domains} must all be item-tracked.
+   */
+  public <T> ItemProjectionCache<T> createItemScoped(
+      String projection, Set<ProjectionVersions.Domain> domains, Freshness freshness) {
+    if (itemVersions == null) throw new IllegalStateException("Item versions are not configured");
+    return register(
+        projection,
+        freshness,
+        (SnapshotCache<VersionedProjectionCache.Versioned<T>> backing, Duration staleness) ->
+            VersionedProjectionCache.itemScoped(
+                backing,
+                itemVersions,
+                signals,
+                domains,
+                properties.maxValueBytes(),
+                staleness,
+                properties.timeout()));
+  }
+
+  /** Builds one projection over its backing cache and staleness bound (null when versioned). */
+  @FunctionalInterface
+  private interface Factory<T> {
+    VersionedProjectionCache<T> create(
+        SnapshotCache<VersionedProjectionCache.Versioned<T>> backing, Duration staleness);
+  }
+
+  private <T> VersionedProjectionCache<T> register(
+      String projection, Freshness freshness, Factory<T> factory) {
     Objects.requireNonNull(freshness);
     var namespace = new SnapshotCache.Namespace(database.toString(), projection);
     if (closed.get()) throw new IllegalStateException("Projection caches closed");
-    if (reservations.incrementAndGet() > properties.maxProjections()) {
-      reservations.decrementAndGet();
-      throw new IllegalStateException("Projection cache capacity exceeded");
-    }
     var backing =
         new BoundedSnapshotCache<VersionedProjectionCache.Versioned<T>>(
             namespace, properties.limits());
+    backing.attach(budget);
     VersionedProjectionCache<T> cache;
     try {
-      cache =
-          new VersionedProjectionCache<>(
-              backing,
-              versions,
-              signals,
-              domains,
-              properties.maxValueBytes(),
-              freshness == Freshness.NOTIFIED ? notifiedStaleness : null);
+      cache = factory.create(backing, freshness == Freshness.NOTIFIED ? notifiedStaleness : null);
     } catch (RuntimeException | Error failure) {
       backing.close();
-      reservations.decrementAndGet();
       throw failure;
     }
     if (caches.putIfAbsent(projection, cache) != null) {
       cache.close();
-      reservations.decrementAndGet();
       throw new IllegalStateException("Projection cache already registered");
     }
     if (closed.get()) {
       if (caches.remove(projection, cache)) {
-        try {
-          cache.close();
-        } finally {
-          reservations.decrementAndGet();
-        }
+        cache.close();
       }
       throw new IllegalStateException("Projection caches closed");
     }
@@ -119,15 +163,20 @@ public final class ProjectionCaches implements AutoCloseable {
       telemetry.observeCache(projection, cache.statistics(), backing::statistics);
     } catch (RuntimeException | Error failure) {
       if (caches.remove(projection, cache)) {
-        try {
-          cache.close();
-        } finally {
-          reservations.decrementAndGet();
-        }
+        cache.close();
       }
       throw failure;
     }
     return cache;
+  }
+
+  /** Bytes held by every line together, and the shared budget they must fit. */
+  public long residentBytes() {
+    return budget.resident();
+  }
+
+  public long residentBudgetBytes() {
+    return budget.total();
   }
 
   public void close() {
@@ -140,8 +189,6 @@ public final class ProjectionCaches implements AutoCloseable {
         } catch (RuntimeException | Error closing) {
           if (failure == null) failure = closing;
           else failure.addSuppressed(closing);
-        } finally {
-          reservations.decrementAndGet();
         }
       }
     }

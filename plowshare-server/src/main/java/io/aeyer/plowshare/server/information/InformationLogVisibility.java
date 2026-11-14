@@ -27,12 +27,13 @@ public interface InformationLogVisibility {
 
   /**
    * Whether {@code account} may read {@code log}, with the verdict of {@code
-   * information_log_readable}. A current deny set answers in memory: it is the inverse closure of
-   * that predicate over the same ancestry edges, quarantine and retained-input authority, versioned
-   * on READABILITY and AUTHORITY. Whenever facts cannot be shared — no account, a dirty or
-   * historical transaction, an oversized deny set, or a disabled cache — the owner's {@code
-   * authoritative} predicate decides instead. No SQL runs between validating the facts and using
-   * them, so no further fence is needed.
+   * information_log_readable}. Current facts of the log's trees answer in memory: the same ancestry
+   * edges, quarantine and retained-input authority, evaluated in Java and confirmed current by
+   * their item versions before the verdict is returned. Whenever facts cannot be shared — no
+   * account, a dirty or historical transaction, an oversized or unaddressable tree, a stale
+   * confirmation, or a disabled cache — the owner's {@code authoritative} predicate decides
+   * instead. No SQL runs between confirming the facts and using them, so no further fence is
+   * needed.
    */
   boolean readable(String account, String log, BooleanSupplier authoritative);
 

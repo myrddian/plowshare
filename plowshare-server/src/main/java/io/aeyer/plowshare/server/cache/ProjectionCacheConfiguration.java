@@ -23,6 +23,8 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 })
 @DependsOnDatabaseInitialization
 public class ProjectionCacheConfiguration {
+  private static final int MAX_SIGNAL_OBSERVERS = 256;
+
   @Bean
   public ProjectionTelemetry projectionTelemetry(ObjectProvider<MeterRegistry> registries) {
     var registry = registries.getIfAvailable();
@@ -77,8 +79,9 @@ public class ProjectionCacheConfiguration {
     return new VersionConnections(source);
   }
 
+  /** One repository supplies both domain and item version evidence from the same pool. */
   @Bean
-  public ProjectionVersions projectionVersions(
+  public JdbcProjectionVersions projectionVersions(
       JdbcTemplate jdbc, VersionConnections authoritative, ProjectionCacheProperties properties) {
     return new JdbcProjectionVersions(
         jdbc,
@@ -102,7 +105,9 @@ public class ProjectionCacheConfiguration {
     notificationSource.setDriverClassName(connections.source().getDriverClassName());
     notificationSource.setConnectionProperties(connections.source().getDataSourceProperties());
     var traced = new TracedDataSource(notificationSource, new JfrJdbcExecutionTrace());
-    int observers = properties.maxProjections() + 2; // Relay wakeups and information invalidation.
+    // Every projection line subscribes once, plus Relay wakeups and information invalidation. Lines
+    // are fixed by composition and not counted, so this only bounds a runaway subscriber loop.
+    int observers = MAX_SIGNAL_OBSERVERS;
     ProjectionChangeSignals signals;
     if (!notified.enabled()) {
       signals =
@@ -132,11 +137,17 @@ public class ProjectionCacheConfiguration {
   @Bean(destroyMethod = "close")
   public ProjectionCaches projectionCaches(
       ProjectionVersions versions,
+      ProjectionItemVersions itemVersions,
       ProjectionChangeSignals signals,
       ProjectionCacheProperties properties,
       ProjectionNotificationProperties notified,
       ProjectionTelemetry telemetry) {
     return new ProjectionCaches(
-        versions, signals, properties, notified.enabled() ? notified.staleness() : null, telemetry);
+        versions,
+        itemVersions,
+        signals,
+        properties,
+        notified.enabled() ? notified.staleness() : null,
+        telemetry);
   }
 }
