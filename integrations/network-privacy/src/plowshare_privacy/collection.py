@@ -11,7 +11,12 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Protocol
 
-from .addressing import AddressingSample, assign_addresses
+from .addressing import (
+    AddressingSample,
+    addressing_comparable,
+    assign_addresses,
+    assignment_changed,
+)
 from .connectors import REGISTRY
 from .contracts import (
     AddressAssignment,
@@ -129,19 +134,12 @@ def changes(
             )
     # Only two known modes for the same MAC are comparable, and any addressing
     # gap or conflict in either collection makes the modes incomparable.
-    if not any(
-        issue.startswith("addressing_") for issue in (*previous.issues, *issues)
-    ):
+    # The device inventory applies the same rule to show a card's last change.
+    if addressing_comparable((*previous.issues, *issues)):
         old_modes = {item.address: item for item in previous.snapshot.addressing}
         for item in current.addressing:
             prior = old_modes.get(item.address)
-            if (
-                prior is not None
-                and item.mac is not None
-                and prior.mac == item.mac
-                and "unknown" not in (prior.mode, item.mode)
-                and prior.mode != item.mode
-            ):
+            if prior is not None and assignment_changed(prior, item):
                 difference.append(
                     f"Address assignment at {item.address} changed: {prior.mode} -> {item.mode}"
                 )

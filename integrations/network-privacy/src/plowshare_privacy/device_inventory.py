@@ -3,11 +3,16 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from .addressing import addressing_comparable, assignment_changed
 from .contracts import (
+    AddressAssignment,
+    AssignmentBasis,
+    AssignmentMode,
     CollectionPlan,
     DeviceIdentity,
     DeviceLabel,
     DnsObservation,
+    Evidence,
     TcpObservation,
 )
 from .device_detection import DeviceDetection, detect_device
@@ -15,6 +20,27 @@ from .dns_activity import DnsActivity
 from .journal import Receipt
 from .presence import PresenceCount, PresenceView, epoch
 from .traffic import TrafficVolume
+
+
+@dataclass(frozen=True)
+class AddressingView:
+    """The address assignment the newest full collection recorded for a card.
+
+    ``observed_at`` is that collection's ``finished_at``. The change fields name
+    the latest mode change at this address for the same MAC, decided by the
+    ``collection.changes`` rule over consecutive collections that list the
+    address; ``changed_in_latest`` says the newest collection made it. This is
+    configuration context, never evidence of compromise.
+    """
+
+    mode: AssignmentMode
+    basis: AssignmentBasis | None
+    services: tuple[str, ...]
+    expires_at: str | None
+    observed_at: str
+    previous_mode: AssignmentMode | None = None
+    changed_at: str | None = None
+    changed_in_latest: bool = False
 
 
 @dataclass(frozen=True)
@@ -35,6 +61,7 @@ class DeviceCard:
     presence: PresenceCount | None = None
     dns_activity: DnsActivity | None = None
     traffic: TrafficVolume | None = None
+    addressing: AddressingView | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +89,15 @@ class _AddressHistory:
     services: tuple[TcpObservation, ...] = ()
     dns: tuple[DnsObservation, ...] = ()
     scans: list[str] = field(default_factory=list)
+    # The assignment the latest listing collection recorded (``None`` when it
+    # recorded none), with what the next collection needs to compare against it.
+    assignment: AddressAssignment | None = None
+    assignment_at: str | None = None
+    assignment_scope: str | None = None
+    assignment_comparable: bool = False
+    # The latest qualifying mode change: (previous mode, changed at, MAC).
+    mode_change: tuple[AssignmentMode, str, str | None] | None = None
+    changed_in_latest: bool = False
 
 
 def device_inventory(
@@ -93,6 +129,8 @@ def device_inventory(
         if not probes:
             continue
         identities = {item.address: item for item in snapshot.devices}
+        assignments = {item.address: item for item in snapshot.addressing}
+        comparable = addressing_comparable(evidence.issues)
         destinations: dict[str, list[DnsObservation]] = defaultdict(list)
         for query in snapshot.dns:
             if query.device in probes:
@@ -115,6 +153,7 @@ def device_inventory(
                 history.last_response_at = evidence.finished_at
             if index >= recent_start:
                 history.scans.append(receipt.scan_id)
+            _fold_assignment(history, assignments.get(address), evidence, comparable)
 
     devices = []
     candidates = []
@@ -187,9 +226,64 @@ def device_inventory(
                 traffic=presence.traffic.get(quick.key)
                 if quick and quick.identity and history.identity == quick.identity
                 else None,
+                addressing=_addressing_view(history),
             )
         )
     return DeviceInventory(tuple(devices), tuple(candidates))
+
+
+def _fold_assignment(
+    history: _AddressHistory,
+    current: AddressAssignment | None,
+    evidence: Evidence,
+    comparable: bool,
+) -> None:
+    """Advance one address's assignment by one collection that lists it.
+
+    A change counts only under the ``collection.changes`` rule: the previous
+    listing collection has the same scope, neither collection has an
+    ``addressing_`` issue, and ``assignment_changed`` holds for the two records.
+    """
+    prior = history.assignment
+    history.changed_in_latest = False
+    if (
+        current is not None
+        and prior is not None
+        and history.assignment_scope == evidence.scope
+        and history.assignment_comparable
+        and comparable
+        and assignment_changed(prior, current)
+    ):
+        history.mode_change = (prior.mode, evidence.finished_at, current.mac)
+        history.changed_in_latest = True
+    history.assignment = current
+    history.assignment_at = evidence.finished_at
+    history.assignment_scope = evidence.scope
+    history.assignment_comparable = comparable
+
+
+def _addressing_view(history: _AddressHistory) -> AddressingView | None:
+    """Show only what the newest listing collection recorded, never a stale value.
+
+    A recorded change is shown only while the same MAC holds the address, so a
+    later holder never inherits an earlier device's change.
+    """
+    current = history.assignment
+    if current is None or history.assignment_at is None:
+        return None
+    change = history.mode_change
+    if change is not None and change[2] != current.mac:
+        change = None
+    return AddressingView(
+        mode=current.mode,
+        basis=current.basis,
+        services=current.services,
+        expires_at=current.expires_at,
+        observed_at=history.assignment_at,
+        previous_mode=change[0] if change else None,
+        changed_at=change[1] if change else None,
+        changed_in_latest=history.changed_in_latest and change is not None,
+    )
 
 
 class InventoryProjection:
