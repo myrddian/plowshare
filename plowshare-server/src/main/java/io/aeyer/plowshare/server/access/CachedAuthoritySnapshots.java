@@ -45,7 +45,7 @@ public final class CachedAuthoritySnapshots implements AuthoritySnapshots {
         () ->
             admission.read(
                 "authority-snapshot",
-                ReadAdmission.Work.AUTHORITY,
+                ReadAdmission.Work.FETCH,
                 () -> repository.load().map(AuthoritySnapshot::new)),
         () -> UNAVAILABLE,
         value -> value.map(snapshot -> snapshot.facts().weight()).orElse(1024L));

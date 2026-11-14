@@ -189,16 +189,51 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         revision);
   }
 
+  /**
+   * Answers one targeted check through the same statement-local admission as {@link
+   * #extractionStates}. The per-row {@code information_readable} predicate resolved the actor's
+   * global-read membership, project roles and contained status again for every revision in the
+   * target's dependency closure; on deployed data one check over a revision with a large closure
+   * took about 270 ms. {@code knowledge_readable_targets} resolves that authority once and applies
+   * the same root, dependency, exclusion and ceiling rules, so the admitted answer is unchanged.
+   * Typed-content exclusion is applied here exactly as {@link #readableSql} applies it.
+   */
   public boolean readable(InformationContext context, UUID revision) {
-    var args = new ArrayList<Object>(selectionArgs(context));
+    java.util.Objects.requireNonNull(revision, "revision");
+    var args = new ArrayList<Object>(targetArguments(context, List.of(revision)));
+    var content = InformationSql.content(context, "r");
+    args.addAll(content.arguments());
     args.add(revision);
     return !jdbc.queryForList(
-            "SELECT 1 FROM information_revision_allowances r WHERE "
-                + readableSql(context)
+            ADMITTED_TARGETS
+                + "SELECT 1 FROM admitted JOIN information_revision_allowances r ON r.id=admitted.revision"
+                + " WHERE r.availability='active' AND "
+                + content.sql()
                 + " AND r.id=?",
             Integer.class,
             args.toArray())
         .isEmpty();
+  }
+
+  /**
+   * One statement-local authority relation over at most 100 explicit targets. Callers prepend this
+   * CTE and bind {@link #targetArguments} first.
+   */
+  private static final String ADMITTED_TARGETS =
+      "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets(?,?,?,?,?,?,?::uuid[],NULL,false,NULL,NULL,NULL)) ";
+
+  private static List<Object> targetArguments(InformationContext context, List<UUID> ids) {
+    var boundary = context.readBoundary();
+    return java.util.Arrays.asList(
+        context.account(),
+        context.selection().scope().name().toLowerCase(Locale.ROOT),
+        context.selection().project(),
+        context.selection().includeGlobal(),
+        boundary == null ? null : boundary.home().project(),
+        boundary == null ? null : boundary.globalRead(),
+        "{"
+            + ids.stream().map(UUID::toString).collect(java.util.stream.Collectors.joining(","))
+            + "}");
   }
 
   @Override
@@ -226,21 +261,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
 
   private java.util.Map<UUID, ExtractionState> loadExtractionStates(
       InformationContext context, List<UUID> ids, Long maximumBytes) {
-    var boundary = context.readBoundary();
-    var args =
-        new ArrayList<Object>(
-            java.util.Arrays.asList(
-                context.account(),
-                context.selection().scope().name().toLowerCase(Locale.ROOT),
-                context.selection().project(),
-                context.selection().includeGlobal(),
-                boundary == null ? null : boundary.home().project(),
-                boundary == null ? null : boundary.globalRead(),
-                "{"
-                    + ids.stream()
-                        .map(UUID::toString)
-                        .collect(java.util.stream.Collectors.joining(","))
-                    + "}"));
+    var args = new ArrayList<Object>(targetArguments(context, ids));
     String bytes = "(octet_length(coalesce(r.source_uri,''))+octet_length(coalesce(s.error,'')))";
     String fits = maximumBytes == null ? "true" : bytes + "<=?";
     if (maximumBytes != null) {
@@ -251,7 +272,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     args.addAll(content.arguments());
     var rows =
         jdbc.query(
-            "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets(?,?,?,?,?,?,?::uuid[],NULL,false,NULL,NULL,NULL)) "
+            ADMITTED_TARGETS
                 + "SELECT r.id,r.generation,CASE WHEN "
                 + fits
                 + " THEN r.source_uri END AS source_uri,s.stage,s.state,s.attempt,"
@@ -734,27 +755,13 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       throw new IllegalArgumentException("Code status has at most 100 revisions");
     if (hashes.isEmpty()) return Map.of();
     var ids = hashes.keySet().stream().sorted().toList();
-    var boundary = context.readBoundary();
-    var args =
-        new ArrayList<Object>(
-            Arrays.asList(
-                context.account(),
-                context.selection().scope().name().toLowerCase(Locale.ROOT),
-                context.selection().project(),
-                context.selection().includeGlobal(),
-                boundary == null ? null : boundary.home().project(),
-                boundary == null ? null : boundary.globalRead(),
-                "{"
-                    + ids.stream()
-                        .map(UUID::toString)
-                        .collect(java.util.stream.Collectors.joining(","))
-                    + "}"));
+    var args = new ArrayList<Object>(targetArguments(context, ids));
     var content = InformationSql.content(context, "r");
     args.add(io.aeyer.plowshare.server.documents.CodeOutline.VERSION);
     args.addAll(content.arguments());
     var result = new HashMap<UUID, io.aeyer.plowshare.server.documents.CodeOutline>();
     jdbc.query(
-        "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets(?,?,?,?,?,?,?::uuid[],NULL,false,NULL,NULL,NULL)) "
+        ADMITTED_TARGETS
             + "SELECT r.id,r.content_hash,o.status,o.reason,o.language,o.parser_version,o.source_hash "
             + "FROM admitted JOIN information_revisions r ON r.id=admitted.revision JOIN code_outlines o ON o.document_id=r.id "
             + "JOIN information_steps step ON step.revision_id=r.id AND step.generation=r.generation AND step.stage='derive' AND step.state='ready' "

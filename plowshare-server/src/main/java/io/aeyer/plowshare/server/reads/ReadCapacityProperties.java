@@ -19,7 +19,9 @@ public record ReadCapacityProperties(
     @DefaultValue("2") int authority,
     @DefaultValue("1") int authorityPerPrincipal,
     @DefaultValue("1") int maintenance,
-    @DefaultValue("1") int maintenancePerPrincipal) {
+    @DefaultValue("1") int maintenancePerPrincipal,
+    @DefaultValue("2") int fetches,
+    @DefaultValue("8") int fetchesTotal) {
   @org.springframework.boot.context.properties.bind.ConstructorBinding
   public ReadCapacityProperties {
     check(interactive, interactivePerPrincipal);
@@ -29,6 +31,7 @@ public record ReadCapacityProperties(
     check(subscriptions, subscriptionsPerPrincipal);
     check(authority, authorityPerPrincipal);
     check(maintenance, maintenancePerPrincipal);
+    check(fetchesTotal, fetches);
   }
 
   public ReadCapacityProperties(
@@ -56,7 +59,9 @@ public record ReadCapacityProperties(
         2,
         1,
         1,
-        1);
+        1,
+        2,
+        8);
   }
 
   public ReadCapacityProperties(
@@ -89,6 +94,7 @@ public record ReadCapacityProperties(
       case INTERACTIVE -> interactive;
       case REPORT, REPORT_REFRESH -> reports;
       case AUTHORITY -> authority;
+      case FETCH -> fetchesTotal;
       case MAINTENANCE -> maintenance;
       case OBSERVER -> observers;
       case SOCKET -> sockets;
@@ -101,6 +107,8 @@ public record ReadCapacityProperties(
       case INTERACTIVE -> interactivePerPrincipal;
       case REPORT, REPORT_REFRESH -> reportsPerPrincipal;
       case AUTHORITY -> authorityPerPrincipal;
+      // The FETCH principal is the cache itself: each cache owns this many slots.
+      case FETCH -> fetches;
       case MAINTENANCE -> maintenancePerPrincipal;
       case OBSERVER -> observersPerPrincipal;
       case SOCKET -> socketsPerPrincipal;

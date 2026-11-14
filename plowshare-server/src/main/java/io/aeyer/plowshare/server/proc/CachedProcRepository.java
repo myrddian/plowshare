@@ -17,6 +17,9 @@ import java.util.Objects;
  * checks.
  */
 public final class CachedProcRepository implements ProcRepository {
+  /** The queue cache's FETCH principal. Uncached PROC reads keep the account's REPORT seat. */
+  static final String FETCHER = "proc-queues";
+
   private final ProcRepository source;
   private final ProjectionCache<ProcViews.Queues> queues;
   private final ReadAdmission admission;
@@ -43,7 +46,9 @@ public final class CachedProcRepository implements ProcRepository {
         key,
         true,
         () ->
-            admission.read(account, ReadAdmission.Work.REPORT, () -> source.queues(account, query)),
+            // The cache's fill uses its own FETCH slots; a requester on a miss waits for it
+            // instead of being refused for its account's report seat.
+            admission.read(FETCHER, ReadAdmission.Work.FETCH, () -> source.queues(account, query)),
         value -> 4096L + 4L * canonical(value).length());
   }
 

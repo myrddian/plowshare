@@ -94,7 +94,9 @@ class InformationProjectionCacheTest {
             call -> {
               String sql = call.getArgument(0);
               scalarSql.add(sql);
-              assertTrue(sql.startsWith("SELECT 1 FROM information_revision_allowances r WHERE "));
+              assertTrue(
+                  sql.startsWith(
+                      "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets("));
               assertFalse(sql.contains("auto_tag"));
               assertFalse(sql.contains("extracted_text"));
               return readable ? List.of(1) : List.of();

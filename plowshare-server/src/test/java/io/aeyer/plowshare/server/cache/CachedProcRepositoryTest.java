@@ -88,7 +88,11 @@ class CachedProcRepositoryTest {
       assertTrue(
           backing.statistics().waiters() >= 2, "Equivalent requests must join before release");
       assertEquals(
-          1, admission.active(ReadAdmission.Work.REPORT), "Followers hold no physical-work slot");
+          1,
+          admission.active(ReadAdmission.Work.FETCH),
+          "The fill holds one of the cache's slots; followers hold none");
+      assertEquals(
+          0, admission.active(ReadAdmission.Work.REPORT), "A cache fill uses no account seat");
       release.complete(null);
       assertSame(snapshot, first.get(5, TimeUnit.SECONDS));
       int accepted = 0;

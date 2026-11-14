@@ -186,6 +186,26 @@ class InformationLogVisibilityTest {
     }
   }
 
+  /**
+   * PROD job_32792EE2: the job's per-step log check missed while the account's only AUTHORITY seat
+   * was busy, was refused, and ended the job. The deny-set load is the cache's fetch, not the
+   * requester's read, so a busy account seat must not refuse it.
+   */
+  @Test
+  void aBusyAccountAuthoritySeatDoesNotRefuseTheCachesFetch() {
+    try (var f = new Fixture()) {
+      var busy = f.admission.admit("reader", ReadAdmission.Work.AUTHORITY);
+      var other = f.admission.admit("other", ReadAdmission.Work.AUTHORITY);
+      try (busy;
+          other) {
+        assertFalse(f.visibility.readable("reader", "restricted", unexpected()));
+        assertTrue(f.visibility.readable("reader", "open", unexpected()));
+      }
+      verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
+      assertEquals(0, f.admission.active(ReadAdmission.Work.FETCH));
+    }
+  }
+
   @Test
   void aRevokedDenySetIsReloadedBeforeItAnswers() {
     try (var f = new Fixture()) {
