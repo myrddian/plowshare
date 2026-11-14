@@ -594,21 +594,24 @@ class ScopedGrantPersistenceTest {
   }
 
   @Test
-  void issuer_manifest_narrowing_reaches_children_in_every_effective_project_decision() {
+  void manifest_demotion_of_issuer_does_not_narrow_person_issued_children() {
     migrate();
     members.assign("one", "alice", ProjectRole.MANAGER, "admin", true);
     members.assign("one", "bob", ProjectRole.CONTRIBUTOR, "alice", true);
     var effective =
         new ApplicationProjectMembers(
             members, applications, new ApplicationGrantLineage(grants, applications));
+    // A person-issued membership is rooted at SYSTEM: demoting the issuer leaves bob's own role,
+    // capped only by bob's own manifest entry.
     when(applications.read("one"))
         .thenReturn(
             new ApplicationPolicy.Boundary(
                 ApplicationPolicy.Kind.APPLICATION,
                 Map.of("alice", ProjectRole.VIEWER, "bob", ProjectRole.MANAGER)));
-    assertTrue(effective.role("one", "bob").isEmpty());
-    assertTrue(effective.roles(List.of("one"), "bob").isEmpty());
-    assertFalse(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
+    assertEquals(ProjectRole.CONTRIBUTOR, effective.role("one", "bob").orElseThrow());
+    assertEquals(Map.of("one", ProjectRole.CONTRIBUTOR), effective.roles(List.of("one"), "bob"));
+    assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
+    assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.WRITE));
     when(applications.read("one"))
         .thenReturn(
             new ApplicationPolicy.Boundary(
@@ -617,6 +620,48 @@ class ScopedGrantPersistenceTest {
     assertEquals(ProjectRole.CONTRIBUTOR, effective.role("one", "bob").orElseThrow());
     assertEquals(Map.of("one", ProjectRole.CONTRIBUTOR), effective.roles(List.of("one"), "bob"));
     assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.WRITE));
+  }
+
+  @Test
+  void manifest_demotion_of_issuer_still_narrows_agent_issued_children() {
+    migrate();
+    var worker = GrantRecipient.agent(who("alice").account(), "worker");
+    var forced =
+        grants.issue(
+            new Issue(
+                UUID.randomUUID(),
+                worker,
+                scope("one"),
+                StandardRole.MANAGER,
+                who("admin"),
+                control(),
+                Optional.empty(),
+                true));
+    var child =
+        grants.issue(
+            new Issue(
+                UUID.randomUUID(),
+                who("bob"),
+                scope("one"),
+                StandardRole.CONTRIBUTOR,
+                worker,
+                forced.id(),
+                Optional.empty(),
+                false));
+    assertEquals(forced.id(), child.authority().orElseThrow());
+    when(applications.read("one"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION,
+                Map.of("alice", ProjectRole.MANAGER, "bob", ProjectRole.MANAGER)));
+    assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.WRITE));
+    // Delegated (agent) lineage still carries its issuer, so demoting alice narrows bob.
+    when(applications.read("one"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION,
+                Map.of("alice", ProjectRole.VIEWER, "bob", ProjectRole.MANAGER)));
+    assertFalse(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
   }
 
   @Test

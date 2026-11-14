@@ -226,6 +226,18 @@ One mechanism serves both this role and the correction:
   `authority_issue_membership` is removed for person issuers; a cap tied to the
   issuer is the same account dependency in another form. Token- and
   agent-issued grants keep their caps.
+- **Application manifest narrowing (decided, user, 2026-11-15):** narrowing
+  no longer follows the issuer for person-issued grants. A person-issued
+  membership in an Application project does not fall when the manifest demotes
+  the manager who issued it. The child keeps its own role, capped only by the
+  manifest's entry for the child. `ApplicationGrantLineage` still narrows
+  through delegated (agent or token) lineage, because those grants keep their
+  issuer in `issuing_grant`.
+- **No self-issuance on the exercised path (security review):** a person cannot
+  exercise a grant for themselves, otherwise a temporary grant could turn itself
+  into a permanent SYSTEM-rooted one. Self-assignment through
+  authority_issue_membership stays bound to the authorizing grant (delegated
+  lineage and expiry); the trigger refuses exercised self-issuance.
 
 ### Rooting path
 
