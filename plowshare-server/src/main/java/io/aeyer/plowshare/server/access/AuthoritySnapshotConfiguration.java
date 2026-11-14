@@ -7,8 +7,10 @@ import io.aeyer.plowshare.server.cache.ProjectionNotificationProperties;
 import io.aeyer.plowshare.server.cache.ProjectionVersions;
 import io.aeyer.plowshare.server.information.SystemProcessingAuthority;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -83,10 +85,21 @@ public class AuthoritySnapshotConfiguration {
    */
   @Bean
   public VerifiedAdmissions verifiedAdmissions(
-      AuthoritySnapshots snapshots, ProjectionNotificationProperties notified) {
+      AuthoritySnapshots snapshots,
+      ProjectionNotificationProperties notified,
+      AuthorityCheckTelemetry telemetry) {
     if (!notified.enabled()) return VerifiedAdmissions.none();
     return new BoundedVerifiedAdmissions(
-        snapshots, notified.staleness(), VERIFIED_ADMISSION_CAPACITY);
+        snapshots, notified.staleness(), VERIFIED_ADMISSION_CAPACITY, telemetry);
+  }
+
+  /** Meters for authority checks; counts nothing when no meter registry exists. */
+  @Bean
+  public AuthorityCheckTelemetry authorityCheckTelemetry(ObjectProvider<MeterRegistry> registries) {
+    var registry = registries.getIfAvailable();
+    return registry == null
+        ? AuthorityCheckTelemetry.none()
+        : new MicrometerAuthorityCheckTelemetry(registry);
   }
 
   /** The stored members that {@code ApplicationProjectMembers} wraps with manifest limits. */

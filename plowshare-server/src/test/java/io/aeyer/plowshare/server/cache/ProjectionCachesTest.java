@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.Set;
 import java.util.UUID;
@@ -11,6 +13,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 
 class ProjectionCachesTest {
@@ -127,7 +130,11 @@ class ProjectionCachesTest {
       primary.addDataSourceProperty("ApplicationName", "actual-fixture");
       primary.setSchema("fixture_schema");
       try (var connections =
-          configuration.projectionVersionConnections(database, properties(2), primary)) {
+          configuration.projectionVersionConnections(
+              database,
+              properties(2),
+              primary,
+              new StaticListableBeanFactory().getBeanProvider(MeterRegistry.class))) {
         var source = connections.source();
         assertEquals(primary.getJdbcUrl(), source.getJdbcUrl());
         assertEquals(primary.getUsername(), source.getUsername());
@@ -137,6 +144,25 @@ class ProjectionCachesTest {
         assertEquals(primary.getDataSourceProperties(), source.getDataSourceProperties());
         assertNotSame(primary.getDataSourceProperties(), source.getDataSourceProperties());
         assertNull(source.getHikariPoolMXBean());
+        assertEquals("plowshare-projection-versions", source.getPoolName());
+      }
+    }
+  }
+
+  @Test
+  void aMeterRegistryGivesTheVersionPoolAMetricsTracker() {
+    var database = new DataSourceProperties();
+    database.setUrl("jdbc:postgresql://database.example.invalid/projection-fixture");
+    var beans = new StaticListableBeanFactory();
+    beans.addBean("registry", new SimpleMeterRegistry());
+    try (var primary = new com.zaxxer.hikari.HikariDataSource()) {
+      primary.setJdbcUrl("jdbc:postgresql://primary.example.invalid/actual-fixture");
+      primary.setDriverClassName("org.postgresql.Driver");
+      try (var connections =
+          new ProjectionCacheConfiguration()
+              .projectionVersionConnections(
+                  database, properties(2), primary, beans.getBeanProvider(MeterRegistry.class))) {
+        assertNotNull(connections.source().getMetricsTrackerFactory());
       }
     }
   }

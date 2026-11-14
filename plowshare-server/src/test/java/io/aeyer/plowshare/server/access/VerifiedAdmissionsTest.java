@@ -128,6 +128,43 @@ class VerifiedAdmissionsTest {
   }
 
   @Test
+  void countsEachOutcome() {
+    var counts =
+        new java.util.EnumMap<AuthorityCheckTelemetry.AdmissionOutcome, Integer>(
+            AuthorityCheckTelemetry.AdmissionOutcome.class);
+    AuthorityCheckTelemetry telemetry =
+        new AuthorityCheckTelemetry() {
+          public void admission(AdmissionOutcome outcome) {
+            counts.merge(outcome, 1, Integer::sum);
+          }
+
+          public void session(SessionOutcome outcome) {}
+        };
+    var counted = new BoundedVerifiedAdmissions(snapshot::get, BOUND, 8, clock::get, telemetry);
+    var counting = policy(counted);
+    var first = admission();
+    counting.require(first);
+    counting.require(first);
+    TransactionSynchronizationManager.setActualTransactionActive(true);
+    TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+    counting.require(first);
+    TransactionSynchronizationManager.clear();
+    snapshot.set(Optional.empty());
+    counting.require(first);
+    snapshot.set(Optional.of(snapshot()));
+    when(members.role("one", "alice")).thenReturn(Optional.empty());
+    assertThrows(CallerFault.class, () -> counting.require(admission()));
+    assertEquals(
+        Map.of(
+            AuthorityCheckTelemetry.AdmissionOutcome.WALKED, 1,
+            AuthorityCheckTelemetry.AdmissionOutcome.VERIFIED_HIT, 1,
+            AuthorityCheckTelemetry.AdmissionOutcome.TRANSACTION_WALK, 1,
+            AuthorityCheckTelemetry.AdmissionOutcome.NO_SNAPSHOT_WALK, 1,
+            AuthorityCheckTelemetry.AdmissionOutcome.REFUSED, 1),
+        counts);
+  }
+
+  @Test
   void repeatedRequireOfOneAdmissionWithinTheBoundWalksOnce() {
     var admitted = admission();
     for (int i = 0; i < 5; i++) {

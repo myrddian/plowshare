@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.access;
 
+import io.aeyer.plowshare.server.access.AuthorityCheckTelemetry.AdmissionOutcome;
 import io.aeyer.plowshare.server.access.OperationAuthority.Admission;
 import io.aeyer.plowshare.server.cache.VersionedProjectionCache;
 import java.time.Duration;
@@ -56,6 +57,7 @@ public final class BoundedVerifiedAdmissions implements VerifiedAdmissions {
   private final long boundNanos;
   private final int capacity;
   private final LongSupplier nanoTime;
+  private final AuthorityCheckTelemetry telemetry;
 
   /** Guards {@link #entries} and {@link #generation}, which change together. */
   private final Object lock = new Object();
@@ -69,6 +71,14 @@ public final class BoundedVerifiedAdmissions implements VerifiedAdmissions {
     this(snapshots, bound, capacity, System::nanoTime);
   }
 
+  public BoundedVerifiedAdmissions(
+      AuthoritySnapshots snapshots,
+      Duration bound,
+      int capacity,
+      AuthorityCheckTelemetry telemetry) {
+    this(snapshots, bound, capacity, System::nanoTime, telemetry);
+  }
+
   /**
    * @param bound the longest an entry may answer; positive and at most one minute, like the
    *     notification staleness it is normally configured from
@@ -77,6 +87,19 @@ public final class BoundedVerifiedAdmissions implements VerifiedAdmissions {
    */
   public BoundedVerifiedAdmissions(
       AuthoritySnapshots snapshots, Duration bound, int capacity, LongSupplier nanoTime) {
+    this(snapshots, bound, capacity, nanoTime, AuthorityCheckTelemetry.none());
+  }
+
+  /**
+   * @param telemetry told how each check was answered; see {@link AdmissionOutcome}
+   */
+  public BoundedVerifiedAdmissions(
+      AuthoritySnapshots snapshots,
+      Duration bound,
+      int capacity,
+      LongSupplier nanoTime,
+      AuthorityCheckTelemetry telemetry) {
+    this.telemetry = Objects.requireNonNull(telemetry);
     this.snapshots = Objects.requireNonNull(snapshots);
     Objects.requireNonNull(bound);
     if (bound.isNegative() || bound.isZero() || bound.compareTo(Duration.ofMinutes(1)) > 0)
@@ -102,19 +125,37 @@ public final class BoundedVerifiedAdmissions implements VerifiedAdmissions {
     // whose own uncommitted writes may differ from committed state must decide what its statements
     // see, and must not leave a verification behind that rests on writes that may roll back.
     if (!VersionedProjectionCache.callerHasNoOwnWrites()) {
-      walk.run();
+      walked(walk, AdmissionOutcome.TRANSACTION_WALK);
       return;
     }
     var current = snapshots.current();
     if (current.isEmpty()) {
-      walk.run();
+      walked(walk, AdmissionOutcome.NO_SNAPSHOT_WALK);
       return;
     }
     var snapshot = current.get();
     long started = nanoTime.getAsLong();
-    if (verified(admission, snapshot, started)) return;
-    walk.run();
+    if (verified(admission, snapshot, started)) {
+      telemetry.admission(AdmissionOutcome.VERIFIED_HIT);
+      return;
+    }
+    walked(walk, AdmissionOutcome.WALKED);
     record(admission, snapshot, started);
+  }
+
+  /**
+   * Runs the walk and counts it as {@code outcome}, or as {@link AdmissionOutcome#REFUSED} when it
+   * throws (the exception propagates unchanged). Counting follows the walk, so a refusal is never
+   * also counted as a walk.
+   */
+  private void walked(Runnable walk, AdmissionOutcome outcome) {
+    try {
+      walk.run();
+    } catch (RuntimeException refusal) {
+      telemetry.admission(AdmissionOutcome.REFUSED);
+      throw refusal;
+    }
+    telemetry.admission(outcome);
   }
 
   /** Number of remembered admissions; for tests and diagnostics only. */

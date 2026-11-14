@@ -27,6 +27,9 @@ class SocketAuthorizationBatchTest {
             io.aeyer.plowshare.server.access.AuthoritySnapshots.class,
             io.aeyer.plowshare.server.access.AuthoritySnapshots::none)
         .withBean(
+            io.aeyer.plowshare.server.access.AuthorityCheckTelemetry.class,
+            io.aeyer.plowshare.server.access.AuthorityCheckTelemetry::none)
+        .withBean(
             io.micrometer.core.instrument.MeterRegistry.class,
             io.micrometer.core.instrument.simple.SimpleMeterRegistry::new)
         .run(

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.server.access.AuthorityCheckTelemetry;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot;
 import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.auth.SessionAuthority.Session;
@@ -47,6 +48,37 @@ class CachedSessionAuthorityTest {
             List.of(),
             List.of(),
             List.of()));
+  }
+
+  @Test
+  void countsSnapshotAndSqlAnswers() {
+    var counts =
+        new java.util.EnumMap<AuthorityCheckTelemetry.SessionOutcome, Integer>(
+            AuthorityCheckTelemetry.SessionOutcome.class);
+    AuthorityCheckTelemetry telemetry =
+        new AuthorityCheckTelemetry() {
+          public void admission(AdmissionOutcome outcome) {}
+
+          public void session(SessionOutcome outcome) {
+            counts.merge(outcome, 1, Integer::sum);
+          }
+        };
+    when(stored.sessionCurrent("alice", 4)).thenReturn(true);
+    when(stored.sessionCurrent("bob", 1)).thenReturn(false);
+    var sessions = new CachedSessionAuthority(stored, () -> Optional.of(snapshot()), telemetry);
+    assertTrue(sessions.sessionCurrent("alice", 3));
+    assertTrue(sessions.sessionCurrent("alice", 4));
+    assertFalse(sessions.sessionCurrent("bob", 1));
+    var alice = new Session("alice", 3);
+    var bob = new Session("bob", 1);
+    when(stored.currentSessions(Set.of(bob))).thenReturn(Set.of());
+    sessions.currentSessions(Set.of(alice, bob));
+    assertEquals(
+        Map.of(
+            AuthorityCheckTelemetry.SessionOutcome.SNAPSHOT, 2,
+            AuthorityCheckTelemetry.SessionOutcome.SQL, 1,
+            AuthorityCheckTelemetry.SessionOutcome.REFUSED, 2),
+        counts);
   }
 
   @Test

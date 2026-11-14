@@ -106,10 +106,12 @@ public class PoolAdmissionConfiguration {
   }
 
   @Bean
-  GatedConnections gatedConnections(DataSource primary, AdmissionThrottle throttle) {
+  GatedConnections gatedConnections(
+      DataSource primary, AdmissionThrottle throttle, ObjectProvider<MeterRegistry> registries) {
     return new GatedConnections(
         new ThrottledDataSource(
-            new TracedDataSource(primary, new JfrJdbcExecutionTrace()), throttle));
+            new TracedDataSource(primary, JdbcExecutionTraces.forPool(registries, "main")),
+            throttle));
   }
 
   @Bean

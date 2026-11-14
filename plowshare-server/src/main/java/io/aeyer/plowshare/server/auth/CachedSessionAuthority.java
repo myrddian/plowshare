@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.auth;
 
+import io.aeyer.plowshare.server.access.AuthorityCheckTelemetry;
+import io.aeyer.plowshare.server.access.AuthorityCheckTelemetry.SessionOutcome;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot;
 import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.cache.VersionedProjectionCache;
@@ -30,8 +32,19 @@ import java.util.Set;
 public final class CachedSessionAuthority implements SessionAuthority {
   private final SessionAuthority stored;
   private final AuthoritySnapshots snapshots;
+  private final AuthorityCheckTelemetry telemetry;
 
   public CachedSessionAuthority(SessionAuthority stored, AuthoritySnapshots snapshots) {
+    this(stored, snapshots, AuthorityCheckTelemetry.none());
+  }
+
+  /**
+   * @param telemetry told per session whether it was accepted from the snapshot, accepted by SQL,
+   *     or finally refused
+   */
+  public CachedSessionAuthority(
+      SessionAuthority stored, AuthoritySnapshots snapshots, AuthorityCheckTelemetry telemetry) {
+    this.telemetry = Objects.requireNonNull(telemetry);
     this.stored = Objects.requireNonNull(stored);
     this.snapshots = Objects.requireNonNull(snapshots);
   }
@@ -39,25 +52,49 @@ public final class CachedSessionAuthority implements SessionAuthority {
   @Override
   public boolean sessionCurrent(String handle, long version) {
     var snapshot = snapshot();
-    if (snapshot.isPresent() && accepts(snapshot.get(), handle, version)) return true;
-    return stored.sessionCurrent(handle, version);
+    if (snapshot.isPresent() && accepts(snapshot.get(), handle, version)) {
+      telemetry.session(SessionOutcome.SNAPSHOT);
+      return true;
+    }
+    boolean current = stored.sessionCurrent(handle, version);
+    telemetry.session(current ? SessionOutcome.SQL : SessionOutcome.REFUSED);
+    return current;
   }
 
   @Override
   public Set<Session> currentSessions(Collection<Session> sessions) {
     var requested = Set.copyOf(sessions);
     var snapshot = snapshot();
-    if (snapshot.isEmpty()) return stored.currentSessions(requested);
+    if (snapshot.isEmpty()) {
+      var answered = stored.currentSessions(requested);
+      countStored(requested, answered);
+      return answered;
+    }
     var current = new HashSet<Session>();
     var unconfirmed = new HashSet<Session>();
     for (var session : requested) {
-      if (accepts(snapshot.get(), session.handle(), session.version())) current.add(session);
-      else unconfirmed.add(session);
+      if (accepts(snapshot.get(), session.handle(), session.version())) {
+        current.add(session);
+        telemetry.session(SessionOutcome.SNAPSHOT);
+      } else {
+        unconfirmed.add(session);
+      }
     }
     // Refusals are rare (a revoked socket is closed and leaves the sweep), so confirming them
     // keeps every refusal exactly as fresh as SQL at the cost of a statement only when one occurs.
-    if (!unconfirmed.isEmpty()) current.addAll(stored.currentSessions(unconfirmed));
+    if (!unconfirmed.isEmpty()) {
+      var answered = stored.currentSessions(unconfirmed);
+      countStored(unconfirmed, answered);
+      current.addAll(answered);
+    }
     return Set.copyOf(current);
+  }
+
+  /** Counts each session the stored authority decided as accepted (SQL) or refused. */
+  private void countStored(Set<Session> asked, Set<Session> accepted) {
+    for (var session : asked) {
+      telemetry.session(accepted.contains(session) ? SessionOutcome.SQL : SessionOutcome.REFUSED);
+    }
   }
 
   private static boolean accepts(AuthoritySnapshot snapshot, String handle, long version) {

@@ -31,6 +31,7 @@ spring:
     # Pressure is observable as hikaricp.connections.pending / .active under
     # /actuator/metrics.
     hikari:
+      pool-name: plowshare-main
       maximum-pool-size: ${PLOWSHARE_DB_POOL:20}
       connection-timeout: ${PLOWSHARE_DB_CONNECTION_TIMEOUT:5000}
   flyway:

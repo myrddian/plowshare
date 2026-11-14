@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.ws;
 
+import io.aeyer.plowshare.server.access.AuthorityCheckTelemetry;
 import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.auth.CachedSessionAuthority;
 import io.aeyer.plowshare.server.auth.SessionAuthority;
@@ -19,11 +20,14 @@ public class SocketSessionConfiguration {
       StoredSessionAuthority facts,
       AuthoritySnapshots snapshots,
       SocketSessionProperties properties,
+      AuthorityCheckTelemetry telemetry,
       org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry>
           registries) {
     // Session facts come from the authority snapshot within its notification-trusted bound; the
     // stored adapter confirms refusals and answers whenever no snapshot may be used.
-    var queue = new QueuedSocketSessions(new CachedSessionAuthority(facts, snapshots), properties);
+    var queue =
+        new QueuedSocketSessions(
+            new CachedSessionAuthority(facts, snapshots, telemetry), properties);
     var registry = registries.getIfAvailable();
     if (registry != null) {
       io.micrometer.core.instrument.Gauge.builder(
