@@ -17,6 +17,7 @@ import io.aeyer.plowshare.server.relay.RelayPayload;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -337,6 +338,7 @@ class ProjectRelayToolInvocationsTest {
   private static final class ScriptedWakeups implements RelayToolWakeups {
     final ArrayDeque<Boolean> script = new ArrayDeque<>();
     final AtomicInteger awaits = new AtomicInteger();
+    final List<Duration> maxima = new ArrayList<>();
     final AtomicInteger opened = new AtomicInteger();
     final AtomicInteger closed = new AtomicInteger();
     final AtomicReference<Instant> clock;
@@ -358,6 +360,7 @@ class ProjectRelayToolInvocationsTest {
           assertFalse(maximum.isNegative() || maximum.isZero());
           assertTrue(maximum.compareTo(Duration.ofSeconds(1)) <= 0, "ceiling is one second");
           awaits.incrementAndGet();
+          maxima.add(maximum);
           clock.updateAndGet(value -> value.plus(advance));
           return script.isEmpty() ? false : script.poll();
         }
@@ -532,5 +535,112 @@ class ProjectRelayToolInvocationsTest {
     // Ten wakes spaced 10 ms apart: the read at t=0 and the next one once 100 ms have passed.
     verify(relay, times(2)).retained(any(), any());
     assertEquals(1, wakeups.closed.get());
+  }
+
+  @Test
+  void eachAwaitIsCappedAtTheTimeLeftInTheReuseWindow() {
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(100), false, false, false);
+    waitFor(
+        waiting(clock, wakeups, Duration.ofMillis(300), HostedInvocationAuthority.NONE),
+        longBinding("provider"),
+        wakeups,
+        3);
+    // Admission at t=0 with a 300 ms bound: the first wait may not overshoot it, and the next
+    // (t=100 ms) has 200 ms left, so re-authorization falls due on time instead of a second late.
+    assertTrue(wakeups.maxima.get(0).compareTo(Duration.ofMillis(300)) <= 0, "" + wakeups.maxima);
+    assertTrue(wakeups.maxima.get(1).compareTo(Duration.ofMillis(200)) <= 0, "" + wakeups.maxima);
+  }
+
+  @Test
+  void waitsWithoutTrustedWakesNeverExceedTheReadGap() {
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(100), false, false, false);
+    wakeups.trusted = false;
+    waitFor(
+        waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE),
+        longBinding("provider"),
+        wakeups,
+        3);
+    // No trusted wake can announce a result or a change, so the result is polled as it always was.
+    assertEquals(3, wakeups.maxima.size());
+    wakeups.maxima.forEach(
+        maximum -> assertTrue(maximum.compareTo(Duration.ofMillis(100)) <= 0, "" + wakeups.maxima));
+  }
+
+  @Test
+  void hostedResultIsNotDisclosedOnAnExpiredAuthorization() {
+    UUID scope = UUID.randomUUID();
+    var hosted = longBinding(HostedToolScopes.route(scope, 1));
+    var invocation =
+        new HostedInvocation(
+            scope,
+            1,
+            UUID.randomUUID(),
+            "caller",
+            "provider",
+            "fixture",
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            "subject",
+            UUID.randomUUID(),
+            "coordinator");
+    when(repository.submit(any()))
+        .thenAnswer(
+            answer -> {
+              RelayToolRepository.Intent intent = answer.getArgument(0);
+              var withHosting =
+                  new RelayToolRepository.Intent(
+                      intent.id(),
+                      intent.projectId(),
+                      intent.fingerprint(),
+                      intent.binding(),
+                      intent.request(),
+                      intent.occurredAt(),
+                      intent.causation(),
+                      intent.agent(),
+                      invocation);
+              stored.set(new RelayToolRepository.Stored(withHosting, null));
+              return stored.get();
+            });
+    var clock = new AtomicReference<>(NOW);
+    // The retained read finds the result but takes longer than the reuse window.
+    when(relay.retained(any(), any()))
+        .thenAnswer(
+            answer -> {
+              clock.updateAndGet(value -> value.plusSeconds(5));
+              var intent = stored.get().intent();
+              var id = intent.id();
+              var result =
+                  new RelayToolCodec.Result(
+                      RelayToolCodec.VERSION,
+                      id.toString(),
+                      "fixture",
+                      hosted.provider(),
+                      hosted.name(),
+                      RelayToolCodec.State.COMPLETED,
+                      "retained evidence");
+              return Optional.of(
+                  new Relay.Publication(
+                      new Relay.TopicKey(42, hosted.results()),
+                      1,
+                      NOW,
+                      new Relay.Draft(
+                          RelayToolCodec.resultRequestId(id).toString(),
+                          RelayPort.publisher("provider"),
+                          NOW,
+                          id.toString(),
+                          id.toString(),
+                          new RelayPayload.Text(RelayToolCodec.write(result)),
+                          intent.causation().next(id.toString(), 8))));
+            });
+    var authority = mock(HostedInvocationAuthority.class);
+    when(authority.permits(any(), eq("caller"))).thenReturn(true, false);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(100));
+    var outcome =
+        waitFor(waiting(clock, wakeups, Duration.ofSeconds(1), authority), hosted, wakeups, 9);
+    // Admission was current when it ran; by disclosure it had expired and was refused.
+    verify(authority, times(2)).permits(any(), eq("caller"));
+    assertEquals(RelayToolCodec.State.UNKNOWN, outcome.state());
   }
 }

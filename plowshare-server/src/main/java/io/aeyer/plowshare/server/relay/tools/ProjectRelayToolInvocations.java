@@ -8,6 +8,7 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.tools.RelayToolWakeups.Wakeup;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -241,6 +242,15 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
             return unknown(id, "Provider result violates the tool contract.");
           }
           var completed = repository.finish(original, completion);
+          // The retained read can outlast the reuse window, so a hosted result is not disclosed
+          // on an authorization that has expired meanwhile. permits() is the single hosted check.
+          if (original.hosted() != null
+              && HostedToolScopes.hosted(binding.provider())
+              && !clock
+                  .get()
+                  .isBefore(authorizedAt.plus(wake.trusted() ? staleness : Duration.ZERO))
+              && !hosting.permits(binding, owner.accountHandle()))
+            return unknown(id, "Hosted authority or availability ended after submission.");
           return result(binding, owner.accountHandle(), project, completed.result());
         }
         if (cancelled.getAsBoolean()
@@ -250,7 +260,9 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
         try {
           long remaining = waitUntil - System.nanoTime();
           authority |=
-              wake.await(Duration.ofNanos(Math.max(1, Math.min(remaining, CEILING.toNanos()))));
+              wake.await(
+                  Duration.ofNanos(
+                      Math.max(1, Math.min(remaining, waitCap(wake, authorizedAt).toNanos()))));
           // A wake inside the read gap waits out the remainder (still bounded by the deadline and
           // cancellation) instead of reading again; authority hints keep accumulating meanwhile.
           while (true) {
@@ -260,9 +272,16 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
                 || left.isZero()
                 || budget <= 0
                 || cancelled.getAsBoolean()
-                || !clock.get().isBefore(deadline)) break;
+                || !clock.get().isBefore(deadline)
+                || reauthorizationDue(wake, authorizedAt)) break;
             authority |=
-                wake.await(Duration.ofNanos(Math.max(1, Math.min(budget, left.toNanos()))));
+                wake.await(
+                    Duration.ofNanos(
+                        Math.max(
+                            1,
+                            Math.min(
+                                budget,
+                                Math.min(left.toNanos(), waitCap(wake, authorizedAt).toNanos())))));
           }
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
@@ -271,6 +290,27 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
         }
       }
     }
+  }
+
+  /**
+   * Longest single wait from now. Never more than {@link #CEILING}, and never past the moment the
+   * reused authorization expires, so re-authorization falls due on time instead of up to a ceiling
+   * late. Without trusted wakes (notifications off, listener down or over capacity) nothing can
+   * announce a result, so the wait is {@link #READ_GAP} and the retained result is polled as fast
+   * as it always was; the same cap applies when the bound is zero and every pass re-authorizes.
+   */
+  private Duration waitCap(Wakeup wake, Instant authorizedAt) {
+    if (!wake.trusted()) return READ_GAP;
+    Duration untilDue = Duration.between(clock.get(), authorizedAt.plus(staleness));
+    if (untilDue.isNegative() || untilDue.isZero()) return READ_GAP;
+    return untilDue.compareTo(CEILING) < 0 ? untilDue : CEILING;
+  }
+
+  /** Whether a positive reuse window has run out, so the next pass must re-authorize. */
+  private boolean reauthorizationDue(Wakeup wake, Instant authorizedAt) {
+    return wake.trusted()
+        && !staleness.isZero()
+        && !clock.get().isBefore(authorizedAt.plus(staleness));
   }
 
   private long authorize(RelayToolDefinition binding, String caller) {
