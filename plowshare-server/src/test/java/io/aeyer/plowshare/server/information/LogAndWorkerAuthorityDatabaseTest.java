@@ -844,8 +844,98 @@ class LogAndWorkerAuthorityDatabaseTest {
   private void assertExtractionParity(
       JdbcInformationCatalogueRepository repository, InformationContext context, List<UUID> ids) {
     var expected = new LinkedHashSet<UUID>();
-    for (UUID id : ids) if (repository.readable(context, id)) expected.add(id);
+    for (UUID id : ids) if (perRowReadable(context, id)) expected.add(id);
     assertEquals(expected, repository.extractionStates(context, ids).keySet());
+  }
+
+  /**
+   * The per-row predicate targeted reads used before they shared the readiness admission. It is the
+   * independent oracle: {@code readable} and {@code extractionStates} now share one routine.
+   */
+  private boolean perRowReadable(InformationContext context, UUID revision) {
+    var filter = InformationSql.read(context, "r");
+    var args = new ArrayList<Object>(filter.arguments());
+    args.add(revision);
+    return !jdbc.queryForList(
+            "SELECT 1 FROM information_revision_allowances r WHERE r.availability='active' AND "
+                + filter.sql()
+                + " AND r.id=?",
+            Integer.class,
+            args.toArray())
+        .isEmpty();
+  }
+
+  @Test
+  void targetedReadsMatchThePerRowPredicateAndResolveAuthorityOnce() {
+    var repository =
+        new JdbcInformationCatalogueRepository(
+            jdbc, Clock.systemUTC(), mock(InformationEvents.class));
+    var project =
+        new InformationContext("reader", InformationContext.Selection.project("one"))
+            .withView(true);
+    var bounded =
+        project.within(
+            io.aeyer.plowshare.server.access.KnowledgeReadScope.homeOnly(
+                io.aeyer.plowshare.protocol.Home.of("one")));
+    var untyped = new InformationContext("reader", InformationContext.Selection.project("one"));
+    var contexts = List.of(project, bounded, untyped);
+    var own = retained("reader", "one");
+    var foreign = retained("other", "two");
+    var ids = List.of(own.revision(), foreign.revision(), UUID.randomUUID());
+    Runnable parity =
+        () -> {
+          for (var context : contexts)
+            for (UUID id : ids)
+              assertEquals(
+                  perRowReadable(context, id),
+                  repository.readable(context, id),
+                  () -> "readable(" + id + ") under " + context.selection());
+        };
+    parity.run();
+    assertTrue(repository.readable(project, own.revision()));
+    assertFalse(repository.readable(project, foreign.revision()));
+    jdbc.update("UPDATE information_revisions SET excluded=true WHERE id=?", own.revision());
+    parity.run();
+    jdbc.update("UPDATE information_revisions SET excluded=false WHERE id=?", own.revision());
+    var explicit = retained("reader", "one");
+    jdbc.update("DELETE FROM information_revisions WHERE id=?", explicit.revision());
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size,extracted_text,allowance_total,processing_policy) VALUES(?,?,1,'Explicit','text/plain','fixture',1,'body',10,'explicit_only')",
+        explicit.revision(),
+        explicit.resource());
+    for (var context : contexts)
+      assertEquals(
+          perRowReadable(context, explicit.revision()),
+          repository.readable(context, explicit.revision()));
+    assertTrue(repository.readable(project, explicit.revision()));
+    assertFalse(
+        repository.readable(untyped, explicit.revision()), "legacy readers omit explicit-only");
+
+    // Authority is resolved once per check, not once per revision of the dependency closure.
+    work.inTransaction(
+        () -> {
+          jdbc.execute("SET LOCAL track_functions='all'");
+          long small = activeCalls(() -> assertTrue(repository.readable(project, own.revision())));
+          for (int index = 0; index < 48; index++)
+            jdbc.update(
+                "INSERT INTO information_inputs(derived_revision,input_revision) VALUES(?,?)",
+                own.revision(),
+                retained("reader", "one").revision());
+          long large = activeCalls(() -> assertTrue(repository.readable(project, own.revision())));
+          assertTrue(small > 0);
+          assertEquals(small, large, "A targeted check must resolve actor authority once");
+          return null;
+        });
+    parity.run();
+
+    jdbc.update(
+        "INSERT INTO information_inputs(derived_revision,input_revision) VALUES(?,?)",
+        own.revision(),
+        foreign.revision());
+    parity.run();
+    assertFalse(repository.readable(project, own.revision()), "an unreadable input withholds it");
+    jdbc.update("DELETE FROM project_members WHERE handle='reader'");
+    parity.run();
   }
 
   @Test

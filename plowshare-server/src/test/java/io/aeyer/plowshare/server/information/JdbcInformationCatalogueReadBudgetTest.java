@@ -46,10 +46,21 @@ class JdbcInformationCatalogueReadBudgetTest {
     var args = ArgumentCaptor.forClass(Object[].class);
     verify(jdbc).queryForList(sql.capture(), eq(Integer.class), args.capture());
     verifyNoMoreInteractions(jdbc);
-    assertTrue(sql.getValue().startsWith("SELECT 1 FROM information_revision_allowances r WHERE "));
+    assertTrue(
+        sql.getValue()
+            .startsWith(
+                "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets("));
+    assertFalse(
+        sql.getValue().contains("information_readable("),
+        "a targeted check must not resolve authority per dependency");
     assertFalse(sql.getValue().contains("extracted_text"));
     assertFalse(sql.getValue().contains("information_content_type_versions"));
-    assertSelection(sql.getValue(), args.getValue());
+    var content = InformationSql.content(context, "r");
+    assertTrue(sql.getValue().endsWith(" AND " + content.sql() + " AND r.id=?"));
+    var bound = Arrays.asList(args.getValue());
+    assertEquals(context.account(), bound.getFirst());
+    assertEquals("{" + revision + "}", bound.get(6));
+    assertEquals(revision, bound.getLast());
   }
 
   @Test

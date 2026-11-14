@@ -198,6 +198,28 @@ SQL-decided form.
 SQL functions in every fixture state and asserts that a decided call reads
 `admins` zero times.
 
+## Targeted readability shares the readiness admission
+
+On PROD at `bb075d37`, the single most expensive top-level statement was the
+catalogue's targeted check, `readable(context, revision)`: about 270 ms per call
+and a quarter of all database time. It applied the per-row `information_readable`
+predicate. That predicate's dependency check runs `knowledge_revision_readable` for
+every revision in the target's closure, and each of those resolves global-read
+membership, project roles and contained status again.
+
+The check now uses `knowledge_readable_targets` with a one-element target list.
+Readiness and code-status lookups already used that routine. It resolves the
+actor's authority once per statement and applies the same root, dependency,
+exclusion and ceiling rules. Typed-content exclusion is unchanged. Row, metadata
+and evidence reads still use the per-row predicate.
+
+`LogAndWorkerAuthorityDatabaseTest` compares the new check with the per-row
+predicate for project, bounded and legacy-view contexts. The fixture states cover
+exclusion, explicit-only content, an unreadable dependency and membership removal.
+The test also asserts that the number of `account_active` calls does not grow when
+the closure grows from 1 to 49 revisions; it fails against the previous
+implementation. The PROD latency after deployment has not been measured.
+
 ## Regression provenance and validation
 
 The per-row document guard and unconditional retrieval dispatch originate in
