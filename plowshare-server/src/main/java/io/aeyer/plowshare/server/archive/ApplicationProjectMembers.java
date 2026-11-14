@@ -17,7 +17,7 @@ public final class ApplicationProjectMembers implements ProjectMembers {
   private final io.aeyer.plowshare.server.access.GrantLineage lineage;
 
   public ApplicationProjectMembers(
-      @Qualifier("jdbcProjectMembers") ProjectMembers stored,
+      @Qualifier("cachedProjectMembers") ProjectMembers stored,
       ApplicationPolicy applications,
       io.aeyer.plowshare.server.access.GrantLineage lineage) {
     this.stored = stored;

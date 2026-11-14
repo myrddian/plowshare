@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sql.DataSource;
 import org.postgresql.PGConnection;
@@ -31,13 +32,34 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
   static final String KNOWLEDGE_ACCESS_CHANNEL = "plowshare_knowledge_access_changes";
   static final String KNOWLEDGE_REVOCATIONS_CHANNEL = "plowshare_knowledge_revocations";
 
-  private final DataSource source;
+  /**
+   * Delivery probes. Every server listens on this one fixed channel, so each session prefixes its
+   * payload with a random nonce and ignores other sessions' probes.
+   */
+  static final String HEARTBEAT_CHANNEL = "plowshare_projection_heartbeat";
 
+  private final DataSource source;
+  private final Duration networkTimeout;
+
+  /** No delivery probes: a silent connection loss is noticed only by version checks. */
   public PostgresProjectionNotificationSource(DataSource source) {
+    this(source, null);
+  }
+
+  /**
+   * {@code networkTimeout} bounds every statement on the session, including probes. Without it a
+   * silently dropped connection (no reset, as after a VM pause or a forgotten NAT entry) blocks a
+   * send forever, and polls on it return empty forever.
+   */
+  public PostgresProjectionNotificationSource(DataSource source, Duration networkTimeout) {
     this.source = Objects.requireNonNull(source);
     if (source instanceof TransactionAwareDataSourceProxy)
       throw new IllegalArgumentException(
           "Notification sessions require an independent data source");
+    if (networkTimeout != null
+        && (networkTimeout.toMillis() < 1 || networkTimeout.toMillis() > Integer.MAX_VALUE))
+      throw new IllegalArgumentException("Positive bounded network timeout required");
+    this.networkTimeout = networkTimeout;
   }
 
   @Override
@@ -47,7 +69,12 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
       connection = source.getConnection();
       connection.setAutoCommit(false);
       connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
-      return new Notifications(connection, connection.unwrap(PGConnection.class));
+      if (networkTimeout != null)
+        // pgjdbc applies this as the socket read timeout; a bounded notification poll overrides
+        // it for its own wait and restores it afterwards.
+        connection.setNetworkTimeout(Runnable::run, (int) networkTimeout.toMillis());
+      return new Notifications(
+          connection, connection.unwrap(PGConnection.class), networkTimeout != null);
     } catch (SQLException | RuntimeException failure) {
       if (connection != null) {
         try {
@@ -70,12 +97,36 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
     private final PGConnection postgres;
     private final JdbcTemplate jdbc;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final boolean probes;
+    private final String nonce = UUID.randomUUID().toString();
     private boolean listening;
+    private long echoed;
 
-    Notifications(Connection connection, PGConnection postgres) {
+    Notifications(Connection connection, PGConnection postgres, boolean probes) {
       this.connection = connection;
       this.postgres = postgres;
+      this.probes = probes;
       jdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
+    }
+
+    @Override
+    public boolean heartbeat(long sequence) {
+      if (!probes) return false;
+      if (sequence < 1) throw new IllegalArgumentException("Positive probe sequence required");
+      if (!listening || closed.get()) throw unavailable();
+      try {
+        // Autocommit: the probe is committed, and therefore queued, before this returns.
+        jdbc.queryForObject(
+            "SELECT pg_notify(?,?)::text", String.class, HEARTBEAT_CHANNEL, nonce + ":" + sequence);
+        return true;
+      } catch (RuntimeException failure) {
+        throw unavailable();
+      }
+    }
+
+    @Override
+    public long heartbeatsReceived() {
+      return echoed;
     }
 
     @Override
@@ -87,6 +138,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
         jdbc.execute("LISTEN " + PROJECTION_V2_CHANNEL);
         jdbc.execute("LISTEN " + KNOWLEDGE_ACCESS_CHANNEL);
         jdbc.execute("LISTEN " + KNOWLEDGE_REVOCATIONS_CHANNEL);
+        if (probes) jdbc.execute("LISTEN " + HEARTBEAT_CHANNEL);
         // LISTEN is transactional: baseline reads are forbidden until this commit has succeeded.
         connection.commit();
         connection.setAutoCommit(true);
@@ -108,6 +160,10 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
         var changed = EnumSet.noneOf(ProjectionVersions.Domain.class);
         if (notifications != null) {
           for (PGNotification notification : notifications) {
+            if (HEARTBEAT_CHANNEL.equals(notification.getName())) {
+              echoed = Math.max(echoed, echo(notification.getParameter()));
+              continue;
+            }
             if (!CHANNEL.equals(notification.getName())
                 && !READABILITY_CHANNEL.equals(notification.getName())
                 && !PROJECTION_V2_CHANNEL.equals(notification.getName())
@@ -135,6 +191,16 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
         }
         return Set.copyOf(changed);
       } catch (SQLException failure) {
+        throw unavailable();
+      }
+    }
+
+    /** This session's probe sequence, or 0 for another session's probe. */
+    private long echo(String payload) {
+      if (payload == null || !payload.startsWith(nonce + ":")) return 0;
+      try {
+        return Long.parseLong(payload.substring(nonce.length() + 1));
+      } catch (NumberFormatException malformed) {
         throw unavailable();
       }
     }

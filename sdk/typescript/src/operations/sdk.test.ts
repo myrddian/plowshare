@@ -4,7 +4,14 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { CURRENT_VERSION } from '../binding/envelope.ts';
 import type { Arrival, Socket } from '../binding/connection.ts';
 import { Plowshare, Refusal, requirePayload } from './sdk.ts';
-import { decodePayload, decodeReply, decodeRequest } from './schema.ts';
+import {
+  decodePayload,
+  decodeReply,
+  decodeRequest,
+  isOperation,
+} from './schema.ts';
+import { parseCommand } from './commands.ts';
+import type { Operation } from './direct.ts';
 import type { Replies } from './replies.ts';
 
 class Wire implements Socket {
@@ -48,6 +55,40 @@ class Wire implements Socket {
 }
 
 describe('validated public SDK contracts', () => {
+  it('refuses every retired external-work operation before any transport effect', () => {
+    const wire = new Wire();
+    const client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
+    const retired = [
+      'incoming.catalog',
+      'incoming.receive',
+      'incoming.status',
+      'incoming.cancel',
+      'outgoing.advertise',
+      'outgoing.claim',
+      'outgoing.report',
+      'outgoing.send',
+      'outgoing.status',
+      'outgoing.cancel',
+      'outgoing.peers',
+    ];
+    for (const operation of retired) {
+      expect(isOperation(operation)).toBe(false);
+      expect(() => decodeRequest(operation, {})).toThrow(
+        'unknown Plowshare operation',
+      );
+      expect(parseCommand(`${operation.replace('.', ' ')} {}`).kind).toBe(
+        'unhandled',
+      );
+    }
+    expectTypeOf<
+      Extract<Operation, `incoming.${string}` | `outgoing.${string}`>
+    >().toEqualTypeOf<never>();
+    for (const method of ['sendOutgoing', 'outgoingStatus', 'cancelOutgoing'])
+      expect(method in client).toBe(false);
+    expect(wire.sent).toHaveLength(0);
+    client.close();
+  });
+
   it('exposes typed Relay methods without acknowledging reads or replaying foreign replies', async () => {
     const wire = new Wire(),
       client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
@@ -227,62 +268,7 @@ describe('validated public SDK contracts', () => {
   });
 });
 
-describe('external DTOs and typed notifications', () => {
-  it('rejects raw or inconsistent external messages without sending', async () => {
-    const wire = new Wire(),
-      client = new Plowshare({ dispatchMode: 'ordered', socket: wire });
-    expect(() =>
-      decodePayload('outgoing.send', {
-        requestId: '00000000-0000-4000-8000-000000000001',
-        peer: 'peer',
-        message: {
-          parts: [{ text: 'text', url: 'https://example.test/file' }],
-        },
-      }),
-    ).toThrow();
-    await expect(
-      client.request('outgoing.send', {
-        requestId: '00000000-0000-4000-8000-000000000001',
-        peer: 'peer',
-        message: { parts: [{ raw: 'bad base64' }] },
-      }),
-    ).rejects.toThrow();
-    expect(wire.sent).toHaveLength(0);
-    client.close();
-  });
-  it('validates integration variants and report observations', () => {
-    expect(() =>
-      decodePayload('outgoing.send', {
-        requestId: '00000000-0000-4000-8000-000000000001',
-        peer: 'peer',
-        message: {
-          parts: [
-            {
-              data: {
-                schema: 'plowshare-integration/1',
-                binding: 'binding',
-                operation: 'actions.execute',
-                arguments: {
-                  action: 'toggle',
-                  parameters: { entity: 'lamp', enabled: true },
-                },
-              },
-            },
-          ],
-        },
-      }),
-    ).not.toThrow();
-    expect(() =>
-      decodePayload('outgoing.report', {
-        id: 'id',
-        revision: 1,
-        state: 'made-up',
-      }),
-    ).toThrow();
-    expect(() =>
-      decodeReply('outgoing.claim', { work: null, action: 'send' }),
-    ).toThrow();
-  });
+describe('typed notifications', () => {
   it('projects valid pushes and reports malformed hints without disturbing requests', async () => {
     const wire = new Wire(),
       pushes: unknown[] = [],

@@ -173,11 +173,14 @@ different owners and state machines. Inspect their owning status API; one generi
 "running" flag cannot represent an approval wait, unavailable input, pending
 remote acknowledgment and a finished partial result accurately.
 
-Direct agent messaging has an actor-like shape: a stable addressed instance owns
-a conversation, receives messages and wakes for bounded handling. The internal
-board provides much of that storage and wake machinery, but its private transport
-topics are hidden from ordinary public swarm deliberation. Delegation, messaging,
-swarm topics and outbound work remain distinct contracts.
+Direct messaging retains addressed instances and conversations in messaging-owned
+records. One project-readable Relay inbox serves each (account, project,
+definition); messaging admits each publication into the existing native wake
+queue. Instances have separate handling gates and per-message allowances, while
+shared conversations reserve unique turn ordinals before execution. The board
+keeps its own forum storage, sequencing and [Relay bridge](../decisions/0060-relay-board-bridge-and-authorized-close.md).
+See [the messaging cutover](../decisions/0061-relay-agent-inboxes-and-messaging-cutover.md).
+Delegation, messaging, swarm topics and outbound work retain distinct lifecycles.
 
 ## Module map for developers
 
@@ -191,7 +194,7 @@ points, extension choices and contribution checks.
 | Agent definitions and execution | `server/agents`, `server/harness`, `server/llm` |
 | Persistence and conversation history | `server/archive` |
 | Documents and information lifecycle | `server/documents`, `server/information` |
-| Swarm and direct messaging | `server/board`, `server/swarm`, `server/agents/Messaging` |
+| Swarm and direct messaging | `server/board`, `server/swarm`, `server/messaging`, `server/agents/Messaging` |
 | Workflows and external work | `server/orchestrations`, `server/outgoing` |
 | Accounts, projects and files | `server/auth`, `server/personal`, `server/files`, `server/union` |
 | Shared TS transport and operations | `sdk/typescript` |

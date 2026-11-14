@@ -9,6 +9,11 @@ The assistant's request and record tools queue work and write records through th
 same services the dashboard uses: ``DeepScanner.request``,
 ``DeviceAssessments.assess`` and ``ProfileManagement.save``. They never reach
 monitor settings, connections, credentials, the schedule, the time zone or limits.
+
+``network.request_reference`` asks the owner for vendor documentation the library
+lacks. It records the product, the question and an optional device through a
+``ReferenceRequestService``; it accepts no link and fetches nothing, so text in
+the question, links included, is only ever read by the owner.
 """
 
 from __future__ import annotations
@@ -62,6 +67,7 @@ from .privacy_issues import (
     IssueValidation,
     needs_explanation,
 )
+from .reference_seed import product_slug
 from .worker import ReconciliationRequired, Worker
 
 if TYPE_CHECKING:
@@ -150,6 +156,12 @@ DEFINITIONS = (
         "write",
         "device_id",
     ),
+    ToolDefinition(
+        "network.request_reference",
+        "Ask the owner to add vendor documentation for a product when the reference library cannot answer a question. It records the product, the unanswered question and optionally the device; it takes no link and fetches nothing. The request is queued for the owner, not answered.",
+        "request",
+        None,
+    ),
 )
 
 # The assistant's request and record tools. They are served to the agent through
@@ -166,6 +178,7 @@ AGENT_ONLY = frozenset(
 NOTE_LIMIT = 1024
 ATTRIBUTION = "Privacy Watch, {day}: "
 LINK_NOTE_LIMIT = LINK_NOTES_LIMIT - len(ATTRIBUTION.format(day="YYYY-MM-DD"))
+QUESTION_LIMIT = 512
 UNKNOWN_DEVICE = "Choose a monitored device with a confirmed MAC address (a device_id from network_devices)."
 
 
@@ -294,8 +307,26 @@ class RecordIssueCall:
     request_id: str
 
 
+@dataclass(frozen=True)
+class ReferenceRequestCall:
+    """Ask the owner for documentation. ``request_id`` is the harness invocation.
+
+    ``question`` is plain text for the owner to read; nothing in it is fetched.
+    ``device_id``, when given, is a currently monitored device.
+    """
+
+    product: str
+    question: str
+    device_id: str | None
+    request_id: str
+
+
 AssistantCall = (
-    DeepScanRequestCall | AssessmentRequestCall | NoteProfileCall | RecordIssueCall
+    DeepScanRequestCall
+    | AssessmentRequestCall
+    | NoteProfileCall
+    | RecordIssueCall
+    | ReferenceRequestCall
 )
 
 ToolCall = (
@@ -311,7 +342,7 @@ ToolCall = (
 )
 
 
-def _note(value: object, limit: int) -> str:
+def _note(value: object, limit: int, field: str = "note") -> str:
     if (
         not isinstance(value, str)
         or not value.strip()
@@ -319,7 +350,7 @@ def _note(value: object, limit: int) -> str:
         or any((ord(c) < 32 and c != "\n") or ord(c) == 127 for c in value)
     ):
         raise ToolRefusal(
-            f"The note must be 1-{limit} characters of text, with no control characters except new lines."
+            f"The {field} must be 1-{limit} characters of text, with no control characters except new lines."
         )
     return value
 
@@ -327,7 +358,13 @@ def _note(value: object, limit: int) -> str:
 def _assistant_call(
     name: str, arguments: object, request_id: str | None
 ) -> AssistantCall:
-    """Decode an assistant tool call; every failure is a ``ToolRefusal``."""
+    """Decode an assistant tool call; every failure is a ``ToolRefusal``.
+
+    A missing harness invocation is a ``ValueError``: it is a caller defect,
+    not something the agent could correct.
+    """
+    if name == "network.request_reference":
+        return _reference_call(arguments, request_id)
     optional = {
         "network.note_profile": set(),
         "network.record_issue": {"mitigation_status", "note"},
@@ -386,19 +423,46 @@ def _assistant_call(
     )
 
 
+def _reference_call(arguments: object, request_id: str | None) -> ReferenceRequestCall:
+    # The fixed fields are the whole contract: a ``url`` or any other key is
+    # refused, so the agent can never name a source to fetch.
+    try:
+        row = object_fields(arguments, {"product", "question"}, {"device_id"})
+    except ValueError:
+        raise ToolRefusal(
+            "The arguments do not match this tool's parameters; nothing ran."
+        ) from None
+    try:
+        product = product_slug(row["product"])
+    except ValueError as error:
+        # The slug rule's fixed wording; it does not echo the value.
+        raise ToolRefusal(str(error)) from None
+    question = _note(row["question"], QUESTION_LIMIT, "question")
+    device = None
+    if row.get("device_id") is not None:
+        try:
+            device = parse_device_id(row["device_id"])
+        except ValueError:
+            raise ToolRefusal(UNKNOWN_DEVICE) from None
+    if request_id is None:
+        raise ValueError("A reference request needs the harness invocation identity")
+    return ReferenceRequestCall(product, question, device, uuid(request_id))
+
+
 def decode_call(
     name: str, arguments: object, *, request_id: str | None = None
 ) -> ToolCall:
     """Reject unknown capabilities and all parameters outside the fixed contract.
 
     ``request_id`` is the harness invocation identity; only the assistant's write
-    tools use it, as the write's idempotency key.
+    tools and reference requests use it, as their idempotency key.
     """
     if name in (
         "network.request_deep_scan",
         "network.request_assessment",
         "network.note_profile",
         "network.record_issue",
+        "network.request_reference",
     ):
         return _assistant_call(name, arguments, request_id)
     if name in ("network.scope", "network.scan_list"):
@@ -575,10 +639,13 @@ class DevicesResult:
 
 @dataclass(frozen=True)
 class WorkRequestResult:
-    """The device's state after a request: queued or running, not finished."""
+    """The state after a request: queued or running, not finished.
+
+    A reference request need not name a device; its ``device_id`` is then empty.
+    """
 
     device_id: str
-    work: Literal["deep_scan", "assessment"]
+    work: Literal["deep_scan", "assessment", "reference"]
     state: str
     detail: str | None
 
@@ -682,6 +749,28 @@ class AssessmentRequests(Protocol):
     async def assess(self, device_id: str) -> AssessmentView: ...
 
 
+@dataclass(frozen=True)
+class ReferenceRequestOutcome:
+    """A reference request's recorded state and a sentence for the agent."""
+
+    state: str
+    detail: str
+
+
+class ReferenceRequestService(Protocol):
+    """Record an owner-facing request for documentation; never fetch anything.
+
+    ``request_id`` is the harness invocation and the request's idempotency key:
+    a repeat with the same identity returns the earlier outcome rather than
+    queueing twice. Refusals meant for the agent are raised as ``ToolRefusal``
+    with fixed wording.
+    """
+
+    def request(
+        self, product: str, question: str, device_id: str | None, request_id: str
+    ) -> ReferenceRequestOutcome: ...
+
+
 class WorkerTools:
     def __init__(
         self,
@@ -692,6 +781,7 @@ class WorkerTools:
         assessments: AssessmentRequests | None = None,
         profiles: ProfileManagement | None = None,
         issues: IssueManagement | None = None,
+        references: ReferenceRequestService | None = None,
         clock: Callable[[], str] = utc_now,
     ):
         self.worker = worker
@@ -701,6 +791,7 @@ class WorkerTools:
         # The assistant's request and record services; None refuses the tool.
         self.deep_scans, self.assessments = deep_scans, assessments
         self.profiles, self.issues = profiles, issues
+        self.references = references
         self.clock = clock
 
     def summary(self, receipt: Receipt) -> ScanSummary:
@@ -734,6 +825,7 @@ class WorkerTools:
                 AssessmentRequestCall,
                 NoteProfileCall,
                 RecordIssueCall,
+                ReferenceRequestCall,
             ),
         ):
             return await self.assist(call)
@@ -899,6 +991,19 @@ class WorkerTools:
             )
         if isinstance(call, AssessmentRequestCall):
             return await self._assess(call)
+        if isinstance(call, ReferenceRequestCall):
+            if self.references is None:
+                raise ToolRefusal(
+                    "Reference requests are not enabled on this collector."
+                )
+            if call.device_id is not None:
+                self._card(call.device_id)
+            outcome = self.references.request(
+                call.product, call.question, call.device_id, call.request_id
+            )
+            return WorkRequestResult(
+                call.device_id or "", "reference", outcome.state, outcome.detail
+            )
         if isinstance(call, RecordIssueCall) and self.issues is None:
             raise ToolRefusal("Privacy issues are not enabled on this collector.")
         if self.profiles is None:

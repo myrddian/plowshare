@@ -1,12 +1,17 @@
 package io.aeyer.plowshare.integrations;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
-import java.nio.file.*;
-import org.junit.jupiter.api.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -27,7 +32,6 @@ class CausalLineageTest {
         b.name(),
         b.adapter(),
         b.project(),
-        b.peer(),
         b.configuration(),
         b.routes(),
         b.allowBindings(),

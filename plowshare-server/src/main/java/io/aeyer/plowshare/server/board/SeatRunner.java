@@ -6,7 +6,9 @@ import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.agents.TurnEligibility;
 import io.aeyer.plowshare.server.events.Dispatcher;
+import io.aeyer.plowshare.server.events.EventPayload;
 import io.aeyer.plowshare.server.events.FiringRecord;
 import io.aeyer.plowshare.server.swarm.SwarmScheduler;
 import java.time.Instant;
@@ -138,9 +140,15 @@ public final class SeatRunner implements Dispatcher.Wakes {
   @Override
   public boolean busy(FiringRecord wake) {
     String conversation = conversationOf(wake);
-    if (voice.isSpeaking(conversation)) {
-      return true;
-    }
+    return !TurnEligibility.decide(
+            TurnEligibility.Reason.READY,
+            () -> voice.isSpeaking(conversation),
+            () -> resourcesBlocked(conversation))
+        .eligible();
+  }
+
+  /** Board legality and pot availability remain with the board, behind the common turn gate. */
+  private boolean resourcesBlocked(String conversation) {
     Optional<BoardSeat> seat = store.seatByConversation(conversation);
     if (seat.isEmpty()) {
       return false;
@@ -196,7 +204,7 @@ public final class SeatRunner implements Dispatcher.Wakes {
     // is granted, nothing stands between it and the guarded speakToSeat call but clock.get():
     // an unknown reason or a countAfter failure must refuse the wake outright rather than
     // leave calls stuck in BoardPot.leased with no settle to give them back.
-    SeatWake data = ((io.aeyer.plowshare.server.events.EventPayload.Seat) wake.data()).wake();
+    SeatWake data = ((EventPayload.Seat) wake.data()).wake();
     String utterance =
         WakeUtterance.of(
             topic,

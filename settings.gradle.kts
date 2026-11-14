@@ -77,3 +77,7 @@ project(":plowshare-mcp-integration").projectDir = file("integrations/mcp")
 
 include("plowshare-discord-integration")
 project(":plowshare-discord-integration").projectDir = file("integrations/discord")
+
+// Independent wire/database acceptance harness; server and adapters remain production-independent.
+include("plowshare-integration-acceptance")
+project(":plowshare-integration-acceptance").projectDir = file("integrations/acceptance")

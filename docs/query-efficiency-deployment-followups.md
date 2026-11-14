@@ -72,6 +72,132 @@ Private installation no longer reports that Help is ready. Existing Personal
 sources are not automatically shared; publish the intended checked-in chapters
 through the installer's documented Global/shared workflow.
 
+## Targeted log readability and job listings
+
+On a deployed `b630d96b` installation, one PostgreSQL backend stayed saturated.
+Sampling active statements attributed most backend time to permission checks
+rather than data reads: `service_project_role`, `information_log_readable` and the
+per-revision catalogue `information_readable` check. Over one minute the database
+answered 341 transactions per second, with about 3,200 `admins` lookups per second.
+Neither cache version domain changed during that minute.
+
+Two separate causes were involved:
+
+- **JIT compilation.** V235 redefined `information_log_readable` and
+  `information_readable_input_selections` with `CREATE OR REPLACE` and no `SET`
+  clause, so neither carried the function-local `jit=off` that V196 gave the
+  collection routines. With JIT, one check over a log with 82 retained inputs took
+  1,983 ms; without it, 47 ms. For a single retained revision, compilation was
+  78 ms of 89 ms. V240 restores the setting on both routines only.
+  `service_project_role` and the catalogue check timed the same with JIT on or off.
+  `FunctionJitSettingsTest` replays the migrations and fails when a later
+  redefinition drops the setting.
+- **Repeated questions.** Targeted log checks bypassed the account's deny set
+  (`information_unreadable_logs`), which feed reads already cache under READABILITY
+  and AUTHORITY. `InformationLogVisibility.readable` now answers point checks from
+  that set when it is current.
+  - Loading the set cost 85–130 ms, about two point checks.
+  - A dirty or historical transaction, an oversized set or a missing account uses
+    the statement predicate.
+  - On deployed data, set membership matched `information_log_readable` for
+    768 of 768 checks across both service accounts.
+  - Job listings also resolved a selection and checked a revision once per input
+    of every job. `InformationJobs.listing` now asks each distinct question once
+    per listing, against current authority.
+
+## Authority decided in server memory
+
+Project role resolution used to issue three statements per check, and every
+permission check repeated it:
+- the service-owner lookup;
+- `service_project_role` or `authority_project_role`, each walking
+  `authority_live_grants()` with `account_active()` evaluated per grant;
+- the `projectLineages` recursive CTE.
+
+Those tables hold tens of rows on deployed installations.
+
+**The snapshot.** `AuthoritySnapshot` holds a typed copy of the authority tables
+and evaluates those functions in Java, clause by clause: grant liveness, account
+activity, project and service roles, the service owner, server administration,
+membership and lineages. `CachedProjectMembers` and `ApplicationGrantLineage` read
+from it. Mutations, history, administrative control and manifest limits are
+unchanged.
+
+**Consistency.**
+- **Versioning.** The snapshot is one entry in the bounded projection cache under
+  the AUTHORITY domain. Every table it copies moves that counter on insert, update
+  and delete (V175). The cache validates the token captured before loading, then
+  validates the stored token again on every hit. A write during or after loading
+  therefore prevents use.
+- **Expiry.** The token's window contains no grant or token expiry, so evaluating
+  expiry at the loading statement's `now()` gives the verdict for any instant the
+  snapshot is served.
+- **Fallbacks.** A dirty, historical or expiry-spanning transaction, a disabled
+  cache, or a table over 10,000 rows receives no snapshot and runs the SQL
+  functions as before.
+- **Capacity.** The snapshot is the twenty-first projection cache, so the default
+  `max-projections` rises from 20 to 24. An installation that sets a lower value
+  fails at startup with "Projection cache capacity exceeded". Per-cache budgets are
+  unchanged; the snapshot itself holds a few kilobytes on deployed installations.
+
+`AuthoritySnapshotDifferentialDatabaseTest` compares every method with its SQL
+function after each of 20 fixture states. These cover account enablement, server
+administration, bootstrap, credential withdrawal, token revocation and expiry,
+owner disablement, ceilings, membership removal, delegated revocation and expiry,
+and issuer removal. A changed authority function must change its Java mirror in
+the same change, or that test fails.
+
+## Notification-trusted authority
+
+On BETA the snapshot removed 85–92% of authority-table reads, but every check still
+issued three small statements: caller eligibility, version capture and the hit's
+version validation. Authority changes are rare and act on a human timescale, so
+the authority snapshot and targeted log checks now trust database notifications
+for repeat reads (see the bounded exception in the
+[cache design](query-efficiency-and-cache-design.md)). A trusted check issues no
+SQL. A committed revocation, role change or account disable takes effect within
+`plowshare.projection-cache.notified.staleness`, 2 s by default, not instantly.
+
+**Why the listener needed probes.** The listener only read its socket. A
+connection lost without a reset, as after a VM pause or a dropped NAT entry, made
+every poll return empty indefinitely: no notification, no error and no recovery.
+The per-read version fence hid this. The listener now sends itself a probe every
+500 ms on a session with a network timeout. An answered probe proves delivery, and
+a probe unanswered for 3 s ends the session. Silent loss therefore recovers in
+about the timeout plus the reconnect delay, and trusted hits stop as soon as
+proof is older than the staleness bound. Probes run whenever
+`plowshare.projection-cache.notified.enabled` is true, the default, including for
+caches that stay versioned. Setting it to false restores the previous behavior.
+
+Writes in the caller's own transaction, transactions above READ COMMITTED and
+expiries inside the bound still use the version fence. `NotifiedProjectionDatabaseTest`
+checks commit-order echoes and a revocation reaching a trusted cache within the
+bound on real PostgreSQL.
+
+## SYSTEM processing decided once
+
+After trusted authority checks, `admins` was still scanned about 56 times a second
+on BETA. The information worker's claim and sweep statements begin with
+`information_system_processing_revisions()`, which starts from
+`authority_live_grants()` and evaluates `account_active()` for every grant on
+every poll. `information_system_scope_valid` repeats the same grant test once per
+owner and project. Both answers are installation-wide facts; on a valid
+installation the SYSTEM root policy, built-in roles and BUILTIN account are
+immutable, so they never change.
+
+`AuthoritySnapshot` now decides both, mirroring V236 and V161 clause by clause,
+and the worker passes the decision to V241's
+`information_system_processing_revisions(system_authorized)`. With a decision,
+the live-grant CTEs never execute; with NULL, SQL decides exactly as before. A
+transaction that cannot use the snapshot passes NULL. The zero-argument function
+remains for older binaries during a rolling upgrade. Per-revision retained-input
+and target-scope predicates are unchanged. The PROC audit view still uses the
+SQL-decided form.
+
+`AuthoritySnapshotDifferentialDatabaseTest` compares both decisions with their
+SQL functions in every fixture state and asserts that a decided call reads
+`admins` zero times.
+
 ## Regression provenance and validation
 
 The per-row document guard and unconditional retrieval dispatch originate in

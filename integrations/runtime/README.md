@@ -2,7 +2,7 @@
 
 This Java 21 executable connects external adapters to Plowshare's existing SDK.
 It owns binding configuration, optional JavaScript mappings, a private journal,
-outgoing requests and orchestration starts/results. Adapters own external protocols,
+Relay requests and orchestration starts/results. Adapters own external protocols,
 credentials, states, actions and subscriptions. Plowshare project agents and
 orchestrations perform inference. No server, protocol, SDK or database change is
 required.
@@ -15,23 +15,71 @@ alone contains no adapter implementations.
 
 Configuration version 1 names the Plowshare origin, a credential environment
 variable, private journal directory and one to 32 bindings. Each binding fixes its
-adapter, project, outgoing peer, adapter configuration, routes and optional local
-`script` file. Unknown configuration fields refuse. Each project/peer pair must be
+adapter, project, explicit Relay topic/principal/generation policy, adapter configuration, routes and optional local
+`script` file. Unknown configuration fields refuse. Each project/request-topic pair must be
 unique; reachable adapters come from optional `allowBindings`, which defaults to
 self and can include only bindings in the same project. Credentials remain in the
 parent runtime and never enter the script worker.
 
-The runtime accepts one structured part under existing outgoing work:
+The runtime accepts existing typed integration data directly as Relay TEXT:
 
 ```json
-{"parts":[{"data":{"schema":"plowshare-integration/1","binding":"house","operation":"states.read","arguments":{"entities":["office.temperature"]}}}]}
+{"schema":"plowshare-integration/1","binding":"house","operation":"states.read","arguments":{"entities":["office.temperature"]}}
 ```
 
-Operations are `states.read` and `actions.execute`. Adapters validate their arguments
-before execution. Results use existing COMPLETED, FAILED, REJECTED or UNKNOWN
-reports, with no invented external task. Existing project tools are sufficient:
-outgoing_peers, outgoing_send and outgoing_read. Selected subscriptions are operator
-configuration. The runtime never uses the global event.fire operation.
+Operations remain `states.read` and `actions.execute`. Adapters allowlist aliases,
+actions and parameters before execution. Configure each binding's `relay` with
+`requests`, `requestGeneration`, `returns`, `returnGeneration`, `channel`, exact
+`publisher` and `producers`, `maxDepth` (1–32), and `maxReturnBytes` (1024–262144).
+There are no implicit topics, principals or incarnation adoption. Read the actual
+publishers and generations through authorized Relay inspection and replace all
+example placeholders. The channel must match the server's explicit native export
+policy and `message.return` branch. The adapter account needs exact return-topic
+INGRESS authority and project log-read authority. Agents separately require
+`relay_publish` and exact execution topic grants.
+
+An execution export's server-retained source event, not a body ID, chooses its
+native requester. Finish the publishing turn while awaiting an ordinary correlated
+native reply. An ORCHESTRATION source is unsupported by the initial export
+contract; event-started investigations reuse their supplied authorized snapshot
+rather than promising a remote wait. Direct SDK producers may read their correlated
+result through the configured result log; ordinary SDK publication creates no
+native execution binding.
+
+The runtime returns `plowshare-message-return/1` with the authoritative source event
+and stable return mutation UUID. Its body is `plowshare-integration-result/1` with
+`state`, `effectState`, typed `result` and nullable `refusal`. `effectState` retains
+the actual external outcome. Oversized evidence remains complete in the private
+journal; delivery is explicitly `REJECTED` with `RESULT_TOO_LARGE`, a null result
+and the original effect state. Nothing is silently truncated. Configure a return
+limit that also fits the server's native body-byte policy. An append receipt means
+broker storage, not native acceptance, model completion or physical verification.
+
+Request capture and cursor movement are atomic under the existing journal lock.
+Execution and publication intents precede I/O. Uncertain actions and publications
+are never replayed: exact retained log reads can reconcile a submitted result;
+missing evidence stays unresolved. One deferred binding does not prevent another
+binding's request pass. `relayAttention()` reports a bounded per-binding attention
+view. The original native causal snapshot is retained by the server; returns omit
+broker parent references so expiry cannot invent replacement authority.
+
+Return reconciliation retains each completely validated search page before
+reading the next. A pass reads at most 32 pages and a restart continues from its
+durable position. Search progress changes neither the publication intent nor its
+effect identity; absence and retention gaps never permit a replacement mutation.
+
+Both topic generations are checked before effects and publications. Public
+`relay.publish` has no atomic expected-generation parameter. Replacement during
+the check/append race remains uncertain, and the owning native receiver separately
+refuses a different retained return incarnation. See the
+[consumer decision and acceptance criteria](docs/relay-cutover.md) and
+[native export contract](../../docs/messaging-relay-exports.md).
+
+Legacy `peer` configuration is rejected. Completed outgoing journal evidence stays
+readable. Any unfinished historical outgoing entry fences startup before adapter
+intake, without querying retired operations or rewriting it as new Relay work.
+Inspect and reconcile that evidence explicitly; a fresh UUID does not prove that
+an old physical effect failed.
 
 ## JavaScript version 1
 
@@ -151,7 +199,7 @@ accepts integral values from 1 to 16. Values above 1 retain observed parent link
 for longer automation chains. For a completed configured action, the runtime records
 a nonblank
 `result.context.id` (at most 128 characters) atomically with its result, before
-outgoing reporting. It matches that ID against a later observation's `context.id`
+Relay result publication. It matches that ID against a later observation's `context.id`
 or `context.parent_id`, within the same binding and configuration fingerprint.
 For example, after observing `child -> acknowledged action` and then
 `grandchild -> child`, a depth limit of 2 or more can suppress the grandchild.
@@ -269,9 +317,10 @@ then identical start submission if absent. An interrupted or unacknowledged exte
 action is UNKNOWN and never automatically resent. HA acceptance and observed physical
 outcomes are different evidence.
 
-Initial outgoing claims are tied to an SDK session and cannot be reclaimed by a
-replacement session. After a lost report the runtime accepts an exactly matching
-durable terminal result. Otherwise it stops with a stranded claim for inspection.
+Unfinished historical outgoing entries stop startup before opening adapter intake.
+Their retained identities and evidence remain available through inspection; they
+are never adopted into Relay or queried through retired SDK operations. A lost
+Relay result reply is reconciled only against its exact retained publication.
 There is no automatic SDK reconnection/replay. HA transport reconnects within its
 adapter, with fresh state and a gap observation.
 

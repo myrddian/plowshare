@@ -1,6 +1,9 @@
 package io.aeyer.plowshare.server.orchestrations;
 
+import io.aeyer.plowshare.protocol.AccountEvent;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.AgentDelegates;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.AgentTool;
 import io.aeyer.plowshare.server.agents.CallerAccess;
@@ -24,6 +27,7 @@ import io.aeyer.plowshare.server.agents.StudioTools;
 import io.aeyer.plowshare.server.agents.TodoTools;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnEnd;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
 import io.aeyer.plowshare.server.approvals.ConductorContinuation;
 import io.aeyer.plowshare.server.approvals.RunApproval;
@@ -35,7 +39,11 @@ import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.hooks.HookContext;
+import io.aeyer.plowshare.server.information.InformationGateRepository;
+import io.aeyer.plowshare.server.information.InformationLogVisibility;
+import io.aeyer.plowshare.server.messaging.MessagingRunExtras;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage.Kind;
+import io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore;
 import io.aeyer.plowshare.server.session.Presence;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.Role;
@@ -99,9 +107,7 @@ public class OrchestrationsConfig {
 
   @Bean
   public OrchestrationStore orchestrationStore(
-      JdbcTemplate jdbc,
-      UnitOfWork work,
-      io.aeyer.plowshare.server.information.InformationLogVisibility visibility) {
+      JdbcTemplate jdbc, UnitOfWork work, InformationLogVisibility visibility) {
     return new OrchestrationStore(jdbc, Instant::now, work).useVisibility(visibility);
   }
 
@@ -278,20 +284,18 @@ public class OrchestrationsConfig {
       OrchestrationChecks orchestrationChecks,
       RunApprovalStore approvals,
       Environments environments,
-      io.aeyer.plowshare.server.agents.Callers agents,
+      Callers agents,
       RecordKeeper recordKeeper,
       OrchestrationAcceptance orchestrationAcceptance,
       CapsSource capsSource,
       ObjectProvider<CommandJudge> judge,
       Checking checking,
       CallerAccess access,
-      org.springframework.jdbc.core.JdbcTemplate jdbc,
-      io.aeyer.plowshare.server.information.InformationGateRepository informationReceipts,
-      io.aeyer.plowshare.server.access.OperationAuthority operations,
-      io.aeyer.plowshare.server.allowances.AllowanceRepository allowances) {
-    var scripts =
-        new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(
-            jdbc, informationReceipts);
+      JdbcTemplate jdbc,
+      InformationGateRepository informationReceipts,
+      OperationAuthority operations,
+      AllowanceRepository allowances) {
+    var scripts = new JdbcScriptStore(jdbc, informationReceipts);
     runtime.useScripts(scripts);
     turn.usePendingReportRetry(
         conversation ->
@@ -326,8 +330,7 @@ public class OrchestrationsConfig {
                 .getIfAvailable(() -> AccountPushes.NONE)
                 .push(
                     run.callerHandle(),
-                    new io.aeyer.plowshare.protocol.AccountEvent.OrchestrationResumed(
-                        run.id(), requestId)));
+                    new AccountEvent.OrchestrationResumed(run.id(), requestId)));
     orchestrations.useApprovalDrain(runtime::deliverApprovalQuestions);
     orchestrations.useRecorder(recordKeeper);
     // A conductor's agent_run that returned is progress: its nudge count starts again.
@@ -447,7 +450,8 @@ public class OrchestrationsConfig {
       ObjectProvider<DefinitionResolver> definitions,
       ObjectProvider<OrchestrationResolver> resolver,
       ObjectProvider<DataLayout> data,
-      ObjectProvider<BoardRunExtras> boards) {
+      ObjectProvider<BoardRunExtras> boards,
+      ObjectProvider<MessagingRunExtras> messages) {
     Studio studio =
         studio(
             orchestrations,
@@ -484,6 +488,14 @@ public class OrchestrationsConfig {
               return boardExtras == null ? RunExtras.Extras.NONE : boardExtras.forRun(context);
             },
             store);
+    extras =
+        combinedRunExtras(
+            extras,
+            context -> {
+              MessagingRunExtras available = messages.getIfAvailable();
+              return available == null ? RunExtras.Extras.NONE : available.forRun(context);
+            },
+            store);
     runtime.useRunExtras(extras);
     runtime.useTriggers(
         (definition, utterance, home, session, conversation) -> {
@@ -505,7 +517,8 @@ public class OrchestrationsConfig {
       OrchestrationsProperties properties,
       OrchestrationStore store,
       Orchestrations orchestrations,
-      Delivery orchestrationDelivery) {
+      Delivery orchestrationDelivery,
+      ChildCompletionWorker childCompletions) {
     return ready -> {
       if (properties.isRecoverAtBoot()) {
         recover(store, orchestrations, orchestrationDelivery);
@@ -514,6 +527,7 @@ public class OrchestrationsConfig {
             "plowshare.orchestrations.recover-at-boot is false: runs a restart"
                 + " interrupted are not picked back up");
       }
+      childCompletions.start();
     };
   }
 
@@ -1119,8 +1133,7 @@ public class OrchestrationsConfig {
           .getIfAvailable(() -> AccountPushes.NONE)
           .push(
               run.callerHandle(),
-              new io.aeyer.plowshare.protocol.AccountEvent.OrchestrationChanged(
-                  run.id(), run.state().wire()));
+              new AccountEvent.OrchestrationChanged(run.id(), run.state().wire()));
     };
   }
 
@@ -1228,9 +1241,9 @@ public class OrchestrationsConfig {
    *       must never see one. (An answered run is {@code running} again by the time its answer is
    *       recorded, which is why the first case reads {@code running}.)
    *   <li>A {@code waiting} run is left alone too, and has nothing to restart: a child's report is
-   *       what wakes it, and that report is undelivered on the child's own row — the drain below is
-   *       what gets it moving again.
-   *   <li>Then every undelivered question and ending is delivered.
+   *       what wakes it. Its undelivered row is recovered by the leased child-completion consumer,
+   *       started after this recovery pass; the drain below cannot bypass that ownership.
+   *   <li>Then undelivered questions and root endings are drained; child endings stay with Relay.
    * </ul>
    *
    * <p>Each run is guarded on its own, so one that throws does not keep the rest waiting.
@@ -1259,7 +1272,7 @@ public class OrchestrationsConfig {
           });
     }
     guarded(
-        "delivering every undelivered orchestration message after a restart", delivery::drainAll);
+        "draining orchestration questions and root results after a restart", delivery::drainAll);
   }
 
   /**
@@ -1305,15 +1318,13 @@ public class OrchestrationsConfig {
    * fixed-registry overload is retained for isolated contexts.
    */
   static ConductorVoice conductorVoice(Turn turn, AgentRegistry agents) {
-    return conductorVoice(
-        turn, io.aeyer.plowshare.server.agents.AgentDelegates.fixed(() -> agents));
+    return conductorVoice(turn, AgentDelegates.fixed(() -> agents));
   }
 
   /**
    * Re-admit delegates in their retained project/account; never use another project's definition.
    */
-  static ConductorVoice conductorVoice(
-      Turn turn, io.aeyer.plowshare.server.agents.AgentDelegates agents) {
+  static ConductorVoice conductorVoice(Turn turn, AgentDelegates agents) {
     return new ConductorVoice() {
       @Override
       public String speakFrom(

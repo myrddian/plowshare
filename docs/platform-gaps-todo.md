@@ -28,6 +28,12 @@ multi-slice effort.
 Items within a track are ordered; tracks are independent unless a **Depends on**
 line says otherwise.
 
+Relay Slice 0 correction, 13 November 2026: C1 and D1 below follow
+[0057](decisions/0057-board-forum-and-relay-messaging-substrate.md) and
+[0058](decisions/0058-a2a-rebuild-on-relay.md), verified against source at
+`7ca27b48ac496b0027923b34b48d3044bddd8b49`. The original review baseline above
+still applies to other items. These corrections do not complete the listed work.
+
 ---
 
 ## Track A: WebSocket transport
@@ -355,36 +361,75 @@ helper.
 
 ### C1: rewrite the A2A adapter (M)
 
-- [ ] Rebuild `integrations/a2a` on the official A2A Java SDK.
+- [ ] Retain A2A as a feature and rewrite `integrations/a2a` as an external
+  public-SDK consumer of Relay ports, assessing the official A2A Java SDK.
 
 **Evidence (verified):** the adapter is a small hand-written JSON-RPC client and
 receiver over OkHttp. Inbound supports text-only `SendMessage`, `GetTask` and
 `CancelTask`; streaming, subscriptions, push notifications, task listing and
 artifacts are unsupported. Its tests depend on `:plowshare-server` internals.
+The receiving path also added adapter responsibilities to core board messaging
+and external-instance/context/task records; outgoing work has its own core queue.
+That core coupling is why a rewrite is needed, not a reason to remove A2A.
 
-**Scope and acceptance:** keep the existing mapping (`contextId` to a persistent
-instance and conversation, task to an incoming receipt); add streaming, artifacts,
-file parts and task follow-ups as the public SDK allows; test against the public
-SDK only. Report gaps the SDK cannot cover instead of changing core. Move outbound
-work onto Relay once D1 lands.
+**Scope and acceptance:** follow [0058](decisions/0058-a2a-rebuild-on-relay.md),
+which supersedes 0008's unshipped plan. Start from context continuity, idempotent
+receipt, task read/cancel/state, authenticated-client isolation and no replay
+after uncertain external effects. Existing mappings and additional protocol
+capabilities are inputs to requirements review, not a mandate to keep the
+current core surface. Test through the public SDK only; report missing public
+capabilities under ADR 0001 rather than adding adapter-specific core changes.
+Account for Home Assistant/shared runtime, Discord and Network Privacy Watch
+before removing any incoming/outgoing surface; scheduled work must be rehomed.
+
+**Depends on:** the payload, bridge and messaging contracts in Relay Slices 1–3
+(D1/D1a); a new transport behind today's queue alone does not complete the rewrite.
 
 ---
 
 ## Track D: messaging and orchestration
 
-### D1: finish the move from board messaging to Relay (L)
+### D1: extract messaging from board transport onto Relay (L)
 
-- [ ] Carry agent mail, delegation and outgoing work on Relay v1.
+- [x] Preserve `message.*`, lifecycle notices and `send_message` while moving
+  bodies to one project-readable Relay inbox per (account, project, definition).
+  Messaging dispatches to the addressed instance; conversations and lifetimes
+  remain its own records. Keep per-message allowances and database lifecycle
+  invariants; replace the board pot and private board transport in the cutover.
 
-**Evidence (reported):** ADR 0040 records the migration as started; message
-bodies, delegation and `outgoing_work` still use board tables, giving several
-delivery mechanisms. Blocked on an audience for account-private content
-(ADR 0037/0039).
+**Implemented in Slice 3:** `messaging/RelayMessaging` consumes `MessageService`
+and repository interfaces, retains its own records and allowances, and publishes
+atomically to project-scoped agent inboxes. Leased consumption admits native
+firings and advances its cursor together. V239 transfers retained threads, queued
+work and paid evidence without replay; V240 reserves shared-conversation turn
+ordinals before execution. The board retains independent forum storage. Removed
+definitions retire only drained inbox bindings. Slice 4 adds physical owner cleanup,
+generation-fenced SDK group deletion and indexed retention discovery. See ADRs
+0061–0062.
+
+**Depends on:** the messaging payload contract and D1a, as Relay Slices 1–3.
+
+### D1a: Relay-to-board bridge and replies (L)
+
+- [x] Add `board.post` and `board.open` receivers through the board's own API,
+  with replies and a terminal outcome returning through Relay. Add the
+  permission-checked `board.close` operation and receiver under project write
+  authority, without the opener-seat restriction.
+
+**Implemented in Slice 2:** the three board receivers retain the publishing
+account, deduplicate by delivery UUID and publish full threaded answers plus one
+terminal through a transactional outbox. Lifecycle reference notices are unchanged.
+The bridge leaves forum storage, seats and ordering with the board. See
+[0060](decisions/0060-relay-board-bridge-and-authorized-close.md) for publisher
+authority, exact disclosure, project-authorized close and idempotency.
 
 ### D2: orchestration parent wake on Relay (M)
 
-- [ ] Replace the in-process `Delivery` → `ParentVoice` path and its in-memory
-  in-flight set, and give `orchestration.child.completed` a consumer.
+- [x] Replace callback delivery of child terminal results with the single leased
+  `orchestration.child.completed` consumer group. V243 captures all terminal
+  outcomes and preserves pending-report recovery beyond retention. Shared turn
+  eligibility prevents nudges/auto-finish overtaking a pending report; questions
+  retain their distinct path. See [0064](decisions/0064-relay-child-completion-and-turn-eligibility.md).
 
 ### D3: parallel commands in scripted orchestrations (M)
 

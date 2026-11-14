@@ -1,5 +1,10 @@
 # Query efficiency and cache design
 
+Current [cache and listener telemetry](server-administration.md#projection-cache-and-listener-metrics)
+exports validated projection outcomes separately from backing lookups, bounded-load
+attempts, fallback reasons and listener delivery proof. Scrapes read memory only;
+notification freshness and durable version checks remain the authority for reuse.
+
 Status: proposed implementation strategy. The
 [query efficiency rules](coding-standards.md#query-efficiency-and-reuse) apply to
 new and changed code. The [first implementation slice](query-efficiency-first-slice.md)
@@ -165,6 +170,23 @@ documented mechanism. Asynchronous invalidation alone cannot guarantee immediate
 revocation across processes. Do not serve protected data from a stale allow
 decision while waiting for a notification. Reuse expensive authority calculations
 within a valid operation snapshot instead of omitting required checks.
+
+**Bounded exception: notification-trusted caches.** A projection cache may opt in
+(`ProjectionCaches.Freshness.NOTIFIED`) to answering repeat reads from memory,
+with no SQL, when *proven* delivery shows nothing watched has changed. Proof is a
+delivery probe: the listener sends itself a `NOTIFY` and, because PostgreSQL
+delivers to a listener in commit order and observers run synchronously on the
+listener, an answered probe means every earlier commit has already invalidated
+the cache. A trusted hit is therefore at most
+`plowshare.projection-cache.notified.staleness` (default 2 s) behind a committed
+revocation. It falls back to the full version fence whenever the listener is not
+ready or its last answered probe is older than that bound, when the caller holds a
+transaction that could contain its own writes, or when an expiry falls within the
+bound. A probe unanswered for `heartbeat-timeout` (default 3 s) ends the listener
+session and starts recovery, so a silently lost connection cannot leave trusted
+hits running. Opt a cache in only when a seconds-scale delay after a permission
+change is acceptable for everything it serves; today that is the authority
+snapshot and targeted log-visibility checks.
 
 ## Bounded RAM cache and LRU contract
 

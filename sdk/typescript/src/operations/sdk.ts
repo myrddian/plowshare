@@ -93,17 +93,7 @@ export interface ConnectOptions extends Omit<WireConnectOptions, 'onPush'> {
 export type { Payloads } from './direct.ts';
 export type { Replies } from './replies.ts';
 export type { JobView, JobOutcome } from '../binding/job-view.ts';
-export type {
-  ExternalMessage,
-  ExternalPart,
-  ExternalResult,
-  ExternalTask,
-  IncomingSource,
-  IncomingCommand,
-  AgentCard,
-  IntegrationRequest,
-  IntegrationResult,
-} from './external.ts';
+
 export {
   ApplicationIdentityClient,
   ApplicationIdentityRefused,
@@ -135,11 +125,14 @@ export type {
   ApplicationCredential,
 } from './application-identities.ts';
 export type { SwarmSelection, SwarmType, SwarmTypes } from './swarm-types.ts';
-export type { OutgoingWork } from './outgoing.ts';
 export type {
   RelayPublishRequest,
   RelayConsumeRequest,
   RelayAckRequest,
+  RelayDeleteGroupRequest,
+  RelayGroupDeleted,
+  RelayInspectGroupRequest,
+  RelayGroupState,
   RelayBatch,
   FilterReviewRequest,
   FilterReviewResponse,
@@ -312,17 +305,6 @@ export class Plowshare {
       ...(this.session === undefined ? {} : { session: this.session }),
       ...payload,
     });
-  }
-  sendOutgoing(
-    payload: Payloads['outgoing.send'],
-  ): Promise<Reply<'outgoing.send'>> {
-    return this.request('outgoing.send', payload);
-  }
-  outgoingStatus(id: string): Promise<Reply<'outgoing.status'>> {
-    return this.request('outgoing.status', { id });
-  }
-  cancelOutgoing(id: string): Promise<Reply<'outgoing.cancel'>> {
-    return this.request('outgoing.cancel', { id });
   }
   /** Explicit ingress. Keep the request UUID to reconcile uncertain publication. */
   publishRelay(

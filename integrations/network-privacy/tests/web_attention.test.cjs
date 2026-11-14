@@ -34,7 +34,7 @@ function summary(deviceId, state, potential_breaches = 0) {
 function credential(purpose, variable, present) {return {purpose, source:'environment', variable, present};}
 function system(overrides = {}) {
   return {pihole:null, unifi:null, advisory_origin:null, deployment:{server_origin:'https://plowshare.example', project:'home', collector:'home-collector',
-    request_topic:'privacy.scan.requested', result_topic:'privacy.scan.completed', group:'collectors', outgoing_peer:null,
+    request_topic:'privacy.scan.requested', result_topic:'privacy.scan.completed', group:'collectors',
     probe_timeout_seconds:1.5, probe_concurrency:32, credentials:[credential('Plowshare service credential', 'PLOWSHARE_TOKEN', true)]}, ...overrides};
 }
 function overview(summaries, extra = {}) {

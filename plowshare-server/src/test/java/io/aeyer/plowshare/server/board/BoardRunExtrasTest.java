@@ -1,14 +1,27 @@
 package io.aeyer.plowshare.server.board;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.agents.*;
+import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.AgentRegistry;
+import io.aeyer.plowshare.server.agents.AgentTool;
+import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.agents.RunExtras;
+import io.aeyer.plowshare.server.agents.Transcript;
+import io.aeyer.plowshare.server.agents.TurnEnd;
+import io.aeyer.plowshare.server.archive.Origin;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.List;
+import java.util.Set;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -91,7 +104,13 @@ class BoardRunExtrasTest {
     BoardSeat member = fixture.store.seat(opened.topic().id(), "researcher").orElseThrow();
     BoardSeat opener = fixture.store.seat(opened.topic().id(), BoardSeat.OPENER).orElseThrow();
     assertEquals(
-        List.of("board_read", "board_post", "board_document", "board_pass", "board_request_topic"),
+        List.of(
+            "board_read",
+            "board_post",
+            "board_document",
+            "board_pass",
+            "board_request_topic",
+            "board_close"),
         names(extras.forRun(context(researcher, member.conversation()))));
     assertEquals(
         List.of("board_read", "board_post", "board_document", "board_close", "board_decide"),
@@ -166,12 +185,7 @@ class BoardRunExtrasTest {
   void an_event_or_global_run_gets_no_board_open() {
     var event =
         fixture.conversations.log(
-            io.aeyer.plowshare.server.archive.Origin.EVENT,
-            Home.of("payments"),
-            "aristoxenus",
-            null,
-            Budget.of(10),
-            "enzo");
+            Origin.EVENT, Home.of("payments"), "aristoxenus", null, Budget.of(10), "enzo");
     assertSame(RunExtras.Extras.NONE, extras.forRun(context(aristoxenus, event.id())));
     String chat = fixture.conversations.open(Home.global(), Budget.of(10)).id();
     var global =

@@ -19,9 +19,14 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.MemoryProposal;
+import io.aeyer.plowshare.server.access.InferenceCalls;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
+import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import io.aeyer.plowshare.server.agents.curator.Curator;
 import io.aeyer.plowshare.server.agents.learner.Learner;
@@ -31,6 +36,7 @@ import io.aeyer.plowshare.server.archive.CompactionStore;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.JobLog;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.archive.PromotionQueue;
@@ -38,6 +44,7 @@ import io.aeyer.plowshare.server.archive.ProposalStore;
 import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.data.DataConfig;
 import io.aeyer.plowshare.server.data.DataLayout;
+import io.aeyer.plowshare.server.documents.CitationStore;
 import io.aeyer.plowshare.server.documents.DocumentStore;
 import io.aeyer.plowshare.server.documents.RetrievalService;
 import io.aeyer.plowshare.server.fetch.FetchService;
@@ -50,6 +57,7 @@ import io.aeyer.plowshare.server.files.Scope;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionCloseListener;
 import io.aeyer.plowshare.server.files.WorkspaceProperties;
+import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.HookContext;
 import io.aeyer.plowshare.server.hooks.Hooks;
 import io.aeyer.plowshare.server.hooks.ToolPre;
@@ -60,10 +68,14 @@ import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
+import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.llm.dispatch.UnknownSpecifierException;
+import io.aeyer.plowshare.server.relay.RelayPublishing;
+import io.aeyer.plowshare.server.requests.RequestProjects;
 import io.aeyer.plowshare.server.search.SearchService;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.server.todos.TodoBoard;
 import io.aeyer.plowshare.server.union.UnionRouting;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -73,7 +85,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -128,20 +146,13 @@ class AgentsConfigTest {
         // directory is created beside the module this suite runs in --
         // which is DataProperties' whole argument for the blank.
         .withUserConfiguration(AgentsConfig.class, DataConfig.class)
-        .withBean(
-            io.aeyer.plowshare.server.requests.RequestProjects.class,
-            () -> io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY)
-        .withBean(
-            io.aeyer.plowshare.server.access.OperationAuthority.class,
-            () -> mock(io.aeyer.plowshare.server.access.OperationAuthority.class))
-        .withBean(
-            io.aeyer.plowshare.server.access.InferenceCalls.class,
-            () -> mock(io.aeyer.plowshare.server.access.InferenceCalls.class))
-        .withBean(
-            io.aeyer.plowshare.server.access.SystemOperations.class,
-            () -> mock(io.aeyer.plowshare.server.access.SystemOperations.class))
+        .withBean(RequestProjects.class, () -> RequestProjects.EXPLICIT_ONLY)
+        .withBean(OperationAuthority.class, () -> mock(OperationAuthority.class))
+        .withBean(InferenceCalls.class, () -> mock(InferenceCalls.class))
+        .withBean(SystemOperations.class, () -> mock(SystemOperations.class))
         .withBean(FileStores.class, () -> FileStores.NONE)
         .withBean(ApplicationResources.class, () -> ApplicationResources.NONE)
+        .withBean(RelayPublishing.class, () -> mock(RelayPublishing.class))
         .withBean(LlmDispatcher.class, () -> dispatcher)
         // THE SHIPPED PROFILES, and read(null) is what a server with no
         // sampling directory gets -- which is the state most of these
@@ -174,22 +185,16 @@ class AgentsConfigTest {
         // not standing in for something optional: it is here so that the
         // context this file asserts on is the one a boot builds.
         .withBean(JobLog.class, () -> mock(JobLog.class))
-        .withBean(
-            io.aeyer.plowshare.server.access.ProjectAuthorization.class,
-            () -> mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class))
+        .withBean(ProjectAuthorization.class, () -> mock(ProjectAuthorization.class))
         // The todo board, required by AgentsConfig.jobRuntime because every boot binds the
         // todo tools. TodosConfig in production; mocked for the stores' reason above.
-        .withBean(
-            io.aeyer.plowshare.server.todos.TodoBoard.class,
-            () -> mock(io.aeyer.plowshare.server.todos.TodoBoard.class))
+        .withBean(TodoBoard.class, () -> mock(TodoBoard.class))
         // A real ProjectStore over a mocked JdbcTemplate, not a mocked
         // store: the configuration file and the sampling directory it
         // is constructed with are what
         // the_mandatory_exclusions_name_this_deployment_s_own_files
         // is about, and a mock would answer for neither.
-        .withBean(
-            io.aeyer.plowshare.server.archive.ProjectMembers.class,
-            () -> mock(io.aeyer.plowshare.server.archive.ProjectMembers.class))
+        .withBean(ProjectMembers.class, () -> mock(ProjectMembers.class))
         .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
         // The file channel and the session registry, which
         // AgentsConfig.runProviders needs in order to decide whether a
@@ -254,9 +259,7 @@ class AgentsConfigTest {
         // reason above and mocked for it too: what these tests read off
         // the runtime is which tool NAMES it binds.
         .withBean(DocumentStore.class, () -> mock(DocumentStore.class))
-        .withBean(
-            io.aeyer.plowshare.server.documents.CitationStore.class,
-            () -> mock(io.aeyer.plowshare.server.documents.CitationStore.class))
+        .withBean(CitationStore.class, () -> mock(CitationStore.class))
         // What fetch is built over. An unconditional bean in
         // production -- FetchConfig -- and supplied directly here for
         // the same reason the corpus is: importing that configuration
@@ -690,7 +693,7 @@ class AgentsConfigTest {
                         declared.topK(),
                         declared.maxTokens(),
                         declared.reasoningEffort(),
-                        java.util.Optional.empty()),
+                        Optional.empty()),
                     name
                         + " asserts an explicit sampling value as well as an"
                         + " intent. That is a model fact stated by a file that"
@@ -742,37 +745,37 @@ class AgentsConfigTest {
    * AgentDefinition#DEFAULT_INTENT} — the same value and a different statement: a file that has not
    * written one has not decided.
    */
-  private static final java.util.Map<String, Sampling.Intent> DECLARED =
+  private static final Map<String, Sampling.Intent> DECLARED =
       // ofEntries and not of: `Map.of` takes ten pairs and the eleventh
       // arrived with image_reader, as a compile error rather than a
       // failure -- the same conversion AgentRegistry.WITHHELD needed for
       // the same reason. Nothing was dropped in it; the count below is
       // what would say so.
-      java.util.Map.ofEntries(
-          java.util.Map.entry("ask_proposer", Sampling.Intent.EXPLORATORY),
-          java.util.Map.entry("ask_critic", Sampling.Intent.PRECISE),
-          java.util.Map.entry("ask_reviewer", Sampling.Intent.PRECISE),
-          java.util.Map.entry("ask_synthesiser", Sampling.Intent.BALANCED),
-          java.util.Map.entry("paragraph_summariser", Sampling.Intent.PRECISE),
-          java.util.Map.entry("span_summariser", Sampling.Intent.PRECISE),
-          java.util.Map.entry("section_summariser", Sampling.Intent.PRECISE),
-          java.util.Map.entry("chapter_summariser", Sampling.Intent.PRECISE),
-          java.util.Map.entry("document_summariser", Sampling.Intent.PRECISE),
-          java.util.Map.entry("information_tagger", Sampling.Intent.PRECISE),
-          java.util.Map.entry("information_tag_grouper", Sampling.Intent.PRECISE),
+      Map.ofEntries(
+          Map.entry("ask_proposer", Sampling.Intent.EXPLORATORY),
+          Map.entry("ask_critic", Sampling.Intent.PRECISE),
+          Map.entry("ask_reviewer", Sampling.Intent.PRECISE),
+          Map.entry("ask_synthesiser", Sampling.Intent.BALANCED),
+          Map.entry("paragraph_summariser", Sampling.Intent.PRECISE),
+          Map.entry("span_summariser", Sampling.Intent.PRECISE),
+          Map.entry("section_summariser", Sampling.Intent.PRECISE),
+          Map.entry("chapter_summariser", Sampling.Intent.PRECISE),
+          Map.entry("document_summariser", Sampling.Intent.PRECISE),
+          Map.entry("information_tagger", Sampling.Intent.PRECISE),
+          Map.entry("information_tag_grouper", Sampling.Intent.PRECISE),
           // The ninth, and the one whose argument is about COPYING
           // rather than about thinking: what this agent must reproduce
           // character for character is a paragraph id and a quotation
           // that has already been checked against that paragraph, so a
           // sampled token in either turns a verified citation into a
           // wrong one under a heading saying it was verified.
-          java.util.Map.entry("close_reader", Sampling.Intent.PRECISE),
+          Map.entry("close_reader", Sampling.Intent.PRECISE),
           // The eleventh, and the first whose reason is not about the
           // words: a picture is read once and the reading is the whole
           // answer, so a sampled token is a detail nobody can check
           // against the frame the way a quotation is checked against
           // its paragraph.
-          java.util.Map.entry("image_reader", Sampling.Intent.PRECISE));
+          Map.entry("image_reader", Sampling.Intent.PRECISE));
 
   /**
    * One shipped definition, sampled as nothing ships.
@@ -816,14 +819,14 @@ class AgentsConfigTest {
               Sampling critic = shipped.get("ask_critic").sampling();
 
               assertEquals(
-                  java.util.OptionalDouble.of(0.6d),
+                  OptionalDouble.of(0.6d),
                   critic.temperature(),
                   "ask_critic used to send temperature 0.0 — the configuration"
                       + " measured returning 3 997 reasoning tokens and empty"
                       + " content, on the family whose vendor forbids greedy"
                       + " decoding by name");
-              assertEquals(java.util.OptionalDouble.of(0.8d), critic.topP());
-              assertEquals(java.util.OptionalInt.of(20), critic.topK());
+              assertEquals(OptionalDouble.of(0.8d), critic.topP());
+              assertEquals(OptionalInt.of(20), critic.topK());
 
               // And the request built from it carries all three, which is
               // the thread the walk above can only test at NONE.
@@ -835,7 +838,7 @@ class AgentsConfigTest {
               // An agent that declares nothing still resolves, because the
               // absent key means `balanced` rather than "leave me alone".
               assertEquals(
-                  java.util.OptionalDouble.of(0.95d),
+                  OptionalDouble.of(0.95d),
                   shipped.get("scribe").sampling().topP(),
                   "an agent with no sampling: key takes the middle of the"
                       + " vocabulary, and the middle is still a row in a"
@@ -941,7 +944,7 @@ class AgentsConfigTest {
               var registry = context.getBean(AgentRegistry.class);
               var offered =
                   runtime.schemasOfferedTo(registry.get("interlocutor")).stream()
-                      .map(io.aeyer.plowshare.server.llm.dispatch.ToolSchema::name)
+                      .map(ToolSchema::name)
                       .toList();
               assertTrue(offered.containsAll(RetrievalTools.NAMES));
               assertTrue(offered.containsAll(ArchiveReadTools.NAMES));
@@ -949,7 +952,7 @@ class AgentsConfigTest {
               assertTrue(offered.contains(ConversationContextTool.NAME));
               assertTrue(
                   runtime.schemasOfferedTo(registry.get("librarian")).stream()
-                      .map(io.aeyer.plowshare.server.llm.dispatch.ToolSchema::name)
+                      .map(ToolSchema::name)
                       .toList()
                       .containsAll(RetrievalTools.NAMES));
               for (String name :
@@ -987,20 +990,20 @@ class AgentsConfigTest {
   @Test
   void every_mcp_capability_has_a_ws_mapping_and_an_explicit_model_adapter_or_boundary()
       throws Exception {
-    var json = new com.fasterxml.jackson.databind.ObjectMapper();
+    var json = new ObjectMapper();
     var manifest =
         json.readTree(
             Files.readString(Path.of("../test-support/contracts/client-capabilities.json")));
     var fixture =
         json.readTree(
             Files.readString(Path.of("../test-support/contracts/mcp-compatibility.json")));
-    java.util.Set<String> mcp = new java.util.TreeSet<>(), mapped = new java.util.TreeSet<>();
+    Set<String> mcp = new TreeSet<>(), mapped = new TreeSet<>();
     fixture
         .path("toolsList")
         .path("result")
         .path("tools")
         .forEach(tool -> mcp.add(tool.path("name").asText()));
-    java.util.Set<String> ws = new java.util.TreeSet<>();
+    Set<String> ws = new TreeSet<>();
     manifest.path("websocketInventory").forEach(row -> ws.add(row.path("frame").asText()));
     runner()
         .run(
@@ -1107,10 +1110,7 @@ class AgentsConfigTest {
                         "memory_read",
                         "memory_recall",
                         "memory_write",
-                        "outgoing_cancel",
-                        "outgoing_peers",
-                        "outgoing_read",
-                        "outgoing_send",
+                        "relay_publish",
                         "result_list",
                         "result_read",
                         "run",
@@ -1932,10 +1932,10 @@ class AgentsConfigTest {
   void the_abort_set_is_exactly_the_four_agents_the_code_looks_up_by_name() {
     assertEquals(
         List.of("conversation_folder", "learner", "promotion_judge", "scribe"),
-        List.copyOf(new java.util.TreeSet<>(AgentsConfig.REQUIRED)));
+        List.copyOf(new TreeSet<>(AgentsConfig.REQUIRED)));
     assertEquals(
         AgentsConfig.REQUIRED,
-        java.util.Set.of(Scribe.AGENT, Curator.AGENT, Learner.AGENT, Compaction.FOLDER));
+        Set.of(Scribe.AGENT, Curator.AGENT, Learner.AGENT, Compaction.FOLDER));
   }
 
   /**
@@ -2315,7 +2315,7 @@ class AgentsConfigTest {
           .map(file -> file.getFileName().toString())
           .filter(name -> name.toLowerCase(Locale.ROOT).endsWith(".md"))
           .map(name -> name.substring(0, name.length() - ".md".length()))
-          .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
+          .collect(Collectors.toCollection(TreeSet::new));
     } catch (IOException e) {
       throw new UncheckedIOException("could not list src/main/resources/agents", e);
     }
@@ -2388,11 +2388,11 @@ class AgentsConfigTest {
     when(local.toolPre(any(), any(), any())).thenReturn(ToolPre.allowed("{}"));
     ObjectProvider<Hooks> projectProvider = mock(ObjectProvider.class);
     ObjectProvider<Hooks> localProvider = mock(ObjectProvider.class);
-    ObjectProvider<io.aeyer.plowshare.server.harness.Harness> harness = mock(ObjectProvider.class);
+    ObjectProvider<Harness> harness = mock(ObjectProvider.class);
     ObjectProvider<CallValidator> validator = mock(ObjectProvider.class);
     when(projectProvider.getIfAvailable(any())).thenReturn(project);
     when(localProvider.getIfAvailable(any())).thenReturn(local);
-    when(harness.getIfAvailable(any())).thenReturn(io.aeyer.plowshare.server.harness.Harness.NONE);
+    when(harness.getIfAvailable(any())).thenReturn(Harness.NONE);
     when(validator.getIfAvailable(any())).thenReturn(CallValidator.NONE);
 
     Hooks chain =

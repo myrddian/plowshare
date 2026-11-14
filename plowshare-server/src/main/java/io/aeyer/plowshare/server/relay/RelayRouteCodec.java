@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -110,11 +111,18 @@ final class RelayRouteCodec {
   }
 
   private static RelayWork work(JsonNode value) {
-    fields(value, Set.of("agent"), Set.of("project", "definition"));
+    fields(
+        value,
+        Set.of(),
+        Set.of("agent", "project", "definition", "topic", "swarm", "replyTopic", "channel"));
     return new RelayWork(
-        text(value.get("agent")),
+        value.has("agent") ? text(value.get("agent")) : null,
         value.has("project") ? text(value.get("project")) : null,
-        value.has("definition") ? text(value.get("definition")) : null);
+        value.has("definition") ? text(value.get("definition")) : null,
+        value.has("topic") ? text(value.get("topic")) : null,
+        value.has("swarm") ? text(value.get("swarm")) : null,
+        value.has("replyTopic") ? text(value.get("replyTopic")) : null,
+        value.has("channel") ? text(value.get("channel")) : null);
   }
 
   static String event(Relay.Publication input) {
@@ -142,8 +150,7 @@ final class RelayRouteCodec {
     root.set(
         "payload",
         parse(
-            RelayPayloadCodec.write(input.event().payload()),
-            io.aeyer.plowshare.protocol.RelayPort.MAX_ENCODED_PAYLOAD_BYTES));
+            RelayPayloadCodec.write(input.event().payload()), RelayPort.MAX_ENCODED_PAYLOAD_BYTES));
     return root.toString();
   }
 

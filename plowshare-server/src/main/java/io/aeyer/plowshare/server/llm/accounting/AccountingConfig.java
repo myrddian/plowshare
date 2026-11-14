@@ -1,11 +1,13 @@
 package io.aeyer.plowshare.server.llm.accounting;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Compaction;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.llm.LlmProperties;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceAccounting;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -33,10 +35,7 @@ public class AccountingConfig {
       UsageScopeRepository scopes, ObjectProvider<UsageExecutionStore> executions) {
     return new UsageOwners() {
       @Override
-      public UsageAttribution in(
-          io.aeyer.plowshare.protocol.Home home,
-          String account,
-          UsageAttribution.Operation operation) {
+      public UsageAttribution in(Home home, String account, UsageAttribution.Operation operation) {
         String project = scopes.project(home);
         return account == null
             ? UsageAttribution.system(project, operation)
@@ -91,9 +90,15 @@ public class AccountingConfig {
   }
 
   @Bean
+  public InferenceTelemetry inferenceTelemetry(ObjectProvider<MeterRegistry> registries) {
+    var registry = registries.getIfAvailable();
+    return registry == null ? InferenceTelemetry.NONE : new MicrometerInferenceTelemetry(registry);
+  }
+
+  @Bean
   public InferenceAccounting inferenceAccounting(
-      AccountingRecorder recorder, InferencePrices prices) {
-    return new DurableInferenceAccounting(recorder, prices, Clock.systemUTC());
+      AccountingRecorder recorder, InferencePrices prices, InferenceTelemetry telemetry) {
+    return new DurableInferenceAccounting(recorder, prices, Clock.systemUTC(), telemetry);
   }
 
   @Bean

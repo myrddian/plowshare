@@ -1,12 +1,22 @@
 package io.aeyer.plowshare.server.board;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.server.access.GrantLineageFixture;
 import io.aeyer.plowshare.server.agents.WorkspaceApplicationPolicy;
-import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.archive.ApplicationProjectMembers;
+import io.aeyer.plowshare.server.archive.ApplicationRegistrations;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRecord;
+import io.aeyer.plowshare.server.archive.ProjectRole;
+import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageRefused;
+import io.aeyer.plowshare.server.messaging.ProjectMessageRouting;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -25,7 +35,7 @@ class ApplicationRoutingTest {
         new ApplicationProjectMembers(
             stored,
             new WorkspaceApplicationPolicy(projects, registrations),
-            io.aeyer.plowshare.server.access.GrantLineageFixture.passthrough());
+            GrantLineageFixture.passthrough());
     var routing = new ProjectMessageRouting(projects, members);
     for (String name : List.of("source", "destination")) {
       Path workspace = Files.createDirectory(root.resolve(name));
@@ -46,7 +56,7 @@ class ApplicationRoutingTest {
     Files.writeString(
         root.resolve("destination/plowshare.json"),
         "{\"version\":1,\"name\":\"destination\",\"routing\":{\"acceptFrom\":[\"source\"]}}");
-    assertThrows(Board.Refused.class, () -> routing.require("reader", "source", "destination"));
+    assertThrows(MessageRefused.class, () -> routing.require("reader", "source", "destination"));
     Files.writeString(
         root.resolve("destination/plowshare.json"),
         "{\"version\":1,\"name\":\"destination\",\"access\":{\"accounts\":[{\"handle\":\"reader\",\"role\":\"CONTRIBUTOR\"}]},\"routing\":{\"acceptFrom\":[\"source\"]}}");

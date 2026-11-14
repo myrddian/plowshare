@@ -7,12 +7,14 @@ import static org.mockito.Mockito.*;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.protocol.transport.*;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -231,14 +233,13 @@ class ConcurrentEventChannelTest {
             return handleAsync(payload, asking).toCompletableFuture().join();
           }
 
-          public java.util.concurrent.CompletionStage<Outcome> handleAsync(
-              Map<String, Object> payload, Asking asking) {
+          public CompletionStage<Outcome> handleAsync(Map<String, Object> payload, Asking asking) {
             executions.incrementAndGet();
             entered.complete(null);
             return result;
           }
         };
-    var authority = mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class);
+    var authority = mock(ProjectAuthorization.class);
     var revoked = new AtomicBoolean();
     // Configure the mock before concurrent calls; changing stubs during delivery races Mockito.
     doAnswer(
@@ -282,6 +283,76 @@ class ConcurrentEventChannelTest {
     }
   }
 
+  /**
+   * The write-time disclosure check reads project roles over JDBC on the drain thread. Interrupting
+   * a virtual thread inside a socket read closes the socket, so a disconnect that interrupted the
+   * check broke a pooled Postgres connection (SQLSTATE 08006, "Closed by interrupt"). The check
+   * must instead finish uninterrupted, and the reply must still not be written.
+   */
+  @Test
+  void disconnect_during_disclosure_check_does_not_interrupt_its_database_read() throws Exception {
+    var result = new CompletableFuture<Outcome>();
+    var entered = new CompletableFuture<Void>();
+    FrameHandler read =
+        new FrameHandler() {
+          public Outcome handle(Map<String, Object> payload, Asking asking) {
+            return handleAsync(payload, asking).toCompletableFuture().join();
+          }
+
+          public CompletionStage<Outcome> handleAsync(Map<String, Object> payload, Asking asking) {
+            entered.complete(null);
+            return result;
+          }
+        };
+    var authority = mock(ProjectAuthorization.class);
+    var checking = new CompletableFuture<Void>();
+    var release = new CompletableFuture<Void>();
+    var interrupted = new CompletableFuture<Boolean>();
+    var atWrite = new AtomicBoolean();
+    doAnswer(
+            ignored -> {
+              // Only the write-time check on the connection's drain thread is the subject here.
+              if (!atWrite.get() || !Thread.currentThread().getName().startsWith("job-events-"))
+                return null;
+              // Stands in for the JDBC role read. join() ignores interrupts, so the flag is
+              // observable afterwards instead of being consumed by the wait.
+              checking.complete(null);
+              try {
+                release.orTimeout(5, TimeUnit.SECONDS).join();
+                interrupted.complete(Thread.currentThread().isInterrupted());
+              } catch (Throwable failed) {
+                interrupted.completeExceptionally(failed);
+                throw failed;
+              }
+              return null;
+            })
+        .when(authority)
+        .require(anyString(), any(), anyString());
+    var router = new FrameRouter(Map.of("relay.topics", read));
+    router.useAuthorization(authority);
+    try (var fixture = new Fixture(false, router)) {
+      fixture.send("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
+      fixture.reply();
+      fixture.send("protected", "relay.topics", Map.of("project", "research"));
+      entered.get(5, TimeUnit.SECONDS);
+      atWrite.set(true);
+      result.complete(Outcome.ok(Map.of("secret", "protected content")));
+      checking.get(5, TimeUnit.SECONDS);
+
+      fixture.open.set(false);
+      fixture.handler.afterConnectionClosed(fixture.socket, CloseStatus.GOING_AWAY);
+      release.complete(null);
+
+      assertFalse(
+          interrupted.get(5, TimeUnit.SECONDS),
+          "closing the connection interrupted the disclosure check's database read");
+      assertTrue(fixture.received.stream().noneMatch(frame -> frame.contains("protected content")));
+    } finally {
+      release.complete(null);
+      result.complete(Outcome.ok());
+    }
+  }
+
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
   void compliant_full_window_refills_inside_physical_reply_handoff(boolean segmented)
@@ -295,8 +366,7 @@ class ConcurrentEventChannelTest {
             throw new AssertionError();
           }
 
-          public java.util.concurrent.CompletionStage<Outcome> handleAsync(
-              Map<String, Object> payload, Asking asking) {
+          public CompletionStage<Outcome> handleAsync(Map<String, Object> payload, Asking asking) {
             int slot = (Integer) payload.get("slot");
             if (slot == 0) firstEntered.complete(null);
             return answers.get(slot);

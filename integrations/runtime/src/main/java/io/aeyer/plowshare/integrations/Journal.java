@@ -2,13 +2,29 @@ package io.aeyer.plowshare.integrations;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aeyer.plowshare.protocol.IntegrationPayload.ActionContext;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.*;
-import java.nio.file.*;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /** Single owner, atomic snapshots and fsync. Unfinished entries are never evicted. */
@@ -75,6 +91,9 @@ public final class Journal implements AutoCloseable, IntegrationJournal {
       }
       if (!data.has("tombstones")) data.set("tombstones", Json.object());
       if (!data.has("causes")) data.set("causes", Json.object());
+      if (!data.has("relayCursors")) data.set("relayCursors", Json.object());
+      if (!data.path("relayCursors").isObject() || data.path("relayCursors").size() > 32)
+        throw new IOException("invalid integration Relay cursor index");
       if (!data.path("causes").isObject() || data.path("causes").size() > Feedback.MAX_TOTAL)
         throw new IOException("journal causal index is invalid or exceeds bounds");
       Map<String, Integer> causeCounts = new HashMap<>();
@@ -604,13 +623,11 @@ public final class Journal implements AutoCloseable, IntegrationJournal {
     return result;
   }
 
-  private static io.aeyer.plowshare.protocol.IntegrationPayload.ActionContext actionContext(
-      JsonNode event) {
+  private static ActionContext actionContext(JsonNode event) {
     JsonNode context = event.path("context");
     if (context.isMissingNode() || context.isNull() || context.isObject() && context.isEmpty())
       return null;
-    return IntegrationCodec.decode(
-        context, io.aeyer.plowshare.protocol.IntegrationPayload.ActionContext.class);
+    return IntegrationCodec.decode(context, ActionContext.class);
   }
 
   private static Map<String, Feedback.Cause> causes(JsonNode source) {
@@ -627,6 +644,13 @@ public final class Journal implements AutoCloseable, IntegrationJournal {
     try {
       entries();
       causes(data.path("causes"));
+      data.path("relayCursors")
+          .fields()
+          .forEachRemaining(
+              e -> {
+                Configuration.name(e.getKey());
+                IntegrationCodec.decode(e.getValue(), RelayRequests.Checkpoint.class);
+              });
       data.path("state")
           .fields()
           .forEachRemaining(e -> IntegrationCodec.bindingState(e.getValue()));
@@ -634,6 +658,47 @@ public final class Journal implements AutoCloseable, IntegrationJournal {
       throw new IOException(
           "journal has unsupported integration DTOs; retain and inspect the original file");
     }
+  }
+
+  @Override
+  public synchronized Optional<RelayRequests.Checkpoint> relayCheckpoint(String binding) {
+    Configuration.name(binding);
+    JsonNode row = data.path("relayCursors").path(binding);
+    return row.isMissingNode()
+        ? Optional.empty()
+        : Optional.of(IntegrationCodec.decode(row, RelayRequests.Checkpoint.class));
+  }
+
+  @Override
+  public synchronized void captureRelay(
+      String binding,
+      RelayRequests.Checkpoint expected,
+      RelayRequests.Checkpoint next,
+      Map<String, IntegrationContracts.Entry> records)
+      throws IOException {
+    Configuration.name(binding);
+    if (!Objects.equals(relayCheckpoint(binding).orElse(null), expected)
+        || expected != null
+            && (!expected.fingerprint().equals(next.fingerprint())
+                || Long.parseLong(expected.position()) > Long.parseLong(next.position())))
+      throw new IOException("Relay cursor identity or position changed");
+    ObjectNode updated = data.deepCopy();
+    ObjectNode all = (ObjectNode) updated.path("records");
+    for (var row : records.entrySet()) {
+      if (!row.getValue().kind().equals("relay") || !row.getValue().binding().equals(binding))
+        throw new IOException("Foreign Relay intake record");
+      JsonNode retained = data.path("records").path(row.getKey());
+      if (!retained.isMissingNode()) {
+        if (!IntegrationCodec.entry(retained)
+            .relay()
+            .source()
+            .equals(row.getValue().relay().source()))
+          throw new IOException("Relay event changed its retained evidence");
+      } else if (!data.path("tombstones").has(row.getKey()))
+        all.set(row.getKey(), stamp(IntegrationCodec.tree(row.getValue()), retained));
+    }
+    ((ObjectNode) updated.path("relayCursors")).set(binding, IntegrationCodec.tree(next));
+    persist(updated);
   }
 
   @Override

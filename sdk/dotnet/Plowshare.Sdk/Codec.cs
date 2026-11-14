@@ -70,11 +70,25 @@ internal static class Codec
         var projected = Decode(catalog.RootElement.GetProperty("results").GetProperty(operation), value, false, 0);
         return JsonSerializer.SerializeToElement(projected).Deserialize<T>()!;
     }
+    internal static T Http<T>(string name, T value)
+        => HttpResult<T>(name, JsonSerializer.SerializeToElement(value), true);
+    internal static T HttpResult<T>(string name, JsonElement value, bool input = false)
+    {
+        var projected = Decode(catalog.RootElement.GetProperty("http").GetProperty(name), value, input, 0);
+        return JsonSerializer.SerializeToElement(projected).Deserialize<T>()!;
+    }
     // Receipt ownership supplements structural decoding before the result escapes this boundary.
     public static void CorrelateDeployment(string operation, JsonElement request, JsonElement result)
     {
         if(operation.StartsWith("tool.scope.host.",StringComparison.Ordinal)||operation.StartsWith("tool.scope.worker.",StringComparison.Ordinal)){if(!HostedMatches(operation,request,result))throw Invalid();return;}
         static string? IdentityText(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (operation is "relay.group.delete" or "relay.group.inspect") {
+            foreach(var key in operation=="relay.group.delete" ? new[]{"project","topic","group","generation"}:new[]{"project","topic","group"}) {
+                string? asked=IdentityText(request,key);
+                if(asked is null || !string.Equals(asked,IdentityText(result,key),StringComparison.Ordinal)) throw Invalid();
+            }
+            return;
+        }
         if (operation is "application.child.ceiling" or "application.child.destroy" or "application.child.cancel" or "application.child.run") {
             // A contained reply must be about the child the caller named; a destruction accounts
             // for it and cannot have removed more source areas than records.

@@ -1,0 +1,21 @@
+-- V235 redefined the targeted log predicate and its retained-input relation with CREATE OR
+-- REPLACE and no SET clause, so neither carries the function-local jit=off that V196 gave the
+-- collection routines. Planned with unknown actors and inputs, the selection CTEs estimate past
+-- jit_above_cost, and PostgreSQL compiles roughly 170 JIT functions on every call. Measured on a
+-- deployed database: one information_log_readable call over a log with 82 retained inputs took
+-- 1,983 ms with JIT and 49 ms without; for a single retained revision, compilation was 78 ms of
+-- 89 ms. The predicate runs once per job in job listings and per transcript read, which kept a
+-- backend saturated.
+--
+-- Only these two routines have measured compilation cost. information_log_readable is a scalar
+-- function that is never inlined, so its setting also covers the selection relation it calls.
+-- The relation keeps its own setting for direct callers; information_log_readable and
+-- information_unreadable_logs already consume it through a MATERIALIZED CTE, so blocking its
+-- inlining changes no caller's plan shape. Bodies, STABLE snapshot, invoker privileges and all
+-- authority, quarantine, ancestry and dependency rules are unchanged. The setting is restored on
+-- return, so other statements keep the caller's JIT policy.
+--
+-- CREATE OR REPLACE resets function configuration. A later redefinition must restate
+-- SET jit='off'; FunctionJitSettingsTest fails the build when it does not.
+ALTER FUNCTION information_log_readable(TEXT,TEXT) SET jit = 'off';
+ALTER FUNCTION information_readable_input_selections(TEXT,UUID[]) SET jit = 'off';

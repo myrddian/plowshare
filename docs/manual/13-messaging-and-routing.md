@@ -19,13 +19,18 @@ and compatibility details.
 | An addressed agent or bot handles a separate request | `send_message` | Durable receipt first; asynchronous recipient handling and replies |
 | A staged workflow | An orchestration | Stage gates, questions, checks and its own durable run |
 | A named application event starts work | Event/trigger or integration policy | The receiver's agent can then send messages if granted |
+| Publish TEXT to an exact project topic | [`relay_publish`](../relay.md#agent-and-orchestration-publishing) | Definition tool grant plus an operator-installed topic grant; returns broker acceptance |
 | Work crosses to another server or external agent | A2A/incoming/outgoing adapter | Separate credentials, work ledger and external protocol |
 
 Internal routes operate on this Plowshare server. A `routeFiles` alias is not an
 HTTP endpoint, event subscription or automatic forwarder. It identifies where a
-send goes; a caller or integration still decides to send. Messaging can use the
-same board storage and wake scheduler as swarms, but its private transport topics
-are not ordinary public deliberation topics.
+send goes; a caller or integration still decides to send. Messaging owns its
+records and per-message allowances. Relay carries messages through one
+project-readable inbox per account, project and definition, dispatching each to
+its addressed instance. A busy instance does not block other instances in that
+inbox. The board remains an independent forum connected by its
+[Relay bridge](../decisions/0060-relay-board-bridge-and-authorized-close.md).
+See [the messaging cutover](../decisions/0061-relay-agent-inboxes-and-messaging-cutover.md).
 
 ## The identities involved
 
@@ -41,7 +46,8 @@ are not ordinary public deliberation topics.
 
 An ordinary shared project is shared scope, not one shared messaging account.
 Alice and Bob can both use `notes` without sharing their instance addresses or
-private histories. An address is not transferable authority. A model cannot set
+conversation histories. Published message bodies are readable by project members
+through Relay; that does not expose source conversations or documents. An address is not transferable authority. A model cannot set
 `from`, `return_address`, `project` or `home` in a send; the harness binds them.
 
 This walkthrough uses a human account. For service credentials, ownership binds
@@ -400,7 +406,8 @@ an automatic information-sharing or publication mechanism.
 
 Handling uses the recipient definition's bounded per-message allowance and turn
 cap. Persistent instances retain history across those turns. Retries do not add
-fresh allowance. Model pools and fair wakes schedule the work; ordinary messaging
+fresh grant to that message’s allowance. Project caps `autoIncrease` can renew
+exhausted steps and calls without resetting spending. Model pools and fair wakes schedule the work; ordinary messaging
 does not require a dedicated swarm slot.
 
 ## Inspect, cancel and recover

@@ -27,7 +27,7 @@ include = ["plowshare_privacy*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-plowshare_privacy = ["web/*", "py.typed"]
+plowshare_privacy = ["web/*", "references/*.json", "py.typed"]
 
 [tool.mypy]
 strict = true

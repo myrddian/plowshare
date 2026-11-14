@@ -12,6 +12,16 @@ advancing that position. A seen position means input became available to that
 subscriber, not that execution finished. Board remains a message board and swarms
 keep their existing behavior.
 
+The decided target keeps the board as an independent forum and moves direct
+messaging behind its existing API onto Relay agent inbox topics. The
+Relay-to-board bridge and the Slice 3 messaging cutover are implemented. Messaging
+owns records and allowances, with one inbox per account/project/definition and
+transactional admission to the native wake queue. See
+[0061](decisions/0061-relay-agent-inboxes-and-messaging-cutover.md). See
+[0057](decisions/0057-board-forum-and-relay-messaging-substrate.md) and
+[0060](decisions/0060-relay-board-bridge-and-authorized-close.md). The delivery
+and lifecycle details below describe the current implementation.
+
 The scheduler publishes due occurrences through Relay, to a topic whose name it
 derives from the scope it is publishing for. That name is private to the events
 subsystem and is deliberately not written down here or anywhere else outside it:
@@ -25,6 +35,42 @@ publish committed reference notices through a transactional outbox. Messaging an
 Board wakes use private Relay availability topics and independent conversation
 consumer groups. Their existing inboxes retain instructions, start claims,
 continuations and outcome receipts.
+
+## Agent and orchestration publishing
+
+Definitions may explicitly grant `relay_publish`, with arguments `{topic, text}`.
+It publishes TEXT in the execution's own project. The operator must also install
+each exact project/definition/topic grant; membership or a tool declaration alone
+does not open a topic:
+
+```yaml
+plowshare:
+  relay:
+    publishing:
+      grants:
+        - project: research
+          definition: coordinator
+          topic: research.findings
+```
+
+Add `relay_publish` to that definition's `tools` list. The default publishing
+grant list is empty; wildcard grants are refused. The server rechecks current
+project Contributor authority, Personal ownership and the current caller-scoped
+agent or orchestration definition. A grant can register its exact TEXT topic with
+standard retention but cannot change an existing kind or policy. It grants no
+read access or downstream feature permission.
+
+The harness supplies event identity, a server-only
+`execution:<sha(account)>:<sha(definition)>` publisher and verified execution
+ancestry. SDK ports use a distinct `sdk:<sha(account)>` namespace. Unknown or exhausted ancestry refuses publication. Success returns
+JSON `{eventId, topic, position, publishedAt}` with a decimal-string position and
+an ISO timestamp. This is broker acceptance, not downstream completion. A durable
+call receipt prevents republishing after Relay expiry or topic removal; changed
+work under the same harness call is refused. Cancellation or an infrastructure
+failure never triggers automatic replay. See
+[0063](decisions/0063-granted-execution-relay-publishing.md) for transactions and
+recovery behavior, and [scripted orchestrations](scripted-orchestrations.md) for
+the journaled command form. Existing feature tools retain their own APIs.
 
 ## Lifecycle publishers and native wakes
 
@@ -41,7 +87,7 @@ claiming to order transactions that have not committed.
 | `approval.requested`, `approval.resolved` | Owning project. Subject is the approval ID; context is its conversation; related is the requesting job. State preserves the decision and subsequent grant lifecycle. |
 | `orchestration.started`, `.resumed`, `.ended`, `.question.asked`, `.question.answered`, `.child.completed` | Conductor project, or system for a global conductor. Subject is the orchestration; context is the conductor conversation; related is its parent or question/answer ID. |
 | `board.opened`, `.message.posted`, `.resolved`, `.closed` | Public Board topics in their project. References identify the topic, message, root, parent or resolution; the original text stays on Board. |
-| `message.accepted`, `.reply.recorded`, `.handling.ended`, `.instance.changed` | Server-private system scope, preserving account-private mailbox visibility. References identify instances, messages and replies. |
+| `message.accepted`, `.reply.recorded`, `.handling.ended`, `.instance.changed` | Currently system scope, readable by server administrators. References identify instances, messages and replies. This is the current workaround, not the decided project-wide agent-topic audience. |
 | `message.wake.requested`, `board.wake.requested` | Server-private system scope. Typed wake references identify an already admitted firing and destination conversation. |
 
 Lifecycle payloads use `source`, `subject`, `state`, nullable `context` and nullable
@@ -49,6 +95,34 @@ Lifecycle payloads use `source`, `subject`, `state`, nullable `context` and null
 `context` to exclude the receiving agent and avoid feedback loops. Notices include
 no message body, command, question, answer or orchestration result. Private mailbox
 topics are classified at transaction end and checked again before publication.
+
+### Child orchestration completion
+
+`orchestration.child.completed` announces every finished, failed, capped or
+cancelled child. The built-in `builtin.orchestrations.children` group consumes it
+under one renewable distributed lease per project or global/server scope. Trusted
+notices select exact current terminal attempts through a scoped batch read; the
+report text remains in the owning orchestration record.
+
+Engine callbacks, free-conversation drains and boot drains do not deliver child
+terminal results. Root results and child questions retain their existing routes.
+Busy or asking parents leave the report pending. Offsets acknowledge availability,
+not delivery: a separate durable reconciliation keyset rotates pending reports
+after lost notices, restart or publication expiry. Recovery waits for any pending
+outbox notice to publish first. It cannot start a child again or settle another
+terminal attempt. Project groups cannot select global reports or vice versa.
+
+The shared `TurnEligibility` decision combines owning waits, occupancy and resource
+availability. A pending child report also blocks parent nudges and plain-text
+auto-finish, so those cannot overtake the report that should drive its next turn.
+Delegation keeps its tree and wait legality; messaging keeps instance concurrency,
+and the board keeps its seat and pot rules. No waiter is added to Relay.
+
+The consumer starts after orchestration recovery. Disabling
+`plowshare.relay.internal-enabled` leaves child results durably pending; there is
+no fallback through the old callback path. See
+[0064](decisions/0064-relay-child-completion-and-turn-eligibility.md) for lease
+fencing, retry limits, at-least-once semantics and the parent-scheduling crash window.
 
 ### Human approval Inbox
 
@@ -221,6 +295,34 @@ Agent and orchestration receivers are asynchronous, one-way submissions. An
 `ACCEPTED` branch records the owning job or orchestration receipt; completion is
 reported by that runtime and its conversation log.
 
+## Board bridge
+
+Routes may select `board.post` or `board.close` with `work: {topic: 'bdt_...'}`,
+or `board.open` with `work: {swarm: 'research'}`. Use an actual retained topic ID.
+These receivers accept no script or project override; openings use the source
+project's named swarm. Publish through the existing SDK port with TEXT:
+
+```json
+{"schema":"plowshare-board-request/1","body":"Investigate this question.","reply_to":"collector.inbox"}
+```
+
+The original publishing account is the author. Its live source ingress permission
+allows posting to the configured forum without granting destination read access
+or a seat. Closing additionally requires destination project write permission.
+Missing/closed topics, exhausted post allowances and unavailable swarms are
+definite refusals, with no fallback opening. Board effects share the existing
+effect-depth limit and uncertainty/receipt rules.
+
+`reply_to` optionally names an existing TEXT topic in the source project. Missing
+or null means no replies; no agent inbox is created by this bridge. Replies
+include the full direct/transitive answer thread and one terminal resolution,
+never unrelated discussion. Each `plowshare-board-reply/1` payload carries
+`kind`, `topic`, `message`, `body`, `authorKind`, `author` and `reply_to` (the
+original request event ID). The durable outbox preserves board order and retries
+only atomic publication, never the forum mutation. Source-project Relay readers
+can read those disclosed answers. See [0060](decisions/0060-relay-board-bridge-and-authorized-close.md)
+for bounds, attribution, disclosure and transaction details.
+
 ## JS handlers
 
 `script.run` pins the selected file before admission and executes it using the
@@ -267,6 +369,15 @@ rather than overlooked: a name a project can configure is also a name an
 operator can grant an external ingress port to, because
 `RelayPortProperties.permits` is pure data with no code-owned reservation of
 topic names, and withdrawing the name withdraws both at once.
+
+Retention discovery uses maintained topic deadlines and count-pressure metadata,
+not a publication probe for every live topic. Two partial-index queries return
+bounded candidates, which the application merges and deduplicates. Append,
+policy changes and prefix pruning update this metadata under the topic lock;
+empty topics have no expiry deadline. An owner may request physical retirement
+only after normal retention and its subscriptions/work have drained. The operator's
+explicit `REMOVE_TOPIC` guard remains unchanged. See
+[Slice 4](decisions/0062-relay-topic-and-group-retirement.md).
 
 Retention removes a prefix of publications and records its expiry boundary.
 Lagging subscriptions report a gap. It does not silently advance or acknowledge
@@ -525,6 +636,8 @@ also supports YAML configuration files; project Relay configuration remains JSON
 | `relay.publish` | UUID `requestId`, project/topic, nonblank text within the configured raw UTF-8 allowance (5 MiB default, 50 MiB ceiling), stable ISO `occurredAt`, optional correlation and parent topic/event. |
 | `relay.consume` | Project/topic, group, UUID consumer instance, `start` OLDEST_RETAINED or LATEST, limit 1–100 (default 100), waitMs 0–30,000 (default 0). |
 | `relay.ack` | Exact project/topic/group/consumer, batch UUID, decimal fence and, for a gap, its exact `expiredThrough`. |
+| `relay.group.inspect` | Exact project/topic/group read. Returns `exists` and nullable cursor `generation`; never registers a group. |
+| `relay.group.delete` | Project/topic/group and the inspected subscriber `generation` UUID. Refuses unread records, gaps, live claims and retained work. |
 
 The [segmented SDK transport](decisions/0009-segmented-sdk-message-transport.md)
 reassembles a logical request, response or push from bounded 64 KiB byte ranges.
@@ -567,8 +680,24 @@ until a successor batch is issued. Expired/superseded tokens or a different
 account/consumer cannot advance a cursor. A retention GAP has no deliverable
 events: inspect the exact loss before acknowledging it. This never implies that
 lost external effects succeeded. SDK groups use a separate `sdk.*` subscriber
-namespace. Removing a deployment grant retains its cursor and published data;
-this first port surface has no group-deletion operation.
+namespace. Removing a deployment grant retains its cursor and published data.
+To retire a group, use the cursor UUID `generation` from its `relay.consume`
+result in `relay.group.delete`. This server returns it for DATA, EMPTY, GAP and
+BUSY; the field remains optional when decoding older servers. `relay.log` also
+exposes subscriber `sdk.<group>`'s generation, but its bounded subscriber list is
+not needed to retire a group. Current project work
+membership and the exact deployment EGRESS grant remain required. Dynamic tool
+groups use their owning lifecycle. Consume/acknowledge all intended records and
+explicitly acknowledge any observed gap first; deletion never advances a cursor.
+It refuses live batches and retained work. The result echoes project, topic,
+group and generation with `removed: true`, or false when that group is already
+absent from an existing topic. A stale generation cannot remove a replacement.
+An already-waiting long poll cannot resurrect a deleted group. After uncertain delivery, call `relay.group.inspect` for the exact group instead
+of replaying the mutation or using consumption as an inspection: consumption can
+register a new group. Inspection returns `exists: false` and `generation: null`
+for an absent group/topic, performs no registration, and requires the same live
+egress/project grants.
+See [the retirement decision](decisions/0062-relay-topic-and-group-retirement.md).
 
 This provides ordered, at-least-once availability per topic/group. It has no
 partition assignment, lease renewal or exactly-once guarantee for external
@@ -977,3 +1106,13 @@ sequence of its own to order currently visible rows and a nullable project for
 wake requests. `relay_tool_invocations` records tool calls with their causation.
 `information_revision_events` is the one non-`relay_` table keyed by a Relay
 position: revision history kept after the second delivery substrate was removed.
+
+## Messaging receiver remediation
+
+The general native receiver, retained outbound returns and consumer migrations
+are tracked in [the remediation task graph](relay-review-task-graph.md). Their
+contracts are documented in [native messaging receivers](relay-messaging-receivers.md)
+and [retained requester returns](messaging-relay-exports.md), under
+[ADR 0066](decisions/0066-relay-messaging-receiver-and-review-remediation.md).
+The task graph records which implementation and independent checks are accepted;
+it does not treat design or source review alone as completed cutover.

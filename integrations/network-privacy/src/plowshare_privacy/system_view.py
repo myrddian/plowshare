@@ -55,7 +55,6 @@ class Deployment:
     request_topic: str
     result_topic: str
     group: str
-    outgoing_peer: str | None
     probe_timeout_seconds: float
     probe_concurrency: int
     credentials: tuple[Credential, ...]
@@ -146,7 +145,6 @@ def describe(
             config.request_topic,
             config.result_topic,
             config.group,
-            config.outgoing_peer,
             plan.timeout,
             plan.concurrency,
             tuple(credentials),

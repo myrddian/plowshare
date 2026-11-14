@@ -294,7 +294,7 @@ class FileMonitorSettings:
                     "schedule",
                     "collection",
                 },
-                {"outgoingPeer", "timeZone"},
+                {"timeZone"},
             )
             plan = object_fields(
                 row["collection"],

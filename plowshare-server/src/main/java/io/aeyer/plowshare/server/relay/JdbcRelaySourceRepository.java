@@ -1,8 +1,11 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -35,11 +38,10 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
     RelayValues.limit(limit, 256);
     // A keyset cursor contains the complete topic plus a project: signed-long scope and '/'.
     if (after != null
-        && (after.length() > io.aeyer.plowshare.protocol.RelayPort.MAX_TOPIC_LENGTH + 28
-            || after.indexOf('\0') >= 0))
+        && (after.length() > RelayPort.MAX_TOPIC_LENGTH + 28 || after.indexOf('\0') >= 0))
       throw new IllegalArgumentException("invalid publisher cursor");
     String scope = "COALESCE('project:'||project_id::text,'system')";
-    var arguments = new java.util.ArrayList<Object>();
+    var arguments = new ArrayList<Object>();
     String predicate = "";
     if (after != null) {
       int separator = after.indexOf('/');
@@ -128,7 +130,7 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
                 topic.name().equals("board.message.posted") ? change.context() : change.subject();
             if (Boolean.TRUE.equals(
                 jdbc.queryForObject(
-                    "SELECT EXISTS(SELECT 1 FROM board_message_instances WHERE topic=?)",
+                    "SELECT EXISTS(SELECT 1 FROM message_instances WHERE former_topic=?)",
                     Boolean.class,
                     board))) {
               jdbc.update("DELETE FROM relay_source_events WHERE id=?", entry.id());
@@ -158,6 +160,5 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
     return RelaySourceRepository.cursor(topic);
   }
 
-  private record Entry(
-      UUID id, java.time.Instant at, RelayPayload payload, RelayCausation causation) {}
+  private record Entry(UUID id, Instant at, RelayPayload payload, RelayCausation causation) {}
 }

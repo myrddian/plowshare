@@ -15,6 +15,7 @@ import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration;
+import io.aeyer.plowshare.server.testing.AuthorityFixtures;
 import io.aeyer.plowshare.server.todos.StageRules;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -24,6 +25,7 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
@@ -89,7 +91,7 @@ class DeliveryTest {
 
   @BeforeEach
   void fresh() {
-    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+    AuthorityFixtures.truncate(
         jdbc,
         "TRUNCATE TABLE orchestration_messages, orchestrations, entries, turns,"
             + " conversations, admins CASCADE");
@@ -180,6 +182,38 @@ class DeliveryTest {
 
   // --- tests ------------------------------------------------------------------------------
 
+  /**
+   * This fixture explicitly drives the leased child route, rather than the removed callback path.
+   */
+  private void ending(OrchestrationRecord run) {
+    if (run.parent() == null) delivery.runEnded(run);
+    else
+      delivery.childCompleted(
+          new ChildCompletions.Completion(0, run.id(), run.parent(), run.endedAt()), () -> {});
+  }
+
+  private void drainCaller(String conversation) {
+    delivery.drainCaller(conversation);
+    store.undeliveredEndings().stream()
+        .filter(run -> run.parent() != null)
+        .filter(run -> conversation.equals(run.callerConversation()))
+        .forEach(this::ending);
+  }
+
+  @Test
+  void direct_callbacks_and_free_or_boot_drains_cannot_deliver_a_child_terminal_result() {
+    var parent = run(callerConversation(), "enzo");
+    var child = finished(nested(parent));
+    delivery.runEnded(child);
+    delivery.drainCaller(parent.conductorConversation());
+    delivery.drainAll();
+    assertTrue(parents.spoken.isEmpty());
+    assertNull(store.find(child.id()).orElseThrow().resultDeliveredAt());
+    ending(child);
+    assertEquals(1, parents.spoken.size());
+    assertNotNull(store.find(child.id()).orElseThrow().resultDeliveredAt());
+  }
+
   @Test
   void a_question_is_spoken_into_the_caller_s_idle_conversation_and_marked_delivered() {
     String conv = callerConversation();
@@ -212,7 +246,7 @@ class DeliveryTest {
     assertNull(deliveredAt(question));
 
     caller.speaking.remove(conv);
-    delivery.drainCaller(conv);
+    drainCaller(conv);
 
     assertEquals(1, caller.spoken.size());
     assertEquals(conv, caller.spoken.get(0).conversation());
@@ -242,7 +276,7 @@ class DeliveryTest {
   void a_caller_with_no_conversation_is_told_in_its_inbox() {
     OrchestrationRecord run = finished(run(null, "enzo"));
 
-    delivery.runEnded(run);
+    ending(run);
 
     assertTrue(caller.spoken.isEmpty());
     assertEquals(
@@ -259,7 +293,7 @@ class DeliveryTest {
             .id();
     OrchestrationRecord run = finished(run(notTurn, "enzo"));
 
-    delivery.runEnded(run);
+    ending(run);
 
     assertTrue(caller.spoken.isEmpty());
     assertEquals(1, inbox.notices.size());
@@ -270,7 +304,7 @@ class DeliveryTest {
   void a_caller_with_no_conversation_and_no_account_is_marked_delivered_and_logged() {
     OrchestrationRecord run = finished(run(null, null));
 
-    delivery.runEnded(run);
+    ending(run);
 
     assertTrue(caller.spoken.isEmpty());
     assertTrue(inbox.notices.isEmpty());
@@ -283,15 +317,15 @@ class DeliveryTest {
     store.stop(run.id(), OrchestrationState.FAILED, "temporary outage");
     var failed = store.find(run.id()).orElseThrow();
     var recovery = new JdbcOrchestrationRecovery(jdbc, work);
-    recovery.claim(run.id(), "enzo", java.util.UUID.randomUUID(), failed.endedAt());
-    delivery.runEnded(failed);
+    recovery.claim(run.id(), "enzo", UUID.randomUUID(), failed.endedAt());
+    ending(failed);
     assertTrue(inbox.notices.isEmpty());
     assertNull(store.find(run.id()).orElseThrow().resultDeliveredAt());
     store.stop(run.id(), OrchestrationState.FAILED, "later failure");
-    delivery.runEnded(failed);
+    ending(failed);
     assertTrue(inbox.notices.isEmpty());
     assertNull(store.find(run.id()).orElseThrow().resultDeliveredAt());
-    delivery.runEnded(store.find(run.id()).orElseThrow());
+    ending(store.find(run.id()).orElseThrow());
     assertEquals(1, inbox.notices.size());
     assertNotNull(store.find(run.id()).orElseThrow().resultDeliveredAt());
   }
@@ -301,8 +335,8 @@ class DeliveryTest {
     String conv = callerConversation();
     OrchestrationRecord run = finished(run(conv, "enzo"));
 
-    delivery.runEnded(run);
-    delivery.runEnded(run);
+    ending(run);
+    ending(run);
 
     assertEquals(1, caller.spoken.size());
     assertEquals(Utterances.endingForCaller(run), caller.spoken.get(0).utterance());
@@ -315,7 +349,7 @@ class DeliveryTest {
     String conv = callerConversation();
     OrchestrationRecord run = run(conv, "enzo");
     OrchestrationMessage question = asked(run);
-    caller.duringSpeak = () -> delivery.drainCaller(conv);
+    caller.duringSpeak = () -> drainCaller(conv);
 
     delivery.questionAsked(run, question);
 
@@ -365,14 +399,14 @@ class DeliveryTest {
     caller.failure = new IllegalStateException("the voice broke");
 
     delivery.questionAsked(run, question);
-    delivery.drainCaller(conv);
+    drainCaller(conv);
     delivery.drainAll();
 
     assertNull(deliveredAt(question));
     assertTrue(inbox.notices.isEmpty());
 
     caller.failure = null;
-    delivery.drainCaller(conv);
+    drainCaller(conv);
 
     assertNotNull(deliveredAt(question));
   }
@@ -385,7 +419,7 @@ class DeliveryTest {
     OrchestrationMessage question = asked(run);
     conductorsSpeaking.add(run.conductorConversation());
 
-    delivery.drainCaller(conv);
+    drainCaller(conv);
     delivery.questionAsked(run, question);
 
     assertTrue(caller.spoken.isEmpty());
@@ -393,7 +427,7 @@ class DeliveryTest {
     assertNull(deliveredAt(question));
 
     conductorsSpeaking.remove(run.conductorConversation());
-    delivery.drainCaller(conv);
+    drainCaller(conv);
 
     assertEquals(1, caller.spoken.size());
     assertNotNull(deliveredAt(question));
@@ -407,7 +441,7 @@ class DeliveryTest {
     // Busy when this attempt looks, and freed before it lets go of the item: the free's drain
     // runs while the item is still in flight, and skips it.
     caller.scripted.addAll(List.of(true, false));
-    caller.duringSpeakingCheck = () -> delivery.drainCaller(conv);
+    caller.duringSpeakingCheck = () -> drainCaller(conv);
 
     delivery.questionAsked(run, question);
 
@@ -719,7 +753,7 @@ class DeliveryTest {
     OrchestrationRecord parent = run(callerConversation(), "enzo");
     OrchestrationRecord child = finished(nested(parent));
 
-    delivery.runEnded(child);
+    ending(child);
 
     assertEquals(
         List.of(new FakeParents.Spoken(parent.id(), Utterances.endingForCaller(child))),
@@ -735,7 +769,7 @@ class DeliveryTest {
     OrchestrationRecord child = finished(nested(parent));
     assertTrue(store.stop(parent.id(), OrchestrationState.FAILED, "the pool went away"));
 
-    delivery.runEnded(child);
+    ending(child);
 
     assertTrue(parents.spoken.isEmpty(), "an ended parent is not a live parent");
     // The child's caller conversation is its dead parent's conductor conversation, which is no
@@ -761,7 +795,7 @@ class DeliveryTest {
     assertNull(deliveredAt(question));
 
     parents.speaking.remove(parent.id());
-    delivery.drainCaller(parent.conductorConversation());
+    drainCaller(parent.conductorConversation());
 
     assertEquals(
         List.of(new FakeParents.Spoken(parent.id(), Utterances.questionForCaller(child, question))),
@@ -791,7 +825,7 @@ class DeliveryTest {
             + " the refusal it gave is one a second speak would only meet again");
 
     parents.refusal = null;
-    delivery.drainCaller(parent.conductorConversation());
+    drainCaller(parent.conductorConversation());
 
     assertEquals(1, parents.spoken.size());
     assertNotNull(deliveredAt(question));
@@ -808,7 +842,7 @@ class DeliveryTest {
     parents.scripted.addAll(List.of(false, true, false));
     parents.refusal = "orchestration " + parent.id() + " already has a turn in flight";
     parents.refusals = 1;
-    parents.duringRefusal = () -> delivery.drainCaller(parent.conductorConversation());
+    parents.duringRefusal = () -> drainCaller(parent.conductorConversation());
 
     delivery.questionAsked(child, question);
 
@@ -852,7 +886,7 @@ class DeliveryTest {
                     OrchestrationState.FAILED,
                     "the model 'reasoning' is served by no pool"));
 
-    delivery.runEnded(child);
+    ending(child);
 
     assertTrue(parents.spoken.isEmpty());
     assertEquals(
@@ -1043,7 +1077,7 @@ class DeliveryTest {
     delivery.questionAsked(store.find(run.id()).orElseThrow(), question);
     assertTrue(store.answer(run.id(), "Postgres", "enzo"));
     OrchestrationRecord ended = finished(run);
-    delivery.runEnded(ended);
+    ending(ended);
 
     assertEquals(2, inbox.notices.size(), inbox.notices.toString());
     assertEquals(Arrays.asList(Delivery.about(question), null), inbox.abouts);
@@ -1138,7 +1172,7 @@ class DeliveryTest {
     delivery.useLogStages(told);
     OrchestrationRecord run = finished(run(null, "enzo"));
 
-    delivery.runEnded(run);
+    ending(run);
 
     String said = Utterances.endingForCaller(run) + "\n\nchecked by a hook";
     assertEquals(List.of(new FakeInbox.Notice("enzo", "orchestration", said)), inbox.notices);
@@ -1155,7 +1189,7 @@ class DeliveryTest {
     delivery.useLogStages(told);
     OrchestrationRecord run = finished(run(callerConversation(), "enzo"));
 
-    delivery.runEnded(run);
+    ending(run);
 
     assertEquals(
         List.of(
@@ -1176,7 +1210,7 @@ class DeliveryTest {
     OrchestrationRecord parent = run(callerConversation(), "enzo");
     OrchestrationRecord child = finished(nested(parent));
 
-    delivery.runEnded(child);
+    ending(child);
 
     String said = Utterances.endingForCaller(child) + "\n\nchecked";
     assertEquals(List.of(new FakeParents.Spoken(parent.id(), said)), parents.spoken);
@@ -1207,12 +1241,12 @@ class DeliveryTest {
     OrchestrationRecord run = finished(run(conv, "enzo"));
     caller.speaking.add(conv);
 
-    delivery.runEnded(run);
+    ending(run);
 
     assertEquals(List.of("pre " + run.conductorConversation() + " conversation"), told.lines);
 
     caller.speaking.remove(conv);
-    delivery.drainCaller(conv);
+    drainCaller(conv);
 
     assertEquals(
         List.of(
@@ -1231,7 +1265,7 @@ class DeliveryTest {
     delivery.useLogStages(told);
     OrchestrationRecord run = finished(run(null, null));
 
-    delivery.runEnded(run);
+    ending(run);
 
     assertEquals(List.of("pre " + run.conductorConversation() + " nowhere"), told.lines);
     assertTrue(inbox.notices.isEmpty());

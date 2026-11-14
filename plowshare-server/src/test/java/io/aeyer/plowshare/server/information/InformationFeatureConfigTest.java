@@ -56,7 +56,9 @@ class InformationFeatureConfigTest {
         .withBean(
             io.aeyer.plowshare.server.requests.RequestProjects.class,
             () -> io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY)
-        .withBean("jdbcProjectMembers", ProjectMembers.class, () -> stored)
+        // ApplicationProjectMembers wraps the stored members behind their in-memory authority
+        // reads.
+        .withBean("cachedProjectMembers", ProjectMembers.class, () -> stored)
         .withBean(ApplicationPolicy.class, () -> policy)
         .withBean(
             io.aeyer.plowshare.server.access.GrantLineage.class,

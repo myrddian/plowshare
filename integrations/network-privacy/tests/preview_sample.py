@@ -433,7 +433,6 @@ def sample_system() -> Row:
             "request_topic": "privacy.scan.requested",
             "result_topic": "privacy.scan.completed",
             "group": "privacy-collectors",
-            "outgoing_peer": None,
             "probe_timeout_seconds": 1.5,
             "probe_concurrency": 32,
             "time_zone": "Australia/Sydney",

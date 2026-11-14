@@ -29,13 +29,6 @@ public record AccessRequest(
           throw new CallerFault("Orchestration receipt request ID must be a UUID");
         }
       }
-      if (kind == ResourceScopeRepository.Kind.OUTGOING) {
-        try {
-          UUID.fromString(id);
-        } catch (IllegalArgumentException invalid) {
-          throw new CallerFault("Outgoing work ID must be a UUID");
-        }
-      }
     }
   }
 

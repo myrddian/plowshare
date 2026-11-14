@@ -1,13 +1,21 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.relay.tools.RelayToolProperties;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -42,8 +50,10 @@ class RelayPortNotificationTest {
         assertTrue(parked.await(1, TimeUnit.SECONDS));
         assertEquals(1, fixture.reads.get());
         verify(fixture.members, times(1)).mayWork("project", "reader");
-        when(fixture.repository.consume(any(), anyString(), any(), any()))
-            .thenReturn(fixture.batch(RelayPort.Status.BUSY));
+        when(fixture.repository.consumeObserved(any(), anyString(), any(), any(), any()))
+            .thenReturn(
+                new RelayPortRepository.Consumed(
+                    fixture.batch(RelayPort.Status.BUSY), fixture.generation));
       } finally {
         release.countDown();
       }
@@ -105,6 +115,7 @@ class RelayPortNotificationTest {
 
   private static final class Fixture implements AutoCloseable {
     final String id = UUID.randomUUID().toString();
+    final UUID generation = UUID.randomUUID();
     final RelayPortRepository repository = mock(RelayPortRepository.class);
     final ProjectMembers members = mock(ProjectMembers.class);
     final ProjectWorkspaces projects = mock(ProjectWorkspaces.class);
@@ -126,11 +137,11 @@ class RelayPortNotificationTest {
                   "reader",
                   RelayPortProperties.Direction.EGRESS,
                   List.of("group"))));
-      when(repository.consume(any(), anyString(), any(), any()))
+      when(repository.consumeObserved(any(), anyString(), any(), any(), any()))
           .thenAnswer(
               call -> {
                 reads.incrementAndGet();
-                return batch(RelayPort.Status.EMPTY);
+                return new RelayPortRepository.Consumed(batch(RelayPort.Status.EMPTY), generation);
               });
     }
 
@@ -142,7 +153,7 @@ class RelayPortNotificationTest {
           members,
           projects,
           8,
-          new io.aeyer.plowshare.server.relay.tools.RelayToolProperties(),
+          new RelayToolProperties(),
           signals);
     }
 

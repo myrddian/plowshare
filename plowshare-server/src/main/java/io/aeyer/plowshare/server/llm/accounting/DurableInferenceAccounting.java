@@ -1,12 +1,15 @@
 package io.aeyer.plowshare.server.llm.accounting;
 
+import io.aeyer.plowshare.server.llm.counting.PromptCount;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceAccounting;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceCapture;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceObserver;
 import io.aeyer.plowshare.server.llm.dispatch.Lane;
+import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import java.time.Clock;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,20 +22,29 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
   private final AccountingRecorder recorder;
   private final InferencePrices prices;
   private final Clock clock;
+  private final InferenceTelemetry telemetry;
 
   public DurableInferenceAccounting(
       AccountingRecorder recorder, InferencePrices prices, Clock clock) {
+    this(recorder, prices, clock, InferenceTelemetry.NONE);
+  }
+
+  public DurableInferenceAccounting(
+      AccountingRecorder recorder,
+      InferencePrices prices,
+      Clock clock,
+      InferenceTelemetry telemetry) {
     this.recorder = Objects.requireNonNull(recorder);
     this.prices = Objects.requireNonNull(prices);
     this.clock = Objects.requireNonNull(clock);
+    this.telemetry = Objects.requireNonNull(telemetry);
   }
 
   @Override
   public InferenceObserver begin(
       String pool, String wireModel, String specifier, Lane lane, UsageAttribution owner) {
     if (owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED) {
-      throw new io.aeyer.plowshare.server.llm.dispatch.LlmException(
-          "inference accounting requires explicit request ownership");
+      throw new LlmException("inference accounting requires explicit request ownership");
     }
     var route = prices.routeFor(pool);
     var price = prices.select(route.billingRoute(), wireModel, clock.instant()).orElse(null);
@@ -48,7 +60,7 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
             price);
     long start = System.nanoTime();
     var call = recorder.begin(metadata);
-    return new ObservedCall(call, elapsed(start));
+    return new ObservedCall(call, elapsed(start), telemetry.admitted(lane, owner.operation()));
   }
 
   private static long elapsed(long start) {
@@ -77,14 +89,17 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
     private boolean durable = true;
     private ObservedAttempt active;
     private CallLifecycle lastOutcome;
+    private final InferenceTelemetry.Call telemetry;
 
-    ObservedCall(AccountingRecorder.Call call, long admissionMillis) {
+    ObservedCall(
+        AccountingRecorder.Call call, long admissionMillis, InferenceTelemetry.Call telemetry) {
       this.call = call;
       this.admissionMillis = admissionMillis;
+      this.telemetry = telemetry;
     }
 
     @Override
-    public synchronized void preflight(io.aeyer.plowshare.server.llm.counting.PromptCount count) {
+    public synchronized void preflight(PromptCount count) {
       call.preflight(count);
     }
 
@@ -130,6 +145,9 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
       }
       durable &= call.finish(outcome, queueMillis, admissionMillis);
       ended = true;
+      // Observe live work once, not journal flushes/projector replay. A buffered terminal record
+      // does not undo already-spent inference. With no attempt, the journal records NOT_DISPATCHED.
+      telemetry.finished(lastOutcome == null ? CallLifecycle.NOT_DISPATCHED : outcome, queueMillis);
       if (!durable) {
         log.warn(
             "inference accounting call {} has incomplete or buffered terminal metadata; its inference result stands",
@@ -143,7 +161,7 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
     }
 
     private final class ObservedAttempt implements Attempt {
-      private final java.util.UUID id;
+      private final UUID id;
       private final long startAccountingMillis;
       private final long startedAt = System.nanoTime();
       private UsageObservation usage = UsageObservation.UNKNOWN;
@@ -153,13 +171,13 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
       private Long firstOutputMillis;
       private boolean finished;
 
-      ObservedAttempt(java.util.UUID id, long startAccountingMillis) {
+      ObservedAttempt(UUID id, long startAccountingMillis) {
         this.id = id;
         this.startAccountingMillis = startAccountingMillis;
       }
 
       @Override
-      public java.util.UUID id() {
+      public UUID id() {
         return id;
       }
 
@@ -228,6 +246,7 @@ public final class DurableInferenceAccounting implements InferenceAccounting {
           finished = true;
           lastOutcome = outcome;
           active = null;
+          telemetry.attemptFinished(outcome, usage, duration, firstOutputMillis);
         }
       }
     }

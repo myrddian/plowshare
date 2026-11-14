@@ -37,6 +37,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
@@ -47,6 +48,8 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -181,7 +184,7 @@ class ProjectionTest {
     // foreign key into board_topics, and user_inbox a hop past that,
     // through its pre-existing V40 foreign key into firings.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE message_route_bindings, message_external_tasks, message_external_contexts, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     turns = new TurnStore(jdbc);
     compactions = new CompactionStore(jdbc);
@@ -649,7 +652,7 @@ class ProjectionTest {
             EntryKind.SUMMARY,
             EntryKind.TURN_SUMMARY,
             EntryKind.NOTICE),
-        java.util.Arrays.stream(EntryKind.values()).filter(EntryKind::projects).toList(),
+        Arrays.stream(EntryKind.values()).filter(EntryKind::projects).toList(),
         "the set of kinds that reach a model has changed; that is a decision about what"
             + " a model is shown and belongs in review, not in a green build");
   }
@@ -1183,9 +1186,7 @@ class ProjectionTest {
       this.definition =
           agent == null
               ? talker(
-                  java.util.Arrays.stream(tools)
-                      .map(tool -> tool.schema().name())
-                      .toArray(String[]::new))
+                  Arrays.stream(tools).map(tool -> tool.schema().name()).toArray(String[]::new))
               : agents.get(agent);
       opened.add(jobs);
     }
@@ -1215,9 +1216,9 @@ class ProjectionTest {
    */
   private static final class Probe implements AgentTool {
 
-    private final java.util.function.Function<Home, String> behaviour;
+    private final Function<Home, String> behaviour;
 
-    Probe(java.util.function.Function<Home, String> behaviour) {
+    Probe(Function<Home, String> behaviour) {
       this.behaviour = behaviour;
     }
 
@@ -1246,22 +1247,22 @@ class ProjectionTest {
     static final int NO_CONTEXT_LENGTH = -1;
 
     private final int loadedContext;
-    private final Deque<java.util.function.Supplier<Completion>> steps = new ArrayDeque<>();
+    private final Deque<Supplier<Completion>> steps = new ArrayDeque<>();
     private final Deque<Integer> costs = new ArrayDeque<>();
     private final List<List<ChatMessage>> seen = Collections.synchronizedList(new ArrayList<>());
-    private volatile java.util.function.Supplier<Completion> fallback;
+    private volatile Supplier<Completion> fallback;
     private volatile boolean asksForATool;
 
     Scripted(int loadedContext) {
       this.loadedContext = loadedContext;
     }
 
-    Scripted then(java.util.function.Supplier<Completion> step) {
+    Scripted then(Supplier<Completion> step) {
       steps.add(step);
       return this;
     }
 
-    Scripted thenAlways(java.util.function.Supplier<Completion> step) {
+    Scripted thenAlways(Supplier<Completion> step) {
       this.fallback = step;
       return this;
     }

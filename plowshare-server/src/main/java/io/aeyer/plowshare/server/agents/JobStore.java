@@ -2,11 +2,16 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.access.AccessRequestDecoder;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import io.aeyer.plowshare.server.archive.JobLog;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
+import io.aeyer.plowshare.server.information.InformationContext;
+import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
@@ -18,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -184,6 +190,8 @@ public final class JobStore
    */
   private final JobLog rows;
 
+  private final JobTelemetry telemetry;
+
   private final ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor();
   private final Map<String, Job> byId = new ConcurrentHashMap<>();
 
@@ -205,7 +213,7 @@ public final class JobStore
     this.runEnds = Objects.requireNonNull(ends, "ends");
   }
 
-  private io.aeyer.plowshare.server.access.OperationAuthority operations;
+  private OperationAuthority operations;
 
   /** Harness continuation uses retained execution identity, never conversation custody. */
   public String retainedExecutor(String conversation) {
@@ -213,17 +221,13 @@ public final class JobStore
     var bound =
         operations
             .conversation(conversation)
-            .orElseThrow(
-                () ->
-                    new io.aeyer.plowshare.server.faults.CallerFault(
-                        "Missing retained execution lineage"));
+            .orElseThrow(() -> new CallerFault("Missing retained execution lineage"));
     operations.require(bound.admission());
     return bound.admission().executor();
   }
 
   /** Focused execution fixture with mandatory operation authority. */
-  public JobStore(
-      io.aeyer.plowshare.server.access.OperationAuthority operations, JobRuntime runtime) {
+  public JobStore(OperationAuthority operations, JobRuntime runtime) {
     this(runtime);
     this.operations = Objects.requireNonNull(operations);
   }
@@ -235,8 +239,19 @@ public final class JobStore
       Compaction logs,
       JobLog rows,
       Duration heartbeat,
-      io.aeyer.plowshare.server.access.OperationAuthority operations) {
-    this(runtime, events, logs, rows, heartbeat);
+      OperationAuthority operations) {
+    this(runtime, events, logs, rows, heartbeat, operations, JobTelemetry.NONE);
+  }
+
+  public JobStore(
+      JobRuntime runtime,
+      JobEvents events,
+      Compaction logs,
+      JobLog rows,
+      Duration heartbeat,
+      OperationAuthority operations,
+      JobTelemetry telemetry) {
+    this(runtime, events, logs, rows, heartbeat, telemetry);
     this.operations = Objects.requireNonNull(operations);
   }
 
@@ -289,11 +304,22 @@ public final class JobStore
    */
   public JobStore(
       JobRuntime runtime, JobEvents events, Compaction logs, JobLog rows, Duration heartbeat) {
+    this(runtime, events, logs, rows, heartbeat, JobTelemetry.NONE);
+  }
+
+  public JobStore(
+      JobRuntime runtime,
+      JobEvents events,
+      Compaction logs,
+      JobLog rows,
+      Duration heartbeat,
+      JobTelemetry telemetry) {
     this.logs = logs;
     this.rows = rows;
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.events = Objects.requireNonNull(events, "events");
     this.heartbeat = Objects.requireNonNull(heartbeat, "heartbeat");
+    this.telemetry = Objects.requireNonNull(telemetry, "telemetry");
   }
 
   /**
@@ -763,7 +789,8 @@ public final class JobStore
         null);
   }
 
-  private String submit(
+  /** Submits an owning native causal turn after its exact reservation was retained. */
+  public String submit(
       AgentDefinition definition,
       String userPrompt,
       Home home,
@@ -846,6 +873,13 @@ public final class JobStore
     Objects.requireNonNull(ended, "ended");
     Objects.requireNonNull(userPrompt, "userPrompt");
     Objects.requireNonNull(home, "home");
+    RelayCausation transcriptSource = transcript.causation();
+    if (transcriptSource != null && causation != null && !transcriptSource.equals(causation))
+      throw new IllegalArgumentException("Job source differs from its reserved transcript");
+    RelayCausation effectiveCausation = causation == null ? transcriptSource : causation;
+    // A delegated causal transcript carries its parent's exact turn source. Retain the child's
+    // reservation before registering its job; storage failure cannot start unbound paid work.
+    if (transcriptSource != null) transcript.reserveCausalSource();
     // Blank as well as null, and refused here rather than several seconds
     // later on a virtual thread. JobRuntime.run refuses it too, but by then
     // a job id has been handed back and a caller is polling something that
@@ -947,7 +981,7 @@ public final class JobStore
           }
           transcript.startedAs(id);
         },
-        causation,
+        effectiveCausation,
         callerHandle == null
             ? Optional.ofNullable(transcript.usage())
                 .map(UsageAttribution::accountHandle)
@@ -1059,25 +1093,22 @@ public final class JobStore
    *     the caller that describes the work
    * @param ended what to tell before the ending is published; see {@link #finish}
    */
-  private io.aeyer.plowshare.server.information.InformationJobs informationJobs;
+  private InformationJobs informationJobs;
 
-  public void useInformationJobs(io.aeyer.plowshare.server.information.InformationJobs policies) {
+  public void useInformationJobs(InformationJobs policies) {
     informationJobs = policies;
   }
 
-  private io.aeyer.plowshare.server.access.ProjectAuthorization projectAccess;
+  private ProjectAuthorization projectAccess;
 
-  public void useProjectAccess(io.aeyer.plowshare.server.access.ProjectAuthorization access) {
+  public void useProjectAccess(ProjectAuthorization access) {
     projectAccess = access;
   }
 
   public Job getFor(String id, String account) {
     if (projectAccess != null)
       projectAccess.require(
-          "job.status",
-          io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-              "job.status", Map.of("job", id)),
-          account);
+          "job.status", AccessRequestDecoder.decode("job.status", Map.of("job", id)), account);
     Job job = get(id);
     if (informationJobs != null) {
       informationJobs.require(id, account);
@@ -1086,30 +1117,34 @@ public final class JobStore
     return job;
   }
 
+  /**
+   * The jobs this account may see. One listing serves the whole call, so a selection, revision or
+   * log shared by many jobs is authorized once rather than once per job and input; each decision
+   * still uses current authority.
+   */
   public List<Job> jobsFor(String account) {
+    var listing = informationJobs == null ? null : informationJobs.listing(account);
     return jobs().stream()
         .filter(
             job ->
                 projectAccess == null
                     || projectAccess.allowed(
                         "job.status",
-                        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                            "job.status", Map.of("job", job.id())),
+                        AccessRequestDecoder.decode("job.status", Map.of("job", job.id())),
                         account))
         .filter(
             job ->
-                informationJobs == null
-                    || (informationJobs.allowed(job.id(), account)
-                        && (job.conversation() == null
-                            || informationJobs.logAllowed(job.conversation(), account))))
+                listing == null
+                    || (listing.allowed(job.id())
+                        && (job.conversation() == null || listing.logAllowed(job.conversation()))))
         .toList();
   }
 
   public String submitInformation(
       String name,
       Home home,
-      io.aeyer.plowshare.server.information.InformationContext context,
-      List<java.util.UUID> inputs,
+      InformationContext context,
+      List<UUID> inputs,
       Function<BooleanSupplier, Outcome> work) {
     if (informationJobs == null)
       throw new IllegalStateException("information job policies are not bound");
@@ -1219,88 +1254,95 @@ public final class JobStore
       // execute is chosen so there is no Future to imply otherwise.
       threads.execute(
           () -> {
-            // Inside the task and not before it: a submission the executor
-            // refuses below never ran, and a STARTED with no ENDED after it
-            // is a listener waiting forever on a job that never began.
-            watch.started(name);
-            // AFTER the STARTED and inside the same task, so the first thing
-            // a listener hears about this job is still that it began. Armed
-            // on the job's own thread and disarmed in the finally below by
-            // the same thread, which is what makes "a beat exists exactly
-            // while the run does" one object's lifetime rather than two
-            // callbacks that have to agree.
-            ScheduledFuture<?> beating = beat(job, watch, name);
+            var measured = telemetry.started();
             try {
-              finish(job, watch, name, work.apply(watch, job::cancelRequested), ended);
-            } catch (Throwable bug) {
-              // The genuine last resort, and narrower than it used to be:
-              // JobRuntime.run now catches RuntimeException around the
-              // dispatcher call itself, so everything that happens during
-              // a turn comes back as an ending carrying the run's real
-              // turn and model-call counts. What is left for this clause
-              // is a bug outside that — in building the tool list, say —
-              // where there is genuinely nothing to count.
-              //
-              // Reported as UNAVAILABLE because that is honest from where
-              // the caller stands: no answer was produced and the reason
-              // was not the model's decision. The zeroes are the honest
-              // numbers here and misleading anywhere else, which is
-              // exactly why the loop keeps its own.
-              //
-              // Throwable and not RuntimeException: LlmPool.submit
-              // rethrows an Error as itself, and an Error escaping here
-              // would leave the job RUNNING for the life of the process
-              // with a poller waiting on it — the one outcome this catch
-              // exists to prevent, arriving through the one type it used
-              // not to cover. The job is finished first and the Error is
-              // then rethrown untouched, because an Error means the JVM
-              // is in a state where swallowing it would be worse than the
-              // hung poller.
-              log.error(
-                  "Job runtime failed [job={} conversation={} project={} account={} agent={} script={}]",
-                  id,
-                  conversation,
-                  home.isGlobal() ? "(global)" : home.project(),
-                  account,
-                  name,
-                  script,
-                  bug);
-              finish(
-                  job,
-                  watch,
-                  name,
-                  new Outcome(
-                      Ending.UNAVAILABLE,
-                      "This run stopped because the job runtime itself failed. Nothing"
-                          + " can be concluded from it.",
-                      0,
-                      0,
-                      "the job runtime failed: "
-                          + bug.getClass().getSimpleName()
-                          + ": "
-                          + bug.getMessage()),
-                  ended);
-              if (bug instanceof Error error) {
-                throw error;
+              // Inside the task and not before it: a submission the executor
+              // refuses below never ran, and a STARTED with no ENDED after it
+              // is a listener waiting forever on a job that never began.
+              watch.started(name);
+              // AFTER the STARTED and inside the same task, so the first thing
+              // a listener hears about this job is still that it began. Armed
+              // on the job's own thread and disarmed in the finally below by
+              // the same thread, which is what makes "a beat exists exactly
+              // while the run does" one object's lifetime rather than two
+              // callbacks that have to agree.
+              ScheduledFuture<?> beating = beat(job, watch, name);
+              try {
+                finish(job, watch, name, work.apply(watch, job::cancelRequested), ended);
+              } catch (Throwable bug) {
+                // The genuine last resort, and narrower than it used to be:
+                // JobRuntime.run now catches RuntimeException around the
+                // dispatcher call itself, so everything that happens during
+                // a turn comes back as an ending carrying the run's real
+                // turn and model-call counts. What is left for this clause
+                // is a bug outside that — in building the tool list, say —
+                // where there is genuinely nothing to count.
+                //
+                // Reported as UNAVAILABLE because that is honest from where
+                // the caller stands: no answer was produced and the reason
+                // was not the model's decision. The zeroes are the honest
+                // numbers here and misleading anywhere else, which is
+                // exactly why the loop keeps its own.
+                //
+                // Throwable and not RuntimeException: LlmPool.submit
+                // rethrows an Error as itself, and an Error escaping here
+                // would leave the job RUNNING for the life of the process
+                // with a poller waiting on it — the one outcome this catch
+                // exists to prevent, arriving through the one type it used
+                // not to cover. The job is finished first and the Error is
+                // then rethrown untouched, because an Error means the JVM
+                // is in a state where swallowing it would be worse than the
+                // hung poller.
+                log.error(
+                    "Job runtime failed [job={} conversation={} project={} account={} agent={} script={}]",
+                    id,
+                    conversation,
+                    home.isGlobal() ? "(global)" : home.project(),
+                    account,
+                    name,
+                    script,
+                    bug);
+                finish(
+                    job,
+                    watch,
+                    name,
+                    new Outcome(
+                        Ending.UNAVAILABLE,
+                        "This run stopped because the job runtime itself failed. Nothing"
+                            + " can be concluded from it.",
+                        0,
+                        0,
+                        "the job runtime failed: "
+                            + bug.getClass().getSimpleName()
+                            + ": "
+                            + bug.getMessage()),
+                    ended);
+                if (bug instanceof Error error) {
+                  throw error;
+                }
+              } finally {
+                // A finally and not a line after finish(...), because the
+                // two paths out of this task are the ordinary one and the
+                // one through the clause above -- which rethrows an Error --
+                // and a beat that outlived a job by either route would be a
+                // job telling a listener it is alive for the rest of the
+                // process's life. false and not true: the argument is
+                // whether to interrupt a beat that is running, and a beat
+                // that is running is inside a queue's offer, which is over
+                // in microseconds and has nothing worth interrupting.
+                if (beating != null) {
+                  beating.cancel(false);
+                }
+              }
+              try {
+                runEnds.ended(id, name, home);
+              } catch (RuntimeException failed) {
+                log.warn("a run ended and its listener failed: {} ({})", id, name, failed);
               }
             } finally {
-              // A finally and not a line after finish(...), because the
-              // two paths out of this task are the ordinary one and the
-              // one through the clause above -- which rethrows an Error --
-              // and a beat that outlived a job by either route would be a
-              // job telling a listener it is alive for the rest of the
-              // process's life. false and not true: the argument is
-              // whether to interrupt a beat that is running, and a beat
-              // that is running is inside a queue's offer, which is over
-              // in microseconds and has nothing worth interrupting.
-              if (beating != null) {
-                beating.cancel(false);
-              }
-            }
-            try {
-              runEnds.ended(id, name, home);
-            } catch (RuntimeException failed) {
-              log.warn("a run ended and its listener failed: {} ({})", id, name, failed);
+              // Observe actual task lifetime, including completion callbacks and fatal exits.
+              // Socket events can be dropped, so their publisher cannot own these counters.
+              measured.finished(job.outcome().map(Outcome::ending).orElse(Ending.UNAVAILABLE));
             }
           });
     } catch (RejectedExecutionException shuttingDown) {
@@ -1309,6 +1351,7 @@ public final class JobStore
       // it — the exact state the catch above exists to prevent, arriving
       // through the other door.
       byId.remove(id);
+      telemetry.rejected();
       throw new IllegalStateException(
           "the job store is shut down and cannot start '" + name + "'", shuttingDown);
     }

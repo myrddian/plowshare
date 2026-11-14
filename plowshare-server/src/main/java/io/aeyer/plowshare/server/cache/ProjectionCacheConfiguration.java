@@ -1,7 +1,12 @@
 package io.aeyer.plowshare.server.cache;
 
 import com.zaxxer.hikari.HikariDataSource;
+import io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace;
+import io.aeyer.plowshare.server.pool.TracedDataSource;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.util.Properties;
 import javax.sql.DataSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
@@ -12,9 +17,20 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 /** Database/cache composition. All addresses and credentials come from the configured database. */
 @Configuration
-@EnableConfigurationProperties(ProjectionCacheProperties.class)
+@EnableConfigurationProperties({
+  ProjectionCacheProperties.class,
+  ProjectionNotificationProperties.class
+})
 @DependsOnDatabaseInitialization
 public class ProjectionCacheConfiguration {
+  @Bean
+  public ProjectionTelemetry projectionTelemetry(ObjectProvider<MeterRegistry> registries) {
+    var registry = registries.getIfAvailable();
+    return registry == null
+        ? ProjectionTelemetry.NONE
+        : new MicrometerProjectionTelemetry(registry);
+  }
+
   /** Not a DataSource bean: registering another one would disable Boot's primary pool creation. */
   public record VersionConnections(HikariDataSource source) implements AutoCloseable {
     public void close() {
@@ -39,7 +55,7 @@ public class ProjectionCacheConfiguration {
       source.setUsername(configured.getUsername());
       source.setPassword(configured.getPassword());
       source.setDriverClassName(configured.getDriverClassName());
-      var driver = new java.util.Properties();
+      var driver = new Properties();
       driver.putAll(configured.getDataSourceProperties());
       source.setDataSourceProperties(driver);
       source.setSchema(configured.getSchema());
@@ -66,8 +82,7 @@ public class ProjectionCacheConfiguration {
       JdbcTemplate jdbc, VersionConnections authoritative, ProjectionCacheProperties properties) {
     return new JdbcProjectionVersions(
         jdbc,
-        new io.aeyer.plowshare.server.pool.TracedDataSource(
-            authoritative.source(), new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace()),
+        new TracedDataSource(authoritative.source(), new JfrJdbcExecutionTrace()),
         properties.maxPendingTransactions());
   }
 
@@ -75,7 +90,9 @@ public class ProjectionCacheConfiguration {
   public ProjectionChangeSignals projectionChangeSignals(
       VersionConnections connections,
       ProjectionVersions versions,
-      ProjectionCacheProperties properties) {
+      ProjectionCacheProperties properties,
+      ProjectionNotificationProperties notified,
+      ProjectionTelemetry telemetry) {
     // LISTEN owns one unpooled session. It must not pin a main or version-pool connection.
     var notificationSource =
         new DriverManagerDataSource(
@@ -84,21 +101,42 @@ public class ProjectionCacheConfiguration {
             connections.source().getPassword());
     notificationSource.setDriverClassName(connections.source().getDriverClassName());
     notificationSource.setConnectionProperties(connections.source().getDataSourceProperties());
-    return new ListeningProjectionChangeSignals(
-        new PostgresProjectionNotificationSource(
-            new io.aeyer.plowshare.server.pool.TracedDataSource(
-                notificationSource, new io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace())),
-        versions,
-        properties.maxProjections() + 2, // Relay wakeups and opaque information invalidation.
-        properties.notificationPoll(),
-        properties.reconnectDelay());
+    var traced = new TracedDataSource(notificationSource, new JfrJdbcExecutionTrace());
+    int observers = properties.maxProjections() + 2; // Relay wakeups and information invalidation.
+    ProjectionChangeSignals signals;
+    if (!notified.enabled()) {
+      signals =
+          new ListeningProjectionChangeSignals(
+              new PostgresProjectionNotificationSource(traced),
+              versions,
+              observers,
+              properties.notificationPoll(),
+              properties.reconnectDelay());
+    } else {
+      // Probes bound how long a silently lost session goes unnoticed, whether or not any cache
+      // trusts notifications for disclosure.
+      signals =
+          new ListeningProjectionChangeSignals(
+              new PostgresProjectionNotificationSource(traced, notified.heartbeatTimeout()),
+              versions,
+              observers,
+              properties.notificationPoll(),
+              properties.reconnectDelay(),
+              notified.heartbeat(),
+              notified.heartbeatTimeout());
+    }
+    telemetry.observeListener(signals, notified);
+    return signals;
   }
 
   @Bean(destroyMethod = "close")
   public ProjectionCaches projectionCaches(
       ProjectionVersions versions,
       ProjectionChangeSignals signals,
-      ProjectionCacheProperties properties) {
-    return new ProjectionCaches(versions, signals, properties);
+      ProjectionCacheProperties properties,
+      ProjectionNotificationProperties notified,
+      ProjectionTelemetry telemetry) {
+    return new ProjectionCaches(
+        versions, signals, properties, notified.enabled() ? notified.staleness() : null, telemetry);
   }
 }

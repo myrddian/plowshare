@@ -1,16 +1,23 @@
 package io.aeyer.plowshare.integrations;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aeyer.plowshare.protocol.IntegrationPayload;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.time.*;
-import java.util.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -30,16 +37,14 @@ class HeldThresholdTest {
       this.listener = listener;
     }
 
-    public void validate(
-        String operation, io.aeyer.plowshare.protocol.IntegrationPayload.Arguments arguments) {}
+    public void validate(String operation, IntegrationPayload.Arguments arguments) {}
 
-    public Result execute(
-        String operation, io.aeyer.plowshare.protocol.IntegrationPayload.Arguments arguments) {
+    public Result execute(String operation, IntegrationPayload.Arguments arguments) {
       if (operation.equals("actions.execute")) actions++;
       return IntegrationFixtures.result("COMPLETED", Json.object().put("acknowledged", true));
     }
 
-    public Map<String, io.aeyer.plowshare.protocol.IntegrationPayload.Reading> snapshot() {
+    public Map<String, IntegrationPayload.Reading> snapshot() {
       if (onSnapshot != null) {
         var once = onSnapshot;
         onSnapshot = null;
@@ -94,7 +99,6 @@ class HeldThresholdTest {
             "house",
             "fake",
             "home",
-            "ha-house",
             new IntegrationFixtures.Settings(),
             Map.of("heat", route),
             Set.of("house"),

@@ -1,11 +1,19 @@
 package io.aeyer.plowshare.server.events;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.ScheduledWork;
-import io.aeyer.plowshare.server.agents.*;
-import io.aeyer.plowshare.server.board.BoardMessaging;
+import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.Callers;
+import io.aeyer.plowshare.server.agents.DefinitionResolver;
+import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
+import io.aeyer.plowshare.server.agents.SkillDefinition;
+import io.aeyer.plowshare.server.agents.SkillResolver;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +37,7 @@ class ScheduleActionAuthorityTest {
             "Instructions",
             "worker",
             SkillDefinition.Mode.NEW,
-            java.util.List.of(),
+            List.of(),
             Map.of(),
             "test",
             OrchestrationDefinition.Tier.PROJECT,
@@ -44,7 +52,7 @@ class ScheduleActionAuthorityTest {
                 Map.of("review", new SkillResolver.Resolved(skill, null)), Map.of()));
     var authority =
         new ScheduleActionAuthority(
-            files, callers, skills, null, mock(BoardMessaging.Routing.class), () -> null);
+            files, callers, skills, null, mock(MessageService.Routing.class), () -> null);
     authority.validate(source, definition("NEW"));
     verify(callers).requireWork("project", "owner");
     assertThrows(RuntimeException.class, () -> authority.validate(source, definition("DIRECT")));

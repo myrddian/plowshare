@@ -246,7 +246,7 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
         ]
         result = await self.assistant_port().agents()
         self.assertEqual(result.missing_tools, ())
-        self.assertEqual(len(result.tools), 10)
+        self.assertEqual(len(result.tools), 11)
 
     def test_the_expected_tools_are_the_assistant_scope_grants(self) -> None:
         manifest = json.loads(

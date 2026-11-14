@@ -1,11 +1,15 @@
 package io.aeyer.plowshare.server.cache;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,6 +22,14 @@ import org.slf4j.LoggerFactory;
  * <p>Observers run outside lifecycle locks and may reenter subscription, close or read APIs. They
  * must perform bounded bookkeeping, not SQL or blocking remote work. Concurrent registration may
  * reorder state callbacks; generations let consumers reject stale state transitions.
+ *
+ * <p>With probing enabled the worker also sends itself a delivery probe every {@code heartbeat}.
+ * Observers are called synchronously on this worker, so when a probe's echo is read, every change
+ * committed before the probe has already been applied; {@link #deliveredThrough} publishes the
+ * probe's send time. A probe unanswered for {@code heartbeatTimeout} means delivery has stopped,
+ * however quiet the socket looks: the session is abandoned and recovery starts, exactly as for a
+ * failed poll. A silent connection loss therefore costs at most that timeout plus the reconnect
+ * delay, never an indefinite wait.
  */
 public final class ListeningProjectionChangeSignals implements ProjectionChangeSignals {
   private static final Logger LOG = LoggerFactory.getLogger(ListeningProjectionChangeSignals.class);
@@ -51,12 +63,23 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   private final int maxObservers;
   private final Duration pollInterval;
   private final Duration reconnectDelay;
+  private final Duration heartbeat;
+  private final Duration heartbeatTimeout;
   private final ConcurrentMap<Long, Registration> observers = new ConcurrentHashMap<>();
   private State state = new State(1, false);
   private long registrationId;
   private boolean closed;
   private Thread worker;
   private ProjectionNotificationSource.Session session;
+  // Written only by the worker; read by cache hits. Valid only for deliveredGeneration.
+  private volatile long deliveredNanos;
+  private volatile long deliveredGeneration = -1;
+  private final AtomicLong reconnectAttempts = new AtomicLong();
+
+  @Override
+  public long reconnectAttempts() {
+    return reconnectAttempts.get();
+  }
 
   public ListeningProjectionChangeSignals(
       ProjectionNotificationSource source,
@@ -72,6 +95,46 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
     this.maxObservers = maxObservers;
     this.pollInterval = pollInterval;
     this.reconnectDelay = reconnectDelay;
+    this.heartbeat = null;
+    this.heartbeatTimeout = null;
+  }
+
+  /**
+   * Probing listener. {@code heartbeat} must be shorter than {@code heartbeatTimeout}, so one late
+   * probe does not by itself abandon a working session.
+   */
+  public ListeningProjectionChangeSignals(
+      ProjectionNotificationSource source,
+      ProjectionVersions versions,
+      int maxObservers,
+      Duration pollInterval,
+      Duration reconnectDelay,
+      Duration heartbeat,
+      Duration heartbeatTimeout) {
+    this.source = Objects.requireNonNull(source);
+    this.versions = Objects.requireNonNull(versions);
+    if (maxObservers < 1) throw new IllegalArgumentException("Positive observer capacity required");
+    checkDuration(pollInterval);
+    checkDuration(reconnectDelay);
+    checkDuration(heartbeat);
+    checkDuration(heartbeatTimeout);
+    if (heartbeat.compareTo(heartbeatTimeout) >= 0)
+      throw new IllegalArgumentException("Heartbeat must be shorter than its timeout");
+    this.maxObservers = maxObservers;
+    this.pollInterval = pollInterval;
+    this.reconnectDelay = reconnectDelay;
+    this.heartbeat = heartbeat;
+    this.heartbeatTimeout = heartbeatTimeout;
+  }
+
+  @Override
+  public OptionalLong deliveredThrough() {
+    long generation = deliveredGeneration;
+    long nanos = deliveredNanos;
+    synchronized (lock) {
+      if (closed || !state.ready() || state.generation() != generation) return OptionalLong.empty();
+    }
+    return OptionalLong.of(nanos);
   }
 
   @Override
@@ -127,8 +190,11 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
   }
 
   private void run() {
+    boolean firstAttempt = true;
     try {
       while (!isClosed()) {
+        if (!firstAttempt) reconnectAttempts.incrementAndGet();
+        firstAttempt = false;
         try (var opened = source.open()) {
           synchronized (lock) {
             if (closed) return;
@@ -139,7 +205,11 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
           if (baseline.isEmpty() || !versions.current(baseline.orElseThrow()))
             throw new IllegalStateException("Projection recovery baseline unavailable");
           transition(true);
-          while (!isClosed()) changed(opened.poll(pollInterval));
+          if (heartbeat == null) {
+            while (!isClosed()) changed(opened.poll(pollInterval));
+          } else {
+            probe(opened);
+          }
         } catch (RuntimeException unavailable) {
           // Reconnect is an explicit infrastructure lifecycle, never replay of a source operation.
           // Log only the exception type: driver messages may contain deployment/credential data.
@@ -165,6 +235,49 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
     }
   }
 
+  /**
+   * Polls with probing. Sends are numbered per session; {@code sent} keeps each unanswered send
+   * time, oldest first, and is bounded because a probe left unanswered past the timeout ends the
+   * session.
+   */
+  private void probe(ProjectionNotificationSource.Session opened) {
+    long generation;
+    synchronized (lock) {
+      generation = state.generation();
+    }
+    var sent = new ArrayDeque<long[]>();
+    long sequence = 0;
+    long interval = heartbeat.toNanos();
+    long timeout = heartbeatTimeout.toNanos();
+    long nextSend = System.nanoTime();
+    while (!isClosed()) {
+      long now = System.nanoTime();
+      if (now - nextSend >= 0) {
+        sequence++;
+        // Record the time before sending: the echo proves delivery of commits before this instant.
+        if (!opened.heartbeat(sequence)) {
+          // This session cannot probe; fall back to plain polling with no freshness claim.
+          while (!isClosed()) changed(opened.poll(pollInterval));
+          return;
+        }
+        sent.addLast(new long[] {sequence, now});
+        nextSend = now + interval;
+      }
+      long wait = Math.min(pollInterval.toNanos(), Math.max(1_000_000L, nextSend - now));
+      changed(opened.poll(Duration.ofNanos(wait)));
+      // Observers have now applied every change returned so far, including those before the echo.
+      long answered = opened.heartbeatsReceived();
+      long through = -1;
+      while (!sent.isEmpty() && sent.peekFirst()[0] <= answered) through = sent.pollFirst()[1];
+      if (through != -1) {
+        deliveredNanos = through;
+        deliveredGeneration = generation;
+      }
+      if (!sent.isEmpty() && System.nanoTime() - sent.peekFirst()[1] > timeout)
+        throw new IllegalStateException("Projection notification delivery stopped");
+    }
+  }
+
   private boolean isClosed() {
     synchronized (lock) {
       return closed;
@@ -178,6 +291,7 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
       if (closed && ready || state.ready() == ready) return;
       next = new State(Math.incrementExact(state.generation()), ready);
       state = next;
+      deliveredGeneration = -1;
       selected = List.copyOf(observers.values());
     }
     for (var registration : selected) {
@@ -198,7 +312,7 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
       var relevant =
           changed.stream()
               .filter(registration.domains::contains)
-              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+              .collect(Collectors.toUnmodifiableSet());
       if (relevant.isEmpty()) continue;
       try {
         registration.observer.changed(relevant);

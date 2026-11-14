@@ -7,8 +7,8 @@ remain stable.
 
 The implementation order is JavaScript/TypeScript, the Java/JVM SDK, Python,
 C#, then Go. These are clients of Plowshare's `plowshare-v1` WebSocket protocol.
-The A2A adapter is a separate process on the Java SDK. Follow the
-[A2A sending manual](a2a-sending.md) to configure a peer and send work.
+The A2A adapter rewrite is tracked separately in
+[Finishing Relay](relay-finishing.md); SDK parity does not complete that rewrite.
 
 | Language | Package | Runtime | Scope |
 | --- | --- | --- | --- |
@@ -24,6 +24,12 @@ TypeScript and the native SDKs provide typed operation APIs. Raw wire envelopes
 remain private to their owning transports and codecs. Follow the
 [native SDK standard](native-sdk-standards.md) for Python, Go and .NET changes.
 Filesystem/process providers remain separate platform integrations.
+
+Java's `BoardClient`, `SwarmClient` and `MessagingClient` expose typed forum,
+swarm discovery/status and stable messaging lifecycle/inspection operations,
+including async request options. Sending remains the agent tool API. All five
+SDK families also support explicit [Relay binary HTTP transfers](relay-blobs.md);
+Python, Go and .NET use generated HTTP DTOs alongside their WS contracts.
 
 [Segmented SDK transport](decisions/0009-segmented-sdk-message-transport.md) is the
 default on new event connections: the upgrade must select `plowshare-segments-v1`.
@@ -147,7 +153,9 @@ A normal `request` resolves the server outcome, not the eventual completion of a
 job. Follow the returned job identity through status reads. Retain an outgoing
 request UUID before submitting; recovery using the same UUID and identical payload
 is an explicit caller decision, never a transport retry. Cancellation of a waiting
-SDK call doesn't cancel remote work; `job.cancel` / `outgoing.cancel` are explicit.
+SDK call doesn't cancel server or remote work. Use `job.cancel` for native jobs;
+external A2A cancellation is an explicit authorized Relay CANCEL request for an
+observed remote identity, as described in the [outbound guide](a2a-relay-outbound.md).
 
 `information.search` returns a list of passages, each carrying cosine `distance`
 and a `chunk` with paragraph identity and section/chapter placement. Synthetic
@@ -329,19 +337,24 @@ Plowshare delivery. Home Assistant is its first adapter, supplying selected stat
 actions and events through HA WebSocket. HA remains an ordinary project with its
 own agents, skills, orchestrations and user-defined mappings.
 
-The runtime and HA pipeline design
-and implementation plan
-build the shared runtime before the HA adapter. Reads/actions use existing
-protocol-neutral outgoing work; events use `orchestration.start`/receipt recovery.
+The runtime and HA pipeline design build the shared runtime before the HA
+adapter. Reads/actions use the existing public SDK Relay topic contracts and retained native
+requester returns; events use `orchestration.start`/receipt recovery. Fresh reads
+from manually started orchestrations remain explicitly deferred; event workflows
+reuse their supplied authorized readings.
 JS returns validated effect plans that the external runtime records before dispatch.
 This requires no Plowshare core runtime/API/tool/database modifications. The
 separately requested interlocutor `run` grant is independent. The runtime/HA
-fixtures, package checks and example resource loaders pass; live HA
-acceptance remains pending. Existing claim-recovery limits remain explicit. The
-runtime has opt-in retention, adjacent equivalent-reading coalescing and held
+fixtures and example resource loaders cover the local contract; selected real
+server harness cases cover direct returns and supplied-reading event workflows.
+A live household deployment remains unverified. Unresolved legacy receipts fence
+startup; uncertain Relay publication needs positive retained evidence and never
+a blind replay. The runtime has opt-in retention, adjacent equivalent-reading
+coalescing and held
 thresholds with explicit restart/resync/gap resets. Opt-in acknowledged-context
 feedback suppression preserves observations while preventing pipeline feedback.
-Deeper causal ancestry and other event types remain later work.
+Observed-parent feedback chains have an explicit bounded depth and preserve
+causation. Additional event families remain separate work.
 
 ## A2A receipt status
 

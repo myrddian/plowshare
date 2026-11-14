@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.server.cache.*;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
 import java.util.Set;
 import org.springframework.context.annotation.*;
@@ -19,7 +20,9 @@ public class InformationVisibilityConfiguration {
         jdbc,
         caches.create(
             "information-log-visibility-v1",
-            Set.of(ProjectionVersions.Domain.READABILITY, ProjectionVersions.Domain.AUTHORITY)),
+            Set.of(ProjectionVersions.Domain.READABILITY, ProjectionVersions.Domain.AUTHORITY),
+            // Targeted log checks only; feed reads keep their own per-read version fence.
+            ProjectionCaches.Freshness.NOTIFIED),
         versions,
         admission);
   }

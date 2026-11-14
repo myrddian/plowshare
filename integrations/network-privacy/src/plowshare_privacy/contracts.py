@@ -941,7 +941,6 @@ class Configuration:
     group: str
     schedule: str
     collection: CollectionPlan
-    outgoing_peer: str | None = None
     # The household's IANA time zone. The dashboard, assessment reports and
     # daily limits all use it, so one day means the same everywhere. None
     # (not configured) uses UTC, and the dashboard says so.
@@ -976,6 +975,10 @@ class Configuration:
             },
             {"outgoingPeer", "timeZone"},
         )
+        if "outgoingPeer" in row:
+            raise ValueError(
+                "outgoingPeer is retired; retain old receipts and configure the native Relay tool provider"
+            )
         origin = text(row["origin"], 2048)
         url = urlsplit(origin)
         if (
@@ -1141,7 +1144,6 @@ class Configuration:
             identifier(row["group"]),
             identifier(row["schedule"]),
             collection,
-            identifier(row["outgoingPeer"]) if "outgoingPeer" in row else None,
             household_zone(row["timeZone"]) if "timeZone" in row else None,
         )
 

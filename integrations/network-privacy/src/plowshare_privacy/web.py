@@ -54,6 +54,9 @@ from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
 from .profile_research import DAILY_LIMIT as RESEARCH_DAILY_LIMIT
 from .profile_research import ResearchReview, admitted_today
+from .reference_library import MAX_REFRESH_DAYS
+from .reference_requests import ReferenceRequest, ReferenceRequests
+from .reference_service import JOURNAL_UNREADABLE, PHASE_LABELS, ReferenceService
 from .schedule_editor import ScheduleManagement
 from .system_view import describe
 from .tools import (
@@ -65,6 +68,11 @@ from .tools import (
     monitored_devices,
 )
 from .worker import ReconciliationRequired, Worker
+
+REQUESTS_UNREADABLE = (
+    "The documentation request list could not be read. Check its file permissions "
+    "or remove it; requests already approved are unaffected."
+)
 
 
 def application(
@@ -84,6 +92,9 @@ def application(
     assessments: AssessmentControl | None = None,
     deep_scans: DeepScanner | None = None,
     deep_scans_detail: str | None = None,
+    references: ReferenceService | None = None,
+    references_detail: str | None = None,
+    reference_requests: ReferenceRequests | None = None,
     ask: AskService | None = None,
     ask_detail: str | None = None,
     advisory_origin: str | None = None,
@@ -244,6 +255,8 @@ def application(
                 }
                 if deep_scans is not None
                 else None,
+                "references": reference_counts(),
+                "reference_requests": request_counts(),
                 "ask": ask_overview(),
             }
         )
@@ -710,6 +723,177 @@ def application(
         service.set_automatic_limit(limit)
         return deep_scan_settings_view(service)
 
+    def reference_library() -> ReferenceService:
+        if references is None:
+            raise web.HTTPNotFound(text="The reference library is not enabled")
+        return references
+
+    def reference_rows(service: ReferenceService) -> web.Response:
+        # Server text in ``error`` was bounded and stripped when it was journaled.
+        return web.json_response(
+            {
+                "references": [
+                    {
+                        "url": item.url,
+                        "product": item.product,
+                        "title": item.title,
+                        "origin": item.origin,
+                        "phase": item.phase,
+                        "label": PHASE_LABELS[item.phase],
+                        "error": item.error,
+                        "retired": item.retired,
+                        "untag_failed": item.untag_failed,
+                    }
+                    for item in service.view()
+                ],
+                "refresh_days": service.refresh_days(),
+                "error": service.error,
+            }
+        )
+
+    async def reference_settings(request: web.Request) -> web.Response:
+        return web.json_response({"refresh_days": reference_library().refresh_days()})
+
+    async def save_reference_settings(request: web.Request) -> web.Response:
+        service = reference_library()
+        row = object_fields(parse_json(await request.read()), {"refresh_days"})
+        days = row["refresh_days"]
+        if type(days) is not int or not 1 <= days <= MAX_REFRESH_DAYS:
+            return web.json_response(
+                {
+                    "error": "Choose a whole number of days from 1 to "
+                    f"{MAX_REFRESH_DAYS} between reference refreshes"
+                },
+                status=400,
+            )
+        service.set_refresh_days(days)
+        return web.json_response({"refresh_days": service.refresh_days()})
+
+    async def reference_list(request: web.Request) -> web.Response:
+        return reference_rows(reference_library())
+
+    async def reference_retry(request: web.Request) -> web.Response:
+        service = reference_library()
+        row = object_fields(parse_json(await request.read()), {"url"})
+        url = row["url"]
+        if not isinstance(url, str):
+            return web.json_response({"error": "Name the reference's link"}, status=400)
+        try:
+            await service.retry(url)
+        except (ValueError, LookupError) as error:
+            # The library's own refusals (unknown reference, wrong phase) say why;
+            # the generic ValueError mapping would hide it.
+            return web.json_response({"error": str(error.args[0])}, status=400)
+        except Refusal as error:
+            return web.json_response(
+                {
+                    "error": "The Library refused the retry: "
+                    + refusal_detail(error, "reference retry")
+                },
+                status=409,
+            )
+        except TransportError:
+            return web.json_response(
+                {
+                    "error": "The Plowshare connection did not answer. "
+                    "Nothing was lost; choose Retry again once it is back."
+                },
+                status=502,
+            )
+        return reference_rows(service)
+
+    def reference_counts() -> dict[str, object] | None:
+        # Counts only; the rows are read when the owner opens Settings.
+        if references is None:
+            return None
+        try:
+            counts = references.counts()
+        except (ValueError, OSError):
+            # A bad journal must not take the whole overview down; say why instead.
+            return {
+                "failed": 0,
+                "blocked": 0,
+                "unresolved": 0,
+                "detail": JOURNAL_UNREADABLE,
+            }
+        return {**asdict(counts), "detail": None}
+
+    def request_journal() -> ReferenceRequests:
+        if reference_requests is None:
+            raise web.HTTPNotFound(text="Documentation requests are not enabled")
+        return reference_requests
+
+    def request_counts() -> dict[str, object] | None:
+        # Counts and product names only; the list itself is read when the owner
+        # opens the review panel.
+        if reference_requests is None:
+            return None
+        try:
+            waiting = reference_requests.pending()
+        except (ValueError, OSError):
+            # A bad journal must not take the whole overview down; say why instead.
+            return {"pending": 0, "products": [], "detail": REQUESTS_UNREADABLE}
+        return {
+            "pending": len(waiting),
+            "products": [r.product for r in waiting],
+            "detail": None,
+        }
+
+    def request_rows(waiting: tuple[ReferenceRequest, ...]) -> web.Response:
+        # ``question`` is the agent's text: the dashboard shows it as text only.
+        return web.json_response(
+            {
+                "requests": [
+                    {
+                        "id": r.id,
+                        "product": r.product,
+                        "question": r.question,
+                        "created_at": r.created_at,
+                    }
+                    for r in waiting
+                ]
+            }
+        )
+
+    def unreadable() -> web.Response:
+        return web.json_response({"error": REQUESTS_UNREADABLE}, status=500)
+
+    async def request_list(request: web.Request) -> web.Response:
+        try:
+            return request_rows(request_journal().pending())
+        except (ValueError, OSError):
+            return unreadable()
+
+    async def request_approve(request: web.Request) -> web.Response:
+        journal = request_journal()
+        try:
+            urls = object_fields(parse_json(await request.read()), {"urls"})["urls"]
+            # The journal enforces the count and each link's rules; here only the
+            # shape. A huge list is already bounded by the request body limit.
+            if not isinstance(urls, list) or not all(isinstance(u, str) for u in urls):
+                raise ValueError("Each reference link must be text")
+            # Approving only queues receipts in the journal; the library's loop
+            # does the fetching later, so no SDK call can happen here.
+            journal.approve(
+                request.match_info["request_id"],
+                tuple(url for url in urls if isinstance(url, str)),
+            )
+        except ValueError as error:
+            return web.json_response({"error": str(error.args[0])}, status=400)
+        except OSError:
+            return unreadable()
+        return request_rows(journal.pending())
+
+    async def request_dismiss(request: web.Request) -> web.Response:
+        journal = request_journal()
+        try:
+            journal.dismiss(request.match_info["request_id"])
+        except ValueError as error:
+            return web.json_response({"error": str(error.args[0])}, status=400)
+        except OSError:
+            return unreadable()
+        return request_rows(journal.pending())
+
     def assistant() -> AskService:
         if ask is None:
             raise web.HTTPNotFound(text="Ask is not enabled")
@@ -1008,6 +1192,8 @@ def application(
                 "deep_scans_detail": deep_scans.detail
                 if deep_scans is not None
                 else deep_scans_detail,
+                # Why the reference library is off: an unreadable journal.
+                "references_detail": references_detail,
                 "ask_available": ask is not None and ask.view().available,
                 # Why Ask is off: an unreadable journal at start-up, or the
                 # running service's own detail.
@@ -1179,6 +1365,13 @@ def application(
     app.router.add_get("/api/devices/{device_id}/deep-scan", deep_scan_view)
     app.router.add_post("/api/devices/{device_id}/deep-scan/request", deep_scan_request)
     app.router.add_post("/api/devices/{device_id}/deep-scan/cancel", deep_scan_cancel)
+    app.router.add_get("/api/references", reference_list)
+    app.router.add_post("/api/references/retry", reference_retry)
+    app.router.add_get("/api/references/settings", reference_settings)
+    app.router.add_post("/api/references/settings", save_reference_settings)
+    app.router.add_get("/api/reference-requests", request_list)
+    app.router.add_post("/api/reference-requests/{request_id}/approve", request_approve)
+    app.router.add_post("/api/reference-requests/{request_id}/dismiss", request_dismiss)
     app.router.add_get("/api/ask", ask_view)
     app.router.add_post("/api/ask", ask_send)
     app.router.add_post("/api/ask/top-up", ask_top_up)

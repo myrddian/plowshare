@@ -1,16 +1,57 @@
 package io.aeyer.plowshare.integrations;
 
-import com.fasterxml.jackson.core.*;
-import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
-import com.fasterxml.jackson.databind.node.*;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
-import io.aeyer.plowshare.integrations.IntegrationContracts.*;
-import io.aeyer.plowshare.protocol.IntegrationPayload.*;
+import com.fasterxml.jackson.databind.type.LogicalType;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Action;
+import io.aeyer.plowshare.integrations.IntegrationContracts.BindingState;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Causality;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Completion;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Edge;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Effect;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Empty;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Entry;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Event;
+import io.aeyer.plowshare.integrations.IntegrationContracts.EventEnvelope;
+import io.aeyer.plowshare.integrations.IntegrationContracts.EventEvidence;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Evidence;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Gap;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Held;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Hold;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Pipeline;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Read;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ReadResult;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ReadingEvidence;
+import io.aeyer.plowshare.integrations.IntegrationContracts.RouteState;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ScriptContext;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ScriptOutput;
+import io.aeyer.plowshare.integrations.IntegrationContracts.ScriptState;
+import io.aeyer.plowshare.integrations.IntegrationContracts.StateChanged;
+import io.aeyer.plowshare.integrations.IntegrationContracts.WrappedEvidence;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Arguments;
+import io.aeyer.plowshare.protocol.IntegrationPayload.Reading;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /** The only runtime DTO JSON boundary. Keeps journal and script wire shapes stable and strict. */
 public final class IntegrationCodec {
@@ -20,8 +61,9 @@ public final class IntegrationCodec {
 
   private static ObjectMapper mapper() {
     ObjectMapper mapper =
-        com.fasterxml.jackson.databind.json.JsonMapper.builder()
+        JsonMapper.builder()
             .findAndAddModules()
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
@@ -30,16 +72,10 @@ public final class IntegrationCodec {
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .build()
-            .setSerializationInclusion(
-                com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL);
+            .setSerializationInclusion(JsonInclude.Include.NON_NULL);
     for (var shape :
-        java.util.List.of(
-            com.fasterxml.jackson.databind.cfg.CoercionInputShape.Integer,
-            com.fasterxml.jackson.databind.cfg.CoercionInputShape.Float,
-            com.fasterxml.jackson.databind.cfg.CoercionInputShape.Boolean))
-      mapper
-          .coercionConfigFor(com.fasterxml.jackson.databind.type.LogicalType.Textual)
-          .setCoercion(shape, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail);
+        List.of(CoercionInputShape.Integer, CoercionInputShape.Float, CoercionInputShape.Boolean))
+      mapper.coercionConfigFor(LogicalType.Textual).setCoercion(shape, CoercionAction.Fail);
     SimpleModule module = new SimpleModule();
     module.addDeserializer(
         EventEnvelope.class,
@@ -208,10 +244,7 @@ public final class IntegrationCodec {
         Json.fields(n, "type", "state", "result");
         event =
             new ReadResult(
-                Json.text(n, "state"),
-                decode(
-                    n.path("result"),
-                    io.aeyer.plowshare.protocol.ExternalResult.IntegrationResult.class));
+                Json.text(n, "state"), decode(n.path("result"), IntegrationResult.class));
       }
       case "completion" -> {
         Json.fields(n, "type", "id", "state", "reportText", "completionAction");

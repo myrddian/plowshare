@@ -5,6 +5,7 @@ import type {
   Route,
   DirectMessagePolicy,
   BotTarget,
+  MessagingBinding,
 } from './contracts.ts';
 
 export function object(
@@ -125,6 +126,8 @@ export function decodeConfig(value: unknown): Configuration {
     'requestTimeoutMs',
     'maxRecords',
     'dm',
+    'messaging',
+    'legacyStateMigration',
   ]);
   if (Object.values(raw).some((field) => field === null))
     throw new Error('Null configuration fields are not supported');
@@ -147,6 +150,29 @@ export function decodeConfig(value: unknown): Configuration {
   const allowedUserIds = array(raw.allowedUserIds, 1000).map(snowflake);
   const routes = array(raw.routes, 100).map(route);
   const dm = directMessages(raw.dm);
+  const messaging = array(raw.messaging, 100).map(messagingBinding);
+  const targets: readonly BotTarget[] =
+    dm.mode === 'service' ? [...routes, dm] : routes;
+  if (
+    new Set(messaging.map((item) => item.project + '\n' + item.bot)).size !==
+      messaging.length ||
+    targets.some(
+      (target) =>
+        !messaging.some(
+          (item) => item.project === target.project && item.bot === target.bot,
+        ),
+    )
+  )
+    throw new Error(
+      'Configure exactly one explicit messaging binding for every receiving bot',
+    );
+  if (
+    raw.legacyStateMigration !== undefined &&
+    typeof raw.legacyStateMigration !== 'boolean'
+  )
+    throw new Error(
+      'legacyStateMigration must explicitly confirm verified server channel mapping',
+    );
   if (!allowedUserIds.length || (!routes.length && dm.mode !== 'service'))
     throw new Error(
       'Configure allowed Discord users and at least one channel or service DM route',
@@ -193,6 +219,8 @@ export function decodeConfig(value: unknown): Configuration {
     requestTimeoutMs: integer(raw.requestTimeoutMs ?? 30000, 1000, 60000),
     maxRecords: integer(raw.maxRecords ?? 500, 1, 1000),
     dm,
+    messaging,
+    legacyStateMigration: raw.legacyStateMigration === true,
   };
 }
 function directMessages(value: unknown): DirectMessagePolicy {
@@ -218,4 +246,17 @@ export function botTargets(config: Configuration): readonly BotTarget[] {
         (other) => other.project === target.project && other.bot === target.bot,
       ) === index,
   );
+}
+
+export function messagingBinding(value: unknown): MessagingBinding {
+  const row = object(value, ['project', 'bot', 'requests', 'replies']);
+  const result = {
+    project: text(row.project),
+    bot: text(row.bot, 256),
+    requests: topicName(row.requests),
+    replies: topicName(row.replies),
+  };
+  if (result.requests === result.replies)
+    throw new Error('Messaging request and return topics must differ');
+  return result;
 }

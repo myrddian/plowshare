@@ -10,8 +10,12 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.llm.LlmProperties;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -39,7 +43,7 @@ class AccountingConfigTest {
   private ApplicationContextRunner storage(DataLayout layout) {
     DataSource offline = mock(DataSource.class);
     return runner
-        .withBean(InferencePrices.class, () -> new PricingCatalog(java.util.List.of()))
+        .withBean(InferencePrices.class, () -> new PricingCatalog(List.of()))
         .withBean(DataLayout.class, () -> layout)
         .withBean(ObjectMapper.class, ObjectMapper::new)
         .withBean(JdbcTemplate.class, () -> new JdbcTemplate(offline))
@@ -67,6 +71,7 @@ class AccountingConfigTest {
   void default_enabled_storage_binds_limits_and_closes_the_writer_with_the_context() {
     var layout = new DataLayout(directory).initialise();
     storage(layout)
+        .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
         .withPropertyValues(
             "plowshare.llm.accounting.max-journal-bytes=32KB",
             "plowshare.llm.accounting.segment-bytes=2KB",
@@ -80,16 +85,15 @@ class AccountingConfigTest {
               assertEquals(
                   3, context.getBean(LlmProperties.class).getAccounting().getRetryBufferEvents());
               assertNotNull(context.getBean(AccountingRecorder.class));
+              assertTrue(
+                  context.getBean(InferenceTelemetry.class)
+                      instanceof MicrometerInferenceTelemetry);
               assertNotNull(context.getBean(AccountingProjector.class));
               assertTrue(Files.exists(layout.accounting().resolve("checkpoint")));
             });
     try (var reopened =
         new AccountingJournal(
-            layout.accounting(),
-            32768,
-            2048,
-            java.time.Duration.ofSeconds(1),
-            AccountingFixtures.MAPPER)) {
+            layout.accounting(), 32768, 2048, Duration.ofSeconds(1), AccountingFixtures.MAPPER)) {
       assertEquals(AccountingJournal.Problem.NONE, reopened.health().problem());
     }
   }

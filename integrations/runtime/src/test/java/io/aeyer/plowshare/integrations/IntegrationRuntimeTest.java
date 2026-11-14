@@ -1,22 +1,33 @@
 package io.aeyer.plowshare.integrations;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.aeyer.plowshare.protocol.Outgoing;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aeyer.plowshare.protocol.IntegrationPayload;
+import io.aeyer.plowshare.protocol.Orchestration;
+import io.aeyer.plowshare.protocol.RelayLog;
+import io.aeyer.plowshare.protocol.RelayPort;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.time.*;
-import java.util.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class IntegrationRuntimeTest {
   @TempDir Path directory;
 
-  static final class FakeAdapter implements IntegrationAdapter {
+  static class FakeAdapter implements IntegrationAdapter {
     Consumer<Observation> listener;
     int actions, reads;
     JsonNode snapshot = Json.object();
@@ -25,20 +36,18 @@ class IntegrationRuntimeTest {
       this.listener = listener;
     }
 
-    public void validate(
-        String operation, io.aeyer.plowshare.protocol.IntegrationPayload.Arguments arguments) {
+    public void validate(String operation, IntegrationPayload.Arguments arguments) {
       if (operation.equals("actions.execute") && !arguments.action().equals("notify"))
         throw new IllegalArgumentException("denied");
     }
 
-    public Result execute(
-        String operation, io.aeyer.plowshare.protocol.IntegrationPayload.Arguments arguments) {
+    public Result execute(String operation, IntegrationPayload.Arguments arguments) {
       if (operation.equals("actions.execute")) actions++;
       if (operation.equals("states.read")) reads++;
       return IntegrationFixtures.result("COMPLETED", Json.object().put("acknowledged", true));
     }
 
-    public Map<String, io.aeyer.plowshare.protocol.IntegrationPayload.Reading> snapshot() {
+    public Map<String, IntegrationPayload.Reading> snapshot() {
       return IntegrationFixtures.readings(snapshot);
     }
 
@@ -61,26 +70,20 @@ class IntegrationRuntimeTest {
   static class FakeGateway implements Gateway {
     int starts;
     boolean loseStart;
-    final Map<UUID, io.aeyer.plowshare.protocol.Orchestration.Started> receipts = new HashMap<>();
+    final Map<UUID, Orchestration.Started> receipts = new HashMap<>();
 
-    public void advertise(String p, List<String> peers) {}
-
-    public Outgoing.Claimed claim(String p, List<String> peers) {
-      return new Outgoing.Claimed(null, null);
+    public RelayLog.Page log(RelayLog.Query query) throws IOException {
+      throw new IOException("No Relay intake configured in this fixture");
     }
 
-    public void report(Outgoing.Report report) throws IOException {}
-
-    public Outgoing.Work outgoing(UUID id) throws IOException {
-      throw new IOException("not found");
+    public RelayPort.Published publish(RelayPort.Publish request) throws IOException {
+      throw new IOException("No Relay publication configured in this fixture");
     }
 
-    public io.aeyer.plowshare.protocol.Orchestration.Started start(
-        io.aeyer.plowshare.protocol.Orchestration.Start payload) throws IOException {
+    public Orchestration.Started start(Orchestration.Start payload) throws IOException {
       starts++;
       UUID id = payload.requestId();
-      var receipt =
-          new io.aeyer.plowshare.protocol.Orchestration.Started("run-fixture", "running", id);
+      var receipt = new Orchestration.Started("run-fixture", "running", id);
       receipts.put(id, receipt);
       if (loseStart) {
         loseStart = false;
@@ -89,14 +92,14 @@ class IntegrationRuntimeTest {
       return receipt;
     }
 
-    public Optional<io.aeyer.plowshare.protocol.Orchestration.Started> receipt(UUID id) {
+    public Optional<Orchestration.Started> receipt(UUID id) {
       return Optional.ofNullable(receipts.get(id));
     }
 
-    public io.aeyer.plowshare.protocol.Orchestration.Status status(String run) {
+    public Orchestration.Status status(String run) {
       return IntegrationCodec.decode(
           Json.object()
-              .<com.fasterxml.jackson.databind.node.ObjectNode>set(
+              .<ObjectNode>set(
                   "orchestration",
                   Json.object()
                       .put("id", run)
@@ -112,12 +115,10 @@ class IntegrationRuntimeTest {
                       .put("conductorConversation", "cnv_fixture")
                       .put("createdAt", "2026-10-04T00:00:00Z")
                       .put("result", "Office is hot"))
-              .<com.fasterxml.jackson.databind.node.ObjectNode>set(
-                  "todos", Json.MAPPER.createArrayNode())
-              .<com.fasterxml.jackson.databind.node.ObjectNode>set(
-                  "messages", Json.MAPPER.createArrayNode())
+              .<ObjectNode>set("todos", Json.MAPPER.createArrayNode())
+              .<ObjectNode>set("messages", Json.MAPPER.createArrayNode())
               .set("children", Json.MAPPER.createArrayNode()),
-          io.aeyer.plowshare.protocol.Orchestration.Status.class);
+          Orchestration.Status.class);
     }
 
     public void close() {}
@@ -140,7 +141,6 @@ class IntegrationRuntimeTest {
             "house",
             "fake",
             "home",
-            "ha-house",
             new IntegrationFixtures.Settings(),
             Map.of("heat", route),
             allowed,
@@ -178,7 +178,6 @@ class IntegrationRuntimeTest {
                     b.name(),
                     b.adapter(),
                     b.project(),
-                    b.peer(),
                     b.configuration(),
                     b.routes(),
                     b.allowBindings(),
