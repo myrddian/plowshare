@@ -23,6 +23,8 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 })
 @DependsOnDatabaseInitialization
 public class ProjectionCacheConfiguration {
+  private static final int MAX_SIGNAL_OBSERVERS = 256;
+
   @Bean
   public ProjectionTelemetry projectionTelemetry(ObjectProvider<MeterRegistry> registries) {
     var registry = registries.getIfAvailable();
@@ -103,7 +105,9 @@ public class ProjectionCacheConfiguration {
     notificationSource.setDriverClassName(connections.source().getDriverClassName());
     notificationSource.setConnectionProperties(connections.source().getDataSourceProperties());
     var traced = new TracedDataSource(notificationSource, new JfrJdbcExecutionTrace());
-    int observers = properties.maxProjections() + 2; // Relay wakeups and information invalidation.
+    // Every projection line subscribes once, plus Relay wakeups and information invalidation. Lines
+    // are fixed by composition and not counted, so this only bounds a runaway subscriber loop.
+    int observers = MAX_SIGNAL_OBSERVERS;
     ProjectionChangeSignals signals;
     if (!notified.enabled()) {
       signals =

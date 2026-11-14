@@ -311,9 +311,9 @@ two-process test shows a write on one process invalidating the item on the other
 
 - Shared data reaches the cache through typed repository interfaces and DTOs; nothing outside a
   repository receives a `JdbcTemplate`.
-- 23 of the 24 allowed projection caches (`plowshare.projection-cache.max-projections`) are in use
-  after slice 2, so each slice states the projections it adds or removes and raises the limit if
-  needed.
+- Each projection is one cache line; the number of lines is not limited. Memory is the only
+  control: `resident-bytes` per line and `total-resident-bytes` across lines (see
+  `ResidentBudget`). The earlier `max-projections` count cap was removed.
 - Each slice names its migrations and the `full-db` tests its change requires.
 
 ## Order

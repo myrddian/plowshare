@@ -241,8 +241,8 @@ class InformationCatalogueReadPersistenceTest {
         Duration.ofSeconds(1),
         Duration.ofSeconds(1),
         128,
-        8,
-        4);
+        4,
+        1L << 40);
   }
 
   private static ProjectionChangeSignals readySignals() {

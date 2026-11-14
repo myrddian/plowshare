@@ -197,7 +197,10 @@ plowshare:
     notification-poll: ${PLOWSHARE_PROJECTION_CACHE_NOTIFICATION_POLL:1s}
     reconnect-delay: ${PLOWSHARE_PROJECTION_CACHE_RECONNECT_DELAY:1s}
     max-pending-transactions: ${PLOWSHARE_PROJECTION_CACHE_MAX_PENDING_TRANSACTIONS:128}
-    max-projections: ${PLOWSHARE_PROJECTION_CACHE_MAX_PROJECTIONS:24}
+    # Bytes held by every projection line together. Each projection is one line, capped by
+    # resident-bytes; past this total the coldest entries of the line furthest above its share
+    # are evicted, never a whole line. The number of lines is not limited.
+    total-resident-bytes: ${PLOWSHARE_PROJECTION_CACHE_TOTAL_RESIDENT_BYTES:67108864}
     # Connections of the separate projection-versions pool (1..32).
     version-connections: ${PLOWSHARE_PROJECTION_CACHE_VERSION_CONNECTIONS:4}
   information:

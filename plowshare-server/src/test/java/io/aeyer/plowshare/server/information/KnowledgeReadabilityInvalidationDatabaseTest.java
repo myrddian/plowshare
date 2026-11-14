@@ -173,8 +173,8 @@ class KnowledgeReadabilityInvalidationDatabaseTest {
         Duration.ofSeconds(1),
         Duration.ofSeconds(1),
         128,
-        24,
-        4);
+        4,
+        1L << 40);
   }
 
   private CachedKnowledgeReadability check(

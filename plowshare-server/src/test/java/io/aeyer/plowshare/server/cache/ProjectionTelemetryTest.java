@@ -54,8 +54,8 @@ class ProjectionTelemetryTest {
         Duration.ofSeconds(1),
         Duration.ofSeconds(1),
         32,
-        1,
-        2);
+        2,
+        1L << 40);
   }
 
   @Test
@@ -91,8 +91,8 @@ class ProjectionTelemetryTest {
       assertEquals(
           1, registry.get(CACHE + ".backing").tag("event", "hits").functionCounter().count());
       int meters = registry.getMeters().size();
-      assertThrows(IllegalStateException.class, () -> caches.create("rejected", DOMAINS));
-      assertEquals(meters, registry.getMeters().size(), "Capacity refusal must not add labels");
+      assertThrows(IllegalStateException.class, () -> caches.create("authority-snapshot", DOMAINS));
+      assertEquals(meters, registry.getMeters().size(), "A refused duplicate must not add labels");
       clearInvocations(versions);
       for (var meter : registry.getMeters())
         meter.measure().forEach(measurement -> measurement.getValue());

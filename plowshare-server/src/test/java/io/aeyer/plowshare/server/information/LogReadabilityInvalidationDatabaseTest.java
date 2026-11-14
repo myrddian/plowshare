@@ -187,8 +187,8 @@ class LogReadabilityInvalidationDatabaseTest {
         Duration.ofSeconds(1),
         Duration.ofSeconds(1),
         128,
-        24,
-        4);
+        4,
+        1L << 40);
   }
 
   /** The production entry point over the cached check; counts the SQL predicate's runs. */

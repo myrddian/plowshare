@@ -208,7 +208,7 @@ inconsistent values fail startup.
 | Property | Default | Effect |
 | --- | --- | --- |
 | `entries` | `256` | Cached entries. |
-| `resident-bytes` | `33554432` | Bytes held by cached values. |
+| `resident-bytes` | `33554432` | Bytes held by one projection line's cached values. |
 | `loads` | `8` | Loads in flight at once. |
 | `loading-bytes` | `67108864` | Bytes of values being loaded. |
 | `waiters` | `256` | Callers waiting on loads, in total. |
@@ -219,7 +219,7 @@ inconsistent values fail startup.
 | `notification-poll` | `1s` | Version-notification poll cadence, at most 30s. |
 | `reconnect-delay` | `1s` | Delay before reconnecting a lost notification session, at most 1m. |
 | `max-pending-transactions` | `128` | Pending transactions tracked (1..4096). |
-| `max-projections` | `24` | Distinct projections (1..64). |
+| `total-resident-bytes` | `67108864` | Bytes held by all projection lines together (at least `resident-bytes`). Each projection is one line with its own LRU; past this total the coldest entries of the line furthest above its share are evicted, never a whole line. The number of projections is not configured or limited. |
 | `notified.enabled` | `true` | Delivery probes, and notification-trusted hits for caches that opt in. |
 | `notified.staleness` | `2s` | Most a trusted hit may lag a committed permission change (at most 1m). |
 | `notified.heartbeat` | `500ms` | Probe interval; must be shorter than `staleness`. |
@@ -230,7 +230,7 @@ inconsistent values fail startup.
 
 These meters read server memory only. Scraping does not acquire database connections,
 validate versions or send probes. Projection labels are the fixed names registered
-by server composition, bounded by `max-projections`. No account, project, cache key,
+by server composition. No account, project, cache key,
 SQL or exception message becomes a label. Counters restart with the server; compare
 rates or interval deltas across deployments.
 

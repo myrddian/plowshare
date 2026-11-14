@@ -5,9 +5,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Explicit per-projection budgets; version connections use a separate bounded pool. {@code timeout}
- * is the single deadline of one cached read: its FETCH slot wait and its wait on a shared reload
- * both draw on it (see {@link io.aeyer.plowshare.server.reads.ReadDeadline}).
+ * Explicit per-projection budgets; version connections use a separate bounded pool. Each projection
+ * is one line (an LRU of its own entries); lines are fixed by server composition and not counted.
+ * {@code residentBytes} caps one line and {@code totalResidentBytes} caps all lines together: past
+ * the total, the coldest entries of the line furthest above its share are evicted (see {@link
+ * ResidentBudget}). {@code timeout} is the single deadline of one cached read: its FETCH slot wait
+ * and its wait on a shared reload both draw on it (see {@link
+ * io.aeyer.plowshare.server.reads.ReadDeadline}).
  */
 @ConfigurationProperties("plowshare.projection-cache")
 public record ProjectionCacheProperties(
@@ -23,8 +27,8 @@ public record ProjectionCacheProperties(
     @DefaultValue("1s") Duration notificationPoll,
     @DefaultValue("1s") Duration reconnectDelay,
     @DefaultValue("128") int maxPendingTransactions,
-    @DefaultValue("24") int maxProjections,
-    @DefaultValue("4") int versionConnections) {
+    @DefaultValue("4") int versionConnections,
+    @DefaultValue("67108864") long totalResidentBytes) {
   /**
    * A domain-scoped entry depends on at most every domain; an item-scoped one on at most {@link
    * ProjectionItemVersions#MAX_ITEMS} items. {@code dependencyLinks} still bounds the total.
@@ -47,8 +51,7 @@ public record ProjectionCacheProperties(
         || maxValueBytes > loadingBytes - (2048L + 128L * 4096) - 16384
         || maxPendingTransactions < 1
         || maxPendingTransactions > 4096
-        || maxProjections < 1
-        || maxProjections > 64
+        || totalResidentBytes < residentBytes
         || versionConnections < 1
         || versionConnections > 32
         || notificationPoll == null
