@@ -52,16 +52,16 @@ test('the pane shows assignment, lease end and change', () => {
     expires_at:'2026-11-14T04:02:45Z', observed_at:'2026-11-14T03:30:00Z', previous_mode:'dhcp_reserved',
     changed_at:'2026-11-14T03:10:11Z', changed_in_latest:true});
   const lines = texts(section);
+  const when = value => vm.runInContext(`formatWhen(${JSON.stringify(value)})`, context);
   assert.equal(section.className, 'readout addressing');
-  assert.ok(lines.includes('Address assignment'));
-  assert.ok(lines.includes('Dynamic (DHCP lease)'));
-  assert.ok(lines.includes('Source: pihole'));
-  assert.ok(lines.some(line => line.startsWith('Lease ends ')));
-  assert.ok(lines.some(line => line.startsWith('Changed from Reserved to Dynamic ')));
+  // The label is the Assignment fact beside it; the readout does not repeat it.
+  assert.deepEqual(lines, ['Address assignment', 'Source: pihole', `Lease recorded to end ${when('2026-11-14T04:02:45Z')}`,
+    `Recorded ${when('2026-11-14T03:30:00Z')}`, `Changed from Reserved to Dynamic ${when('2026-11-14T03:10:11Z')}`]);
+  assert.ok(!lines.some(line => line.startsWith('Lease ends ')));
   // Nothing recorded means no lease line, no source and no change line.
   const bare = texts(call(context, 'renderAddressing(value)', {mode:'static', basis:'outside_dhcp_range', services:[],
-    expires_at:null, previous_mode:null, changed_at:null}));
-  assert.deepEqual(bare, ['Address assignment', 'Static (outside the DHCP range)']);
+    expires_at:null, observed_at:'2026-11-14T03:30:00Z', previous_mode:null, changed_at:null}));
+  assert.deepEqual(bare, ['Address assignment', `Recorded ${when('2026-11-14T03:30:00Z')}`]);
 });
 
 test('no addressing renders nothing', () => {
@@ -103,6 +103,23 @@ test('the device list can be searched by assignment', () => {
   assert.deepEqual(tagsOf(cards[0]), []);
   assert.deepEqual(tagsOf(cards[1]), ['Static in DHCP range']);
   assert.deepEqual(tagsOf(cards[2]), []);
+  // Tokens the attention band's multi-device actions search for.
+  assert.ok(cards[1].dataset.search.split(' ').includes('static-in-dhcp-range'));
+  assert.ok(!cards[0].dataset.search.includes('static-in-dhcp-range'));
+  assert.ok(!cards[0].dataset.search.includes('assignment-changed'));
+});
+
+test('a changed assignment is searchable by its token', () => {
+  const {context, node} = dashboard();
+  const changed = {mode:'static', basis:'outside_dhcp_range', previous_mode:'dhcp_dynamic', changed_at:'2026-11-14T03:10:11Z', changed_in_latest:true};
+  context.value = {devices:[
+    {name:'Moved', address:'192.0.2.10', identity:null, last_known_identity:null, detection:null, dns_activity:null, traffic:null, addressing:changed},
+    {name:'Earlier', address:'192.0.2.11', identity:null, last_known_identity:null, detection:null, dns_activity:null, traffic:null,
+      addressing:{...changed, changed_in_latest:false}}], candidates:[]};
+  vm.runInContext('assessmentIndex = new Map(); renderInventory(value)', context);
+  const cards = node('device-cards').children.filter(card => card.tag === 'article');
+  assert.ok(cards[0].dataset.search.split(' ').includes('assignment-changed'));
+  assert.ok(!cards[1].dataset.search.includes('assignment-changed'));
 });
 
 test('the Evidence view lists assignments', async () => {
@@ -185,4 +202,32 @@ test('unmonitored devices never raise addressing items', () => {
   const stray = modeDevice('Stray', '192.0.2.99', state('static', 'no_lease_or_reservation', {previous_mode:'dhcp_dynamic', changed_in_latest:true}));
   const rows = attention(context, node, fullOverview([modeDevice('TV', '192.0.2.10', null)], {candidates:[stray]}));
   assert.equal(rows.length, 0);
+});
+
+test('addressing items for several devices search the list by their token', () => {
+  const {context, node} = dashboard();
+  const both = state('static', 'no_lease_or_reservation', {previous_mode:'dhcp_dynamic', changed_at:'2026-11-14T03:10:11Z', changed_in_latest:true});
+  context.value = fullOverview([modeDevice('TV', '192.0.2.10', both), modeDevice('Cam', '192.0.2.11', both)]);
+  vm.runInContext('assessmentIndex = new Map(); renderAttention(value)', context);
+  const buttons = node('attention-items').children.map(item => item.children.find(child => child.tag === 'button'));
+  const tokens = [];
+  for (const button of buttons) {
+    node('device-search').value = 'leftover';
+    vm.runInContext("setSignalFilter('third')", context);
+    button.listeners.click();
+    tokens.push(node('device-search').value);
+    // The list filters are cleared, never narrowed to assessments needing review.
+    assert.equal(vm.runInContext('signalFilter', context), 'all');
+    assert.equal(node('device-presence').value, 'observed');
+  }
+  assert.deepEqual(tokens, ['static-in-dhcp-range', 'assignment-changed']);
+});
+
+test('an addressing item for one device opens that device', () => {
+  const {context, node} = dashboard();
+  const both = state('static', 'no_lease_or_reservation', {previous_mode:'dhcp_dynamic', changed_at:'2026-11-14T03:10:11Z', changed_in_latest:true});
+  context.value = fullOverview([modeDevice('TV', '192.0.2.10', both)]);
+  vm.runInContext('assessmentIndex = new Map(); renderAttention(value)', context);
+  const labels = node('attention-items').children.map(item => item.children.find(child => child.tag === 'button').textContent);
+  assert.deepEqual(labels, ['Open TV', 'Open TV']);
 });

@@ -683,12 +683,16 @@ function addressingShort(mode) {
   return Object.hasOwn(addressingShortNames, mode) ? addressingShortNames[mode] : 'Unknown';
 }
 // Assignment is configuration context, not a signal: it is shown as recorded.
+// The label itself is the pane's Assignment fact, so the readout holds only
+// where it came from and when. Both times are as the collection recorded them,
+// so a lease end in the past reads as a record, not as a stale lease.
 function renderAddressing(addressing) {
   if (!addressing) return null;
   const section = element('section', undefined, 'readout addressing');
-  section.append(element('h4', 'Address assignment'), element('p', addressingLabel(addressing)));
+  section.append(element('h4', 'Address assignment'));
   if (addressing.services?.length) section.append(element('p', `Source: ${addressing.services.join(', ')}`, 'hint source'));
-  if (addressing.expires_at) section.append(element('p', `Lease ends ${formatWhen(addressing.expires_at)}`));
+  if (addressing.expires_at) section.append(element('p', `Lease recorded to end ${formatWhen(addressing.expires_at)}`));
+  if (addressing.observed_at) section.append(element('p', `Recorded ${formatWhen(addressing.observed_at)}`));
   if (addressing.previous_mode && addressing.changed_at) {
     section.append(element('p', `Changed from ${addressingShort(addressing.previous_mode)} to ${addressingShort(addressing.mode)} ${formatWhen(addressing.changed_at)}`, 'limit'));
   }
@@ -2312,7 +2316,10 @@ function renderInventory(value) {
     card.dataset.address = device.address;
     card.dataset.signals = signals.join(' ');
     const assessmentLabels = assessmentTags(assessment);
-    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor, device.detection?.device_type, ...flags, ...assessmentLabels.map(tag => tag.textContent), device.addressing && addressingShort(device.addressing.mode)].filter(Boolean).join(' ').toLowerCase();
+    card.dataset.search = [device.name, device.address, known?.mac, known?.hostname, known?.vendor, device.detection?.device_type, ...flags, ...assessmentLabels.map(tag => tag.textContent), device.addressing && addressingShort(device.addressing.mode),
+      // Tokens the attention band's addressing items search the list for.
+      device.addressing?.basis === 'no_lease_or_reservation' && 'static-in-dhcp-range',
+      device.addressing?.changed_in_latest === true && 'assignment-changed'].filter(Boolean).join(' ').toLowerCase();
 
     const summary = element('button', undefined, 'device-summary');
     summary.type = 'button';
@@ -2491,6 +2498,18 @@ function reviewAction(devices) {
   if (devices.length === 1) return ['Open ' + devices[0].name, () => focusDevice(devices[0].address)];
   return ['Show them in the device list', () => {showInventory('review', 'attention'); showView('devices', true);}];
 }
+// Like reviewAction, but several devices are found by a search token that
+// renderInventory puts in their search text, with every other filter cleared,
+// so the list shows exactly those devices whatever their assessment state.
+function searchAction(token, devices) {
+  if (devices.length === 1) return reviewAction(devices);
+  return ['Show them in the device list', () => {
+    showInventory('all', 'attention');
+    byId('device-search').value = token;
+    filterDevices();
+    showView('devices', true);
+  }];
+}
 function renderAttention(value) {
   const items = [];
   const observed = value.devices.filter(device => assessmentOf(device));
@@ -2543,10 +2562,10 @@ function renderAttention(value) {
   // these rows follow the others. Only monitored devices (value.devices) count.
   const clashing = value.devices.filter(device => device.addressing?.basis === 'no_lease_or_reservation');
   if (clashing.length) items.push(attentionItem(formatCount(clashing.length), 'Static address inside the DHCP range',
-    `${deviceNames(clashing)} use an address the DHCP server can hand out, with no lease or reservation; that can clash with another device.`, ...reviewAction(clashing)));
+    `${deviceNames(clashing)} use an address the DHCP server can hand out, with no lease or reservation; that can clash with another device.`, ...searchAction('static-in-dhcp-range', clashing)));
   const reassigned = value.devices.filter(device => device.addressing?.changed_in_latest === true);
   if (reassigned.length) items.push(attentionItem(formatCount(reassigned.length), 'Address assignment changed',
-    `${deviceNames(reassigned)} changed how their address is assigned in the latest collection.`, ...reviewAction(reassigned)));
+    `${deviceNames(reassigned)} changed how their address is assigned in the latest collection.`, ...searchAction('assignment-changed', reassigned)));
   byId('attention-items').replaceChildren(...items);
   byId('attention').hidden = items.length === 0;
   byId('attention-clear').hidden = items.length > 0;
