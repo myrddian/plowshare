@@ -1,7 +1,8 @@
 package io.aeyer.plowshare.server.cache;
 
 import com.zaxxer.hikari.HikariDataSource;
-import io.aeyer.plowshare.server.pool.JfrJdbcExecutionTrace;
+import com.zaxxer.hikari.metrics.micrometer.MicrometerMetricsTrackerFactory;
+import io.aeyer.plowshare.server.pool.JdbcExecutionTraces;
 import io.aeyer.plowshare.server.pool.TracedDataSource;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Properties;
@@ -47,8 +48,16 @@ public class ProjectionCacheConfiguration {
    */
   @Bean(destroyMethod = "close")
   public VersionConnections projectionVersionConnections(
-      DataSourceProperties database, ProjectionCacheProperties cache, DataSource primary) {
+      DataSourceProperties database,
+      ProjectionCacheProperties cache,
+      DataSource primary,
+      ObjectProvider<MeterRegistry> registries) {
     var connections = projectionVersionConnections(database, cache);
+    var registry = registries.getIfAvailable();
+    if (registry != null) {
+      // Pool gauges (hikaricp.*) are tagged by pool name, which keeps this pool apart from main.
+      connections.source().setMetricsTrackerFactory(new MicrometerMetricsTrackerFactory(registry));
+    }
     if (primary instanceof HikariDataSource configured) {
       var source = connections.source();
       // Hikari-specific Boot properties can override the generic datasource properties.
@@ -72,7 +81,7 @@ public class ProjectionCacheConfiguration {
       DataSourceProperties database, ProjectionCacheProperties cache) {
     HikariDataSource source =
         database.initializeDataSourceBuilder().type(HikariDataSource.class).build();
-    source.setPoolName("projection-versions");
+    source.setPoolName("plowshare-projection-versions");
     source.setMinimumIdle(0);
     source.setMaximumPoolSize(cache.versionConnections());
     source.setReadOnly(true);
@@ -82,10 +91,14 @@ public class ProjectionCacheConfiguration {
   /** One repository supplies both domain and item version evidence from the same pool. */
   @Bean
   public JdbcProjectionVersions projectionVersions(
-      JdbcTemplate jdbc, VersionConnections authoritative, ProjectionCacheProperties properties) {
+      JdbcTemplate jdbc,
+      VersionConnections authoritative,
+      ProjectionCacheProperties properties,
+      ObjectProvider<MeterRegistry> registries) {
     return new JdbcProjectionVersions(
         jdbc,
-        new TracedDataSource(authoritative.source(), new JfrJdbcExecutionTrace()),
+        new TracedDataSource(
+            authoritative.source(), JdbcExecutionTraces.forPool(registries, "projection-versions")),
         properties.maxPendingTransactions());
   }
 
@@ -95,7 +108,8 @@ public class ProjectionCacheConfiguration {
       ProjectionVersions versions,
       ProjectionCacheProperties properties,
       ProjectionNotificationProperties notified,
-      ProjectionTelemetry telemetry) {
+      ProjectionTelemetry telemetry,
+      ObjectProvider<MeterRegistry> registries) {
     // LISTEN owns one unpooled session. It must not pin a main or version-pool connection.
     var notificationSource =
         new DriverManagerDataSource(
@@ -104,7 +118,8 @@ public class ProjectionCacheConfiguration {
             connections.source().getPassword());
     notificationSource.setDriverClassName(connections.source().getDriverClassName());
     notificationSource.setConnectionProperties(connections.source().getDataSourceProperties());
-    var traced = new TracedDataSource(notificationSource, new JfrJdbcExecutionTrace());
+    var traced =
+        new TracedDataSource(notificationSource, JdbcExecutionTraces.forPool(registries, "listen"));
     // Every projection line subscribes once, plus Relay wakeups and information invalidation. Lines
     // are fixed by composition and not counted, so this only bounds a runaway subscriber loop.
     int observers = MAX_SIGNAL_OBSERVERS;

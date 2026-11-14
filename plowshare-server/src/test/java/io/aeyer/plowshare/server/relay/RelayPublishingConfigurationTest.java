@@ -61,7 +61,7 @@ class RelayPublishingConfigurationTest {
     var receipt =
         new RelayPublishing.Receipt(
             UUID.randomUUID(), "input", "1", Instant.parse("2026-11-13T00:00:00Z"));
-    when(repository.publish(any())).thenReturn(receipt);
+    when(repository.publish(any(), any())).thenReturn(receipt);
     var grants = new RelayPublishingProperties();
     grants.setGrants(List.of(new RelayPublishingProperties.Grant("research", "writer", "input")));
     var beans = new DefaultListableBeanFactory();

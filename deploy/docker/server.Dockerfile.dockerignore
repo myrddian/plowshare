@@ -8,3 +8,5 @@
 !deploy/docker/server-entrypoint.sh
 !deploy/docker/server-filestores.sh
 !deploy/docker/server-healthcheck.sh
+!deploy/monitoring/
+!deploy/monitoring/plowshare.jfc

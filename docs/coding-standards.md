@@ -260,6 +260,10 @@ useful fields and query it again to make the same operation proceed. Reuse the
 authorized, immutable typed snapshot already available to the caller. A repeated
 read must have an explicit freshness, version, scope, transaction or concurrency
 reason. Reuse never turns an earlier permission check into an authorization lease.
+The one bounded exception is a verified operation admission or socket session check: the same
+check, under the same authority snapshot, may be answered from memory for at most the notified
+staleness bound (2 s by default) outside a write transaction. A refusal is never reused, and checks
+inside a write transaction always re-verify.
 
 Review server repositories, service composition and client request sequences for:
 

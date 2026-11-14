@@ -5,6 +5,8 @@ import io.aeyer.plowshare.protocol.InformationNavigation.Readable;
 import io.aeyer.plowshare.protocol.InformationRequest;
 import io.aeyer.plowshare.protocol.InformationRequest.*;
 import io.aeyer.plowshare.protocol.InformationResponse;
+import io.aeyer.plowshare.server.access.KnowledgeReadScope;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
@@ -18,15 +20,28 @@ public final class DocumentNavigation implements InformationNavigationService {
   private final UnitOfWork work;
   private final boolean writesEnabled;
 
+  /** The run's write fence for one bounded call; {@link OperationFence#none()} otherwise. */
+  private final OperationFence fence;
+
   public DocumentNavigation(
       InformationNavigationRepository repository,
       InformationAccess access,
       UnitOfWork work,
       boolean writesEnabled) {
+    this(repository, access, work, writesEnabled, OperationFence.none());
+  }
+
+  private DocumentNavigation(
+      InformationNavigationRepository repository,
+      InformationAccess access,
+      UnitOfWork work,
+      boolean writesEnabled,
+      OperationFence fence) {
     this.repository = Objects.requireNonNull(repository);
     this.access = Objects.requireNonNull(access);
     this.work = Objects.requireNonNull(work);
     this.writesEnabled = writesEnabled;
+    this.fence = Objects.requireNonNull(fence);
   }
 
   private InformationContext context(String account, InformationRequest.Selection selection) {
@@ -70,12 +85,15 @@ public final class DocumentNavigation implements InformationNavigationService {
     return n == null ? 0 : n;
   }
 
+  @Override
   public InformationResponse execute(
       String account,
       InformationRequest request,
-      io.aeyer.plowshare.server.access.KnowledgeReadScope readBoundary) {
+      KnowledgeReadScope readBoundary,
+      OperationFence fence) {
     Objects.requireNonNull(readBoundary);
-    return new DocumentNavigation(repository, access.within(readBoundary), work, writesEnabled)
+    return new DocumentNavigation(
+            repository, access.within(readBoundary), work, writesEnabled, fence)
         .execute(account, request);
   }
 
@@ -314,6 +332,9 @@ public final class DocumentNavigation implements InformationNavigationService {
           repository.lock();
           repository.lockAccount(account);
           var previous = authorise.get();
+          // A run's operation fence, after the navigation locks and live work check and before a
+          // receipt is replayed or anything is written; none() for socket and administrative calls.
+          fence.require();
           String fingerprint = repository.fingerprint(request);
           var old = repository.receipt(account, requestId);
           if (old.isPresent()) {

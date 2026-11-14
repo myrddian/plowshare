@@ -106,7 +106,8 @@ class InformationProjectionCacheTest {
             call -> {
               String sql = call.getArgument(0);
               scalarSql.add(sql);
-              assertTrue(sql.contains(InformationSql.read(context, "r").sql().split(" AND ")[0]));
+              assertTrue(sql.contains("knowledge_readable_targets("));
+              assertFalse(sql.contains("information_readable("));
               return readable ? List.of(textBytes) : List.of();
             });
     when(jdbc.queryForList(anyString(), any(Object[].class)))
@@ -114,7 +115,7 @@ class InformationProjectionCacheTest {
             call -> {
               String sql = call.getArgument(0);
               metadataSql.add(sql);
-              if (metadataGrew && sql.startsWith("WITH projected")) return List.of();
+              if (metadataGrew && sql.contains("projected AS MATERIALIZED")) return List.of();
               return List.of(metadataRow());
             });
     when(jdbc.query(anyString(), ArgumentMatchers.<RowMapper<Object>>any(), any(Object[].class)))

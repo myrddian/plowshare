@@ -9,6 +9,7 @@ import io.aeyer.plowshare.server.access.AuthorityAction;
 import io.aeyer.plowshare.server.access.InferenceCalls;
 import io.aeyer.plowshare.server.access.KnowledgeReadScope;
 import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind;
 import io.aeyer.plowshare.server.access.SystemOperations;
@@ -69,6 +70,7 @@ import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
+import io.aeyer.plowshare.server.pool.OperationStatements;
 import io.aeyer.plowshare.server.reads.BusyReadRetry;
 import io.aeyer.plowshare.server.relay.RelayPublishing;
 import io.aeyer.plowshare.server.todos.TodoLists;
@@ -2543,6 +2545,8 @@ public final class JobRuntime {
     }
   }
 
+  // The step and tool-call statement scopes exist for their counts; nothing reads them.
+  @SuppressWarnings("try")
   private Outcome converse(
       AgentDefinition definition,
       String userPrompt,
@@ -3054,180 +3058,282 @@ public final class JobRuntime {
     Set<AgentRules.Rule> deliveredFileRules = new HashSet<>();
 
     while (true) {
-      admittedAuthority.run();
-      if (operation != null) operations.require(operation);
-      Set<AgentRules.Rule> fileRulesForThisStep = Set.copyOf(deliveredFileRules);
-      requireLogReadable(transcript.conversationId(), owner);
-      // The three boundary checks, in the order a caller would want them
-      // answered. Cancellation before the budget so that a cancelled run
-      // is reported as cancelled rather than as having run out of
-      // something.
-      // Asked of the cap on every pass and never read once into a local:
-      // that is what makes a ceiling an operator moved mid-run take
-      // effect at the next boundary rather than at the next run.
-      if (!cancelled.getAsBoolean()) {
-        automaticLimits.budget(
-            transcript.conversationId(), budget, definition, sessionId, transcript);
-        automaticLimits.steps(
-            transcript.conversationId(), cap, steps, definition, sessionId, transcript, budget);
-      }
-      if (cap.stops(steps)) {
-        return capReached(cap, trail, steps, modelCalls);
-      }
-      // A FOLD INSIDE THE TURN, at the tool-call boundary: after the step's results and
-      // before the next model call, and only when there will be one -- after the cap and
-      // with budget left, so a turn about to end is not made to wait for a summary it
-      // will never send. Neither a step nor a call of this run: the transcript makes its
-      // summarising call on nobody's allowance, so `steps` and `modelCalls` do not move
-      // and the budget is not asked. Before the cancellation check, so a run cancelled
-      // while a fold was being written is stopped the moment it returns.
-      if (aStepEnded) {
-        aStepEnded = false;
-        if (!budget.exhausted()) {
-          openedAt = transcript.stepEnded(history, openedAt);
+      try (var ignored = OperationStatements.open(OperationStatements.Kind.JOB_STEP)) {
+        admittedAuthority.run();
+        if (operation != null) operations.require(operation);
+        Set<AgentRules.Rule> fileRulesForThisStep = Set.copyOf(deliveredFileRules);
+        requireLogReadable(transcript.conversationId(), owner);
+        // The three boundary checks, in the order a caller would want them
+        // answered. Cancellation before the budget so that a cancelled run
+        // is reported as cancelled rather than as having run out of
+        // something.
+        // Asked of the cap on every pass and never read once into a local:
+        // that is what makes a ceiling an operator moved mid-run take
+        // effect at the next boundary rather than at the next run.
+        if (!cancelled.getAsBoolean()) {
+          automaticLimits.budget(
+              transcript.conversationId(), budget, definition, sessionId, transcript);
+          automaticLimits.steps(
+              transcript.conversationId(), cap, steps, definition, sessionId, transcript, budget);
         }
-      }
-      if (cancelled.getAsBoolean()) {
-        return stopped(
-            Ending.CANCELLED,
-            "This run was cancelled after "
-                + steps
-                + " "
-                + TurnCap.stepWord(steps)
-                + " and did not reach an answer.",
-            trail,
-            steps,
-            modelCalls,
-            "");
-      }
-      // WHO RUNS NOW (spec 2026-09-29 §5), asked after cancellation and before the budget:
-      // a wait that ends cancelled has spent no model call, and the loop's own sentence
-      // says so. The specifier is the route's, so a run rerouted to its fallback waits for
-      // the fallback's pools. The slot is held only across the call below and given back in
-      // its finally, so it is never held while tools run.
-      Scheduling.Slot slot = turn.await(route.specifier(), cancelled);
-      if (slot == null) {
-        return stopped(
-            Ending.CANCELLED,
-            "This run was cancelled after "
-                + steps
-                + " "
-                + TurnCap.stepWord(steps)
-                + " and did not reach an answer.",
-            trail,
-            steps,
-            modelCalls,
-            "");
-      }
-      // Claimed before the call, not after: a run that dies mid-call has
-      // spent that call, and a budget that only counted completed calls
-      // would let a flapping endpoint be retried without limit.
-      Optional<Budget.Claim> claimed;
-      try {
-        claimed = budget.tryClaim();
-      } catch (RuntimeException | Error failed) {
-        slot.release();
-        throw failed;
-      }
-      if (claimed.isEmpty()) {
-        slot.release();
-        return budgetSpent(budget, trail, steps, modelCalls);
-      }
-      modelCalls++;
-      // Published where the budget was claimed and not where the answer
-      // arrives, so this stream counts what Outcome counts: a call that
-      // dies mid-flight has been spent, and the ending that follows will
-      // report the same number. Two vocabularies for one fact is the drift
-      // this event set was cut to avoid.
-      watch.modelCall(definition.name(), steps, modelCalls);
+        if (cap.stops(steps)) {
+          return capReached(cap, trail, steps, modelCalls);
+        }
+        // A FOLD INSIDE THE TURN, at the tool-call boundary: after the step's results and
+        // before the next model call, and only when there will be one -- after the cap and
+        // with budget left, so a turn about to end is not made to wait for a summary it
+        // will never send. Neither a step nor a call of this run: the transcript makes its
+        // summarising call on nobody's allowance, so `steps` and `modelCalls` do not move
+        // and the budget is not asked. Before the cancellation check, so a run cancelled
+        // while a fold was being written is stopped the moment it returns.
+        if (aStepEnded) {
+          aStepEnded = false;
+          if (!budget.exhausted()) {
+            openedAt = transcript.stepEnded(history, openedAt);
+          }
+        }
+        if (cancelled.getAsBoolean()) {
+          return stopped(
+              Ending.CANCELLED,
+              "This run was cancelled after "
+                  + steps
+                  + " "
+                  + TurnCap.stepWord(steps)
+                  + " and did not reach an answer.",
+              trail,
+              steps,
+              modelCalls,
+              "");
+        }
+        // WHO RUNS NOW (spec 2026-09-29 §5), asked after cancellation and before the budget:
+        // a wait that ends cancelled has spent no model call, and the loop's own sentence
+        // says so. The specifier is the route's, so a run rerouted to its fallback waits for
+        // the fallback's pools. The slot is held only across the call below and given back in
+        // its finally, so it is never held while tools run.
+        Scheduling.Slot slot = turn.await(route.specifier(), cancelled);
+        if (slot == null) {
+          return stopped(
+              Ending.CANCELLED,
+              "This run was cancelled after "
+                  + steps
+                  + " "
+                  + TurnCap.stepWord(steps)
+                  + " and did not reach an answer.",
+              trail,
+              steps,
+              modelCalls,
+              "");
+        }
+        // Claimed before the call, not after: a run that dies mid-call has
+        // spent that call, and a budget that only counted completed calls
+        // would let a flapping endpoint be retried without limit.
+        Optional<Budget.Claim> claimed;
+        try {
+          claimed = budget.tryClaim();
+        } catch (RuntimeException | Error failed) {
+          slot.release();
+          throw failed;
+        }
+        if (claimed.isEmpty()) {
+          slot.release();
+          return budgetSpent(budget, trail, steps, modelCalls);
+        }
+        modelCalls++;
+        // Published where the budget was claimed and not where the answer
+        // arrives, so this stream counts what Outcome counts: a call that
+        // dies mid-flight has been spent, and the ending that follows will
+        // report the same number. Two vocabularies for one fact is the drift
+        // this event set was cut to avoid.
+        watch.modelCall(definition.name(), steps, modelCalls);
 
-      // Read here and again where the completion lands, and this pair is
-      // the whole of what makes a model call's duration a measurement
-      // rather than an inference. There is no entry at this moment -- an
-      // entry records something that COMPLETED -- so nothing downstream
-      // can recover this instant afterwards, and a reader subtracting two
-      // entry stamps would be measuring an interval that also holds the
-      // history read and, past the first turn, a whole tool call.
-      // V16__entry_timing.sql is the column and the argument.
-      Instant sent = clock.get();
-      Pacing.Call timed = pacing.sending();
-      Completion completion;
-      // Spent here, whether or not the call comes back: the nudge asked for ONE request
-      // that may not end in prose, and a refusal rerouted or a call that failed does not
-      // earn the run a second one. Read outside the try because the completion's tool
-      // calls are judged against it below.
-      boolean forced = mustCallNext;
-      mustCallNext = false;
-      boolean regenerating = regenerateResponse;
-      regenerateResponse = false;
-      try {
-        // Streamed, and the reason is a wall clock rather than a wish to
-        // show tokens. Measured 2026-09-02 against qwen3.5-9b: a
-        // 51-token prompt took 95.9 seconds, because the model thinks
-        // before it answers — 2 997 completion tokens, 6 571 characters
-        // of reasoning — and a pool's chat-timeout is 60 seconds. An
-        // arithmetic question blew it. Thinking cannot be turned off;
-        // six ways were tried against the node and all six were accepted
-        // and ignored.
-        //
-        // complete(...) waits out one read timeout for a response that
-        // arrives whole. stream(...) waits streaming-timeout between
-        // chunks — they arrive every ~1.5 seconds throughout, thinking
-        // included — under max-stream-duration for the whole call. The
-        // deadline changes shape from wall-clock to inactivity, which is
-        // the shape that fits a model that thinks, and a genuinely
-        // wedged endpoint is still caught.
-        //
-        // The cancellation flag goes down with the call, and that is
-        // the second thing streaming buys: it is read once per chunk
-        // rather than once per turn, so a run cancelled thirty seconds
-        // into a ninety-second generation stops there instead of paying
-        // for the rest of an answer nobody will read. See
-        // LlmTransport.stream for the granularity, and DISCARDS below
-        // for what happens to the tokens.
-        //
-        // Tools go out on this path exactly as they did on the blocking
-        // one — OpenAiTransport.stream reassembles tool_calls deltas and
-        // Completion.toolCalls documents that the two paths agree — so
-        // nothing below this line changes.
-        // WHO IS LISTENING, ASKED ONCE PER CALL. A run nobody is
-        // watching the tokens of builds no deltas at all: constructing
-        // one per chunk to have it dropped is work on the thread
-        // reading the model's response, which is the one thread this
-        // whole design is about not slowing.
-        // The route and not the definition names the model: the agent's
-        // own, or its fallback's after a refusal was rerouted. The
-        // history is the same list either way.
-        // The forced request alone carries the way out; see
-        // WrittenCalls.REPLY_AS_WRITTEN for why REQUIRED needs one.
-        completion =
-            streamed(
-                slot,
-                systemRequest(
-                    requiring(
-                        route
-                            .requestFor(regenerating ? regenerationHistory(history) : history)
-                            .withAttribution(usageFor(transcript, definition, steps + 1))
-                            .withAuthorization(
-                                operation == null
-                                    ? CallAuthorization.DIRECT
-                                    : inferenceCalls == null
-                                        ? () -> operations.require(operation)
-                                        : inferenceCalls.claimed(operation, claimed.orElseThrow()))
-                            .withTools(
-                                regenerating
-                                    ? List.of()
-                                    : forced ? withTheWayOut(schemas) : schemas),
-                        extras,
-                        schemas,
-                        forced),
-                    claimed.orElseThrow()),
-                timed.timing(
-                    informationStream(
-                        !regenerating && watch.streaming() ? watching(watch) : DISCARDS,
-                        transcript.conversationId())),
-                cancelled);
-      } catch (ModelResponseRejected rejected) {
+        // Read here and again where the completion lands, and this pair is
+        // the whole of what makes a model call's duration a measurement
+        // rather than an inference. There is no entry at this moment -- an
+        // entry records something that COMPLETED -- so nothing downstream
+        // can recover this instant afterwards, and a reader subtracting two
+        // entry stamps would be measuring an interval that also holds the
+        // history read and, past the first turn, a whole tool call.
+        // V16__entry_timing.sql is the column and the argument.
+        Instant sent = clock.get();
+        Pacing.Call timed = pacing.sending();
+        Completion completion;
+        // Spent here, whether or not the call comes back: the nudge asked for ONE request
+        // that may not end in prose, and a refusal rerouted or a call that failed does not
+        // earn the run a second one. Read outside the try because the completion's tool
+        // calls are judged against it below.
+        boolean forced = mustCallNext;
+        mustCallNext = false;
+        boolean regenerating = regenerateResponse;
+        regenerateResponse = false;
+        try {
+          // Streamed, and the reason is a wall clock rather than a wish to
+          // show tokens. Measured 2026-09-02 against qwen3.5-9b: a
+          // 51-token prompt took 95.9 seconds, because the model thinks
+          // before it answers — 2 997 completion tokens, 6 571 characters
+          // of reasoning — and a pool's chat-timeout is 60 seconds. An
+          // arithmetic question blew it. Thinking cannot be turned off;
+          // six ways were tried against the node and all six were accepted
+          // and ignored.
+          //
+          // complete(...) waits out one read timeout for a response that
+          // arrives whole. stream(...) waits streaming-timeout between
+          // chunks — they arrive every ~1.5 seconds throughout, thinking
+          // included — under max-stream-duration for the whole call. The
+          // deadline changes shape from wall-clock to inactivity, which is
+          // the shape that fits a model that thinks, and a genuinely
+          // wedged endpoint is still caught.
+          //
+          // The cancellation flag goes down with the call, and that is
+          // the second thing streaming buys: it is read once per chunk
+          // rather than once per turn, so a run cancelled thirty seconds
+          // into a ninety-second generation stops there instead of paying
+          // for the rest of an answer nobody will read. See
+          // LlmTransport.stream for the granularity, and DISCARDS below
+          // for what happens to the tokens.
+          //
+          // Tools go out on this path exactly as they did on the blocking
+          // one — OpenAiTransport.stream reassembles tool_calls deltas and
+          // Completion.toolCalls documents that the two paths agree — so
+          // nothing below this line changes.
+          // WHO IS LISTENING, ASKED ONCE PER CALL. A run nobody is
+          // watching the tokens of builds no deltas at all: constructing
+          // one per chunk to have it dropped is work on the thread
+          // reading the model's response, which is the one thread this
+          // whole design is about not slowing.
+          // The route and not the definition names the model: the agent's
+          // own, or its fallback's after a refusal was rerouted. The
+          // history is the same list either way.
+          // The forced request alone carries the way out; see
+          // WrittenCalls.REPLY_AS_WRITTEN for why REQUIRED needs one.
+          completion =
+              streamed(
+                  slot,
+                  systemRequest(
+                      requiring(
+                          route
+                              .requestFor(regenerating ? regenerationHistory(history) : history)
+                              .withAttribution(usageFor(transcript, definition, steps + 1))
+                              .withAuthorization(
+                                  operation == null
+                                      ? CallAuthorization.DIRECT
+                                      : inferenceCalls == null
+                                          ? () -> operations.require(operation)
+                                          : inferenceCalls.claimed(
+                                              operation, claimed.orElseThrow()))
+                              .withTools(
+                                  regenerating
+                                      ? List.of()
+                                      : forced ? withTheWayOut(schemas) : schemas),
+                          extras,
+                          schemas,
+                          forced),
+                      claimed.orElseThrow()),
+                  timed.timing(
+                      informationStream(
+                          !regenerating && watch.streaming() ? watching(watch) : DISCARDS,
+                          transcript.conversationId())),
+                  cancelled);
+        } catch (ModelResponseRejected rejected) {
+          if (informationInputs != null
+              && !informationInputs.logAllowed(transcript.conversationId(), owner))
+            return stopped(
+                Ending.UNAVAILABLE,
+                "An information input became unavailable; no answer was delivered.",
+                trail,
+                steps,
+                modelCalls,
+                "");
+          steps++;
+          recordRejectedResponse(transcript, home, owner, rejected);
+          // A turn with a required tool cannot be repaired by accepting a prose answer.
+          // Re-enter the normal admission loop so the extra call spends its own allowance.
+          if (responseRetryUsed
+              || extras.requiresAToolCall()
+              || forced
+              || rejected.reason() == ModelResponseRejected.Reason.GUARD_UNAVAILABLE
+              || cap.stops(steps)
+              || budget.exhausted()
+              || cancelled.getAsBoolean()) {
+            return stopped(
+                Ending.UNAVAILABLE,
+                "The model returned an invalid response.",
+                trail,
+                steps,
+                modelCalls,
+                rejected.getMessage());
+          }
+          responseRetryUsed = true;
+          regenerateResponse = true;
+          continue;
+        } catch (CallerAbandonedException cancelledMidStream) {
+          // The run was cancelled while the model was still generating.
+          //
+          // Caught ahead of LlmException, and the ordering is the whole of
+          // what keeps the ending honest: CallerAbandonedException is
+          // deliberately not an LlmException so this cannot be reported as
+          // the endpoint failing, and the clause below would say "the
+          // model could not be reached" about a host that was generating
+          // perfectly well when somebody pressed stop.
+          //
+          // The wording is the loop's own cancellation wording, for the
+          // reason the endings are distinct from each other at all: two
+          // sentences for one ending is two endings to anyone reading the
+          // result.
+          //
+          // steps is not incremented, on the same terms as the clause
+          // below: a request that did not come back completed neither half
+          // of a step. modelCalls is, because the call was claimed and
+          // spent before dispatch.
+          return stopped(
+              Ending.CANCELLED,
+              "This run was cancelled after "
+                  + steps
+                  + " "
+                  + TurnCap.stepWord(steps)
+                  + " and did not reach an answer.",
+              trail,
+              steps,
+              modelCalls,
+              "");
+        } catch (LlmException unreachable) {
+          return stopped(
+              Ending.UNAVAILABLE,
+              "This run could not go on: the model could not be reached.",
+              trail,
+              steps,
+              modelCalls,
+              describe(unreachable));
+        } catch (RuntimeException broken) {
+          // Wider than LlmException on purpose, and it is about the
+          // counters rather than about the ending. Anything else escaping
+          // here — an IllegalArgumentException out of ChatRequest for a
+          // definition whose model: is misconfigured, or a transport bug
+          // LlmPool.submit rethrows as itself — would otherwise reach
+          // JobStore's last-resort catch, which has no counters and
+          // reports Outcome(UNAVAILABLE, …, 0, 0, …). Zero steps and zero
+          // model calls for a run that may have made ten, and that has
+          // already spent them from a Budget shared with its whole tree:
+          // a Task 5 parent reading modelCalls() off a failed child would
+          // be told the tree spent nothing and would carry on spending.
+          // The detail says the failure was not the endpoint's, which is
+          // what keeps this distinguishable from the clause above.
+          return stopped(
+              Ending.UNAVAILABLE,
+              "This run could not go on: submitting to the model failed for a"
+                  + " reason that is not the endpoint being unreachable.",
+              trail,
+              steps,
+              modelCalls,
+              describe(broken));
+        } finally {
+          slot.release();
+        }
+        // The other half of the measurement, taken before anything else is
+        // done with the completion so that what is timed is the call and not
+        // the bookkeeping after it. Only the paths that RETURN a completion
+        // reach here: a call that threw has no duration, and the four
+        // clauses above return without one rather than reporting the time it
+        // took to fail as the time it took to answer.
         if (informationInputs != null
             && !informationInputs.logAllowed(transcript.conversationId(), owner))
           return stopped(
@@ -3237,1040 +3343,991 @@ public final class JobRuntime {
               steps,
               modelCalls,
               "");
+        Duration modelCallTook = Duration.between(sent, clock.get());
+        Long firstTokenMillis = timed.ended(completion);
+        // WHAT THE CALL THOUGHT, AS A ROW OF ITS OWN AND BEFORE WHAT IT SAID.
+        // A kind with no role: recorded as a fact about the call and never
+        // projected, so no later call is sent it. Written here, ahead of
+        // the refusal judgement and both answer paths, so every call that
+        // came back with thinking leaves it exactly once.
+        String thinking = timed.thought();
+        if (thinking != null) {
+          transcript.record(LoggedEntry.thinking(thinking));
+        }
+        // Counted here and not before the call: a step is a request plus the
+        // tool results it asked for, and a request that threw completed
+        // neither half of that.
         steps++;
-        recordRejectedResponse(transcript, home, owner, rejected);
-        // A turn with a required tool cannot be repaired by accepting a prose answer.
-        // Re-enter the normal admission loop so the extra call spends its own allowance.
-        if (responseRetryUsed
-            || extras.requiresAToolCall()
-            || forced
-            || rejected.reason() == ModelResponseRejected.Reason.GUARD_UNAVAILABLE
-            || cap.stops(steps)
-            || budget.exhausted()
-            || cancelled.getAsBoolean()) {
+        // What the model charged for this prompt, straight off the
+        // Completion, and only when it said. TokenUsage's counts are
+        // nullable because a local OpenAI-compatible server may omit usage
+        // entirely, and a zero is refused rather than reported: absent and
+        // free are different facts, and turns_prompt_tokens_are_a_measurement
+        // exists because compaction decided from a zero would read the
+        // history as empty and never fire.
+        Integer promptTokens = completion.usage().promptTokens();
+        if (promptTokens != null && promptTokens > 0) {
+          transcript.promptMeasured(promptTokens);
+        }
+        // The other half of the same usage object, on the same terms. What
+        // a generation cost is not what a prompt cost and is not added to
+        // it here: every generation but a turn's last is appended to the
+        // history this loop goes on sending, so it is inside a later prompt
+        // measurement already, and only the last one -- the answer this
+        // method returns with -- is in neither. Transcript.answerMeasured
+        // argues it; Compaction is what does the arithmetic.
+        Integer completionTokens = completion.usage().completionTokens();
+        if (completionTokens != null && completionTokens > 0) {
+          transcript.answerMeasured(completionTokens);
+        }
+
+        if (regenerating
+            && (!completion.toolCalls().isEmpty()
+                || completion.content().isBlank()
+                || "length".equals(completion.finishReason())
+                || WrittenCalls.writtenIn(completion.content(), offered).isPresent()
+                || WrittenCalls.writesToolEnvelope(completion.content()))) {
+          transcript.record(
+              LoggedEntry.diagnostic(
+                  "Model response regeneration did not return a complete answer without tools."));
           return stopped(
               Ending.UNAVAILABLE,
-              "The model returned an invalid response.",
+              "The model could not regenerate a complete answer without tools.",
               trail,
               steps,
               modelCalls,
-              rejected.getMessage());
+              "");
         }
-        responseRetryUsed = true;
-        regenerateResponse = true;
-        continue;
-      } catch (CallerAbandonedException cancelledMidStream) {
-        // The run was cancelled while the model was still generating.
-        //
-        // Caught ahead of LlmException, and the ordering is the whole of
-        // what keeps the ending honest: CallerAbandonedException is
-        // deliberately not an LlmException so this cannot be reported as
-        // the endpoint failing, and the clause below would say "the
-        // model could not be reached" about a host that was generating
-        // perfectly well when somebody pressed stop.
-        //
-        // The wording is the loop's own cancellation wording, for the
-        // reason the endings are distinct from each other at all: two
-        // sentences for one ending is two endings to anyone reading the
-        // result.
-        //
-        // steps is not incremented, on the same terms as the clause
-        // below: a request that did not come back completed neither half
-        // of a step. modelCalls is, because the call was claimed and
-        // spent before dispatch.
-        return stopped(
-            Ending.CANCELLED,
-            "This run was cancelled after "
-                + steps
-                + " "
-                + TurnCap.stepWord(steps)
-                + " and did not reach an answer.",
-            trail,
-            steps,
-            modelCalls,
-            "");
-      } catch (LlmException unreachable) {
-        return stopped(
-            Ending.UNAVAILABLE,
-            "This run could not go on: the model could not be reached.",
-            trail,
-            steps,
-            modelCalls,
-            describe(unreachable));
-      } catch (RuntimeException broken) {
-        // Wider than LlmException on purpose, and it is about the
-        // counters rather than about the ending. Anything else escaping
-        // here — an IllegalArgumentException out of ChatRequest for a
-        // definition whose model: is misconfigured, or a transport bug
-        // LlmPool.submit rethrows as itself — would otherwise reach
-        // JobStore's last-resort catch, which has no counters and
-        // reports Outcome(UNAVAILABLE, …, 0, 0, …). Zero steps and zero
-        // model calls for a run that may have made ten, and that has
-        // already spent them from a Budget shared with its whole tree:
-        // a Task 5 parent reading modelCalls() off a failed child would
-        // be told the tree spent nothing and would carry on spending.
-        // The detail says the failure was not the endpoint's, which is
-        // what keeps this distinguishable from the clause above.
-        return stopped(
-            Ending.UNAVAILABLE,
-            "This run could not go on: submitting to the model failed for a"
-                + " reason that is not the endpoint being unreachable.",
-            trail,
-            steps,
-            modelCalls,
-            describe(broken));
-      } finally {
-        slot.release();
-      }
-      // The other half of the measurement, taken before anything else is
-      // done with the completion so that what is timed is the call and not
-      // the bookkeeping after it. Only the paths that RETURN a completion
-      // reach here: a call that threw has no duration, and the four
-      // clauses above return without one rather than reporting the time it
-      // took to fail as the time it took to answer.
-      if (informationInputs != null
-          && !informationInputs.logAllowed(transcript.conversationId(), owner))
-        return stopped(
-            Ending.UNAVAILABLE,
-            "An information input became unavailable; no answer was delivered.",
-            trail,
-            steps,
-            modelCalls,
-            "");
-      Duration modelCallTook = Duration.between(sent, clock.get());
-      Long firstTokenMillis = timed.ended(completion);
-      // WHAT THE CALL THOUGHT, AS A ROW OF ITS OWN AND BEFORE WHAT IT SAID.
-      // A kind with no role: recorded as a fact about the call and never
-      // projected, so no later call is sent it. Written here, ahead of
-      // the refusal judgement and both answer paths, so every call that
-      // came back with thinking leaves it exactly once.
-      String thinking = timed.thought();
-      if (thinking != null) {
-        transcript.record(LoggedEntry.thinking(thinking));
-      }
-      // Counted here and not before the call: a step is a request plus the
-      // tool results it asked for, and a request that threw completed
-      // neither half of that.
-      steps++;
-      // What the model charged for this prompt, straight off the
-      // Completion, and only when it said. TokenUsage's counts are
-      // nullable because a local OpenAI-compatible server may omit usage
-      // entirely, and a zero is refused rather than reported: absent and
-      // free are different facts, and turns_prompt_tokens_are_a_measurement
-      // exists because compaction decided from a zero would read the
-      // history as empty and never fire.
-      Integer promptTokens = completion.usage().promptTokens();
-      if (promptTokens != null && promptTokens > 0) {
-        transcript.promptMeasured(promptTokens);
-      }
-      // The other half of the same usage object, on the same terms. What
-      // a generation cost is not what a prompt cost and is not added to
-      // it here: every generation but a turn's last is appended to the
-      // history this loop goes on sending, so it is inside a later prompt
-      // measurement already, and only the last one -- the answer this
-      // method returns with -- is in neither. Transcript.answerMeasured
-      // argues it; Compaction is what does the arithmetic.
-      Integer completionTokens = completion.usage().completionTokens();
-      if (completionTokens != null && completionTokens > 0) {
-        transcript.answerMeasured(completionTokens);
-      }
 
-      if (regenerating
-          && (!completion.toolCalls().isEmpty()
-              || completion.content().isBlank()
-              || "length".equals(completion.finishReason())
-              || WrittenCalls.writtenIn(completion.content(), offered).isPresent()
-              || WrittenCalls.writesToolEnvelope(completion.content()))) {
-        transcript.record(
-            LoggedEntry.diagnostic(
-                "Model response regeneration did not return a complete answer without tools."));
-        return stopped(
-            Ending.UNAVAILABLE,
-            "The model could not regenerate a complete answer without tools.",
-            trail,
-            steps,
-            modelCalls,
-            "");
-      }
-
-      // The forced request answered with nothing but the way out: the call the held draft
-      // wrote was an example, and the draft is the answer, delivered down the ordinary
-      // answer path below -- prompt.post, the mandatory reviewer if any, the ANSWER entry.
-      // The way out WRITTEN as text there is the same decline: it is in that request's
-      // schemas but in no `offered` map, so the guard below would not hold it, and a model
-      // that writes its calls out is the likeliest to write this one out too -- delivered,
-      // the person would read `reply_as_written({})` in place of the draft it chose.
-      boolean declined =
-          forced
-              && heldDraft != null
-              && (completion.toolCalls().isEmpty()
-                  ? WrittenCalls.writesTheWayOut(completion.content())
-                  : completion.toolCalls().stream()
-                      .allMatch(wanted -> WrittenCalls.REPLY_AS_WRITTEN.equals(wanted.name())));
-      // A call the validator made for the model (spec 2026-09-28 §5): run below, down the
-      // ordinary tool path, as the reply of the model call whose held text it stands in for.
-      // `said` and `call` are the answer's, set in the branch below and read by the answer
-      // path after it.
-      ToolCall madeForTheModel = null;
-      String said = null;
-      Invocation call = null;
-      if (completion.toolCalls().isEmpty() || declined) {
-        // The model stopped asking for tools and said something. This is
-        // the only place Completion.content() becomes an Outcome's text.
-        //
-        // Null-coalesced, though Completion documents content as never
-        // null and OpenAiTransport reads it with asText("") so the
-        // shipped path cannot produce one. Outcome refuses a null text,
-        // so a hand-built completion carrying one would surface as a
-        // NullPointerException inside the job rather than as anything a
-        // caller could read. Empty string is the honest rendering: a
-        // model that said nothing answered with nothing.
-        //
-        // RECORDED HERE, AND IT USED TO BE `Turn`'S TO WRITE. The
-        // message a turn comes to is the one message of a run that is
-        // never appended to the history the loop goes on sending -- the
-        // loop returns with it -- so `Turn.closeTheLog` wrote it
-        // afterwards out of `Outcome.text`, from a site that has the
-        // answer and cannot have the one thing only this frame holds:
-        // how long the call that produced it took. The most interesting
-        // duration in a conversation was therefore the only one that
-        // could not be measured. It is written here, where the
-        // Completion is still in hand; `closeTheLog` now records an
-        // answer only for the endings whose text THIS RUNTIME wrote,
-        // which correspond to no model call and correctly carry no
-        // duration. The content is `Outcome.text` for an ANSWERED run by
-        // construction -- the two are the same expression -- so the log
-        // holds exactly what it held before, plus the measurement.
-        //
-        // No tool calls, because this is the branch where the model
-        // asked for none.
-        //
-        // JUDGED FIRST, AND BY THE HARNESS. The detector reads the
-        // completion and nothing else; the model is never asked whether
-        // it refused. What the judgement does is Rerouting's to decide
-        // from the agent's own definition: reroute, or record the answer
-        // as the loop always has, with `refused` in its provenance.
-        // Not asked of a declined completion: what it says is the held draft, which was
-        // already judged when it arrived and was not a refusal then.
-        Optional<String> refusal = declined ? Optional.empty() : refusals.refusal(completion);
-        said = declined ? heldDraft : completion.content() == null ? "" : completion.content();
-        if (declined) {
-          transcript.record(
-              LoggedEntry.diagnostic(
-                  "The held draft was delivered as"
-                      + " written: the model "
-                      + (completion.toolCalls().isEmpty() ? "wrote a call to " : "called ")
-                      + WrittenCalls.REPLY_AS_WRITTEN
-                      + ", so the call it wrote was an example."));
-        }
-        call =
-            route.invocation(
-                completion,
-                refusal.isPresent()
-                    ? CompletionOutcome.REFUSED
-                    : "length".equals(completion.finishReason())
-                        ? CompletionOutcome.CUT_OFF
-                        : CompletionOutcome.ANSWERED,
-                sent,
-                firstTokenMillis);
-        route.called(call, modelCallTook);
-        if (refusal.isPresent()) {
-          if (regenerating) {
-            return stopped(
-                Ending.UNAVAILABLE,
-                "The model declined to regenerate an answer.",
-                trail,
-                steps,
-                modelCalls,
-                "");
-          }
-          Rerouting.Decision decision =
-              route.refused(call, refusal.get(), completion.content(), modelCallTook);
-          if (decision == Rerouting.Decision.REROUTED) {
-            // Back round the loop with the history exactly as it
-            // was: the refusal was never appended to it, so the
-            // fallback is sent what the refused call was sent. The
-            // boundary checks above apply to it as to any call.
-            continue;
-          }
-        }
-        // A TOOL CALL WRITTEN AS TEXT IS A CALL FAILURE, NEVER THE TURN'S ANSWER (spec
-        // 2026-09-28-call-failures). Measured twice: the bot Aristoxenus ended its turn
-        // with `orchestrate_implement_specification({"request": ...})` in a fence and no
-        // tool call (2026-09-27, entry 123 of cnv_317717703EFBC15E), and a conductor
-        // answered three turns running with nothing but todo_write's arguments
-        // (2026-09-28, orc_318408A44038F859, entries 252, 256, 260). A tool call is the
-        // model's business: it hears a warning, and the person never reads the call.
-        //
-        // Held before the prompt.post hooks and the mandatory reviewer, because the draft
-        // is not an answer: hooks judging it, or a reviewer checking it, would be spent on
-        // text nobody receives. Keyed on nothing but the tools THIS run is offered, so it
-        // holds in every run -- bot, agent and conductor. The draft goes in the history
-        // ahead of the warning so the model can see what it wrote, and the next request is
-        // REQUIRED (which made gpt-oss-120b call the tool it had been writing out; see
-        // ToolChoice) with WrittenCalls.REPLY_AS_WRITTEN as the way back for a call that
-        // was only an example. Not asked of a declined completion: that model said so.
-        Optional<String> written =
-            declined ? Optional.empty() : WrittenCalls.writtenIn(completion.content(), offered);
-        if (written.isPresent()) {
-          String tool = written.get();
-          String draft = completion.content();
-          transcript.record(
-              LoggedEntry.diagnostic(
-                  "A draft answer was held because it"
-                      + " wrote a call to `"
-                      + tool
-                      + "` as text:\n"
-                      + draft));
-          // On the run's last step or its last budgeted call (both asked without
-          // spending) there is no request left to warn on: the written call is still
-          // withheld, but the turn ends with the constraint that stopped it -- the
-          // ending and sentence a prose or tool reply on this step would have met at
-          // the top of the loop, in that order. Not CALL_FAILURES: the allowance was
-          // not what ran out, and for a conductor that ending fails the run where a cap
-          // is put to the person and may be continued (ruled in the final review;
-          // spec §4). The note is the harness:call-failure record of a warning that
-          // had no request to go on.
-          if (!cancelled.getAsBoolean()) {
-            automaticLimits.budget(
-                transcript.conversationId(), budget, definition, sessionId, transcript);
-            automaticLimits.steps(
-                transcript.conversationId(), cap, steps, definition, sessionId, transcript, budget);
-          }
-          boolean lastStep = cap.stops(steps);
-          if (lastStep || budget.exhausted()) {
+        // The forced request answered with nothing but the way out: the call the held draft
+        // wrote was an example, and the draft is the answer, delivered down the ordinary
+        // answer path below -- prompt.post, the mandatory reviewer if any, the ANSWER entry.
+        // The way out WRITTEN as text there is the same decline: it is in that request's
+        // schemas but in no `offered` map, so the guard below would not hold it, and a model
+        // that writes its calls out is the likeliest to write this one out too -- delivered,
+        // the person would read `reply_as_written({})` in place of the draft it chose.
+        boolean declined =
+            forced
+                && heldDraft != null
+                && (completion.toolCalls().isEmpty()
+                    ? WrittenCalls.writesTheWayOut(completion.content())
+                    : completion.toolCalls().stream()
+                        .allMatch(wanted -> WrittenCalls.REPLY_AS_WRITTEN.equals(wanted.name())));
+        // A call the validator made for the model (spec 2026-09-28 §5): run below, down the
+        // ordinary tool path, as the reply of the model call whose held text it stands in for.
+        // `said` and `call` are the answer's, set in the branch below and read by the answer
+        // path after it.
+        ToolCall madeForTheModel = null;
+        String said = null;
+        Invocation call = null;
+        if (completion.toolCalls().isEmpty() || declined) {
+          // The model stopped asking for tools and said something. This is
+          // the only place Completion.content() becomes an Outcome's text.
+          //
+          // Null-coalesced, though Completion documents content as never
+          // null and OpenAiTransport reads it with asText("") so the
+          // shipped path cannot produce one. Outcome refuses a null text,
+          // so a hand-built completion carrying one would surface as a
+          // NullPointerException inside the job rather than as anything a
+          // caller could read. Empty string is the honest rendering: a
+          // model that said nothing answered with nothing.
+          //
+          // RECORDED HERE, AND IT USED TO BE `Turn`'S TO WRITE. The
+          // message a turn comes to is the one message of a run that is
+          // never appended to the history the loop goes on sending -- the
+          // loop returns with it -- so `Turn.closeTheLog` wrote it
+          // afterwards out of `Outcome.text`, from a site that has the
+          // answer and cannot have the one thing only this frame holds:
+          // how long the call that produced it took. The most interesting
+          // duration in a conversation was therefore the only one that
+          // could not be measured. It is written here, where the
+          // Completion is still in hand; `closeTheLog` now records an
+          // answer only for the endings whose text THIS RUNTIME wrote,
+          // which correspond to no model call and correctly carry no
+          // duration. The content is `Outcome.text` for an ANSWERED run by
+          // construction -- the two are the same expression -- so the log
+          // holds exactly what it held before, plus the measurement.
+          //
+          // No tool calls, because this is the branch where the model
+          // asked for none.
+          //
+          // JUDGED FIRST, AND BY THE HARNESS. The detector reads the
+          // completion and nothing else; the model is never asked whether
+          // it refused. What the judgement does is Rerouting's to decide
+          // from the agent's own definition: reroute, or record the answer
+          // as the loop always has, with `refused` in its provenance.
+          // Not asked of a declined completion: what it says is the held draft, which was
+          // already judged when it arrived and was not a refusal then.
+          Optional<String> refusal = declined ? Optional.empty() : refusals.refusal(completion);
+          said = declined ? heldDraft : completion.content() == null ? "" : completion.content();
+          if (declined) {
             transcript.record(
-                LoggedEntry.hook(
-                    CallFailures.unwarned(
-                        tool,
-                        lastStep ? "the run's last step" : "the run's last budgeted model call")));
-            // The record's call_failure line for a written call nobody was warned
-            // about: the turn ends over it, and the record says so in its own words.
-            activity.callFailureEnded(
-                transcript.conversationId(),
-                definition.name(),
-                tool,
-                lastStep
-                    ? RunActivity.Unwarned.LAST_STEP
-                    : RunActivity.Unwarned.LAST_BUDGETED_CALL);
-            return lastStep
-                ? capReached(cap, trail, steps, modelCalls)
-                : budgetSpent(budget, trail, steps, modelCalls);
+                LoggedEntry.diagnostic(
+                    "The held draft was delivered as"
+                        + " written: the model "
+                        + (completion.toolCalls().isEmpty() ? "wrote a call to " : "called ")
+                        + WrittenCalls.REPLY_AS_WRITTEN
+                        + ", so the call it wrote was an example."));
           }
-          // From the second in a row, and for a safe tool only, the validator may make
-          // the call the model meant. Never on the first: a single slip is the model's
-          // to correct. Asked once per failure, and not at all about a tool off the
-          // safe list, whose call it could never make.
-          if (callFailures.failed() >= 2 && CallFailures.SAFE.contains(tool)) {
-            madeForTheModel =
-                validated(
-                    tool,
-                    draft,
-                    WrittenCalls.bareArguments(draft, offered).orElse(null),
-                    offered.get(tool).schema(),
-                    userPrompt,
-                    cancelled,
-                    transcript,
-                    usageFor(transcript, definition, steps));
+          call =
+              route.invocation(
+                  completion,
+                  refusal.isPresent()
+                      ? CompletionOutcome.REFUSED
+                      : "length".equals(completion.finishReason())
+                          ? CompletionOutcome.CUT_OFF
+                          : CompletionOutcome.ANSWERED,
+                  sent,
+                  firstTokenMillis);
+          route.called(call, modelCallTook);
+          if (refusal.isPresent()) {
+            if (regenerating) {
+              return stopped(
+                  Ending.UNAVAILABLE,
+                  "The model declined to regenerate an answer.",
+                  trail,
+                  steps,
+                  modelCalls,
+                  "");
+            }
+            Rerouting.Decision decision =
+                route.refused(call, refusal.get(), completion.content(), modelCallTook);
+            if (decision == Rerouting.Decision.REROUTED) {
+              // Back round the loop with the history exactly as it
+              // was: the refusal was never appended to it, so the
+              // fallback is sent what the refused call was sent. The
+              // boundary checks above apply to it as to any call.
+              continue;
+            }
           }
-          if (madeForTheModel == null) {
-            // The record's call_failure line (spec 2026-09-28, the orchestration
-            // record §2), told where the warning is issued -- or, when none is left,
-            // told as the turn ending, in words the last warning's line cannot be
-            // mistaken for. A call the validator made is no failure the person needs
-            // told: it goes down the tool path and is told there, as a tool line.
-            if (callFailures.exhausted()) {
+          // A TOOL CALL WRITTEN AS TEXT IS A CALL FAILURE, NEVER THE TURN'S ANSWER (spec
+          // 2026-09-28-call-failures). Measured twice: the bot Aristoxenus ended its turn
+          // with `orchestrate_implement_specification({"request": ...})` in a fence and no
+          // tool call (2026-09-27, entry 123 of cnv_317717703EFBC15E), and a conductor
+          // answered three turns running with nothing but todo_write's arguments
+          // (2026-09-28, orc_318408A44038F859, entries 252, 256, 260). A tool call is the
+          // model's business: it hears a warning, and the person never reads the call.
+          //
+          // Held before the prompt.post hooks and the mandatory reviewer, because the draft
+          // is not an answer: hooks judging it, or a reviewer checking it, would be spent on
+          // text nobody receives. Keyed on nothing but the tools THIS run is offered, so it
+          // holds in every run -- bot, agent and conductor. The draft goes in the history
+          // ahead of the warning so the model can see what it wrote, and the next request is
+          // REQUIRED (which made gpt-oss-120b call the tool it had been writing out; see
+          // ToolChoice) with WrittenCalls.REPLY_AS_WRITTEN as the way back for a call that
+          // was only an example. Not asked of a declined completion: that model said so.
+          Optional<String> written =
+              declined ? Optional.empty() : WrittenCalls.writtenIn(completion.content(), offered);
+          if (written.isPresent()) {
+            String tool = written.get();
+            String draft = completion.content();
+            transcript.record(
+                LoggedEntry.diagnostic(
+                    "A draft answer was held because it"
+                        + " wrote a call to `"
+                        + tool
+                        + "` as text:\n"
+                        + draft));
+            // On the run's last step or its last budgeted call (both asked without
+            // spending) there is no request left to warn on: the written call is still
+            // withheld, but the turn ends with the constraint that stopped it -- the
+            // ending and sentence a prose or tool reply on this step would have met at
+            // the top of the loop, in that order. Not CALL_FAILURES: the allowance was
+            // not what ran out, and for a conductor that ending fails the run where a cap
+            // is put to the person and may be continued (ruled in the final review;
+            // spec §4). The note is the harness:call-failure record of a warning that
+            // had no request to go on.
+            if (!cancelled.getAsBoolean()) {
+              automaticLimits.budget(
+                  transcript.conversationId(), budget, definition, sessionId, transcript);
+              automaticLimits.steps(
+                  transcript.conversationId(),
+                  cap,
+                  steps,
+                  definition,
+                  sessionId,
+                  transcript,
+                  budget);
+            }
+            boolean lastStep = cap.stops(steps);
+            if (lastStep || budget.exhausted()) {
+              transcript.record(
+                  LoggedEntry.hook(
+                      CallFailures.unwarned(
+                          tool,
+                          lastStep
+                              ? "the run's last step"
+                              : "the run's last budgeted model call")));
+              // The record's call_failure line for a written call nobody was warned
+              // about: the turn ends over it, and the record says so in its own words.
               activity.callFailureEnded(
                   transcript.conversationId(),
                   definition.name(),
                   tool,
-                  RunActivity.Unwarned.ALLOWANCE_SPENT);
-              return stopped(
-                  Ending.CALL_FAILURES, CallFailures.ENDED, trail, steps, modelCalls, "");
+                  lastStep
+                      ? RunActivity.Unwarned.LAST_STEP
+                      : RunActivity.Unwarned.LAST_BUDGETED_CALL);
+              return lastStep
+                  ? capReached(cap, trail, steps, modelCalls)
+                  : budgetSpent(budget, trail, steps, modelCalls);
             }
-            int left = callFailures.warned();
-            activity.callFailure(transcript.conversationId(), definition.name(), tool, left);
-            String warning = CallFailures.warning(tool, left);
-            transcript.record(LoggedEntry.hook(CallFailures.failure(tool, warning)));
-            history.add(ChatMessage.assistant(draft, List.of()));
-            history.add(ChatMessage.user(warning));
-            mustCallNext = true;
-            heldDraft = draft;
-            continue;
-          }
-        }
-      }
-      // THE MODEL'S ANSWER: a reply that asked for no tool, or declined the forced one, and is
-      // not a call the validator made for it -- that one goes down the tool path below.
-      if ((completion.toolCalls().isEmpty() || declined) && madeForTheModel == null) {
-        PromptPost post =
-            promptPost(activeHooks(route, harnessRun, skillChecks), hookContext, said, List.of());
-        if (definition.reviewWith() != null && !answerReviewed) {
-          post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
-          AgentTool delegate = offered.get(AgentRunTool.NAME);
-          if (!(delegate instanceof AgentRunTool runner)) {
-            return stopped(
-                Ending.SUB_AGENT_FAILED,
-                "This run could not deliver an answer because its mandatory"
-                    + " reviewer '"
-                    + definition.reviewWith()
-                    + "' was not available.",
-                trail,
-                steps,
-                modelCalls,
-                "mandatory answer review was not wired");
-          }
-
-          String draft = post.reply();
-          transcript.record(
-              LoggedEntry.diagnostic(
-                  "A draft answer was withheld for independent review:\n" + draft));
-          final String review;
-          try {
-            review = runner.runDeclared(definition.reviewWith(), reviewTask(draft), home);
-          } catch (AgentRunTool.SubAgentFailed child) {
-            return stopped(
-                Ending.SUB_AGENT_FAILED,
-                child.sentence(),
-                trail,
-                steps,
-                modelCalls,
-                child.detail());
-          }
-          transcript.record(
-              LoggedEntry.diagnostic("The mandatory answer reviewer reported:\n" + review));
-          history.add(ChatMessage.assistant(draft, List.of()));
-          history.add(ChatMessage.user(revisionRequest(review)));
-          answerReviewed = true;
-          continue;
-        }
-        transcript.record(LoggedEntry.answer(post.reply(), List.of()).took(modelCallTook).by(call));
-        post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
-        return new Outcome(
-            Ending.ANSWERED, post.reply(), steps, modelCalls, truncationNote(completion));
-      }
-
-      // The ids are settled for the whole batch *before* the assistant
-      // message is built, so both halves of every call agree about it.
-      // Filing a result under an id the assistant turn does not declare
-      // emits a conversation the contract calls malformed, and a strict
-      // OpenAI-compatible server rejects the *next* request outright —
-      // ending the run UNAVAILABLE for a reason nothing in the message
-      // would explain.
-      // On the forced request the way out, beside real calls, means nothing: the real
-      // calls run and it is dropped here, before the assistant turn is built, so the
-      // history never declares a call that no result answers. On any other request it
-      // was never offered and falls through to noSuchTool like any unknown name.
-      // A call the validator made is the batch, alone; its blank id is synthesised below
-      // as for a model's call that sent none.
-      List<ToolCall> wantedCalls =
-          madeForTheModel != null
-              ? List.of(madeForTheModel)
-              : forced
-                  ? completion.toolCalls().stream()
-                      .filter(wanted -> !WrittenCalls.REPLY_AS_WRITTEN.equals(wanted.name()))
-                      .toList()
-                  : completion.toolCalls();
-      List<ToolCall> asked = new ArrayList<>(wantedCalls.size());
-      for (ToolCall wanted : wantedCalls) {
-        asked.add(
-            wanted.id().isBlank()
-                ? new ToolCall(synthesisedId(++synthesised), wanted.name(), wanted.arguments())
-                : wanted);
-      }
-      // Step ownership distinguishes later model calls, not two ambiguous declarations in one
-      // batch. Reject the entire malformed batch before any tool can acquire an effect identity.
-      if (asked.stream().map(ToolCall::id).distinct().count() != asked.size())
-        return stopped(
-            Ending.UNAVAILABLE,
-            "The model reused a tool-call ID within one batch; no tools in that batch ran.",
-            trail,
-            steps,
-            modelCalls,
-            "");
-      pacing.asked(asked.size());
-      // A real tool call restores the call-failure allowance (spec 2026-09-28 §4).
-      if (!asked.isEmpty()) {
-        callFailures.called();
-      }
-      // The assistant turn first, then its results: that order is the
-      // contract, and a tool message whose call is not already in the
-      // history is one the model has nothing to attach to. ChatRequest
-      // now refuses that shape outright; see its constructor.
-      // A call the validator made carries no text: the held reply it stands in for is on
-      // the record as a diagnostic, and the call is what that reply meant.
-      PromptPost post =
-          promptPost(
-              activeHooks(route, harnessRun, skillChecks),
-              hookContext,
-              madeForTheModel != null || completion.content() == null ? "" : completion.content(),
-              asked.stream().map(ToolCall::name).toList());
-      history.add(ChatMessage.assistant(post.reply(), asked));
-      // The ids as SENT and not as received: `asked` carries the stand-in
-      // for a call that arrived without one, and a log recording the blank
-      // id the model sent would file the result under an id the answer it
-      // is paired with does not declare.
-      // A call the validator made is filed under the model call whose reply it stands in
-      // for, which was already counted when that reply was held.
-      Invocation asking =
-          madeForTheModel != null
-              ? call
-              : route.invocation(
-                  completion, CompletionOutcome.CALLED_TOOLS, sent, firstTokenMillis);
-      if (madeForTheModel == null) {
-        route.called(asking, modelCallTook);
-      }
-      LoggedEntry requestedCall =
-          LoggedEntry.answer(post.reply(), asked)
-              .naming(salientsOf(asked))
-              .took(modelCallTook)
-              .by(asking);
-      boolean typedResults =
-          asked.stream()
-              .anyMatch(
-                  wanted -> {
-                    AgentTool tool = offered.get(wanted.name());
-                    return tool instanceof AgentTool.ContentTool typed && typed.typedResults(home);
-                  });
-      if (typedResults
-          || (suspendedRunCalls != null
-              && transcript.conversationId() != null
-              && asked.stream().anyMatch(wanted -> RunTool.NAME.equals(wanted.name())))) {
-        try {
-          transcript.recordDurably(requestedCall);
-        } catch (RuntimeException unrecorded) {
-          return stopped(
-              Ending.UNAVAILABLE,
-              typedResults
-                  ? "The typed tool request could not be retained durably; no tool was dispatched."
-                  : "The command request could not be retained durably; no command was dispatched.",
-              trail,
-              steps - 1,
-              modelCalls,
-              describe(unrecorded));
-        }
-      } else transcript.record(requestedCall);
-      post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
-      // Collected across the batch and appended after it, never between
-      // two results. The contract describes an assistant turn's tool
-      // calls as answered by one tool message each and describes nothing
-      // going in among them, so a user message wedged between two of
-      // them is a shape taken on faith — and ChatRequest's javadoc
-      // records what this repository already paid to learn about sending
-      // a message list nothing on this side validates. Nothing is lost
-      // by waiting: qwen3.5-9b does not batch, measured 0/4, so every
-      // batch the reference model produces holds one call and this is
-      // the position the design asks for anyway — immediately after the
-      // result.
-      List<String> notes = new ArrayList<>();
-      List<String> results = new ArrayList<>(asked.size());
-      // Each result's outcome as the record line tells it, for step.post: a hook's denial or
-      // a name no tool answers to is known here and not readable off the result's text.
-      List<String> outcomes = new ArrayList<>(asked.size());
-      List<Content.StoredImage> pictures = new ArrayList<>();
-      for (ToolCall wanted : asked) {
-        admittedAuthority.run();
-        if (operation != null) operations.require(operation);
-        // Counted before the dispatch and for every call the model
-        // asked for, whether or not anything answers to the name. What
-        // is being counted is what the model did, not what the runtime
-        // managed to do about it.
-        String note = repeats.noteFor(wanted, cap);
-        if (note != null) {
-          notes.add(note);
-        }
-        // BEFORE THE DISPATCH, so the call that trips this is never
-        // made. It is the same call whose answer the model has already
-        // read several times over; running it once more would spend a
-        // tool call, and a file read or a delegated agent is not free,
-        // to obtain a result that is already in the history above.
-        //
-        // Any note this batch collected goes with it, unsent. The run is
-        // over, and a nudge to try something else is addressed to a turn
-        // that is not going to happen.
-        //
-        // steps - 1, for the reason the SUB_AGENT_FAILED and UNAVAILABLE
-        // clauses below give and Outcome.steps defines: a step is one
-        // model call plus every tool result it asked for, and this
-        // step's results were never appended. The model call that asked
-        // for them was made and is counted.
-        if (repeats.futile()) {
-          return stopped(Ending.STUCK, repeats.futility(), trail, steps - 1, modelCalls, "");
-        }
-        AgentTool tool = offered.get(wanted.name());
-        ToolObservation observation = null;
-        // THE RECORD'S TOOL LINE (spec 2026-09-28, the orchestration record §2): told as
-        // the call starts, so a call still running is the current activity, and told its
-        // outcome in a word on every way out below. Here and not earlier, so a call the
-        // validator made -- which is this batch, alone -- is told like the model's own,
-        // and a batch STUCK ends above opens no line it would never settle.
-        RunActivity.Call recording =
-            activity.called(
-                transcript.conversationId(),
-                definition.name(),
-                wanted.name(),
-                () -> ToolLines.salient(wanted.name(), wanted.arguments()));
-        String told;
-        // Around the whole of producing this result and not only around
-        // a dispatch that happens, so that every `tool_result` carries a
-        // measurement of the same thing: how long it took to arrive at
-        // what the model is about to be shown. A name nothing answers to
-        // therefore reports the time it took to write the refusal, which
-        // is honest and is near enough to nothing; a branch that left it
-        // unmeasured would put "no tool ran" and "nobody measured" into
-        // one column under one spelling.
-        if (wanted.name().equals(AgentRunTool.NAME) && !cancelled.getAsBoolean())
-          automaticLimits.budget(
-              transcript.conversationId(), budget, definition, sessionId, transcript);
-        Instant askedAt = clock.get();
-        String result;
-        List<HookRecord> toolRecords = new ArrayList<>();
-        String fenced =
-            tool == null ? null : extras.fence().refusal(wanted.name(), wanted.arguments());
-        if (fenced == null && tool != null && skills != null) {
-          fenced = skills.refusal(transcript.conversationId(), wanted.name());
-        }
-        if (fenced == null && tool != null && bound != null) fenced = bound.fence(wanted.name());
-        if (fenced == null && tool != null) {
-          List<AgentRules.Rule> applicable =
-              fileRules.forTool(
-                  definition, home, sessionId, owner, wanted.name(), wanted.arguments());
-          List<AgentRules.Rule> unread =
-              applicable.stream()
-                  .filter(
-                      rule ->
-                          !fileRulesForThisStep.contains(rule)
-                              && !definition.prompt().contains(rule.text()))
-                  .toList();
-          if (!unread.isEmpty()) {
-            deliveredFileRules.addAll(unread);
-            fenced =
-                "Applicable file instructions must be read before this operation. Nothing ran; "
-                    + "review these instructions and invoke the operation on the next model step.\n\n"
-                    + unread.stream()
-                        .map(
-                            rule ->
-                                "Instructions from "
-                                    + rule.origin()
-                                    + " (scope: "
-                                    + rule.scope()
-                                    + "):\n"
-                                    + rule.text())
-                        .collect(Collectors.joining("\n\n"));
-          }
-        }
-        if (tool == null) {
-          result = noSuchTool(wanted.name(), offered.keySet());
-          told = ToolLines.REFUSED;
-        } else if (fenced != null) {
-          // Rule 4 (spec 2026-09-29 §3): refused before hooks, on the model's own
-          // arguments, and nothing ran, so the trail does not gain it. Told REFUSED, as
-          // a tool the run does not hold is: the harness said no, not a hook or a person.
-          result = fenced;
-          told = ToolLines.REFUSED;
-        } else {
-          Hooks active = activeHooks(route, harnessRun, skillChecks);
-          // run's gate stands around the chain and is no hook's to leave out:
-          // RunTool says why.
-          ToolPre preTool =
-              tool instanceof RunTool run
-                  ? runGate(
-                      run,
-                      wanted.arguments(),
-                      home,
-                      hookContext,
-                      (context, arguments) -> toolPre(active, context, wanted.name(), arguments))
-                  : toolPre(active, hookContext, wanted.name(), wanted.arguments());
-          toolRecords.addAll(preTool.records());
-          if (tool instanceof RunTool run
-              && run.waitingApproval().isPresent()
-              && suspendedRunCalls != null) {
-            var question = run.waitingApproval().orElseThrow();
-            String approval = question.id();
-            suspendedRunCalls.retain(
-                approval,
-                transcript.conversationId(),
-                sessionId,
-                question.side(),
-                callerHandle,
-                new ToolCall(
-                    wanted.id(), wanted.name(), run.retainedArguments(preTool.arguments(), home)));
-            // The model's original stack, including all delegated parents and sibling calls,
-            // remains suspended. Neither waiting nor an approval answer enters its prompt.
-            toolRecords.forEach(r -> transcript.record(LoggedEntry.hook(r)));
-            toolRecords.clear();
-            String root = question.conversation();
-            var resumption = new RunCallResumption(suspendedRunCalls);
-            var executedAt = new AtomicReference<Instant>();
-            Optional<String> output;
-            try {
-              output =
-                  resumption.await(
-                      approval,
-                      root,
-                      activeRunApprovals,
+            // From the second in a row, and for a safe tool only, the validator may make
+            // the call the model meant. Never on the first: a single slip is the model's
+            // to correct. Asked once per failure, and not at all about a tool off the
+            // safe list, whose call it could never make.
+            if (callFailures.failed() >= 2 && CallFailures.SAFE.contains(tool)) {
+              madeForTheModel =
+                  validated(
+                      tool,
+                      draft,
+                      WrittenCalls.bareArguments(draft, offered).orElse(null),
+                      offered.get(tool).schema(),
+                      userPrompt,
                       cancelled,
-                      () -> {
-                        if (approvalDelivery != null) approvalDelivery.drain(root);
-                      },
-                      observed -> recordApprovalDecision(observed.approval(), transcript),
-                      retainedCall -> {
-                        executedAt.set(clock.get());
-                        return resumeRunCall(
-                            retainedCall,
-                            offered,
-                            home,
-                            cancelled,
-                            transcript,
-                            definition,
-                            hookContext,
-                            route,
-                            harnessRun,
-                            skillChecks,
-                            watch,
-                            recording,
-                            operation);
-                      },
-                      text -> {
-                        transcript.recordDurably(
-                            LoggedEntry.toolResult(wanted.id(), text)
-                                .told(ToolLines.outcome(RunTool.NAME, text))
-                                .took(
-                                    executedAt.get() == null
-                                        ? Duration.ZERO
-                                        : Duration.between(executedAt.get(), clock.get())));
-                      });
-            } catch (RuntimeException interrupted) {
-              return stopped(
-                  interrupted instanceof SessionGoneException
-                      ? Ending.SESSION_GONE
-                      : Ending.UNAVAILABLE,
-                  "The command continuation was interrupted. Its retained execution record will be reconciled without replaying an uncertain command.",
-                  trail,
-                  steps - 1,
-                  modelCalls,
-                  describe(interrupted));
+                      transcript,
+                      usageFor(transcript, definition, steps));
             }
-            if (output.isEmpty()) {
-              String cancelledResult =
-                  "The harness cancelled this retained command because its requesting run ended. Nothing ran.";
-              approvals.deny(
-                  approval,
-                  RunApproval.RUN_ENDED,
-                  "The requesting run was cancelled before execution.");
-              suspendedRunCalls.complete(approval, cancelledResult);
-              transcript.recordDurably(
-                  LoggedEntry.toolResult(wanted.id(), cancelledResult).told(ToolLines.DENIED));
-              suspendedRunCalls.acknowledged(approval);
-              extras.end().approvalResumed(approval);
-              recording.returned(ToolLines.DENIED);
-              return stopped(Ending.CANCELLED, cancelledResult, trail, steps, modelCalls, "");
+            if (madeForTheModel == null) {
+              // The record's call_failure line (spec 2026-09-28, the orchestration
+              // record §2), told where the warning is issued -- or, when none is left,
+              // told as the turn ending, in words the last warning's line cannot be
+              // mistaken for. A call the validator made is no failure the person needs
+              // told: it goes down the tool path and is told there, as a tool line.
+              if (callFailures.exhausted()) {
+                activity.callFailureEnded(
+                    transcript.conversationId(),
+                    definition.name(),
+                    tool,
+                    RunActivity.Unwarned.ALLOWANCE_SPENT);
+                return stopped(
+                    Ending.CALL_FAILURES, CallFailures.ENDED, trail, steps, modelCalls, "");
+              }
+              int left = callFailures.warned();
+              activity.callFailure(transcript.conversationId(), definition.name(), tool, left);
+              String warning = CallFailures.warning(tool, left);
+              transcript.record(LoggedEntry.hook(CallFailures.failure(tool, warning)));
+              history.add(ChatMessage.assistant(draft, List.of()));
+              history.add(ChatMessage.user(warning));
+              mustCallNext = true;
+              heldDraft = draft;
+              continue;
             }
-            extras.end().approvalResumed(approval);
-            result = output.get();
-            history.add(ChatMessage.tool(wanted.id(), result));
-            results.add(result);
-            told = ToolLines.outcome(RunTool.NAME, result);
-            outcomes.add(told);
-            recording.returned(told);
-            if (executedAt.get() != null) trail.add(RunTool.NAME);
-            continue;
           }
-          if (preTool.isDenied()) {
-            // Refused before it ran, in words the model can act on. Not
-            // added to the trail: nothing ran.
-            // A question put to a person is not a refusal, and reads as what it is.
-            boolean awaiting = tool instanceof RunTool run && run.waitingApproval().isPresent();
-            result =
-                awaiting ? preTool.denied() : "the call was refused by a hook: " + preTool.denied();
-            told = awaiting ? ToolLines.ASKED : ToolLines.DENIED;
-          } else {
-            trail.add(wanted.name());
-            // THE TOOL'S OWN SCHEMA NAME, AND NOT wanted.name(). The two
-            // are equal here — this branch is reached because the offered
-            // map answered to the name the model sent — so this is not a
-            // correctness fix but a containment one: reading the name off
-            // something this server registered makes it impossible for a
-            // model-supplied string to reach a listener even if the map
-            // is later keyed some other way. The arguments are not passed
-            // and there is no parameter for them; JobWatch says why.
-            watch.toolCalled(definition.name(), tool.schema().name());
+        }
+        // THE MODEL'S ANSWER: a reply that asked for no tool, or declined the forced one, and is
+        // not a call the validator made for it -- that one goes down the tool path below.
+        if ((completion.toolCalls().isEmpty() || declined) && madeForTheModel == null) {
+          PromptPost post =
+              promptPost(activeHooks(route, harnessRun, skillChecks), hookContext, said, List.of());
+          if (definition.reviewWith() != null && !answerReviewed) {
+            post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+            AgentTool delegate = offered.get(AgentRunTool.NAME);
+            if (!(delegate instanceof AgentRunTool runner)) {
+              return stopped(
+                  Ending.SUB_AGENT_FAILED,
+                  "This run could not deliver an answer because its mandatory"
+                      + " reviewer '"
+                      + definition.reviewWith()
+                      + "' was not available.",
+                  trail,
+                  steps,
+                  modelCalls,
+                  "mandatory answer review was not wired");
+            }
+
+            String draft = post.reply();
+            transcript.record(
+                LoggedEntry.diagnostic(
+                    "A draft answer was withheld for independent review:\n" + draft));
+            final String review;
             try {
-              // The model's arguments, or tool.pre's rewrite of them,
-              // and otherwise untouched, empty string included: a
-              // model calling a tool that needs nothing sends "",
-              // ToolCall guarantees it is never null, and
-              // ToolArguments documents what Jackson does with it.
-              // The tool's own permission check -- the fence, inside
-              // run -- judges whatever actually runs, so a rewrite is
-              // checked exactly once, on what is executed.
-              if (confined)
-                retainedResources.require(
-                    home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
-              admittedAuthority.run();
-              if (operation != null) operations.require(operation);
-              if (operation != null) {
-                var targets = OperationToolTargets.decode(wanted.name(), preTool.arguments());
-                for (String project : targets.projects())
-                  if (!home.project().equals(project))
-                    throw new CallerFault("Tool target exceeds operation home");
-                if (wanted.name().equals(MemoryTools.READ_NAME))
-                  operations.requireReadTargets(operation, home, targets.resources());
-                else operations.requireTargets(operation, home, targets.resources());
-              }
-              tool.calledAs(wanted.id());
-              // Internal grants come from the admitted definition. External provider proxies
-              // recheck their additional authority inside run, alongside tool-owned access checks.
-              if (tool instanceof AgentTool.ContentTool typed && typed.typedResults(home)) {
-                AgentTool.Result returned =
-                    typed.runResult(
-                        preTool.arguments(), home, usageFor(transcript, definition, steps));
-                result = usable(returned.text(), wanted.name());
-                observation =
-                    returned.observation() == null ? null : returned.observation().afterHook(false);
-              } else {
-                result =
-                    usable(
-                        transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                            ? tool.run(preTool.arguments(), home)
-                            : tool.run(
-                                preTool.arguments(), home, usageFor(transcript, definition, steps)),
-                        wanted.name());
-              }
-              String providerText = result;
-              admittedAuthority.run();
-              if (operation != null) operations.require(operation);
-              if (confined)
-                retainedResources.require(
-                    home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
-              ToolPost postTool =
-                  toolPost(
-                      activeHooks(route, harnessRun, skillChecks),
-                      hookContext,
-                      wanted.name(),
-                      preTool.arguments(),
-                      result);
-              toolRecords.addAll(postTool.records());
-              // Through usable again: a hook that redacts to nothing
-              // must not hand the model the blank result usable
-              // exists to replace.
-              result = usable(postTool.result(), wanted.name());
-              if (observation != null)
-                observation =
-                    observation.afterHook(!withheld(postTool) && result.equals(providerText));
-              // A result a tool.post hook withheld is an error whatever it read;
-              // a delegate's call is its ending; anything else is read off what
-              // the model is shown, a redaction included.
-              Outcome.Ending delegate =
-                  tool instanceof AgentRunTool runner ? runner.returned() : null;
-              told =
-                  withheld(postTool)
-                      ? ToolLines.ERROR
-                      : delegate != null
-                          ? ToolLines.delegation(delegate)
-                          : ToolLines.outcome(wanted.name(), result);
+              review = runner.runDeclared(definition.reviewWith(), reviewTask(draft), home);
             } catch (AgentRunTool.SubAgentFailed child) {
-              // Its own clause, above the general one, and not folded
-              // into dependencyFailure: the ending differs. A child
-              // that could not reach what it depends on is the same
-              // class of failure as a dead endpoint here — see
-              // AgentRunTool for why it is not a tool result — but a
-              // caller reading UNAVAILABLE would look for a broken
-              // endpoint of this run's own, and the thing to look at
-              // is one agent further down. The detail names it.
-              //
-              // steps - 1 for the reason the two clauses below give:
-              // this step's tool results were never appended, so the
-              // step did not complete, while the model call that
-              // asked for them was made and is counted.
-              //
-              // What the hooks decided about this call is written
-              // first, here and before the two returns below: the
-              // run ends, but a rewrite that happened still happened.
-              // The tool line is settled first on all three: the run ends, and a
-              // line left open would read as the current activity forever.
-              recording.returned(ToolLines.ERROR);
-              withParked(toolRecords, runHooks)
-                  .forEach(record -> transcript.record(LoggedEntry.hook(record)));
               return stopped(
                   Ending.SUB_AGENT_FAILED,
                   child.sentence(),
                   trail,
-                  steps - 1,
+                  steps,
                   modelCalls,
                   child.detail());
-            } catch (RuntimeException failed) {
-              if (failed instanceof SessionGoneException) {
-                // ABOVE dependencyFailure AND NOT INSIDE IT, AND THE
-                // ORDER IS THE WHOLE MECHANISM. SessionGoneException
-                // extends WorkspaceUnavailableException, which that
-                // method names, so both clauses match and the first
-                // one wins — swap them and this ending becomes
-                // unreachable with every test about UNAVAILABLE still
-                // green. a_session_that_went_away_is_its_own_ending
-                // and a_disk_that_went_away_is_not_a_session_that_went_away
-                // are the pair that fails in one direction each.
-                //
-                // The subclass rather than a sibling is deliberate
-                // and is argued in SessionGoneException: a build that
-                // never learned about this clause still ends the run
-                // as UNAVAILABLE, which is the safe direction, rather
-                // than handing the model a tool result about a client
-                // that is not there.
-                //
-                // steps - 1 for the reason the clause below gives.
-                recording.returned(ToolLines.ERROR);
-                withParked(toolRecords, runHooks)
-                    .forEach(record -> transcript.record(LoggedEntry.hook(record)));
-                return stopped(
-                    Ending.SESSION_GONE,
-                    "This run could not go on: the client session whose files"
-                        + " it was working in went away.",
-                    trail,
-                    steps - 1,
-                    modelCalls,
-                    wanted.name() + ": " + describe(failed));
-              }
-              if (dependencyFailure(failed)) {
-                // steps - 1, matching the LlmException path above
-                // and Outcome.steps's own definition: a step is one
-                // model call plus every tool result it asked for,
-                // and this one's results were never appended. The
-                // increment has already happened because the model
-                // call did return; counting the step anyway would
-                // report a step that did not complete, and the two
-                // unavailable paths would disagree about the same
-                // fact for no reason a reader could find.
-                recording.returned(ToolLines.ERROR);
-                withParked(toolRecords, runHooks)
-                    .forEach(record -> transcript.record(LoggedEntry.hook(record)));
-                return stopped(
-                    Ending.UNAVAILABLE,
-                    "This run could not go on: something the tool '"
-                        + wanted.name()
-                        + "' needs could not be reached.",
-                    trail,
-                    steps - 1,
-                    modelCalls,
-                    wanted.name() + ": " + describe(failed));
-              }
-              result =
-                  "the tool '"
-                      + wanted.name()
-                      + "' failed: "
-                      + describe(failed)
-                      + ". This is a fault in the tool rather than in what you sent"
-                      + " it; you may try something else.";
-              told = ToolLines.ERROR;
             }
+            transcript.record(
+                LoggedEntry.diagnostic("The mandatory answer reviewer reported:\n" + review));
+            history.add(ChatMessage.assistant(draft, List.of()));
+            history.add(ChatMessage.user(revisionRequest(review)));
+            answerReviewed = true;
+            continue;
           }
+          transcript.record(
+              LoggedEntry.answer(post.reply(), List.of()).took(modelCallTook).by(call));
+          post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+          return new Outcome(
+              Ending.ANSWERED, post.reply(), steps, modelCalls, truncationNote(completion));
         }
-        Duration toolTook = Duration.between(askedAt, clock.get());
-        history.add(ChatMessage.tool(wanted.id(), result));
-        results.add(result);
-        outcomes.add(told);
-        // Recorded where it is appended, so that the four returns above
-        // -- STUCK, SUB_AGENT_FAILED, SESSION_GONE and a dependency
-        // failure -- leave the log in exactly the state they leave the
-        // history in: a declared call with nothing answering it. That is
-        // not a gap to be repaired here. It is the fact, and
-        // `Projection` is what a later request reads it through.
-        LoggedEntry toolEntry =
-            LoggedEntry.toolResult(wanted.id(), result)
-                .observing(observation)
-                .told(told)
-                .took(toolTook);
-        if (observation == null) transcript.record(toolEntry);
-        else {
+
+        // The ids are settled for the whole batch *before* the assistant
+        // message is built, so both halves of every call agree about it.
+        // Filing a result under an id the assistant turn does not declare
+        // emits a conversation the contract calls malformed, and a strict
+        // OpenAI-compatible server rejects the *next* request outright —
+        // ending the run UNAVAILABLE for a reason nothing in the message
+        // would explain.
+        // On the forced request the way out, beside real calls, means nothing: the real
+        // calls run and it is dropped here, before the assistant turn is built, so the
+        // history never declares a call that no result answers. On any other request it
+        // was never offered and falls through to noSuchTool like any unknown name.
+        // A call the validator made is the batch, alone; its blank id is synthesised below
+        // as for a model's call that sent none.
+        List<ToolCall> wantedCalls =
+            madeForTheModel != null
+                ? List.of(madeForTheModel)
+                : forced
+                    ? completion.toolCalls().stream()
+                        .filter(wanted -> !WrittenCalls.REPLY_AS_WRITTEN.equals(wanted.name()))
+                        .toList()
+                    : completion.toolCalls();
+        List<ToolCall> asked = new ArrayList<>(wantedCalls.size());
+        for (ToolCall wanted : wantedCalls) {
+          asked.add(
+              wanted.id().isBlank()
+                  ? new ToolCall(synthesisedId(++synthesised), wanted.name(), wanted.arguments())
+                  : wanted);
+        }
+        // Step ownership distinguishes later model calls, not two ambiguous declarations in one
+        // batch. Reject the entire malformed batch before any tool can acquire an effect identity.
+        if (asked.stream().map(ToolCall::id).distinct().count() != asked.size())
+          return stopped(
+              Ending.UNAVAILABLE,
+              "The model reused a tool-call ID within one batch; no tools in that batch ran.",
+              trail,
+              steps,
+              modelCalls,
+              "");
+        pacing.asked(asked.size());
+        // A real tool call restores the call-failure allowance (spec 2026-09-28 §4).
+        if (!asked.isEmpty()) {
+          callFailures.called();
+        }
+        // The assistant turn first, then its results: that order is the
+        // contract, and a tool message whose call is not already in the
+        // history is one the model has nothing to attach to. ChatRequest
+        // now refuses that shape outright; see its constructor.
+        // A call the validator made carries no text: the held reply it stands in for is on
+        // the record as a diagnostic, and the call is what that reply meant.
+        PromptPost post =
+            promptPost(
+                activeHooks(route, harnessRun, skillChecks),
+                hookContext,
+                madeForTheModel != null || completion.content() == null ? "" : completion.content(),
+                asked.stream().map(ToolCall::name).toList());
+        history.add(ChatMessage.assistant(post.reply(), asked));
+        // The ids as SENT and not as received: `asked` carries the stand-in
+        // for a call that arrived without one, and a log recording the blank
+        // id the model sent would file the result under an id the answer it
+        // is paired with does not declare.
+        // A call the validator made is filed under the model call whose reply it stands in
+        // for, which was already counted when that reply was held.
+        Invocation asking =
+            madeForTheModel != null
+                ? call
+                : route.invocation(
+                    completion, CompletionOutcome.CALLED_TOOLS, sent, firstTokenMillis);
+        if (madeForTheModel == null) {
+          route.called(asking, modelCallTook);
+        }
+        LoggedEntry requestedCall =
+            LoggedEntry.answer(post.reply(), asked)
+                .naming(salientsOf(asked))
+                .took(modelCallTook)
+                .by(asking);
+        boolean typedResults =
+            asked.stream()
+                .anyMatch(
+                    wanted -> {
+                      AgentTool tool = offered.get(wanted.name());
+                      return tool instanceof AgentTool.ContentTool typed
+                          && typed.typedResults(home);
+                    });
+        if (typedResults
+            || (suspendedRunCalls != null
+                && transcript.conversationId() != null
+                && asked.stream().anyMatch(wanted -> RunTool.NAME.equals(wanted.name())))) {
           try {
-            pictures.addAll(transcript.recordToolResult(toolEntry));
+            transcript.recordDurably(requestedCall);
           } catch (RuntimeException unrecorded) {
             return stopped(
                 Ending.UNAVAILABLE,
-                "The tool observation could not be retained durably. Its invocation remains the recovery source; no image was sent to the model.",
+                typedResults
+                    ? "The typed tool request could not be retained durably; no tool was dispatched."
+                    : "The command request could not be retained durably; no command was dispatched.",
                 trail,
                 steps - 1,
                 modelCalls,
                 describe(unrecorded));
           }
-        }
-        // A command that did not end ok is recorded with the end of what it answered,
-        // from this result -- the harness's own, never the model's words about it -- so the
-        // delegation facts footer can say how it failed (ToolLines.tail).
-        recording.returned(
-            told, recordedOutput(tool == null ? null : tool.schema().name(), told, result));
-        withParked(toolRecords, runHooks)
-            .forEach(record -> transcript.record(LoggedEntry.hook(record)));
-      }
-      if (!pictures.isEmpty()) history.add(Projection.images(pictures));
-      // STEP.POST, AFTER THE WHOLE BATCH'S RESULTS AND BEFORE THE NOTES ARE
-      // SENT, so a hook's note goes where Repeats' does: never between two
-      // tool results, which the contract does not allow.
-      StepPost afterStep =
-          stepPost(
-              activeHooks(route, harnessRun, skillChecks),
-              hookContext.withUsage(usageFor(transcript, definition, steps)),
-              new Step(
-                  steps,
-                  completion.servedBy() == null ? null : completion.servedBy().wireModel(),
-                  asked,
-                  results,
-                  thinking,
-                  outcomes));
-      notes.addAll(afterStep.notes());
-      afterStep.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
-      // AFTER the results and never instead of one. The tool message
-      // above carries exactly what the tool produced, which is what keeps
-      // a history — and the archive built from it — a record of what
-      // actually happened rather than of what this runtime wished had.
-      for (String note : notes) {
-        history.add(ChatMessage.user(note));
-        // Recorded although it will never be projected. The nudge really
-        // was put in front of the model, so a log that omitted it would
-        // not be a record of what happened; and it must not be projected,
-        // because a later turn would be nudged again about a repetition
-        // that stopped several turns ago. Recorded and invisible is the
-        // whole shape EntryKind exists to make expressible.
-        transcript.record(LoggedEntry.runtimeNote(note));
-      }
-      // A TURN A TOOL ASKED TO END ENDS HERE, AND HERE IS THE ONLY PLACE IT CAN. This is the
-      // first line at which the step is whole: every call the batch declared has its tool
-      // result in the history and the log, with its hook records and the notes after them.
-      // One line earlier -- inside the batch -- would leave the calls after the tripping one
-      // unanswered, which is the malformed history TurnEnd exists not to throw into. One line
-      // later is the top of the loop, where the cap, cancellation and the budget are asked,
-      // and a turn that has ended must not be reported as capped or out of budget because it
-      // happened to end on the boundary. `steps` already counts this step, and correctly:
-      // its results were all appended, which is Outcome.steps' definition of a completed one.
-      //
-      // A request never overrides a stopping ending. STUCK, SUB_AGENT_FAILED, SESSION_GONE
-      // and a dependency failure all return from inside the batch, so a batch that tripped
-      // this and then broke never gets here. Its text is the tool's own sentence rather than
-      // `stopped`'s, because it is not a run that stopped short: TurnEnd refused a blank one.
-      //
-      // A REQUESTED ANSWER IS RECORDED HERE, as the ANSWERED branch above records a model's.
-      // Compaction's TurnTranscript.closed writes a closing answer for every ending but
-      // ANSWERED, because for that one the loop already has; a finish that returned without
-      // this line would leave a turn that answered with no answer in its log. What is kept
-      // from that branch is the entry and nothing else: no duration or invocation, because
-      // no model call produced this text -- a tool's argument did, and the call that carried
-      // it is already recorded above with its own -- and no prompt.post pass, because that
-      // stage is the model's reply being shaped and this is not one. Not added to `history`
-      // either, matching that branch: the loop returns with it.
-      if (extras.end() != null) {
-        Optional<TurnEnd.Requested> ended = extras.end().requested();
-        if (ended.isPresent()) {
-          if (ended.get().ending() == Ending.ANSWERED) {
-            transcript.record(LoggedEntry.answer(ended.get().text(), List.of()));
+        } else transcript.record(requestedCall);
+        post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+        // Collected across the batch and appended after it, never between
+        // two results. The contract describes an assistant turn's tool
+        // calls as answered by one tool message each and describes nothing
+        // going in among them, so a user message wedged between two of
+        // them is a shape taken on faith — and ChatRequest's javadoc
+        // records what this repository already paid to learn about sending
+        // a message list nothing on this side validates. Nothing is lost
+        // by waiting: qwen3.5-9b does not batch, measured 0/4, so every
+        // batch the reference model produces holds one call and this is
+        // the position the design asks for anyway — immediately after the
+        // result.
+        List<String> notes = new ArrayList<>();
+        List<String> results = new ArrayList<>(asked.size());
+        // Each result's outcome as the record line tells it, for step.post: a hook's denial or
+        // a name no tool answers to is known here and not readable off the result's text.
+        List<String> outcomes = new ArrayList<>(asked.size());
+        List<Content.StoredImage> pictures = new ArrayList<>();
+        for (ToolCall wanted : asked) {
+          try (var ignoredCall = OperationStatements.open(OperationStatements.Kind.TOOL_CALL)) {
+            admittedAuthority.run();
+            if (operation != null) operations.require(operation);
+            // Counted before the dispatch and for every call the model
+            // asked for, whether or not anything answers to the name. What
+            // is being counted is what the model did, not what the runtime
+            // managed to do about it.
+            String note = repeats.noteFor(wanted, cap);
+            if (note != null) {
+              notes.add(note);
+            }
+            // BEFORE THE DISPATCH, so the call that trips this is never
+            // made. It is the same call whose answer the model has already
+            // read several times over; running it once more would spend a
+            // tool call, and a file read or a delegated agent is not free,
+            // to obtain a result that is already in the history above.
+            //
+            // Any note this batch collected goes with it, unsent. The run is
+            // over, and a nudge to try something else is addressed to a turn
+            // that is not going to happen.
+            //
+            // steps - 1, for the reason the SUB_AGENT_FAILED and UNAVAILABLE
+            // clauses below give and Outcome.steps defines: a step is one
+            // model call plus every tool result it asked for, and this
+            // step's results were never appended. The model call that asked
+            // for them was made and is counted.
+            if (repeats.futile()) {
+              return stopped(Ending.STUCK, repeats.futility(), trail, steps - 1, modelCalls, "");
+            }
+            AgentTool tool = offered.get(wanted.name());
+            ToolObservation observation = null;
+            // THE RECORD'S TOOL LINE (spec 2026-09-28, the orchestration record §2): told as
+            // the call starts, so a call still running is the current activity, and told its
+            // outcome in a word on every way out below. Here and not earlier, so a call the
+            // validator made -- which is this batch, alone -- is told like the model's own,
+            // and a batch STUCK ends above opens no line it would never settle.
+            RunActivity.Call recording =
+                activity.called(
+                    transcript.conversationId(),
+                    definition.name(),
+                    wanted.name(),
+                    () -> ToolLines.salient(wanted.name(), wanted.arguments()));
+            String told;
+            // Around the whole of producing this result and not only around
+            // a dispatch that happens, so that every `tool_result` carries a
+            // measurement of the same thing: how long it took to arrive at
+            // what the model is about to be shown. A name nothing answers to
+            // therefore reports the time it took to write the refusal, which
+            // is honest and is near enough to nothing; a branch that left it
+            // unmeasured would put "no tool ran" and "nobody measured" into
+            // one column under one spelling.
+            if (wanted.name().equals(AgentRunTool.NAME) && !cancelled.getAsBoolean())
+              automaticLimits.budget(
+                  transcript.conversationId(), budget, definition, sessionId, transcript);
+            Instant askedAt = clock.get();
+            String result;
+            List<HookRecord> toolRecords = new ArrayList<>();
+            String fenced =
+                tool == null ? null : extras.fence().refusal(wanted.name(), wanted.arguments());
+            if (fenced == null && tool != null && skills != null) {
+              fenced = skills.refusal(transcript.conversationId(), wanted.name());
+            }
+            if (fenced == null && tool != null && bound != null)
+              fenced = bound.fence(wanted.name());
+            if (fenced == null && tool != null) {
+              List<AgentRules.Rule> applicable =
+                  fileRules.forTool(
+                      definition, home, sessionId, owner, wanted.name(), wanted.arguments());
+              List<AgentRules.Rule> unread =
+                  applicable.stream()
+                      .filter(
+                          rule ->
+                              !fileRulesForThisStep.contains(rule)
+                                  && !definition.prompt().contains(rule.text()))
+                      .toList();
+              if (!unread.isEmpty()) {
+                deliveredFileRules.addAll(unread);
+                fenced =
+                    "Applicable file instructions must be read before this operation. Nothing ran; "
+                        + "review these instructions and invoke the operation on the next model step.\n\n"
+                        + unread.stream()
+                            .map(
+                                rule ->
+                                    "Instructions from "
+                                        + rule.origin()
+                                        + " (scope: "
+                                        + rule.scope()
+                                        + "):\n"
+                                        + rule.text())
+                            .collect(Collectors.joining("\n\n"));
+              }
+            }
+            if (tool == null) {
+              result = noSuchTool(wanted.name(), offered.keySet());
+              told = ToolLines.REFUSED;
+            } else if (fenced != null) {
+              // Rule 4 (spec 2026-09-29 §3): refused before hooks, on the model's own
+              // arguments, and nothing ran, so the trail does not gain it. Told REFUSED, as
+              // a tool the run does not hold is: the harness said no, not a hook or a person.
+              result = fenced;
+              told = ToolLines.REFUSED;
+            } else {
+              Hooks active = activeHooks(route, harnessRun, skillChecks);
+              // run's gate stands around the chain and is no hook's to leave out:
+              // RunTool says why.
+              ToolPre preTool =
+                  tool instanceof RunTool run
+                      ? runGate(
+                          run,
+                          wanted.arguments(),
+                          home,
+                          hookContext,
+                          (context, arguments) ->
+                              toolPre(active, context, wanted.name(), arguments))
+                      : toolPre(active, hookContext, wanted.name(), wanted.arguments());
+              toolRecords.addAll(preTool.records());
+              if (tool instanceof RunTool run
+                  && run.waitingApproval().isPresent()
+                  && suspendedRunCalls != null) {
+                var question = run.waitingApproval().orElseThrow();
+                String approval = question.id();
+                suspendedRunCalls.retain(
+                    approval,
+                    transcript.conversationId(),
+                    sessionId,
+                    question.side(),
+                    callerHandle,
+                    new ToolCall(
+                        wanted.id(),
+                        wanted.name(),
+                        run.retainedArguments(preTool.arguments(), home)));
+                // The model's original stack, including all delegated parents and sibling calls,
+                // remains suspended. Neither waiting nor an approval answer enters its prompt.
+                toolRecords.forEach(r -> transcript.record(LoggedEntry.hook(r)));
+                toolRecords.clear();
+                String root = question.conversation();
+                var resumption = new RunCallResumption(suspendedRunCalls);
+                var executedAt = new AtomicReference<Instant>();
+                Optional<String> output;
+                try {
+                  output =
+                      resumption.await(
+                          approval,
+                          root,
+                          activeRunApprovals,
+                          cancelled,
+                          () -> {
+                            if (approvalDelivery != null) approvalDelivery.drain(root);
+                          },
+                          observed -> recordApprovalDecision(observed.approval(), transcript),
+                          retainedCall -> {
+                            executedAt.set(clock.get());
+                            return resumeRunCall(
+                                retainedCall,
+                                offered,
+                                home,
+                                cancelled,
+                                transcript,
+                                definition,
+                                hookContext,
+                                route,
+                                harnessRun,
+                                skillChecks,
+                                watch,
+                                recording,
+                                operation);
+                          },
+                          text -> {
+                            transcript.recordDurably(
+                                LoggedEntry.toolResult(wanted.id(), text)
+                                    .told(ToolLines.outcome(RunTool.NAME, text))
+                                    .took(
+                                        executedAt.get() == null
+                                            ? Duration.ZERO
+                                            : Duration.between(executedAt.get(), clock.get())));
+                          });
+                } catch (RuntimeException interrupted) {
+                  return stopped(
+                      interrupted instanceof SessionGoneException
+                          ? Ending.SESSION_GONE
+                          : Ending.UNAVAILABLE,
+                      "The command continuation was interrupted. Its retained execution record will be reconciled without replaying an uncertain command.",
+                      trail,
+                      steps - 1,
+                      modelCalls,
+                      describe(interrupted));
+                }
+                if (output.isEmpty()) {
+                  String cancelledResult =
+                      "The harness cancelled this retained command because its requesting run ended. Nothing ran.";
+                  approvals.deny(
+                      approval,
+                      RunApproval.RUN_ENDED,
+                      "The requesting run was cancelled before execution.");
+                  suspendedRunCalls.complete(approval, cancelledResult);
+                  transcript.recordDurably(
+                      LoggedEntry.toolResult(wanted.id(), cancelledResult).told(ToolLines.DENIED));
+                  suspendedRunCalls.acknowledged(approval);
+                  extras.end().approvalResumed(approval);
+                  recording.returned(ToolLines.DENIED);
+                  return stopped(Ending.CANCELLED, cancelledResult, trail, steps, modelCalls, "");
+                }
+                extras.end().approvalResumed(approval);
+                result = output.get();
+                history.add(ChatMessage.tool(wanted.id(), result));
+                results.add(result);
+                told = ToolLines.outcome(RunTool.NAME, result);
+                outcomes.add(told);
+                recording.returned(told);
+                if (executedAt.get() != null) trail.add(RunTool.NAME);
+                continue;
+              }
+              if (preTool.isDenied()) {
+                // Refused before it ran, in words the model can act on. Not
+                // added to the trail: nothing ran.
+                // A question put to a person is not a refusal, and reads as what it is.
+                boolean awaiting = tool instanceof RunTool run && run.waitingApproval().isPresent();
+                result =
+                    awaiting
+                        ? preTool.denied()
+                        : "the call was refused by a hook: " + preTool.denied();
+                told = awaiting ? ToolLines.ASKED : ToolLines.DENIED;
+              } else {
+                trail.add(wanted.name());
+                // THE TOOL'S OWN SCHEMA NAME, AND NOT wanted.name(). The two
+                // are equal here — this branch is reached because the offered
+                // map answered to the name the model sent — so this is not a
+                // correctness fix but a containment one: reading the name off
+                // something this server registered makes it impossible for a
+                // model-supplied string to reach a listener even if the map
+                // is later keyed some other way. The arguments are not passed
+                // and there is no parameter for them; JobWatch says why.
+                watch.toolCalled(definition.name(), tool.schema().name());
+                try {
+                  // The model's arguments, or tool.pre's rewrite of them,
+                  // and otherwise untouched, empty string included: a
+                  // model calling a tool that needs nothing sends "",
+                  // ToolCall guarantees it is never null, and
+                  // ToolArguments documents what Jackson does with it.
+                  // The tool's own permission check -- the fence, inside
+                  // run -- judges whatever actually runs, so a rewrite is
+                  // checked exactly once, on what is executed.
+                  if (confined)
+                    retainedResources.require(
+                        home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
+                  admittedAuthority.run();
+                  if (operation != null) operations.require(operation);
+                  if (operation != null) {
+                    var targets = OperationToolTargets.decode(wanted.name(), preTool.arguments());
+                    for (String project : targets.projects())
+                      if (!home.project().equals(project))
+                        throw new CallerFault("Tool target exceeds operation home");
+                    if (wanted.name().equals(MemoryTools.READ_NAME))
+                      operations.requireReadTargets(operation, home, targets.resources());
+                    else operations.requireTargets(operation, home, targets.resources());
+                  }
+                  tool.calledAs(wanted.id());
+                  // Internal grants come from the admitted definition. External provider proxies
+                  // recheck their additional authority inside run, alongside tool-owned access
+                  // checks.
+                  if (tool instanceof AgentTool.ContentTool typed && typed.typedResults(home)) {
+                    AgentTool.Result returned =
+                        typed.runResult(
+                            preTool.arguments(), home, usageFor(transcript, definition, steps));
+                    result = usable(returned.text(), wanted.name());
+                    observation =
+                        returned.observation() == null
+                            ? null
+                            : returned.observation().afterHook(false);
+                  } else {
+                    result =
+                        usable(
+                            transcript.usage().status()
+                                    == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                                ? tool.run(preTool.arguments(), home)
+                                : tool.run(
+                                    preTool.arguments(),
+                                    home,
+                                    usageFor(transcript, definition, steps)),
+                            wanted.name());
+                  }
+                  String providerText = result;
+                  // The after-tool check is a disclosure gate: it decides whether the
+                  // model may see what the tool returned, and cannot undo what the tool
+                  // did (writes are fenced in their own transactions). Every check in
+                  // this block is an authority or retention check, so any CallerFault
+                  // refusal from it means authority changed while the tool ran and gets
+                  // the model-facing explanation below. Infrastructure failures are not
+                  // CallerFaults and keep the generic tool-fault path.
+                  boolean authorityWithdrawn = false;
+                  try {
+                    admittedAuthority.run();
+                    if (operation != null) operations.require(operation);
+                    if (confined)
+                      retainedResources.require(
+                          home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
+                  } catch (CallerFault withdrawn) {
+                    authorityWithdrawn = true;
+                  }
+                  if (authorityWithdrawn) {
+                    // The result and tool.post are both skipped: nothing the tool
+                    // returned reaches the model or a hook. The run ends at the next
+                    // step's check, as it would for any other revocation.
+                    result = withheldForAuthority(wanted.name());
+                    told = ToolLines.ERROR;
+                  } else {
+                    ToolPost postTool =
+                        toolPost(
+                            activeHooks(route, harnessRun, skillChecks),
+                            hookContext,
+                            wanted.name(),
+                            preTool.arguments(),
+                            result);
+                    toolRecords.addAll(postTool.records());
+                    // Through usable again: a hook that redacts to nothing
+                    // must not hand the model the blank result usable
+                    // exists to replace.
+                    result = usable(postTool.result(), wanted.name());
+                    if (observation != null)
+                      observation =
+                          observation.afterHook(!withheld(postTool) && result.equals(providerText));
+                    // A result a tool.post hook withheld is an error whatever it read;
+                    // a delegate's call is its ending; anything else is read off what
+                    // the model is shown, a redaction included.
+                    Outcome.Ending delegate =
+                        tool instanceof AgentRunTool runner ? runner.returned() : null;
+                    told =
+                        withheld(postTool)
+                            ? ToolLines.ERROR
+                            : delegate != null
+                                ? ToolLines.delegation(delegate)
+                                : ToolLines.outcome(wanted.name(), result);
+                  }
+                } catch (AgentRunTool.SubAgentFailed child) {
+                  // Its own clause, above the general one, and not folded
+                  // into dependencyFailure: the ending differs. A child
+                  // that could not reach what it depends on is the same
+                  // class of failure as a dead endpoint here — see
+                  // AgentRunTool for why it is not a tool result — but a
+                  // caller reading UNAVAILABLE would look for a broken
+                  // endpoint of this run's own, and the thing to look at
+                  // is one agent further down. The detail names it.
+                  //
+                  // steps - 1 for the reason the two clauses below give:
+                  // this step's tool results were never appended, so the
+                  // step did not complete, while the model call that
+                  // asked for them was made and is counted.
+                  //
+                  // What the hooks decided about this call is written
+                  // first, here and before the two returns below: the
+                  // run ends, but a rewrite that happened still happened.
+                  // The tool line is settled first on all three: the run ends, and a
+                  // line left open would read as the current activity forever.
+                  recording.returned(ToolLines.ERROR);
+                  withParked(toolRecords, runHooks)
+                      .forEach(record -> transcript.record(LoggedEntry.hook(record)));
+                  return stopped(
+                      Ending.SUB_AGENT_FAILED,
+                      child.sentence(),
+                      trail,
+                      steps - 1,
+                      modelCalls,
+                      child.detail());
+                } catch (OperationFence.Withdrawn withdrawn) {
+                  // The tool's in-transaction write fence refused: its transaction rolled back,
+                  // but earlier committed units (a receipt, a log) may stand. Same words as the
+                  // after-tool check, never the tool's own "refused", and tool.post is skipped.
+                  result = withheldForAuthority(wanted.name());
+                  told = ToolLines.ERROR;
+                } catch (RuntimeException failed) {
+                  if (failed instanceof SessionGoneException) {
+                    // ABOVE dependencyFailure AND NOT INSIDE IT, AND THE
+                    // ORDER IS THE WHOLE MECHANISM. SessionGoneException
+                    // extends WorkspaceUnavailableException, which that
+                    // method names, so both clauses match and the first
+                    // one wins — swap them and this ending becomes
+                    // unreachable with every test about UNAVAILABLE still
+                    // green. a_session_that_went_away_is_its_own_ending
+                    // and a_disk_that_went_away_is_not_a_session_that_went_away
+                    // are the pair that fails in one direction each.
+                    //
+                    // The subclass rather than a sibling is deliberate
+                    // and is argued in SessionGoneException: a build that
+                    // never learned about this clause still ends the run
+                    // as UNAVAILABLE, which is the safe direction, rather
+                    // than handing the model a tool result about a client
+                    // that is not there.
+                    //
+                    // steps - 1 for the reason the clause below gives.
+                    recording.returned(ToolLines.ERROR);
+                    withParked(toolRecords, runHooks)
+                        .forEach(record -> transcript.record(LoggedEntry.hook(record)));
+                    return stopped(
+                        Ending.SESSION_GONE,
+                        "This run could not go on: the client session whose files"
+                            + " it was working in went away.",
+                        trail,
+                        steps - 1,
+                        modelCalls,
+                        wanted.name() + ": " + describe(failed));
+                  }
+                  if (dependencyFailure(failed)) {
+                    // steps - 1, matching the LlmException path above
+                    // and Outcome.steps's own definition: a step is one
+                    // model call plus every tool result it asked for,
+                    // and this one's results were never appended. The
+                    // increment has already happened because the model
+                    // call did return; counting the step anyway would
+                    // report a step that did not complete, and the two
+                    // unavailable paths would disagree about the same
+                    // fact for no reason a reader could find.
+                    recording.returned(ToolLines.ERROR);
+                    withParked(toolRecords, runHooks)
+                        .forEach(record -> transcript.record(LoggedEntry.hook(record)));
+                    return stopped(
+                        Ending.UNAVAILABLE,
+                        "This run could not go on: something the tool '"
+                            + wanted.name()
+                            + "' needs could not be reached.",
+                        trail,
+                        steps - 1,
+                        modelCalls,
+                        wanted.name() + ": " + describe(failed));
+                  }
+                  result =
+                      "the tool '"
+                          + wanted.name()
+                          + "' failed: "
+                          + describe(failed)
+                          + ". This is a fault in the tool rather than in what you sent"
+                          + " it; you may try something else.";
+                  told = ToolLines.ERROR;
+                }
+              }
+            }
+            Duration toolTook = Duration.between(askedAt, clock.get());
+            history.add(ChatMessage.tool(wanted.id(), result));
+            results.add(result);
+            outcomes.add(told);
+            // Recorded where it is appended, so that the four returns above
+            // -- STUCK, SUB_AGENT_FAILED, SESSION_GONE and a dependency
+            // failure -- leave the log in exactly the state they leave the
+            // history in: a declared call with nothing answering it. That is
+            // not a gap to be repaired here. It is the fact, and
+            // `Projection` is what a later request reads it through.
+            LoggedEntry toolEntry =
+                LoggedEntry.toolResult(wanted.id(), result)
+                    .observing(observation)
+                    .told(told)
+                    .took(toolTook);
+            if (observation == null) transcript.record(toolEntry);
+            else {
+              try {
+                pictures.addAll(transcript.recordToolResult(toolEntry));
+              } catch (RuntimeException unrecorded) {
+                return stopped(
+                    Ending.UNAVAILABLE,
+                    "The tool observation could not be retained durably. Its invocation remains the recovery source; no image was sent to the model.",
+                    trail,
+                    steps - 1,
+                    modelCalls,
+                    describe(unrecorded));
+              }
+            }
+            // A command that did not end ok is recorded with the end of what it answered,
+            // from this result -- the harness's own, never the model's words about it -- so the
+            // delegation facts footer can say how it failed (ToolLines.tail).
+            recording.returned(
+                told, recordedOutput(tool == null ? null : tool.schema().name(), told, result));
+            withParked(toolRecords, runHooks)
+                .forEach(record -> transcript.record(LoggedEntry.hook(record)));
           }
-          // requested: this text is the tool's sentence, not the model's -- which
-          // Orchestrations.route must be able to tell (see Outcome#requested).
-          return new Outcome(
-              ended.get().ending(), ended.get().text(), steps, modelCalls, "", Pace.NONE, true);
         }
+        if (!pictures.isEmpty()) history.add(Projection.images(pictures));
+        // STEP.POST, AFTER THE WHOLE BATCH'S RESULTS AND BEFORE THE NOTES ARE
+        // SENT, so a hook's note goes where Repeats' does: never between two
+        // tool results, which the contract does not allow.
+        StepPost afterStep =
+            stepPost(
+                activeHooks(route, harnessRun, skillChecks),
+                hookContext.withUsage(usageFor(transcript, definition, steps)),
+                new Step(
+                    steps,
+                    completion.servedBy() == null ? null : completion.servedBy().wireModel(),
+                    asked,
+                    results,
+                    thinking,
+                    outcomes));
+        notes.addAll(afterStep.notes());
+        afterStep.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+        // AFTER the results and never instead of one. The tool message
+        // above carries exactly what the tool produced, which is what keeps
+        // a history — and the archive built from it — a record of what
+        // actually happened rather than of what this runtime wished had.
+        for (String note : notes) {
+          history.add(ChatMessage.user(note));
+          // Recorded although it will never be projected. The nudge really
+          // was put in front of the model, so a log that omitted it would
+          // not be a record of what happened; and it must not be projected,
+          // because a later turn would be nudged again about a repetition
+          // that stopped several turns ago. Recorded and invisible is the
+          // whole shape EntryKind exists to make expressible.
+          transcript.record(LoggedEntry.runtimeNote(note));
+        }
+        // A TURN A TOOL ASKED TO END ENDS HERE, AND HERE IS THE ONLY PLACE IT CAN. This is the
+        // first line at which the step is whole: every call the batch declared has its tool
+        // result in the history and the log, with its hook records and the notes after them.
+        // One line earlier -- inside the batch -- would leave the calls after the tripping one
+        // unanswered, which is the malformed history TurnEnd exists not to throw into. One line
+        // later is the top of the loop, where the cap, cancellation and the budget are asked,
+        // and a turn that has ended must not be reported as capped or out of budget because it
+        // happened to end on the boundary. `steps` already counts this step, and correctly:
+        // its results were all appended, which is Outcome.steps' definition of a completed one.
+        //
+        // A request never overrides a stopping ending. STUCK, SUB_AGENT_FAILED, SESSION_GONE
+        // and a dependency failure all return from inside the batch, so a batch that tripped
+        // this and then broke never gets here. Its text is the tool's own sentence rather than
+        // `stopped`'s, because it is not a run that stopped short: TurnEnd refused a blank one.
+        //
+        // A REQUESTED ANSWER IS RECORDED HERE, as the ANSWERED branch above records a model's.
+        // Compaction's TurnTranscript.closed writes a closing answer for every ending but
+        // ANSWERED, because for that one the loop already has; a finish that returned without
+        // this line would leave a turn that answered with no answer in its log. What is kept
+        // from that branch is the entry and nothing else: no duration or invocation, because
+        // no model call produced this text -- a tool's argument did, and the call that carried
+        // it is already recorded above with its own -- and no prompt.post pass, because that
+        // stage is the model's reply being shaped and this is not one. Not added to `history`
+        // either, matching that branch: the loop returns with it.
+        if (extras.end() != null) {
+          Optional<TurnEnd.Requested> ended = extras.end().requested();
+          if (ended.isPresent()) {
+            if (ended.get().ending() == Ending.ANSWERED) {
+              transcript.record(LoggedEntry.answer(ended.get().text(), List.of()));
+            }
+            // requested: this text is the tool's sentence, not the model's -- which
+            // Orchestrations.route must be able to tell (see Outcome#requested).
+            return new Outcome(
+                ended.get().ending(), ended.get().text(), steps, modelCalls, "", Pace.NONE, true);
+          }
+        }
+        // The step is whole and the turn goes on: the boundary a fold inside it may run at.
+        aStepEnded = true;
       }
-      // The step is whole and the turn goes on: the boundary a fold inside it may run at.
-      aStepEnded = true;
     }
   }
 
@@ -4657,6 +4714,23 @@ public final class JobRuntime {
                     .accept(revision));
     }
     FileTools.Reads reads = new FileTools.Reads(codeMap);
+    // The in-transaction fence for tools whose writes own a database transaction (relay_publish
+    // and the information_write paths). It repeats the after-tool check's authority -- the
+    // RunAdmission, then the retained operation when there is one -- but inside the write, where
+    // a revocation still rolls the write back. Read through the field at call time, as the other
+    // checks here are. docs/operation-write-fences.md lists which tools are fenced.
+    // With no admission and no operation it does nothing, exactly as the after-tool block. A
+    // refusal is rethrown as OperationFence.Withdrawn, which tools cannot mistake for an ordinary
+    // CallerFault "refused" result; the tool loop maps it to the withheld-result wording.
+    OperationFence writeFence =
+        () -> {
+          try {
+            admittedAuthority.run();
+            if (operation != null) operations.require(operation);
+          } catch (CallerFault withdrawn) {
+            throw new OperationFence.Withdrawn(withdrawn);
+          }
+        };
     Map<String, AgentTool> offered = new LinkedHashMap<>();
     for (String name : definition.tools()) {
       if (messaging != null && SendMessageTool.NAME.equals(name)) {
@@ -4809,7 +4883,8 @@ public final class JobRuntime {
                         || ScriptProgram.isScript(definition.prompt())
                     ? RelayPublishing.DefinitionKind.ORCHESTRATION
                     : RelayPublishing.DefinitionKind.AGENT,
-                cancelled);
+                cancelled,
+                writeFence);
       // Both of this run's information axes, named once for the four bindings that take
       // them. This is the site where the conversation record is in hand, so it is where
       // the decision of WHICH actor to build belongs; informationActorFor carries the
@@ -4970,7 +5045,8 @@ public final class JobRuntime {
                       if (operation == null || cancelled.getAsBoolean())
                         throw new IllegalStateException("Query run is unavailable");
                       operations.require(operation);
-                    });
+                    })
+                .withWriteFence(writeFence);
       }
       if (runInformation != null && tool instanceof DocumentTools.Search search) {
         tool =
@@ -5052,6 +5128,14 @@ public final class JobRuntime {
           (name, tool) -> messaging.protect(tool, definition, transcript.conversationId()));
     reads.offered(offered.keySet());
     return offered;
+  }
+
+  /** What the model is told when authority changed while a tool ran. */
+  private static String withheldForAuthority(String tool) {
+    return "the result of '"
+        + tool
+        + "' was withheld because this run's authority changed while it"
+        + " ran. Any change the tool made may already have happened.";
   }
 
   /**

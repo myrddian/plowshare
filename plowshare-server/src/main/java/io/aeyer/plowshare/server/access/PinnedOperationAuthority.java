@@ -3,8 +3,8 @@ package io.aeyer.plowshare.server.access;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
-import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.*;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
@@ -34,6 +34,12 @@ public final class PinnedOperationAuthority implements OperationAuthority {
 
   /** Server configuration, never a caller's argument; absent until an operator configures it. */
   private final ContainmentBounds bounds;
+
+  /**
+   * Remembers admissions whose full walk passed recently, so repeated rechecks of one operation are
+   * cheap. {@link VerifiedAdmissions#none()} unless composition supplies a bounded one.
+   */
+  private final VerifiedAdmissions verified;
 
   public PinnedOperationAuthority(
       IdentityRepository identities,
@@ -86,7 +92,8 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       OperationRecords records,
       ResourceScopeRepository resources,
       io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
-      org.springframework.beans.factory.ObjectProvider<ContainmentBounds> bounds) {
+      ObjectProvider<ContainmentBounds> bounds,
+      ObjectProvider<VerifiedAdmissions> verified) {
     this(
         identities,
         grants,
@@ -95,7 +102,8 @@ public final class PinnedOperationAuthority implements OperationAuthority {
         records,
         resources,
         knowledge,
-        bounds.getIfAvailable(ContainmentBounds::absent));
+        bounds.getIfAvailable(ContainmentBounds::absent),
+        verified.getIfAvailable(VerifiedAdmissions::none));
   }
 
   public PinnedOperationAuthority(
@@ -107,6 +115,33 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       ResourceScopeRepository resources,
       io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
       ContainmentBounds bounds) {
+    this(
+        identities,
+        grants,
+        authority,
+        members,
+        records,
+        resources,
+        knowledge,
+        bounds,
+        VerifiedAdmissions.none());
+  }
+
+  /**
+   * @param verified the bounded memory of passed walks that {@link #require} may answer from; see
+   *     {@link BoundedVerifiedAdmissions} for its key, validity and staleness bound
+   */
+  public PinnedOperationAuthority(
+      IdentityRepository identities,
+      ScopedGrantRepository grants,
+      ScopedAuthority authority,
+      ProjectMembers members,
+      OperationRecords records,
+      ResourceScopeRepository resources,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
+      ContainmentBounds bounds,
+      VerifiedAdmissions verified) {
+    this.verified = Objects.requireNonNull(verified);
     this.bounds = Objects.requireNonNull(bounds);
     this.knowledge = Objects.requireNonNull(knowledge);
     this.identities = Objects.requireNonNull(identities);
@@ -147,11 +182,14 @@ public final class PinnedOperationAuthority implements OperationAuthority {
         members.authorityAccount(executor).orElseThrow(PinnedOperationAuthority::denied);
     var recipient = GrantRecipient.account(identities.account(source).id());
     var live = grants.live(recipient);
+    // One walk for the admission: grants already refused or accepted for one action share their
+    // lineage and manifest reads with the next action.
+    var walk = authority.walk(recipient, live);
     var support = new ArrayList<Support>();
     for (var action : actions) {
       var binding =
           live.stream()
-              .filter(grant -> authority.allowsUsing(recipient, target, action, grant.id()))
+              .filter(grant -> walk.allows(target, action, grant.id()))
               .findFirst()
               .orElseThrow(PinnedOperationAuthority::denied);
       support.add(new Support(action, binding.id()));
@@ -321,8 +359,24 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     if (depth > bounds.maxDepth()) throw denied();
   }
 
+  /**
+   * Rechecks the admission's live authority and its whole retained ancestry.
+   *
+   * <p>A repeat of an equal admission may be answered from the configured {@link
+   * VerifiedAdmissions} instead of walking: only after that admission passed this walk under the
+   * same authority snapshot, within the configured bound (2 s by default), and never inside a
+   * transaction that may hold its own writes. A revocation, membership, role, Application manifest
+   * or operation record change can therefore take up to that bound to stop an admission that
+   * already passed. A refusal is never remembered.
+   */
   @Override
   public void require(Admission admission) {
+    Objects.requireNonNull(admission);
+    verified.require(admission, () -> walk(admission));
+  }
+
+  /** The full live check {@link #require} performs when it cannot answer from memory. */
+  private void walk(Admission admission) {
     var visited = new HashSet<UUID>();
     for (int depth = 0; ; depth++) {
       if (depth >= 64 || !visited.add(admission.id())) throw denied();
@@ -440,10 +494,15 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       throw denied();
     var role =
         members.role(project, admission.executor()).orElseThrow(PinnedOperationAuthority::denied);
+    // One read of the source's live grants serves every support item: they all name grants of the
+    // same recipient, and the grants are selected by id from this list; the walk also shares
+    // lineage and manifest reads between items that name one grant. Read lazily so an
+    // admission with no support, or one refused by its role ceiling first, reads nothing.
+    ScopedAuthority.Walk walk = null;
     for (var item : admission.support()) {
-      if (!ceiling(role, item.action())
-          || !authority.allowsUsing(admission.source(), scope, item.action(), item.grant()))
-        throw denied();
+      if (!ceiling(role, item.action())) throw denied();
+      if (walk == null) walk = authority.walk(admission.source(), grants.live(admission.source()));
+      if (!walk.allows(scope, item.action(), item.grant())) throw denied();
     }
     return containment;
   }
@@ -521,7 +580,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     records.started(admission.id(), job);
   }
 
-  private static CallerFault denied() {
-    return new CallerFault("Operation is outside its retained scoped authority");
+  private static AuthorityWithdrawnException denied() {
+    return new AuthorityWithdrawnException("Operation is outside its retained scoped authority");
   }
 }

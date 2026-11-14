@@ -1,28 +1,55 @@
 package io.aeyer.plowshare.server.access;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.server.access.AuthorityIds.AccountId;
 import io.aeyer.plowshare.server.archive.CachedProjectMembers;
 import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.auth.AdminStore;
+import io.aeyer.plowshare.server.auth.CachedSessionAuthority;
+import io.aeyer.plowshare.server.auth.JdbcAccountAdministrationRepository;
+import io.aeyer.plowshare.server.auth.SessionAuthority;
+import io.aeyer.plowshare.server.auth.SessionAuthority.Session;
+import io.aeyer.plowshare.server.auth.StoredSessionAuthority;
+import io.aeyer.plowshare.server.cache.BoundedSnapshotCache;
+import io.aeyer.plowshare.server.cache.JdbcProjectionVersions;
+import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
+import io.aeyer.plowshare.server.cache.VersionedProjectionCache;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
 import io.aeyer.plowshare.server.testing.AuthorityFixtures;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -38,6 +65,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * disablement, token scope ceilings, membership removal, delegated grant expiry and revocation,
  * client membership and personal spaces. A change to one of those SQL functions that is not
  * mirrored in Java fails here.
+ *
+ * <p>Every state also compares the snapshot's live grants for every (account, agent) recipient, the
+ * lineage of every grant and an unknown id, and the socket session facts of every account at
+ * several versions with {@link JdbcScopedGrantRepository} and {@link AdminStore}, including order.
+ * The fixture includes delegated agent grants (one issued by an agent, one expiring) so these
+ * comparisons see agent recipients, multi-link chains and their revocation.
  */
 @Tag("full-db")
 @Testcontainers
@@ -55,6 +88,29 @@ class AuthoritySnapshotDifferentialDatabaseTest {
   private final List<String> handles =
       List.of("alice", "bob", "carol", "admin", "owner", "@service/probe", "missing");
   private final List<String> projects = new ArrayList<>();
+  private AdminStore accounts;
+
+  /** Agent keys compared in every state; {@code ghost} never holds a grant. */
+  private static final List<String> AGENTS = List.of("helper", "scout", "ghost");
+
+  /** Comparisons per kind across the class, reported once after all tests. */
+  private static final Map<String, Long> COMPARISONS = new TreeMap<>();
+
+  private static final AtomicInteger STATES = new AtomicInteger();
+
+  @AfterAll
+  static void report() {
+    System.out.println(
+        "AuthoritySnapshotDifferentialDatabaseTest states="
+            + STATES
+            + " comparisons="
+            + COMPARISONS);
+  }
+
+  private static void same(String kind, Object expected, Object actual, String message) {
+    assertEquals(expected, actual, message);
+    COMPARISONS.merge(kind, 1L, Long::sum);
+  }
 
   @BeforeAll
   static void migrate() {
@@ -71,6 +127,7 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     AuthorityFixtures.truncate(jdbc, "TRUNCATE admins,projects CASCADE");
     stored = new JdbcProjectMembers(jdbc);
     grants = new JdbcScopedGrantRepository(jdbc);
+    accounts = new AdminStore(jdbc);
     repository = new JdbcAuthoritySnapshotRepository(jdbc, 10_000);
     jdbc.update(
         "INSERT INTO admins(handle,password_hash) VALUES('alice','fixture'),('bob','fixture'),('carol','fixture')");
@@ -98,6 +155,20 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     jdbc.update(
         "INSERT INTO service_token_scopes(token_id,project_id,role) SELECT ?,id,'VIEWER' FROM projects WHERE name='two'",
         token);
+    // Delegated agent grants on 'one': alice forces MANAGER onto her agent 'helper', which issues
+    // READER to bob's agent 'scout' (a two-link chain issued by an agent); alice also issues an
+    // expiring CONTRIBUTOR to her own 'scout'.
+    delegate("alice", null, "one", "alice", "helper", "MANAGER", true, null);
+    delegate("alice", "helper", "one", "bob", "scout", "READER", false, null);
+    delegate(
+        "alice",
+        null,
+        "one",
+        "alice",
+        "scout",
+        "CONTRIBUTOR",
+        false,
+        Timestamp.from(Instant.now().plusSeconds(3600)));
     projects.clear();
     projects.addAll(jdbc.queryForList("SELECT name FROM projects ORDER BY name", String.class));
     projects.addAll(List.of("absent", "personal:" + "00", PersonalSpaces.name("missing")));
@@ -109,6 +180,45 @@ class AuthoritySnapshotDifferentialDatabaseTest {
         handle,
         role,
         project);
+  }
+
+  /**
+   * Issues one ROLE grant to {@code recipient}'s {@code agent}, from the issuer's (or its agent's)
+   * live SELF grant on {@code project}; the V216 insert trigger checks it as in service.
+   */
+  private void delegate(
+      String issuer,
+      String issuerAgent,
+      String project,
+      String recipient,
+      String agent,
+      String role,
+      boolean forced,
+      Timestamp expires) {
+    int issued =
+        jdbc.update(
+            "INSERT INTO authority_grants(subject_account,subject_agent,scope_id,role_id,requested_role,"
+                + "issuer_account,issuer_agent,issuing_grant,provenance,manager_forced,expires_at)"
+                + " SELECT target.id,?,parent.scope_id,role.id,?,parent.subject_account,"
+                + "parent.subject_agent,parent.id,'ROLE',?,?"
+                + " FROM authority_grants parent JOIN authority_accounts source"
+                + " ON source.id=parent.subject_account AND source.legacy_handle=?"
+                + " JOIN authority_scopes scope ON scope.id=parent.scope_id"
+                + " JOIN projects p ON p.id=scope.project_id"
+                + " CROSS JOIN authority_accounts target CROSS JOIN authority_roles role"
+                + " WHERE parent.revoked_at IS NULL AND parent.coverage='SELF' AND p.name=?"
+                + " AND parent.subject_agent IS NOT DISTINCT FROM CAST(? AS text)"
+                + " AND target.legacy_handle=? AND role.name=? LIMIT 1",
+            agent,
+            role,
+            forced,
+            expires,
+            issuer,
+            project,
+            issuerAgent,
+            recipient,
+            role);
+    assertEquals(1, issued, "delegated " + role + " to " + recipient + "/" + agent);
   }
 
   private AuthoritySnapshot snapshot() {
@@ -138,7 +248,10 @@ class AuthoritySnapshotDifferentialDatabaseTest {
 
   /** Every snapshot method and every cached membership read against its SQL source. */
   private void parity(String state) {
+    STATES.incrementAndGet();
     var snapshot = snapshot();
+    grantParity(state, snapshot);
+    sessionParity(state, snapshot);
     var members = new CachedProjectMembers(stored, () -> Optional.of(snapshot));
     var live = new HashMap<UUID, Integer>();
     jdbc.query(
@@ -202,6 +315,74 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     }
   }
 
+  /**
+   * {@code live} for every (account, agent) recipient and {@code lineage} for every grant id and an
+   * unknown one, element for element and in order.
+   */
+  private void grantParity(String state, AuthoritySnapshot snapshot) {
+    var agents = new ArrayList<Optional<String>>();
+    agents.add(Optional.empty());
+    AGENTS.forEach(agent -> agents.add(Optional.of(agent)));
+    for (UUID account :
+        jdbc.queryForList("SELECT id FROM authority_accounts ORDER BY id", UUID.class))
+      for (var agent : agents) {
+        var recipient = new GrantRecipient(new AccountId(account), agent);
+        same(
+            "live",
+            grants.live(recipient),
+            snapshot.live(recipient),
+            state + ": live " + recipient);
+      }
+    var ids = new ArrayList<>(jdbc.queryForList("SELECT id FROM authority_grants", UUID.class));
+    ids.add(UUID.randomUUID());
+    for (UUID id : ids)
+      same("lineage", grants.lineage(id), snapshot.lineage(id), state + ": lineage " + id);
+  }
+
+  /**
+   * {@code sessionCurrent} for every account (fixture handles, every {@code admins} row and an
+   * unknown handle) at versions 0..2 and its stored version and the next, and one {@code
+   * currentSessions} batch of all of them, against the snapshot's session fence alone and through
+   * {@link CachedSessionAuthority}.
+   */
+  private void sessionParity(String state, AuthoritySnapshot snapshot) {
+    var everyone = new HashSet<>(handles);
+    everyone.addAll(jdbc.queryForList("SELECT handle FROM admins", String.class));
+    var sessions = new HashSet<Session>();
+    for (String handle : everyone) {
+      var versions = new HashSet<>(List.of(0L, 1L, 2L));
+      jdbc.queryForList("SELECT session_version FROM admins WHERE handle=?", Long.class, handle)
+          .forEach(
+              version -> {
+                versions.add(version);
+                versions.add(version + 1);
+              });
+      for (long version : versions) {
+        sessions.add(new Session(handle, version));
+        same(
+            "sessionCurrent",
+            accounts.sessionCurrent(handle, version),
+            snapshot.activeSessionVersion(handle).filter(fence -> fence == version).isPresent(),
+            state + ": sessionCurrent " + handle + "@" + version);
+      }
+    }
+    var expected = accounts.currentSessions(sessions);
+    var inMemory = new HashSet<Session>();
+    for (var session : sessions)
+      if (snapshot
+          .activeSessionVersion(session.handle())
+          .filter(fence -> fence == session.version())
+          .isPresent()) inMemory.add(session);
+    same("currentSessions", expected, Set.copyOf(inMemory), state + ": currentSessions");
+    same(
+        "currentSessions",
+        expected,
+        new CachedSessionAuthority(
+                new StoredSessionAuthority(accounts), () -> Optional.of(snapshot))
+            .currentSessions(sessions),
+        state + ": cached currentSessions");
+  }
+
   @Test
   void everyAuthorityChangeGivesTheSameVerdictInMemoryAsInSql() {
     parity("baseline");
@@ -233,6 +414,18 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     mutations.put(
         "owner left project one",
         "DELETE FROM project_members WHERE handle='owner' AND project_id=(SELECT id FROM projects WHERE name='one')");
+    mutations.put(
+        "alice sessions revoked",
+        "UPDATE admins SET session_version=session_version+1 WHERE handle='alice'");
+    mutations.put(
+        "service principal sessions revoked",
+        "UPDATE admins SET session_version=session_version+1 WHERE handle='@service/probe'");
+    mutations.put(
+        "helper delegation revoked",
+        "UPDATE authority_grants SET revoked_at=now(),version=version+1 WHERE subject_agent='helper'");
+    mutations.put(
+        "alice left project one",
+        "DELETE FROM project_members WHERE handle='alice' AND project_id=(SELECT id FROM projects WHERE name='one')");
     for (var mutation : mutations.entrySet()) {
       jdbc.update(mutation.getValue());
       parity(mutation.getKey());
@@ -333,5 +526,115 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     ProjectMembers members = new CachedProjectMembers(stored, AuthoritySnapshots.none());
     assertEquals(stored.role("one", "alice"), members.role("one", "alice"));
     assertEquals(stored.members("one"), members.members("one"));
+  }
+
+  /**
+   * The production composition (versioned cache, {@link CachedAuthoritySnapshots}, the grant and
+   * session decorators) against real AUTHORITY counters: a {@code session_version} bump through the
+   * administration path and a grant revocation through the repository each move the version, so the
+   * next answer is loaded again and reflects the change. Notification trust is not enabled here;
+   * {@code NotifiedProjectionDatabaseTest} bounds that path.
+   */
+  @Test
+  void aSessionRevocationAndAGrantRevocationInvalidateTheSnapshot() {
+    var authoritative =
+        new DriverManagerDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+    var versions = new JdbcProjectionVersions(jdbc, authoritative, 128);
+    var domains = Set.of(ProjectionVersions.Domain.AUTHORITY);
+    var signals = mock(ProjectionChangeSignals.class);
+    when(signals.subscribe(eq(domains), any()))
+        .thenAnswer(
+            call -> {
+              ProjectionChangeSignals.Observer observer = call.getArgument(1);
+              observer.stateChanged(new ProjectionChangeSignals.State(1, true));
+              return (ProjectionChangeSignals.Subscription) () -> {};
+            });
+    var loads = new AtomicInteger();
+    try (var cache =
+        new VersionedProjectionCache<Optional<AuthoritySnapshot>>(
+            new BoundedSnapshotCache<>(
+                new SnapshotCache.Namespace(UUID.randomUUID().toString(), "authority"),
+                new SnapshotCache.Limits(
+                    8, 4_000_000, 2, 4_000_000, 64, 64, 2, 32, Duration.ofSeconds(5))),
+            versions,
+            signals,
+            domains,
+            1_000_000)) {
+      var snapshots =
+          new CachedAuthoritySnapshots(
+              cache,
+              () -> {
+                loads.incrementAndGet();
+                return repository.load();
+              },
+              ReadAdmission.direct());
+      var cachedGrants = new CachedScopedGrantRepository(grants, snapshots);
+      SessionAuthority sessions =
+          new CachedSessionAuthority(
+              new StoredSessionAuthority(accounts) {
+                @Override
+                public boolean sessionCurrent(String handle, long version) {
+                  throw new AssertionError("An accepted session must not reach SQL");
+                }
+              },
+              snapshots);
+      long version = accounts.sessionVersion("alice");
+      assertTrue(sessions.sessionCurrent("alice", version));
+      assertTrue(sessions.sessionCurrent("alice", version));
+      assertEquals(1, loads.get(), "One load answers repeated checks while the version holds");
+
+      var token = versions.capture(domains).orElseThrow();
+      new JdbcAccountAdministrationRepository(jdbc).revokeSessions("alice");
+      assertFalse(versions.current(token), "A session_version bump moves AUTHORITY");
+      assertEquals(
+          Optional.of(version + 1),
+          snapshots.current().orElseThrow().activeSessionVersion("alice"));
+      assertEquals(2, loads.get());
+      assertEquals(
+          accounts.currentSessions(Set.of(new Session("alice", version))),
+          snapshots
+              .current()
+              .orElseThrow()
+              .activeSessionVersion("alice")
+              .filter(fence -> fence == version)
+              .map(fence -> Set.of(new Session("alice", fence)))
+              .orElse(Set.of()));
+      assertTrue(sessions.sessionCurrent("alice", version + 1));
+
+      UUID alice =
+          jdbc.queryForObject(
+              "SELECT id FROM authority_accounts WHERE legacy_handle='alice'", UUID.class);
+      var helper = GrantRecipient.agent(new AccountId(alice), "helper");
+      var bobScout =
+          GrantRecipient.agent(
+              new AccountId(
+                  jdbc.queryForObject(
+                      "SELECT id FROM authority_accounts WHERE legacy_handle='bob'", UUID.class)),
+              "scout");
+      var delegated = cachedGrants.live(helper);
+      assertEquals(1, delegated.size());
+      assertTrue(
+          cachedGrants.lineage(cachedGrants.live(bobScout).getFirst().id()).size() >= 3,
+          "scout, helper, alice's membership and its ancestry");
+      int before = loads.get();
+      var membership =
+          grants.live(GrantRecipient.account(new AccountId(alice))).stream()
+              .filter(binding -> binding.project().equals(Optional.of("one")))
+              .findFirst()
+              .orElseThrow();
+      token = versions.capture(domains).orElseThrow();
+      grants.revoke(
+          delegated.getFirst().id(),
+          delegated.getFirst().version(),
+          GrantRecipient.account(new AccountId(alice)),
+          membership.id());
+      assertFalse(versions.current(token), "A grant revocation moves AUTHORITY");
+      assertEquals(List.of(), cachedGrants.live(helper));
+      assertEquals(List.of(), cachedGrants.lineage(delegated.getFirst().id()));
+      assertEquals(grants.live(bobScout), cachedGrants.live(bobScout));
+      assertTrue(cachedGrants.live(bobScout).isEmpty(), "The agent-issued child lost its parent");
+      assertEquals(before + 1, loads.get(), "The revocation forced exactly one reload");
+    }
   }
 }

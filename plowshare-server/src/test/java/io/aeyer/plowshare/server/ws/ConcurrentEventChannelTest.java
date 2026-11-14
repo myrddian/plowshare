@@ -7,12 +7,16 @@ import static org.mockito.Mockito.*;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.protocol.transport.*;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot;
 import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.agents.Watchers;
+import io.aeyer.plowshare.server.auth.SessionAuthority;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
@@ -164,6 +168,47 @@ class ConcurrentEventChannelTest {
     } finally {
       release.complete(null);
     }
+  }
+
+  /** Counts session checks for one concurrent request whose handler asks the fence three times. */
+  private int sessionChecksPerRequest(Duration bound) throws Exception {
+    var snapshot = mock(AuthoritySnapshot.class);
+    var accounts = mock(SessionAuthority.class);
+    when(accounts.sessionCurrent(anyString(), anyLong())).thenReturn(true);
+    var router =
+        new FrameRouter(
+            Map.of(
+                "information.facets",
+                (payload, asking) -> {
+                  for (int i = 0; i < 3; i++) asking.queryValidity().run();
+                  return Outcome.ok(Map.of("done", true));
+                }));
+    try (var fixture =
+        new Fixture(
+            false,
+            router,
+            handler -> {
+              handler.useSocketAuthorization(new SocketAuthorization(accounts));
+              handler.configureSessionCheckReuse(bound, () -> Optional.of(snapshot), () -> 0L);
+            })) {
+      fixture.socket.getAttributes().put("plowshare.sessionVersion", 1L);
+      fixture.send("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
+      fixture.reply();
+      clearInvocations(accounts);
+      fixture.send("one", "information.facets", Map.of());
+      assertEquals("one", FrameJson.answering().readTree(fixture.reply()).path("id").asText());
+      var calls = mockingDetails(accounts).getInvocations().size();
+      return calls;
+    }
+  }
+
+  @Test
+  void one_request_costs_one_session_check_inside_the_bound() throws Exception {
+    // Frame receipt plus the request's own entry check; the handler, the post-handler fence and
+    // the disclosure fence reuse the entry result instead of asking again.
+    assertEquals(2, sessionChecksPerRequest(Duration.ofSeconds(2)));
+    // Before the change (and with notifications disabled) every one of those asked.
+    assertTrue(sessionChecksPerRequest(Duration.ZERO) >= 6);
   }
 
   @Test

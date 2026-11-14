@@ -1,11 +1,15 @@
 package io.aeyer.plowshare.server.information;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.*;
 import io.aeyer.plowshare.protocol.InformationNavigation.*;
+import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
 import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
+import io.aeyer.plowshare.server.access.KnowledgeReadScope;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.archive.*;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -56,6 +60,52 @@ class DocumentNavigationTest {
     verify(repository).lock();
     verify(repository).lockAccount("author");
     verifyNoMoreInteractions(repository);
+  }
+
+  @Test
+  void boundedRelationshipWriteRunsTheRunFenceAfterLocksAndBeforeTheWrite() {
+    var fence = mock(OperationFence.class);
+    var relationship = UUID.randomUUID();
+    var command = relationshipRemove(relationship);
+    when(repository.receipt(eq("author"), any())).thenReturn(Optional.empty());
+    when(repository.remove(any(), eq(relationship), eq(1L))).thenReturn(mock(Changed.class));
+
+    service.execute("author", command, KnowledgeReadScope.homeOnly(Home.of("research")), fence);
+
+    var order = inOrder(repository, fence);
+    order.verify(repository).lock();
+    order.verify(repository).lockAccount("author");
+    order.verify(fence).require();
+    order.verify(repository).receipt(eq("author"), any());
+    order.verify(repository).remove(any(), eq(relationship), eq(1L));
+  }
+
+  @Test
+  void aRevokedRunFenceStopsARelationshipWriteBeforeAnyReceiptOrMutation() {
+    var fence = mock(OperationFence.class);
+    var revoked = new AuthorityWithdrawnException("revoked");
+    doThrow(revoked).when(fence).require();
+    var command = relationshipRemove(UUID.randomUUID());
+
+    assertSame(
+        revoked,
+        assertThrows(
+            AuthorityWithdrawnException.class,
+            () ->
+                service.execute(
+                    "author", command, KnowledgeReadScope.homeOnly(Home.of("research")), fence)));
+
+    verify(repository, never()).receipt(any(), any());
+    verify(repository, never()).remove(any(), any(), anyLong());
+    verify(repository, never()).record(any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  private InformationRequest.RelationshipRemove relationshipRemove(UUID relationship) {
+    when(members.role("research", "author")).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
+    var project =
+        new InformationRequest.Selection(
+            new InformationRequest.Scope("project", "research", false), "documents", null);
+    return new InformationRequest.RelationshipRemove(project, UUID.randomUUID(), relationship, 1L);
   }
 
   @Test

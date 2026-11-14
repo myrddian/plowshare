@@ -151,7 +151,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     return new NotFoundFault("information is unavailable in this selection");
   }
 
-  private static <T> T decode(Map<String, Object> input, Class<T> type) {
+  /** Converts one JDBC row to its DTO; package-private for the differential database test. */
+  static <T> T decode(Map<String, Object> input, Class<T> type) {
     var row = new LinkedHashMap<String, Object>(input);
     row.replaceAll(
         (key, value) ->
@@ -256,8 +257,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * One statement-local authority relation over at most 100 explicit targets. Callers prepend this
    * CTE and bind {@link #targetArguments} first.
    */
-  private static final String ADMITTED_TARGETS =
-      "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets(?,?,?,?,?,?,?::uuid[],NULL,false,NULL,NULL,NULL)) ";
+  private static final String ADMITTED_CTE =
+      "admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets(?,?,?,?,?,?,?::uuid[],NULL,false,NULL,NULL,NULL))";
+
+  private static final String ADMITTED_TARGETS = "WITH " + ADMITTED_CTE + " ";
 
   private static List<Object> targetArguments(InformationContext context, List<UUID> ids) {
     var boundary = context.readBoundary();
@@ -367,83 +370,188 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         JdbcInformationCatalogueRepository::metadataWeight);
   }
 
-  private Optional<AuthorizedMetadata> loadMetadata(
+  /**
+   * The projected catalogue row of one readable revision, through {@link #oneRevision}. A bounded
+   * load returns only a row whose JSON projection fits {@code maximumBytes}.
+   *
+   * <p>Package-private for {@code KnowledgeReadabilityDifferentialDatabaseTest}.
+   */
+  Optional<AuthorizedMetadata> loadMetadata(
       InformationContext context, UUID revision, Long maximumBytes) {
-    var args = new ArrayList<Object>(selectionArgs(context));
-    args.add(revision);
-    String sql = SELECT + " WHERE " + readableSql(context) + " AND r.id=?";
-    if (maximumBytes != null) {
-      sql =
-          "WITH projected AS MATERIALIZED ("
-              + sql
-              + ") SELECT * FROM projected WHERE octet_length(to_jsonb(projected)::text)<=?";
-      args.add(maximumBytes);
-    }
-    var rows = jdbc.queryForList(sql, args.toArray());
+    var rows =
+        oneRevision(
+            context,
+            revision,
+            read -> {
+              var args = new ArrayList<Object>(read.arguments());
+              String sql = SELECT + read.join() + " WHERE " + read.where();
+              if (maximumBytes != null) {
+                sql =
+                    read.with(
+                        List.of("projected AS MATERIALIZED (" + sql + ")"),
+                        "SELECT * FROM projected WHERE octet_length(to_jsonb(projected)::text)<=?");
+                args.add(maximumBytes);
+              } else sql = read.with(sql);
+              return jdbc.queryForList(sql, args.toArray()).stream().findFirst();
+            });
     // A source may grow, disappear or lose readability after preflight. Never cache a truncated
     // projection or a false negative: retry the original current SQL outside shared admission.
     if (rows.isEmpty() && maximumBytes != null) throw new ProjectionCache.Bypass();
-    return rows.stream()
-        .map(row -> new AuthorizedMetadata(context, decode(row, Information.Revision.class)))
-        .findFirst();
+    return rows.map(
+        row -> new AuthorizedMetadata(context, decode(row, Information.Revision.class)));
   }
 
   public Optional<AuthorizedText> authorizedText(InformationContext context, UUID revision) {
     if (!textCache.enabled()) return loadText(context, revision, null);
     long bound = projectionBound(textCache.maxWeight(), context, 4);
-    var sizes =
-        jdbc.queryForList(
-            "SELECT "
-                + TEXT_BYTES
-                + " FROM information_revision_allowances r WHERE "
-                + readableSql(context)
-                + " AND r.id=?",
-            Long.class,
-            readArguments(context, revision));
+    var sizes = textBytes(context, revision);
     if (sizes.isEmpty()) return Optional.empty();
     return textCache.read(
         readKey(context, revision),
-        bound > 0 && sizes.getFirst() <= bound,
+        bound > 0 && sizes.get() <= bound,
         () -> loadText(context, revision, bound),
         () -> loadText(context, revision, null),
         JdbcInformationCatalogueRepository::textWeight);
   }
 
-  private Optional<AuthorizedText> loadText(
-      InformationContext context, UUID revision, Long maximumBytes) {
-    var args = new ArrayList<Object>(selectionArgs(context));
-    args.add(revision);
-    if (maximumBytes != null) args.add(maximumBytes);
-    var rows =
-        jdbc.query(
-            "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.content_hash,r.text_hash,r.generation,r.extracted_text FROM information_revision_allowances r WHERE "
-                + readableSql(context)
-                + " AND r.id=?"
-                + (maximumBytes == null ? "" : " AND " + TEXT_BYTES + "<=?"),
-            (rs, n) ->
-                new AuthorizedText(
-                    context,
-                    rs.getObject(1, UUID.class),
-                    rs.getObject(2, UUID.class),
-                    rs.getString(3),
-                    rs.getString(4),
-                    rs.getString(5),
-                    rs.getString(6),
-                    rs.getLong(7),
-                    rs.getString(8)),
-            args.toArray());
-    if (rows.isEmpty() && maximumBytes != null) throw new ProjectionCache.Bypass();
-    return rows.stream().findFirst();
+  /**
+   * The size of one readable revision's text projection, or empty when it is not readable; through
+   * {@link #oneRevision}. Package-private for {@code KnowledgeReadabilityDifferentialDatabaseTest}.
+   */
+  Optional<Long> textBytes(InformationContext context, UUID revision) {
+    return oneRevision(
+        context,
+        revision,
+        read ->
+            jdbc
+                .queryForList(
+                    read.with(
+                        "SELECT "
+                            + TEXT_BYTES
+                            + " FROM information_revision_allowances r"
+                            + read.join()
+                            + " WHERE "
+                            + read.where()),
+                    Long.class,
+                    read.arguments().toArray())
+                .stream()
+                .findFirst());
   }
 
-  private static final String TEXT_BYTES =
+  /**
+   * The text of one readable revision, through {@link #oneRevision}. A bounded load returns only a
+   * text whose projection fits {@code maximumBytes}. Package-private for {@code
+   * KnowledgeReadabilityDifferentialDatabaseTest}.
+   */
+  Optional<AuthorizedText> loadText(InformationContext context, UUID revision, Long maximumBytes) {
+    var rows =
+        oneRevision(
+            context,
+            revision,
+            read -> {
+              var args = new ArrayList<Object>(read.arguments());
+              if (maximumBytes != null) args.add(maximumBytes);
+              return jdbc
+                  .query(
+                      read.with(
+                          "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.content_hash,r.text_hash,r.generation,r.extracted_text FROM information_revision_allowances r"
+                              + read.join()
+                              + " WHERE "
+                              + read.where()
+                              + (maximumBytes == null ? "" : " AND " + TEXT_BYTES + "<=?")),
+                      (rs, n) ->
+                          new AuthorizedText(
+                              context,
+                              rs.getObject(1, UUID.class),
+                              rs.getObject(2, UUID.class),
+                              rs.getString(3),
+                              rs.getString(4),
+                              rs.getString(5),
+                              rs.getString(6),
+                              rs.getLong(7),
+                              rs.getString(8)),
+                      args.toArray())
+                  .stream()
+                  .findFirst();
+            });
+    if (rows.isEmpty() && maximumBytes != null) throw new ProjectionCache.Bypass();
+    return rows;
+  }
+
+  static final String TEXT_BYTES =
       "COALESCE(octet_length(r.extracted_text),0)::bigint+octet_length(r.content_hash)"
           + "+COALESCE(octet_length(r.text_hash),0)+octet_length(r.document_type)+octet_length(r.document_subtype)";
 
-  private static Object[] readArguments(InformationContext context, UUID revision) {
-    var args = new ArrayList<Object>(selectionArgs(context));
-    args.add(revision);
-    return args.toArray();
+  /**
+   * How one single-revision read restricts {@code information_revision_allowances r} to the target:
+   * statement-local CTEs to prepend, a join after {@code r} (and {@code q}), the {@code WHERE}
+   * predicate, and the arguments of all three in that order. Statement builders append their own
+   * trailing arguments after {@link #arguments}.
+   */
+  private record OneRevisionRead(
+      List<String> ctes, String join, String where, List<Object> arguments) {
+    /** {@code select}, prefixed by this read's CTEs. */
+    String with(String select) {
+      return with(List.of(), select);
+    }
+
+    /** {@code select}, prefixed by this read's CTEs and then the caller's {@code extra} CTEs. */
+    String with(List<String> extra, String select) {
+      var all = new ArrayList<>(ctes);
+      all.addAll(extra);
+      return all.isEmpty() ? select : "WITH " + String.join(",", all) + " " + select;
+    }
+  }
+
+  /**
+   * Reads one revision's row only if it is readable in {@code context}, by one of two statements.
+   *
+   * <ol>
+   *   <li><b>Decided in code, then a plain fetch.</b> {@link KnowledgeReadabilityCheck} decides
+   *       readability from shared facts and the authority snapshot exactly as {@link #readable}
+   *       does, including typed-content exclusion and the retained ceiling. An unreadable revision
+   *       is absent without any row SQL. A readable one is fetched by id with no permission
+   *       predicate: only {@code r.availability='active'} and the caller's size guard remain. The
+   *       check confirms its facts after the fetch, so a data-side write between the decision and
+   *       the fetch (availability, exclusion, quarantine, a policy, an input or a dependency's
+   *       availability) declines the read and the fetched row is discarded; see {@link
+   *       CachedKnowledgeReadability#fetchIfReadable}. Authority (memberships, grants, tokens,
+   *       principals) may lag by the snapshot's 2 s bound, as for every snapshot-decided check.
+   *   <li><b>Fallback, the permission-filtered statement.</b> When the check declines (a caller
+   *       transaction that may hold its own writes, no snapshot, a cache that cannot serve, the
+   *       fact budget, a stale confirmation), the read admits its target through the same
+   *       statement-local {@code knowledge_readable_targets} relation as {@link #readable}'s
+   *       fallback, with a one-element target list, joined to the row, plus {@link
+   *       InformationSql#content}. That is the per-row {@code information_readable} predicate and
+   *       read ceiling of {@link #readableSql} with actor authority resolved once instead of once
+   *       per dependency-closure node; {@code KnowledgeReadabilityDifferentialDatabaseTest}
+   *       compares both paths with that predicate row by row.
+   * </ol>
+   *
+   * @param fetch runs one statement for the given read shape and returns its row, if any
+   */
+  private <T> Optional<T> oneRevision(
+      InformationContext context,
+      UUID revision,
+      java.util.function.Function<OneRevisionRead, Optional<T>> fetch) {
+    Objects.requireNonNull(revision, "revision");
+    var plain =
+        new OneRevisionRead(List.of(), "", "r.availability='active' AND r.id=?", List.of(revision));
+    return switch (readability.fetchIfReadable(context, revision, () -> fetch.apply(plain))) {
+      case KnowledgeReadabilityCheck.Guarded.Answered<T> answered -> answered.row();
+      case KnowledgeReadabilityCheck.Guarded.Declined<T> declined -> {
+        var content = InformationSql.content(context, "r");
+        var args = new ArrayList<Object>(targetArguments(context, List.of(revision)));
+        args.addAll(content.arguments());
+        args.add(revision);
+        yield fetch.apply(
+            new OneRevisionRead(
+                List.of(ADMITTED_CTE),
+                " JOIN admitted ON admitted.revision=r.id",
+                "r.availability='active' AND " + content.sql() + " AND r.id=?",
+                args));
+      }
+    };
   }
 
   private static SnapshotCache.Key readKey(InformationContext context, UUID revision) {
@@ -1018,7 +1126,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     return "r.availability='active' AND " + InformationSql.read(context, "r").sql();
   }
 
-  private static final String SELECT =
+  /** The catalogue row projection; package-private for the differential database test. */
+  static final String SELECT =
       "SELECT r.id,r.resource_id,r.ordinal,r.title,r.media_type,r.document_type,r.document_subtype,r.source_uri,r.content_hash,r.text_hash,"
           + "r.byte_size,r.created_at,r.availability,r.excluded,r.generation,r.converter,r.allowance_total,r.allowance_spent,q.source_name,q.kind,q.owner_handle AS author,q.tags,q.tags_version AS \"tagsVersion\","
           + io.aeyer.plowshare.server.information.InformationFacetSql.readyTags("r")

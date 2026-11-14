@@ -9,6 +9,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.access.*;
 import io.aeyer.plowshare.server.access.AuthorityIds.*;
+import io.aeyer.plowshare.server.access.ScopedAuthorityMocks;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.allowances.*;
 import io.aeyer.plowshare.server.archive.*;
@@ -1040,7 +1041,7 @@ class ContainedRuntimeReachTest {
   final class Reads {
     final IdentityRepository identities = mock(IdentityRepository.class);
     final ScopedGrantRepository grants = mock(ScopedGrantRepository.class);
-    final ScopedAuthority scoped = mock(ScopedAuthority.class);
+    final ScopedAuthority scoped = ScopedAuthorityMocks.mockAuthority();
     final ProjectMembers members = mock(ProjectMembers.class);
     final OperationRecords records = mock(OperationRecords.class);
     final ResourceScopeRepository resources = mock(ResourceScopeRepository.class);
@@ -1086,7 +1087,8 @@ class ContainedRuntimeReachTest {
               AuthorityAction.WRITE,
               AuthorityAction.RUN_MODEL,
               AuthorityAction.CONVERSATION_CREATE))
-        when(scoped.allowsUsing(recipient, container, action, grant)).thenReturn(true);
+        when(scoped.allowsUsing(eq(recipient), eq(container), eq(action), eq(grant), anyList()))
+            .thenReturn(true);
     }
 
     /**

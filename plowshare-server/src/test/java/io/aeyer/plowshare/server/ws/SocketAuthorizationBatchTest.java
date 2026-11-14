@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.ws;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.server.access.AuthorityCheckTelemetry;
 import io.aeyer.plowshare.server.auth.SessionAuthority;
 import java.util.ArrayList;
 import java.util.Map;
@@ -23,6 +24,10 @@ class SocketAuthorizationBatchTest {
             io.aeyer.plowshare.server.auth.StoredSessionAuthority.class,
             io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class)
         .withBean(io.aeyer.plowshare.server.auth.AdminStore.class, () -> accounts)
+        .withBean(
+            io.aeyer.plowshare.server.access.AuthoritySnapshots.class,
+            io.aeyer.plowshare.server.access.AuthoritySnapshots::none)
+        .withBean(AuthorityCheckTelemetry.class, AuthorityCheckTelemetry::none)
         .withBean(
             io.micrometer.core.instrument.MeterRegistry.class,
             io.micrometer.core.instrument.simple.SimpleMeterRegistry::new)

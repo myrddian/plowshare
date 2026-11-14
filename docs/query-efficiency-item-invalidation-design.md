@@ -128,6 +128,10 @@ log check (`BusyReadRetry`). No existing projection was moved to item scope.
 
 ## Slice 1: targeted readability from shared data
 
+[ADR 0070](decisions/0070-document-level-readability.md) later decides readability per document,
+with cross-boundary content enforced at write time; it replaces this slice's per-revision closure
+walk once implemented.
+
 - **Shared data.** Revisions, resources, scopes, root and navigation policies, dependency closures,
   reference obligations, links and contained principals, each cached by item (`revision:<id>`,
   `resource:<id>`, `scope:<id>`). PROD holds 118 revisions, 84 resources, 328 retained inputs and

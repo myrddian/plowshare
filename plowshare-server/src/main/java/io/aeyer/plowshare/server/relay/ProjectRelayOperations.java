@@ -18,6 +18,7 @@ public final class ProjectRelayOperations implements RelayOperations {
   private final RelayOperationRepository repository;
   private final RelayPublicationSignals signals;
   private final UnitOfWork transactions;
+  private final RegisteredTopics registered;
 
   public ProjectRelayOperations(
       ProjectMembers members,
@@ -27,6 +28,28 @@ public final class ProjectRelayOperations implements RelayOperations {
       RelayOperationRepository repository,
       RelayPublicationSignals signals,
       UnitOfWork transactions) {
+    this(
+        members,
+        projects,
+        routing,
+        dispatch,
+        repository,
+        signals,
+        transactions,
+        new LruRegisteredTopics());
+  }
+
+  /** {@code registered} is the memo shared with the publishing port; removals invalidate it. */
+  public ProjectRelayOperations(
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      RelayRouting routing,
+      RelayDispatch dispatch,
+      RelayOperationRepository repository,
+      RelayPublicationSignals signals,
+      UnitOfWork transactions,
+      RegisteredTopics registered) {
+    this.registered = Objects.requireNonNull(registered);
     this.members = Objects.requireNonNull(members);
     this.projects = Objects.requireNonNull(projects);
     this.routing = Objects.requireNonNull(routing);
@@ -87,7 +110,12 @@ public final class ProjectRelayOperations implements RelayOperations {
             .filter(value -> !value.equals(account))
             .isPresent()) throw new CallerFault("Relay control authority changed");
     var result = repository.apply(access, request, resolution);
-    transactions.afterCommit(() -> signals.published(topic));
+    transactions.afterCommit(
+        () -> {
+          // A removed topic must be registered again before the next publication.
+          if (request.action() == RelayControl.Action.REMOVE_TOPIC) registered.forget(topic);
+          signals.published(topic);
+        });
     return result;
   }
 }

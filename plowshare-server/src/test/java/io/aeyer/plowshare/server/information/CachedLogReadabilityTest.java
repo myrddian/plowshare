@@ -58,7 +58,7 @@ class CachedLogReadabilityTest {
     return new AuthoritySnapshot(
         new AuthoritySnapshot.Facts(
             Instant.now(),
-            List.of(new AuthoritySnapshot.Account("alice", "USER", true, false, false)),
+            List.of(new AuthoritySnapshot.Account("alice", "USER", true, false, false, 0)),
             Map.of(ALICE, "alice"),
             List.of(new AuthoritySnapshot.Role(ROLE, "GLOBAL_READ", Optional.empty(), false)),
             List.of(

@@ -2,7 +2,9 @@ package io.aeyer.plowshare.server.relay.tools;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.agents.ApplicationResources;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
@@ -10,12 +12,15 @@ import io.aeyer.plowshare.server.archive.ProjectNames;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.auth.AdminStore;
+import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
+import io.aeyer.plowshare.server.cache.ProjectionNotificationProperties;
 import io.aeyer.plowshare.server.providers.ProviderCredentialGrants;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayLogRepository;
 import io.aeyer.plowshare.server.relay.RelayPortRepository;
 import io.aeyer.plowshare.server.relay.RelayProperties;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -42,6 +47,19 @@ class HostedScopeCompositionTest {
           () -> mock(io.aeyer.plowshare.server.images.ArtifactRepository.class));
       context.registerBean(UnitOfWork.class, () -> UnitOfWork.NONE);
       context.registerBean(RelayProperties.class, RelayProperties::new);
+      context.registerBean(
+          ProjectionChangeSignals.class,
+          () -> {
+            var signals = mock(ProjectionChangeSignals.class);
+            when(signals.subscribe(any(), any()))
+                .thenReturn(mock(ProjectionChangeSignals.Subscription.class));
+            return signals;
+          });
+      context.registerBean(
+          ProjectionNotificationProperties.class,
+          () ->
+              new ProjectionNotificationProperties(
+                  true, Duration.ofSeconds(2), Duration.ofMillis(500), Duration.ofSeconds(3)));
       context.registerBean(
           com.fasterxml.jackson.databind.ObjectMapper.class,
           () -> new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());

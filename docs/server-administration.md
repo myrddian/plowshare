@@ -198,6 +198,37 @@ warning. The remedy is to raise the pool size, which raises `permits` with it; r
 `permit-margin` does not help, since it only reserves connections the throttle never
 hands out.
 
+### Statement and authority-check meters
+
+Present only when a meter registry exists (it does, with actuator). Each `plowshare.jdbc.statements` timer registers on the first statement of its `pool`, `method` and `outcome` combination, so a combination that has never occurred (for example `outcome=failed`) is absent rather than zero; the two authority counters register every outcome at startup, so they read zero until used.
+
+| Meter | Type | Tags | What it shows |
+| --- | --- | --- | --- |
+| `plowshare.jdbc.statements` | timer | `pool`, `method`, `outcome` | Every physical JDBC execute (a batch is one) and its duration. `pool` is `main`, `projection-versions` or `listen`; `method` is the JDBC execute method; `outcome` is `ok` or `failed`. |
+| `plowshare.authority.admission.checks` | counter | `outcome` | How each operation admission recheck was answered: `verified_hit` (remembered, no walk), `walked` (walked and recorded), `transaction_walk` (caller's transaction may hold writes, never reused), `no_snapshot_walk` (no usable authority snapshot, never reused), `refused` (the walk threw; never recorded). |
+| `plowshare.authority.session.checks` | counter | `outcome` | How each socket session was decided: `snapshot` (accepted from memory), `sql` (accepted by the stored authority), `refused` (the final answer was not current). |
+| `plowshare.operation.statements` | distribution summary (percentile histogram) | `kind` | JDBC statements one operation executed, recorded when it ends. `kind` is `tool_call`, `job_step` or `socket_request`; a job step includes its tool calls. Counted per thread: work a tool hands to another thread, or a concurrent socket handler completes elsewhere, is not in its operation. Registered with the first statement meter, zero until used. |
+
+Socket session checks are reused within one request: after a request's first successful
+session check, the handler, the post-handler fence, the disclosure fence and wait loops
+reuse it only while an authority snapshot is present, it is the same snapshot instance
+that was current when the success was recorded, and the success is younger than
+`plowshare.projection-cache.notified.staleness` (2 s by default). A new AUTHORITY version
+(including a session revocation), a lost snapshot (for example a down notification
+listener) or the bound ending triggers a real check; a refusal is never reused. Revocation
+therefore reaches a running request or a socket's delivery fence within the snapshot's own
+lag, with no extra stacking. With notifications disabled every check is exact. New frames
+and the one-second sweep still check on their own.
+
+The SQL text, its hash, identities and project or topic names are never tags, so each
+set is constant whatever the traffic; statement attribution stays in the opt-in JFR
+`plowshare.JdbcExecute` event. Comparing the `statements` count before and after a
+change measures round trips directly.
+
+The two Hikari pools are named `plowshare-main` and `plowshare-projection-versions`, so
+the `hikaricp.*` pool meters carry that name in their `pool` tag and the two pools can
+be told apart.
+
 ### Projection cache budgets
 
 Projection caches are bounded by explicit budgets under `plowshare.projection-cache`,
@@ -434,7 +465,38 @@ by the intended monitoring system. A separate port does not add authentication;
 restrict network/proxy access as well. A configured Prometheus scraper and persistent
 time-series storage retain samples across server restarts; Grafana can query that
 history. Bundling the registry alone does not collect history. Container publishing,
-ingress, scrapes, alerts and PostgreSQL instrumentation remain deployment work.
+ingress, scrapes and alerts remain deployment work.
+
+The Docker deployment wires this up without defaults: when
+`PLOWSHARE_MANAGEMENT_PORT` and `PLOWSHARE_MANAGEMENT_BIND` are both set, the
+entrypoint passes the settings above (one without the other stops startup), and
+`PLOWSHARE_JFR_DIR` starts a bounded flight recording that includes the opt-in
+`plowshare.JdbcExecute` event. PostgreSQL preloads `pg_stat_statements` and
+`auto_explain`, both slow-statement logging thresholds are off by default (enabling them
+writes SQL statement text, not parameters, to the PostgreSQL container log), and an optional
+exporter profile, using its own `pg_monitor` role, exposes top statements by `queryid`.
+`pg_stat_statements` is optional: V260 installs it only for a superuser migration role and
+otherwise continues with a notice; only the exporter and snapshot script use it.
+PostgreSQL's default `log_min_error_statement=error` still logs the SQL text of failing
+statements (never parameters, since `log_parameter_max_length_on_error=0`).
+The statement-count meters `plowshare.jdbc.statements`,
+`plowshare.authority.admission.checks`, `plowshare.authority.session.checks` and
+`plowshare.operation.statements` are charted in `deploy/monitoring/grafana-plowshare.json`.
+See the [Docker README](../deploy/docker/README.md#monitoring).
+
+### Upgrade notes for the telemetry changes
+
+- **Metric tag.** The main Hikari pool is now named `plowshare-main`, so the
+  `hikaricp_*{pool=...}` series changes from `HikariPool-1` to `plowshare-main`. Update
+  dashboards and alert rules that select the old tag; history under the old tag is not
+  renamed.
+- **PostgreSQL restart.** The compose database command adds preload libraries
+  (`pg_stat_statements`, `auto_explain`) and `track_io_timing=on`. A running instance picks
+  them up only after a PostgreSQL restart.
+- **Relay tool results.** A waiting tool call re-reads its retained result when a relay
+  publication or authority change wakes it. While notifications are off, the listener is
+  down or the waiter capacity is exceeded, it reads at most every 100 ms, as before; each
+  such read also re-checks authorization.
 
 ## Information feature switches
 

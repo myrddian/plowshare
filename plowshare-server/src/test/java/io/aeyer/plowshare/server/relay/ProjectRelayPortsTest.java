@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -20,6 +21,7 @@ import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.relay.tools.RelayToolAuthority;
 import io.aeyer.plowshare.server.relay.tools.RelayToolCodec;
 import io.aeyer.plowshare.server.relay.tools.RelayToolDefinition;
 import io.aeyer.plowshare.server.relay.tools.RelayToolProperties;
@@ -28,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class ProjectRelayPortsTest {
   final Relay relay = mock(Relay.class);
@@ -253,6 +256,93 @@ class ProjectRelayPortsTest {
                 "reviewer",
                 new RelayPort.Ack("project", "source.topic", "filters", id, id, "1", null)));
     verifyNoInteractions(relay, repository);
+  }
+
+  @Test
+  void secondPublishToSameTopicDoesNotRegisterAgain() {
+    allow();
+    when(relay.publish(any(), any()))
+        .thenAnswer(
+            call ->
+                new Relay.Publication(call.getArgument(0), 1, Instant.EPOCH, call.getArgument(1)));
+    ports.publish("reviewer", request());
+    ports.publish("reviewer", request());
+    verify(relay, times(1)).registerTopic(any(), any(), any());
+    verify(repository, times(1)).rememberPublisher("reviewer");
+    verify(relay, times(2)).publish(any(), any());
+  }
+
+  @Test
+  void topicDeletedElsewhereIsReRegisteredOnce() {
+    allow();
+    when(relay.publish(any(), any()))
+        .thenThrow(new RelayTopicMissingException())
+        .thenAnswer(
+            call ->
+                new Relay.Publication(call.getArgument(0), 1, Instant.EPOCH, call.getArgument(1)));
+    assertEquals("1", ports.publish("reviewer", request()).position());
+    verify(relay, times(2)).registerTopic(any(), any(), any());
+    verify(relay, times(2)).publish(any(), any());
+  }
+
+  @Test
+  void secondMissPropagates() {
+    allow();
+    when(relay.publish(any(), any())).thenThrow(new RelayTopicMissingException());
+    assertThrows(RelayTopicMissingException.class, () -> ports.publish("reviewer", request()));
+    verify(relay, times(2)).publish(any(), any());
+    verify(relay, times(2)).registerTopic(any(), any(), any());
+  }
+
+  @Test
+  void failedRegistrationIsNotRemembered() {
+    allow();
+    when(relay.registerTopic(any(), any(), any()))
+        .thenThrow(new IllegalStateException("db down"))
+        .thenReturn(
+            new Relay.Topic(
+                new Relay.TopicKey(7, "custom.topic"),
+                RelayPayload.Kind.TEXT,
+                Relay.Policy.systemDefault(),
+                0,
+                0));
+    when(relay.publish(any(), any()))
+        .thenAnswer(
+            call ->
+                new Relay.Publication(call.getArgument(0), 1, Instant.EPOCH, call.getArgument(1)));
+    assertThrows(IllegalStateException.class, () -> ports.publish("reviewer", request()));
+    ports.publish("reviewer", request());
+    verify(relay, times(2)).registerTopic(any(), any(), any());
+  }
+
+  @Test
+  void missWithinAnEnclosingTransactionForgetsAndRethrowsWithoutRetry() {
+    allow();
+    when(relay.publish(any(), any())).thenThrow(new RelayTopicMissingException());
+    TransactionSynchronizationManager.setActualTransactionActive(true);
+    try {
+      assertThrows(RelayTopicMissingException.class, () -> ports.publish("reviewer", request()));
+    } finally {
+      TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
+    verify(relay, times(1)).publish(any(), any());
+    verify(relay, times(1)).registerTopic(any(), any(), any());
+    // The key was forgotten, so the next publish registers again.
+    assertThrows(RelayTopicMissingException.class, () -> ports.publish("reviewer", request()));
+    verify(relay, times(3)).registerTopic(any(), any(), any());
+  }
+
+  @Test
+  void egressToolTopicRegistersOnEveryRequire() {
+    allow();
+    var tools = mock(RelayToolAuthority.class);
+    when(tools.permits(any(), any(), any(), any(), any())).thenReturn(true);
+    var scoped = new ProjectRelayPorts(relay, repository, properties, members, projects, 8, tools);
+    var query =
+        new RelayPort.Consume(
+            "project", "tool.x", "filters", id, RelayPort.Start.OLDEST_RETAINED, 1, 0);
+    for (int i = 0; i < 3; i++) scoped.consume("reviewer", query);
+    verify(relay, times(3)).registerTopic(any(), any(), any());
   }
 
   @Test

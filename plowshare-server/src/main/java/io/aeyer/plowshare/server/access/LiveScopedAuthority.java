@@ -2,10 +2,16 @@ package io.aeyer.plowshare.server.access;
 
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.archive.ProjectRole;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Function;
 import org.springframework.stereotype.Component;
 
-/** Reads live lineage on every decision; failures never turn into permission or a cached allow. */
+/** Reads live lineage on every walk; failures never turn into permission or a cached allow. */
 @Component
 public final class LiveScopedAuthority implements ScopedAuthority {
   private final ScopedGrantRepository grants;
@@ -42,8 +48,20 @@ public final class LiveScopedAuthority implements ScopedAuthority {
                 binding.recipient().equals(recipient)
                     && binding.actions().contains(action)
                     && covers(binding, target, action)
-                    && applicationAllows(binding, action)
+                    && applicationAllows(binding, action, applications::read)
                     && lineage.valid(binding.id()));
+  }
+
+  @Override
+  public boolean allowsUsing(
+      GrantRecipient recipient, AuthorityScope target, AuthorityAction action, UUID grant) {
+    Objects.requireNonNull(recipient);
+    Objects.requireNonNull(target);
+    Objects.requireNonNull(action);
+    Objects.requireNonNull(grant);
+    // The scope check precedes the grant read so an unknown target costs no grant query.
+    if (!target.equals(identities.scope(target.id()))) return false;
+    return new LiveWalk(recipient, grants.live(recipient)).usable(target, action, grant);
   }
 
   @Override
@@ -51,24 +69,64 @@ public final class LiveScopedAuthority implements ScopedAuthority {
       GrantRecipient recipient,
       AuthorityScope target,
       AuthorityAction action,
-      java.util.UUID grant) {
-    Objects.requireNonNull(recipient);
-    Objects.requireNonNull(target);
-    Objects.requireNonNull(action);
-    Objects.requireNonNull(grant);
-    if (!target.equals(identities.scope(target.id()))) return false;
-    return grants.live(recipient).stream()
-        .filter(binding -> binding.id().equals(grant))
-        .anyMatch(
-            binding ->
-                binding.recipient().equals(recipient)
-                    && binding.actions().contains(action)
-                    && covers(binding, target, action)
-                    && applicationAllows(binding, action)
-                    && lineage.valid(binding.id()));
+      UUID grant,
+      List<ScopedGrantRepository.Binding> live) {
+    return walk(recipient, live).allows(target, action, grant);
   }
 
-  private boolean applicationAllows(ScopedGrantRepository.Binding binding, AuthorityAction action) {
+  @Override
+  public Walk walk(GrantRecipient recipient, List<ScopedGrantRepository.Binding> live) {
+    return new LiveWalk(Objects.requireNonNull(recipient), Objects.requireNonNull(live));
+  }
+
+  /**
+   * Per-walk memo of lineage validity per grant and Application boundary per project. Both are pure
+   * functions of the stored rows and the deployed manifest for the duration of one decision, so
+   * repeating them per support item buys nothing. The maps are fields of this short-lived object
+   * only; nothing is retained on the authority, and a failure is never memoised because {@code
+   * computeIfAbsent} stores nothing when the loader throws.
+   */
+  private final class LiveWalk implements Walk {
+    private final GrantRecipient recipient;
+    private final List<ScopedGrantRepository.Binding> live;
+    private final Map<UUID, Boolean> lineages = new HashMap<>();
+    private final Map<String, ApplicationPolicy.Boundary> boundaries = new HashMap<>();
+
+    LiveWalk(GrantRecipient recipient, List<ScopedGrantRepository.Binding> live) {
+      this.recipient = recipient;
+      this.live = live;
+    }
+
+    @Override
+    public boolean allows(AuthorityScope target, AuthorityAction action, UUID grant) {
+      Objects.requireNonNull(target);
+      Objects.requireNonNull(action);
+      Objects.requireNonNull(grant);
+      if (!target.equals(identities.scope(target.id()))) return false;
+      return usable(target, action, grant);
+    }
+
+    boolean usable(AuthorityScope target, AuthorityAction action, UUID grant) {
+      return live.stream()
+          .filter(binding -> binding.id().equals(grant))
+          .anyMatch(
+              binding ->
+                  binding.recipient().equals(recipient)
+                      && binding.actions().contains(action)
+                      && covers(binding, target, action)
+                      && applicationAllows(binding, action, this::boundary)
+                      && lineages.computeIfAbsent(binding.id(), lineage::valid));
+    }
+
+    private ApplicationPolicy.Boundary boundary(String project) {
+      return boundaries.computeIfAbsent(project, applications::read);
+    }
+  }
+
+  private static boolean applicationAllows(
+      ScopedGrantRepository.Binding binding,
+      AuthorityAction action,
+      Function<String, ApplicationPolicy.Boundary> boundaries) {
     if (binding.project().isEmpty()
         || binding.role() == StandardRole.ADMIN
         || binding.role() == StandardRole.SYSTEM) return true;
@@ -79,9 +137,9 @@ public final class LiveScopedAuthority implements ScopedAuthority {
           case READER -> ProjectRole.VIEWER;
           default -> throw new IllegalStateException("Unsupported project role");
         };
-    return applications
-        .read(binding.project().orElseThrow())
-        .limit(binding.recipientHandle(), java.util.Optional.of(stored))
+    return boundaries
+        .apply(binding.project().orElseThrow())
+        .limit(binding.recipientHandle(), Optional.of(stored))
         .filter(
             role ->
                 switch (action) {

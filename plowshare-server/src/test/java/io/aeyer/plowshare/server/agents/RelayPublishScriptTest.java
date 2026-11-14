@@ -1,6 +1,9 @@
 package io.aeyer.plowshare.server.agents;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,6 +20,11 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.AuthorityAction;
+import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.OperationFence;
+import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
@@ -30,8 +38,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 /** Uses the real harness script-dispatch path with a mocked journal and publication capability. */
 class RelayPublishScriptTest {
@@ -57,16 +67,23 @@ class RelayPublishScriptTest {
               0L);
 
   private Outcome execute() {
-    var runtime = new JobRuntime(models, List.of(new RelayPublishTool(publishing)));
+    return execute(
+        new JobRuntime(models, List.of(new RelayPublishTool(publishing))), Budget.noCalls());
+  }
+
+  private static AgentDefinition definition() {
+    return OrchestrationRegistry.parsePinned(
+            "writer",
+            "writer.js",
+            SOURCE,
+            Set.of(RelayPublishTool.NAME),
+            OrchestrationDefinition.Tier.SHIPPED)
+        .conductor();
+  }
+
+  private Outcome execute(JobRuntime runtime, Budget budget) {
     runtime.useScripts(scripts);
-    var definition =
-        OrchestrationRegistry.parsePinned(
-                "writer",
-                "writer.js",
-                SOURCE,
-                Set.of(RelayPublishTool.NAME),
-                OrchestrationDefinition.Tier.SHIPPED)
-            .conductor();
+    var definition = definition();
     when(scripts.head(CONVERSATION))
         .thenAnswer(
             call -> new ScriptStore.Head(Optional.ofNullable(journal.get()), Optional.empty()));
@@ -128,7 +145,7 @@ class RelayPublishScriptTest {
         definition,
         "publish",
         Home.of("research"),
-        Budget.noCalls(),
+        budget,
         () -> false,
         "session",
         JobWatch.UNWATCHED,
@@ -143,7 +160,7 @@ class RelayPublishScriptTest {
     var receipt =
         new RelayPublishing.Receipt(
             UUID.randomUUID(), "reports.input", "1", Instant.parse("2026-11-13T00:00:00Z"));
-    when(publishing.publish(any(), any(), any())).thenReturn(receipt);
+    when(publishing.publish(any(), any(), any(), any())).thenReturn(receipt);
     assertEquals(Outcome.Ending.TURN_CAP, execute().ending());
     verify(publishing)
         .publish(
@@ -160,11 +177,54 @@ class RelayPublishScriptTest {
                     "session",
                     "script_0",
                     RelayPublishing.DefinitionKind.ORCHESTRATION)),
-            eq(new RelayPublishing.Request("reports.input", "script text")));
+            eq(new RelayPublishing.Request("reports.input", "script text")),
+            any());
     verify(scripts).started(CONVERSATION, 0, INPUT);
     assertTrue(journal.get().result().contains(receipt.eventId().toString()));
     verify(models, atLeastOnce()).wireModelFor(any());
     verifyNoMoreInteractions(models);
+  }
+
+  @Test
+  void the_runtime_fence_rechecks_the_retained_operation_and_refuses_once_revoked() {
+    var operations = mock(OperationAuthority.class);
+    var admission = mock(OperationAuthority.Admission.class);
+    when(admission.executor()).thenReturn("alice");
+    when(admission.home()).thenReturn(Home.of("research"));
+    when(admission.actions()).thenReturn(Set.of(AuthorityAction.values()));
+    var budget = Budget.noCalls();
+    when(operations.conversation(CONVERSATION))
+        .thenReturn(
+            Optional.of(
+                new OperationAuthority.Conversation(
+                    CONVERSATION,
+                    "writer",
+                    admission,
+                    null,
+                    new AllowanceId(budget.identity()),
+                    OperationExecution.fingerprint(definition()))));
+    when(operations.derive(eq(admission), any())).thenReturn(admission);
+    var revoked = new AtomicBoolean();
+    doAnswer(
+            call -> {
+              if (revoked.get()) throw new AuthorityWithdrawnException("revoked");
+              return null;
+            })
+        .when(operations)
+        .require(admission);
+    var receipt =
+        new RelayPublishing.Receipt(
+            UUID.randomUUID(), "reports.input", "1", Instant.parse("2026-11-13T00:00:00Z"));
+    var fence = ArgumentCaptor.forClass(OperationFence.class);
+    when(publishing.publish(any(), any(), any(), fence.capture())).thenReturn(receipt);
+
+    execute(new JobRuntime(operations, models, List.of(new RelayPublishTool(publishing))), budget);
+
+    assertNotSame(OperationFence.none(), fence.getValue());
+    assertDoesNotThrow(() -> fence.getValue().require());
+    revoked.set(true);
+    var refused = assertThrows(OperationFence.Withdrawn.class, () -> fence.getValue().require());
+    assertInstanceOf(AuthorityWithdrawnException.class, refused.getCause());
   }
 
   @Test

@@ -7,6 +7,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -34,11 +35,24 @@ import java.util.regex.Pattern;
  * contains no grant or token expiry, so the verdict at {@code at} equals the verdict at any instant
  * the snapshot is served. Revocation, enablement and membership changes move the AUTHORITY version
  * and invalidate the snapshot before it can answer again.
+ *
+ * <p>Served snapshots are notification-trusted ({@code AuthoritySnapshotConfiguration}): a
+ * committed change, including a grant revocation or a {@code session_version} bump, can take up to
+ * {@code plowshare.projection-cache.notified.staleness} (2 s by default) to reach the answers given
+ * from it. Callers that cannot accept that bound must not use the snapshot.
  */
 public final class AuthoritySnapshot {
-  /** One {@code admins} row. */
+  /**
+   * One {@code admins} row. {@code sessionVersion} is the socket session fence; every {@code
+   * admins} update, including one that only bumps it, moves the AUTHORITY version (V175).
+   */
   public record Account(
-      String handle, String kind, boolean enabled, boolean bootstrap, boolean serverAdmin) {
+      String handle,
+      String kind,
+      boolean enabled,
+      boolean bootstrap,
+      boolean serverAdmin,
+      long sessionVersion) {
     public Account {
       Objects.requireNonNull(handle);
       Objects.requireNonNull(kind);
@@ -269,6 +283,7 @@ public final class AuthoritySnapshot {
   private final Map<String, UUID> authorityAccountsByHandle = new HashMap<>();
   private final Map<Long, List<Scope>> scopesByProject = new HashMap<>();
   private final Map<UUID, Integer> live;
+  private final Map<GrantRecipient, List<Binding>> liveByRecipient;
   private final boolean systemProcessing;
   private final boolean globalReadRole;
 
@@ -312,6 +327,7 @@ public final class AuthoritySnapshot {
                     .put(member.handle(), member));
     facts.grants().forEach(grant -> grants.put(grant.binding().id(), grant));
     live = Collections.unmodifiableMap(liveGrants());
+    liveByRecipient = liveByRecipient();
     systemProcessing = intrinsicProcessingGrant();
     globalReadRole = globalReadRoleAction();
   }
@@ -582,17 +598,76 @@ public final class AuthoritySnapshot {
             .sorted(AuthoritySnapshot::postgresOrder)
             .toList();
     var chains = new ArrayList<List<Binding>>();
-    for (UUID root : roots) {
-      var chain = new ArrayList<Binding>();
-      var current = grants.get(root);
-      for (int depth = 0; current != null && depth <= MAX_DEPTH; depth++) {
-        chain.add(current.binding());
-        if (depth == MAX_DEPTH) break;
-        current = current.binding().authority().map(grants::get).orElse(null);
-      }
-      chains.add(List.copyOf(chain));
-    }
+    for (UUID root : roots) chains.add(chain(root));
     return List.copyOf(chains);
+  }
+
+  /**
+   * {@code ScopedGrantRepository.live(recipient)}: the live {@code authority_grant_records} rows
+   * whose subject account and agent equal the recipient's ({@code subject_agent IS NOT DISTINCT
+   * FROM}), ordered by {@code created_at, id} as PostgreSQL orders them.
+   */
+  public List<Binding> live(GrantRecipient recipient) {
+    Objects.requireNonNull(recipient);
+    return liveByRecipient.getOrDefault(recipient, List.of());
+  }
+
+  /**
+   * {@code ScopedGrantRepository.lineage(id)}: empty unless the grant is live; otherwise the grant
+   * and its issuing ancestry, child to parent, at most {@value #MAX_DEPTH} links above it.
+   * Ancestors are followed whether or not they are live themselves, exactly as the recursive CTE
+   * joins plain {@code authority_grants}.
+   */
+  public List<Binding> lineage(UUID id) {
+    Objects.requireNonNull(id);
+    return live.containsKey(id) ? chain(id) : List.of();
+  }
+
+  /**
+   * {@code SELECT session_version FROM admins WHERE handle=? AND account_active(handle)}: the
+   * session fence of an active account, empty for an inactive or unknown one. {@code
+   * AdminStore.sessionCurrent} and {@code currentSessions} accept a socket session exactly when
+   * this equals its version.
+   */
+  public Optional<Long> activeSessionVersion(String handle) {
+    if (handle == null || !accountActive(handle)) return Optional.empty();
+    return Optional.of(accounts.get(handle).sessionVersion());
+  }
+
+  /**
+   * The recursive {@code chain} term shared by {@code lineage} and {@code projectLineages}: the
+   * grant, then each {@code issuing_grant} while {@code depth<32}, so at most {@value #MAX_DEPTH} +
+   * 1 rows. Every {@code authority_grants} row has its {@code authority_grant_records} row (the
+   * view inner-joins only foreign keys), so following the loaded rows is following the table.
+   */
+  private List<Binding> chain(UUID root) {
+    var chain = new ArrayList<Binding>();
+    var current = grants.get(root);
+    for (int depth = 0; current != null && depth <= MAX_DEPTH; depth++) {
+      chain.add(current.binding());
+      if (depth == MAX_DEPTH) break;
+      current = current.binding().authority().map(grants::get).orElse(null);
+    }
+    return List.copyOf(chain);
+  }
+
+  /** The live bindings per recipient, each list in {@code ORDER BY created_at, id}. */
+  private Map<GrantRecipient, List<Binding>> liveByRecipient() {
+    var byRecipient = new HashMap<GrantRecipient, List<Binding>>();
+    for (UUID id : live.keySet()) {
+      var binding = grants.get(id).binding();
+      byRecipient.computeIfAbsent(binding.recipient(), key -> new ArrayList<>()).add(binding);
+    }
+    var order =
+        Comparator.comparing((Binding binding) -> binding.createdAt().toInstant())
+            .thenComparing(Binding::id, AuthoritySnapshot::postgresOrder);
+    var result = new HashMap<GrantRecipient, List<Binding>>();
+    byRecipient.forEach(
+        (recipient, bindings) -> {
+          bindings.sort(order);
+          result.put(recipient, List.copyOf(bindings));
+        });
+    return Map.copyOf(result);
   }
 
   /**
