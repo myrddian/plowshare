@@ -36,6 +36,14 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     this.resources = resources;
   }
 
+  /**
+   * Test seam, package-private: called with {@code "stage"} immediately before the real-path check
+   * that precedes staging and with {@code "move"} immediately before the one that precedes the
+   * final rename in {@link #writeApplication}, so a test can swap the folder in between. Production
+   * code never sets it.
+   */
+  java.util.function.Consumer<String> checkpoint = point -> {};
+
   private final DataLayout data;
   private final SessionChannel channel;
   private final PresenceRegistry presences;
@@ -140,6 +148,12 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
    * create ({@code overwrite=false}) checks for an existing file and then renames without
    * replacement; the JDK refuses an existing target, so only a racing create in the instant between
    * its check and the rename can still be replaced.
+   *
+   * <p>The segment checks see links that exist when they run. A folder swapped for a link
+   * afterwards is caught by real-path checks immediately before the temporary file is created and
+   * immediately before the rename: each requires the folder's real path to be inside the root's. A
+   * refusal deletes the temporary file. The rename itself still resolves the folder by name, so
+   * only a swap in the instant between the last check and the rename remains possible.
    */
   public void writeApplication(
       ScheduleDefinitionStore.Source source, String name, String text, boolean overwrite) {
@@ -162,9 +176,14 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
       for (Entry entry : read(source)) if (!entry.name().equals(name)) projected.add(entry);
       projected.add(new Entry(name, text));
       bounded(projected);
+      Path real = root(source).toRealPath();
+      checkpoint.accept("stage");
+      inside(folder, real);
       Path staged = Files.createTempFile(folder, "schedule-", ".tmp");
       try {
         Files.writeString(staged, text, StandardCharsets.UTF_8);
+        checkpoint.accept("move");
+        inside(folder, real);
         if (overwrite)
           Files.move(
               staged, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -266,15 +285,22 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     return data.schedulesFor(source.projectId());
   }
 
+  /** Refuses a folder whose real path has left the root's real path. */
+  private static void inside(Path folder, Path realRoot) throws IOException {
+    if (!folder.toRealPath().startsWith(realRoot))
+      throw new WorkspaceUnavailableException("Schedule folder moved outside its root");
+  }
+
+  private Path root(ScheduleDefinitionStore.Source source) {
+    return resources
+        .root(source.projectId())
+        .orElseGet(() -> data.root())
+        .toAbsolutePath()
+        .normalize();
+  }
+
   private void safe(Path path, ScheduleDefinitionStore.Source source) {
-    Path
-        root =
-            resources
-                .root(source.projectId())
-                .orElseGet(() -> data.root())
-                .toAbsolutePath()
-                .normalize(),
-        at = root;
+    Path root = root(source), at = root;
     if (!path.toAbsolutePath().normalize().startsWith(root))
       throw new WorkspaceUnavailableException("Schedule path escaped the definitions tier");
     for (Path segment : root.relativize(path.toAbsolutePath().normalize())) {

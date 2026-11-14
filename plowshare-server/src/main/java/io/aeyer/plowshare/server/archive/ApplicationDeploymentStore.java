@@ -24,6 +24,17 @@ public interface ApplicationDeploymentStore {
     }
   }
 
+  /**
+   * One activation request.
+   *
+   * @param install {@code true} inserts {@code release} as a new retained release; {@code false}
+   *     re-activates an existing one
+   * @param scheduleOnly a project Manager's schedule-only revision (ADR 0068): a new release whose
+   *     files differ from the expected head only in {@code schedules/*.json}, with the same
+   *     destination, writable areas and manifest. It is admitted for a current project Manager
+   *     instead of a server administrator, and it never changes the owned identity, the project
+   *     type or the schedule registration. It must install a new release over an expected head.
+   */
   record Mutation(
       String project,
       UUID requestId,
@@ -32,7 +43,8 @@ public interface ApplicationDeploymentStore {
       Retained release,
       java.nio.file.Path verifiedRoot,
       boolean install,
-      io.aeyer.plowshare.server.applications.ApplicationIdentitySource identity) {
+      io.aeyer.plowshare.server.applications.ApplicationIdentitySource identity,
+      boolean scheduleOnly) {
     public Mutation(
         String project,
         UUID requestId,
@@ -42,6 +54,27 @@ public interface ApplicationDeploymentStore {
         java.nio.file.Path verifiedRoot,
         boolean install) {
       this(project, requestId, expectedRevision, fingerprint, release, verifiedRoot, install, null);
+    }
+
+    public Mutation(
+        String project,
+        UUID requestId,
+        UUID expectedRevision,
+        String fingerprint,
+        Retained release,
+        java.nio.file.Path verifiedRoot,
+        boolean install,
+        io.aeyer.plowshare.server.applications.ApplicationIdentitySource identity) {
+      this(
+          project,
+          requestId,
+          expectedRevision,
+          fingerprint,
+          release,
+          verifiedRoot,
+          install,
+          identity,
+          false);
     }
 
     public Mutation {
@@ -54,7 +87,8 @@ public interface ApplicationDeploymentStore {
           || fingerprint == null
           || !fingerprint.matches("[0-9a-f]{64}")
           || !verifiedRoot.isAbsolute()
-          || !install && expectedRevision == null)
+          || !install && expectedRevision == null
+          || scheduleOnly && (!install || expectedRevision == null))
         throw new IllegalArgumentException("Invalid deployment mutation");
     }
   }

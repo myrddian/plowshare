@@ -1,4 +1,4 @@
-package io.aeyer.plowshare.server.auth;
+package io.aeyer.plowshare.server.events;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;

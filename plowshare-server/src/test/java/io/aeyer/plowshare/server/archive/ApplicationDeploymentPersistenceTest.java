@@ -244,6 +244,189 @@ class ApplicationDeploymentPersistenceTest {
             projects.id(name)));
   }
 
+  // ADR 0068: schedule-only revisions. The commit fence relies on the PostgreSQL project-row lock
+  // and the receipt tables, which is why these run against a real database.
+
+  /** A deployment service whose store re-checks project management under the project lock. */
+  SourceApplicationDeployments revisor(
+      io.aeyer.plowshare.server.applications.ApplicationPackageValidator validator) {
+    var members = new JdbcProjectMembers(jdbc);
+    var revisions =
+        new JdbcApplicationDeploymentStore(
+            jdbc,
+            work,
+            projects,
+            schedules,
+            null,
+            null,
+            io.aeyer.plowshare.server.applications.ContainmentFence.unfenced(),
+            members);
+    return new SourceApplicationDeployments(
+        revisions, members, projects, files, validator, null, projects);
+  }
+
+  /** A permanent, non-administrator account with a stored role on the deployed project. */
+  void member(String handle, ProjectRole role) {
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,server_admin) VALUES (?,'fixture',FALSE)"
+            + " ON CONFLICT DO NOTHING",
+        handle);
+    new JdbcProjectMembers(jdbc).assign(name, handle, role, "deployer", true);
+  }
+
+  int count(String sql) {
+    return jdbc.queryForObject(sql, Integer.class, projects.id(name));
+  }
+
+  @Test
+  void managerScheduleRevisionCommitsUnderHeadFence() throws Exception {
+    var initial = deployments.deploy("deployer", request(UUID.randomUUID(), null, "one"));
+    member("operator", ProjectRole.MANAGER);
+    Long id = projects.id(name);
+    String revision =
+        revisor((project, root) -> {}).revise("operator", id, "daily", "{\"cron\":1}", false);
+    UUID head = UUID.fromString(revision);
+    assertEquals(head, deployments.status("deployer", name).activeRevision());
+    assertEquals(2, deployments.status("deployer", name).releases().size());
+    assertEquals(
+        2, count("SELECT count(*) FROM application_deployment_receipts WHERE project_id = ?"));
+    assertEquals(
+        "operator",
+        jdbc.queryForObject(
+            "SELECT account FROM application_deployment_receipts WHERE revision = ?",
+            String.class,
+            head));
+    var row = projects.find(name).orElseThrow();
+    assertEquals("MANAGED", row.type());
+    assertTrue(row.workspace().endsWith(revision));
+    assertEquals(
+        new FileStoreReference("applications", name + "/revisions/" + revision),
+        row.placement().applicationRoot());
+    assertEquals("one", Files.readString(row.workspace().resolve("README.md")));
+    assertEquals("{\"cron\":1}", Files.readString(row.workspace().resolve("schedules/daily.json")));
+    // The previous revision is retained for rollback, untouched.
+    assertFalse(
+        Files.exists(
+            row.workspace()
+                .resolveSibling(initial.release().revision().toString())
+                .resolve("schedules")));
+    // The registration from the first deployment is the only one: a revision never re-registers.
+    verify(schedules, times(1)).register("deployer", id, "server");
+    verifyNoMoreInteractions(schedules);
+  }
+
+  @Test
+  void scheduleRevisionRefusedWhenHeadMoved() throws Exception {
+    var initial = deployments.deploy("deployer", request(UUID.randomUUID(), null, "one"));
+    member("operator", ProjectRole.MANAGER);
+    Long id = projects.id(name);
+    var concurrent = new java.util.concurrent.atomic.AtomicReference<Receipt>();
+    // The administrator's deploy commits while the schedule revision is staged and validated,
+    // after the revision has read the head it expects.
+    var revisions =
+        revisor(
+            (project, root) -> {
+              if (concurrent.get() == null)
+                concurrent.set(
+                    deployments.deploy(
+                        "deployer",
+                        request(UUID.randomUUID(), initial.release().revision(), "two")));
+            });
+    var refusal =
+        assertThrows(
+            CallerFault.class, () -> revisions.revise("operator", id, "daily", "{}", false));
+    assertTrue(refusal.getMessage().startsWith("Application revision changed"));
+    var moved = concurrent.get().release().revision();
+    assertEquals(moved, deployments.status("deployer", name).activeRevision());
+    assertEquals(2, deployments.status("deployer", name).releases().size());
+    assertEquals(
+        2, count("SELECT count(*) FROM application_deployment_receipts WHERE project_id = ?"));
+    assertTrue(projects.find(name).orElseThrow().workspace().endsWith(moved.toString()));
+    // The refused revision's staging is removed; the two committed revisions remain.
+    try (var staged = Files.list(directory.resolve("sources").resolve(name + "/revisions"))) {
+      assertEquals(2, staged.count());
+    }
+  }
+
+  @Test
+  void ownedApplicationScheduleRevisionKeepsIdentityAndRebindsActingGrants() throws Exception {
+    var identities = ownedLifecycle();
+    String handle = "acting-" + UUID.randomUUID();
+    deployments.deploy("deployer", actingRequest(null, handle, "CONTRIBUTOR"));
+    var owned = identities.status("deployer", name).identity();
+    member("operator", ProjectRole.MANAGER);
+    var members = new JdbcProjectMembers(jdbc);
+    // The production composition: identities and acting are present, and neither may demand
+    // server administration of a project Manager's schedule-only revision.
+    var guarded =
+        new JdbcApplicationDeploymentStore(
+            jdbc,
+            work,
+            projects,
+            schedules,
+            identities,
+            actingRepository(),
+            io.aeyer.plowshare.server.applications.ContainmentFence.unfenced(),
+            members);
+    String revision =
+        new SourceApplicationDeployments(
+                guarded, members, projects, files, (project, root) -> {}, identities, projects)
+            .revise("operator", projects.id(name), "daily", "{}", false);
+    assertEquals(UUID.fromString(revision), deployments.status("deployer", name).activeRevision());
+    assertEquals(owned, identities.status("deployer", name).identity());
+    // Acting grants are live only for the head revision; the revision re-binds them.
+    assertTrue(actingRepository().grant(name, "users").isPresent());
+  }
+
+  @Test
+  void nonManagerCannotActivateScheduleRevision() throws Exception {
+    var initial = deployments.deploy("deployer", request(UUID.randomUUID(), null, "one"));
+    member("helper", ProjectRole.CONTRIBUTOR);
+    Long id = projects.id(name);
+    assertThrows(
+        CallerFault.class,
+        () -> revisor((project, root) -> {}).revise("helper", id, "daily", "{}", false));
+    // The store's own check refuses a Contributor's schedule-only mutation under the lock, even
+    // when a caller skipped the service.
+    UUID revision = UUID.randomUUID();
+    Path staged =
+        Files.createDirectory(
+            directory.resolve("sources").resolve(name + "/revisions/" + revision));
+    var previous = store.release(name, initial.release().revision());
+    var mutation =
+        new ApplicationDeploymentStore.Mutation(
+            name,
+            UUID.randomUUID(),
+            initial.release().revision(),
+            "0".repeat(64),
+            new ApplicationDeploymentStore.Retained(
+                new Release(revision, "1".repeat(64), 2),
+                previous.destination(),
+                new ApplicationPlacement(
+                    new FileStoreReference("applications", name + "/revisions/" + revision),
+                    previous.placement().writableAreas())),
+            staged,
+            true,
+            null,
+            true);
+    var members = new JdbcProjectMembers(jdbc);
+    var guarded =
+        new JdbcApplicationDeploymentStore(
+            jdbc,
+            work,
+            projects,
+            schedules,
+            null,
+            null,
+            io.aeyer.plowshare.server.applications.ContainmentFence.unfenced(),
+            members);
+    assertThrows(RuntimeException.class, () -> guarded.commit("helper", mutation));
+    assertEquals(
+        initial.release().revision(), deployments.status("deployer", name).activeRevision());
+    assertEquals(
+        1, count("SELECT count(*) FROM application_deployment_receipts WHERE project_id = ?"));
+  }
+
   @Test
   void failed_schedule_enrollment_rolls_back_project_placement_and_receipt() {
     doThrow(new CallerFault("Enrollment failed"))

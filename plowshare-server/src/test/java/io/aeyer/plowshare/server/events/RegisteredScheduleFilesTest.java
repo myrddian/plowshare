@@ -146,6 +146,52 @@ class RegisteredScheduleFilesTest {
     assertEquals("{}", Files.readString(folder.resolve("s20.json")));
   }
 
+  /**
+   * Swaps {@code schedules/} for a link to a folder outside the root at one checkpoint, as a
+   * concurrent writer on the host could, and asserts nothing lands outside the root.
+   */
+  private void refusesFolderSwappedAt(String point) throws Exception {
+    var files = application();
+    Path folder = Files.createDirectories(root.resolve("schedules"));
+    Path elsewhere = Files.createTempDirectory("elsewhere");
+    Path moved = elsewhere.resolve("moved");
+    files.checkpoint =
+        at -> {
+          if (!at.equals(point)) return;
+          try {
+            Files.move(folder, moved);
+            Files.createSymbolicLink(folder, moved);
+          } catch (java.io.IOException failed) {
+            throw new java.io.UncheckedIOException(failed);
+          }
+        };
+    try {
+      assertThrows(
+          WorkspaceUnavailableException.class,
+          () -> files.writeApplication(SOURCE, "daily", "{}", true));
+      try (var written = Files.list(moved)) {
+        assertEquals(java.util.List.of(), written.toList());
+      }
+    } finally {
+      Files.deleteIfExists(folder);
+      try (var left = Files.list(moved)) {
+        for (Path path : left.toList()) Files.delete(path);
+      }
+      Files.deleteIfExists(moved);
+      Files.deleteIfExists(elsewhere);
+    }
+  }
+
+  @Test
+  void applicationWriteRefusesFolderSwappedForALinkBeforeStaging() throws Exception {
+    refusesFolderSwappedAt("stage");
+  }
+
+  @Test
+  void applicationWriteRefusesFolderSwappedForALinkBeforeTheMove() throws Exception {
+    refusesFolderSwappedAt("move");
+  }
+
   private static final ScheduleDefinitionStore.Source SOURCE =
       new ScheduleDefinitionStore.Source(1, "owner", 7L, "project", "server");
 

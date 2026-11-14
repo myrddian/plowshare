@@ -189,4 +189,195 @@ class SourceApplicationDeploymentsTest {
     }
     verifyNoInteractions(applications);
   }
+
+  // ADR 0068: a project Manager's save on a MANAGED Application lands as a schedule-only revision.
+
+  final UUID active = UUID.randomUUID();
+  final FileStoreReference outputs = new FileStoreReference("applications", "outputs");
+
+  /** Formatting a re-resolved manifest would never reproduce: proves the bytes are copied. */
+  final String manifest =
+      "{ \"version\":1,\"name\":\"app\" ,\n"
+          + "  \"service\":{\"handle\":\"worker\",\"role\":\"CONTRIBUTOR\"},"
+          + "\"executionAccount\":\"@service/00000000-0000-0000-0000-000000000001\"}";
+
+  ProjectNames names;
+  ApplicationIdentities identities;
+
+  /** An active revision as a prior deployment retained it, with the store reporting it as head. */
+  Path activeRevision() throws Exception {
+    Path root = Files.createDirectories(directory.resolve("app/revisions/" + active));
+    Files.writeString(root.resolve("plowshare.json"), manifest);
+    Files.writeString(root.resolve("README.md"), "caf\u00e9 \u2014 \uD83D\uDE80\r\nno newline");
+    Files.createDirectories(root.resolve("schedules"));
+    Files.writeString(root.resolve("schedules/daily.json"), "{\"old\":true}");
+    Files.createDirectories(root.resolve("agents/deep"));
+    Files.writeString(root.resolve("agents/deep/helper.md"), "# helper\n");
+    var retained =
+        List.of(
+            new File("plowshare.json", manifest),
+            new File("README.md", Files.readString(root.resolve("README.md"))),
+            new File("schedules/daily.json", "{\"old\":true}"),
+            new File("agents/deep/helper.md", "# helper\n"));
+    var release = new Release(active, SourceApplicationDeployments.digest(retained), 4);
+    when(store.status("app")).thenReturn(new Status("app", active, List.of(release)));
+    when(store.release("app", active))
+        .thenReturn(
+            new ApplicationDeploymentStore.Retained(
+                release,
+                destination,
+                new ApplicationPlacement(
+                    new FileStoreReference("applications", "app/revisions/" + active),
+                    List.of(outputs))));
+    names = mock(ProjectNames.class);
+    when(names.nameForId(7L)).thenReturn(Optional.of("app"));
+    identities = mock(ApplicationIdentities.class);
+    when(members.mayManage("app", "manager")).thenReturn(true);
+    service =
+        new SourceApplicationDeployments(
+            store, members, projects, stores, validator, identities, names);
+    return root;
+  }
+
+  ApplicationDeploymentStore.Mutation committed() {
+    var mutation = org.mockito.ArgumentCaptor.forClass(ApplicationDeploymentStore.Mutation.class);
+    verify(store).commit(eq("manager"), mutation.capture());
+    return mutation.getValue();
+  }
+
+  List<Path> revisions() throws Exception {
+    try (var listed = Files.list(directory.resolve("app/revisions"))) {
+      return listed.sorted().toList();
+    }
+  }
+
+  @Test
+  void scheduleRevisionCopiesEveryOtherFileByteForByte() throws Exception {
+    Path old = activeRevision();
+    String revision = service.revise("manager", 7L, "daily", "{\"new\":true}", true);
+    var mutation = committed();
+    assertEquals(revision, mutation.release().release().revision().toString());
+    Path fresh = directory.resolve("app/revisions/" + revision);
+    assertEquals(fresh, mutation.verifiedRoot());
+    for (String path : List.of("plowshare.json", "README.md", "agents/deep/helper.md"))
+      assertArrayEquals(
+          Files.readAllBytes(old.resolve(path)), Files.readAllBytes(fresh.resolve(path)), path);
+    assertEquals("{\"new\":true}", Files.readString(fresh.resolve("schedules/daily.json")));
+    // The retained revision is never touched.
+    assertEquals("{\"old\":true}", Files.readString(old.resolve("schedules/daily.json")));
+    try (var walked = Files.walk(fresh)) {
+      assertEquals(4, walked.filter(Files::isRegularFile).count());
+    }
+    assertTrue(mutation.scheduleOnly());
+    assertTrue(mutation.install());
+    assertEquals(active, mutation.expectedRevision());
+    assertEquals(4, mutation.release().release().fileCount());
+    verify(validator).validate("app", fresh);
+  }
+
+  @Test
+  void scheduleRevisionCopiesManifestWithoutResolving() throws Exception {
+    activeRevision();
+    String revision = service.revise("manager", 7L, "weekly", "{}", false);
+    assertEquals(
+        manifest,
+        Files.readString(directory.resolve("app/revisions/" + revision + "/plowshare.json")));
+    // No reservation, activation or status read: the owned identity is carried, not re-resolved.
+    verifyNoInteractions(identities);
+    var identity = committed().identity();
+    assertEquals("@service/00000000-0000-0000-0000-000000000001", identity.principal());
+  }
+
+  @Test
+  void scheduleRevisionAddsNewScheduleFile() throws Exception {
+    activeRevision();
+    String revision = service.revise("manager", 7L, "weekly", "{\"w\":1}", false);
+    Path fresh = directory.resolve("app/revisions/" + revision);
+    assertEquals("{\"w\":1}", Files.readString(fresh.resolve("schedules/weekly.json")));
+    assertEquals("{\"old\":true}", Files.readString(fresh.resolve("schedules/daily.json")));
+    var release = committed().release().release();
+    assertEquals(5, release.fileCount());
+    assertEquals(
+        SourceApplicationDeployments.digest(
+            List.of(
+                new File("plowshare.json", manifest),
+                new File("README.md", Files.readString(fresh.resolve("README.md"))),
+                new File("schedules/daily.json", "{\"old\":true}"),
+                new File("schedules/weekly.json", "{\"w\":1}"),
+                new File("agents/deep/helper.md", "# helper\n"))),
+        release.digest());
+  }
+
+  @Test
+  void scheduleRevisionRefusesExistingWithoutOverwrite() throws Exception {
+    activeRevision();
+    var refusal =
+        assertThrows(CallerFault.class, () -> service.revise("manager", 7L, "daily", "{}", false));
+    assertEquals("A schedule named daily already exists", refusal.getMessage());
+    assertEquals(1, revisions().size());
+    verify(store, never()).commit(any(), any());
+    // Names follow the schedule identity rule before anything is read or staged.
+    assertThrows(CallerFault.class, () -> service.revise("manager", 7L, "../escape", "{}", true));
+    assertThrows(
+        CallerFault.class, () -> service.revise("manager", 7L, "big", "x".repeat(65537), true));
+    assertEquals(1, revisions().size());
+    verify(store, never()).commit(any(), any());
+  }
+
+  @Test
+  void scheduleRevisionKeepsDestinationAndWritableAreas() throws Exception {
+    activeRevision();
+    String revision = service.revise("manager", 7L, "daily", "{}", true);
+    var retained = committed().release();
+    assertEquals(destination, retained.destination());
+    assertEquals(List.of(outputs), retained.placement().writableAreas());
+    assertEquals(
+        new FileStoreReference("applications", "app/revisions/" + revision),
+        retained.placement().applicationRoot());
+    // The Manager needs no FileStore authority and no server administration.
+    verify(stores, never()).permits(any(), any(), any());
+    verify(members, never()).isServerAdmin(any());
+  }
+
+  @Test
+  void failedValidationRemovesStagedRevision() throws Exception {
+    activeRevision();
+    doThrow(new CallerFault("Invalid resources")).when(validator).validate(eq("app"), any());
+    assertThrows(CallerFault.class, () -> service.revise("manager", 7L, "daily", "{}", true));
+    assertEquals(1, revisions().size());
+    verify(store, never()).commit(any(), any());
+    // A definite refusal by the head fence rolls the transaction back; its staging goes too.
+    doNothing().when(validator).validate(any(), any());
+    doThrow(
+            new CallerFault(
+                "Application revision changed; read deployment status before submitting a new request"))
+        .when(store)
+        .commit(any(), any());
+    assertThrows(CallerFault.class, () -> service.revise("manager", 7L, "daily", "{}", true));
+    assertEquals(1, revisions().size());
+  }
+
+  @Test
+  void uncertainCommitRetainsStagedRevision() throws Exception {
+    activeRevision();
+    // The outcome is unknown, so the staged directory may be the committed head: keep it.
+    doThrow(new IllegalStateException("connection lost")).when(store).commit(any(), any());
+    assertThrows(
+        IllegalStateException.class, () -> service.revise("manager", 7L, "daily", "{}", true));
+    assertEquals(2, revisions().size());
+  }
+
+  @Test
+  void contributorRefused() throws Exception {
+    activeRevision();
+    when(members.mayWork("app", "contributor")).thenReturn(true);
+    when(members.mayManage("app", "@service/worker")).thenReturn(true);
+    for (String caller : List.of("contributor", "stranger", "@service/worker"))
+      assertThrows(
+          CallerFault.class, () -> service.revise(caller, 7L, "daily", "{}", true), caller);
+    assertEquals(1, revisions().size());
+    verify(store, never()).commit(any(), any());
+    verify(store, never()).status(any());
+    verifyNoInteractions(validator);
+  }
 }

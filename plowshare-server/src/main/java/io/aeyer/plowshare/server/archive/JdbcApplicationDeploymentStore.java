@@ -30,6 +30,13 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
    */
   private final io.aeyer.plowshare.server.applications.ContainmentFence containment;
 
+  /**
+   * Project management authority for schedule-only revisions (ADR 0068), checked under the project
+   * row lock. A store without it refuses every schedule-only mutation; ordinary deployments do not
+   * use it.
+   */
+  private final ProjectMembers members;
+
   public JdbcApplicationDeploymentStore(
       JdbcTemplate jdbc,
       UnitOfWork work,
@@ -72,6 +79,19 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
       io.aeyer.plowshare.server.applications.ApplicationIdentities identities,
       io.aeyer.plowshare.server.acting.ActingRepository acting,
       io.aeyer.plowshare.server.applications.ContainmentFence containment) {
+    this(jdbc, work, projects, schedules, identities, acting, containment, null);
+  }
+
+  public JdbcApplicationDeploymentStore(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      ServerProjects projects,
+      io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
+      io.aeyer.plowshare.server.applications.ApplicationIdentities identities,
+      io.aeyer.plowshare.server.acting.ActingRepository acting,
+      io.aeyer.plowshare.server.applications.ContainmentFence containment,
+      ProjectMembers members) {
+    this.members = members;
     this.containment = Objects.requireNonNull(containment, "containment fence");
     this.acting = acting;
     this.identities = identities;
@@ -129,13 +149,27 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
         .orElseThrow(() -> new CallerFault("Choose a retained Application revision"));
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Order, in one transaction: the identity administrator lock (ordinary deployments only), the
+   * project row lock, the live-child fence, the receipt, then the head-revision fence. A
+   * schedule-only mutation (ADR 0068) then requires a current project Manager instead of a server
+   * administrator, checked here under the project row lock, and activates through {@link
+   * ServerProjects#activateScheduleRevision}. It does not take the identity administrator lock or
+   * touch the owned identity: its manifest is the expected head's, byte for byte, so the identity
+   * cannot change. Acting declarations are re-bound to the new head as for any activation, because
+   * live grants are keyed to the head revision. The release row, head and receipt are written
+   * exactly as for any other deployment.
+   */
   @Override
   public Receipt commit(String account, Mutation mutation) {
     if (!mutation.fingerprint().matches("[0-9a-f]{64}"))
       throw new IllegalArgumentException("Invalid deployment fingerprint");
     return work.inTransaction(
         () -> {
-          if (identities != null) identities.lockActivation(account, mutation.project());
+          if (identities != null && !mutation.scheduleOnly())
+            identities.lockActivation(account, mutation.project());
           Long id = ProjectIds.toWrite(jdbc, Home.of(mutation.project()));
           jdbc.queryForObject("SELECT id FROM projects WHERE id = ? FOR UPDATE", Long.class, id);
           // Under the lock, and immediately after it. A parent revision change refuses while any
@@ -172,12 +206,24 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
           // The owning repository updates only source placement. The enclosing transaction retains
           // membership, memories and in-flight records, and rolls back every database effect on
           // failure.
-          projects.activateDeployment(
-              mutation.project(),
-              release.placement(),
-              previous == null ? null : previous.placement(),
-              mutation.verifiedRoot(),
-              account);
+          if (mutation.scheduleOnly()) {
+            if (previous == null)
+              throw new CallerFault("Deploy the Application before revising it");
+            requireManager(account, mutation.project());
+            projects.activateScheduleRevision(
+                account,
+                mutation.project(),
+                release.placement(),
+                previous.placement(),
+                mutation.verifiedRoot());
+          } else {
+            projects.activateDeployment(
+                mutation.project(),
+                release.placement(),
+                previous == null ? null : previous.placement(),
+                mutation.verifiedRoot(),
+                account);
+          }
           if (mutation.install()) {
             jdbc.update(
                 "INSERT INTO application_releases (revision, project_id, digest, file_count, destination, placement) VALUES (?, ?, ?, ?, ?::jsonb, ?::jsonb)",
@@ -203,7 +249,7 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
               mutation.fingerprint(),
               release.release().revision());
           String scheduleOwner = account;
-          if (identities != null) {
+          if (identities != null && !mutation.scheduleOnly()) {
             var source = mutation.identity();
             if (source == null)
               throw new CallerFault("Deployment needs a validated identity declaration");
@@ -225,6 +271,14 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
           if (active == null) schedules.register(scheduleOwner, id, "server");
           return new Receipt(mutation.requestId(), mutation.project(), release.release());
         });
+  }
+
+  /** A current project Manager, never a service principal; refused rather than reported. */
+  private void requireManager(String account, String project) {
+    if (members == null
+        || io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account)
+        || !members.mayManage(project, account))
+      throw new CallerFault("Saving an Application schedule requires a project Manager");
   }
 
   @Override

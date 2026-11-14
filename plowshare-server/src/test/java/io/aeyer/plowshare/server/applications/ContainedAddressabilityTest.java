@@ -187,7 +187,8 @@ class ContainedAddressabilityTest {
             mock(ScheduleDefinitions.Authority.class),
             mock(ScheduleControlAuthority.class),
             mock(ApplicationProjects.class),
-            mock(ApplicationScheduleAudit.class));
+            mock(ApplicationScheduleAudit.class),
+            mock(io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions.class));
     var refusal = assertThrows(CallerFault.class, () -> schedules.requireRead("alice", CHILD));
     assertTrue(refusal.getMessage().contains("ordinary"), refusal.getMessage());
     // The role check is never reached, so the refusal does not depend on the authority predicate.

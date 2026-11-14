@@ -33,9 +33,11 @@ class ScheduleDefinitionsTest {
   private final ScheduleControlAuthority controls = mock(ScheduleControlAuthority.class);
   private final ApplicationProjects applications = mock(ApplicationProjects.class);
   private final ApplicationScheduleAudit audit = mock(ApplicationScheduleAudit.class);
+  private final io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions revisions =
+      mock(io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions.class);
   private final ScheduleDefinitions service =
       new FileScheduleDefinitions(
-          store, files, projects, members, authority, controls, applications, audit);
+          store, files, projects, members, authority, controls, applications, audit, revisions);
 
   @BeforeEach
   void configure() {
@@ -407,7 +409,7 @@ class ScheduleDefinitionsTest {
           () ->
               service.save(
                   actor, new ScheduledWork.Save("daily", "project", "server", definition, true)));
-    verifyNoInteractions(controls, audit);
+    verifyNoInteractions(controls, audit, revisions);
     verify(files, never()).delete(any(), anyString());
     verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
     verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
@@ -548,16 +550,35 @@ class ScheduleDefinitionsTest {
   }
 
   @Test
-  void managedApplicationSavesAwaitTheRevisionPath() {
+  void managerSavesManagedApplicationScheduleAsRevision() {
     application(ApplicationProjects.ProjectType.MANAGED);
-    when(members.mayManage("project", "owner")).thenReturn(true);
-    var refusal =
-        assertThrows(
-            UnsupportedOperationException.class, () -> saveApplication("owner", definition));
-    assertEquals(
-        "MANAGED Application schedule saves arrive in the next task", refusal.getMessage());
+    when(members.mayManage("project", "manager")).thenReturn(true);
+    String text = ScheduleDefinitionCodec.write(definition);
+    when(revisions.revise("manager", 7L, "daily", text, true)).thenReturn("rev");
+    assertEquals(prior, saveApplication("manager", definition));
+    var order = inOrder(authority, revisions, files, store, audit);
+    order.verify(authority).validate(source, definition);
+    order.verify(revisions).revise("manager", 7L, "daily", text, true);
+    order.verify(files).read(source);
+    order.verify(store).apply(eq(source), eq("daily"), eq(definition), any());
+    order.verify(audit).saved("manager", "project/daily@rev");
+    // The revision is the only write: no in-place file and no new registration.
     verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
-    verifyNoInteractions(audit);
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+    verify(store, never()).register(anyString(), any(), anyString());
+  }
+
+  @Test
+  void managedApplicationSaveValidatesBeforeRevising() {
+    application(ApplicationProjects.ProjectType.MANAGED);
+    when(members.mayManage("project", "manager")).thenReturn(true);
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("bad action"))
+        .when(authority)
+        .validate(source, definition);
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> saveApplication("manager", definition));
+    verifyNoInteractions(revisions, audit);
   }
 
   @Test

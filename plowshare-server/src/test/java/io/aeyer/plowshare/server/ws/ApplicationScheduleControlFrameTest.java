@@ -72,7 +72,8 @@ class ApplicationScheduleControlFrameTest {
             action,
             new ApplicationScheduleControlAuthority(resources, members),
             mock(io.aeyer.plowshare.server.events.ApplicationProjects.class),
-            mock(io.aeyer.plowshare.server.events.ApplicationScheduleAudit.class));
+            mock(io.aeyer.plowshare.server.events.ApplicationScheduleAudit.class),
+            mock(io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions.class));
     var schedules = mock(ScheduleStore.class);
     var frames =
         new EventFrames(

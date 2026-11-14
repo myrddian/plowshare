@@ -17,6 +17,7 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
   private final ScheduleControlAuthority controls;
   private final ApplicationProjects applications;
   private final ApplicationScheduleAudit audit;
+  private final io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions revisions;
 
   public FileScheduleDefinitions(
       ScheduleDefinitionStore store,
@@ -26,7 +27,9 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
       Authority authority,
       ScheduleControlAuthority controls,
       ApplicationProjects applications,
-      ApplicationScheduleAudit audit) {
+      ApplicationScheduleAudit audit,
+      io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions revisions) {
+    this.revisions = revisions;
     this.store = store;
     this.files = files;
     this.projects = projects;
@@ -78,6 +81,13 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
    * registered owner's execution access and validate the actions under that owner and parse the
    * cron; write; reconcile; audit. Nothing is written until every check has passed.
    *
+   * <p>The write depends on the project type. A MANAGED project's save becomes a schedule-only
+   * deployment revision ({@link
+   * io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions}), committed under the
+   * deployment head fence, and its audit target carries {@code @<revision>}. Reconciliation then
+   * reads the new revision, which is the project's workspace once the revision commits. Any other
+   * Application root is written in place.
+   *
    * <p>No transaction spans the file write and the projection. A crash after the write and before
    * reconciliation leaves a valid file that the poll reconciles on its next tick, exactly as an
    * ordinary save does. The audit row is written after reconciliation and before its result is
@@ -90,9 +100,6 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
         applications
             .find(pending.projectId())
             .orElseThrow(() -> new CallerFault("Choose a registered project for schedule files"));
-    if (project.type() == ApplicationProjects.ProjectType.MANAGED)
-      throw new UnsupportedOperationException(
-          "MANAGED Application schedule saves arrive in the next task");
     var source =
         store
             .registered(pending.projectId(), pending.source())
@@ -105,13 +112,16 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
     authority.validate(source, request.definition());
     CronSchedule.parse(request.definition().cron(), request.definition().zone())
         .nextAfter(Instant.now());
-    files.writeApplication(
-        source,
-        request.name(),
-        ScheduleDefinitionCodec.write(request.definition()),
-        request.overwrite());
+    String text = ScheduleDefinitionCodec.write(request.definition());
+    String target = project.name() + "/" + request.name();
+    if (project.type() == ApplicationProjects.ProjectType.MANAGED)
+      target +=
+          "@"
+              + revisions.revise(
+                  account, pending.projectId(), request.name(), text, request.overwrite());
+    else files.writeApplication(source, request.name(), text, request.overwrite());
     var scan = reconcile(source);
-    audit.saved(account, project.name() + "/" + request.name());
+    audit.saved(account, target);
     requireComplete(scan);
     return store.snapshot(source, request.name()).orElseThrow().effective();
   }

@@ -7,7 +7,6 @@ import io.aeyer.plowshare.server.agents.SkillResolver;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
-import io.aeyer.plowshare.server.auth.JdbcApplicationScheduleAudit;
 import io.aeyer.plowshare.server.cache.ProjectionCaches;
 import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import io.aeyer.plowshare.server.data.DataLayout;
@@ -83,7 +82,9 @@ public class ScheduleDefinitionConfig {
       ScheduleDefinitions.Authority authority,
       ApplicationResources resources,
       ApplicationProjects applications,
-      ApplicationScheduleAudit audit) {
+      ApplicationScheduleAudit audit,
+      ObjectProvider<io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions>
+          revisions) {
     return new FileScheduleDefinitions(
         store,
         files,
@@ -92,7 +93,11 @@ public class ScheduleDefinitionConfig {
         authority,
         new ApplicationScheduleControlAuthority(resources, members),
         applications,
-        audit);
+        audit,
+        // Resolved per save, so composing schedules never waits on the deployment service, whose
+        // store and package validator are themselves built from scheduling beans.
+        (caller, projectId, name, text, overwrite) ->
+            revisions.getObject().revise(caller, projectId, name, text, overwrite));
   }
 
   @Bean

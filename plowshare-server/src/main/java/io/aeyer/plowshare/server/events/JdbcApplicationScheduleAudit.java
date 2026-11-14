@@ -1,6 +1,5 @@
-package io.aeyer.plowshare.server.auth;
+package io.aeyer.plowshare.server.events;
 
-import io.aeyer.plowshare.server.events.ApplicationScheduleAudit;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**

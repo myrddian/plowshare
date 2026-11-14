@@ -31,6 +31,27 @@ public interface ServerProjects extends ProjectWorkspaces {
       Path verifiedRoot,
       String handle);
 
+  /**
+   * Atomic source switch for a project Manager's schedule-only revision (ADR 0068).
+   *
+   * <p>Unlike {@link #activateDeployment}, this neither requires server administration nor
+   * FileStore {@code MANAGER} access: the new revision lands beside the active one in the
+   * destination the server already staged for this placed project. The caller, the deployment
+   * store, has already checked that {@code account} is a current project Manager under the same
+   * project row lock.
+   *
+   * <p>It refuses unless the project is MANAGED, its stored placement is still {@code expected},
+   * {@code placement} keeps {@code expected}'s FileStore, writable areas and revisions directory,
+   * and {@code verifiedRoot} is what the placement resolves to now. It then moves the project's
+   * workspace and stored placement to the new revision and changes nothing else.
+   */
+  ProjectRecord activateScheduleRevision(
+      String account,
+      String name,
+      ApplicationPlacement placement,
+      ApplicationPlacement expected,
+      Path verifiedRoot);
+
   record ServerWorkspace(Path root, boolean application, ApplicationPlacement placement) {
     public ServerWorkspace(Path root, boolean application) {
       this(root, application, null);
