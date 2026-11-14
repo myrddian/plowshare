@@ -614,12 +614,10 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
    */
   @Override
   public ProjectRecord activateScheduleRevision(
-      String account,
       String name,
       ApplicationPlacement placement,
       ApplicationPlacement expected,
       Path verifiedRoot) {
-    Objects.requireNonNull(account);
     Objects.requireNonNull(placement);
     Objects.requireNonNull(expected);
     Objects.requireNonNull(verifiedRoot);

@@ -378,14 +378,163 @@ class ApplicationDeploymentPersistenceTest {
     assertTrue(actingRepository().grant(name, "users").isPresent());
   }
 
+  /** A copy of the head's files staged as a new revision directory, for hand-built mutations. */
+  Path stageCopy(UUID head, UUID revision) throws Exception {
+    // The head's root as the FileStore resolved it, so the staged sibling resolves the same way.
+    Path from = projects.find(name).orElseThrow().workspace();
+    Path to = from.resolveSibling(revision.toString());
+    try (var paths = Files.walk(from)) {
+      for (Path path : paths.toList())
+        Files.copy(path, to.resolve(from.relativize(path).toString()));
+    }
+    return to;
+  }
+
+  ApplicationDeploymentStore.Mutation scheduleOnly(UUID head, UUID revision, Path root) {
+    var previous = store.release(name, head);
+    return new ApplicationDeploymentStore.Mutation(
+        name,
+        UUID.randomUUID(),
+        head,
+        "0".repeat(64),
+        new ApplicationDeploymentStore.Retained(
+            new Release(revision, "1".repeat(64), 2),
+            previous.destination(),
+            new ApplicationPlacement(
+                new FileStoreReference("applications", name + "/revisions/" + revision),
+                previous.placement().writableAreas())),
+        root,
+        true,
+        // The declarations a caller claims, read from the head: the staged manifest may differ.
+        io.aeyer.plowshare.server.applications.ApplicationIdentitySource.read(
+            projects.find(name).orElseThrow().workspace()),
+        true);
+  }
+
+  @Test
+  void scheduleOnlyMutationWithChangedManifestIsRefused() throws Exception {
+    var initial = deployments.deploy("deployer", request(UUID.randomUUID(), null, "one"));
+    UUID head = initial.release().revision();
+    member("operator", ProjectRole.MANAGER);
+    var members = new JdbcProjectMembers(jdbc);
+    var guarded =
+        new JdbcApplicationDeploymentStore(
+            jdbc,
+            work,
+            projects,
+            schedules,
+            null,
+            null,
+            io.aeyer.plowshare.server.applications.ContainmentFence.unfenced(),
+            members);
+    // Each variant hands the store a schedule-only mutation a Manager could not get from the
+    // service: a changed manifest (new acting declarations), a changed or removed source file, a
+    // new non-schedule file, and a nested schedules path.
+    List<java.util.function.Consumer<Path>> tamper =
+        List.of(
+            root ->
+                rewrite(
+                    root.resolve("plowshare.json"),
+                    text ->
+                        text.substring(0, text.length() - 1)
+                            + ",\"acting\":[{\"grant\":\"users\",\"ceiling\":\"MANAGER\","
+                            + "\"personal\":true,\"proofs\":[\"acting-token\"]}]}"),
+            root -> rewrite(root.resolve("README.md"), text -> text + " changed"),
+            root -> delete(root.resolve("README.md")),
+            root -> write(root.resolve("agents.md"), "# new"),
+            root -> write(root.resolve("schedules/nested/daily.json"), "{}"));
+    for (var change : tamper) {
+      UUID revision = UUID.randomUUID();
+      Path root = stageCopy(head, revision);
+      write(root.resolve("schedules/daily.json"), "{}");
+      change.accept(root);
+      var refusal =
+          assertThrows(
+              CallerFault.class,
+              () -> guarded.commit("operator", scheduleOnly(head, revision, root)));
+      assertEquals(
+          "A schedule-only revision may change only schedules/*.json", refusal.getMessage());
+    }
+    assertEquals(head, deployments.status("deployer", name).activeRevision());
+    assertEquals(1, deployments.status("deployer", name).releases().size());
+    assertEquals(
+        1, count("SELECT count(*) FROM application_deployment_receipts WHERE project_id = ?"));
+    assertTrue(projects.find(name).orElseThrow().workspace().endsWith(head.toString()));
+    // The same hand-built path admits an honest schedule-only change.
+    UUID revision = UUID.randomUUID();
+    Path root = stageCopy(head, revision);
+    write(root.resolve("schedules/daily.json"), "{}");
+    guarded.commit("operator", scheduleOnly(head, revision, root));
+    assertEquals(revision, deployments.status("deployer", name).activeRevision());
+  }
+
+  @Test
+  void adminDeployAndRollbackAfterScheduleRevision() throws Exception {
+    var initial = deployments.deploy("deployer", request(UUID.randomUUID(), null, "one"));
+    member("operator", ProjectRole.MANAGER);
+    UUID scheduled =
+        UUID.fromString(
+            revisor((project, root) -> {})
+                .revise("operator", projects.id(name), "daily", "{}", false));
+    // Both read the stored placement, which must already name the schedule revision.
+    var deployed = deployments.deploy("deployer", request(UUID.randomUUID(), scheduled, "two"));
+    assertEquals(
+        deployed.release().revision(), deployments.status("deployer", name).activeRevision());
+    var rolled =
+        deployments.activate(
+            "deployer",
+            new Activate(
+                name,
+                UUID.randomUUID(),
+                deployed.release().revision(),
+                initial.release().revision()));
+    assertEquals(initial.release(), rolled.release());
+    assertEquals(
+        initial.release().revision(), deployments.status("deployer", name).activeRevision());
+    assertTrue(
+        projects
+            .find(name)
+            .orElseThrow()
+            .workspace()
+            .endsWith(initial.release().revision().toString()));
+  }
+
+  static void rewrite(Path file, java.util.function.UnaryOperator<String> change) {
+    try {
+      Files.writeString(file, change.apply(Files.readString(file)));
+    } catch (java.io.IOException failed) {
+      throw new java.io.UncheckedIOException(failed);
+    }
+  }
+
+  static void write(Path file, String text) {
+    try {
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, text);
+    } catch (java.io.IOException failed) {
+      throw new java.io.UncheckedIOException(failed);
+    }
+  }
+
+  static void delete(Path file) {
+    try {
+      Files.delete(file);
+    } catch (java.io.IOException failed) {
+      throw new java.io.UncheckedIOException(failed);
+    }
+  }
+
   @Test
   void nonManagerCannotActivateScheduleRevision() throws Exception {
     var initial = deployments.deploy("deployer", request(UUID.randomUUID(), null, "one"));
     member("helper", ProjectRole.CONTRIBUTOR);
     Long id = projects.id(name);
-    assertThrows(
-        CallerFault.class,
-        () -> revisor((project, root) -> {}).revise("helper", id, "daily", "{}", false));
+    assertEquals(
+        "Saving an Application schedule requires a project Manager",
+        assertThrows(
+                CallerFault.class,
+                () -> revisor((project, root) -> {}).revise("helper", id, "daily", "{}", false))
+            .getMessage());
     // The store's own check refuses a Contributor's schedule-only mutation under the lock, even
     // when a caller skipped the service.
     UUID revision = UUID.randomUUID();
@@ -420,7 +569,9 @@ class ApplicationDeploymentPersistenceTest {
             null,
             io.aeyer.plowshare.server.applications.ContainmentFence.unfenced(),
             members);
-    assertThrows(RuntimeException.class, () -> guarded.commit("helper", mutation));
+    assertEquals(
+        "Saving an Application schedule requires a project Manager",
+        assertThrows(CallerFault.class, () -> guarded.commit("helper", mutation)).getMessage());
     assertEquals(
         initial.release().revision(), deployments.status("deployer", name).activeRevision());
     assertEquals(

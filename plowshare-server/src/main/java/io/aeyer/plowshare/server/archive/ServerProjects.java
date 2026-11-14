@@ -36,9 +36,10 @@ public interface ServerProjects extends ProjectWorkspaces {
    *
    * <p>Unlike {@link #activateDeployment}, this neither requires server administration nor
    * FileStore {@code MANAGER} access: the new revision lands beside the active one in the
-   * destination the server already staged for this placed project. The caller, the deployment
-   * store, has already checked that {@code account} is a current project Manager under the same
-   * project row lock.
+   * destination the server already staged for this placed project. It takes no account and performs
+   * no authority check: its only permitted caller is the deployment store's commit transaction,
+   * which has already checked the caller is a current project Manager and that the staged root
+   * changes only {@code schedules/*.json}, under the same project row lock.
    *
    * <p>It refuses unless the project is MANAGED, its stored placement is still {@code expected},
    * {@code placement} keeps {@code expected}'s FileStore, writable areas and revisions directory,
@@ -46,7 +47,6 @@ public interface ServerProjects extends ProjectWorkspaces {
    * workspace and stored placement to the new revision and changes nothing else.
    */
   ProjectRecord activateScheduleRevision(
-      String account,
       String name,
       ApplicationPlacement placement,
       ApplicationPlacement expected,

@@ -156,11 +156,12 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
    * project row lock, the live-child fence, the receipt, then the head-revision fence. A
    * schedule-only mutation (ADR 0068) then requires a current project Manager instead of a server
    * administrator, checked here under the project row lock, and activates through {@link
-   * ServerProjects#activateScheduleRevision}. It does not take the identity administrator lock or
-   * touch the owned identity: its manifest is the expected head's, byte for byte, so the identity
-   * cannot change. Acting declarations are re-bound to the new head as for any activation, because
-   * live grants are keyed to the head revision. The release row, head and receipt are written
-   * exactly as for any other deployment.
+   * ServerProjects#activateScheduleRevision}, after proving with {@link ScheduleOnlyRevision} that
+   * the staged root differs from the current root only in {@code schedules/*.json}. It does not
+   * take the identity administrator lock or touch the owned identity: its manifest is the expected
+   * head's, byte for byte, so the identity cannot change. Acting declarations are re-bound to the
+   * new head as for any activation, because live grants are keyed to the head revision. The release
+   * row, head and receipt are written exactly as for any other deployment.
    */
   @Override
   public Receipt commit(String account, Mutation mutation) {
@@ -210,8 +211,15 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
             if (previous == null)
               throw new CallerFault("Deploy the Application before revising it");
             requireManager(account, mutation.project());
+            // The flag lowers authority, so the store proves its premise itself: against the
+            // locked row's current root, only schedules/*.json may be added or changed.
+            ScheduleOnlyRevision.requireOnlySchedulesChanged(
+                projects
+                    .find(mutation.project())
+                    .orElseThrow(() -> new CallerFault("Application source is unavailable"))
+                    .workspace(),
+                mutation.verifiedRoot());
             projects.activateScheduleRevision(
-                account,
                 mutation.project(),
                 release.placement(),
                 previous.placement(),
