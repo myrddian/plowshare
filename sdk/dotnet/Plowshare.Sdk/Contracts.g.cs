@@ -878,6 +878,7 @@ public sealed record ServerAccountDto {
  [JsonPropertyName("enabled")] public required bool Enabled { get; init; }
  [JsonPropertyName("handle")] public required string Handle { get; init; }
  [JsonPropertyName("mustChangePassword")] public required bool MustChangePassword { get; init; }
+ [JsonPropertyName("projectCreator")] public required bool ProjectCreator { get; init; }
  [JsonPropertyName("serverAdmin")] public required bool ServerAdmin { get; init; }
 }
 
@@ -4618,6 +4619,7 @@ public sealed record AdminAccountResetPayloadDto {
 public sealed record AdminAccountUpdatePayloadDto {
  [JsonPropertyName("enabled")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> Enabled { get; init; }
  [JsonPropertyName("handle")] public required string Handle { get; init; }
+ [JsonPropertyName("projectCreator")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> ProjectCreator { get; init; }
  [JsonPropertyName("serverAdmin")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> ServerAdmin { get; init; }
 }
 
@@ -7105,6 +7107,7 @@ public static partial class Operations { public static Task<Reply<AccountCredent
 public sealed record AdminAccountUpdateRequest {
  [JsonPropertyName("enabled")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> Enabled { get; init; }
  [JsonPropertyName("handle")] public required string Handle { get; init; }
+ [JsonPropertyName("projectCreator")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> ProjectCreator { get; init; }
  [JsonPropertyName("serverAdmin")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> ServerAdmin { get; init; }
 }
 public static partial class Operations { public static Task<Reply<ServerAccountDto>> AdminAccountUpdateAsync(this Client client,AdminAccountUpdateRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<AdminAccountUpdateRequest,ServerAccountDto>("admin.account.update",request,cancellationToken,options); }

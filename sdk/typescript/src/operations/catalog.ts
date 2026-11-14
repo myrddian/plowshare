@@ -143,6 +143,7 @@ export interface ExtendedPayloads
     handle: string;
     enabled?: boolean;
     serverAdmin?: boolean;
+    projectCreator?: boolean;
   };
   'admin.account.reset': { handle: string };
   'admin.sessions': { handle: string };

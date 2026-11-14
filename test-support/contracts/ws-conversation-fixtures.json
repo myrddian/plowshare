@@ -549,7 +549,8 @@
         "enabled": true,
         "serverAdmin": false,
         "mustChangePassword": true,
-        "createdAt": "2026-10-04T00:00:00Z"
+        "createdAt": "2026-10-04T00:00:00Z",
+        "projectCreator": false
       }
     ]
   },
@@ -561,7 +562,8 @@
         "enabled": true,
         "serverAdmin": false,
         "mustChangePassword": true,
-        "createdAt": "2026-10-04T00:00:00Z"
+        "createdAt": "2026-10-04T00:00:00Z",
+        "projectCreator": false
       },
       "temporaryPassword": "test-fixture-only"
     }
@@ -573,7 +575,8 @@
       "enabled": true,
       "serverAdmin": false,
       "mustChangePassword": true,
-      "createdAt": "2026-10-04T00:00:00Z"
+      "createdAt": "2026-10-04T00:00:00Z",
+      "projectCreator": false
     }
   },
   "admin.account.reset": {
@@ -584,7 +587,8 @@
         "enabled": true,
         "serverAdmin": false,
         "mustChangePassword": true,
-        "createdAt": "2026-10-04T00:00:00Z"
+        "createdAt": "2026-10-04T00:00:00Z",
+        "projectCreator": false
       },
       "temporaryPassword": "test-fixture-only"
     }

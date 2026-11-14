@@ -65,7 +65,7 @@ export async function protocolFixture(options = {}) {
   const messageOpenReceipts = new Map();
   const workflowReceipts = new Map();
   let workflowAckMissing = false;
-  const adminAccounts = new Map([['fixture',{handle:'fixture',enabled:true,serverAdmin:options.serverAdmin === true,mustChangePassword:false,createdAt:'2026-10-04T00:00:00Z'}]]);
+  const adminAccounts = new Map([['fixture',{handle:'fixture',enabled:true,serverAdmin:options.serverAdmin === true,mustChangePassword:false,createdAt:'2026-10-04T00:00:00Z',projectCreator:false}]]);
   const serviceAccounts = new Map(), serviceTokens = new Map();
   let refuseServiceTokenListingOnce = false;
   let serviceTokenNumber = 0, serviceCredentialNumber = 0;
@@ -472,7 +472,7 @@ export async function protocolFixture(options = {}) {
         case 'admin.accounts': result.payload=[...adminAccounts.values()]; break;
         case 'admin.account.create': {
           if(adminAccounts.has(payload.handle)){result={code:'BAD_REQUEST',said:'That account handle already exists'};break;}
-          const account={handle:payload.handle,enabled:true,serverAdmin:payload.serverAdmin ?? false,mustChangePassword:true,createdAt:'2026-10-04T00:00:00Z'};
+          const account={handle:payload.handle,enabled:true,serverAdmin:payload.serverAdmin ?? false,mustChangePassword:true,createdAt:'2026-10-04T00:00:00Z',projectCreator:false};
           adminAccounts.set(account.handle,account);auditAdmin('account.create',account);result.payload={account,temporaryPassword:'fixture-one-time-password'};break;
         }
         case 'admin.account.update': {

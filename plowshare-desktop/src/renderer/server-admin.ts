@@ -5,6 +5,12 @@ import { background } from './events.ts';
 import { decodeAdminCall } from '../admin-input.ts';
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
 import { displayText } from 'plowshare-client-ts/binding/values';
+import {
+  accountStatus,
+  creatorActionLabel,
+  toggledUpdate,
+  type AccountToggle,
+} from './server-admin-accounts.ts';
 import { installPricingAdmin } from './pricing-admin.ts';
 import { installServiceAdmin } from './service-admin.ts';
 import type {
@@ -46,7 +52,7 @@ export function installServerAdmin(
     <label><input name="serverAdmin" type="checkbox">Server administrator</label><button>Create account</button></form></details>
     <section data-credential hidden><h3>Temporary password</h3><p data-credential-name></p><p>Give this password to the account owner. They must change it before using the server.</p><input data-password readonly aria-label="Temporary password" autocomplete="off"><button type="button" data-hide-password>Dismiss password</button></section>
     <div class="admin-columns"><div data-accounts aria-label="Accounts"></div><section data-account hidden><h3 data-account-name></h3><p data-account-status></p>
-    <div class="admin-actions"><button type="button" data-enabled></button><button type="button" data-role></button><button type="button" data-reset>Reset password</button><button type="button" data-revoke>Sign out all sessions</button></div>
+    <div class="admin-actions"><button type="button" data-enabled></button><button type="button" data-role></button><button type="button" data-creator></button><button type="button" data-reset>Reset password</button><button type="button" data-revoke>Sign out all sessions</button></div>
     <h4>Active login sessions</h4><div data-sessions></div></section></div>`;
   panels.append(accountsPanel);
   const auditPanel = document.createElement('section');
@@ -149,13 +155,14 @@ export function installServerAdmin(
     if (!account) return;
     get('[data-account-name]').textContent = account.handle;
     get('[data-account-status]').textContent =
-      `${account.enabled ? 'Enabled' : 'Disabled'} · ${account.serverAdmin ? 'Server administrator' : 'Regular user'}${account.mustChangePassword ? ' · Password change required' : ''}`;
+      accountStatus(account);
     get('[data-enabled]').textContent = account.enabled
       ? 'Disable account'
       : 'Enable account';
     get('[data-role]').textContent = account.serverAdmin
       ? 'Remove administrator role'
       : 'Make administrator';
+    get('[data-creator]').textContent = creatorActionLabel(account);
     get<HTMLButtonElement>('[data-reset]').disabled =
       busy || account.handle === handle;
     accountsPanel
@@ -208,7 +215,7 @@ export function installServerAdmin(
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.accountHandle = account.handle;
-      button.textContent = `${account.handle} · ${account.serverAdmin ? 'Administrator' : 'Regular user'}${account.enabled ? '' : ' · Disabled'}`;
+      button.textContent = `${account.handle} · ${account.serverAdmin ? 'Administrator' : 'Regular user'}${account.projectCreator ? ' · Creator' : ''}${account.enabled ? '' : ' · Disabled'}`;
       button.addEventListener('click', () => {
         background(
           run(async () => {
@@ -333,16 +340,14 @@ export function installServerAdmin(
   for (const [selector, field] of [
     ['[data-enabled]', 'enabled'],
     ['[data-role]', 'serverAdmin'],
-  ] as const)
+    ['[data-creator]', 'projectCreator'],
+  ] as [string, AccountToggle][])
     get(selector).addEventListener('click', () => {
       clearPassword();
       background(
         run(async () => {
           const account = accounts.find((row) => row.handle === selected)!;
-          await call('admin.account.update', {
-            handle: selected,
-            [field]: !account[field],
-          });
+          await call('admin.account.update', toggledUpdate(account, field));
           await refresh();
         }),
       );

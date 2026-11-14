@@ -679,6 +679,7 @@ class ServerAccountDto:
     enabled: bool
     handle: str
     must_change_password: bool
+    project_creator: bool
     server_admin: bool
 
 @dataclass(frozen=True, kw_only=True)
@@ -3869,6 +3870,7 @@ class AdminAccountUpdatePayloadDto:
     """Validated fields of the AdminAccountUpdatePayloadDto protocol contract."""
     enabled: bool | Unset = UNSET
     handle: str
+    project_creator: bool | Unset = UNSET
     server_admin: bool | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -6164,6 +6166,7 @@ class AdminAccountUpdateRequest(Request[ServerAccountDto]):
     """Validated fields of the AdminAccountUpdateRequest protocol contract."""
     enabled: bool | Unset = UNSET
     handle: str
+    project_creator: bool | Unset = UNSET
     server_admin: bool | Unset = UNSET
     operation: ClassVar[str] = "admin.account.update"
 
@@ -9758,7 +9761,7 @@ _FIELDS = {
     HostedToolWorkerDto: {"binding": "binding", "registration": "registration"},
     UsageFilterDto: {"agent": "agent", "conversation": "conversation", "cursor": "cursor", "from": "from_", "group_by": "group_by", "limit": "limit", "model": "model", "orchestration": "orchestration", "pool": "pool", "project": "project", "route": "route", "run": "run", "scope": "scope", "to": "to"},
     ActingTurnReceiptDto: {"agent": "agent", "conversation": "conversation", "job": "job", "requestId": "request_id", "state": "state"},
-    ServerAccountDto: {"createdAt": "created_at", "enabled": "enabled", "handle": "handle", "mustChangePassword": "must_change_password", "serverAdmin": "server_admin"},
+    ServerAccountDto: {"createdAt": "created_at", "enabled": "enabled", "handle": "handle", "mustChangePassword": "must_change_password", "projectCreator": "project_creator", "serverAdmin": "server_admin"},
     AccountCredentialDto: {"account": "account", "temporaryPassword": "temporary_password"},
     AdminAuditDto: {"action": "action", "actor": "actor", "enabled": "enabled", "id": "id", "occurredAt": "occurred_at", "serverAdmin": "server_admin", "target": "target"},
     AdminAuditPageDto: {"before": "before", "entries": "entries"},
@@ -10082,7 +10085,7 @@ _FIELDS = {
     ActingTurnStartPayloadDto: {"agent": "agent", "conversation": "conversation", "requestId": "request_id", "task": "task"},
     AdminAccountCreatePayloadDto: {"handle": "handle", "serverAdmin": "server_admin"},
     AdminAccountResetPayloadDto: {"handle": "handle"},
-    AdminAccountUpdatePayloadDto: {"enabled": "enabled", "handle": "handle", "serverAdmin": "server_admin"},
+    AdminAccountUpdatePayloadDto: {"enabled": "enabled", "handle": "handle", "projectCreator": "project_creator", "serverAdmin": "server_admin"},
     AdminAuditPayloadDto: {"before": "before", "handle": "handle", "limit": "limit"},
     AdminPricingSetPayloadDto: {"billingRoute": "billing_route", "currency": "currency", "expectedVersion": "expected_version", "mode": "mode", "model": "model", "rates": "rates", "requestFee": "request_fee", "source": "source", "tiers": "tiers"},
     AdminPricingSetPayloadDtoRatesDto: {"cacheRead": "cache_read", "cacheWrite": "cache_write", "input": "input", "output": "output"},
@@ -10369,7 +10372,7 @@ _FIELDS = {
     ActingTurnStartRequest: {"agent": "agent", "conversation": "conversation", "requestId": "request_id", "task": "task"},
     AdminAccountCreateRequest: {"handle": "handle", "serverAdmin": "server_admin"},
     AdminAccountResetRequest: {"handle": "handle"},
-    AdminAccountUpdateRequest: {"enabled": "enabled", "handle": "handle", "serverAdmin": "server_admin"},
+    AdminAccountUpdateRequest: {"enabled": "enabled", "handle": "handle", "projectCreator": "project_creator", "serverAdmin": "server_admin"},
     AdminAccountsRequest: {},
     AdminAuditRequest: {"before": "before", "handle": "handle", "limit": "limit"},
     AdminPricingListRequest: {},
