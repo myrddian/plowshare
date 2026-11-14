@@ -256,7 +256,9 @@ class ScopedGrantPersistenceTest {
                           AuthorityAction.CONVERSATION_CREATE,
                           AuthorityAction.RUN_MODEL)
                       .contains(action);
-              case MANAGER -> action != AuthorityAction.ADMINISTER;
+              // Project creation is held only by PROJECT_CREATOR, never by a project role.
+              case MANAGER ->
+                  action != AuthorityAction.ADMINISTER && action != AuthorityAction.PROJECT_CREATE;
               case ADMIN ->
                   Set.of(
                           AuthorityAction.ADMINISTER,

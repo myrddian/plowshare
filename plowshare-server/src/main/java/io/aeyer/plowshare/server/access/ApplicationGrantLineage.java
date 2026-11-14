@@ -102,7 +102,7 @@ public final class ApplicationGrantLineage implements GrantLineage {
             case READER -> Optional.of(ProjectRole.VIEWER);
             case CONTRIBUTOR -> Optional.of(ProjectRole.CONTRIBUTOR);
             case MANAGER -> Optional.of(ProjectRole.MANAGER);
-            case ADMIN, SYSTEM, GLOBAL_READ -> Optional.empty();
+            case ADMIN, SYSTEM, GLOBAL_READ, PROJECT_CREATOR -> Optional.empty();
           };
       if (role.isEmpty() || !valid(chain, policies)) continue;
       role = policies.computeIfAbsent(project, applications::read).limit(account, role);

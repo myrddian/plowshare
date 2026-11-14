@@ -19,7 +19,11 @@ public final class RoleGrantPolicy {
     Objects.requireNonNull(requested);
     Objects.requireNonNull(issuerKind);
     Objects.requireNonNull(issuingRole);
-    if (requested == StandardRole.SYSTEM || requested == StandardRole.GLOBAL_READ)
+    // PROJECT_CREATOR has its own administrator-only issuing path; scoped role management never
+    // assigns it, at any scope.
+    if (requested == StandardRole.SYSTEM
+        || requested == StandardRole.GLOBAL_READ
+        || requested == StandardRole.PROJECT_CREATOR)
       throw new CallerFault("This role is not assignable through scoped role management");
     if (agent && requested == StandardRole.ADMIN)
       throw new CallerFault("Agents cannot receive ADMIN");
@@ -39,7 +43,7 @@ public final class RoleGrantPolicy {
         switch (issuingRole) {
           case SYSTEM, ADMIN -> true;
           case MANAGER -> effective != StandardRole.ADMIN;
-          case CONTRIBUTOR, READER, GLOBAL_READ -> false;
+          case CONTRIBUTOR, READER, GLOBAL_READ, PROJECT_CREATOR -> false;
         };
     if (!permits) throw new CallerFault("Issuing grant cannot delegate that role");
     return effective;

@@ -119,6 +119,57 @@ class ScopedRolePolicyTest {
                 StandardRole.CONTRIBUTOR));
   }
 
+  @Test
+  void project_creator_is_not_assignable_through_scoped_role_management() {
+    for (var issuing : List.of(StandardRole.SYSTEM, StandardRole.ADMIN, StandardRole.MANAGER))
+      for (boolean agent : List.of(false, true))
+        assertThrows(
+            CallerFault.class,
+            () ->
+                RoleGrantPolicy.effective(
+                    StandardRole.PROJECT_CREATOR, agent, false, AccountKind.USER, false, issuing));
+  }
+
+  @Test
+  void project_creator_issues_nothing() {
+    for (var requested : List.of(StandardRole.READER, StandardRole.CONTRIBUTOR))
+      assertEquals(
+          "Issuing grant cannot delegate that role",
+          assertThrows(
+                  CallerFault.class,
+                  () ->
+                      RoleGrantPolicy.effective(
+                          requested,
+                          false,
+                          false,
+                          AccountKind.USER,
+                          false,
+                          StandardRole.PROJECT_CREATOR))
+              .getMessage());
+  }
+
+  /**
+   * Holding the creator role is not a scoped permission: the creation scope answers no scoped
+   * action, PROJECT_CREATE included, even to a live creator binding that names it.
+   */
+  @ParameterizedTest
+  @EnumSource(AuthorityAction.class)
+  void project_creation_scope_authorizes_no_scoped_action(AuthorityAction action) {
+    var creation = new AuthorityScope.ProjectCreation(BuiltInIdentities.PROJECT_CREATION);
+    when(identities.scope(creation.id())).thenReturn(creation);
+    var creator =
+        binding(
+            human,
+            StandardRole.PROJECT_CREATOR,
+            Coverage.SELF,
+            BuiltInIdentities.PROJECT_CREATION,
+            Set.of(AuthorityAction.PROJECT_CREATE));
+    when(repository.live(human)).thenReturn(List.of(creator));
+    assertFalse(authority.allows(human, creation, action));
+    assertFalse(authority.allowsUsing(human, creation, action, creator.id()));
+    assertFalse(authority.allows(human, project, action));
+  }
+
   @ParameterizedTest
   @EnumSource(AuthorityAction.class)
   void admin_control_never_supplies_project_data_or_execution(AuthorityAction action) {
