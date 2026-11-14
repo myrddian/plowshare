@@ -6,12 +6,14 @@ import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.agents.ApplicationResources;
 import io.aeyer.plowshare.server.data.DataLayout;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -88,9 +90,9 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
 
   public void write(
       ScheduleDefinitionStore.Source source, String name, String text, boolean overwrite) {
-    if (!source.source().equals("workspace") && resources.root(source.projectId()).isPresent())
+    if (applicationOwned(source))
       throw new IllegalArgumentException(
-          "Update Application schedules through a new deployment revision");
+          "Application schedules are written only through the Application save path");
     ScheduledWork.identity(name, "file name");
     if (text.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES)
       throw new IllegalArgumentException("Schedule file exceeds 64 KiB");
@@ -125,10 +127,62 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     }
   }
 
+  /**
+   * Writes one schedule file in place in an Application root (ADR 0068).
+   *
+   * <p>Every check runs before the target changes: the name rule and 64 KiB limit, then the path
+   * containment and symlink checks, then the folder's 256-file and 1 MiB limits as they would stand
+   * after this write. The limits are checked here because a folder over them is unreadable, so a
+   * write that crossed them would suspend every schedule in it at the next scan.
+   *
+   * <p>The text is staged in a temporary file in the same folder and renamed into place, so a scan
+   * sees the old file or the new one, never a partial one. A replacement is an atomic rename. A
+   * create ({@code overwrite=false}) checks for an existing file and then renames without
+   * replacement; the JDK refuses an existing target, so only a racing create in the instant between
+   * its check and the rename can still be replaced.
+   */
+  public void writeApplication(
+      ScheduleDefinitionStore.Source source, String name, String text, boolean overwrite) {
+    if (!applicationOwned(source))
+      throw new IllegalArgumentException("This schedule source is not an Application root");
+    ScheduledWork.identity(name, "file name");
+    if (text.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES)
+      throw new IllegalArgumentException("Schedule file exceeds 64 KiB");
+    Path folder = folder(source), file = folder.resolve(name + ".json");
+    try {
+      safe(file, source);
+      Files.createDirectories(folder);
+      safe(file, source);
+      boolean exists = Files.exists(file, LinkOption.NOFOLLOW_LINKS);
+      if (exists && !overwrite)
+        throw new CallerFault("A schedule named " + name + " already exists");
+      // read() applies the same per-file, regular-file and name checks a scan will; the projected
+      // folder then replaces this name's entry with the new text before the limits are checked.
+      List<Entry> projected = new ArrayList<>();
+      for (Entry entry : read(source)) if (!entry.name().equals(name)) projected.add(entry);
+      projected.add(new Entry(name, text));
+      bounded(projected);
+      Path staged = Files.createTempFile(folder, "schedule-", ".tmp");
+      try {
+        Files.writeString(staged, text, StandardCharsets.UTF_8);
+        if (overwrite)
+          Files.move(
+              staged, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        else Files.move(staged, file);
+      } finally {
+        Files.deleteIfExists(staged);
+      }
+    } catch (FileAlreadyExistsException exists) {
+      throw new CallerFault("A schedule named " + name + " already exists");
+    } catch (IOException failed) {
+      throw new WorkspaceUnavailableException("Schedule file could not be written", failed);
+    }
+  }
+
   public void delete(ScheduleDefinitionStore.Source source, String name) {
-    if (!source.source().equals("workspace") && resources.root(source.projectId()).isPresent())
+    if (applicationOwned(source))
       throw new IllegalArgumentException(
-          "Update Application schedules through a new deployment revision");
+          "Application schedules cannot be deleted; save a replacement definition instead");
     ScheduledWork.identity(name, "file name");
     if (source.source().equals("workspace")) {
       ask(session(source), FileRequest.delete(id(), remotePath(name)).forSchedules());

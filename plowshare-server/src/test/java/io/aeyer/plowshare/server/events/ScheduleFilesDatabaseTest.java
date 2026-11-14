@@ -200,7 +200,9 @@ class ScheduleFilesDatabaseTest {
               mock(ProjectStore.class),
               new JdbcProjectMembers(jdbc),
               mock(ScheduleDefinitions.Authority.class),
-              mock(ScheduleControlAuthority.class));
+              mock(ScheduleControlAuthority.class),
+              mock(ApplicationProjects.class),
+              mock(ApplicationScheduleAudit.class));
       var page = new SchedulePage(null, 1);
       assertEquals(List.of(file), service.page("viewer", "project", page));
       assertEquals(List.of(file), service.page("viewer", "project", page));
@@ -663,7 +665,9 @@ class ScheduleFilesDatabaseTest {
               mock(ProjectStore.class),
               new JdbcProjectMembers(jdbc),
               mock(ScheduleDefinitions.Authority.class),
-              mock(ScheduleControlAuthority.class));
+              mock(ScheduleControlAuthority.class),
+              mock(ApplicationProjects.class),
+              mock(ApplicationScheduleAudit.class));
       assertEquals(1, service.list("owner").size());
       jdbc.update(
           "DELETE FROM project_members WHERE project_id=? AND handle='owner'", source.projectId());

@@ -32,6 +32,8 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.auth.ServiceAccountRepository;
 import io.aeyer.plowshare.server.auth.ServiceAccounts;
+import io.aeyer.plowshare.server.events.ApplicationProjects;
+import io.aeyer.plowshare.server.events.ApplicationScheduleAudit;
 import io.aeyer.plowshare.server.events.FileScheduleDefinitions;
 import io.aeyer.plowshare.server.events.ScheduleControlAuthority;
 import io.aeyer.plowshare.server.events.ScheduleDefinitionStore;
@@ -183,7 +185,9 @@ class ContainedAddressabilityTest {
             mock(ProjectStore.class),
             members,
             mock(ScheduleDefinitions.Authority.class),
-            mock(ScheduleControlAuthority.class));
+            mock(ScheduleControlAuthority.class),
+            mock(ApplicationProjects.class),
+            mock(ApplicationScheduleAudit.class));
     var refusal = assertThrows(CallerFault.class, () -> schedules.requireRead("alice", CHILD));
     assertTrue(refusal.getMessage().contains("ordinary"), refusal.getMessage());
     // The role check is never reached, so the refusal does not depend on the authority predicate.

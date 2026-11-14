@@ -7,6 +7,7 @@ import io.aeyer.plowshare.server.agents.SkillResolver;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.auth.JdbcApplicationScheduleAudit;
 import io.aeyer.plowshare.server.cache.ProjectionCaches;
 import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import io.aeyer.plowshare.server.data.DataLayout;
@@ -80,13 +81,27 @@ public class ScheduleDefinitionConfig {
       ProjectStore projects,
       ProjectMembers members,
       ScheduleDefinitions.Authority authority,
-      ApplicationResources resources) {
+      ApplicationResources resources,
+      ApplicationProjects applications,
+      ApplicationScheduleAudit audit) {
     return new FileScheduleDefinitions(
         store,
         files,
         projects,
         members,
         authority,
-        new ApplicationScheduleControlAuthority(resources, members));
+        new ApplicationScheduleControlAuthority(resources, members),
+        applications,
+        audit);
+  }
+
+  @Bean
+  public ApplicationProjects applicationProjects(ProjectStore projects) {
+    return new ProjectStoreApplicationProjects(projects, projects);
+  }
+
+  @Bean
+  public ApplicationScheduleAudit applicationScheduleAudit(JdbcTemplate jdbc) {
+    return new JdbcApplicationScheduleAudit(jdbc);
   }
 }
