@@ -45,7 +45,7 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
         cache.read(
             new SnapshotCache.Key("blocked-logs", ProjectionCache.fingerprint(account)),
             true,
-            () -> admission.read(account, ReadAdmission.Work.AUTHORITY, () -> load(account)),
+            () -> admission.read(account, ReadAdmission.Work.FETCH, () -> load(account)),
             value -> value.blocked().map(JdbcInformationLogVisibility::weight).orElse(1024L));
     // Oversized snapshots retain a versioned fallback marker, never a partial deny list. The
     // original statement-authoritative path remains available under the same physical budget.
@@ -77,7 +77,7 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
         cache.read(
             new SnapshotCache.Key("blocked-logs", ProjectionCache.fingerprint(account)),
             true,
-            () -> admission.read(account, ReadAdmission.Work.AUTHORITY, () -> load(account)),
+            () -> admission.read(account, ReadAdmission.Work.FETCH, () -> load(account)),
             Facts::authoritative,
             value -> value.blocked().map(JdbcInformationLogVisibility::weight).orElse(1024L));
     var blocked = facts.blocked();

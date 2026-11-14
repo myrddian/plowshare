@@ -169,6 +169,10 @@ plowshare:
     sockets-per-principal: ${PLOWSHARE_READ_CAPACITY_SOCKETS_PER_PRINCIPAL:32}
     subscriptions: ${PLOWSHARE_READ_CAPACITY_SUBSCRIPTIONS:512}
     subscriptions-per-principal: ${PLOWSHARE_READ_CAPACITY_SUBSCRIPTIONS_PER_PRINCIPAL:32}
+    # The cache's own slots into PostgreSQL for shared fetches (log deny sets, the
+    # authority snapshot). Requesters on a miss wait for a slot; they are never refused
+    # for capacity. Concurrent misses for one key share one load.
+    fetches: ${PLOWSHARE_READ_CAPACITY_FETCHES:2}
   # Per-projection cache budgets (ProjectionCacheProperties). Every budget is a
   # hard bound; invalid combinations fail startup. The version connections are
   # a separate pool from the main one. Details: docs/server-administration.md.

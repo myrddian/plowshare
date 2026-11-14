@@ -20,6 +20,8 @@ public final class BoundedReadAdmission implements ReadAdmission {
   private final ReadCapacityProperties limits;
   private final ReadSchedulingProperties scheduling;
   private final java.util.ArrayList<Key> waiting = new java.util.ArrayList<>();
+  // FIFO tickets for cache fetches; identity, not equality, marks each caller's place.
+  private final java.util.ArrayList<Key> fetching = new java.util.ArrayList<>();
   private final ConcurrentMap<Key, Integer> principals = new ConcurrentHashMap<>();
   private final int[] active = new int[Work.values().length];
   private final AtomicLong rejected = new AtomicLong();
@@ -37,7 +39,9 @@ public final class BoundedReadAdmission implements ReadAdmission {
     Objects.requireNonNull(work);
     var key = key(principal, work);
     synchronized (this) {
-      if (!available(key, work) || report(work) && !waiting.isEmpty()) throw rejectedRead();
+      if (!available(key, work)
+          || report(work) && !waiting.isEmpty()
+          || work == Work.FETCH && !fetching.isEmpty()) throw rejectedRead();
       return reserve(key, work);
     }
   }
@@ -48,13 +52,19 @@ public final class BoundedReadAdmission implements ReadAdmission {
     // their existing refusal semantics. Interruption/timeout removes the waiter before any IO.
     // An enclosing synchronization may already retain a caller/version-pool connection, even
     // without an actual transaction. Never park such a caller while it holds connections/locks.
-    boolean waitable =
-        work == Work.REPORT
-            && !org.springframework.transaction.support.TransactionSynchronizationManager
+    // A cache fetch always waits for one of the cache's slots: the slots bound the cache's own
+    // load on PostgreSQL, and a refused miss would fail every caller coalesced onto it. Waiting
+    // inside a transaction cannot starve a slot holder, because a fetch runs inline on its
+    // requester's thread and uses that requester's own connection when one is bound.
+    boolean parkable =
+        !org.springframework.transaction.support.TransactionSynchronizationManager
                 .isSynchronizationActive()
             && !org.springframework.transaction.support.TransactionSynchronizationManager
                 .isActualTransactionActive();
-    var lease = waitable ? awaitReport(principal) : admit(principal, work);
+    var lease =
+        work == Work.FETCH
+            ? awaitFetch(principal)
+            : parkable && work == Work.REPORT ? awaitReport(principal) : admit(principal, work);
     try (lease) {
       return action.get();
     }
@@ -91,6 +101,42 @@ public final class BoundedReadAdmission implements ReadAdmission {
       waiting.removeIf(candidate -> candidate == ticket);
       notifyAll();
     }
+  }
+
+  /**
+   * Waits in arrival order for one of the cache's FETCH slots for at most {@code fetchWaitMillis}.
+   * A fetch holds one slot for one load, so the wait is bounded by the loads ahead of it; the
+   * deadline only turns a stuck load into a refusal rather than an indefinite park.
+   */
+  private synchronized Lease awaitFetch(String principal) {
+    var key = key(principal, Work.FETCH);
+    if (fetching.isEmpty() && available(key, Work.FETCH)) return reserve(key, Work.FETCH);
+    var ticket = new Key(principal, Work.FETCH);
+    fetching.add(ticket);
+    long deadline =
+        System.nanoTime()
+            + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(scheduling.fetchWaitMillis());
+    try {
+      while (true) {
+        if (fetching.getFirst() == ticket && available(key, Work.FETCH))
+          return reserve(key, Work.FETCH);
+        long remaining = deadline - System.nanoTime();
+        if (remaining <= 0) throw rejectedRead();
+        try {
+          java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(this, remaining);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw rejectedRead();
+        }
+      }
+    } finally {
+      fetching.removeIf(candidate -> candidate == ticket);
+      notifyAll();
+    }
+  }
+
+  public synchronized int waitingFetches() {
+    return fetching.size();
   }
 
   private static boolean report(Work work) {

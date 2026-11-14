@@ -25,6 +25,8 @@ public class ReadCapacityConfiguration {
             .register(registry);
       Gauge.builder("plowshare.read.waiting", admission, BoundedReadAdmission::waitingReports)
           .register(registry);
+      Gauge.builder("plowshare.read.fetch.waiting", admission, BoundedReadAdmission::waitingFetches)
+          .register(registry);
       Gauge.builder("plowshare.read.rejected", admission, BoundedReadAdmission::rejected)
           .register(registry);
     }

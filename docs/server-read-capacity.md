@@ -19,13 +19,23 @@ against the total database capacity when running multiple server processes.
 | --- | ---: | --- |
 | `interactive` / `interactive-per-principal` | 16 / 4 | Executing audited socket reads and legacy HTTP GET requests |
 | `reports` / `reports-per-principal` | 2 / 1 | Physical PROC and usage repository loads |
-| `authority` / `authority-per-principal` | 2 / 1 | Physical visibility graph loads and retained foreground code reads, including non-shareable reads |
+| `authority` / `authority-per-principal` | 2 / 1 | Statement-authoritative visibility reads and retained foreground code reads, including non-shareable reads |
+| `fetches` | 2 | The cache's own slots into PostgreSQL for shared fetches: an account's log deny set and the authority snapshot |
 | `maintenance` / `maintenance-per-principal` | 1 / 1 | Embedding discovery and background code metadata batches |
 | `observers` / `observers-per-principal` | 64 / 4 | Parked information readiness requests |
 | `sockets` / `sockets-per-principal` | 1024 / 32 | Attached event and file sockets combined |
 | `subscriptions` / `subscriptions-per-principal` | 512 / 32 | Usage subscriptions across sockets |
 
 Environment overrides use `PLOWSHARE_READ_CAPACITY_` plus the property in upper snake case.
+
+A cache fetch is not requester backpressure. The `fetches` slots belong to the cache and bound its
+own concurrent loads on PostgreSQL. The cache merges concurrent misses for one key into a single
+load before admission, so a slot bounds distinct concurrent loads, not requesters. A requester on a
+miss waits in arrival order for a slot, including inside a transaction: the load runs on that
+requester's thread and its own connection, so waiting cannot starve a slot holder.
+`plowshare.read-scheduling.fetch-wait-millis` (5,000 ms) only turns a stuck load into a refusal.
+Fetches do not use the per-account `authority` budget. Previously a miss was refused whenever the
+account's single AUTHORITY seat was busy, which ended agent jobs at their per-step log check.
 
 Socket session checks have a separate bounded intake before any session SQL, shared by event and
 file sockets and their execution/disclosure fences. `plowshare.socket-sessions.pending` (256)
