@@ -319,12 +319,12 @@ device, then choose **Assess this device** under **Agent assessment**.
 
 1. The collector builds the device's dossier from what it already holds:
    identity, open services, DNS grouped by purpose, Pi-hole silence, UniFi
-   traffic, supplemental facts (see **Device descriptions**), explicit
-   coverage gaps and code-computed attention signals. It retains the dossier
-   as `network-privacy-dossier/<device_id>.json` (document version 2) so the
-   report can cite the exact revision. A dossier over its 16,000-byte budget
-   drops listed advisories first, then the least important DNS destinations,
-   and says so in its coverage lines.
+   traffic, supplemental facts (see **Device descriptions**), address
+   assignment, explicit coverage gaps and code-computed attention signals. It
+   retains the dossier as `network-privacy-dossier/<device_id>.json`
+   (document version 4) so the report can cite the exact revision. A dossier
+   over its 16,000-byte budget drops listed advisories first, then the least
+   important DNS destinations, and says so in its coverage lines.
 2. It starts `assess_network_device`. The assessor reads only that dossier and
    returns structured JSON. The script rejects HTML, tables, raw identifiers,
    Markdown structure, exfiltration claims and signals the dossier does not

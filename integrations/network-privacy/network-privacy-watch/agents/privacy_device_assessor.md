@@ -47,6 +47,10 @@ Rules for every field:
   remote-control service makes an open port expected), never restate them as
   something the device was seen doing, and never raise a concern from them
   alone. The script writes them in their own report section.
+- DATA.dossier.addressing (when present) says how the device's address was
+  assigned and whether that changed. It is network-configuration context:
+  mention a static address inside the DHCP range or a recent change in plain
+  words, but never treat it alone as a concern.
 - Mitigations name the mechanism (device setting, Pi-hole domain block, VLAN or
   firewall rule), the likely breakage and how to verify. Pi-hole blocks names,
   not addresses. Never claim a mitigation is applied.

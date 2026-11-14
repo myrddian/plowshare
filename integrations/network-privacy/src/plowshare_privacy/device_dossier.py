@@ -32,7 +32,7 @@ from .advisories import Advisory
 from .contracts import mac_address, uuid
 from .device_detection import ServiceExposure, exposures_for
 from .device_facts import AdvisoryStatus, DeviceDescription, DeviceFacts, ModelSource
-from .device_inventory import DeviceCard
+from .device_inventory import AddressingView, DeviceCard
 from .dns_activity import (
     GROUP_ORDER,
     Destination,
@@ -320,6 +320,11 @@ class DeviceDossier:
     signals: tuple[Signal, ...]
     # Destinations dropped from this record to fit the byte budget.
     trimmed_destinations: int = 0
+    # The card's address assignment, copied unchanged (None when the latest
+    # collection recorded none). Network-configuration context only: it never
+    # produces a signal, so it cannot raise a concern on its own. Encoded last,
+    # under ``addressing``, from dossier document version 4.
+    addressing: AddressingView | None = None
 
 
 def parse_device_id(value: object) -> str:
@@ -823,6 +828,7 @@ def build_dossier(
         section,
         _coverage(card, profile, 0, section, 0, profile_note, deep_scan),
         device_signals(card),
+        addressing=card.addressing,
     )
     # Advisories go first: each is about the model rather than this device's
     # behaviour, and the total and CVE count stay in the record.

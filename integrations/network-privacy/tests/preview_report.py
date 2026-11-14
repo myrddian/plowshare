@@ -1,7 +1,7 @@
 """The preview's sample assessment, produced by the real code paths.
 
 The dossier is built by ``build_dossier`` from the same sample device and
-facts the preview shows, and wrapped in the real version 3 envelope. The
+facts the preview shows, and wrapped in the current document envelope. The
 assessor and reviewer answers are fixed sample text. A Java test runs them
 through the real ``assess_network_device`` script and requires the result to
 equal ``preview-tv-assessment.md``, which the preview serves as its report, so
