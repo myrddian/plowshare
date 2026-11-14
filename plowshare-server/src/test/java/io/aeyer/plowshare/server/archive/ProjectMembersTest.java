@@ -139,7 +139,7 @@ class ProjectMembersTest {
             presences,
             projects::rootOn,
             members,
-            new JdbcProjectCreatorGrants(jdbc)::holds,
+            new JdbcProjectCreatorGrants(jdbc)::mayCreate,
             projects);
     var socket = mock(WebSocketSession.class);
     when(socket.getUri())
@@ -315,7 +315,7 @@ class ProjectMembersTest {
             presences,
             projects::rootOn,
             members,
-            new JdbcProjectCreatorGrants(jdbc)::holds,
+            new JdbcProjectCreatorGrants(jdbc)::mayCreate,
             projects);
     var socket = org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketSession.class);
     org.mockito.Mockito.when(socket.getUri())

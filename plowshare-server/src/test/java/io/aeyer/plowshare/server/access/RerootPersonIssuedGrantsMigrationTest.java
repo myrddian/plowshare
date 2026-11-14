@@ -285,6 +285,107 @@ class RerootPersonIssuedGrantsMigrationTest {
             account("sam")));
   }
 
+  private void enabled(String handle, boolean enabled) {
+    jdbc.update("UPDATE admins SET enabled=? WHERE handle=?", enabled, handle);
+  }
+
+  /**
+   * A dormant grant (its subject disabled at deploy time) is neither revoked nor re-rooted, and nor
+   * is its live issuing grant, so re-enabling the account restores its access.
+   */
+  @Test
+  void disabled_member_under_live_manager_survives_reenable() {
+    UUID mia = issueMembership("one", "mia", "admin", "MANAGER");
+    UUID sam = issueMembership("one", "sam", "mia", "CONTRIBUTOR");
+    enabled("sam", false);
+    assertTrue(live(mia));
+    assertFalse(live(sam));
+    String miaBefore = row(mia);
+    String samBefore = row(sam);
+
+    migrateTo("261");
+
+    assertEquals(miaBefore, row(mia));
+    assertEquals(samBefore, row(sam));
+    assertTrue(live(mia));
+    enabled("sam", true);
+    assertTrue(live(sam));
+    assertEquals(1, liveGrantsOn("one", "sam"));
+  }
+
+  /** A disabled manager's grant and every grant issued under it come back on re-enable. */
+  @Test
+  void disabled_manager_with_issued_members_survives_reenable() {
+    UUID mia = issueMembership("one", "mia", "admin", "MANAGER");
+    UUID sam = issueMembership("one", "sam", "mia", "MANAGER");
+    UUID tom = roleGrant("tom", null, "one", "READER", "sam", null, sam, false);
+    var before = liveAccess();
+    enabled("mia", false);
+    assertFalse(live(mia));
+    assertFalse(live(sam));
+    assertFalse(live(tom));
+    List<String> rows = List.of(row(mia), row(sam), row(tom));
+
+    migrateTo("261");
+
+    assertEquals(rows, List.of(row(mia), row(sam), row(tom)));
+    enabled("mia", true);
+    assertTrue(live(mia));
+    assertTrue(live(sam));
+    assertTrue(live(tom));
+    assertEquals(before, liveAccess());
+  }
+
+  /**
+   * A token-issued membership under a person-issued grant to a service: with the owning service
+   * disabled, both are dormant, so neither is moved and both revive with the service.
+   */
+  @Test
+  void disabled_service_owner_under_rerooted_grant_survives_reenable() {
+    new JdbcServiceAccountRepository(jdbc).create("service");
+    UUID owner = issueMembership("one", "service", "admin", "MANAGER");
+    UUID sam = issueMembership("one", "sam", "@service/" + serviceToken("one"), "CONTRIBUTOR");
+    // A live sibling under the same issuer is still re-rooted.
+    UUID mia = issueMembership("one", "mia", "admin", "MANAGER");
+    var before = liveAccess();
+    enabled("service", false);
+    assertFalse(live(owner));
+    assertFalse(live(sam));
+    String ownerBefore = row(owner);
+    String samBefore = row(sam);
+
+    migrateTo("261");
+
+    assertEquals(ownerBefore, row(owner));
+    assertEquals(samBefore, row(sam));
+    assertRevokedBySystem(mia);
+    assertEquals(root(), uuidColumn("issuing_grant", current("MEMBERSHIP", "one", "mia")));
+    enabled("service", true);
+    assertTrue(live(owner));
+    assertTrue(live(sam));
+    assertEquals(before, liveAccess());
+  }
+
+  /**
+   * A token revocation is permanent, unlike disabling an account: the grant it issued is dead, not
+   * dormant, so it does not stop its live issuing grant from being re-rooted.
+   */
+  @Test
+  void grant_under_revoked_token_does_not_keep_its_issuer() {
+    new JdbcServiceAccountRepository(jdbc).create("service");
+    issueMembership("one", "service", "admin", "MANAGER");
+    UUID token = serviceToken("one");
+    UUID sam = issueMembership("one", "sam", "@service/" + token, "CONTRIBUTOR");
+    jdbc.update("UPDATE service_tokens SET revoked_at=now() WHERE id=?", token);
+    assertFalse(live(sam));
+
+    migrateTo("261");
+
+    assertFalse(live(sam));
+    assertTrue(live(current("MEMBERSHIP", "one", "service")));
+    assertEquals(root(), uuidColumn("issuing_grant", current("MEMBERSHIP", "one", "service")));
+  }
+
   @Test
   void agent_and_token_issued_grants_are_untouched() {
     // tom's root-issued membership authorizes a forced MANAGER grant for his agent, which is a

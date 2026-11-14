@@ -357,6 +357,23 @@ class ServerAdministrationTest {
   }
 
   @Test
+  void disabled_creator_is_listed_and_its_revocation_is_audited() {
+    service.create("owner", "worker", false);
+    service.update("owner", "worker", null, null, true);
+    var disabled = service.update("owner", "worker", false, null, null);
+    assertFalse(disabled.enabled());
+    assertTrue(disabled.projectCreator());
+    assertTrue(
+        service.list("owner").stream()
+            .filter(account -> account.handle().equals("worker"))
+            .allMatch(ServerAdministration.Account::projectCreator));
+    assertFalse(service.update("owner", "worker", null, null, false).projectCreator());
+    assertEquals(
+        "account.project-creator.revoke",
+        service.history("owner", "worker", 0, 50).entries().getFirst().action());
+  }
+
+  @Test
   void frames_require_admin_and_reject_malformed_flags() {
     service.create("owner", "worker", false);
     var frames = new AdminFrames(accounts);

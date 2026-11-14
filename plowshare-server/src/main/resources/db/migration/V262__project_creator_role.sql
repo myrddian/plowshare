@@ -182,6 +182,47 @@ CREATE FUNCTION authority_may_create_projects(handle TEXT) RETURNS BOOLEAN LANGU
             AND NOT u.bootstrap AND u.account_kind='USER');
 $$;
 
+-- Whether an account holds the role, for the administration view and the revoke result: a USER,
+-- non-bootstrap account with an unrevoked, unexpired PROJECT_CREATOR grant at the creation scope
+-- whose lineage is live when account activity is ignored. It differs from
+-- authority_may_create_projects only for a disabled account (or a holder whose bound self-grant
+-- hangs under a disabled administrator's ADMIN_CONTROL grant): that account cannot create projects
+-- but still holds the role, which comes back on re-enable, so an administrator sees and can revoke
+-- it. The walk is V216's authority_live_grants() with the account_active() conditions removed (the
+-- subject's, and the token principal's two admins.enabled tests); every other condition is kept.
+-- It is never a creation decision.
+CREATE FUNCTION authority_holds_project_creator(handle TEXT) RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
+    WITH RECURSIVE viable(id,depth) AS (
+        SELECT g.id,0 FROM authority_grants g JOIN authority_roles r ON r.id=g.role_id
+        JOIN authority_accounts a ON a.id=g.subject_account JOIN admins u ON u.handle=a.legacy_handle
+        JOIN authority_scopes root_scope ON root_scope.id=g.scope_id AND root_scope.kind='ADMINISTRATION' AND root_scope.account_id=r.intrinsic_account
+        WHERE g.provenance='ROOT_POLICY' AND g.revoked_at IS NULL
+            AND r.intrinsic_account=a.id AND NOT r.assignable AND u.account_kind='BUILTIN'
+            AND NOT u.enabled AND g.coverage='ALL_SCOPES'
+        UNION ALL
+        SELECT g.id,v.depth+1 FROM authority_grants g JOIN viable v ON v.id=g.issuing_grant
+        JOIN authority_accounts a ON a.id=g.subject_account JOIN admins u ON u.handle=a.legacy_handle
+        JOIN authority_scopes s ON s.id=g.scope_id
+        WHERE v.depth<32 AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
+            AND s.kind NOT IN ('RESTRICTED','CONTAINED') AND NOT u.bootstrap
+            AND (s.kind<>'PERSONAL' OR s.account_id=g.subject_account)
+            AND (g.issuing_token IS NULL OR EXISTS(SELECT 1 FROM service_tokens t JOIN service_token_scopes ts ON ts.token_id=t.id
+                JOIN projects p ON p.id=ts.project_id
+                JOIN admins principal ON principal.handle=t.principal_handle
+                JOIN admins owner ON owner.handle=t.owner_handle AND owner.account_kind='SERVICE'
+                WHERE t.id=g.issuing_token AND ts.project_id=s.project_id AND ts.role='MANAGER'
+                    AND t.credential_issued AND t.revoked_at IS NULL AND t.expires_at>now()))
+            AND (g.provenance NOT IN ('ADMIN_CONTROL','LEGACY_ADMIN_DATA') OR (u.account_kind='USER' AND u.server_admin))
+    ) SELECT EXISTS(
+        SELECT 1 FROM authority_grants g JOIN viable v ON v.id=g.id
+        JOIN authority_roles r ON r.id=g.role_id
+        JOIN authority_accounts a ON a.id=g.subject_account
+        JOIN admins u ON u.handle=a.legacy_handle
+        WHERE a.legacy_handle=$1 AND r.name='PROJECT_CREATOR'
+            AND g.scope_id='00000000-0000-0000-0000-00000000000b' AND g.subject_agent IS NULL
+            AND NOT u.bootstrap AND u.account_kind='USER');
+$$;
+
 -- authority_grant_insert(): V260's definition with the PROJECT_CREATOR branch added. Every V260
 -- line is kept unchanged and in order; the additions are the `creator` variable, the branch, and
 -- the IF NOT creator ... END IF that wraps V260's role-ceiling and scope-coverage checks.

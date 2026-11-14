@@ -53,11 +53,27 @@ A person-issued grant carries only its own explicit expiry. A cap at the
 issuer's expiry would be the same account dependency in another form. Agent- and
 token-issued grants keep their caps.
 
-Accepted residual risk: if expiring person grants are ever introduced, two
-temporary managers could re-issue memberships to each other and make each other
-permanent. Today no person grant carries an expiry (only grants issued through
-service tokens do, and those stay bound), so the path is not reachable. This
-decision must be revisited before any feature creates expiring person grants.
+Known, accepted, open risk: two people can make each other's expiring
+memberships permanent. The path exists today:
+
+- A service token is a time-limited proxy for its service account. Its effective
+  access is the lower of the account's project role and the token's ceiling,
+  and both may be MANAGER (V111), so a service account can manage project
+  membership through a token.
+- A membership issued through a token is capped at the token's expiry and stays
+  bound to that token-issued lineage.
+- A USER who holds such an expiring membership is a person exercising a role, so
+  under role-exercised issuance they can issue uncapped SYSTEM-rooted grants to
+  others. Two such users can therefore make each other permanent before the
+  token expires.
+
+Open question, deferred by the user for their own analysis: whether
+token-issued grants should follow the service account's role (SYSTEM-rooted,
+with no token-expiry cap); whether exercised issuance should be capped at the
+exercised grant's expiry; and whether service accounts should be limited (for
+example to CONTRIBUTOR) or barred from membership management. Until that is
+decided this risk is accepted and open. It must also be revisited before any
+feature creates expiring person grants.
 
 ### 4. Application manifests
 
@@ -78,6 +94,18 @@ keep their issuer in `issuing_grant`.
   is still live when the copy is written.
 - A self-check makes the migration fail if the live grant set differs before
   and after.
+- Dormant grants are kept. A grant that is not live only because an account on
+  its path is disabled (its subject, an ancestor's subject, or an issuing
+  token's principal or owning service) revives when that account is re-enabled,
+  so V261 neither revokes nor re-roots it. It also leaves every live ancestor of
+  a dormant grant on its old lineage, so the dormant subtree stays intact. Only
+  grants that are dead even with every account enabled (revoked or expired
+  lineage, a revoked token) are revoked. A second self-check compares access
+  over "live if every account were enabled" before and after.
+- Operator note: a kept live grant still depends on its issuer, as before V261.
+  Accounts disabled at deploy time keep that old shape; re-enabling them does
+  not re-root anything. Re-issue such a grant (remove and add the member again)
+  if it must outlive its issuer.
 - Operator note: V261 re-checks each moved grant through the grant trigger. Time
   it against a pre-deploy dump before a production rollout.
 - Operator note: the audit log records the revoke and the re-issue, but has no
@@ -98,6 +126,15 @@ keep their issuer in `issuing_grant`.
   is a bound self-grant and ends if they stop being an administrator; another
   administrator's grant replaces it with the durable form.
 - Administrators get no implicit grant.
+- The administration view lists a disabled account that holds an unrevoked
+  grant (with a lineage that would be live if accounts were enabled) as a
+  holder, and revoking it is audited. It still cannot create projects while
+  disabled: `authority_may_create_projects` and its snapshot mirror remain the
+  creation decision, and `authority_holds_project_creator` only answers "holds".
+- An administrator who demotes themselves and revokes their own creator role in
+  one `admin.account.update` call is refused and the whole call rolls back: the
+  demotion applies first, so the revoke no longer has administrator authority.
+  Revoke the role first, then demote, in two calls.
 
 ### 7. Rooting
 
@@ -113,9 +150,13 @@ keep their issuer in `issuing_grant`.
   role" and "existing project without membership", so it does not reveal whether
   a name exists. The TUI and desktop append a fixed hint to ask an administrator
   for the project creator role.
-- A refusal or archive outage during creation withdraws the presence and roots
-  nothing; the socket closes with 1003. A project with no row and no MANAGER is
-  never served.
+- A refusal during creation (another creator won the race) gives the claim
+  back and the socket closes with 1003.
+- An archive outage during creation makes `FileChannelHandler.declared`
+  withdraw the presence and return true. The socket stays open and lends its
+  files only; its ready frame carries no project, so a client that requires a
+  ready project reports 1003. A project with no row and no MANAGER is never
+  served.
 
 ## Alternatives rejected
 

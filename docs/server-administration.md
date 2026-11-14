@@ -796,8 +796,11 @@ gains access.
 plowshare-cli admin account update '{"handle":"sam","projectCreator":true}'
 ```
 
-The desktop server administration dialog has a "May create projects" control;
-`projectCreator:false` revokes the role. The account listing reports it.
+In the desktop server administration dialog, **Allow creating projects** grants
+the role and **Revoke project creator role** removes it; an account that holds
+it shows "May create projects". `projectCreator:false` revokes the role. The
+account listing reports it, including for a disabled account, which keeps the
+role but cannot create projects until it is enabled again.
 
 The role grants one action and nothing else. It does not:
 
@@ -819,7 +822,10 @@ someone else, the grant belongs to the role and no longer depends on that person
 Demoting or disabling the issuer leaves it live. A grant you give yourself stays
 bound to your own authority and ends with it, as do grants issued by agents,
 tokens or service accounts. A person-issued grant has no expiry cap taken from the
-issuer. Granting the role to yourself as an administrator works, but another
+issuer. One consequence is a known open risk: a person holding an expiring
+membership issued through a service token can issue permanent grants, so two
+such people can make each other permanent before the token expires; see
+ADR 0069 §3. Granting the role to yourself as an administrator works, but another
 administrator's grant replaces it with a durable one.
 
 Inspect the current account's effective access and explicit grants:

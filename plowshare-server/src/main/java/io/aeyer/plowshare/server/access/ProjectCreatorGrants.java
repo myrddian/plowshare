@@ -20,7 +20,18 @@ import java.util.Set;
  * PROJECT_CREATION scope row.
  */
 public interface ProjectCreatorGrants {
-  /** {@code authority_may_create_projects(handle)}; a null or blank handle is false. */
+  /**
+   * {@code authority_may_create_projects(handle)}: the project-creation decision, which also
+   * requires the account to be active. A null or blank handle is false.
+   */
+  boolean mayCreate(String handle);
+
+  /**
+   * {@code authority_holds_project_creator(handle)}: whether the account holds the role, for the
+   * administration view and {@link #revoke}'s result. Unlike {@link #mayCreate} it ignores account
+   * activity, so a disabled account whose grant revives on re-enable is still a holder an
+   * administrator can see and revoke. Never a creation decision. A null or blank handle is false.
+   */
   boolean holds(String handle);
 
   /**
@@ -45,7 +56,7 @@ public interface ProjectCreatorGrants {
   /**
    * Revokes the subject's unrevoked creator grant, live or dead, attributed to {@code actor} and
    * their {@code ADMIN_CONTROL} grant. A non-holder is left unchanged (a dead row is still cleaned
-   * up). No other grant is touched.
+   * up). No other grant is touched. A disabled holder ({@link #holds}) is revoked like any other.
    *
    * @return whether the account was a holder and no longer is; false for a no-op
    */

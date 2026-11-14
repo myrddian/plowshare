@@ -225,6 +225,53 @@ class ProjectCreatorGrantsDatabaseTest {
     assertEquals(authority, control("other"));
   }
 
+  /**
+   * A disabled account cannot create projects, but its grant revives on re-enable, so the
+   * administration view still lists it as a holder; the creation decision does not.
+   */
+  @Test
+  void disabled_holder_is_listed_as_holder() {
+    grants.grant("admin", "sam");
+    grants.grant("admin", "admin");
+    jdbc.update("UPDATE admins SET enabled=FALSE WHERE handle IN ('sam','admin')");
+    assertFalse(mayCreate("sam"));
+    assertFalse(mayCreate("admin"));
+    assertTrue(grants.holds("sam"));
+    // The disabled administrator's bound self-grant hangs under their own ADMIN_CONTROL grant,
+    // which also revives on re-enable.
+    assertTrue(grants.holds("admin"));
+    assertEquals(Set.of("sam", "admin"), grants.holdersAmong(List.of("sam", "admin", "mia")));
+    // Granting to the disabled holder still fails clearly; nothing is written.
+    var refused = assertThrows(CallerFault.class, () -> grants.grant("other", "sam"));
+    assertEquals(
+        "The project creator role can only be granted to an active user account",
+        refused.getMessage());
+    assertEquals(1, creatorRows("sam").size());
+    jdbc.update("UPDATE admins SET enabled=TRUE WHERE handle='sam'");
+    assertTrue(mayCreate("sam"));
+  }
+
+  /** Revoking a disabled holder is a change: it returns true and the revocation is audited. */
+  @Test
+  void revoking_disabled_holder_is_audited() {
+    grants.grant("admin", "sam");
+    jdbc.update("UPDATE admins SET enabled=FALSE WHERE handle='sam'");
+    assertTrue(grants.revoke("other", "sam"));
+    assertFalse(grants.holds("sam"));
+    var row = creatorRows("sam").getFirst();
+    assertEquals(account("other"), row.get("revoked_by"));
+    var audit =
+        jdbc.queryForMap(
+            "SELECT actor_account,authority FROM authority_grant_audit WHERE grant_id=? AND event='REVOKE'",
+            row.get("id"));
+    assertEquals(account("other"), audit.get("actor_account"));
+    assertEquals(control("other"), audit.get("authority"));
+    // Re-enabled, the account does not get the role back.
+    jdbc.update("UPDATE admins SET enabled=TRUE WHERE handle='sam'");
+    assertFalse(mayCreate("sam"));
+    assertFalse(grants.revoke("other", "sam"));
+  }
+
   @Test
   void grant_is_idempotent() {
     assertTrue(grants.grant("admin", "sam"));

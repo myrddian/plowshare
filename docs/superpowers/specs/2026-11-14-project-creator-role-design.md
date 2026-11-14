@@ -228,7 +228,10 @@ One mechanism serves both this role and the correction:
   explicit `expires_at`. The cap at the issuer's grant expiry in
   `authority_issue_membership` is removed for person issuers; a cap tied to the
   issuer is the same account dependency in another form. Token- and
-  agent-issued grants keep their caps.
+  agent-issued grants keep their caps. A person holding a token-issued (so
+  expiring) membership can still issue permanent grants; that laundering path
+  is a known, accepted, open risk, and its remedy is an open question in
+  ADR 0069 §3.
 - **Application manifest narrowing (decided, user, 2026-11-15):** narrowing
   no longer follows the issuer for person-issued grants. A person-issued
   membership in an Application project does not fall when the manifest demotes

@@ -139,12 +139,12 @@ class CachedProjectCreationTest {
 
   @Test
   void falls_back_to_repository_without_snapshot() {
-    when(stored.holds("sam")).thenReturn(true);
+    when(stored.mayCreate("sam")).thenReturn(true);
     var creation = new CachedProjectCreation(stored, AuthoritySnapshots.none());
     assertTrue(creation.mayCreate("sam"));
     assertFalse(creation.mayCreate("mia"));
-    verify(stored).holds("sam");
-    verify(stored).holds("mia");
+    verify(stored).mayCreate("sam");
+    verify(stored).mayCreate("mia");
   }
 
   @Test

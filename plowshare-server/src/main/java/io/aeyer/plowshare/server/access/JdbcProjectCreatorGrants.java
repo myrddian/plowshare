@@ -60,16 +60,23 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
   }
 
   @Override
-  public boolean holds(String handle) {
+  public boolean mayCreate(String handle) {
     if (handle == null || handle.isBlank()) return false;
     return Boolean.TRUE.equals(
         jdbc.queryForObject("SELECT authority_may_create_projects(?)", Boolean.class, handle));
   }
 
+  @Override
+  public boolean holds(String handle) {
+    if (handle == null || handle.isBlank()) return false;
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject("SELECT authority_holds_project_creator(?)", Boolean.class, handle));
+  }
+
   /**
    * One statement. The cheap unrevoked-creator-row filters select candidates and the SQL function
-   * decides each, so the answer is {@code authority_may_create_projects} itself while the
-   * live-grant walk runs only for accounts that hold a creator row at all.
+   * decides each, so the answer is {@code authority_holds_project_creator} itself while the lineage
+   * walk runs only for accounts that hold a creator row at all.
    */
   @Override
   public Set<String> holdersAmong(Collection<String> handles) {
@@ -84,7 +91,7 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
             "SELECT a.legacy_handle FROM authority_grants g"
                 + " JOIN authority_accounts a ON a.id=g.subject_account"
                 + " WHERE g.scope_id=? AND g.revoked_at IS NULL AND a.legacy_handle=ANY(?)"
-                + " AND authority_may_create_projects(a.legacy_handle)",
+                + " AND authority_holds_project_creator(a.legacy_handle)",
             String.class,
             CREATION,
             new SqlArrayValue("text", selected)));
@@ -99,6 +106,7 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
               UUID subject = recipient(handle);
               boolean self = subject.equals(authority.account());
               Optional<Existing> existing = unrevoked(subject);
+              // The recipient is active, so holds() here equals the creation decision.
               if (existing.isPresent() && holds(handle)) {
                 // A live grant is kept unless it is a bound self-grant and another administrator
                 // now grants the role: their grant is durable, so it replaces the bound one rather
@@ -145,7 +153,8 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
                       .flatMap(this::unrevoked);
               if (existing.isEmpty()) return false;
               // A dead (expired or lineage-dead) row is cleaned up, but the account was not a
-              // holder, so nothing changed for it.
+              // holder, so nothing changed for it. A disabled holder is a holder (its grant would
+              // revive on re-enable), so its revocation is a change the caller audits.
               boolean held = holds(handle);
               revokeRow(existing.get().id(), authority);
               return held;
