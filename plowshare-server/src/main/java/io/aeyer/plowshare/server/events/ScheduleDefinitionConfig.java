@@ -80,13 +80,33 @@ public class ScheduleDefinitionConfig {
       ProjectStore projects,
       ProjectMembers members,
       ScheduleDefinitions.Authority authority,
-      ApplicationResources resources) {
+      ApplicationResources resources,
+      ApplicationProjects applications,
+      ApplicationScheduleAudit audit,
+      ObjectProvider<io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions>
+          revisions) {
     return new FileScheduleDefinitions(
         store,
         files,
         projects,
         members,
         authority,
-        new ApplicationScheduleControlAuthority(resources, members));
+        new ApplicationScheduleControlAuthority(resources, members),
+        applications,
+        audit,
+        // Resolved per save, so composing schedules never waits on the deployment service, whose
+        // store and package validator are themselves built from scheduling beans.
+        (caller, projectId, name, text, overwrite) ->
+            revisions.getObject().revise(caller, projectId, name, text, overwrite));
+  }
+
+  @Bean
+  public ApplicationProjects applicationProjects(ProjectStore projects) {
+    return new ProjectStoreApplicationProjects(projects, projects);
+  }
+
+  @Bean
+  public ApplicationScheduleAudit applicationScheduleAudit(JdbcTemplate jdbc) {
+    return new JdbcApplicationScheduleAudit(jdbc);
   }
 }

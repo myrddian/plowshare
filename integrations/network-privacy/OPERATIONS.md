@@ -55,10 +55,22 @@ Use the arrow keys, Home and End to move between the dashboard tabs.
    Choose a managed FileStore from the dropdown, enter the password again, then
    **Deploy reviewed revision**.
 
-Application schedules are immutable source definitions. This dashboard editor
-changes the source timing and initial pause setting through a reviewed Application
+A project Manager can also change the schedule frequency on any install with
+Plowshare CLI `schedule save` (`plowshare-cli --project <project> --payload -
+schedule save < request.json`, with `source: "server"` and `overwrite: true`); it
+needs no deployment administrator and no bootstrap layout. The saved `paused`
+value replaces the current Pause/Resume state: the packaged `network_scan` ships
+`"paused": true`, so set `"paused": false` in the request to keep monitoring
+running. A later deployment from an unchanged source tree replaces the saved
+schedule; carry the change into the source tree. The dashboard editor below still
+needs the bootstrap `deployment/` layout.
+
+An Application schedule definition changes only through a project Manager's
+`schedule save` or an Application deployment. This dashboard editor changes the
+source timing and initial pause setting through a reviewed Application
 deployment, with the reviewed revision as a concurrency fence. Overview's
-**Pause monitoring** and **Resume monitoring** change only the runtime state.
+**Pause monitoring** and **Resume monitoring** are an operational override that
+changes only the runtime state, never the definition.
 They are on by default and work on any install, bootstrap-made or not. The
 reviewed schedule editor needs the bootstrap `deployment/` layout; otherwise it
 refuses with "The schedule editor needs the bootstrap deployment layout; Pause and
@@ -609,6 +621,7 @@ separately from failed connection or permission checks. Operational pause/resume
 uses a project manager's Plowshare CLI, TUI, desktop or web-console session;
 it does not redeploy the Application. The dashboard's schedule revision editor
 requires a deployment-administrator login because it changes Application source.
+A project Manager's `schedule save` changes frequency without that login.
 Tool visibility comes from a current unmeasured
 context projection of an existing project conversation, not declared agent grants.
 Before a project conversation exists, visibility remains unknown.

@@ -2,7 +2,9 @@
 
 Status: accepted for implementation. The Application control-actor boundary below
 is superseded by [ADR 0020](0020-application-schedule-operational-authority.md);
-the durable projection and lifecycle decisions remain in effect.
+the durable projection and lifecycle decisions remain in effect. Superseded in
+part by [ADR 0068](0068-application-schedule-save.md) (schedule saves): deployed
+schedule definitions can now be saved by a project Manager.
 
 ## Platform need
 

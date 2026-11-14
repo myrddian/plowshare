@@ -15,6 +15,9 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
   private final ProjectMembers members;
   private final Authority authority;
   private final ScheduleControlAuthority controls;
+  private final ApplicationProjects applications;
+  private final ApplicationScheduleAudit audit;
+  private final io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions revisions;
 
   public FileScheduleDefinitions(
       ScheduleDefinitionStore store,
@@ -22,18 +25,37 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
       ProjectStore projects,
       ProjectMembers members,
       Authority authority,
-      ScheduleControlAuthority controls) {
+      ScheduleControlAuthority controls,
+      ApplicationProjects applications,
+      ApplicationScheduleAudit audit,
+      io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions revisions) {
+    this.revisions = revisions;
     this.store = store;
     this.files = files;
     this.projects = projects;
     this.members = members;
     this.authority = authority;
     this.controls = controls;
+    this.applications = applications;
+    this.audit = audit;
   }
 
+  /**
+   * Saves one schedule file and returns its effective projection.
+   *
+   * <p>Workspace, global and ordinary project server sources register the caller as the folder's
+   * owner and write through {@link ScheduleFiles#write}. A project server source whose folder is an
+   * Application root (the {@link ScheduleFiles#applicationOwned} predicate) takes the Application
+   * path of ADR 0068 instead; see {@link #saveApplication}.
+   */
   public ScheduledWork.File save(String account, ScheduledWork.Save request) {
-    String project = request.project();
-    var source = enroll(account, project, request.source());
+    var pending = pending(account, request.project(), request.source());
+    // Every path requires a project Manager (or a server administrator for global folders). This
+    // runs before the Application probe so an unauthorized caller learns nothing about the root.
+    manage(pending);
+    if (pending.project() != null && files.applicationOwned(pending))
+      return saveApplication(account, request, pending);
+    var source = store.register(account, pending.projectId(), pending.source());
     authority.validate(source, request.definition());
     CronSchedule.parse(request.definition().cron(), request.definition().zone())
         .nextAfter(Instant.now());
@@ -48,6 +70,64 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
     requireComplete(reconcile(source));
     // Reconciliation commits each file separately. This final keyed read is current rather than
     // reusing the pre-scan deletion snapshot or reloading every sibling definition.
+    return store.snapshot(source, request.name()).orElseThrow().effective();
+  }
+
+  /**
+   * A project Manager's save on an Application root (ADR 0068).
+   *
+   * <p>Order: the caller is already authorized as a current project Manager and is refused if it is
+   * a service principal; resolve the project type and the existing registered source, which is
+   * never created or reassigned here; require the registered owner's execution access and validate
+   * the actions under that owner and parse the cron; write; reconcile; audit. Nothing is written
+   * until every check has passed.
+   *
+   * <p>The write depends on the project type. A MANAGED project's save becomes a schedule-only
+   * deployment revision ({@link
+   * io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions}), committed under the
+   * deployment head fence, and its audit target carries {@code @<revision>}. Reconciliation then
+   * reads the new revision, which is the project's workspace once the revision commits. Any other
+   * Application root is written in place.
+   *
+   * <p>No transaction spans the file write and the projection. A crash after the write and before
+   * reconciliation leaves a valid file that the poll reconciles on its next tick, exactly as an
+   * ordinary save does. The audit row is written after reconciliation and before its result is
+   * reported, so a written file is audited even when reconciliation then reports the folder
+   * unavailable; an audit failure is reported to the caller, whose file has nonetheless landed.
+   */
+  private ScheduledWork.File saveApplication(
+      String account, ScheduledWork.Save request, ScheduleDefinitionStore.Source pending) {
+    // Service principals never author Application schedules, on either path. The MANAGED revision
+    // path refuses them too; checking here keeps the in-place path from relying on membership.
+    if (io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account))
+      throw new CallerFault("Saving an Application schedule requires a project Manager");
+    var project =
+        applications
+            .find(pending.projectId())
+            .orElseThrow(() -> new CallerFault("Choose a registered project for schedule files"));
+    var source =
+        store
+            .registered(pending.projectId(), pending.source())
+            .orElseThrow(
+                () -> new CallerFault("No registered schedule source for this Application"));
+    // Reconciliation suspends every file of an owner without execution access. Refuse first
+    // rather than write a file that the same save would then report as unavailable.
+    if (!members.mayWork(source.project(), source.account()))
+      throw new CallerFault("The registered schedule owner no longer has execution access");
+    authority.validate(source, request.definition());
+    CronSchedule.parse(request.definition().cron(), request.definition().zone())
+        .nextAfter(Instant.now());
+    String text = ScheduleDefinitionCodec.write(request.definition());
+    String target = project.name() + "/" + request.name();
+    if (project.type() == ApplicationProjects.ProjectType.MANAGED)
+      target +=
+          "@"
+              + revisions.revise(
+                  account, pending.projectId(), request.name(), text, request.overwrite());
+    else files.writeApplication(source, request.name(), text, request.overwrite());
+    var scan = reconcile(source);
+    audit.saved(account, target);
+    requireComplete(scan);
     return store.snapshot(source, request.name()).orElseThrow().effective();
   }
 
@@ -201,14 +281,19 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
   }
 
   private ScheduleDefinitionStore.Source enroll(String account, String project, String source) {
-    if (project == null && source.equals("workspace"))
+    var pending = pending(account, project, source);
+    manage(pending);
+    return store.register(account, pending.projectId(), source);
+  }
+
+  /** The caller's unregistered view of a folder: validated identity, not yet authorized. */
+  private ScheduleDefinitionStore.Source pending(String account, String project, String source) {
+    if (project == null && "workspace".equals(source))
       throw new CallerFault("Workspace schedule files require a project");
     Long projectId = project == null ? null : projects.id(project);
     if (project != null && projectId == null)
       throw new CallerFault("Choose a registered project for schedule files");
-    var pending = new ScheduleDefinitionStore.Source(0, account, projectId, project, source);
-    manage(pending);
-    return store.register(account, projectId, source);
+    return new ScheduleDefinitionStore.Source(0, account, projectId, project, source);
   }
 
   private void manage(ScheduleDefinitionStore.Source source) {

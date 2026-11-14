@@ -162,7 +162,14 @@ They are validated before agent grants and activated without a server restart.
 These are narrow capabilities, not an arbitrary global server overlay. Deployment refuses `.plowshare/` source. These resources work without a connected client.
 Clients cannot replace the deployed Application tier. Server schedules are enrolled
 for reconciliation on first deployment; they retain ordinary owner permission and
-pause rules. Update packaged schedule definitions with a new source deployment.
+pause rules. A current project Manager updates a packaged schedule definition with
+`schedule.save` (`source: "server"`), which needs no server administration: a MANAGED
+project gets a schedule-only deployment revision, and a DISJOINT or hand-registered
+root is written in place in `schedules/`. See [Scheduling](scheduling.md). For
+example, `plowshare-cli --project P --payload - schedule save < request.json`.
+A later `application.deploy` from a source tree that still holds the old
+`schedules/<name>.json` replaces the saved schedule, so carry the change into the
+source tree too. Deleting an Application schedule remains refused.
 Application agent and bot definitions also belong to their source package.
 Update `agents/` or `bots/` through `application.deploy` for managed source, or the
 owning external deployment workflow for DISJOINT source. `agent.define` is for
@@ -317,6 +324,10 @@ file into that checkout:
 bin/plowshare-cli project create '{"name":"home-assistant","type":"DISJOINT","workspace":"/srv/pipeline/home-assistant","writePaths":["generated","reports"]}'
 ```
 
+A project Manager can still change the registered Application's schedule timing
+through `schedule save`, which rewrites only `schedules/<name>.json` in place. The
+pipeline's next sync of that file replaces the saved schedule, so carry the change
+into the pipeline's source as well.
 The pipeline can update the directory while Plowshare retains the project's
 framework state. Neither server project type participates in client union sync.
 `DISJOINT` makes independent lifecycle ownership explicit. It can register an
@@ -539,7 +550,8 @@ checkout makes its permitted sources available to the server resolver.
 Application definitions load directly from the registered root, without a connected
 client: `agents/`, `bots/`, `skills/`, `orchestrations/`, `hooks/` and `schedules/`.
 Instructions and policy files also live in that root. There is no `.plowshare/`
-tier or client override for these deployed resources.
+tier or client override for these deployed resources. The one API write is a project
+Manager's `schedule.save` of `schedules/<name>.json` (see [Scheduling](scheduling.md)).
 
 Legacy External server project definitions live under the private server data tree at
 `projects/<project-id>/`, including `skills/<name>/SKILL.md`. They are separate

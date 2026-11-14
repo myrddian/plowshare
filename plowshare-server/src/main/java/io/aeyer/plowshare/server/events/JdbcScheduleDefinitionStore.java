@@ -102,6 +102,19 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
         });
   }
 
+  public Optional<Source> registered(long projectId, String source) {
+    if (projectId < 1 || !List.of("server", "workspace").contains(source))
+      throw new IllegalArgumentException("Invalid schedule source lookup");
+    return jdbc
+        .query(
+            SOURCE_QUERY + " WHERE s.project_id=? AND s.source=?",
+            JdbcScheduleDefinitionStore::source,
+            projectId,
+            source)
+        .stream()
+        .findFirst();
+  }
+
   public List<Source> sources() {
     return jdbc.query(SOURCE_QUERY + " ORDER BY s.id", JdbcScheduleDefinitionStore::source);
   }

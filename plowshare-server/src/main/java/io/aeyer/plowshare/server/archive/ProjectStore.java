@@ -603,6 +603,75 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
         });
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Runs inside the deployment store's transaction and project row lock (it joins that
+   * transaction). The stored {@code project_type}, {@code write_paths}, membership and creator are
+   * never changed here; only {@code workspace} and {@code application_storage} follow the new head,
+   * because the stored placement names the active revision directory and the next deployment
+   * compares it with its expected head.
+   */
+  @Override
+  public ProjectRecord activateScheduleRevision(
+      ProjectRecord current,
+      ApplicationPlacement placement,
+      ApplicationPlacement expected,
+      Path verifiedRoot) {
+    Objects.requireNonNull(current);
+    String name = current.name();
+    Objects.requireNonNull(placement);
+    Objects.requireNonNull(expected);
+    Objects.requireNonNull(verifiedRoot);
+    ordinary(name);
+    return withCreator(
+        name,
+        null,
+        () -> {
+          // The caller's row, read under the same project row lock this re-enters; the UPDATE
+          // below repeats the MANAGED predicate in SQL.
+          var row = current;
+          if (!row.type().equals("MANAGED") || !expected.equals(row.placement()))
+            throw new ArchiveRefusedException(
+                "Application source changed outside its deployment lifecycle");
+          var root = placement.applicationRoot();
+          var active = expected.applicationRoot();
+          if (!root.store().equals(active.store())
+              || !revisions(root.path()).equals(revisions(active.path()))
+              || !placement.writableAreas().equals(expected.writableAreas()))
+            throw new ArchiveRefusedException(
+                "A schedule revision keeps the Application's destination and writable areas");
+          var resolved = fileStores.resolve(placement).root();
+          if (!resolved.equals(verifiedRoot))
+            throw new ArchiveRefusedException("FileStore configuration changed before activation");
+          // Inside the existing destination: a sibling of the active revision directory.
+          Path workspace = io.aeyer.plowshare.protocol.FileAccess.canonical(row.workspace());
+          if (resolved.getParent() == null || !resolved.getParent().equals(workspace.getParent()))
+            throw new ArchiveRefusedException(
+                "A schedule revision must stay inside the Application's existing destination");
+          validWorkspace(name, resolved);
+          List<ProjectRecord> changed =
+              jdbc.query(
+                  "UPDATE projects SET workspace = ?, application_storage = ?::jsonb, defined_at = now() WHERE name = ? AND project_type = 'MANAGED' AND machine IS NULL AND personal_owner IS NULL RETURNING "
+                      + COLUMNS,
+                  ROW_MAPPER,
+                  resolved.toString(),
+                  ApplicationPlacementCodec.encode(placement),
+                  name);
+          if (changed.size() != 1)
+            throw new ArchiveRefusedException("Application identity is unavailable");
+          return resolved(changed.getFirst());
+        });
+  }
+
+  /** The revisions directory of a {@code <destination>/revisions/<revision>} reference path. */
+  private static String revisions(String path) {
+    int slash = path.lastIndexOf('/');
+    if (slash <= 0 || !path.substring(0, slash).endsWith("/revisions"))
+      throw new ArchiveRefusedException("Application root is not a deployment revision");
+    return path.substring(0, slash);
+  }
+
   private <T> T withCreator(String name, String handle, Supplier<T> write) {
     return ArchiveUnavailableException.translating(
         "create a project with its first member",

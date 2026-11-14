@@ -21,9 +21,10 @@ public class ApplicationDeploymentConfig {
       io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
       ApplicationIdentities identities,
       io.aeyer.plowshare.server.acting.ActingRepository acting,
-      ContainmentFence containment) {
+      ContainmentFence containment,
+      ProjectMembers members) {
     return new JdbcApplicationDeploymentStore(
-        jdbc, work, projects, schedules, identities, acting, containment);
+        jdbc, work, projects, schedules, identities, acting, containment, members);
   }
 
   /**
@@ -113,16 +114,22 @@ public class ApplicationDeploymentConfig {
     };
   }
 
+  /**
+   * One service implements both administrator deployments and project Managers' schedule-only
+   * revisions (ADR 0068), so both share staging, validation and the store's head fence. The bean is
+   * typed as the implementation so that it satisfies both interfaces.
+   */
   @Bean
-  public ApplicationDeployments applicationDeployments(
+  public SourceApplicationDeployments applicationDeployments(
       ApplicationDeploymentStore store,
       ProjectMembers members,
       ProjectWorkspaces projects,
       FileStores fileStores,
       ApplicationPackageValidator validator,
-      ApplicationIdentities identities) {
+      ApplicationIdentities identities,
+      ProjectNames names) {
     return new SourceApplicationDeployments(
-        store, members, projects, fileStores, validator, identities);
+        store, members, projects, fileStores, validator, identities, names);
   }
 
   /**
