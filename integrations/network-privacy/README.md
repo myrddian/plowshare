@@ -965,6 +965,16 @@ The app uses its existing Application service connection and the public SDK
 password or human login is needed. The server checks the manifest execution-account
 binding and effective Contributor access on each call. The worker stays a Contributor.
 
+Pause and Resume are on by default for `plowshare-privacy serve` and work on any
+install, including services started by an operator's own launcher rather than the
+bootstrap installer. They read the configuration named by `--config` and keep their
+state in a `deployment/` directory beside it, created owner-only on first use. The
+reviewed schedule editor additionally needs the bootstrap `deployment/` layout
+(`deployment/setup.json`); without it, review, deploy and reconcile refuse with
+"The schedule editor needs the bootstrap deployment layout; Pause and Resume
+remain available." Start the collector with `--no-deployment-controls` to turn off
+both; the dashboard still shows the controls and says they are unavailable.
+
 Pause prevents future scheduled scans while existing work can finish. Resume
 selects the next future occurrence; missed ticks are not replayed. These controls
 create no Application revision and do not enable local collection, start a manual

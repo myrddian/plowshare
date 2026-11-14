@@ -49,20 +49,28 @@ Use the arrow keys, Home and End to move between the dashboard tabs.
    including baseline investigations; they do not limit model calls, tokens or
    monetary spend. Legacy changed completions count conservatively on upgrade.
 5. In **Settings**, expand **Change schedule frequency**. Choose a listed
-   frequency, an IANA time zone and whether to pause. Enter the configured deployment administrator's password
-   to **Review schedule revision**. Inspect the full prepared Application source,
-   active revision and source digest. Choose a managed FileStore from the dropdown,
-   enter the password again, then **Deploy reviewed revision**.
+   frequency, an IANA time zone and whether to pause. Enter the configured
+   deployment administrator's password to **Review schedule revision**. Inspect
+   the full prepared Application source, active revision and source digest.
+   Choose a managed FileStore from the dropdown, enter the password again, then
+   **Deploy reviewed revision**.
 
 Application schedules are immutable source definitions. This dashboard editor
 changes the source timing and initial pause setting through a reviewed Application
-deployment, with the reviewed revision as a concurrency fence. For operational
-pause/resume without changing source, use Plowshare CLI `schedule pause <internalName>`
-or `schedule resume <internalName>`, TUI `/schedule pause` / `/schedule resume`, desktop
-Activity controls, or the web console **Schedules** view. Obtain the registered
-`internalName` from `schedule files`; use its owning account with project management
-authority. Runtime controls preserve an unchanged deployed definition and restart
-state; changing the schedule source clears the operational override.
+deployment, with the reviewed revision as a concurrency fence. Overview's
+**Pause monitoring** and **Resume monitoring** change only the runtime state.
+They are on by default and work on any install, bootstrap-made or not. The
+reviewed schedule editor needs the bootstrap `deployment/` layout; otherwise it
+refuses with "The schedule editor needs the bootstrap deployment layout; Pause and
+Resume remain available." `--no-deployment-controls` turns off both; the
+dashboard then shows them as unavailable rather than hiding them. Outside the
+dashboard, for operational pause/resume without changing source, use Plowshare CLI
+`schedule pause <internalName>` or `schedule resume <internalName>`, TUI
+`/schedule pause` / `/schedule resume`, desktop Activity controls, or the web
+console **Schedules** view. Obtain the registered `internalName` from
+`schedule files`; use its owning account with project management authority.
+Runtime controls preserve an unchanged deployed definition and restart state;
+changing the schedule source clears the operational override.
 
 The dashboard editor uses short-lived public login sessions and typed SDK
 deployment operations. Administrator credentials are never saved or used by
