@@ -143,7 +143,7 @@ class RelayPublishScriptTest {
     var receipt =
         new RelayPublishing.Receipt(
             UUID.randomUUID(), "reports.input", "1", Instant.parse("2026-11-13T00:00:00Z"));
-    when(publishing.publish(any(), any(), any())).thenReturn(receipt);
+    when(publishing.publish(any(), any(), any(), any())).thenReturn(receipt);
     assertEquals(Outcome.Ending.TURN_CAP, execute().ending());
     verify(publishing)
         .publish(
@@ -160,7 +160,8 @@ class RelayPublishScriptTest {
                     "session",
                     "script_0",
                     RelayPublishing.DefinitionKind.ORCHESTRATION)),
-            eq(new RelayPublishing.Request("reports.input", "script text")));
+            eq(new RelayPublishing.Request("reports.input", "script text")),
+            any());
     verify(scripts).started(CONVERSATION, 0, INPUT);
     assertTrue(journal.get().result().contains(receipt.eventId().toString()));
     verify(models, atLeastOnce()).wireModelFor(any());

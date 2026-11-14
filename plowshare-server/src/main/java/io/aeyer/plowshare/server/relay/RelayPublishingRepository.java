@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.time.Instant;
 import java.util.Objects;
@@ -17,7 +18,16 @@ public interface RelayPublishingRepository {
    * Atomically retains intent, appends once and saves its receipt; conflicts and failures roll
    * back.
    */
-  RelayPublishing.Receipt publish(Intent intent);
+  default RelayPublishing.Receipt publish(Intent intent) {
+    return publish(intent, OperationFence.none());
+  }
+
+  /**
+   * As {@link #publish(Intent)}, running {@code fence} inside the transaction after the receipt row
+   * insert has serialized same-call contenders and before any broker append or receipt read. A
+   * fence failure rolls back the inserted receipt row with everything else.
+   */
+  RelayPublishing.Receipt publish(Intent intent, OperationFence fence);
 
   record Intent(
       UUID id,

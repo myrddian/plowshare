@@ -1,8 +1,10 @@
 package io.aeyer.plowshare.server.relay;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -10,18 +12,24 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
+import io.aeyer.plowshare.server.archive.TurnRelaySources;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 class GrantedRelayPublishingTest {
   private final RelayPublishingRepository repository = mock(RelayPublishingRepository.class);
@@ -55,7 +63,7 @@ class GrantedRelayPublishingTest {
     when(definitions.permits(7, execution)).thenReturn(true);
     when(repository.ancestry(7, owner))
         .thenReturn(Optional.of(new RelayCausation("root", "incoming", 2)));
-    when(repository.publish(any()))
+    when(repository.publish(any(), any()))
         .thenAnswer(
             call -> {
               RelayPublishingRepository.Intent intent = call.getArgument(0);
@@ -72,7 +80,7 @@ class GrantedRelayPublishingTest {
     var repeat = publishing.publish("research", execution, request);
     assertEquals(first, repeat);
     var captured = ArgumentCaptor.forClass(RelayPublishingRepository.Intent.class);
-    verify(repository, Mockito.times(2)).publish(captured.capture());
+    verify(repository, Mockito.times(2)).publish(captured.capture(), any());
     assertEquals(request.text(), captured.getValue().request().text());
     assertEquals(new RelayCausation("root", "run", 3), captured.getValue().causation());
     var changed =
@@ -118,7 +126,7 @@ class GrantedRelayPublishingTest {
     }
     when(repository.ancestry(7, owner)).thenReturn(Optional.empty());
     assertThrows(CallerFault.class, () -> publishing.publish("research", execution, request));
-    verify(repository, never()).publish(any());
+    verify(repository, never()).publish(any(), any());
   }
 
   @Test
@@ -134,6 +142,68 @@ class GrantedRelayPublishingTest {
       assertThrows(CallerFault.class, () -> publishing.publish("research", context, request));
     }
     verifyNoInteractions(repository);
+  }
+
+  @Test
+  void revocationBeforeCommitRollsBackPublish() {
+    // The real repository over a recording unit of work: the fence runs inside the publication
+    // transaction, so a revocation it observes aborts the unit before the broker append.
+    var events = new ArrayList<String>();
+    UnitOfWork recording =
+        new UnitOfWork() {
+          @Override
+          public <T> T inTransaction(Supplier<T> work) {
+            events.add("begin");
+            try {
+              T result = work.get();
+              events.add("commit");
+              return result;
+            } catch (RuntimeException failed) {
+              events.add("rollback");
+              throw failed;
+            }
+          }
+        };
+    var jdbc = mock(JdbcTemplate.class);
+    when(jdbc.update(anyString(), any(Object[].class)))
+        .thenAnswer(
+            call -> {
+              events.add("insert");
+              return 1;
+            });
+    var relay = mock(Relay.class);
+    var sources = mock(TurnRelaySources.class);
+    when(sources.ancestry(7, owner))
+        .thenReturn(Optional.of(new RelayCausation("root", "incoming", 2)));
+    var fenced =
+        new GrantedRelayPublishing(
+            new JdbcRelayPublishingRepository(
+                jdbc, recording, relay, ExecutionPublicationObserver.NONE, sources),
+            grants,
+            definitions,
+            members,
+            projects,
+            8,
+            () -> now);
+    var revoked = new AuthorityWithdrawnException("revoked before commit");
+
+    var thrown =
+        assertThrows(
+            AuthorityWithdrawnException.class,
+            () ->
+                fenced.publish(
+                    "research",
+                    execution,
+                    request,
+                    () -> {
+                      events.add("fence");
+                      throw revoked;
+                    }));
+
+    assertSame(revoked, thrown);
+    assertEquals(List.of("begin", "insert", "fence", "rollback"), events);
+    verifyNoInteractions(relay);
+    verify(jdbc).update(anyString(), any(Object[].class));
   }
 
   @Test

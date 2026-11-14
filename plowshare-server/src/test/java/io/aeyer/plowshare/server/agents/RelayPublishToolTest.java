@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
@@ -67,7 +68,7 @@ class RelayPublishToolTest {
     var receipt =
         new RelayPublishing.Receipt(
             UUID.randomUUID(), "input", "9007199254740993", Instant.parse("2026-11-13T00:00:00Z"));
-    when(publishing.publish(any(), any(), any())).thenReturn(receipt);
+    when(publishing.publish(any(), any(), any(), any())).thenReturn(receipt);
     var first = tool("first");
     var second = tool("second");
     String input = "{\"topic\":\"input\",\"text\":\"  text\\n  \"}";
@@ -81,14 +82,31 @@ class RelayPublishToolTest {
             eq(
                 new RelayPublishing.Execution(
                     owner, "session", "first", RelayPublishing.DefinitionKind.AGENT)),
-            eq(new RelayPublishing.Request("input", "  text\n  ")));
+            eq(new RelayPublishing.Request("input", "  text\n  ")),
+            any());
     verify(publishing)
         .publish(
             eq("research"),
             eq(
                 new RelayPublishing.Execution(
                     owner, "session", "second", RelayPublishing.DefinitionKind.AGENT)),
+            any(),
             any());
+  }
+
+  @Test
+  void the_run_fence_is_handed_to_the_publication_transaction() {
+    OperationFence fence = () -> {};
+    var receipt =
+        new RelayPublishing.Receipt(
+            UUID.randomUUID(), "input", "1", Instant.parse("2026-11-13T00:00:00Z"));
+    when(publishing.publish(any(), any(), any(), eq(fence))).thenReturn(receipt);
+    var tool =
+        new RelayPublishTool(publishing)
+            .forRun("writer", "session", RelayPublishing.DefinitionKind.AGENT, () -> false, fence);
+    tool.calledAs("call");
+    tool.run("{\"topic\":\"input\",\"text\":\"text\"}", Home.of("research"), owner);
+    verify(publishing).publish(eq("research"), any(), any(), eq(fence));
   }
 
   @Test
@@ -101,11 +119,11 @@ class RelayPublishToolTest {
     assertTrue(cancelled.run(input, Home.of("research"), owner).contains("cancelled"));
     assertTrue(tool("call").run(input, Home.of("research")).contains("authenticated"));
     verifyNoInteractions(publishing);
-    when(publishing.publish(any(), any(), any()))
+    when(publishing.publish(any(), any(), any(), any()))
         .thenThrow(new IllegalStateException("database unavailable"));
     assertThrows(
         IllegalStateException.class, () -> tool("call").run(input, Home.of("research"), owner));
-    verify(publishing).publish(any(), any(), any());
+    verify(publishing).publish(any(), any(), any(), any());
   }
 
   @Test

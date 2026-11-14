@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.InformationDiscovery;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.information.*;
@@ -158,6 +159,17 @@ public final class InformationTool implements AgentTool {
 
   private Runnable queryValidity;
   private String queryCall;
+  private OperationFence writeFence = OperationFence.none();
+
+  /**
+   * Runtime-supplied fence that every write runs inside its own transaction before writing: content
+   * upload and revision, evidence, reports and relationship changes. {@code acquire} only submits a
+   * durable ticket that a worker admits later, so it is not fenced here.
+   */
+  public InformationTool withWriteFence(OperationFence fence) {
+    this.writeFence = java.util.Objects.requireNonNull(fence);
+    return this;
+  }
 
   /** Runtime-supplied operation fence; a read tool cannot forge a standalone search. */
   public InformationTool withQueryValidity(Runnable validity) {
@@ -504,7 +516,12 @@ public final class InformationTool implements AgentTool {
                   context.selection().includeGlobal()));
         var command = InformationNavigationInputs.command(operation, fields);
         // Navigation is a read admitted against the acting principal.
-        var result = navigation.get().execute(actor.acting(), command, context.readBoundary());
+        var result =
+            mutation
+                ? navigation
+                    .get()
+                    .execute(actor.acting(), command, context.readBoundary(), writeFence)
+                : navigation.get().execute(actor.acting(), command, context.readBoundary());
         if (!writing) recordNavigationReads(context, result, command);
         inputs.requireLog(log, actor.attribution());
         return JSON.writeValueAsString(result);
@@ -524,7 +541,8 @@ public final class InformationTool implements AgentTool {
                     null,
                     session,
                     InformationContentInputs.expected(args),
-                    InformationContentInputs.typing(args));
+                    InformationContentInputs.typing(args),
+                    writeFence);
             inputs.reads(log, context).accept(admission.revision());
             result = admission;
           }
@@ -534,7 +552,8 @@ public final class InformationTool implements AgentTool {
             var typing = InformationContentInputs.typing(args);
             if (typing == null) throw new CallerFault("typing is required");
             var admission =
-                service.reviseMetadata(context, id(args, "requestId"), previous, typing, session);
+                service.reviseMetadata(
+                    context, id(args, "requestId"), previous, typing, session, writeFence);
             inputs.reads(log, context).accept(admission.revision());
             result = admission;
           }
@@ -560,7 +579,8 @@ public final class InformationTool implements AgentTool {
                         required(args, "quote"),
                         required(args, "locator"),
                         id(args, "requestId"),
-                        session));
+                        session,
+                        writeFence));
           }
           case "report" -> {
             var dependencies = new LinkedHashSet<>(ids(args, "inputs"));
@@ -582,7 +602,8 @@ public final class InformationTool implements AgentTool {
                         args),
                     log,
                     InformationContentInputs.expected(args),
-                    InformationContentInputs.typing(args));
+                    InformationContentInputs.typing(args),
+                    writeFence);
             inputs.reads(log, context).accept(admission.revision());
             result = admission;
           }

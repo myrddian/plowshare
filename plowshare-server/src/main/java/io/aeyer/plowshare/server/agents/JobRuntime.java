@@ -9,6 +9,7 @@ import io.aeyer.plowshare.server.access.AuthorityAction;
 import io.aeyer.plowshare.server.access.InferenceCalls;
 import io.aeyer.plowshare.server.access.KnowledgeReadScope;
 import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind;
 import io.aeyer.plowshare.server.access.SystemOperations;
@@ -4711,6 +4712,16 @@ public final class JobRuntime {
                     .accept(revision));
     }
     FileTools.Reads reads = new FileTools.Reads(codeMap);
+    // The in-transaction fence for tools whose writes own a database transaction (relay_publish
+    // and the information_write paths). It repeats the after-tool check's authority -- the
+    // RunAdmission, then the retained operation when there is one -- but inside the write, where
+    // a revocation still rolls the write back. Read through the field at call time, as the other
+    // checks here are. docs/operation-write-fences.md lists which tools are fenced.
+    OperationFence writeFence =
+        () -> {
+          admittedAuthority.run();
+          if (operation != null) operations.require(operation);
+        };
     Map<String, AgentTool> offered = new LinkedHashMap<>();
     for (String name : definition.tools()) {
       if (messaging != null && SendMessageTool.NAME.equals(name)) {
@@ -4863,7 +4874,8 @@ public final class JobRuntime {
                         || ScriptProgram.isScript(definition.prompt())
                     ? RelayPublishing.DefinitionKind.ORCHESTRATION
                     : RelayPublishing.DefinitionKind.AGENT,
-                cancelled);
+                cancelled,
+                writeFence);
       // Both of this run's information axes, named once for the four bindings that take
       // them. This is the site where the conversation record is in hand, so it is where
       // the decision of WHICH actor to build belongs; informationActorFor carries the
@@ -5008,7 +5020,8 @@ public final class JobRuntime {
                       if (operation == null || cancelled.getAsBoolean())
                         throw new IllegalStateException("Query run is unavailable");
                       operations.require(operation);
-                    });
+                    })
+                .withWriteFence(writeFence);
       }
       if (runInformation != null && tool instanceof DocumentTools.Search search) {
         tool =
