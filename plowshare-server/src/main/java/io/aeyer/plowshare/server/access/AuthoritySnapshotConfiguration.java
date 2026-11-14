@@ -11,6 +11,7 @@ import java.util.Set;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Composes the in-memory authority snapshot and the project membership reads that use it. */
@@ -51,6 +52,19 @@ public class AuthoritySnapshotConfiguration {
         return snapshots.current().map(snapshot -> snapshot.systemScopeValid(project));
       }
     };
+  }
+
+  /**
+   * The grant repository every service consumes: live grants and lineage from the snapshot, with
+   * the JDBC repository for mutations, fallbacks and every other read. Its freshness is the
+   * snapshot's notification-trusted bound; see {@link CachedScopedGrantRepository}.
+   */
+  @Bean
+  @Primary
+  public ScopedGrantRepository cachedScopedGrantRepository(
+      @Qualifier("jdbcScopedGrantRepository") ScopedGrantRepository stored,
+      AuthoritySnapshots snapshots) {
+    return new CachedScopedGrantRepository(stored, snapshots);
   }
 
   /** The stored members that {@code ApplicationProjectMembers} wraps with manifest limits. */

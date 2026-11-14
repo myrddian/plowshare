@@ -201,6 +201,54 @@ SQL-decided form.
 SQL functions in every fixture state and asserts that a decided call reads
 `admins` zero times.
 
+## Live grants, lineage and socket sessions from the snapshot
+
+On PROD after `2c305443`, three agent jobs spent about half of 26.7 s of
+top-level statement time in three statements, each re-walking
+`authority_live_grants()` or calling `account_active()` per row:
+`ScopedGrantRepository.live(recipient)` (5,149 calls), `lineage(id)` (5,052
+calls) and the socket session checks `AdminStore.currentSessions` /
+`sessionCurrent` (11,659 calls).
+
+**What moved.**
+- `CachedScopedGrantRepository`, the primary `ScopedGrantRepository` bean,
+  answers `live` and `lineage` from `AuthoritySnapshot`. Its grant rows were
+  already the full `authority_grant_records` bindings, so no grant column was
+  added. `live` keeps `ORDER BY created_at, id` with PostgreSQL's unsigned UUID
+  order; `lineage` is empty unless the grant is live, then follows
+  `issuing_grant` for at most 32 links, live or not, as the CTE does.
+- `CachedSessionAuthority`, under the socket session queue, accepts a session
+  when the snapshot's account is active and its new `session_version` field
+  equals the session's version.
+- `projectLineages` was already answered from the snapshot by
+  `ApplicationGrantLineage`, and `projectBindings` has no production caller;
+  both are unchanged.
+
+**Versioning.** Every `admins` update, including a bare `session_version` bump,
+moves AUTHORITY: V175's statement triggers are not column-sensitive for the
+authority tables, and no later migration narrowed them. No migration was needed.
+
+**Freshness.** These answers inherit the snapshot's notification-trusted bound,
+`plowshare.projection-cache.notified.staleness` (2 s by default). A revoked
+grant may still be returned as live, a new grant may still be missing, and a
+revoked session, password change or disabled account may still be honoured by
+the socket sweep for up to that bound. A session the snapshot refuses is
+rechecked in SQL, so a fresh login is never refused because of the snapshot's
+age.
+
+**Fallbacks.** SQL answers, exactly as before, when no snapshot may be used (the
+conditions above) or the caller holds a Spring transaction that may contain its
+own writes. Issuance and revocation keep their in-transaction SQL recheck.
+
+`AuthoritySnapshotDifferentialDatabaseTest` compares, in each of its 25 fixture
+states, `live` for every account with no agent and three agent keys, `lineage`
+for every grant and an unknown id, and session facts for every account at
+several versions. The fixture adds delegated agent grants, including an
+agent-issued, two-link chain and an expiring grant, session revocations and the
+revocation of a delegation. It also checks that a session revocation and a grant
+revocation through the real repositories move the AUTHORITY version and force a
+reload.
+
 ## Targeted readability shares the readiness admission
 
 On PROD at `bb075d37`, the single most expensive top-level statement was the
