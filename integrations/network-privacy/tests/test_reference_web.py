@@ -6,7 +6,7 @@ import asyncio
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -119,6 +119,37 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
             404, (await client.get("/api/references", headers=HEADERS)).status
         )
 
+    async def test_slow_fetch_is_timed_and_counted(self) -> None:
+        library = self.service.library
+        await self.service.poll()
+        first = library.view()[0]
+        self.assertEqual("awaiting", first.phase)
+        assert first.awaiting_since is not None
+        started = datetime.fromisoformat(first.awaiting_since.replace("Z", "+00:00"))
+        early = ReferenceService(library, lambda: started + timedelta(minutes=9))
+        late = ReferenceService(library, lambda: started + timedelta(minutes=12))
+        self.assertEqual(0, early.counts().slow)
+        self.assertEqual(2, late.counts().slow)
+        client = await self.client(late)
+        body = await (await client.get("/api/references", headers=HEADERS)).json()
+        first = body["references"][0]
+        self.assertEqual((12, True), (first["waiting_minutes"], first["slow"]))
+        overview = await (await client.get("/api/overview", headers=HEADERS)).json()
+        self.assertEqual(2, overview["references"]["slow"])
+        # A retired page no longer needs the owner's attention.
+        library.plan_seed((ENTRY,))
+        self.assertEqual(1, late.counts().slow)
+
+    async def test_finished_fetch_has_no_waiting_time(self) -> None:
+        await self.service.poll()
+        self.port.finish(0)
+        await self.service.poll()
+        client = await self.client(self.service)
+        body = await (await client.get("/api/references", headers=HEADERS)).json()
+        row = next(r for r in body["references"] if r["url"] == URL)
+        self.assertNotEqual("awaiting", row["phase"])
+        self.assertEqual((None, False), (row["waiting_minutes"], row["slow"]))
+
     async def test_retry_rejects_unknown_url(self) -> None:
         client = await self.client(self.service)
         for url in ("https://docs.example.test/missing", 5):
@@ -146,7 +177,7 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Fetching is disabled", failed["error"])
         overview = await (await client.get("/api/overview", headers=HEADERS)).json()
         self.assertEqual(
-            {"failed": 1, "blocked": 0, "unresolved": 0, "detail": None},
+            {"failed": 1, "blocked": 0, "unresolved": 0, "slow": 0, "detail": None},
             overview["references"],
         )
         response = await client.post(
@@ -157,7 +188,7 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("queued", again["phase"])
         overview = await (await client.get("/api/overview", headers=HEADERS)).json()
         self.assertEqual(
-            {"failed": 0, "blocked": 0, "unresolved": 0, "detail": None},
+            {"failed": 0, "blocked": 0, "unresolved": 0, "slow": 0, "detail": None},
             overview["references"],
         )
 

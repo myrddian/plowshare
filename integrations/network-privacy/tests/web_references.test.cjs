@@ -232,3 +232,29 @@ test('the refresh interval shows with the rows and saves a whole number of days'
   assert.equal(node('reference-refresh-days').value, '30');
   assert.equal(node('reference-settings-detail').textContent, 'Pages are fetched again every 30 days.');
 });
+
+test('a fetch shows how long it has waited, and a slow one says so without Retry', () => {
+  const {node, run} = dashboard();
+  run("renderReferences({references:[" + [row('awaiting', {waiting_minutes:0, slow:false}), row('awaiting', {waiting_minutes:1, slow:false}), row('awaiting', {waiting_minutes:25, slow:true}), row('tagged', {waiting_minutes:null, slow:false})].map(JSON.stringify).join(',') + "], error:null})");
+  const rows = node('reference-list').children.map(item => texts(item).join(' | '));
+  assert.match(rows[0], /Fetching for less than a minute/);
+  assert.match(rows[1], /Fetching for 1 minute\b/);
+  assert.match(rows[2], /Fetching for 25 minutes/);
+  assert.match(rows[2], /taking longer than it should/);
+  assert.doesNotMatch(rows[1], /longer than it should/);
+  assert.doesNotMatch(rows[3], /Fetching for/);
+  assert.deepEqual(node('reference-list').children.map(item => buttons(item).length), [0, 0, 0, 0]);
+});
+
+test('attention lists slow fetches apart from failures', () => {
+  const {context, node, run} = dashboard();
+  const band = value => {context.value = value; run('renderAttention(value)'); return node('attention-items').children.map(item => texts(item).join(' | '));};
+  let lines = band(overview({failed:0, blocked:0, unresolved:0, slow:3, detail:null}));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^3 \| Reference docs are slow to fetch \|/);
+  assert.match(lines[0], /Open Settings$/);
+  lines = band(overview({failed:1, blocked:0, unresolved:0, slow:2, detail:null}));
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^1 \| Reference docs need a check/);
+  assert.match(lines[1], /^2 \| Reference docs are slow to fetch/);
+});

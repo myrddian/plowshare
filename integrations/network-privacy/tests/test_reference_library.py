@@ -814,6 +814,69 @@ class LibraryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self.port.retries)
         self.assertEqual(1, len(self.port.acquires))
 
+    async def test_awaiting_since_follows_the_awaiting_phase(self) -> None:
+        self.library.plan_seed((ENTRY,))
+        self.assertIsNone(self.receipt().awaiting_since)
+        await self.library.advance()
+        self.assertEqual("awaiting", self.receipt().phase)
+        self.assertEqual(NOW, self.receipt().awaiting_since)
+        # A later pass that finds the ticket still running keeps the first time.
+        later = ReferenceLibrary(
+            ReferenceJournal(self.root), self.port, lambda: "2026-11-14T13:00:00Z"
+        )
+        self.port.tickets[0].state = "running"
+        await later.advance()
+        self.assertEqual(NOW, self.receipt().awaiting_since)
+        self.port.finish(0)
+        await later.advance()
+        self.assertEqual("retained", self.receipt().phase)
+        self.assertIsNone(self.receipt().awaiting_since)
+
+    async def test_awaiting_without_a_start_takes_the_tickets_creation(
+        self,
+    ) -> None:
+        # A journal written before ``awaiting_since`` existed: the ticket's own
+        # creation time is the best record of when the wait began.
+        self.port.now = "2026-11-14T09:30:00Z"
+        self.library.plan_seed((ENTRY,))
+        await self.library.advance()
+        ledger = self.library.journal.read()
+        self.library.journal.save(
+            replace(
+                ledger,
+                receipts=tuple(
+                    replace(r, awaiting_since=None) for r in ledger.receipts
+                ),
+            )
+        )
+        raw = json.loads((self.root / "references.json").read_text())
+        for row in raw["receipts"]:
+            row.pop("awaiting_since", None)
+        (self.root / "references.json").write_text(json.dumps(raw))
+        reopened = self.open()
+        self.assertIsNone(reopened.view()[0].awaiting_since)
+        await reopened.advance()
+        self.assertEqual("2026-11-14T09:30:00Z", reopened.view()[0].awaiting_since)
+
+    async def test_owner_retry_restarts_the_wait(self) -> None:
+        self.port.now = "2026-11-01T00:00:00Z"
+        self.library.plan_seed((ENTRY,))
+        await self.library.advance()
+        self.port.tickets[0].state, self.port.tickets[0].error = "failed", "Timeout"
+        await self.library.advance()
+        self.assertEqual("failed", self.receipt().phase)
+        self.assertIsNone(self.receipt().awaiting_since)
+        await self.library.retry(URL)
+        self.assertEqual("awaiting", self.receipt().phase)
+        # The re-run ticket is old; the wait starts at the owner's retry.
+        self.assertEqual(NOW, self.receipt().awaiting_since)
+
+    async def test_malformed_awaiting_since_is_rejected(self) -> None:
+        self.library.plan_seed((ENTRY,))
+        await self.library.advance()
+        with self.assertRaises(ValueError):
+            replace(self.receipt(), awaiting_since="yesterday")
+
 
 if __name__ == "__main__":
     unittest.main()
