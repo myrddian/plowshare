@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { PROJECT_CREATOR_HINT } from 'plowshare-client-ts/operations/project-creator-hint';
 
 import type {
   Agent,
@@ -19,6 +20,7 @@ import {
   describeFirings,
   describeHelp,
   describeInbox,
+  describeRootRefused,
   describeNotSaved,
   describeProposal,
   describeSchedules,
@@ -3630,6 +3632,26 @@ describe('the cap dialog', () => {
   it('says who answered a cap question first, when its dialog is taken away', () => {
     expect(describeCapSettled('orc_2', 'implement_specification', 'yes')).toBe(
       "orc_2's cap question was answered by implement_specification: yes",
+    );
+  });
+});
+
+describe('describeRootRefused', () => {
+  const reason = "this account may not root 'annex'";
+
+  it('adds the creator hint on its own line for a policy refusal', () => {
+    const said = describeRootRefused('annex', reason, 1008);
+    expect(said).toBe(
+      `the server would not let this client root annex: ${reason}\n${PROJECT_CREATOR_HINT}`,
+    );
+  });
+
+  it('adds no hint for any other refusal', () => {
+    expect(describeRootRefused('annex', reason, 1003)).toBe(
+      `the server would not let this client root annex: ${reason}`,
+    );
+    expect(describeRootRefused('annex', reason)).not.toContain(
+      PROJECT_CREATOR_HINT,
     );
   });
 });

@@ -9,7 +9,12 @@ import type {
   Connection,
   Socket,
 } from 'plowshare-client-ts/binding/connection';
-import { rooter, sameClaim } from 'plowshare-client-node/rooter';
+import {
+  PROJECT_CREATOR_HINT,
+  RootRefused,
+  rooter,
+  sameClaim,
+} from 'plowshare-client-node/rooter';
 import { enforcing } from 'plowshare-client-node/enforcer';
 import {
   discover,
@@ -207,8 +212,12 @@ export class FilePresence {
       }
       this.lifetime?.abort();
       await this.held.release();
+      const said = error instanceof Error ? error.message : errorMessage(error);
+      // Close code 1008 is the server's policy refusal, so say what can change it.
       const detail =
-        error instanceof Error ? error.message : errorMessage(error);
+        error instanceof RootRefused && error.code === 1008
+          ? `${said}\n${PROJECT_CREATOR_HINT}`
+          : said;
       // A refused move retains the previously selected project if still available.
       if (previous) {
         try {
@@ -234,7 +243,10 @@ export class FilePresence {
             });
         }
       } else this.changed({ status: 'off', detail });
-      throw error;
+      // The caller sees the same words the status shows, hint included.
+      throw error instanceof RootRefused && detail !== said
+        ? new RootRefused(detail, error.code)
+        : error;
     }
   }
   private async stopCommands() {

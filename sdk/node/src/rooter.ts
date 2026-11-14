@@ -28,6 +28,7 @@
  */
 import { WORKSPACE_CHANGED } from 'plowshare-client-ts/binding/files';
 import { watchWorkspace, type WorkspaceWatch } from './workspace-watch.ts';
+import { PROJECT_CREATOR_HINT } from 'plowshare-client-ts/operations/project-creator-hint';
 import type { Claim } from 'plowshare-client-ts/binding/auth';
 import { serve } from 'plowshare-client-ts/binding/channel';
 import type {
@@ -36,6 +37,23 @@ import type {
   Serving,
 } from 'plowshare-client-ts/binding/channel';
 import type { Socket } from 'plowshare-client-ts/binding/connection';
+
+export { PROJECT_CREATOR_HINT };
+
+/**
+ * A claim the server closed before it landed. `message` is the server's reason
+ * (or a description of the missing one); `code` is the WebSocket close code, so
+ * a caller can tell a policy refusal (1008) from a conflict (1003).
+ */
+export class RootRefused extends Error {
+  readonly code: number | undefined;
+
+  constructor(message: string, code: number | undefined) {
+    super(message);
+    this.name = 'RootRefused';
+    this.code = code;
+  }
+}
 
 export interface RooterOptions {
   /** Opens `/v1/files` with this claim — `openFiles`, with the token bookkeeping done. */
@@ -208,9 +226,10 @@ export function rooter(options: RooterOptions): Rooter {
       clearTimeout(timer);
       if (refused !== undefined && !entry.leaving) {
         await release();
-        throw new Error(
+        throw new RootRefused(
           refused.reason ??
             `the file channel closed before the server took the claim (${refused.code ?? 'no code'})`,
+          refused.code,
         );
       }
     },
