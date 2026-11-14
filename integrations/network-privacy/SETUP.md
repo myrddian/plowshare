@@ -258,7 +258,12 @@ assignment mode and the basis for it:
 | `unknown` | — | Anything else, including addresses without a confirmed MAC. |
 
 `static` is only claimed from a complete DHCP scope for the address's subnet. It
-is never a default: a missing, partial or failed read gives `unknown`. A lease is
+is never a default: a missing, partial or failed read gives `unknown`. A scope is
+complete only when `dhcp_reservations` is on for that service as well as
+`dhcp_scope`, on Pi-hole and UniFi alike, because an unread reservation or fixed
+IP could hold any address; with `dhcp_scope` alone no address is ever `static`.
+If complete scopes from different services cover an address and disagree, it is
+`unknown` with an addressing conflict. A lease is
 identity and addressing evidence, not presence; it shows an address was handed to
 a MAC, not that the device is online now. A reservation or fixed IP is intent
 only: it says which address a MAC should get, so it feeds addressing and never
@@ -271,6 +276,8 @@ reads `config/dns/hosts` and only ever supplies a name. UniFi reads fixed IPs
 from its known-client list (`rest/user`, which includes offline clients) and
 DHCP settings from `rest/networkconf`. Both UniFi reads use the controller's
 legacy endpoints, so they need `trafficSite`; run `enable-unifi-traffic` first.
+That command is the way to set `trafficSite`, and it also turns UniFi traffic
+counters on.
 Before enabling them, confirm with your controller that the configured API key
 can read those two endpoints for your site; a refused read appears as an
 addressing gap, not as a static address.

@@ -789,7 +789,10 @@ class PiHoleV6:
         entry not in the plain form is skipped with ``addressing_partial``.
         Such a partial reservation read also leaves the scope incomplete: a
         rejected entry could reserve a selected address, which the scope would
-        otherwise call ``static``.
+        otherwise call ``static``. For the same reason the scope is complete
+        only when ``dhcp_reservations`` is enabled too (as UniFi requires its
+        fixed IPs): without it an unread reservation could hold any address.
+        That is not an issue, since the operator did not enable reservations.
         """
         try:
             raw = await self._request(session, "GET", "config/dhcp", sid=sid)
@@ -843,6 +846,8 @@ class PiHoleV6:
                     )
             if scope is not None and len(issues) > first_issue:
                 scope = replace(scope, complete=False)
+        elif scope is not None:
+            scope = replace(scope, complete=False)
         return PiHoleDhcp(
             True,
             scope,

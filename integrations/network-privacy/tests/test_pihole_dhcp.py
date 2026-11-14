@@ -268,10 +268,12 @@ class PiHoleDhcpTest(PiHoleServerCase):
                     (data.addressing,), {ADDRESS: _identity()}, (ADDRESS,), utc_now()
                 )
                 self.assertEqual(assignments[0].mode, "unknown")
-        # Reservations off: the hosts list is not read, the scope stays complete.
+        # Reservations off: the hosts list is not read, so an unseen reservation
+        # could hold any address and the scope is incomplete, without an issue.
         data = await self.source(frozenset({"dhcp_scope"})).read((ADDRESS,), utc_now())
         assert data.addressing is not None
-        self.assertTrue(data.addressing.scopes[0].complete)
+        self.assertFalse(data.addressing.scopes[0].complete)
+        self.assertEqual(data.addressing.issues, ())
 
     async def test_invalid_range_leaves_the_scope_incomplete(self) -> None:
         cases = {
@@ -378,23 +380,6 @@ class PiHoleDhcpTest(PiHoleServerCase):
         listener = await asyncio.start_server(accept, "127.0.0.1", 0)
         self.addAsyncCleanup(listener.wait_closed)
         self.addCleanup(listener.close)
-        plan = CollectionPlan(
-            "tcp",
-            (ADDRESS,),
-            (listener.sockets[0].getsockname()[1],),
-            1,
-            1,
-            None,
-            0,
-            sources=(
-                ServicePlan(
-                    "pihole",
-                    "dns",
-                    frozenset({"network_table", "dhcp_scope"}),
-                    self.plan,
-                ),
-            ),
-        )
         original = asyncio.open_connection
 
         async def connection(
@@ -402,13 +387,26 @@ class PiHoleDhcpTest(PiHoleServerCase):
         ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
             return await original("127.0.0.1", port)
 
-        with patch(
-            "plowshare_privacy.collection.asyncio.open_connection",
-            side_effect=connection,
-        ):
-            evidence = await NetworkCollector("fixture", plan, bind(plan)).collect(
-                str(uuid4()), "fixture:event", None, None
+        async def collect(capabilities: frozenset[Capability]) -> Evidence:
+            plan = CollectionPlan(
+                "tcp",
+                (ADDRESS,),
+                (listener.sockets[0].getsockname()[1],),
+                1,
+                1,
+                None,
+                0,
+                sources=(ServicePlan("pihole", "dns", capabilities, self.plan),),
             )
+            with patch(
+                "plowshare_privacy.collection.asyncio.open_connection",
+                side_effect=connection,
+            ):
+                return await NetworkCollector("fixture", plan, bind(plan)).collect(
+                    str(uuid4()), "fixture:event", None, None
+                )
+
+        evidence = await collect(frozenset({"network_table", *DHCP_ONLY}))
         [assignment] = evidence.snapshot.addressing
         self.assertEqual(
             (assignment.address, assignment.mac, assignment.mode, assignment.basis),
@@ -416,6 +414,10 @@ class PiHoleDhcpTest(PiHoleServerCase):
         )
         self.assertEqual(assignment.services, ("dns",))
         self.assertEqual(self.dhcp_calls(), 1)
+        # The scope alone cannot rule out a reservation: never static.
+        evidence = await collect(frozenset({"network_table", "dhcp_scope"}))
+        [assignment] = evidence.snapshot.addressing
+        self.assertEqual((assignment.mode, assignment.basis), ("unknown", None))
 
 
 class PiHoleLeaseTest(PiHoleServerCase):
@@ -496,7 +498,8 @@ class PiHoleLeaseTest(PiHoleServerCase):
         self.assertEqual(data.addressing.issues, ())
         [scope] = data.addressing.scopes
         self.assertEqual(scope.lease_table, "complete")
-        self.assertTrue(scope.complete)
+        # Reservations are not read, so the scope cannot decide static.
+        self.assertFalse(scope.complete)
         self.assertEqual(
             self.calls,
             [

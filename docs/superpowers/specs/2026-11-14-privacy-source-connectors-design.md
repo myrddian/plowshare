@@ -123,6 +123,14 @@ DHCP rules:
 - **The DHCP check runs at connect, and again once per full collection.** If
   the operator turns DHCP on or off in Pi-hole, the status follows within one
   collection.
+- **DHCP settings, leases and local names are read once per full collection**,
+  for all its targets, never once per 32-address batch. Each batch's identities
+  still merge the leases and names of their own addresses. The collection has
+  exactly one Pi-hole DHCP scope, so one batch's failed read can never let
+  another batch's scope decide its addresses.
+- **The scope is complete only with `dhcp_reservations` enabled** and its read
+  complete, as UniFi requires its fixed IPs. With `dhcp_scope` alone an unread
+  reservation could hold any address, so no address is ever `static`.
 - **A lease is identity and addressing evidence, not presence.** A lease proves
   an address was handed to a MAC. It does not prove the device is online now,
   so leases never create a `Sighting`.
@@ -177,6 +185,13 @@ Further rules:
 - **Two configured sources naming different MACs** for one address (a Pi-hole
   reservation and a UniFi fixed IP) give `unknown` plus `addressing_conflict`.
 - **An address without a confirmed MAC** is `unknown`.
+- **Several complete scopes covering one address** must all give the same mode
+  and basis. If one of them cannot decide (an in-range address whose lease table
+  was read incompletely), the address is `unknown`; if they decide differently
+  (for example a Pi-hole range and a UniFi range that disagree), it is
+  `unknown` plus one `addressing_conflict`. Sample order never picks a winner.
+- **Scope inference is IPv4 only.** An IPv6 address can still be reserved or
+  leased; without either it is `unknown`.
 - **Coverage gaps:** `addressing_unavailable` and `addressing_partial` follow
   the same pattern as the other buckets.
 - **The mode is compared between collections.** When the same address and MAC
