@@ -324,6 +324,50 @@ generations, and a full generation change. It also asserts that an idle poll
 over 3,000 current sources visits fewer than 50 rows under a generic plan; the
 previous statement visits all 3,000 and fails that assertion.
 
+## Repeated operation rechecks answered from memory
+
+On PROD (28-minute sample) agent tool calls drove about 47,000 `grants.live` and
+46,000 `grants.lineage` calls. `JobRuntime` rechecks one operation admission
+four times per tool call: at the top of the step, after pre-tool hooks, through
+`requireTargets` or `requireReadTargets`, and after the tool returns. Each
+`PinnedOperationAuthority.require` walks the admission's ancestry and, per
+ancestor, re-reads accounts, the scope and home, the member role (Application
+boundary, project record and manifest) and `allowsUsing` for every supporting
+grant. Every call site stays: pre-tool hooks run between them, and the
+after-tool check is what notices a revocation during a long tool.
+
+**What changed.** `require` now asks `VerifiedAdmissions` before walking.
+Composition supplies `BoundedVerifiedAdmissions`, a per-process LRU of at most
+1,024 admissions that passed the full walk. An entry is keyed on the whole
+`Admission` value (id, executor, account, scope, home, source, ordered support
+and `globalRead`), so no other admission can reuse it. It answers only while the
+caller's authority snapshot is the very instance it was verified under (one per
+AUTHORITY version) and it is younger than
+`plowshare.projection-cache.notified.staleness`, 2 s by default, measured from
+before its walk. The age bound covers inputs that do not move the AUTHORITY
+version: the Application manifest, operation records and resource scopes.
+`requireTargets` and `requireReadTargets` still call `require` and still check
+their targets and home on every call. A tool step therefore walks once instead
+of four times (`VerifiedAdmissionsTest`).
+
+**Freshness.** A revocation, membership or role change, manifest change or
+operation record change may let an admission that already passed keep running
+for up to the bound, on top of the snapshot's own notification lag. A fresh
+admission is never admitted from memory.
+
+**Fallbacks.** Every recheck walks, and nothing is recorded, when no snapshot
+may be used, when the caller holds a Spring transaction that may contain its own
+writes, or when `plowshare.projection-cache.notified.enabled` is false. A walk
+that refuses throws as before and leaves no entry.
+
+**Not changed.** The admitted turn's own check (`RunAdmission.check`, from
+`PersonalActingWork`) re-verifies the delegated acting policy, the binding's
+ownership and activity and the agent definition; SYSTEM work's `require` runs
+its purpose's validity fence and the retained-envelope check. Both have their own
+authority contracts and fences that are not keyed by an operation admission, so
+they still run in full. `allowsUsing` still re-reads `live` per supporting grant;
+those reads already come from the snapshot.
+
 ## Regression provenance and validation
 
 The per-row document guard and unconditional retrieval dispatch originate in

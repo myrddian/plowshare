@@ -5,6 +5,7 @@ import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.*;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
@@ -34,6 +35,12 @@ public final class PinnedOperationAuthority implements OperationAuthority {
 
   /** Server configuration, never a caller's argument; absent until an operator configures it. */
   private final ContainmentBounds bounds;
+
+  /**
+   * Remembers admissions whose full walk passed recently, so repeated rechecks of one operation are
+   * cheap. {@link VerifiedAdmissions#none()} unless composition supplies a bounded one.
+   */
+  private final VerifiedAdmissions verified;
 
   public PinnedOperationAuthority(
       IdentityRepository identities,
@@ -86,7 +93,8 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       OperationRecords records,
       ResourceScopeRepository resources,
       io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
-      org.springframework.beans.factory.ObjectProvider<ContainmentBounds> bounds) {
+      ObjectProvider<ContainmentBounds> bounds,
+      ObjectProvider<VerifiedAdmissions> verified) {
     this(
         identities,
         grants,
@@ -95,7 +103,8 @@ public final class PinnedOperationAuthority implements OperationAuthority {
         records,
         resources,
         knowledge,
-        bounds.getIfAvailable(ContainmentBounds::absent));
+        bounds.getIfAvailable(ContainmentBounds::absent),
+        verified.getIfAvailable(VerifiedAdmissions::none));
   }
 
   public PinnedOperationAuthority(
@@ -107,6 +116,33 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       ResourceScopeRepository resources,
       io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
       ContainmentBounds bounds) {
+    this(
+        identities,
+        grants,
+        authority,
+        members,
+        records,
+        resources,
+        knowledge,
+        bounds,
+        VerifiedAdmissions.none());
+  }
+
+  /**
+   * @param verified the bounded memory of passed walks that {@link #require} may answer from; see
+   *     {@link BoundedVerifiedAdmissions} for its key, validity and staleness bound
+   */
+  public PinnedOperationAuthority(
+      IdentityRepository identities,
+      ScopedGrantRepository grants,
+      ScopedAuthority authority,
+      ProjectMembers members,
+      OperationRecords records,
+      ResourceScopeRepository resources,
+      io.aeyer.plowshare.server.information.AccountKnowledgePermissions knowledge,
+      ContainmentBounds bounds,
+      VerifiedAdmissions verified) {
+    this.verified = Objects.requireNonNull(verified);
     this.bounds = Objects.requireNonNull(bounds);
     this.knowledge = Objects.requireNonNull(knowledge);
     this.identities = Objects.requireNonNull(identities);
@@ -321,8 +357,24 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     if (depth > bounds.maxDepth()) throw denied();
   }
 
+  /**
+   * Rechecks the admission's live authority and its whole retained ancestry.
+   *
+   * <p>A repeat of an equal admission may be answered from the configured {@link
+   * VerifiedAdmissions} instead of walking: only after that admission passed this walk under the
+   * same authority snapshot, within the configured bound (2 s by default), and never inside a
+   * transaction that may hold its own writes. A revocation, membership, role, Application manifest
+   * or operation record change can therefore take up to that bound to stop an admission that
+   * already passed. A refusal is never remembered.
+   */
   @Override
   public void require(Admission admission) {
+    Objects.requireNonNull(admission);
+    verified.require(admission, () -> walk(admission));
+  }
+
+  /** The full live check {@link #require} performs when it cannot answer from memory. */
+  private void walk(Admission admission) {
     var visited = new HashSet<UUID>();
     for (int depth = 0; ; depth++) {
       if (depth >= 64 || !visited.add(admission.id())) throw denied();
