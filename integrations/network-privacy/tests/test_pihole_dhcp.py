@@ -7,10 +7,11 @@ import ipaddress
 import os
 import unittest
 from dataclasses import replace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import patch
 from uuid import uuid4
 
+from aiohttp import web
 from test_connectors import PIHOLE
 from test_pihole import ADDRESS, MAC, SECRET, PiHoleServerCase
 
@@ -62,6 +63,7 @@ TWO_LEASES = (
     "identity_ambiguous: Pi-hole DHCP lists multiple leases for a selected address"
 )
 LEASE_CALL = ("GET", "/api/dhcp/leases")
+NAMES_UNREADABLE_TEXT = "identity_partial: Pi-hole local DNS records could not be read"
 
 
 class _Identities:
@@ -861,6 +863,184 @@ class PiHoleLeaseTest(PiHoleServerCase):
         self.assertEqual(data.devices, (self.lease_identity(),))
         self.assertIsNone(data.addressing)
         self.assertEqual(self.calls[1:3], [("GET", "/api/config/dhcp"), LEASE_CALL])
+
+
+# 40 selected addresses inside the default DHCP range: two collector batches.
+MANY = tuple(f"192.0.2.{101 + index}" for index in range(40))
+EVERYTHING: frozenset[Capability] = frozenset(
+    {
+        "network_table",
+        "dhcp_scope",
+        "dhcp_reservations",
+        "dhcp_leases",
+        "local_dns_names",
+    }
+)
+
+
+def _mac(index: int) -> str:
+    return f"02:00:00:00:00:{index:02x}"
+
+
+class PiHoleCollectionScopeTest(PiHoleServerCase):
+    """DHCP settings, leases and local names are read once per full collection."""
+
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        # Endpoints answering 503 on their first request only.
+        self.fail_first: set[str] = set()
+        # Selected addresses the network table does not list.
+        self.unlisted: set[str] = set()
+
+    def failing(self, path: str) -> bool:
+        first = self.calls.count(("GET", path)) == 1
+        return first and path in self.fail_first
+
+    async def devices(self, request: web.Request) -> web.Response:
+        self.calls.append((request.method, request.path))
+        listed = [
+            self.device(address, _mac(index))
+            for index, address in enumerate(MANY)
+            if address not in self.unlisted
+        ]
+        return web.json_response({"devices": listed, "took": 0.01})
+
+    async def dhcp(self, request: web.Request) -> web.Response:
+        response = await super().dhcp(request)
+        return web.Response(status=503) if self.failing(request.path) else response
+
+    async def dhcp_leases(self, request: web.Request) -> web.Response:
+        response = await super().dhcp_leases(request)
+        return web.Response(status=503) if self.failing(request.path) else response
+
+    def settings(self) -> dict[str, object]:
+        config = cast(dict[str, object], self.dhcp_settings)["config"]
+        return cast(dict[str, object], cast(dict[str, object], config)["dhcp"])
+
+    async def collect(
+        self, capabilities: frozenset[Capability] = EVERYTHING
+    ) -> Evidence:
+        plan = CollectionPlan(
+            "tcp",
+            MANY,
+            (443,),
+            0.1,
+            1,
+            None,
+            0,
+            sources=(ServicePlan("pihole", "dns", capabilities, self.plan),),
+        )
+        with patch(
+            "plowshare_privacy.collection.asyncio.open_connection",
+            side_effect=TimeoutError,
+        ):
+            return await NetworkCollector("fixture", plan, bind(plan)).collect(
+                str(uuid4()), "fixture:event", None, None
+            )
+
+    def lease(self, index: int, mac: str | None = None) -> dict[str, object]:
+        return {
+            "expires": 0,
+            "name": "lease-name",
+            "hwaddr": mac or _mac(index),
+            "ip": MANY[index],
+            "clientid": "*",
+        }
+
+    async def test_one_read_of_settings_leases_and_names_per_collection(
+        self,
+    ) -> None:
+        self.leases = {"leases": [self.lease(35)], "took": 0.01}
+        self.dns_hosts = {
+            "config": {"dns": {"hosts": [MANY[36] + " named.lan"]}},
+            "took": 0.01,
+        }
+        self.unlisted = {MANY[36]}
+        evidence = await self.collect()
+        for path in ("config/dhcp", "dhcp/leases", "config/dns/hosts"):
+            self.assertEqual(self.calls.count(("GET", "/api/" + path)), 1, path)
+        # One session per batch; the table is read in each.
+        self.assertEqual(self.calls.count(("POST", "/api/auth")), 2)
+        self.assertEqual(self.calls.count(("GET", "/api/network/devices")), 2)
+        devices = {device.address: device for device in evidence.snapshot.devices}
+        # The second batch's lease and name were merged with its own table.
+        leased = devices[MANY[35]]
+        self.assertEqual(
+            (leased.evidence, leased.vendor, leased.service),
+            ("dhcp_lease", "Fixture vendor", "dns"),
+        )
+        named = devices[MANY[36]]
+        self.assertEqual((named.hostname, named.evidence), ("named.lan", "local_dns"))
+        modes = {
+            item.address: (item.mode, item.basis)
+            for item in evidence.snapshot.addressing
+        }
+        self.assertEqual(modes[MANY[35]], ("dhcp_dynamic", "dhcp_lease"))
+        self.assertEqual(modes[MANY[0]], ("static", "no_lease_or_reservation"))
+        self.assertEqual(modes[MANY[39]], ("static", "no_lease_or_reservation"))
+        # The name-only record has no MAC.
+        self.assertEqual(modes[MANY[36]], ("unknown", None))
+        self.assertFalse(
+            any(issue.startswith("addressing_") for issue in evidence.issues)
+        )
+
+    def assert_never_static(self, evidence: Evidence) -> None:
+        self.assertEqual(len(evidence.snapshot.addressing), len(MANY))
+        for item in evidence.snapshot.addressing:
+            self.assertNotEqual(item.mode, "static", item.address)
+            self.assertEqual(item.mode, "unknown", item.address)
+
+    async def test_failed_lease_read_makes_no_address_static(self) -> None:
+        self.fail_first = {"/api/dhcp/leases"}
+        evidence = await self.collect()
+        self.assert_never_static(evidence)
+        self.assertEqual(self.calls.count(LEASE_CALL), 1)
+        self.assertIn(LEASES_UNREADABLE, evidence.issues)
+        self.assertIn(IDENTITY_LEASES_UNREADABLE, evidence.issues)
+
+    async def test_failed_settings_read_makes_no_address_static(self) -> None:
+        self.fail_first = {"/api/config/dhcp"}
+        evidence = await self.collect()
+        self.assert_never_static(evidence)
+        self.assertEqual(self.calls.count(("GET", "/api/config/dhcp")), 1)
+        self.assertNotIn(LEASE_CALL, self.calls)
+        self.assertIn(UNAVAILABLE, evidence.issues)
+
+    async def test_lease_contradicted_in_one_batch_leaves_the_table_incomplete(
+        self,
+    ) -> None:
+        # The second batch's table names another MAC for the leased address.
+        self.leases = {"leases": [self.lease(35, OTHER_MAC)], "took": 0.01}
+        evidence = await self.collect()
+        self.assertIn(DISAGREE, evidence.issues)
+        self.assert_never_static(evidence)
+
+    async def test_failed_first_session_leaves_later_batches_without_leases(
+        self,
+    ) -> None:
+        self.leases = {"leases": [self.lease(35)], "took": 0.01}
+        source = PiHoleV6(self.plan, capabilities=EVERYTHING, service="dns")
+        sessions = 0
+        authenticate = source._authenticate
+
+        async def flaky(session: object) -> str:
+            nonlocal sessions
+            sessions += 1
+            if sessions == 1:
+                raise ValueError("first session refused")
+            return await authenticate(cast(Any, session))
+
+        with patch.object(source, "_authenticate", flaky):
+            read = await source.read_collection((MANY[:32], MANY[32:]), utc_now())
+        self.assertIsNotNone(read.addressing)
+        assert read.addressing is not None
+        self.assertEqual(read.addressing.scopes, ())
+        self.assertEqual(read.addressing.issues, (UNAVAILABLE,))
+        second = read.batches[1]
+        self.assertNotIn("dhcp_lease", [device.evidence for device in second.devices])
+        self.assertIn(IDENTITY_LEASES_UNREADABLE, second.issues)
+        self.assertIn(NAMES_UNREADABLE_TEXT, second.issues)
+        self.assertNotIn(LEASE_CALL, self.calls)
 
 
 class DhcpOnlyServiceTest(unittest.TestCase):

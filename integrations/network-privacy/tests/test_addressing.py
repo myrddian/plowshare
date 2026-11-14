@@ -31,6 +31,10 @@ HOLDER_CONFLICT = (
 CONFIGURED_CONFLICT = (
     "addressing_conflict: configured address assignments disagree on a selected address"
 )
+SCOPE_CONFLICT = (
+    "addressing_conflict: DHCP scopes from different services disagree on a"
+    " selected address"
+)
 
 
 def identity(address: str, mac: str | None) -> DeviceIdentity:
@@ -375,6 +379,98 @@ class AssignAddressesTest(unittest.TestCase):
     def test_only_targets_with_an_identity_record_are_assigned(self) -> None:
         assignments, _ = assign(devices={SECOND: MAC}, targets=(FIRST, SECOND))
         self.assertEqual([item.address for item in assignments], [SECOND])
+
+    def test_disagreeing_scopes_from_two_services_are_unknown(self) -> None:
+        # One service says FIRST is outside its range, the other inside it.
+        dns = AddressingSample(scopes=(scope("home-dns"),))
+        gateway = AddressingSample(
+            scopes=(scope("controller", start="192.0.2.2", lease_table="none"),)
+        )
+        for samples in ((dns, gateway), (gateway, dns)):
+            with self.subTest(first=samples[0].scopes[0].service):
+                assignments, issues = assign(*samples)
+                self.assertEqual(
+                    assignments[0],
+                    AddressAssignment(FIRST, MAC, "unknown", None, (), None),
+                )
+                self.assertEqual(issues, (SCOPE_CONFLICT,))
+        # Reported once, however many addresses the scopes disagree on.
+        assignments, issues = assign(
+            dns,
+            gateway,
+            devices={FIRST: MAC, SECOND: OTHER_MAC},
+            targets=(FIRST, SECOND),
+        )
+        self.assertEqual([item.mode for item in assignments], ["unknown", "unknown"])
+        self.assertEqual(issues, (SCOPE_CONFLICT,))
+
+    def test_scope_that_cannot_decide_blocks_another_scope(self) -> None:
+        # An in-range scope with an incomplete lease table cannot decide; the
+        # other scope's static is not taken over it, and it is no conflict.
+        unsure = AddressingSample(
+            scopes=(scope("home-dns", start=FIRST, lease_table="incomplete"),)
+        )
+        sure = AddressingSample(scopes=(scope("controller"),))
+        for samples in ((unsure, sure), (sure, unsure)):
+            with self.subTest(first=samples[0].scopes[0].service):
+                assignments, issues = assign(*samples)
+                self.assertEqual(assignments[0].mode, "unknown")
+                self.assertEqual(issues, ())
+
+    def test_agreeing_scopes_from_two_services_decide(self) -> None:
+        assignments, issues = assign(
+            AddressingSample(scopes=(scope("home-dns"),)),
+            AddressingSample(scopes=(scope("controller", lease_table="none"),)),
+        )
+        self.assertEqual(
+            assignments[0],
+            AddressAssignment(
+                FIRST,
+                MAC,
+                "static",
+                "outside_dhcp_range",
+                ("home-dns", "controller"),
+                None,
+            ),
+        )
+        self.assertEqual(issues, ())
+        # Identical scopes agree.
+        assignments, issues = assign(
+            AddressingSample(scopes=(scope(),)), AddressingSample(scopes=(scope(),))
+        )
+        self.assertEqual(
+            (assignments[0].mode, assignments[0].services), ("static", ("home-dns",))
+        )
+        self.assertEqual(issues, ())
+
+    def test_ipv6_address_is_unknown_for_scope_inference(self) -> None:
+        address = "2001:db8::5"
+        sample = AddressingSample(scopes=(scope(),))
+        assignments, issues = assign(sample, devices={address: MAC}, targets=(address,))
+        self.assertEqual(
+            assignments[0], AddressAssignment(address, MAC, "unknown", None, (), None)
+        )
+        self.assertEqual(issues, ())
+        # Reservations and leases still decide an IPv6 address.
+        reserved, _ = assign(
+            AddressingSample(
+                reservations=(Reservation(address, MAC, "dhcp_reservation", "d"),),
+                scopes=(scope(),),
+            ),
+            devices={address: MAC},
+            targets=(address,),
+        )
+        leased, _ = assign(
+            AddressingSample(
+                leases=(Lease(address, MAC, None, LATER, "d"),), scopes=(scope(),)
+            ),
+            devices={address: MAC},
+            targets=(address,),
+        )
+        self.assertEqual(
+            [(reserved[0].mode, reserved[0].basis), (leased[0].mode, leased[0].basis)],
+            [("dhcp_reserved", "dhcp_reservation"), ("dhcp_dynamic", "dhcp_lease")],
+        )
 
     def test_out_of_scope_facts_rejected(self) -> None:
         outside = "192.0.2.99"

@@ -20,7 +20,15 @@ from .identity_source import (
     ManagedInventory,
     ManagedProductLookup,
 )
-from .pihole import DeviceDataSource
+
+# The device-read contracts live with their first implementation; they are
+# re-exported here so the vendor-neutral collector imports no connector module.
+from .pihole import (
+    CollectionData,
+    CollectionDeviceSource,
+    DeviceData,
+    DeviceDataSource,
+)
 from .traffic import TrafficCounter
 
 
@@ -55,6 +63,19 @@ class AddressingReader(Protocol):
         self, targets: tuple[str, ...], observed_at: str
     ) -> AddressingSample: ...
 
+
+__all__ = [
+    "AddressingReader",
+    "Bound",
+    "CollectionData",
+    "CollectionDeviceSource",
+    "DeviceData",
+    "DeviceDataSource",
+    "DnsActivityReader",
+    "PresenceReader",
+    "SourceSet",
+    "TrafficReader",
+]
 
 R = TypeVar("R", covariant=True)
 

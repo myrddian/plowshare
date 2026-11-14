@@ -658,6 +658,41 @@ class CollectorSourcesTest(unittest.IsolatedAsyncioTestCase):
         # Adopted inventory alone binds no service-tagged reader.
         NetworkCollector("fixture", plan(unifi(UNIFI, "managed_inventory")))
 
+    async def test_per_batch_addressing_from_several_batches_is_refused(
+        self,
+    ) -> None:
+        # A source read batch by batch may not give each batch its own scope:
+        # one batch's scope could decide another batch whose read failed.
+        sample = AddressingSample(
+            scopes=(
+                DhcpScope(
+                    "home-dns",
+                    ipaddress.IPv4Network("192.0.2.0/24"),
+                    "192.0.2.100",
+                    "192.0.2.200",
+                    True,
+                    "complete",
+                ),
+            )
+        )
+        many = tuple(f"192.0.2.{index}" for index in range(1, 41))
+        enabled = replace(plan(pihole("network_table", "dhcp_scope")), targets=many)
+        sources = SourceSet(
+            device_reads=(
+                Bound[DeviceDataSource]("home-dns", "pihole", _AddressedTable(sample)),
+            )
+        )
+        with (
+            patch(
+                "plowshare_privacy.collection.asyncio.open_connection",
+                side_effect=TimeoutError,
+            ),
+            self.assertRaisesRegex(ValueError, "several batches"),
+        ):
+            await NetworkCollector("fixture", enabled, sources).collect(
+                SITE, "fixture:event", None, None
+            )
+
     def test_collector_contains_no_vendor_names(self) -> None:
         tree = ast.parse(Path(collection.__file__).read_text(encoding="utf-8"))
         docstrings = {

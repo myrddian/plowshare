@@ -35,7 +35,12 @@ from .identity_merge import PRECEDENCE, merge_identities
 from .identity_source import IdentitySample, ManagedProductLookup
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .presence import MAX_ATTRIBUTION_GAP, PresenceSample, Sighting, epoch
-from .source_set import SourceSet
+from .source_set import (
+    CollectionDeviceSource,
+    DeviceData,
+    DeviceDataSource,
+    SourceSet,
+)
 from .traffic import TrafficCounter
 
 
@@ -199,6 +204,30 @@ def _disagreeing_kinds(
 def _rank(identity: DeviceIdentity) -> int:
     kind = evidence_kind(identity)
     return PRECEDENCE.index(kind) if kind in PRECEDENCE else len(PRECEDENCE)
+
+
+async def _read_batches(
+    reader: DeviceDataSource, batches: tuple[tuple[str, ...], ...], observed: str
+) -> tuple[tuple[DeviceData, ...], AddressingSample | None]:
+    """One device source's reads of every batch, with its addressing facts.
+
+    A ``CollectionDeviceSource`` reads its collection-wide facts once and
+    returns one addressing sample. Any other source is read batch by batch; it
+    may return addressing facts from at most one batch, because a scope read
+    per batch could decide addresses of another batch whose own read failed.
+    """
+    if isinstance(reader, CollectionDeviceSource):
+        read = await reader.read_collection(batches, observed)
+        if len(read.batches) != len(batches) or any(
+            part.addressing is not None for part in read.batches
+        ):
+            raise ValueError("Device source returned an invalid collection read")
+        return read.batches, read.addressing
+    parts = tuple([await reader.read(batch, observed) for batch in batches])
+    facts = [part.addressing for part in parts if part.addressing is not None]
+    if len(facts) > 1:
+        raise ValueError("Device source returned addressing facts for several batches")
+    return parts, facts[0] if facts else None
 
 
 def _device_sample(
@@ -617,15 +646,17 @@ class NetworkCollector:
             window = None
             # Per kind, so a conflict can name the services that disagreed.
             samples: list[tuple[ConnectorKind, IdentitySample]] = []
-            # Device reads carry addressing facts with their session's other rows.
+            # Each device read carries at most one addressing sample per collection.
             addressing: list[AddressingSample] = []
             if self.sources.device_reads:
                 dns_rows: list[DnsObservation] = []
                 windows: list[DnsWindow] = []
                 for bound in self.sources.device_reads:
                     table: list[DeviceIdentity] = []
-                    for batch in batches:
-                        enriched = await bound.reader.read(batch, observed)
+                    parts, facts = await _read_batches(bound.reader, batches, observed)
+                    if facts is not None:
+                        addressing.append(facts)
+                    for batch, enriched in zip(batches, parts, strict=True):
                         if (
                             len({device.address for device in enriched.devices})
                             != len(enriched.devices)
@@ -641,8 +672,6 @@ class NetworkCollector:
                         dns_rows.extend(enriched.dns)
                         if enriched.window is not None:
                             windows.append(enriched.window)
-                        if enriched.addressing is not None:
-                            addressing.append(enriched.addressing)
                         issues.extend(enriched.issues)
                     samples.append((bound.kind, IdentitySample(tuple(table))))
                 if len(dns_rows) > MAX_DNS_ROWS:

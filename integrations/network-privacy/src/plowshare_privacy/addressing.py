@@ -35,6 +35,15 @@ a lease of its own it is ``unknown``;
 configured sources (reservations or fixed IPs) naming different MACs for one
 address make it ``unknown`` with ``addressing_conflict``. An address whose
 identity has no MAC is ``unknown``.
+
+Several complete scopes may contain one address (for instance a Pi-hole and a
+UniFi gateway both serving the subnet). Rule 3 decides only when every one of
+them gives the same ``(mode, basis)``; the assignment then names all their
+services. If one of them cannot decide (an in-range address with an incomplete
+lease table) the address is ``unknown``; if they decide differently it is
+``unknown`` with one deduplicated ``addressing_conflict``. Sample order never
+picks a winner. Rule 3 applies to IPv4 addresses only: scopes are IPv4, so an
+IPv6 address without a lease or reservation is ``unknown``.
 """
 
 from __future__ import annotations
@@ -58,6 +67,10 @@ HOLDER_CONFLICT = (
 )
 CONFIGURED_CONFLICT = (
     "addressing_conflict: configured address assignments disagree on a selected address"
+)
+SCOPE_CONFLICT = (
+    "addressing_conflict: DHCP scopes from different services disagree on a"
+    " selected address"
 )
 
 
@@ -119,7 +132,7 @@ def assign_addresses(
 
     ``devices`` is the snapshot's final merged identity map. Leases expiring at
     or before ``observed_at`` are ignored. When several complete scopes contain
-    an address, the first in sample order decides it. Returned issues are the
+    an address they must all agree, or it is ``unknown``. Returned issues are the
     samples' own issues in sample order, then the conflicts, deduplicated.
     Raises ValueError for a lease or reservation outside ``targets``.
     """
@@ -179,30 +192,54 @@ def assign_addresses(
             )
             continue
         # Another MAC's lease or reservation contradicts every scope basis.
-        decided = None if leased or configured_other else _by_scope(address, scopes)
+        decided: _Decision | None = None
+        if not (leased or configured_other):
+            decided, disagree = _by_scope(address, scopes)
+            if disagree:
+                issues.append(SCOPE_CONFLICT)
         assignments.append(
             _unknown(address, mac)
             if decided is None
-            else _known(address, mac, decided[0], decided[1], [decided[2]])
+            else _known(address, mac, decided[0], decided[1], decided[2])
         )
     return tuple(assignments), tuple(dict.fromkeys(issues))
 
 
-def _by_scope(
-    address: str, scopes: list[DhcpScope]
-) -> tuple[AssignmentMode, AssignmentBasis, DhcpScope] | None:
-    """Rule 3 from the first complete scope containing ``address``, if any."""
-    ip = ipaddress.IPv4Address(address)
-    scope = next((item for item in scopes if ip in item.network), None)
-    if scope is None:
-        return None
+_Decision = tuple[AssignmentMode, AssignmentBasis, tuple[DhcpScope, ...]]
+
+
+def _by_scope(address: str, scopes: list[DhcpScope]) -> tuple[_Decision | None, bool]:
+    """Rule 3 from every complete scope containing ``address``: ``(decision, disagree)``.
+
+    The decision exists only when at least one scope contains the address and
+    all of them decide the same ``(mode, basis)``; it carries those scopes.
+    ``disagree`` is true when two of them decide differently. A non-IPv4
+    address is never contained in a scope and never raises.
+    """
+    ip = ipaddress.ip_address(address)
+    if not isinstance(ip, ipaddress.IPv4Address):
+        return None, False
+    covering = tuple(item for item in scopes if ip in item.network)
+    results = {_scope_result(ip, item) for item in covering}
+    if len(results) != 1:
+        return None, len(results - {None}) > 1
+    [result] = results
+    if result is None:
+        return None, False
+    return (result[0], result[1], covering), False
+
+
+def _scope_result(
+    ip: ipaddress.IPv4Address, scope: DhcpScope
+) -> tuple[AssignmentMode, AssignmentBasis] | None:
+    """Rule 3 for one complete scope containing ``ip``; None when it cannot decide."""
     start, end = ipaddress.IPv4Address(scope.start), ipaddress.IPv4Address(scope.end)
     if not start <= ip <= end:
-        return "static", "outside_dhcp_range", scope
+        return "static", "outside_dhcp_range"
     if scope.lease_table == "complete":
-        return "static", "no_lease_or_reservation", scope
+        return "static", "no_lease_or_reservation"
     if scope.lease_table == "none":
-        return "dhcp_dynamic", "inside_dhcp_range", scope
+        return "dhcp_dynamic", "inside_dhcp_range"
     return None
 
 

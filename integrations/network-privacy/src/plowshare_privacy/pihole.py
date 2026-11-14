@@ -5,13 +5,18 @@ returned evidence; network-table associations are bounded and freshness checked.
 No Pi-hole settings, blocking rules or DHCP leases are changed. POST/DELETE are
 used only to open/close this adapter's session, and are never replayed.
 
-DHCP settings (``GET config/dhcp``) are read once per collection session, and
+DHCP settings (``GET config/dhcp``) are read once per full collection, and
 only when ``dhcp_scope``, ``dhcp_reservations`` or ``dhcp_leases`` is enabled.
 With ``dhcp_leases`` and DHCP active, the lease table (``GET dhcp/leases``) is
-read in the same session by full collections and identity checks, never by
-presence or activity reads. Both are decoded here into ``DhcpScope``,
-``Reservation``, ``Lease`` and ``DeviceIdentity`` facts; raw responses never
-leave this module.
+read once too, by full collections and identity checks, never by presence or
+activity reads; ``local_dns_names`` reads ``config/dns/hosts`` the same way.
+A full collection (``read_collection``) makes these reads in its first batch's
+session, for all of its targets, and reuses them for every later batch; each
+batch's session reads only its network table and queries. The collection
+therefore yields exactly one DHCP scope, so one batch's failed read can never
+leave another batch's scope to decide its addresses. Everything is decoded here
+into ``DhcpScope``, ``Reservation``, ``Lease`` and ``DeviceIdentity`` facts; raw
+responses never leave this module.
 """
 
 from __future__ import annotations
@@ -22,9 +27,10 @@ import math
 import os
 import re
 from collections import Counter
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import aiohttp
 
@@ -63,6 +69,33 @@ class DeviceDataSource(Protocol):
     """Return bounded observations for the selected addresses, with explicit coverage gaps."""
 
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData: ...
+
+
+@dataclass(frozen=True)
+class CollectionData:
+    """One full collection's device reads: one ``DeviceData`` per batch, in order.
+
+    ``addressing`` holds the collection's addressing facts, read once for all
+    batches (None when no addressing capability is enabled); every batch's own
+    ``addressing`` is None.
+    """
+
+    batches: tuple[DeviceData, ...]
+    addressing: AddressingSample | None
+
+
+@runtime_checkable
+class CollectionDeviceSource(DeviceDataSource, Protocol):
+    """A device source whose collection-wide facts are read once per collection.
+
+    ``read_collection`` reads every batch in order and returns one
+    ``DeviceData`` per batch plus the collection's single addressing sample. A
+    source without it is read batch by batch through ``read``.
+    """
+
+    async def read_collection(
+        self, batches: tuple[tuple[str, ...], ...], observed_at: str
+    ) -> CollectionData: ...
 
 
 @dataclass(frozen=True)
@@ -183,25 +216,84 @@ def _local_record(entry: object) -> tuple[str, str]:
 
 @dataclass(frozen=True)
 class _LeaseRead:
-    """One ``dhcp/leases`` read: active in-scope leases and their identities.
+    """One ``dhcp/leases`` read for all of a collection's targets.
 
-    ``complete`` holds only when the table was decoded fully below
-    ``MAX_LEASES``. ``identities`` has one record per address leased to a
-    single MAC; an address leased to several MACs is ambiguous instead.
+    ``leases`` are the active in-scope leases. ``identities`` has one record
+    per address leased to a single MAC, without a vendor (each batch adds its
+    own table's, see ``_lease_sample``); an address leased to several MACs is
+    in ``ambiguous`` instead. ``complete`` holds only when the table was decoded
+    fully below ``MAX_LEASES``. Both issue tuples describe the whole table.
     """
 
     leases: tuple[Lease, ...]
-    identities: IdentitySample
+    identities: tuple[DeviceIdentity, ...]
+    ambiguous: frozenset[str]
     complete: bool
+    identity_issues: tuple[str, ...]
     addressing_issues: tuple[str, ...]
 
 
 _UNREAD_LEASES = _LeaseRead(
     (),
-    IdentitySample(issues=(_IDENTITY_LEASES_UNREADABLE,)),
+    (),
+    frozenset(),
     False,
+    (_IDENTITY_LEASES_UNREADABLE,),
     (DHCP_LEASES_UNREADABLE,),
 )
+
+
+def _lease_sample(
+    leased: _LeaseRead, targets: tuple[str, ...], table: tuple[DeviceIdentity, ...]
+) -> IdentitySample:
+    """The lease identities of one batch's ``targets``.
+
+    A lease identity copies the vendor of the batch ``table`` record with the
+    same MAC (Pi-hole leases carry none). The whole table's issues are kept;
+    the multiple-leases issue only when this batch holds such an address.
+    """
+    scope = frozenset(targets)
+    vendors = {device.mac: device.vendor for device in table if device.mac}
+    ambiguous = leased.ambiguous & scope
+    return IdentitySample(
+        tuple(
+            # Every lease identity has a MAC.
+            replace(device, vendor=vendors.get(device.mac or ""))
+            for device in leased.identities
+            if device.address in scope
+        ),
+        ambiguous,
+        (*leased.identity_issues, *((_LEASES_AMBIGUOUS,) if ambiguous else ())),
+    )
+
+
+@dataclass(frozen=True)
+class _SharedReads:
+    """The reads a full collection makes once, for all of its targets.
+
+    ``reached`` is False when the session that should make them failed before
+    they ran; then they hold nothing. ``dhcp`` is None when no DHCP capability
+    needed the settings, ``leased`` when no lease table was read (capability
+    off, or DHCP not active or unreadable). ``names`` are the local DNS names
+    of the collection's targets, ``name_issues`` their read's issues.
+    """
+
+    reached: bool
+    dhcp: PiHoleDhcp | None = None
+    leased: _LeaseRead | None = None
+    names: Mapping[str, str] = field(default_factory=dict)
+    name_issues: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _SessionRead:
+    """One session's results; ``withheld`` are leased addresses it found ambiguous."""
+
+    data: DeviceData
+    ambiguous: frozenset[str]
+    samples: tuple[QuerySample, ...]
+    shared: _SharedReads
+    withheld: frozenset[str]
 
 
 def _lease_expiry(value: object, observed: float) -> tuple[bool, str | None]:
@@ -540,16 +632,94 @@ class PiHoleV6:
         )
 
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
-        """The full collection read; it alone carries addressing facts."""
-        sample, _, _ = await self._read(
-            targets,
-            observed_at,
-            queries=True,
-            addressing=True,
-            leases=True,
-            names=True,
+        """A one-batch full collection read; it alone carries addressing facts."""
+        read = await self.read_collection((targets,), observed_at)
+        return replace(read.batches[0], addressing=read.addressing)
+
+    async def read_collection(
+        self, batches: tuple[tuple[str, ...], ...], observed_at: str
+    ) -> CollectionData:
+        """A full collection: one session per batch, collection-wide facts once.
+
+        Every batch is validated before any request. The first batch's session
+        reads ``config/dhcp``, ``dhcp/leases`` and ``config/dns/hosts`` (as
+        enabled) for every target of the collection; each batch's identities
+        are merged with the leases and names of its own addresses only. The
+        single addressing sample is built after the last batch, so a lease
+        withheld by any batch leaves the collection's lease table incomplete.
+        If that first session fails, no batch has lease or name evidence and
+        the collection's addressing is ``addressing_unavailable``.
+        """
+        batches = tuple(
+            tuple(str(ipaddress.ip_address(address)) for address in batch)
+            for batch in batches
         )
-        return sample
+        everyone = tuple(address for batch in batches for address in batch)
+        if (
+            any(len(batch) > BATCH_SIZE for batch in batches)
+            or len(everyone) > MAX_TARGETS
+            or len(set(everyone)) != len(everyone)
+        ):
+            raise ValueError(
+                f"Pi-hole requires at most {BATCH_SIZE} unique selected addresses"
+                " per batch"
+            )
+        parts: list[DeviceData] = []
+        shared: _SharedReads | None = None
+        withheld: set[str] = set()
+        for batch in batches:
+            result = await self._read(
+                batch,
+                observed_at,
+                queries=True,
+                addressing=True,
+                leases=True,
+                names=True,
+                everyone=everyone,
+                shared=shared,
+            )
+            parts.append(result.data)
+            shared = result.shared
+            withheld |= result.withheld
+        addressing = (
+            self._addressing(shared, frozenset(withheld))
+            if shared is not None and self.capabilities & _DHCP_SETTINGS
+            else None
+        )
+        return CollectionData(tuple(parts), addressing)
+
+    def _addressing(
+        self, shared: _SharedReads, withheld: frozenset[str]
+    ) -> AddressingSample:
+        """The collection's one addressing sample from its shared reads.
+
+        A first session that failed before the settings read is a gap. Leases
+        at ``withheld`` addresses (contradicted in some batch) are dropped, and
+        the lease table is then incomplete, so no in-range static is inferred
+        from a read that held a contradiction.
+        """
+        read = (
+            shared.dhcp
+            if shared.dhcp is not None
+            else PiHoleDhcp(None, None, (), (DHCP_UNAVAILABLE,))
+        )
+        scope = read.scope
+        leases: tuple[Lease, ...] = ()
+        lease_issues: tuple[str, ...] = ()
+        if shared.leased is not None:
+            leases = tuple(
+                item for item in shared.leased.leases if item.address not in withheld
+            )
+            lease_issues = shared.leased.addressing_issues
+            complete = shared.leased.complete and leases == shared.leased.leases
+            if scope is not None and complete:
+                scope = replace(scope, lease_table="complete")
+        return AddressingSample(
+            leases=leases,
+            reservations=read.reservations,
+            scopes=(scope,) if scope is not None else (),
+            issues=(*read.issues, *lease_issues),
+        )
 
     async def _authenticate(self, session: aiohttp.ClientSession) -> str:
         """Open this adapter's API session and return its id (never replayed)."""
@@ -686,18 +856,15 @@ class PiHoleV6:
         sid: str,
         targets: tuple[str, ...],
         observed: float,
-        table: tuple[DeviceIdentity, ...],
     ) -> _LeaseRead:
         """One ``GET dhcp/leases``, decoded into active leases for ``targets``.
 
         Every decoded entry is validated, in scope or not, because a malformed
         entry could be any address: it is skipped and the read is incomplete.
         Only the first ``MAX_LEASES`` entries are decoded. Expired leases are
-        dropped. A lease identity copies the vendor of the ``table`` record
-        with the same MAC (Pi-hole leases carry none). No active lease for a
-        selected address is not a coverage gap, unlike a missing table
-        association: leases describe DHCP clients only, and statically
-        addressed devices legitimately have none.
+        dropped. No active lease for a selected address is not a coverage gap,
+        unlike a missing table association: leases describe DHCP clients only,
+        and statically addressed devices legitimately have none.
         """
         try:
             raw = await self._request(session, "GET", "dhcp/leases", sid=sid)
@@ -712,7 +879,6 @@ class PiHoleV6:
             addressing_issues.append(DHCP_LEASE_LIMIT)
             identity_issues.append(_IDENTITY_LEASE_LIMIT)
         scope = frozenset(targets)
-        vendors = {device.mac: device.vendor for device in table if device.mac}
         leases: list[Lease] = []
         by_address: dict[str, list[DeviceIdentity]] = {}
         for value in values[:MAX_LEASES]:
@@ -733,7 +899,7 @@ class PiHoleV6:
                         "label": None,
                         "hostname": hostname,
                         "mac": mac,
-                        "vendor": vendors.get(mac),
+                        "vendor": None,
                         "source": "pihole-v6",
                         "observed_at": instant(observed),
                         "last_seen": None,
@@ -756,14 +922,12 @@ class PiHoleV6:
                 continue
             # The same MAC listed twice: the first entry, as addressing keeps it.
             devices.append(candidates[0])
-        if ambiguous:
-            identity_issues.append(_LEASES_AMBIGUOUS)
         return _LeaseRead(
             tuple(dict.fromkeys(leases)),
-            IdentitySample(
-                tuple(devices), frozenset(ambiguous), tuple(identity_issues)
-            ),
+            tuple(devices),
+            frozenset(ambiguous),
             not addressing_issues,
+            tuple(identity_issues),
             tuple(addressing_issues),
         )
 
@@ -850,26 +1014,24 @@ class PiHoleV6:
         """
         if len(targets) > BATCH_SIZE:
             raise ValueError("Pi-hole requires at most 32 unique selected addresses")
-        sample, _, _ = await self._read(
+        result = await self._read(
             targets, observed_at, queries=False, leases=True, names=True
         )
-        return sample
+        return result.data
 
     async def presence(
         self, targets: tuple[str, ...], observed_at: str
     ) -> IdentitySample:
         """Read the network table once for the watched scope, without querying DNS logs."""
-        sample, ambiguous, _ = await self._read(targets, observed_at, queries=False)
-        return IdentitySample(sample.devices, ambiguous, sample.issues)
+        result = await self._read(targets, observed_at, queries=False)
+        return IdentitySample(result.data.devices, result.ambiguous, result.data.issues)
 
     async def activity(
         self, targets: tuple[str, ...], since: str, observed_at: str
     ) -> tuple[tuple[QuerySample, ...], tuple[str, ...]]:
         """Read query logs for confirmed clients only, without re-reading the device table."""
-        data, _, samples = await self._read(
-            targets, observed_at, queries=True, since=since
-        )
-        return samples, data.issues
+        result = await self._read(targets, observed_at, queries=True, since=since)
+        return result.samples, result.data.issues
 
     async def _read(
         self,
@@ -881,17 +1043,26 @@ class PiHoleV6:
         addressing: bool = False,
         leases: bool = False,
         names: bool = False,
-    ) -> tuple[DeviceData, frozenset[str], tuple[QuerySample, ...]]:
+        everyone: tuple[str, ...] | None = None,
+        shared: _SharedReads | None = None,
+    ) -> _SessionRead:
         """One session reading the enabled capabilities for ``targets``.
 
-        ``addressing`` returns the DHCP facts (full collections only);
+        ``addressing`` reads the DHCP settings for the collection's addressing
+        facts (full collections only; ``read_collection`` builds the sample);
         ``leases`` reads the lease table as identity evidence when
         ``dhcp_leases`` is enabled and ``config/dhcp`` reports DHCP active.
         ``names`` reads ``config/dns/hosts`` when ``local_dns_names`` is enabled
         and applies it after the merge (``_apply_names``).
-        Lease identities are merged with the network table by
-        ``merge_identities``: a lease outranks a table record with the same MAC,
-        and a different MAC leaves the address ambiguous.
+
+        Without ``shared`` this session makes those reads itself, for
+        ``everyone`` (default ``targets``), and returns them in ``shared``; with
+        it, it reuses them and makes none, so a session is opened only for the
+        network table or queries. If the reads were never reached, a batch that
+        wanted leases or names reports them unreadable. Lease identities are
+        merged with this batch's network table by ``merge_identities``: a lease
+        outranks a table record with the same MAC, and a different MAC leaves
+        the address ambiguous (and its lease ``withheld``).
         """
         limit = BATCH_SIZE if queries and since is None else MAX_TARGETS
         if len(targets) > limit or len(set(targets)) != len(targets):
@@ -916,142 +1087,173 @@ class PiHoleV6:
         dhcp_settings = (
             addressing and bool(self.capabilities & _DHCP_SETTINGS)
         ) or lease_read
+        # Only a session without shared reads makes them (the first batch).
+        reads_shared = shared is None
+        wide = targets if everyone is None else everyone
+        open_shared = reads_shared and (dhcp_settings or name_read)
         dhcp: PiHoleDhcp | None = None
         leased: _LeaseRead | None = None
         local: dict[str, str] = {}
+        name_issues: tuple[str, ...] = ()
+        reached = False
         samples: tuple[QuerySample, ...] = ()
         identity = IdentitySample()
         dns: tuple[DnsObservation, ...] = ()
         window: DnsWindow | None = None
         issues: set[str] = set()
         sid: str | None = None
-        if not table and not queries and not dhcp_settings and not name_read:
-            return DeviceData((), (), None, ()), frozenset(), ()
-        async with self._session() as session:
-            try:
-                sid = await self._authenticate(session)
-                if table:
-                    try:
-                        identity = self._devices(
-                            await self._request(
-                                session,
-                                "GET",
-                                "network/devices",
-                                sid=sid,
-                                parameters={
-                                    "max_devices": "256",
-                                    "max_addresses": "16",
-                                },
-                            ),
-                            targets,
-                            end,
-                        )
-                        issues.update(identity.issues)
-                    except (
-                        PiHoleUnavailable,
-                        ValueError,
-                        aiohttp.ClientError,
-                        TimeoutError,
-                    ):
-                        issues.add(
-                            "identity_unavailable: Pi-hole device records could not be read or validated"
-                        )
-                if dhcp_settings:
-                    dhcp = await self._dhcp(session, sid, targets)
-                if lease_read and dhcp is not None and dhcp.active is True:
-                    leased = await self._leases(
-                        session, sid, targets, end, identity.devices
-                    )
-                if name_read:
-                    local, name_issues = await self._local_names(session, sid, targets)
-                    issues.update(name_issues)
-                if queries:
-                    semaphore = asyncio.Semaphore(4)
-
-                    async def sample(address: str) -> QuerySample:
-                        async with semaphore:
-                            try:
-                                raw = await self._request(
+        if table or queries or open_shared:
+            async with self._session() as session:
+                try:
+                    sid = await self._authenticate(session)
+                    if table:
+                        try:
+                            identity = self._devices(
+                                await self._request(
                                     session,
                                     "GET",
-                                    "queries",
+                                    "network/devices",
                                     sid=sid,
                                     parameters={
-                                        "client_ip": address,
-                                        "from": str(start),
-                                        "until": str(end),
-                                        "length": str(self.plan.query_limit),
-                                        "disk": "false",
+                                        "max_devices": "256",
+                                        "max_addresses": "16",
                                     },
-                                )
-                                return self._queries(
-                                    raw,
-                                    address,
-                                    start,
-                                    end,
-                                    half_open=since is not None,
-                                )
-                            except (
-                                PiHoleUnavailable,
-                                ValueError,
-                                aiohttp.ClientError,
-                                TimeoutError,
-                            ):
-                                return QuerySample(
-                                    (),
-                                    0,
-                                    0,
-                                    (
-                                        "dns_unavailable: Pi-hole queries could not be read or validated for a selected device",
-                                    ),
-                                )
-
-                    samples = tuple(
-                        await asyncio.gather(*(sample(address) for address in targets))
-                    )
-                    for sample_result in samples:
-                        issues.update(sample_result.issues)
-                    if since is None:
-                        dns = tuple(
-                            observation
-                            for sample_result in samples
-                            for observation in sample_result.dns
-                        )
-                        if len(dns) > 256:
-                            dns = dns[:256]
-                            issues.add(
-                                "dns_truncated: normalized Pi-hole destination limit reached"
+                                ),
+                                targets,
+                                end,
                             )
-                        window = DnsWindow(
-                            "pihole-v6",
-                            instant(start),
-                            instant(end),
-                            sum(sample.read for sample in samples),
-                            sum(sample.available for sample in samples),
-                            not any(issue.startswith("dns_") for issue in issues),
+                            issues.update(identity.issues)
+                        except (
+                            PiHoleUnavailable,
+                            ValueError,
+                            aiohttp.ClientError,
+                            TimeoutError,
+                        ):
+                            issues.add(
+                                "identity_unavailable: Pi-hole device records could not be read or validated"
+                            )
+                    if open_shared:
+                        if dhcp_settings:
+                            dhcp = await self._dhcp(session, sid, wide)
+                        if lease_read and dhcp is not None and dhcp.active is True:
+                            leased = await self._leases(session, sid, wide, end)
+                        if name_read:
+                            local, name_issues = await self._local_names(
+                                session, sid, wide
+                            )
+                        reached = True
+                    if queries:
+                        semaphore = asyncio.Semaphore(4)
+
+                        async def sample(address: str) -> QuerySample:
+                            async with semaphore:
+                                try:
+                                    raw = await self._request(
+                                        session,
+                                        "GET",
+                                        "queries",
+                                        sid=sid,
+                                        parameters={
+                                            "client_ip": address,
+                                            "from": str(start),
+                                            "until": str(end),
+                                            "length": str(self.plan.query_limit),
+                                            "disk": "false",
+                                        },
+                                    )
+                                    return self._queries(
+                                        raw,
+                                        address,
+                                        start,
+                                        end,
+                                        half_open=since is not None,
+                                    )
+                                except (
+                                    PiHoleUnavailable,
+                                    ValueError,
+                                    aiohttp.ClientError,
+                                    TimeoutError,
+                                ):
+                                    return QuerySample(
+                                        (),
+                                        0,
+                                        0,
+                                        (
+                                            "dns_unavailable: Pi-hole queries could not be read or validated for a selected device",
+                                        ),
+                                    )
+
+                        samples = tuple(
+                            await asyncio.gather(
+                                *(sample(address) for address in targets)
+                            )
                         )
-            except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
-                # Unchanged for the default capabilities, including activity
-                # reads, which have always reported both gaps.
-                if "network_table" in self.capabilities or lease_read or name_read:
-                    issues.add(
-                        "identity_unavailable: Pi-hole authentication or connection failed"
-                    )
-                if queries:
-                    issues.add(
-                        "dns_unavailable: Pi-hole authentication or connection failed"
-                    )
-            finally:
-                if sid is not None and not await self._close(session, sid):
-                    issues.add(_CLEANUP_FAILED)
+                        for sample_result in samples:
+                            issues.update(sample_result.issues)
+                        if since is None:
+                            dns = tuple(
+                                observation
+                                for sample_result in samples
+                                for observation in sample_result.dns
+                            )
+                            if len(dns) > 256:
+                                dns = dns[:256]
+                                issues.add(
+                                    "dns_truncated: normalized Pi-hole destination limit reached"
+                                )
+                            window = DnsWindow(
+                                "pihole-v6",
+                                instant(start),
+                                instant(end),
+                                sum(sample.read for sample in samples),
+                                sum(sample.available for sample in samples),
+                                not any(issue.startswith("dns_") for issue in issues),
+                            )
+                except (
+                    PiHoleUnavailable,
+                    ValueError,
+                    aiohttp.ClientError,
+                    TimeoutError,
+                ):
+                    # Unchanged for the default capabilities, including activity
+                    # reads, which have always reported both gaps.
+                    if "network_table" in self.capabilities or lease_read or name_read:
+                        issues.add(
+                            "identity_unavailable: Pi-hole authentication or connection failed"
+                        )
+                    if queries:
+                        issues.add(
+                            "dns_unavailable: Pi-hole authentication or connection failed"
+                        )
+                finally:
+                    if sid is not None and not await self._close(session, sid):
+                        issues.add(_CLEANUP_FAILED)
+        if reads_shared:
+            shared = (
+                _SharedReads(True, dhcp, leased, local, name_issues)
+                if reached
+                else _SharedReads(False)
+            )
+        else:
+            assert shared is not None
+            if not shared.reached:
+                # The first session failed: this batch has no leases or names.
+                if lease_read:
+                    issues.add(_IDENTITY_LEASES_UNREADABLE)
+                if name_read:
+                    issues.add(_LOCAL_DNS_UNREADABLE)
         devices = identity.devices
         ambiguous = identity.ambiguous_addresses
-        if lease_read and dhcp is not None and dhcp.active is None:
+        withheld: frozenset[str] = frozenset()
+        if name_read:
+            issues.update(shared.name_issues)
+        if lease_read and shared.dhcp is not None and shared.dhcp.active is None:
             # DHCP settings unreadable: whether leases exist is unknown.
             issues.add(_IDENTITY_LEASES_UNREADABLE)
-        if leased is not None:
-            issues.update(leased.identities.issues)
-            merge = merge_identities((identity, leased.identities), frozenset(targets))
+        if lease_read and shared.leased is not None:
+            batch_leases = _lease_sample(shared.leased, targets, identity.devices)
+            issues.update(batch_leases.issues)
+            merge = merge_identities((identity, batch_leases), frozenset(targets))
             # Address order, as the network table alone returns its devices.
             devices = tuple(sorted(merge.devices, key=lambda device: device.address))
             ambiguous = ambiguous | merge.ambiguous | merge.conflicts
@@ -1062,33 +1264,23 @@ class PiHoleV6:
             # DeviceData carries no ambiguity across services, so another
             # service may still confirm an address Pi-hole found contradictory.
             # Its leases there are withheld so they can never decide
-            # dhcp_dynamic, and the table is incomplete so no in-range static
-            # is inferred from a read that held a contradiction.
-            kept = tuple(
-                item for item in leased.leases if item.address not in ambiguous
+            # dhcp_dynamic (``_addressing`` then marks the table incomplete).
+            withheld = frozenset(
+                item.address
+                for item in shared.leased.leases
+                if item.address in ambiguous
             )
-            if kept != leased.leases:
-                leased = replace(leased, leases=kept, complete=False)
-        if local:
-            devices = self._apply_names(devices, local, ambiguous, end)
-        addressing_sample: AddressingSample | None = None
-        if addressing and dhcp_settings:
-            # A session that failed before the settings read is a gap too.
-            read = dhcp or PiHoleDhcp(None, None, (), (DHCP_UNAVAILABLE,))
-            scope = read.scope
-            if scope is not None and leased is not None and leased.complete:
-                scope = replace(scope, lease_table="complete")
-            addressing_sample = AddressingSample(
-                leases=leased.leases if leased is not None else (),
-                reservations=read.reservations,
-                scopes=(scope,) if scope is not None else (),
-                issues=(
-                    *read.issues,
-                    *(leased.addressing_issues if leased is not None else ()),
-                ),
-            )
-        return (
-            DeviceData(devices, dns, window, tuple(sorted(issues)), addressing_sample),
+        names_here = {
+            address: name
+            for address, name in shared.names.items()
+            if address in frozenset(targets)
+        }
+        if names_here:
+            devices = self._apply_names(devices, names_here, ambiguous, end)
+        return _SessionRead(
+            DeviceData(devices, dns, window, tuple(sorted(issues))),
             ambiguous,
             samples,
+            shared,
+            withheld,
         )
