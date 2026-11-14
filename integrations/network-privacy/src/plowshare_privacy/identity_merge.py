@@ -13,8 +13,11 @@ emit their own issue strings from the returned sets):
   device, regardless of rank. A record of any kind without a MAC never
   conflicts; it can only win when no MAC-bearing record outranks it.
 * Precedence: otherwise the record whose evidence kind ranks highest in
-  `PRECEDENCE` wins whole; its `DeviceIdentity` is returned unchanged, with no
-  field coalescing from lower-ranked records. Ties keep the earliest record
+  `PRECEDENCE` wins; its `DeviceIdentity` is returned with one exception: a
+  winner with no `vendor` takes the vendor of the best-ranked other record for
+  the same MAC that has one (a controller reports no vendor, while Pi-hole's
+  network table does). Nothing else is coalesced, and a record without a MAC
+  never lends its vendor. Ties keep the earliest record
   (sample order, then record order). `local_dns` is name-only, so it never wins
   against a MAC-bearing record. `configured` is not in `PRECEDENCE`; callers
   never pass it, but if one is passed it ranks below `local_dns`.
@@ -24,7 +27,7 @@ emit their own issue strings from the returned sets):
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .contracts import DeviceIdentity, EvidenceKind, evidence_kind
 from .identity_source import IdentitySample
@@ -81,5 +84,15 @@ def merge_identities(
         if len(macs) > 1:
             conflicts.add(address)
             continue
-        devices.append(min(records, key=rank))
+        winner = min(records, key=rank)
+        if winner.vendor is None and winner.mac:
+            # Same MAC, so the vendor describes this interface; no conflict here.
+            lender = min(
+                (r for r in records if r.vendor and r.mac),
+                key=rank,
+                default=None,
+            )
+            if lender is not None:
+                winner = replace(winner, vendor=lender.vendor)
+        devices.append(winner)
     return IdentityMerge(tuple(devices), frozenset(conflicts), frozenset(ambiguous))
