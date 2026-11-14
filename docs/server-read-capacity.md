@@ -35,8 +35,12 @@ load before admission, so a slot bounds distinct concurrent loads, not requester
 miss waits in arrival order for a slot, including inside a transaction: the load runs on that
 requester's thread and its own connection, so waiting cannot starve a slot holder.
 `plowshare.read-scheduling.fetch-wait-millis` (5,000 ms) only turns a stuck load into a refusal.
-Fetches do not use the per-account `authority` or `reports` budgets. Uncached PROC and usage-audit
-reads, and background usage refreshes, keep their REPORT and REPORT_REFRESH seats. Previously a miss was refused whenever the
+Log deny sets and the authority snapshot use no per-account seat: a deny set has one key per
+account, so an account's misses always share one fill, and the snapshot is one key. PROC queue and
+usage report keys include the query, so one account could start many distinct fills; those fills
+first hold the account's `reports` seat, which queues rather than refuses, and only then a cache
+slot, so no tenant can take every slot. Uncached PROC and usage-audit reads and background usage
+refreshes keep their REPORT and REPORT_REFRESH seats. At most 256 fetches wait at once. Previously a miss was refused whenever the
 account's single AUTHORITY seat was busy, which ended agent jobs at their per-step log check.
 
 Socket session checks have a separate bounded intake before any session SQL, shared by event and

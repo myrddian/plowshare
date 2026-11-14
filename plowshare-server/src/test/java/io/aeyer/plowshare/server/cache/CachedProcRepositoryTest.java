@@ -92,7 +92,9 @@ class CachedProcRepositoryTest {
           admission.active(ReadAdmission.Work.FETCH),
           "The fill holds one of the cache's slots; followers hold none");
       assertEquals(
-          0, admission.active(ReadAdmission.Work.REPORT), "A cache fill uses no account seat");
+          1,
+          admission.active(ReadAdmission.Work.REPORT),
+          "The fill holds its account's report seat, so one tenant cannot take every slot");
       release.complete(null);
       assertSame(snapshot, first.get(5, TimeUnit.SECONDS));
       int accepted = 0;

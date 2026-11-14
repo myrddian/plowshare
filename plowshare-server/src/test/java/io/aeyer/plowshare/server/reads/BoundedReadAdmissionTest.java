@@ -359,6 +359,34 @@ class BoundedReadAdmissionTest {
     }
   }
 
+  @Test
+  void theFetchQueueIsCappedAndExcessFetchesNeverEnterSql() throws Exception {
+    var admission = new BoundedReadAdmission(new ReadCapacityProperties(4, 2, 2, 1, 8, 2));
+    var first = admission.admit("cache", ReadAdmission.Work.FETCH);
+    var second = admission.admit("cache", ReadAdmission.Work.FETCH);
+    try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var queued = new ArrayList<java.util.concurrent.Future<String>>();
+      for (int i = 0; i < 256; i++)
+        queued.add(
+            callers.submit(() -> admission.read("cache", ReadAdmission.Work.FETCH, () -> "ok")));
+      awaitFetching(admission, 256);
+      assertThrows(
+          ReadUnavailableException.class,
+          () ->
+              admission.read(
+                  "cache",
+                  ReadAdmission.Work.FETCH,
+                  () -> {
+                    fail("A fetch past the queue cap must not enter SQL");
+                    return "unreachable";
+                  }));
+      first.close();
+      second.close();
+      for (var future : queued) assertEquals("ok", future.get(10, TimeUnit.SECONDS));
+    }
+    assertEquals(0, admission.waitingFetches());
+  }
+
   private static void awaitFetching(BoundedReadAdmission admission, int count) {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
     while (admission.waitingFetches() != count && System.nanoTime() < deadline) Thread.yield();
