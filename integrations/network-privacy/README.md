@@ -186,10 +186,13 @@ UniFi API key can read those endpoints before enabling them; a refused read is
 an addressing gap.
 
 The dashboard shows what the latest collection recorded and nothing older. The
-device list and pane label each address's assignment (for example `Reserved
-(DHCP reservation)` or `Static inside the DHCP range (no lease or
-reservation)`), with the lease end when there is one and the latest mode change
-(`Changed from Dynamic to Static …`). A change counts only under the
+device pane labels each address's assignment (for example `Reserved (DHCP
+reservation)` or `Static inside the DHCP range (no lease or reservation)`),
+with when it was recorded, the lease end the collection recorded when there is
+one and the latest mode change (`Changed from Dynamic to Static …`). The device
+list can be searched by mode (`dynamic`, `reserved`, `static`) and tags a
+static address inside the DHCP range. An assignment recorded for another MAC
+than the device now at the address is not shown. A change counts only under the
 `collection.changes` rule: the same scope, both modes known, the same MAC and no
 `addressing_` issue in either collection. The overview counts devices by mode,
 and the attention band lists a static address inside the DHCP range and a
@@ -204,7 +207,9 @@ The collector now retains dossiers as version 4 documents, which add
 `assess_network_device.js` accepts version 4, and only then upgrade the
 collector that writes it; an older script refuses a version 4 dossier and the
 assessment stops before any model call. Retained version 1 to 3 dossiers are
-still read unchanged. Follow
+still read unchanged. Rolling the collector back after it has written version 4
+dossiers stops retention for those devices until a newer collector rewrites
+them. Follow
 [upgrade the Application and collector](SETUP.md#upgrade-the-application-and-collector).
 
 ## Guided setup

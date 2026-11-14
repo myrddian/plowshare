@@ -42,7 +42,9 @@ All paths are relative to `integrations/network-privacy/` unless they start with
   | `unknown`, or anything unrecognised | `Unknown` |
 
   - Short mode names: `Dynamic`, `Reserved`, `Static`, `Unknown`.
-  - Lease line: `Lease ends <formatWhen(expires_at)>`.
+  - Lease line: `Lease recorded to end <formatWhen(expires_at)>`.
+  - Recorded line: `Recorded <formatWhen(observed_at)>`.
+  - The device pane's `Assignment` fact carries the label; the `Address assignment` readout holds only the source, lease, recorded and change lines (final-review ruling).
   - Change line: `Changed from <Short previous> to <Short current> <formatWhen(changed_at)>`.
 - Tests:
   - Python: from `integrations/network-privacy`, `PYTHONPYCACHEPREFIX=build/python-cache ../../build/privacy-python-env/bin/python -m unittest discover -s tests -p '<file>'`.
