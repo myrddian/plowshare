@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.protocol.ToolScopes;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -286,6 +287,79 @@ class ApplicationToolRegistryTest {
     assertNotEquals(changed, withdrawn);
     head.set(new RelayLogRepository.Head(head.get().position(), Optional.empty()));
     assertNotEquals(withdrawn, registry.revision(1L));
+  }
+
+  private static final String THREE_TOOLS =
+      """
+      {"name":"network_a","description":"A","parameters":[],"timeoutSeconds":30},
+      {"name":"network_b","description":"B","parameters":[],"timeoutSeconds":30},
+      {"name":"network_c","description":"C","parameters":[],"timeoutSeconds":30}
+      """;
+
+  private static ToolScopes.Connection hosted(String scope) {
+    return new ToolScopes.Connection(
+        "fixture",
+        scope,
+        "scanner",
+        "scanner",
+        "provider",
+        "network_",
+        List.of("*"),
+        List.of("coordinator"),
+        30);
+  }
+
+  private ApplicationToolRegistry registryOver(ToolScopeConnections hostedScopes) {
+    return new ApplicationToolRegistry(
+        id -> id == 1L ? Optional.of(root) : Optional.empty(),
+        projects,
+        members,
+        names,
+        logs,
+        new RelayToolProperties(),
+        invocations,
+        new ToolGrants() {
+          public boolean permits(Long p, String a, String n, String s, String t) {
+            return true;
+          }
+
+          public boolean acceptsDynamic(Long p, String a, String n, String s) {
+            return true;
+          }
+        },
+        () -> Set.of("memory_read"),
+        clock::get,
+        hostedScopes);
+  }
+
+  @Test
+  void hostedListIsReadOnceForAllCatalogueTools() {
+    catalogue(THREE_TOOLS);
+    var hostedScopes = mock(ToolScopeConnections.class);
+    when(hostedScopes.connections("fixture", null)).thenReturn(List.of(hosted("scans")));
+
+    registryOver(hostedScopes).revision(1L);
+
+    // One read serves every tool of every provider and the revision stamp.
+    verify(hostedScopes, times(1)).connections("fixture", null);
+  }
+
+  @Test
+  void firstConnectionPerProviderWinsAfterHoist() {
+    catalogue(THREE_TOOLS);
+    var first = hosted("first");
+    var second = hosted("second");
+    var hostedScopes = mock(ToolScopeConnections.class);
+    when(hostedScopes.connections("fixture", null)).thenReturn(List.of(first, second));
+    when(hostedScopes.permits(any(), anyString(), any(), any(), anyString())).thenReturn(false);
+    when(hostedScopes.permits(eq(first), anyString(), any(), any(), anyString())).thenReturn(true);
+
+    var tools =
+        registryOver(hostedScopes)
+            .tools(Home.of("fixture"), "coordinator", null, () -> false, "provider");
+
+    // Only the first connection is permitted, so all three tools prove each entry carries it.
+    assertEquals(3, tools.size());
   }
 
   @Test

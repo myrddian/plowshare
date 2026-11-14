@@ -4,6 +4,7 @@ import static io.aeyer.plowshare.server.agents.ToolFailure.Code.*;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.protocol.ToolScopes;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.applications.ApplicationServerSettings;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
@@ -126,13 +127,18 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
   }
 
   private record Entry(
-      RelayToolDefinition binding,
-      boolean available,
-      Optional<io.aeyer.plowshare.protocol.ToolScopes.Connection> scope) {}
+      RelayToolDefinition binding, boolean available, Optional<ToolScopes.Connection> scope) {}
 
-  private record Snapshot(Map<String, Entry> entries, String revision) {
+  /**
+   * One consistent view of a project's tools. {@code hosted} is the hosted-connection list read
+   * once while the snapshot was built; {@link #revision(Long)} stamps with that same list rather
+   * than reading authority a second time.
+   */
+  private record Snapshot(
+      Map<String, Entry> entries, String revision, List<ToolScopes.Connection> hosted) {
     Snapshot {
       entries = Map.copyOf(entries);
+      hosted = List.copyOf(hosted);
     }
   }
 
@@ -201,6 +207,12 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
                         Optional.empty())));
     StringBuilder revision = new StringBuilder(settings.toString());
     Long id = projects.id(project);
+    // The hosted list depends only on the project and each read does SQL plus per-binding checks,
+    // so read it once and index the first connection per provider (the pre-existing findFirst
+    // choice) instead of re-reading it for every tool of every provider.
+    var hosted = connections.connections(project, null);
+    Map<String, ToolScopes.Connection> firstByProvider = new LinkedHashMap<>();
+    hosted.forEach(c -> firstByProvider.putIfAbsent(c.provider(), c));
     for (var provider : settings.providers()) {
       var latest = logs.latest(new Relay.TopicKey(id, provider.topic()));
       if (latest.position() == 0) continue;
@@ -236,14 +248,12 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
                       new Entry(
                           t.bind(project, provider),
                           available,
-                          connections.connections(project, null).stream()
-                              .filter(c -> c.provider().equals(provider.provider()))
-                              .findFirst())));
+                          Optional.ofNullable(firstByProvider.get(provider.provider())))));
       // The validated, parsed declarations: records all the way down, so equal content gives an
       // equal string regardless of the publication's whitespace or event identity.
       revision.append(catalogue);
     }
-    return new Snapshot(entries, RelayPort.hash(revision.toString()));
+    return new Snapshot(entries, RelayPort.hash(revision.toString()), hosted);
   }
 
   private void validateCatalogue(
@@ -281,10 +291,11 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
   @Override
   public String revision(Long id) {
     String project = id == null ? null : project(id);
-    return project == null
-        ? ""
-        : RelayPort.hash(
-            snapshot(project).revision() + connections.connections(project, null).toString());
+    return project == null ? "" : stamp(snapshot(project));
+  }
+
+  private static String stamp(Snapshot snapshot) {
+    return RelayPort.hash(snapshot.revision() + snapshot.hosted().toString());
   }
 
   /** Without an authenticated owner there is no authority to reveal provider schemas. */
