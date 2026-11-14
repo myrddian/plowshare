@@ -74,10 +74,16 @@ class IdentityLifecycleTest {
     var passwords = mock(PasswordHasher.class);
     var admin =
         new ServerAdministration(
-            administration, UnitOfWork.NONE, accounts, passwords, tokens, events);
+            administration,
+            UnitOfWork.NONE,
+            accounts,
+            passwords,
+            tokens,
+            events,
+            mock(ProjectCreatorGrants.class));
     assertThrows(CallerFault.class, () -> admin.create("admin", handle, true));
     assertThrows(CallerFault.class, () -> admin.reset("admin", handle));
-    assertThrows(CallerFault.class, () -> admin.update("admin", handle, true, true));
+    assertThrows(CallerFault.class, () -> admin.update("admin", handle, true, true, null));
     verify(administration).lockAdministrators();
     verifyNoMoreInteractions(administration);
     verifyNoInteractions(passwords);

@@ -71,7 +71,8 @@ public class AdminFrames implements FrameArea {
                         a.requireHandle(FrameTypes.ADMIN_ACCOUNT_UPDATE),
                         text(p, "handle"),
                         flag(p, "enabled"),
-                        flag(p, "serverAdmin"))),
+                        flag(p, "serverAdmin"),
+                        flag(p, "projectCreator"))),
         FrameTypes.ADMIN_ACCOUNT_RESET,
             (p, a) ->
                 Outcome.ok(

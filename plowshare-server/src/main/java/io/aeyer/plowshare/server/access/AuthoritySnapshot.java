@@ -552,6 +552,31 @@ public final class AuthoritySnapshot {
     return account != null && account.enabled() && account.serverAdmin() && !account.bootstrap();
   }
 
+  /**
+   * {@code authority_may_create_projects(handle)} (V262): {@code account_active(handle)} and a live
+   * grant (so unrevoked, unexpired and SYSTEM-rooted) of the {@code PROJECT_CREATOR} role at the
+   * PROJECT_CREATION scope, to the account with that legacy handle and no agent, where that account
+   * is a non-bootstrap USER. Server administration is not consulted.
+   */
+  public boolean projectCreator(String handle) {
+    if (handle == null || !accountActive(handle)) return false;
+    var account = accounts.get(handle);
+    if (account.bootstrap() || !account.kind().equals("USER")) return false;
+    UUID subject = authorityAccountsByHandle.get(handle);
+    if (subject == null) return false;
+    UUID creation = BuiltInIdentities.PROJECT_CREATION.value();
+    for (UUID id : live.keySet()) {
+      var grant = grants.get(id);
+      var binding = grant.binding();
+      if (!binding.recipient().account().value().equals(subject)
+          || binding.recipient().agent().isPresent()
+          || !binding.scope().value().equals(creation)) continue;
+      var role = roles.get(grant.role());
+      if (role != null && role.name().equals("PROJECT_CREATOR")) return true;
+    }
+    return false;
+  }
+
   /** The raw {@code project_members} role of an enabled account, if any. */
   public Optional<String> memberRole(String project, String handle) {
     var target = projectsByName.get(project);

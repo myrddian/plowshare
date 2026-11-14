@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.auth;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.server.access.JdbcProjectCreatorGrants;
+import io.aeyer.plowshare.server.access.ProjectCreatorGrants;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.ws.*;
 import java.time.Clock;
@@ -80,6 +82,7 @@ class ServerAdministrationTest {
         StoredSessionAuthority.class,
         io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class);
     context.register(JdbcAccountAdministrationRepository.class);
+    context.registerBean(ProjectCreatorGrants.class, () -> new JdbcProjectCreatorGrants(jdbc));
     context.registerBean(
         io.aeyer.plowshare.server.archive.UnitOfWork.class,
         () ->
@@ -125,9 +128,9 @@ class ServerAdministrationTest {
   @Test
   void new_administrator_must_complete_password_setup_before_replacing_the_current_one() {
     service.create("owner", "successor", true);
-    assertThrows(CallerFault.class, () -> service.update("owner", "owner", false, null));
+    assertThrows(CallerFault.class, () -> service.update("owner", "owner", false, null, null));
     accounts.changePassword("successor", passwords.hash("successor-test-password".toCharArray()));
-    service.update("owner", "owner", false, null);
+    service.update("owner", "owner", false, null, null);
     assertFalse(accounts.isEnabled("owner"));
     assertTrue(accounts.isServerAdmin("successor"));
   }
@@ -175,15 +178,15 @@ class ServerAdministrationTest {
     assertThrows(CallerFault.class, () -> service.list("worker"));
     assertThrows(CallerFault.class, () -> service.history("worker", "", 0, 50));
     assertThrows(CallerFault.class, () -> service.sessions("worker", "owner"));
-    assertThrows(CallerFault.class, () -> service.update("worker", "worker", null, true));
+    assertThrows(CallerFault.class, () -> service.update("worker", "worker", null, true, null));
     assertThrows(CallerFault.class, () -> service.reset("worker", "owner"));
     assertThrows(CallerFault.class, () -> service.revokeSessions("worker", "owner"));
   }
 
   @Test
   void last_enabled_administrator_survives_concurrent_role_changes() throws Exception {
-    assertThrows(CallerFault.class, () -> service.update("owner", "owner", false, null));
-    assertThrows(CallerFault.class, () -> service.update("owner", "owner", null, false));
+    assertThrows(CallerFault.class, () -> service.update("owner", "owner", false, null, null));
+    assertThrows(CallerFault.class, () -> service.update("owner", "owner", null, false, null));
     service.create("owner", "other", true);
     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
       var start = new CountDownLatch(1);
@@ -195,7 +198,7 @@ class ServerAdministrationTest {
                           () -> {
                             start.await();
                             try {
-                              service.update(handle, handle, null, false);
+                              service.update(handle, handle, null, false, null);
                               return true;
                             } catch (CallerFault refused) {
                               return false;
@@ -262,7 +265,7 @@ class ServerAdministrationTest {
       throws Exception {
     var created = service.create("owner", "worker", false);
     var pair = tokens.issuePair("worker", false);
-    service.update("owner", "worker", false, null);
+    service.update("owner", "worker", false, null, null);
     assertFalse(accounts.byHandle("worker").orElseThrow().enabled());
     assertFalse(tokens.validAccess(pair.access()));
     assertTrue(tokens.refresh(pair.refresh()).isEmpty());
@@ -291,7 +294,7 @@ class ServerAdministrationTest {
             .andReturn()
             .getResponse()
             .getStatus());
-    service.update("owner", "worker", true, null);
+    service.update("owner", "worker", true, null, null);
     assertFalse(tokens.validAccess(pair.access()));
     assertTrue(tokens.validAccess(tokens.issuePair("worker", true).access()));
   }
@@ -301,11 +304,11 @@ class ServerAdministrationTest {
     service.create("owner", "worker", false);
     tokens.issuePair("worker", true);
     assertEquals(1, service.sessions("owner", "worker").size());
-    service.update("owner", "worker", null, true);
+    service.update("owner", "worker", null, true, null);
     assertTrue(service.sessions("owner", "worker").isEmpty());
     var page = service.history("owner", "worker", 0, 1);
     assertTrue(page.before() > 0);
-    service.update("owner", "worker", null, false);
+    service.update("owner", "worker", null, false, null);
     var older = service.history("owner", "worker", page.before(), 100);
     assertEquals(1, older.entries().size());
     assertEquals("account.create", older.entries().getFirst().action());
@@ -324,13 +327,33 @@ class ServerAdministrationTest {
     try {
       assertThrows(
           org.springframework.dao.DataIntegrityViolationException.class,
-          () -> service.update("owner", "worker", false, null));
+          () -> service.update("owner", "worker", false, null, null));
       assertTrue(accounts.isEnabled("worker"));
       assertTrue(tokens.validAccess(pair.access()));
       assertEquals(1, service.history("owner", "", 0, 50).entries().size());
     } finally {
       jdbc.execute("ALTER TABLE admin_audit DROP CONSTRAINT test_reject_update");
     }
+  }
+
+  @Test
+  void project_creator_changes_join_the_account_transaction() {
+    service.create("owner", "worker", false);
+    var granted = service.update("owner", "worker", null, null, true);
+    assertTrue(granted.projectCreator());
+    assertTrue(
+        service.list("owner").stream()
+            .filter(account -> account.handle().equals("worker"))
+            .allMatch(ServerAdministration.Account::projectCreator));
+    assertEquals(
+        "account.project-creator.grant",
+        service.history("owner", "worker", 0, 50).entries().getFirst().action());
+    assertFalse(service.update("owner", "worker", null, null, false).projectCreator());
+    // Disabling and granting in one call: the grant is refused for the now inactive recipient, and
+    // the account change rolls back with it.
+    assertThrows(CallerFault.class, () -> service.update("owner", "worker", false, null, true));
+    assertTrue(accounts.isEnabled("worker"));
+    assertFalse(service.list("owner").getLast().projectCreator());
   }
 
   @Test

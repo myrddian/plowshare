@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.access;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.archive.CachedProjectMembers;
@@ -167,6 +168,12 @@ class AuthoritySnapshotDifferentialDatabaseTest {
           members.isServerAdmin(handle),
           state + ": isServerAdmin " + handle);
       assertEquals(
+          Boolean.TRUE.equals(
+              jdbc.queryForObject(
+                  "SELECT authority_may_create_projects(?)", Boolean.class, handle)),
+          snapshot.projectCreator(handle),
+          state + ": authority_may_create_projects " + handle);
+      assertEquals(
           stored.authorityAccount(handle),
           members.authorityAccount(handle),
           state + ": authorityAccount " + handle);
@@ -279,6 +286,61 @@ class AuthoritySnapshotDifferentialDatabaseTest {
         "DELETE FROM project_members WHERE handle='alice' AND project_id=(SELECT id FROM projects WHERE name='two')");
     parity("issuer removed");
     assertTrue(snapshot().authorityProjectRole("two", "carol").isEmpty());
+  }
+
+  @Test
+  void projectCreatorMatchesThroughIssuerDemotionAccountStateRevocationAndExpiry()
+      throws InterruptedException {
+    var creators = new JdbcProjectCreatorGrants(jdbc);
+    creators.grant("admin", "alice");
+    creators.grant("admin", "carol");
+    parity("creators granted");
+    assertTrue(snapshot().projectCreator("alice"));
+    var mutations = new LinkedHashMap<String, String>();
+    mutations.put("alice disabled", "UPDATE admins SET enabled=false WHERE handle='alice'");
+    mutations.put("alice enabled", "UPDATE admins SET enabled=true WHERE handle='alice'");
+    mutations.put(
+        "alice bootstrap",
+        "UPDATE admins SET bootstrap=true,must_change_password=true WHERE handle='alice'");
+    mutations.put(
+        "alice ordinary",
+        "UPDATE admins SET bootstrap=false,must_change_password=false WHERE handle='alice'");
+    mutations.put("issuer demoted", "UPDATE admins SET server_admin=false WHERE handle='admin'");
+    mutations.put("issuer disabled", "UPDATE admins SET enabled=false WHERE handle='admin'");
+    mutations.put(
+        "issuer restored", "UPDATE admins SET enabled=true,server_admin=true WHERE handle='admin'");
+    for (var mutation : mutations.entrySet()) {
+      jdbc.update(mutation.getValue());
+      parity(mutation.getKey());
+    }
+    assertTrue(snapshot().projectCreator("alice"));
+    creators.revoke("admin", "carol");
+    parity("carol revoked");
+    assertFalse(snapshot().projectCreator("carol"));
+    // An expiring creator grant, written directly: the service issues open-ended grants.
+    jdbc.update(
+        "INSERT INTO authority_grants(subject_account,scope_id,role_id,requested_role,issuer_account,"
+            + "issuing_grant,exercised_grant,provenance,expires_at)"
+            + " SELECT bob.id,?,?,'PROJECT_CREATOR',admin.id,root.id,control.id,'ROLE',?"
+            + " FROM authority_accounts bob, authority_accounts admin, authority_grants root, authority_grants control"
+            + " WHERE bob.legacy_handle='bob' AND admin.legacy_handle='admin' AND root.provenance='ROOT_POLICY'"
+            + " AND control.provenance='ADMIN_CONTROL' AND control.revoked_at IS NULL"
+            + " AND control.subject_account=admin.id AND control.scope_id=?",
+        BuiltInIdentities.PROJECT_CREATION.value(),
+        BuiltInIdentities.PROJECT_CREATOR.value(),
+        Timestamp.from(Instant.now().plusMillis(300)),
+        BuiltInIdentities.ADMINISTRATION.value());
+    parity("bob expiring creator");
+    assertTrue(snapshot().projectCreator("bob"));
+    Instant expires =
+        jdbc.queryForObject(
+                "SELECT max(expires_at) FROM authority_grants WHERE scope_id=?",
+                Timestamp.class,
+                BuiltInIdentities.PROJECT_CREATION.value())
+            .toInstant();
+    while (Instant.now().isBefore(expires.plusMillis(50))) Thread.sleep(10);
+    parity("bob creator expired");
+    assertFalse(snapshot().projectCreator("bob"));
   }
 
   /**
