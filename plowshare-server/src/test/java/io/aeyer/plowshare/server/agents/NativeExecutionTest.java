@@ -29,6 +29,19 @@ class NativeExecutionTest {
   }
 
   @Test
+  void project_caps_keep_a_native_conductor_at_zero_model_calls() {
+    // A project budget cap once turned a native conductor into a model-call definition with no
+    // model: the constructor threw "model", Orchestrations logged the caps as unreadable and every
+    // orchestration in that project ran without its project's caps.
+    var nativeDefinition = parse(SOURCE).conductor();
+    var capped = nativeDefinition.withCaps(25, 200);
+    assertTrue(capped.nativeOnly());
+    assertEquals(0, capped.maxModelCalls());
+    assertEquals(25, capped.maxTurns());
+    assertSame(nativeDefinition, nativeDefinition.withCaps(null, 200));
+  }
+
+  @Test
   void native_script_needs_no_model_and_retains_zero_calls() {
     var nativeDefinition = parse(SOURCE).conductor();
     assertTrue(nativeDefinition.nativeOnly());
