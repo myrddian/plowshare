@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.protocol.HostedToolScopes;
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
@@ -13,9 +14,13 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -326,5 +331,172 @@ class ProjectRelayToolInvocationsTest {
         () ->
             new io.aeyer.plowshare.server.applications.ApplicationServerSettings.Catalogue(
                 "plowshare-tool-catalog/1", List.of(declaration)));
+  }
+
+  /** Scripted wake-ups: each await consumes one entry, advances the clock and never blocks. */
+  private static final class ScriptedWakeups implements RelayToolWakeups {
+    final ArrayDeque<Boolean> script = new ArrayDeque<>();
+    final AtomicInteger awaits = new AtomicInteger();
+    final AtomicInteger opened = new AtomicInteger();
+    final AtomicInteger closed = new AtomicInteger();
+    final AtomicReference<Instant> clock;
+    final Duration advance;
+
+    ScriptedWakeups(AtomicReference<Instant> clock, Duration advance, Boolean... wakes) {
+      this.clock = clock;
+      this.advance = advance;
+      script.addAll(List.of(wakes));
+    }
+
+    @Override
+    public Wakeup open() {
+      opened.incrementAndGet();
+      return new Wakeup() {
+        @Override
+        public boolean await(Duration maximum) {
+          assertFalse(maximum.isNegative() || maximum.isZero());
+          assertTrue(maximum.compareTo(Duration.ofSeconds(1)) <= 0, "ceiling is one second");
+          awaits.incrementAndGet();
+          clock.updateAndGet(value -> value.plus(advance));
+          return script.isEmpty() ? false : script.poll();
+        }
+
+        @Override
+        public void close() {
+          closed.incrementAndGet();
+        }
+      };
+    }
+  }
+
+  private ProjectRelayToolInvocations waiting(
+      AtomicReference<Instant> clock,
+      RelayToolWakeups wakeups,
+      Duration staleness,
+      HostedInvocationAuthority hosting) {
+    return new ProjectRelayToolInvocations(
+        repository, relay, members, projects, clock::get, 8, hosting, wakeups, staleness);
+  }
+
+  private RelayToolDefinition longBinding(String provider) {
+    return new RelayToolDefinition(
+        "fixture", provider, "provider", "network_scope", "Read", List.of(), 60);
+  }
+
+  private RelayToolInvocations.Outcome waitFor(
+      ProjectRelayToolInvocations invocations,
+      RelayToolDefinition tool,
+      ScriptedWakeups wakeups,
+      int awaits) {
+    return invocations.invoke(
+        tool,
+        RelayToolCodec.arguments("{}"),
+        owner,
+        "model-call",
+        () -> wakeups.awaits.get() >= awaits);
+  }
+
+  @Test
+  void hostedPermitsOncePerAuthorization() {
+    UUID scope = UUID.randomUUID();
+    var hosted = longBinding(HostedToolScopes.route(scope, 1));
+    var invocation =
+        new HostedInvocation(
+            scope,
+            1,
+            UUID.randomUUID(),
+            "caller",
+            "provider",
+            "fixture",
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            "subject",
+            UUID.randomUUID(),
+            "coordinator");
+    when(repository.submit(any()))
+        .thenAnswer(
+            answer -> {
+              RelayToolRepository.Intent intent = answer.getArgument(0);
+              var withHosting =
+                  new RelayToolRepository.Intent(
+                      intent.id(),
+                      intent.projectId(),
+                      intent.fingerprint(),
+                      intent.binding(),
+                      intent.request(),
+                      intent.occurredAt(),
+                      intent.causation(),
+                      intent.agent(),
+                      invocation);
+              return new RelayToolRepository.Stored(withHosting, null);
+            });
+    var authority = mock(HostedInvocationAuthority.class);
+    when(authority.permits(any(), eq("caller"))).thenReturn(true);
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ZERO, false, false, false);
+    // Zero staleness means every wake authorizes: initial admission plus four loop passes.
+    var outcome = waitFor(waiting(clock, wakeups, Duration.ZERO, authority), hosted, wakeups, 3);
+    assertEquals(RelayToolCodec.State.UNKNOWN, outcome.state());
+    verify(authority, times(5)).permits(any(), eq("caller"));
+    verify(projects, times(5)).id("fixture");
+    assertEquals(1, wakeups.opened.get());
+    assertEquals(1, wakeups.closed.get());
+  }
+
+  @Test
+  void waitReauthorizesOnAuthoritySignal() {
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ZERO, false, false, true, false);
+    var outcome =
+        waitFor(
+            waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE),
+            longBinding("provider"),
+            wakeups,
+            4);
+    assertEquals(RelayToolCodec.State.UNKNOWN, outcome.state());
+    // Admission, then only the pass that followed the authority wake.
+    verify(projects, times(2)).id("fixture");
+    // Relay wakes only read the retained result: the pre-wait pass plus one per wake.
+    verify(relay, times(5)).retained(any(), any());
+    assertEquals(1, wakeups.closed.get());
+  }
+
+  @Test
+  void waitReauthorizesAfterTheBoundWithoutSignals() {
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofSeconds(1), false, false, false, false);
+    waitFor(
+        waiting(clock, wakeups, Duration.ofSeconds(2), HostedInvocationAuthority.NONE),
+        longBinding("provider"),
+        wakeups,
+        4);
+    // Admission at t=0, then t=2 and t=4: a pass younger than the bound reuses the decision.
+    verify(projects, times(3)).id("fixture");
+  }
+
+  @Test
+  void refusalDuringTheWaitIsFatalAndReleasesTheRegistration() {
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ZERO, true);
+    var service = waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE);
+    when(members.mayWork("fixture", "caller")).thenAnswer(answer -> wakeups.awaits.get() == 0);
+    assertThrows(CallerFault.class, () -> waitFor(service, longBinding("provider"), wakeups, 9));
+    assertEquals(1, wakeups.opened.get());
+    assertEquals(1, wakeups.closed.get());
+  }
+
+  @Test
+  void cancellationIsSeenOnTheNextWakeAndReleasesTheRegistration() {
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ZERO, false);
+    var outcome =
+        waitFor(
+            waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE),
+            longBinding("provider"),
+            wakeups,
+            1);
+    assertEquals(RelayToolCodec.State.UNKNOWN, outcome.state());
+    assertEquals(1, wakeups.awaits.get());
+    assertEquals(1, wakeups.closed.get());
   }
 }
