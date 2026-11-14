@@ -495,6 +495,48 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         assert again is not None
         self.assertEqual((again.lookback_seconds, again.timeout), (7200, 2.5))
 
+    async def test_resaving_settings_keeps_the_dhcp_network(self) -> None:
+        """Both settings writers keep ``dhcpNetwork``, in either services form."""
+        secret = self.root / "fixture-pihole-password"
+        secret.write_text("fixture-secret")
+        secret.chmod(0o600)
+        settings = {
+            "origin": "https://pihole.example",
+            "passwordEnvironment": "FIXTURE_PIHOLE_PASSWORD",
+            "dhcpNetwork": "192.168.1.0/24",
+        }
+        sources = [
+            {
+                "kind": "pihole",
+                "id": "home-dns",
+                "capabilities": ["dhcp_scope", "dns_queries", "network_table"],
+                "settings": settings,
+            }
+        ]
+        for form in ("legacy", "sources"):
+            with self.subTest(form=form):
+                self.settings.pending_path.unlink(missing_ok=True)
+                row = json.loads(self.path.read_text())
+                row["collection"].pop("pihole", None)
+                row["collection"].pop("sources", None)
+                if form == "legacy":
+                    row["collection"]["pihole"] = settings
+                else:
+                    row["collection"]["sources"] = sources
+                configured = Configuration.decode(row, self.path)
+                self.receipts.prepare_scope_change(configured.collection)
+                self.path.write_text(json.dumps(row))
+                self.receipts.complete_scope_change(configured.collection)
+                self.worker.config = configured
+                await self.settings.save(CHOICE)
+                await self.settings.save_pihole("https://other.example", secret)
+                # A second connection save reads the tuning from the pending file.
+                await self.settings.save_pihole("https://third.example", secret)
+                pending = Configuration.read(self.settings.pending_path).collection
+                assert pending.pihole is not None
+                self.assertEqual(pending.pihole.origin, "https://third.example")
+                self.assertEqual(str(pending.pihole.dhcp_network), "192.168.1.0/24")
+
     async def test_first_pihole_connection_uses_default_tuning(self) -> None:
         self.assertIsNone(self.settings.view().pihole)
         secret = self.root / "fixture-pihole-password"

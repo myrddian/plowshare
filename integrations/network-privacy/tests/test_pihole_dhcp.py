@@ -30,6 +30,7 @@ from plowshare_privacy.contracts import (
     CollectionPlan,
     DeviceIdentity,
     Evidence,
+    PiHolePlan,
     ServicePlan,
     utc_now,
 )
@@ -89,13 +90,66 @@ class PiHoleDhcpTest(PiHoleServerCase):
         config = cast(dict[str, object], self.dhcp_settings)["config"]
         return cast(dict[str, object], cast(dict[str, object], config)["dhcp"])
 
+    def network_plan(self, network: str) -> PiHolePlan:
+        """This fixture's plan with ``dhcpNetwork`` set, decoded as configured."""
+        return PiHolePlan.decode(
+            {
+                "origin": self.origin,
+                "passwordEnvironment": "PIHOLE_TEST_PASSWORD",
+                "dhcpNetwork": network,
+            }
+        )
+
     def source(
-        self, capabilities: frozenset[Capability] = DHCP_ONLY, service: str = "dns"
+        self,
+        capabilities: frozenset[Capability] = DHCP_ONLY,
+        service: str = "dns",
+        network: str | None = None,
     ) -> PiHoleV6:
-        return PiHoleV6(self.plan, capabilities=capabilities, service=service)
+        plan = self.plan if network is None else self.network_plan(network)
+        return PiHoleV6(plan, capabilities=capabilities, service=service)
 
     def dhcp_calls(self) -> int:
         return self.calls.count(("GET", "/api/config/dhcp"))
+
+    async def collect(
+        self, capabilities: frozenset[Capability], plan: PiHolePlan | None = None
+    ) -> Evidence:
+        """One full collection of ``ADDRESS`` through a bound Pi-hole service."""
+
+        async def accept(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            writer.close()
+            await writer.wait_closed()
+
+        listener = await asyncio.start_server(accept, "127.0.0.1", 0)
+        self.addAsyncCleanup(listener.wait_closed)
+        self.addCleanup(listener.close)
+        original = asyncio.open_connection
+
+        async def connection(
+            address: str, port: int
+        ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+            return await original("127.0.0.1", port)
+
+        collection = CollectionPlan(
+            "tcp",
+            (ADDRESS,),
+            (listener.sockets[0].getsockname()[1],),
+            1,
+            1,
+            None,
+            0,
+            sources=(ServicePlan("pihole", "dns", capabilities, plan or self.plan),),
+        )
+        with patch(
+            "plowshare_privacy.collection.asyncio.open_connection",
+            side_effect=connection,
+        ):
+            return await NetworkCollector(
+                "fixture", collection, bind(collection)
+            ).collect(str(uuid4()), "fixture:event", None, None)
 
     async def test_dhcp_scope_and_reservations_decoded(self) -> None:
         self.settings()["hosts"] = [
@@ -296,7 +350,6 @@ class PiHoleDhcpTest(PiHoleServerCase):
         cases: dict[str, dict[str, object]] = {
             "empty start": {"start": ""},
             "invalid end": {"end": "192.0.2"},
-            "empty netmask": {"netmask": ""},
             "zero netmask": {"netmask": "0.0.0.0"},
             "non-contiguous netmask": {"netmask": "255.0.255.0"},
             "hostmask": {"netmask": "0.0.0.255"},
@@ -422,42 +475,7 @@ class PiHoleDhcpTest(PiHoleServerCase):
         self.assertEqual(self.dhcp_calls(), 0)
 
     async def test_collection_decides_addressing_from_the_scope(self) -> None:
-        async def accept(
-            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-        ) -> None:
-            writer.close()
-            await writer.wait_closed()
-
-        listener = await asyncio.start_server(accept, "127.0.0.1", 0)
-        self.addAsyncCleanup(listener.wait_closed)
-        self.addCleanup(listener.close)
-        original = asyncio.open_connection
-
-        async def connection(
-            address: str, port: int
-        ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-            return await original("127.0.0.1", port)
-
-        async def collect(capabilities: frozenset[Capability]) -> Evidence:
-            plan = CollectionPlan(
-                "tcp",
-                (ADDRESS,),
-                (listener.sockets[0].getsockname()[1],),
-                1,
-                1,
-                None,
-                0,
-                sources=(ServicePlan("pihole", "dns", capabilities, self.plan),),
-            )
-            with patch(
-                "plowshare_privacy.collection.asyncio.open_connection",
-                side_effect=connection,
-            ):
-                return await NetworkCollector("fixture", plan, bind(plan)).collect(
-                    str(uuid4()), "fixture:event", None, None
-                )
-
-        evidence = await collect(frozenset({"network_table", *DHCP_ONLY}))
+        evidence = await self.collect(frozenset({"network_table", *DHCP_ONLY}))
         [assignment] = evidence.snapshot.addressing
         self.assertEqual(
             (assignment.address, assignment.mac, assignment.mode, assignment.basis),
@@ -466,9 +484,129 @@ class PiHoleDhcpTest(PiHoleServerCase):
         self.assertEqual(assignment.services, ("dns",))
         self.assertEqual(self.dhcp_calls(), 1)
         # The scope alone cannot rule out a reservation: never static.
-        evidence = await collect(frozenset({"network_table", "dhcp_scope"}))
+        evidence = await self.collect(frozenset({"network_table", "dhcp_scope"}))
         [assignment] = evidence.snapshot.addressing
         self.assertEqual((assignment.mode, assignment.basis), ("unknown", None))
+
+    async def test_empty_netmask_without_dhcp_network_is_not_an_issue(self) -> None:
+        # Pi-hole's default for a directly connected LAN (seen on a live v6):
+        # dnsmasq takes the subnet from the Pi-hole host's own interface, which
+        # this read cannot see. Nothing failed; the range is just not usable.
+        self.settings()["netmask"] = ""
+        self.settings()["hosts"] = [MAC + "," + ADDRESS]
+        offered = await self.source().offered()
+        self.assertIs(offered.active, True)
+        self.assertIsNone(offered.scope)
+        self.assertEqual(offered.issues, ())
+        data = await self.source().read((ADDRESS, OTHER), utc_now())
+        assert data.addressing is not None
+        # Reservations are still read and still classify their addresses.
+        self.assertEqual(
+            data.addressing,
+            AddressingSample(
+                (), (Reservation(ADDRESS, MAC, "dhcp_reservation", "dns"),), (), ()
+            ),
+        )
+        other = replace(_identity(OTHER_MAC), address=OTHER)
+        assignments, issues = assign_addresses(
+            (data.addressing,),
+            {ADDRESS: _identity(), OTHER: other},
+            (ADDRESS, OTHER),
+            utc_now(),
+        )
+        self.assertEqual(
+            [(item.address, item.mode, item.basis) for item in assignments],
+            [
+                (ADDRESS, "dhcp_reserved", "dhcp_reservation"),
+                # Without a scope nothing is inferred static.
+                (OTHER, "unknown", None),
+            ],
+        )
+        self.assertEqual(issues, ())
+
+    async def test_empty_netmask_takes_the_configured_dhcp_network(self) -> None:
+        self.settings()["netmask"] = ""
+        offered = await self.source(network="192.0.2.0/24").offered()
+        self.assertEqual(offered.issues, ())
+        self.assertEqual(
+            offered.scope,
+            DhcpScope(
+                "dns",
+                ipaddress.IPv4Network("192.0.2.0/24"),
+                "192.0.2.100",
+                "192.0.2.200",
+                True,
+                "incomplete",
+            ),
+        )
+
+    async def test_dhcp_network_must_hold_the_router_and_range(self) -> None:
+        self.settings()["netmask"] = ""
+        cases = {
+            "end outside network": ("192.0.2.0/25", {}),
+            "router outside network": (
+                "192.0.2.64/26",
+                {"start": "192.0.2.70", "end": "192.0.2.120"},
+            ),
+            "range in another network": ("10.0.0.0/24", {}),
+            "start after end": (
+                "192.0.2.0/24",
+                {"start": "192.0.2.200", "end": "192.0.2.100"},
+            ),
+        }
+        original = dict(self.settings())
+        for name, (network, change) in cases.items():
+            with self.subTest(name):
+                self.settings().update(original, **change)
+                offered = await self.source(network=network).offered()
+                self.assertIs(offered.active, True)
+                assert offered.scope is not None
+                self.assertEqual(offered.scope.network, ipaddress.IPv4Network(network))
+                self.assertFalse(offered.scope.complete)
+                self.assertEqual(offered.issues, (INVALID_RANGE,))
+        # Undecodable range settings still give no scope, with the issue.
+        self.settings().update(original, start="")
+        offered = await self.source(network="192.0.2.0/24").offered()
+        self.assertIsNone(offered.scope)
+        self.assertEqual(offered.issues, (INVALID_RANGE,))
+
+    async def test_netmask_must_agree_with_the_dhcp_network(self) -> None:
+        # 192.0.2.1/255.255.255.0 is 192.0.2.0/24.
+        offered = await self.source(network="192.0.2.0/24").offered()
+        assert offered.scope is not None
+        self.assertTrue(offered.scope.complete)
+        self.assertEqual(offered.issues, ())
+        for network in ("192.0.2.0/25", "192.0.2.128/25", "10.0.0.0/24"):
+            with self.subTest(network):
+                offered = await self.source(network=network).offered()
+                assert offered.scope is not None
+                # The scope keeps the network Pi-hole reports.
+                self.assertEqual(
+                    offered.scope.network, ipaddress.IPv4Network("192.0.2.0/24")
+                )
+                self.assertFalse(offered.scope.complete)
+                self.assertEqual(offered.issues, (INVALID_RANGE,))
+
+    async def test_empty_netmask_infers_static_only_with_dhcp_network(self) -> None:
+        self.settings()["netmask"] = ""
+        full = frozenset[Capability]({"network_table", "dhcp_leases", *DHCP_ONLY})
+        evidence = await self.collect(full)
+        [assignment] = evidence.snapshot.addressing
+        self.assertEqual((assignment.mode, assignment.basis), ("unknown", None))
+        self.assertFalse(
+            any(issue.startswith("addressing_") for issue in evidence.issues)
+        )
+        # Full reservation and lease reads plus the configured network: an
+        # address outside the range is static.
+        evidence = await self.collect(full, self.network_plan("192.0.2.0/24"))
+        [assignment] = evidence.snapshot.addressing
+        self.assertEqual(
+            (assignment.address, assignment.mode, assignment.basis),
+            (ADDRESS, "static", "outside_dhcp_range"),
+        )
+        self.assertFalse(
+            any(issue.startswith("addressing_") for issue in evidence.issues)
+        )
 
 
 class PiHoleLeaseTest(PiHoleServerCase):
@@ -1038,6 +1176,26 @@ class PiHoleCollectionScopeTest(PiHoleServerCase):
             any(issue.startswith("addressing_") for issue in evidence.issues)
         )
 
+    async def test_empty_netmask_still_classifies_leases_and_reservations(
+        self,
+    ) -> None:
+        self.settings()["netmask"] = ""
+        self.settings()["hosts"] = [_mac(1) + "," + MANY[1]]
+        self.leases = {"leases": [self.lease(35)], "took": 0.01}
+        evidence = await self.collect()
+        modes = {
+            item.address: (item.mode, item.basis)
+            for item in evidence.snapshot.addressing
+        }
+        self.assertEqual(modes[MANY[35]], ("dhcp_dynamic", "dhcp_lease"))
+        self.assertEqual(modes[MANY[1]], ("dhcp_reserved", "dhcp_reservation"))
+        # No scope, so nothing else is inferred, and no addressing gap is
+        # reported that would switch off assignment change lines.
+        self.assertEqual(modes[MANY[0]], ("unknown", None))
+        self.assertFalse(
+            any(issue.startswith("addressing_") for issue in evidence.issues)
+        )
+
     def assert_never_static(self, evidence: Evidence) -> None:
         self.assertEqual(len(evidence.snapshot.addressing), len(MANY))
         for item in evidence.snapshot.addressing:
@@ -1311,3 +1469,50 @@ class PiHoleLocalDnsTest(PiHoleServerCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DhcpNetworkSettingTest(unittest.TestCase):
+    """``dhcpNetwork`` decodes strictly against the shared DHCP LAN allowlist."""
+
+    def decode(self, network: object) -> PiHolePlan:
+        return PiHolePlan.decode(
+            {
+                "origin": "https://pihole.example.invalid",
+                "passwordEnvironment": "PIHOLE_PASSWORD",
+                "dhcpNetwork": network,
+            }
+        )
+
+    def test_absent_is_none_and_a_private_lan_decodes(self) -> None:
+        plan = PiHolePlan.decode(
+            {
+                "origin": "https://pihole.example.invalid",
+                "passwordEnvironment": "PIHOLE_PASSWORD",
+            }
+        )
+        self.assertIsNone(plan.dhcp_network)
+        for network in ("192.168.1.0/24", "10.0.0.0/8", "172.16.4.0/30"):
+            with self.subTest(network):
+                self.assertEqual(
+                    self.decode(network).dhcp_network, ipaddress.IPv4Network(network)
+                )
+
+    def test_rejects_anything_but_a_private_ipv4_lan(self) -> None:
+        for network in (
+            "8.8.8.0/24",
+            "192.168.1.0/31",
+            "192.168.1.1/32",
+            "10.0.0.0/7",
+            "127.0.0.0/8",
+            "169.254.0.0/16",
+            "fd00::/64",
+            "192.168.1.5/24",
+            "192.168.1.0",
+            "not-a-network",
+            "",
+            24,
+            None,
+        ):
+            with self.subTest(network=network):
+                with self.assertRaisesRegex(ValueError, "dhcpNetwork"):
+                    self.decode(network)

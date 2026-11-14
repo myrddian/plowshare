@@ -530,6 +530,51 @@ def device_labels(value: object, targets: tuple[str, ...]) -> tuple[DeviceLabel,
     return tuple(sorted(labels, key=lambda label: label.address))
 
 
+# A DHCP network is a private unicast LAN of this prefix length.
+_MIN_DHCP_PREFIX, _MAX_DHCP_PREFIX = 8, 30
+_THIS_NETWORK = ipaddress.IPv4Network("0.0.0.0/8")
+
+
+def dhcp_lan(network: ipaddress.IPv4Network) -> bool:
+    """Whether ``network`` can be a DHCP scope: a private unicast IPv4 LAN, /8 to /30.
+
+    Loopback, link-local, multicast, unspecified, reserved and ``0.0.0.0/8``
+    networks are rejected. Every connector, and the configured Pi-hole
+    ``dhcpNetwork``, applies this one allowlist.
+    """
+    return (
+        _MIN_DHCP_PREFIX <= network.prefixlen <= _MAX_DHCP_PREFIX
+        and network.is_private
+        and not network.is_loopback
+        and not network.is_link_local
+        and not network.is_multicast
+        and not network.is_unspecified
+        and not network.is_reserved
+        and not network.overlaps(_THIS_NETWORK)
+    )
+
+
+def dhcp_network_setting(value: object) -> ipaddress.IPv4Network:
+    """A configured DHCP network: strict IPv4 CIDR text that passes ``dhcp_lan``.
+
+    Host bits must be zero and the prefix explicit, so the stored value is
+    exactly the network it names. Raises ValueError naming ``dhcpNetwork``.
+    """
+    try:
+        raw = text(value, 18)
+        if "/" not in raw:
+            raise ValueError("Missing prefix length")
+        network = ipaddress.IPv4Network(raw, strict=True)
+    except ValueError:
+        network = None
+    if network is None or not dhcp_lan(network):
+        raise ValueError(
+            "Pi-hole dhcpNetwork must be a private IPv4 LAN in CIDR form, "
+            "/8 to /30, such as 192.168.1.0/24"
+        )
+    return network
+
+
 @dataclass(frozen=True)
 class PiHolePlan:
     origin: str
@@ -539,6 +584,10 @@ class PiHolePlan:
     query_limit: int
     max_identity_age: int
     timeout: float
+    # The DHCP network when Pi-hole's own netmask is empty: dnsmasq then takes
+    # the subnet from the Pi-hole host's interface, which a read cannot see.
+    # When the netmask is set, the two must agree. None means not configured.
+    dhcp_network: ipaddress.IPv4Network | None = None
 
     @classmethod
     def decode(cls, value: object) -> PiHolePlan:
@@ -552,6 +601,7 @@ class PiHolePlan:
                 "queryLimit",
                 "maxIdentityAgeSeconds",
                 "timeoutSeconds",
+                "dhcpNetwork",
             },
         )
         origin = text(row["origin"], 2048).rstrip("/")
@@ -605,6 +655,7 @@ class PiHolePlan:
             integer(row.get("queryLimit", 64), 1, 256),
             integer(row.get("maxIdentityAgeSeconds", 86400), 60, 604800),
             float(timeout),
+            dhcp_network_setting(row["dhcpNetwork"]) if "dhcpNetwork" in row else None,
         )
 
 

@@ -85,6 +85,12 @@ def _pihole_scope(settings: PiHolePlan | UniFiPlan) -> dict[str, object]:
     plan = _pihole_settings(settings)
     values = asdict(plan)
     values["password_file"] = str(plan.password_file) if plan.password_file else None
+    # It decides what is inferred static, so it is scope once set; unset, the
+    # key is left out so untouched configurations keep their fingerprint.
+    if plan.dhcp_network is None:
+        values.pop("dhcp_network")
+    else:
+        values["dhcp_network"] = str(plan.dhcp_network)
     return values
 
 
@@ -241,6 +247,15 @@ _PIHOLE_FIELDS = (
         "integer",
         False,
         "Timeout for each Pi-hole session; 0.1 to 10, default 5.",
+    ),
+    SettingField(
+        "dhcpNetwork",
+        "DHCP network (when Pi-hole's netmask is empty)",
+        "text",
+        False,
+        "Private IPv4 CIDR of the DHCP LAN, such as 192.168.1.0/24. Needed only "
+        "when Pi-hole's DHCP netmask is empty; without it, addresses are never "
+        "inferred static.",
     ),
 )
 

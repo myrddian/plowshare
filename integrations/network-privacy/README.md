@@ -166,6 +166,15 @@ alone never gives a `static` result. When several services' complete scopes
 cover an address and decide differently, it is `unknown` with an
 `addressing_conflict`.
 
+Pi-hole's DHCP netmask is often empty: that is its default for a directly
+connected LAN, where dnsmasq takes the subnet from the Pi-hole host's own
+interface, which a read cannot see. Set the Pi-hole service's
+`settings.dhcpNetwork` to the LAN's private IPv4 CIDR (such as
+`192.168.1.0/24`), or pass `--dhcp-network CIDR` to `enable-capability`. Without
+it, reservations and leases still classify addresses, but no Pi-hole address is
+ever `static`, and no issue is reported. When the netmask is set, `dhcpNetwork`
+must name the same network, or the range is reported invalid.
+
 Leases are identity and addressing evidence, not presence: they never mark a
 device online. Reservations and fixed IPs are intent only and never assert an
 identity. Pi-hole reads `config/dhcp`, `dhcp/leases` while its DHCP server is

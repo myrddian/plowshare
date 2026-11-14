@@ -42,6 +42,8 @@ from .config_rows import put_service, service_entry, service_settings, to_source
 from .contracts import (
     Capability,
     Configuration,
+    PiHolePlan,
+    dhcp_network_setting,
     integer,
     load_json,
     object_fields,
@@ -920,7 +922,11 @@ def enable_unifi_traffic(setup: Setup, site: str) -> None:
 
 
 def enable_capability(
-    setup: Setup, service: str, capability: Capability, enabled: bool
+    setup: Setup,
+    service: str,
+    capability: Capability,
+    enabled: bool,
+    dhcp_network: str | None = None,
 ) -> None:
     """Turn one capability of a configured service on or off on a stopped collector.
 
@@ -929,24 +935,45 @@ def enable_capability(
     entry with the kind as its id, its currently enabled capabilities listed
     explicitly, and its settings verbatim. Enabling or disabling a capability
     changes what is read, so the write uses the same scope-change fence as
-    ``connect_pihole``. A request that changes nothing writes nothing. This
-    never contacts a service or the Plowshare server.
+    ``connect_pihole``.
+
+    ``dhcp_network`` (Pi-hole only) also sets that service's
+    ``settings.dhcpNetwork``, the DHCP LAN to use when Pi-hole's own netmask is
+    empty. It decides what is inferred static, so it is scope and is written
+    in the same fenced write; with the capability already in the requested
+    state, the call is a pure ``dhcpNetwork`` change. A request that changes
+    nothing writes nothing. This never contacts a service or the Plowshare
+    server.
     """
     config = Configuration.read(setup.collector)
     current = next((s for s in config.collection.sources if s.id == service), None)
     if current is None:
         raise SetupProblem("No configured service has id " + service)
+    network = None
+    if dhcp_network is not None:
+        if current.kind != "pihole" or not isinstance(current.settings, PiHolePlan):
+            raise SetupProblem("--dhcp-network applies only for a Pi-hole service.")
+        try:
+            network = dhcp_network_setting(dhcp_network)
+        except ValueError as error:
+            raise SetupProblem(str(error)) from None
     wanted = (
         current.capabilities | {capability}
         if enabled
         else current.capabilities - {capability}
     )
-    if wanted == current.capabilities:
+    network_changes = (
+        network is not None
+        and isinstance(current.settings, PiHolePlan)
+        and current.settings.dhcp_network != network
+    )
+    if wanted == current.capabilities and not network_changes:
         print(
             "Capability "
             + capability
             + " is already "
             + ("on" if enabled else "off")
+            + ("" if network is None else " and dhcpNetwork is " + str(network))
             + "; nothing changed."
         )
         return
@@ -954,7 +981,12 @@ def enable_capability(
         raise SetupProblem(
             "A service needs at least one capability; remove the service instead"
         )
-    if not enabled and capability == "dns_queries" and config.collection.dns_profiles:
+    if (
+        wanted != current.capabilities
+        and not enabled
+        and capability == "dns_queries"
+        and config.collection.dns_profiles
+    ):
         raise SetupProblem("Turn off DNS activity profiles before dns_queries.")
     pending = setup.collector.with_name(
         setup.collector.stem + ".pending" + setup.collector.suffix
@@ -974,6 +1006,11 @@ def enable_capability(
     for entry in entries:
         if isinstance(entry, dict) and entry.get("id") == current.id:
             entry["capabilities"] = sorted(wanted)
+            if network is not None:
+                settings = entry.get("settings")
+                if not isinstance(settings, dict):
+                    raise SetupProblem("Invalid collector service settings")
+                settings["dhcpNetwork"] = str(network)
     try:
         configured = Configuration.decode(row, setup.collector)
     except ValueError as error:
@@ -986,10 +1023,15 @@ def enable_capability(
         receipts.prepare_scope_change(configured.collection)
         replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
         receipts.complete_scope_change(configured.collection)
+    changes: list[str] = []
+    if wanted != current.capabilities:
+        changes.append(
+            "Capability " + capability + (" enabled" if enabled else " disabled")
+        )
+    if network_changes:
+        changes.append("dhcpNetwork set to " + str(network))
     print(
-        "Capability "
-        + capability
-        + (" enabled" if enabled else " disabled")
+        " and ".join(changes)
         + " on "
         + current.id
         + ". Start the collector; the next scan begins a new baseline."
@@ -1079,6 +1121,12 @@ def main() -> None:
     )
     capability.add_argument(
         "--off", action="store_true", help="Turn the capability off instead"
+    )
+    capability.add_argument(
+        "--dhcp-network",
+        metavar="CIDR",
+        help="Pi-hole only: the DHCP LAN, such as 192.168.1.0/24, for when "
+        "Pi-hole's DHCP netmask is empty",
     )
     commands.add_parser(
         "install",
@@ -1240,7 +1288,13 @@ def main() -> None:
             enable_unifi_traffic(setup, args.site)
             return
         if args.command == "enable-capability":
-            enable_capability(setup, args.service, args.capability, not args.off)
+            enable_capability(
+                setup,
+                args.service,
+                args.capability,
+                not args.off,
+                dhcp_network=args.dhcp_network,
+            )
             return
         if args.command == "start":
             saved = (
