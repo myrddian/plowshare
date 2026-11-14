@@ -271,6 +271,34 @@ The test also asserts that the number of `account_active` calls does not grow wh
 the closure grows from 1 to 49 revisions; it fails against the previous
 implementation. The PROD latency after deployment has not been measured.
 
+## Single-revision catalogue reads decided in code
+
+On PROD (28-minute sample), the catalogue's projected row read averaged about
+195 ms over 215 calls (14.7% of statement time) and the text-size read took
+14.5 s over 534 calls. Both still applied the per-row `information_readable`
+predicate, which walks the dependency closure once per row.
+
+`JdbcInformationCatalogueRepository` now reads one revision (`loadMetadata`,
+`textBytes`, `loadText`) in one of two ways. When slice 1's cached check can
+decide, an unreadable revision is absent without any row SQL, and a readable one
+is fetched by id with only `r.availability='active'` and the size guard. The
+fetch runs between the check's evaluation and its one confirmation statement, so
+a data-side write between decision and fetch (including a dependency's
+availability, which no predicate on the fetched row could see) declines the read
+to the fallback. Authority may lag by the snapshot's 2 s bound, as for every
+snapshot decision. Otherwise the fallback admits the target through
+`knowledge_readable_targets` with a one-element list, as `readable()` does, plus
+the typed-content filter. `evidence` (keyed by evidence id) and the code
+outline/projection reads are unchanged; catalogue pages, lists and facets are
+unchanged.
+
+`KnowledgeReadabilityDifferentialDatabaseTest` compares both paths with the
+replaced per-row statements, row content and size-guard refusals included, and
+asserts that a warm cached read calls no permission function. Each fallback
+statement still costs a few milliseconds on the small fixture, about the same as
+the per-row predicate there; the saving is expected on large closures. The PROD
+latency after deployment has not been measured.
+
 ## Retrieval poll under a generic plan
 
 V239's `retrieval_ready_generation` index made the retrieval worker's idle poll

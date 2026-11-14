@@ -202,16 +202,16 @@ class InformationCatalogueReadPersistenceTest {
 
     @Override
     public List<Map<String, Object>> queryForList(String sql, Object... args) {
-      if (sql.startsWith("WITH projected") || sql.startsWith("SELECT r.id,r.resource_id,r.ordinal"))
-        metadataLoads++;
+      if (sql.contains("SELECT r.id,r.resource_id,r.ordinal")) metadataLoads++;
       return super.queryForList(sql, args);
     }
 
     @Override
     public <T> List<T> queryForList(String sql, Class<T> type, Object... args) {
-      if (sql.startsWith("SELECT 1 FROM information_revision_allowances")) metadataAuthorization++;
+      if (sql.contains("SELECT 1 FROM admitted JOIN information_revision_allowances"))
+        metadataAuthorization++;
       var rows = super.queryForList(sql, type, args);
-      if (sql.startsWith("SELECT COALESCE(octet_length(r.extracted_text)")) {
+      if (sql.contains("SELECT COALESCE(octet_length(r.extracted_text)")) {
         textSizeReads++;
         var callback = afterTextSize;
         afterTextSize = () -> {};
@@ -222,7 +222,7 @@ class InformationCatalogueReadPersistenceTest {
 
     @Override
     public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
-      if (sql.startsWith("SELECT r.id,r.resource_id,r.document_type")) textLoads++;
+      if (sql.contains("SELECT r.id,r.resource_id,r.document_type")) textLoads++;
       return super.query(sql, mapper, args);
     }
   }

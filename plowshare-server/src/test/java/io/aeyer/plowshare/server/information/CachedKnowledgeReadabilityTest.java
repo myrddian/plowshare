@@ -147,7 +147,7 @@ class CachedKnowledgeReadabilityTest {
   }
 
   /** Confirms against the fake cache's counters and counts statements. */
-  private static final class Versions implements ProjectionItemVersions {
+  private static class Versions implements ProjectionItemVersions {
     final Cache cache;
     final AtomicInteger statements = new AtomicInteger();
 
@@ -286,7 +286,16 @@ class CachedKnowledgeReadabilityTest {
     var jdbc = mock(JdbcTemplate.class);
     var declined = new AtomicBoolean();
     KnowledgeReadabilityCheck readability =
-        (context, revision) -> declined.get() ? Optional.empty() : Optional.of(true);
+        new KnowledgeReadabilityCheck() {
+          public Optional<Boolean> readable(InformationContext context, UUID revision) {
+            return declined.get() ? Optional.empty() : Optional.of(true);
+          }
+
+          public <T> Guarded<T> fetchIfReadable(
+              InformationContext context, UUID revision, Supplier<Optional<T>> fetch) {
+            throw new AssertionError("readable() does not fetch a row");
+          }
+        };
     var catalogue =
         new JdbcInformationCatalogueRepository(
             jdbc,
@@ -306,5 +315,85 @@ class CachedKnowledgeReadabilityTest {
         .thenReturn(List.of());
     assertFalse(catalogue.readable(PERSONAL, REVISION));
     verify(jdbc).queryForList(anyString(), eq(Integer.class), any(Object[].class));
+  }
+
+  @Test
+  void aReadableRevisionIsFetchedBeforeTheOneConfirmation() {
+    when(repository.revision(REVISION)).thenReturn(revision(List.of()));
+    when(repository.resource(RESOURCE)).thenReturn(resource());
+    var order = new ArrayList<String>();
+    var counting =
+        new Versions(cache) {
+          @Override
+          public Set<ProjectionVersions.Item> staleItems(Collection<ItemToken> tokens) {
+            order.add("confirm");
+            return super.staleItems(tokens);
+          }
+        };
+    AuthoritySnapshots snapshots = () -> Optional.of(snapshot());
+    var check =
+        new CachedKnowledgeReadability(
+            cache, repository, counting, snapshots, ReadAdmission.direct(), 64);
+    var outcome =
+        check.fetchIfReadable(
+            PERSONAL,
+            REVISION,
+            () -> {
+              order.add("fetch");
+              return Optional.of("row");
+            });
+    assertEquals(new KnowledgeReadabilityCheck.Guarded.Answered<>(Optional.of("row")), outcome);
+    assertEquals(List.of("fetch", "confirm"), order, "The confirmation covers the fetch");
+    assertEquals(1, counting.statements.get());
+  }
+
+  @Test
+  void anUnreadableRevisionIsAnsweredAbsentWithoutFetching() {
+    when(repository.revision(REVISION)).thenReturn(new KnowledgeFact.Absent(REVISION));
+    var outcome =
+        check()
+            .fetchIfReadable(
+                PERSONAL,
+                REVISION,
+                () -> {
+                  throw new AssertionError("An unreadable row is never fetched");
+                });
+    assertEquals(new KnowledgeReadabilityCheck.Guarded.Answered<>(Optional.empty()), outcome);
+    assertEquals(1, versions.statements.get());
+  }
+
+  @Test
+  void aWriteCommittedDuringTheFetchDiscardsTheRowAndDeclines() {
+    when(repository.revision(REVISION)).thenReturn(revision(List.of()));
+    when(repository.resource(RESOURCE)).thenReturn(resource());
+    var resourceItem = new ProjectionVersions.Item(READABILITY, "resource:" + RESOURCE);
+    var outcome =
+        check()
+            .fetchIfReadable(
+                PERSONAL,
+                REVISION,
+                () -> {
+                  // A policy write commits after the decision, before the confirmation.
+                  cache.counters.put(resourceItem, 9L);
+                  return Optional.of("row");
+                });
+    assertEquals(new KnowledgeReadabilityCheck.Guarded.Declined<>(), outcome);
+    assertEquals(List.of(resourceItem), cache.invalidated);
+  }
+
+  @Test
+  void anUndecidableReadDeclinesWithoutFetching() {
+    TransactionSynchronizationManager.setActualTransactionActive(true);
+    var outcome =
+        check()
+            .fetchIfReadable(
+                PERSONAL,
+                REVISION,
+                () -> {
+                  throw new AssertionError("A declined read is never fetched");
+                });
+    assertEquals(new KnowledgeReadabilityCheck.Guarded.Declined<>(), outcome);
+    verifyNoInteractions(repository);
+    assertEquals(0, versions.statements.get());
   }
 }
