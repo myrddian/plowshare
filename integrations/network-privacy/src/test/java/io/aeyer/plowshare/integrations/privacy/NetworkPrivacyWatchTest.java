@@ -254,6 +254,33 @@ class NetworkPrivacyWatchTest {
   }
 
   @Test
+  void information_discovery_is_granted_where_its_allowance_fits_and_named_in_the_prompt()
+      throws Exception {
+    // The shipped skill runs the read-only Librarian in a fresh context (NEW mode). A caller
+    // needs the grant; narrow, low-allowance workers deliberately do not get it.
+    var skill =
+        Files.readString(
+            Path.of(
+                "../../plowshare-server/src/main/resources/skills/information-discovery/SKILL.md"));
+    assertTrue(skill.contains("\nagent: librarian\n"), "the skill's executor moved");
+    assertTrue(skill.contains("\nmode: NEW\n"));
+    assertTrue(skill.contains("\nagentVisible: true\n"));
+    var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
+    assertTrue(agents.disabled().isEmpty(), agents.disabled().toString());
+    for (String name : List.of("privacy_assistant", "privacy_analyst", "privacy_coordinator")) {
+      assertEquals(List.of("information-discovery"), agents.get(name).skills(), name);
+      assertTrue(
+          Files.readString(application.resolve("agents/" + name + ".md"))
+              .contains("information-discovery skill with skill_run once"),
+          name);
+    }
+    for (String name :
+        List.of("privacy_reviewer", "privacy_device_assessor", "privacy_device_profiler")) {
+      assertTrue(agents.get(name).skills().isEmpty(), name);
+    }
+  }
+
+  @Test
   void the_assistant_is_exported_async_and_has_no_admin_or_write_grants() throws Exception {
     var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
     var assistant = agents.get("privacy_assistant");
