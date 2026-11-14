@@ -11,6 +11,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.session.Role;
@@ -25,6 +26,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.LongPredicate;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
@@ -263,6 +265,55 @@ class DefinitionResolverTest {
     assertNotSame(initial, updated);
     assertTrue(updated.get("worker").prompt().contains("other prompt"));
     assertSame(updated, resolver.forCaller(new DefinitionResolver.Caller(7L, null)));
+  }
+
+  @Test
+  void oneRootResolutionPerTierOnACacheHit(@TempDir Path root) throws Exception {
+    Path project = root.resolve("project"), personal = root.resolve("personal");
+    write(project.resolve("bots"), "worker", "project prompt");
+    write(personal.resolve("bots"), "helper", "personal prompt");
+    var roots = new java.util.concurrent.atomic.AtomicInteger();
+    ApplicationResources counting =
+        id -> {
+          roots.incrementAndGet();
+          return id == null ? Optional.empty() : Optional.of(id.equals(7L) ? project : personal);
+        };
+    var resolver = resolverOver(new DataLayout(null), new FakeFiles());
+    resolver.useApplicationResources(counting);
+    resolver.usePersonalResources(caller -> 9L);
+    // The registry's revision reads the same root; forward the per-call resources as production
+    // does, so the count includes that third consumer.
+    resolver.useScopedTools(
+        new ScopedTools() {
+          public Set<String> names(Long project) {
+            return Set.of();
+          }
+
+          public Set<String> stagedNames(String project, Path root, Set<String> builtins) {
+            return Set.of();
+          }
+
+          public String revision(Long project) {
+            throw new AssertionError("the per-call resources must be passed");
+          }
+
+          @Override
+          public String revision(Long project, ApplicationResources resources) {
+            resources.root(project);
+            return "";
+          }
+
+          public List<AgentTool> tools(
+              Home home, String agent, String session, BooleanSupplier cancelled) {
+            return List.of();
+          }
+        });
+    var caller = new DefinitionResolver.Caller(7L, null);
+    AgentRegistry first = resolver.forCaller(caller);
+    roots.set(0);
+
+    assertSame(first, resolver.forCaller(caller));
+    assertEquals(2, roots.get(), "one root resolution per tier");
   }
 
   @Test

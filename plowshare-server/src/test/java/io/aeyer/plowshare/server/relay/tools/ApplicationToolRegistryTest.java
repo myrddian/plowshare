@@ -289,6 +289,18 @@ class ApplicationToolRegistryTest {
     assertNotEquals(withdrawn, registry.revision(1L));
   }
 
+  @Test
+  void revision_resolves_the_root_through_the_resources_it_is_given() {
+    var asked = new java.util.concurrent.atomic.AtomicInteger();
+    ApplicationResources perCall =
+        id -> {
+          asked.incrementAndGet();
+          return Optional.empty();
+        };
+    registry.revision(1L, perCall);
+    assertEquals(1, asked.get());
+  }
+
   private static final String THREE_TOOLS =
       """
       {"name":"network_a","description":"A","parameters":[],"timeoutSeconds":30},

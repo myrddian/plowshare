@@ -90,10 +90,14 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
   }
 
   private ApplicationServerSettings settings(String project) {
+    return settings(project, resources);
+  }
+
+  private ApplicationServerSettings settings(String project, ApplicationResources source) {
     Long id = projects.id(project);
     return id == null
         ? ApplicationServerSettings.EMPTY
-        : resources
+        : source
             .root(id)
             .map(root -> checked(project, root, builtins.get()))
             .orElse(ApplicationServerSettings.EMPTY);
@@ -144,6 +148,10 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
 
   private Snapshot snapshot(String project) {
     return snapshot(project, settings(project));
+  }
+
+  private Snapshot snapshot(String project, ApplicationResources source) {
+    return snapshot(project, settings(project, source));
   }
 
   private ApplicationServerSettings settings(String project, String account) {
@@ -290,8 +298,13 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
 
   @Override
   public String revision(Long id) {
+    return revision(id, resources);
+  }
+
+  @Override
+  public String revision(Long id, ApplicationResources source) {
     String project = id == null ? null : project(id);
-    return project == null ? "" : stamp(snapshot(project));
+    return project == null ? "" : stamp(snapshot(project, source));
   }
 
   private static String stamp(Snapshot snapshot) {
