@@ -220,6 +220,31 @@ The test also asserts that the number of `account_active` calls does not grow wh
 the closure grows from 1 to 49 revisions; it fails against the previous
 implementation. The PROD latency after deployment has not been measured.
 
+## Retrieval poll under a generic plan
+
+V239's `retrieval_ready_generation` index made the retrieval worker's idle poll
+an index probe, but only under a plan built for the actual parameter values.
+pgJDBC switches a repeated statement to a server-side generic plan after five
+executions. That plan cannot tell that `generation<?` and `generation>?` match
+nothing, so it walked `retrieval_pending` in `retry_at` order and filtered out
+every current row. On PROD at `bb075d37`, with 16,196 ready sources, that was
+about 2,950 blocks and 9.4 ms per poll, 12.7 s of database time in 41 minutes.
+
+`JdbcPassageRepository.pending` now gates the ready half with three ordered
+`LIMIT 1` probes of the generation index, one per stale range. The gate does
+not depend on outer rows, so PostgreSQL evaluates it once as a one-time filter
+and skips the ready half when nothing is stale. A read-only EXPLAIN on PROD,
+with the generic plan forced, read 20 blocks in 0.30 ms instead of 3,111 blocks
+in 12.4 ms. After a generation change the gate is true and the ready half runs
+as before.
+
+`RetrievalPollPlanDatabaseTest` compares the gated poll with the previous
+statement under automatic, forced-generic and forced-custom plans. The fixture
+states cover pending, failed and in-flight rows, NULL, older and newer
+generations, and a full generation change. It also asserts that an idle poll
+over 3,000 current sources visits fewer than 50 rows under a generic plan; the
+previous statement visits all 3,000 and fails that assertion.
+
 ## Regression provenance and validation
 
 The per-row document guard and unconditional retrieval dispatch originate in

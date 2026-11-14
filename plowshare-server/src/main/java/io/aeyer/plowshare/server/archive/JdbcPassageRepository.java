@@ -42,6 +42,16 @@ public final class JdbcPassageRepository implements PassageRepository {
    * another generation are the {@code IS NULL}, {@code <} and {@code >} ranges of V239's {@code
    * retrieval_ready_generation}, which are empty once every source is current. The selected set and
    * its order are unchanged.
+   *
+   * <p>The ready half is gated by a probe of those three ranges. pgJDBC switches to a server-side
+   * generic plan after five executions, and a generic plan cannot see that {@code generation<?}
+   * matches nothing: it estimates a third of the table and instead walks {@code retrieval_pending}
+   * in {@code retry_at} order, filtering out every current row. On deployed data that read 3,100
+   * blocks per idle poll instead of 17. Each probe is an ordered {@code LIMIT 1} on the generation
+   * index, the only plan that can produce its first row without sorting the table, so it stays an
+   * index probe under any plan. The gate does not depend on the outer rows, so PostgreSQL evaluates
+   * it once as a one-time filter and skips the ready half when nothing is stale. After a generation
+   * change, when most rows are stale, the gate is true and the ready half runs as before.
    */
   public List<Source> pending(String generation) {
     return jdbc.query(
@@ -55,6 +65,11 @@ public final class JdbcPassageRepository implements PassageRepository {
               (SELECT source_type,source_id,retry_at FROM retrieval_sources
                 WHERE status='ready' AND (generation IS NULL OR generation<? OR generation>?)
                   AND (retry_at<=CURRENT_TIMESTAMP OR (last_error LIKE 'RepairInFlight:%' AND last_error<>?))
+                  AND (EXISTS(SELECT 1 FROM retrieval_sources WHERE status='ready' AND generation IS NULL)
+                    OR (SELECT generation FROM retrieval_sources WHERE status='ready' AND generation<?
+                        ORDER BY generation LIMIT 1) IS NOT NULL
+                    OR (SELECT generation FROM retrieval_sources WHERE status='ready' AND generation>?
+                        ORDER BY generation DESC LIMIT 1) IS NOT NULL)
                 ORDER BY retry_at,source_type,source_id LIMIT 8)
               ORDER BY retry_at,source_type,source_id LIMIT 8
             )
@@ -76,6 +91,8 @@ public final class JdbcPassageRepository implements PassageRepository {
         generation,
         generation,
         "RepairInFlight:" + generation,
+        generation,
+        generation,
         generation);
   }
 
