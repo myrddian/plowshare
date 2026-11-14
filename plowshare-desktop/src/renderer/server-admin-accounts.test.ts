@@ -20,7 +20,10 @@ const account = (projectCreator: boolean): ServerAccount => ({
 test('account detail states whether the account may create projects', () => {
   assert.match(accountStatus(account(true)), /May create projects/);
   assert.match(accountStatus(account(false)), /Cannot create projects/);
-  assert.equal(creatorActionLabel(account(true)), 'Revoke project creator role');
+  assert.equal(
+    creatorActionLabel(account(true)),
+    'Revoke project creator role',
+  );
   assert.equal(creatorActionLabel(account(false)), 'Allow creating projects');
 });
 
@@ -28,6 +31,9 @@ test('the creator toggle sends only the flipped projectCreator field', () => {
   for (const held of [true, false]) {
     const update = toggledUpdate(account(held), 'projectCreator');
     assert.deepEqual(update, { handle: 'sam', projectCreator: !held });
-    assert.deepEqual(decodeAdminCall('admin.account.update', update).payload, update);
+    assert.deepEqual(
+      decodeAdminCall('admin.account.update', update).payload,
+      update,
+    );
   }
 });

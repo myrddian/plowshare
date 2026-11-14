@@ -154,8 +154,7 @@ export function installServerAdmin(
     get('[data-account]').hidden = !account;
     if (!account) return;
     get('[data-account-name]').textContent = account.handle;
-    get('[data-account-status]').textContent =
-      accountStatus(account);
+    get('[data-account-status]').textContent = accountStatus(account);
     get('[data-enabled]').textContent = account.enabled
       ? 'Disable account'
       : 'Enable account';
