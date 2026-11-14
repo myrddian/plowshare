@@ -208,18 +208,18 @@ inconsistent values fail startup.
 | Property | Default | Effect |
 | --- | --- | --- |
 | `entries` | `256` | Cached entries. |
-| `resident-bytes` | `33554432` | Bytes held by cached values. |
+| `resident-bytes` | `33554432` | Bytes held by one projection line's cached values. |
 | `loads` | `8` | Loads in flight at once. |
 | `loading-bytes` | `67108864` | Bytes of values being loaded. |
 | `waiters` | `256` | Callers waiting on loads, in total. |
 | `waiters-per-load` | `64` | Callers waiting on one load. |
 | `dependency-links` | `8192` | Dependency links between entries. |
 | `max-value-bytes` | `8388608` | Largest single value; must fit within `loading-bytes` with headroom. |
-| `timeout` | `5s` | How long a caller waits for a load. |
+| `timeout` | `2s` | The single deadline of one cached read, from when it reaches the cache. The FETCH slot wait of its loader and its wait on another request's reload both draw on it; past it the read is refused as busy (retry) and no uncached load is started. An elected loader whose load outlives it still stores the value for the next read. |
 | `notification-poll` | `1s` | Version-notification poll cadence, at most 30s. |
 | `reconnect-delay` | `1s` | Delay before reconnecting a lost notification session, at most 1m. |
 | `max-pending-transactions` | `128` | Pending transactions tracked (1..4096). |
-| `max-projections` | `24` | Distinct projections (1..64). |
+| `total-resident-bytes` | `67108864` | Bytes held by all projection lines together (at least `resident-bytes`). Each projection is one line with its own LRU; past this total the coldest entries of the line furthest above its share are evicted, never a whole line. The number of projections is not configured or limited. |
 | `notified.enabled` | `true` | Delivery probes, and notification-trusted hits for caches that opt in. |
 | `notified.staleness` | `2s` | Most a trusted hit may lag a committed permission change (at most 1m). |
 | `notified.heartbeat` | `500ms` | Probe interval; must be shorter than `staleness`. |
@@ -230,7 +230,7 @@ inconsistent values fail startup.
 
 These meters read server memory only. Scraping does not acquire database connections,
 validate versions or send probes. Projection labels are the fixed names registered
-by server composition, bounded by `max-projections`. No account, project, cache key,
+by server composition. No account, project, cache key,
 SQL or exception message becomes a label. Counters restart with the server; compare
 rates or interval deltas across deployments.
 
@@ -249,6 +249,7 @@ rates or interval deltas across deployments.
 | `bypass_cache_refused` | Recoverable backing-cache refusal led to an ordinary-loader attempt. |
 | `bypass_stale` | Retrieved candidate failed the final readiness/version check and led to an ordinary-loader attempt. |
 | `capacity_rejected` | Capacity exhaustion refused the read without an ordinary-loader fallback. |
+| `deadline_rejected` | The read's `timeout` passed before a value was available (waiting for another request's reload, or the caller's own load outlived it); refused as busy without an ordinary-loader fallback. |
 
 The first three events count successful cache returns and are mutually exclusive per
 read. `load` and bypasses count attempts; adding them to returns double-counts work.
@@ -257,6 +258,17 @@ decide their SQL fallback later. SQL failures retain their original error behavi
 and do not replay a load. Authority snapshot load attempts use
 `projection="authority-snapshot-v1",event="load"`; `loaded_return` counts the subset
 that could be returned through the cache.
+
+`knowledge-facts-v1` holds the shared revision and resource facts of the targeted
+readability check. Its reads are confirmed together, one statement per check, after
+the check has read every fact it needs: there `versioned_hit` and `loaded_return`
+count facts returned before that confirmation. A failed confirmation invalidates the
+stale facts and the check falls back to its SQL statement.
+
+`log-tree-facts-v1` holds one log tree per root for the targeted log check, read and
+confirmed the same way together with the knowledge facts of its retained inputs. A
+write in one tree reloads only that tree. `information-log-visibility-v1` now serves
+only collection reads (transcript lists, orchestration lists and inbox feeds).
 
 `plowshare.projection.cache.backing` exports existing backing-cache counters with
 `projection` and `event` tags: `hits`, `misses`, `coalesced`, `evictions`, `bypassed`,

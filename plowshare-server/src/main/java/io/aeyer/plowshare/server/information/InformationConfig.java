@@ -1,15 +1,19 @@
 package io.aeyer.plowshare.server.information;
 
+import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.cache.ProjectionCacheProperties;
 import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionItemVersions;
 import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import io.aeyer.plowshare.server.documents.*;
 import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.Hooks;
 import io.aeyer.plowshare.server.llm.*;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
 import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -172,11 +176,43 @@ public class InformationConfig {
         records, relay, consumption, projects, java.time.Instant::now);
   }
 
+  /**
+   * The shared revision and resource facts of design slice 1. One item-scoped, versioned projection
+   * holds every fact for both the targeted readability check and log visibility's retained inputs;
+   * an evaluation may read at most the projection's entry limit of facts, so its facts can stay
+   * resident together.
+   */
+  @Bean
+  KnowledgeFactSource knowledgeFactSource(
+      JdbcTemplate jdbc,
+      ProjectionCaches caches,
+      ProjectionCacheProperties properties,
+      ReadAdmission admission) {
+    return new KnowledgeFactSource(
+        caches.createItemScoped(
+            "knowledge-facts-v1",
+            java.util.Set.of(Domain.READABILITY),
+            ProjectionCaches.Freshness.VERSIONED),
+        new JdbcKnowledgeFactRepository(jdbc),
+        admission,
+        properties.entries());
+  }
+
+  /** The targeted readability check from item-cached shared facts (design slice 1). */
+  @Bean
+  public KnowledgeReadabilityCheck knowledgeReadabilityCheck(
+      KnowledgeFactSource facts,
+      ProjectionItemVersions itemVersions,
+      AuthoritySnapshots authority) {
+    return new CachedKnowledgeReadability(facts, itemVersions, authority);
+  }
+
   @Bean
   public InformationCatalogueRepository informationCatalogueRepository(
       JdbcTemplate jdbc,
       AllowanceRepository allowances,
       ProjectionCaches caches,
+      KnowledgeReadabilityCheck readability,
       InformationEvents events) {
     return new JdbcInformationCatalogueRepository(
         jdbc,
@@ -200,6 +236,7 @@ public class InformationConfig {
             "readiness-v1",
             java.util.Set.of(
                 Domain.DOCUMENTS, Domain.PROGRESS, Domain.KNOWLEDGE_ACCESS, Domain.AUTHORITY)),
+        readability,
         events);
   }
 

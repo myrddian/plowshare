@@ -168,28 +168,41 @@ class InformationLogVisibilityTest {
     }
   }
 
-  private static BooleanSupplier unexpected() {
-    return () -> fail("A current deny set must answer without the targeted predicate");
-  }
-
+  /**
+   * Design slice 2: targeted checks are answered per log tree ({@link CachedLogReadability}) and,
+   * when that declines, by the caller's predicate. They never load the per-account deny set, which
+   * only collection reads consume. (Before slice 2 they shared that set.)
+   */
   @Test
-  void targetedChecksShareOneDenySetPerAccountWithoutThePredicate() {
+  void targetedChecksNeverLoadTheAccountDenySet() {
     try (var f = new Fixture()) {
-      for (int check = 0; check < 50; check++) {
-        assertFalse(f.visibility.readable("reader", "restricted", unexpected()));
-        assertTrue(f.visibility.readable("reader", "open", unexpected()));
-      }
-      verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
-      assertTrue(f.visibility.readable("other", "open", unexpected()));
-      verify(f.jdbc, times(2)).queryForList(anyString(), eq(String.class), any(Object[].class));
-      assertEquals(0, f.admission.active(ReadAdmission.Work.AUTHORITY));
+      var predicate = new AtomicInteger();
+      BooleanSupplier authoritative =
+          () -> {
+            predicate.incrementAndGet();
+            return false;
+          };
+      for (int check = 0; check < 5; check++)
+        assertFalse(f.visibility.readable("reader", "restricted", authoritative));
+      assertEquals(5, predicate.get(), "No tree check is configured: the predicate decides");
+      verifyNoInteractions(f.jdbc);
+
+      assertFalse(f.visibility.readable(null, "open", authoritative));
+      assertEquals(6, predicate.get());
+      when(f.versions.capture(DOMAINS)).thenReturn(Optional.empty());
+      assertFalse(f.visibility.readable("reader", "open", authoritative));
+      assertEquals(7, predicate.get(), "A dirty transaction keeps its own statement authority");
+      verifyNoInteractions(f.jdbc);
+
+      assertThrows(
+          IllegalArgumentException.class, () -> f.visibility.readable(" ", "open", authoritative));
     }
   }
 
   /**
-   * PROD job_32792EE2: the job's per-step log check missed while the account's only AUTHORITY seat
-   * was busy, was refused, and ended the job. The deny-set load is the cache's fetch, not the
-   * requester's read, so a busy account seat must not refuse it.
+   * PROD job_32792EE2: a check missed while the account's only AUTHORITY seat was busy, was
+   * refused, and ended the job. The deny-set load is the cache's fetch, not the requester's read,
+   * so a busy account seat must not refuse a collection read's fill either.
    */
   @Test
   void aBusyAccountAuthoritySeatDoesNotRefuseTheCachesFetch() {
@@ -198,8 +211,10 @@ class InformationLogVisibilityTest {
       var other = f.admission.admit("other", ReadAdmission.Work.AUTHORITY);
       try (busy;
           other) {
-        assertFalse(f.visibility.readable("reader", "restricted", unexpected()));
-        assertTrue(f.visibility.readable("reader", "open", unexpected()));
+        assertEquals(
+            true,
+            f.visibility.read(
+                "reader", facts -> facts.blocked().orElseThrow().contains("restricted")));
       }
       verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
       assertEquals(0, f.admission.active(ReadAdmission.Work.FETCH));
@@ -207,9 +222,11 @@ class InformationLogVisibilityTest {
   }
 
   @Test
-  void aRevokedDenySetIsReloadedBeforeItAnswers() {
+  void aRevokedDenySetIsReloadedBeforeACollectionReadUsesIt() {
     try (var f = new Fixture()) {
-      assertTrue(f.visibility.readable("reader", "open", unexpected()));
+      assertEquals(
+          false,
+          f.visibility.read("reader", facts -> facts.blocked().orElseThrow().contains("open")));
       // A grant revocation or new input moves the version: the stored set no longer validates.
       when(f.versions.current(f.token)).thenReturn(false);
       var revoked =
@@ -228,39 +245,10 @@ class InformationLogVisibilityTest {
       when(f.versions.current(revoked)).thenReturn(true);
       when(f.jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
           .thenReturn(List.of("restricted", "open"));
-      assertFalse(f.visibility.readable("reader", "open", unexpected()));
+      assertEquals(
+          true,
+          f.visibility.read("reader", facts -> facts.blocked().orElseThrow().contains("open")));
       verify(f.jdbc, times(2)).queryForList(anyString(), eq(String.class), any(Object[].class));
-    }
-  }
-
-  @Test
-  void unsharedTransactionsOversizedSetsAndMissingAccountsUseThePredicate() {
-    try (var f = new Fixture()) {
-      var predicate = new AtomicInteger();
-      BooleanSupplier authoritative =
-          () -> {
-            predicate.incrementAndGet();
-            return false;
-          };
-      assertFalse(f.visibility.readable(null, "open", authoritative));
-      assertEquals(1, predicate.get());
-      verifyNoInteractions(f.jdbc);
-
-      when(f.versions.capture(DOMAINS)).thenReturn(Optional.empty());
-      assertFalse(f.visibility.readable("reader", "open", authoritative));
-      assertEquals(2, predicate.get(), "A dirty transaction keeps its own statement authority");
-      verifyNoInteractions(f.jdbc);
-
-      when(f.versions.capture(DOMAINS)).thenReturn(Optional.of(f.token));
-      when(f.jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
-          .thenReturn(Collections.nCopies(32769, "blocked"));
-      assertFalse(f.visibility.readable("reader", "open", authoritative));
-      assertFalse(f.visibility.readable("reader", "open", authoritative));
-      assertEquals(4, predicate.get(), "An oversized deny set never becomes a partial allow set");
-      verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
-
-      assertThrows(
-          IllegalArgumentException.class, () -> f.visibility.readable(" ", "open", authoritative));
     }
   }
 }

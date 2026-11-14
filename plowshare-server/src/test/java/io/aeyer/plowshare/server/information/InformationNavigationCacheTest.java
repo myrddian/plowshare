@@ -293,8 +293,8 @@ class InformationNavigationCacheTest {
                   Duration.ofSeconds(1),
                   Duration.ofSeconds(1),
                   32,
-                  1,
-                  2));
+                  2,
+                  1L << 40));
       ProjectionCache<Documents> cache =
           caches.create(
               "navigation-documents",

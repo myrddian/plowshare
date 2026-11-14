@@ -677,8 +677,8 @@ class AuthoredInformationPersistenceTest {
             java.time.Duration.ofSeconds(1),
             java.time.Duration.ofSeconds(1),
             128,
-            3,
-            4));
+            4,
+            1L << 40));
   }
 
   private JdbcInformationContentTypeRepository cachedTypes(

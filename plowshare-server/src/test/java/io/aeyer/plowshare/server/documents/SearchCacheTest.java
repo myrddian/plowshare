@@ -245,8 +245,8 @@ class SearchCacheTest {
               Duration.ofSeconds(1),
               Duration.ofSeconds(1),
               32,
-              1,
-              2);
+              2,
+              1L << 40);
       caches = new ProjectionCaches(versions, signals, properties);
       store =
           new DocumentStore(

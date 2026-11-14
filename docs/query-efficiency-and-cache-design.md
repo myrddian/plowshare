@@ -190,7 +190,9 @@ bound. A probe unanswered for `heartbeat-timeout` (default 3 s) ends the listene
 session and starts recovery, so a silently lost connection cannot leave trusted
 hits running. Opt a cache in only when a seconds-scale delay after a permission
 change is acceptable for everything it serves; today that is the authority
-snapshot and targeted log-visibility checks.
+snapshot and the log-visibility deny sets of collection reads, whose consumers
+keep their own version fence. Targeted log checks read versioned item-scoped tree
+facts instead (see the [item invalidation design](query-efficiency-item-invalidation-design.md#slice-2-status)).
 
 ## Bounded RAM cache and LRU contract
 

@@ -38,6 +38,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   private final ProjectionCache<Information.Facets> facetsCache;
   private final InformationEvents events;
   private final ProjectionCache<java.util.Map<UUID, ExtractionState>> readinessCache;
+  private final KnowledgeReadabilityCheck readability;
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
   /**
@@ -105,6 +106,35 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       ProjectionCache<Information.Facets> facetsCache,
       ProjectionCache<java.util.Map<UUID, ExtractionState>> readinessCache,
       InformationEvents events) {
+    this(
+        jdbc,
+        clock,
+        allowances,
+        metadataCache,
+        textCache,
+        listCache,
+        facetsCache,
+        readinessCache,
+        KnowledgeReadabilityCheck.none(),
+        events);
+  }
+
+  /**
+   * {@code readability} answers {@link #readable} from shared facts when it can; every check it
+   * declines runs the SQL statement, which stays the oracle.
+   */
+  public JdbcInformationCatalogueRepository(
+      JdbcTemplate jdbc,
+      Clock clock,
+      AllowanceRepository allowances,
+      ProjectionCache<Optional<AuthorizedMetadata>> metadataCache,
+      ProjectionCache<Optional<AuthorizedText>> textCache,
+      ProjectionCache<List<Information.Revision>> listCache,
+      ProjectionCache<Information.Facets> facetsCache,
+      ProjectionCache<java.util.Map<UUID, ExtractionState>> readinessCache,
+      KnowledgeReadabilityCheck readability,
+      InformationEvents events) {
+    this.readability = Objects.requireNonNull(readability);
     this.readinessCache = Objects.requireNonNull(readinessCache);
     this.events = Objects.requireNonNull(events);
     this.jdbc = Objects.requireNonNull(jdbc);
@@ -197,9 +227,16 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
    * took about 270 ms. {@code knowledge_readable_targets} resolves that authority once and applies
    * the same root, dependency, exclusion and ceiling rules, so the admitted answer is unchanged.
    * Typed-content exclusion is applied here exactly as {@link #readableSql} applies it.
+   *
+   * <p>When the composition supplies a {@link KnowledgeReadabilityCheck}, that answers first from
+   * shared item-cached facts and the authority snapshot, without per-row permission SQL. It
+   * declines (and this statement answers) for a caller in a writing transaction and whenever its
+   * facts cannot be served or confirmed; see {@link CachedKnowledgeReadability}.
    */
   public boolean readable(InformationContext context, UUID revision) {
     java.util.Objects.requireNonNull(revision, "revision");
+    var answered = readability.readable(context, revision);
+    if (answered.isPresent()) return answered.get();
     var args = new ArrayList<Object>(targetArguments(context, List.of(revision)));
     var content = InformationSql.content(context, "r");
     args.addAll(content.arguments());

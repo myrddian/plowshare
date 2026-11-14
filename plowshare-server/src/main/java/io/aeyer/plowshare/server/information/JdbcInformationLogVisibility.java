@@ -7,7 +7,21 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** One bounded graph fill per account/version, with fresh fences around the consuming SQL. */
+/**
+ * Log visibility for two kinds of caller.
+ *
+ * <p><b>Targeted checks</b> ({@link #readable}) are answered per log tree by {@code check} (design
+ * slice 2, {@link CachedLogReadability}): shared, item-invalidated tree facts evaluated in Java, so
+ * an agent step in one tree reloads nothing for any other tree or account. When it declines, the
+ * caller's {@code information_log_readable} predicate decides, exactly as before the cache.
+ *
+ * <p><b>Collection reads</b> ({@link #read}) still consume one bounded deny set per account,
+ * versioned on READABILITY and AUTHORITY, with fresh fences around the consuming SQL. Their
+ * consumers filter arbitrary pages of conversations, orchestrations and inbox items with {@code NOT
+ * IN (deny set)} before ordering and LIMIT, so the logs they will touch are not known in advance;
+ * deriving the set from trees would mean loading every tree, which is the whole-table scan the deny
+ * set already performs once per account and version.
+ */
 public final class JdbcInformationLogVisibility implements InformationLogVisibility {
   /** The cache's FETCH principal: deny-set loads use this cache's slots, not the account's. */
   static final String FETCHER = "information-log-visibility";
@@ -19,16 +33,29 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
   private final ProjectionCache<Facts> cache;
   private final ProjectionVersions versions;
   private final ReadAdmission admission;
+  private final LogReadabilityCheck check;
 
+  /** Targeted checks always use the caller's predicate. */
   public JdbcInformationLogVisibility(
       JdbcTemplate jdbc,
       ProjectionCache<Facts> cache,
       ProjectionVersions versions,
       ReadAdmission admission) {
+    this(jdbc, cache, versions, admission, LogReadabilityCheck.none());
+  }
+
+  /** Targeted checks ask {@code check} first and the caller's predicate when it declines. */
+  public JdbcInformationLogVisibility(
+      JdbcTemplate jdbc,
+      ProjectionCache<Facts> cache,
+      ProjectionVersions versions,
+      ReadAdmission admission,
+      LogReadabilityCheck check) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.cache = Objects.requireNonNull(cache);
     this.versions = Objects.requireNonNull(versions);
     this.admission = Objects.requireNonNull(admission);
+    this.check = Objects.requireNonNull(check);
   }
 
   @Override
@@ -64,11 +91,11 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
   }
 
   /**
-   * Answers a targeted check from the account's deny set. A miss loads that set once (about two
-   * targeted checks' cost on a deployed database); later checks are free until READABILITY or
-   * AUTHORITY moves. The cache validates a hit's own token before returning it, and an ineligible
-   * caller transaction receives the authoritative marker without loading. Membership is decided in
-   * memory, so nothing can change between that validation and the verdict.
+   * Answers a targeted check from the log's trees ({@link LogReadabilityCheck}); whenever that
+   * declines — no account or log, a writing or historical caller transaction, an unaddressable or
+   * oversized tree, a cache that cannot serve, or a stale confirmation — the caller's {@code
+   * authoritative} predicate decides. The per-account deny set is not consulted, so a targeted
+   * check never loads it.
    */
   @Override
   public boolean readable(String account, String log, BooleanSupplier authoritative) {
@@ -76,16 +103,8 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
     if (account == null || log == null) return authoritative.getAsBoolean();
     if (account.isBlank())
       throw new IllegalArgumentException("Current account required for log visibility");
-    var facts =
-        cache.read(
-            new SnapshotCache.Key("blocked-logs", ProjectionCache.fingerprint(account)),
-            true,
-            () -> admission.read(FETCHER, ReadAdmission.Work.FETCH, () -> load(account)),
-            Facts::authoritative,
-            value -> value.blocked().map(JdbcInformationLogVisibility::weight).orElse(1024L));
-    var blocked = facts.blocked();
-    if (blocked.isEmpty()) return authoritative.getAsBoolean();
-    return !blocked.get().contains(log);
+    var verdict = check.readable(account, log);
+    return verdict.isPresent() ? verdict.get() : authoritative.getAsBoolean();
   }
 
   private Facts load(String account) {

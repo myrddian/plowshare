@@ -4,6 +4,9 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -31,6 +34,18 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
 
   static final String KNOWLEDGE_ACCESS_CHANNEL = "plowshare_knowledge_access_changes";
   static final String KNOWLEDGE_REVOCATIONS_CHANNEL = "plowshare_knowledge_revocations";
+
+  /**
+   * Keyed item hints (migration V257): {@code <domain>|<item>|<item>...}, or {@code <domain>|*} for
+   * every item of the domain. Older binaries do not listen here.
+   */
+  static final String ITEM_CHANNEL = "plowshare_item_changes";
+
+  /**
+   * Item hints retained from one poll per domain. A burst beyond this becomes the domain's fallback
+   * item, which invalidates as much as a domain change does.
+   */
+  static final int MAX_POLLED_ITEMS = 4096;
 
   /**
    * Delivery probes. Every server listens on this one fixed channel, so each session prefixes its
@@ -138,6 +153,7 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
         jdbc.execute("LISTEN " + PROJECTION_V2_CHANNEL);
         jdbc.execute("LISTEN " + KNOWLEDGE_ACCESS_CHANNEL);
         jdbc.execute("LISTEN " + KNOWLEDGE_REVOCATIONS_CHANNEL);
+        jdbc.execute("LISTEN " + ITEM_CHANNEL);
         if (probes) jdbc.execute("LISTEN " + HEARTBEAT_CHANNEL);
         // LISTEN is transactional: baseline reads are forbidden until this commit has succeeded.
         connection.commit();
@@ -150,6 +166,11 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
 
     @Override
     public Set<ProjectionVersions.Domain> poll(Duration timeout) {
+      return pollChanges(timeout).domains();
+    }
+
+    @Override
+    public Changes pollChanges(Duration timeout) {
       Objects.requireNonNull(timeout);
       long millis = timeout.toMillis();
       if (millis < 1 || millis > Integer.MAX_VALUE)
@@ -158,10 +179,15 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
       try {
         PGNotification[] notifications = postgres.getNotifications((int) millis);
         var changed = EnumSet.noneOf(ProjectionVersions.Domain.class);
+        var items = new HashMap<ProjectionVersions.Domain, Set<ProjectionVersions.Item>>();
         if (notifications != null) {
           for (PGNotification notification : notifications) {
             if (HEARTBEAT_CHANNEL.equals(notification.getName())) {
               echoed = Math.max(echoed, echo(notification.getParameter()));
+              continue;
+            }
+            if (ITEM_CHANNEL.equals(notification.getName())) {
+              items(notification.getParameter(), items);
               continue;
             }
             if (!CHANNEL.equals(notification.getName())
@@ -169,30 +195,66 @@ public final class PostgresProjectionNotificationSource implements ProjectionNot
                 && !PROJECTION_V2_CHANNEL.equals(notification.getName())
                 && !KNOWLEDGE_ACCESS_CHANNEL.equals(notification.getName())
                 && !KNOWLEDGE_REVOCATIONS_CHANNEL.equals(notification.getName())) continue;
-            changed.add(
-                switch (notification.getParameter()) {
-                  case "documents" -> ProjectionVersions.Domain.DOCUMENTS;
-                  case "search" -> ProjectionVersions.Domain.SEARCH;
-                  case "schedules" -> ProjectionVersions.Domain.SCHEDULES;
-                  case "relay" -> ProjectionVersions.Domain.RELAY;
-                  case "transcripts" -> ProjectionVersions.Domain.TRANSCRIPTS;
-                  case "authority" -> ProjectionVersions.Domain.AUTHORITY;
-                  case "observations" -> ProjectionVersions.Domain.OBSERVATIONS;
-                  case "knowledge_access" -> ProjectionVersions.Domain.KNOWLEDGE_ACCESS;
-                  case "knowledge_revocations" -> ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS;
-                  case "readability" -> ProjectionVersions.Domain.READABILITY;
-                  case "queues" -> ProjectionVersions.Domain.QUEUES;
-                  case "progress" -> ProjectionVersions.Domain.PROGRESS;
-                  case "types" -> ProjectionVersions.Domain.TYPES;
-                  case "extractions" -> ProjectionVersions.Domain.EXTRACTIONS;
-                  default -> throw unavailable();
-                });
+            changed.add(domain(notification.getParameter()));
           }
         }
-        return Set.copyOf(changed);
+        var selected = new HashSet<ProjectionVersions.Item>();
+        items.values().forEach(selected::addAll);
+        return new Changes(changed, selected);
       } catch (SQLException failure) {
         throw unavailable();
       }
+    }
+
+    /**
+     * Adds one keyed payload. An unknown or untracked domain fails the session like any malformed
+     * hint; an address outside the item grammar, or more than {@link #MAX_POLLED_ITEMS} items,
+     * widens to the domain's fallback item rather than dropping a change.
+     */
+    private static void items(
+        String payload, Map<ProjectionVersions.Domain, Set<ProjectionVersions.Item>> items) {
+      if (payload == null) throw unavailable();
+      String[] parts = payload.split("\\|", -1);
+      var domain = domain(parts[0]);
+      if (!domain.itemTracked() || parts.length < 2) throw unavailable();
+      var all = ProjectionVersions.Item.all(domain);
+      var selected = items.computeIfAbsent(domain, ignored -> new HashSet<>());
+      if (selected.contains(all)) return;
+      for (int index = 1; index < parts.length; index++) {
+        ProjectionVersions.Item item;
+        try {
+          item = new ProjectionVersions.Item(domain, parts[index]);
+        } catch (IllegalArgumentException malformed) {
+          item = all;
+        }
+        if (item.isAll() || selected.size() >= MAX_POLLED_ITEMS) {
+          selected.clear();
+          selected.add(all);
+          return;
+        }
+        selected.add(item);
+      }
+    }
+
+    private static ProjectionVersions.Domain domain(String name) {
+      if (name == null) throw unavailable();
+      return switch (name) {
+        case "documents" -> ProjectionVersions.Domain.DOCUMENTS;
+        case "search" -> ProjectionVersions.Domain.SEARCH;
+        case "schedules" -> ProjectionVersions.Domain.SCHEDULES;
+        case "relay" -> ProjectionVersions.Domain.RELAY;
+        case "transcripts" -> ProjectionVersions.Domain.TRANSCRIPTS;
+        case "authority" -> ProjectionVersions.Domain.AUTHORITY;
+        case "observations" -> ProjectionVersions.Domain.OBSERVATIONS;
+        case "knowledge_access" -> ProjectionVersions.Domain.KNOWLEDGE_ACCESS;
+        case "knowledge_revocations" -> ProjectionVersions.Domain.KNOWLEDGE_REVOCATIONS;
+        case "readability" -> ProjectionVersions.Domain.READABILITY;
+        case "queues" -> ProjectionVersions.Domain.QUEUES;
+        case "progress" -> ProjectionVersions.Domain.PROGRESS;
+        case "types" -> ProjectionVersions.Domain.TYPES;
+        case "extractions" -> ProjectionVersions.Domain.EXTRACTIONS;
+        default -> throw unavailable();
+      };
     }
 
     /** This session's probe sequence, or 0 for another session's probe. */

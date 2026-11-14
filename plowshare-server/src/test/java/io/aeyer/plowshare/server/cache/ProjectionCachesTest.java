@@ -33,19 +33,19 @@ class ProjectionCachesTest {
   }
 
   @Test
-  void projectionCountLimitRejectsBeforeAllocatingAnotherLifecycle() {
+  void everyProjectionGetsALineWithoutACountLimitAndAllShareOneBudget() {
     var signals = new VersionedProjectionCacheTest.Signals();
     try (var factory = new ProjectionCaches(versions(), signals, properties(1))) {
-      factory.create("search", DOMAINS);
-      assertThrows(IllegalStateException.class, () -> factory.create("documents", DOMAINS));
-      assertEquals(1, signals.observers.size());
-      assertEquals(0, signals.disposed.get());
+      for (int index = 0; index < 40; index++) factory.create("projection-" + index, DOMAINS);
+      assertEquals(40, signals.observers.size());
+      assertEquals(0, factory.residentBytes());
+      assertEquals(1L << 40, factory.residentBudgetBytes());
     }
-    assertEquals(1, signals.disposed.get());
+    assertEquals(40, signals.disposed.get());
   }
 
   @Test
-  void failedSubscriptionDoesNotConsumeTheOnlyProjectionReservation() {
+  void failedSubscriptionLeavesNoLineBehind() {
     var signals = spy(new VersionedProjectionCacheTest.Signals());
     doThrow(new IllegalStateException("Subscription fixture unavailable"))
         .doCallRealMethod()
@@ -161,7 +161,7 @@ class ProjectionCachesTest {
         Duration.ofSeconds(1),
         Duration.ofSeconds(1),
         32,
-        projections,
-        2);
+        2,
+        1L << 40);
   }
 }

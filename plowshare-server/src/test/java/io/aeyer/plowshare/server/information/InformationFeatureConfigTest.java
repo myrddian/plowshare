@@ -131,8 +131,8 @@ class InformationFeatureConfigTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(1),
             128,
-            8,
-            4));
+            4,
+            1L << 40));
   }
 
   private final InformationNavigationRepository repository =

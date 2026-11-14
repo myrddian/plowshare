@@ -289,7 +289,7 @@ class SearchCacheDatabaseTest {
               Duration.ofSeconds(1),
               128,
               2,
-              2);
+              1L << 40);
       caches = new ProjectionCaches(versions, new ReadySignals(), properties);
       reader =
           new DocumentStore(

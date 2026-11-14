@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.reads;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -106,10 +107,12 @@ public final class BoundedReadAdmission implements ReadAdmission {
   }
 
   /**
-   * Waits in arrival order for one of its cache's FETCH slots for at most {@code fetchWaitMillis}.
-   * The principal is the cache, never the requester; {@code fetches-total} bounds all caches. A
-   * fetch holds one slot for one load, so the wait is bounded by the loads ahead of it; the
-   * deadline only turns a stuck load into a refusal rather than an indefinite park.
+   * Waits in arrival order for one of its cache's FETCH slots until the request's {@link
+   * ReadDeadline}: inside a cache read the wait uses what remains of that read's budget, so the
+   * slot wait and the cache's reload wait share one deadline. Outside one it waits at most {@code
+   * fetchWaitMillis}. The principal is the cache, never the requester; {@code fetches-total} bounds
+   * all caches. A fetch holds one slot for one load, so the wait is bounded by the loads ahead of
+   * it; the deadline only turns a stuck load into a refusal rather than an indefinite park.
    */
   private synchronized Lease awaitFetch(String principal) {
     var key = key(principal, Work.FETCH);
@@ -119,9 +122,7 @@ public final class BoundedReadAdmission implements ReadAdmission {
     if (fetching.size() >= MAX_FETCH_WAITERS) throw rejectedRead();
     var ticket = new Key(principal, Work.FETCH);
     fetching.add(ticket);
-    long deadline =
-        System.nanoTime()
-            + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(scheduling.fetchWaitMillis());
+    long deadline = ReadDeadline.deadlineNanos(Duration.ofMillis(scheduling.fetchWaitMillis()));
     try {
       while (true) {
         // The oldest waiter whose cache has a free slot goes next, so one busy cache never
