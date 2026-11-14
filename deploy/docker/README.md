@@ -143,9 +143,11 @@ pipeline steps; these files target Docker Compose.
 The shipped telemetry is opt-in and has no default addresses.
 
 - **PostgreSQL** always preloads `pg_stat_statements` and `auto_explain` (a restart is
-  needed to change this; migration V259 creates the extension's views). Statements
-  slower than `PLOWSHARE_PG_SLOW_MS` and plans slower than
-  `PLOWSHARE_PG_AUTO_EXPLAIN_MS` (both default 1000 ms) are logged.
+  needed to change this; migration V259 creates the extension's views). Logging of
+  statements slower than `PLOWSHARE_PG_SLOW_MS` and plans slower than
+  `PLOWSHARE_PG_AUTO_EXPLAIN_MS` is **off by default** (-1). Enabling either writes
+  SQL statement text to the PostgreSQL container log; bind parameters are never
+  logged.
 - **Server metrics**: set `PLOWSHARE_MANAGEMENT_PORT` and `PLOWSHARE_MANAGEMENT_BIND`
   together in the server environment (an overlay adds them to the `server` service)
   to serve `/actuator/prometheus` on a separate listener; the entrypoint refuses one
@@ -153,8 +155,12 @@ The shipped telemetry is opt-in and has no default addresses.
   authentication, so make it reachable only by Prometheus (shared network or an
   overlay `ports` entry bound to a private address).
 - **PostgreSQL metrics**: `docker compose --profile monitoring up -d postgres-exporter`
-  starts the pinned exporter. It publishes no host port and reuses the database
-  password secret; Prometheus reaches it on the compose network at port 9187, or an
+  starts the pinned exporter. It publishes no host port and connects as its own
+  role, not the owner. Before starting it, create the role once as the database
+  owner (placeholder password only) and put the same password in
+  `secrets/monitoring-database-password` under the state root:
+  `CREATE ROLE plowshare_monitor LOGIN PASSWORD '<from the secret>'; GRANT pg_monitor TO plowshare_monitor;`
+  (set `PLOWSHARE_MONITORING_DB_USER` to use another role name); Prometheus reaches it on the compose network at port 9187, or an
   operator overlay adds `ports`. Its custom queries export `queryid` (never statement
   text), counts, time, rows and buffer blocks for the top 50 statements by total
   time, plus table scan counters.

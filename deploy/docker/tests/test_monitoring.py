@@ -32,6 +32,24 @@ class ComposeTelemetryTests(unittest.TestCase):
         self.assertIn("track_io_timing=on", command)
         self.assertIn("pg_stat_statements.track=top", command)
 
+    def test_statement_logging_is_off_by_default_and_never_logs_parameters(self):
+        command = service_block("postgres")
+        self.assertIn("log_min_duration_statement=${PLOWSHARE_PG_SLOW_MS:--1}", command)
+        self.assertIn("auto_explain.log_min_duration=${PLOWSHARE_PG_AUTO_EXPLAIN_MS:--1}", command)
+        for setting in (
+            "log_parameter_max_length=0",
+            "log_parameter_max_length_on_error=0",
+            "auto_explain.log_parameter_max_length=0",
+        ):
+            self.assertRegex(command, rf"(?m)^      - {re.escape(setting)}$")
+
+    def test_exporter_uses_its_own_least_privilege_role_and_secret(self):
+        block = service_block("postgres-exporter")
+        self.assertNotIn("database-password", block.replace("monitoring-database-password", ""))
+        self.assertIn("monitoring-database-password", block)
+        self.assertNotRegex(block, r"DATA_SOURCE_USER: plowshare\s*$")
+        self.assertIn("PLOWSHARE_MONITORING_DB_USER:-plowshare_monitor", block)
+
     def test_exporter_is_opt_in_unpublished_and_pinned(self):
         block = service_block("postgres-exporter")
         self.assertRegex(block, r"profiles: \[monitoring\]")

@@ -11,7 +11,8 @@ services:
     volumes:
       - ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/postgres:/var/lib/postgresql/data
     # pg_stat_statements and auto_explain must be preloaded; changing them needs a restart.
-    # Statements slower than the thresholds (milliseconds) are logged, with plans.
+    # The slow-statement and plan thresholds (milliseconds) default to -1 (off): enabling
+    # them writes SQL statement text to the container log. Bind values are never logged.
     command:
       - postgres
       - -c
@@ -29,11 +30,17 @@ services:
       - -c
       - track_io_timing=on
       - -c
-      - auto_explain.log_min_duration=${PLOWSHARE_PG_AUTO_EXPLAIN_MS:-1000}
+      - auto_explain.log_min_duration=${PLOWSHARE_PG_AUTO_EXPLAIN_MS:--1}
       - -c
       - auto_explain.log_format=json
       - -c
-      - log_min_duration_statement=${PLOWSHARE_PG_SLOW_MS:-1000}
+      - log_min_duration_statement=${PLOWSHARE_PG_SLOW_MS:--1}
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
+      - -c
+      - auto_explain.log_parameter_max_length=0
     shm_size: 256m
     mem_limit: 3g
     restart: unless-stopped
@@ -102,12 +109,12 @@ services:
     profiles: [monitoring]
     environment:
       DATA_SOURCE_URI: postgres:5432/plowshare?sslmode=disable
-      DATA_SOURCE_USER: plowshare
-      DATA_SOURCE_PASS_FILE: /run/secrets/database-password
+      DATA_SOURCE_USER: ${PLOWSHARE_MONITORING_DB_USER:-plowshare_monitor}
+      DATA_SOURCE_PASS_FILE: /run/secrets/monitoring-database-password
     command:
       - --extend.query-path=/etc/postgres-exporter/queries.yaml
     secrets:
-      - database-password
+      - monitoring-database-password
     volumes:
       - ../monitoring/postgres-exporter-queries.yaml:/etc/postgres-exporter/queries.yaml:ro
     depends_on:
@@ -126,3 +133,5 @@ secrets:
     file: ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/secrets/database-password
   admin-password:
     file: ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/secrets/admin-password
+  monitoring-database-password:
+    file: ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/secrets/monitoring-database-password

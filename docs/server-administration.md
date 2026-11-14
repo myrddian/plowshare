@@ -461,7 +461,9 @@ The Docker deployment wires this up without defaults: when
 entrypoint passes the settings above (one without the other stops startup), and
 `PLOWSHARE_JFR_DIR` starts a bounded flight recording that includes the opt-in
 `plowshare.JdbcExecute` event. PostgreSQL preloads `pg_stat_statements` and
-`auto_explain`, and an optional exporter profile exposes top statements by `queryid`.
+`auto_explain`, both slow-statement logging thresholds are off by default (enabling them
+writes SQL statement text, not parameters, to the PostgreSQL container log), and an optional
+exporter profile, using its own `pg_monitor` role, exposes top statements by `queryid`.
 The statement-count meters `plowshare.jdbc.statements`,
 `plowshare.authority.admission.checks`, `plowshare.authority.session.checks` and
 `plowshare.operation.statements` are charted in `deploy/monitoring/grafana-plowshare.json`.
