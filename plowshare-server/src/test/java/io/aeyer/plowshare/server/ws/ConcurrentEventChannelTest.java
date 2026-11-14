@@ -7,12 +7,16 @@ import static org.mockito.Mockito.*;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.protocol.transport.*;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot;
 import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.agents.Watchers;
+import io.aeyer.plowshare.server.auth.SessionAuthority;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
@@ -167,8 +171,9 @@ class ConcurrentEventChannelTest {
   }
 
   /** Counts session checks for one concurrent request whose handler asks the fence three times. */
-  private int sessionChecksPerRequest(java.time.Duration bound) throws Exception {
-    var accounts = mock(io.aeyer.plowshare.server.auth.SessionAuthority.class);
+  private int sessionChecksPerRequest(Duration bound) throws Exception {
+    var snapshot = mock(AuthoritySnapshot.class);
+    var accounts = mock(SessionAuthority.class);
     when(accounts.sessionCurrent(anyString(), anyLong())).thenReturn(true);
     var router =
         new FrameRouter(
@@ -184,7 +189,7 @@ class ConcurrentEventChannelTest {
             router,
             handler -> {
               handler.useSocketAuthorization(new SocketAuthorization(accounts));
-              handler.useSessionCheckBound(bound, () -> 0L);
+              handler.configureSessionCheckReuse(bound, () -> Optional.of(snapshot), () -> 0L);
             })) {
       fixture.socket.getAttributes().put("plowshare.sessionVersion", 1L);
       fixture.send("select", ConcurrentDispatch.TYPE, Map.of("mode", ConcurrentDispatch.MODE));
@@ -201,9 +206,9 @@ class ConcurrentEventChannelTest {
   void one_request_costs_one_session_check_inside_the_bound() throws Exception {
     // Frame receipt plus the request's own entry check; the handler, the post-handler fence and
     // the disclosure fence reuse the entry result instead of asking again.
-    assertEquals(2, sessionChecksPerRequest(java.time.Duration.ofSeconds(2)));
+    assertEquals(2, sessionChecksPerRequest(Duration.ofSeconds(2)));
     // Before the change (and with notifications disabled) every one of those asked.
-    assertTrue(sessionChecksPerRequest(java.time.Duration.ZERO) >= 6);
+    assertTrue(sessionChecksPerRequest(Duration.ZERO) >= 6);
   }
 
   @Test

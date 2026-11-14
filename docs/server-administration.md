@@ -209,6 +209,17 @@ Present only when a meter registry exists (it does, with actuator). Each `plowsh
 | `plowshare.authority.session.checks` | counter | `outcome` | How each socket session was decided: `snapshot` (accepted from memory), `sql` (accepted by the stored authority), `refused` (the final answer was not current). |
 | `plowshare.operation.statements` | distribution summary (percentile histogram) | `kind` | JDBC statements one operation executed, recorded when it ends. `kind` is `tool_call`, `job_step` or `socket_request`; a job step includes its tool calls. Counted per thread: work a tool hands to another thread, or a concurrent socket handler completes elsewhere, is not in its operation. Registered with the first statement meter, zero until used. |
 
+Socket session checks are reused within one request: after a request's first successful
+session check, the handler, the post-handler fence, the disclosure fence and wait loops
+reuse it only while an authority snapshot is present, it is the same snapshot instance
+that was current when the success was recorded, and the success is younger than
+`plowshare.projection-cache.notified.staleness` (2 s by default). A new AUTHORITY version
+(including a session revocation), a lost snapshot (for example a down notification
+listener) or the bound ending triggers a real check; a refusal is never reused. Revocation
+therefore reaches a running request or a socket's delivery fence within the snapshot's own
+lag, with no extra stacking. With notifications disabled every check is exact. New frames
+and the one-second sweep still check on their own.
+
 The SQL text, its hash, identities and project or topic names are never tags, so each
 set is constant whatever the traffic; statement attribution stays in the opt-in JFR
 `plowshare.JdbcExecute` event. Comparing the `statements` count before and after a

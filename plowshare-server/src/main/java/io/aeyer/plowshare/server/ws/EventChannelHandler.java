@@ -9,8 +9,10 @@ import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.protocol.transport.ConcurrentDispatch;
+import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.agents.JobEvents;
 import io.aeyer.plowshare.server.agents.Watchers;
+import io.aeyer.plowshare.server.cache.ProjectionNotificationProperties;
 import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.events.SpeakerHandles;
 import io.aeyer.plowshare.server.faults.Fault;
@@ -19,6 +21,7 @@ import io.aeyer.plowshare.server.pool.OperationStatements;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -30,6 +33,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -600,12 +604,14 @@ public final class EventChannelHandler extends TextWebSocketHandler
   private SocketAuthorization socketAuthorization;
 
   /**
-   * How long one request (or one socket's delivery fence) may reuse a session check that succeeded.
-   * Zero, the default for fixtures and for disabled notifications, checks every time.
+   * How long one request (or one socket's delivery fence) may reuse a session check that succeeded,
+   * and the snapshot source that gates it; see {@link RequestSessionValidity}. Zero, the default
+   * for fixtures and for disabled notifications, checks every time.
    */
-  private java.time.Duration sessionCheckBound = java.time.Duration.ZERO;
+  private Duration sessionCheckBound = Duration.ZERO;
 
-  private java.util.function.LongSupplier sessionClock = System::nanoTime;
+  private AuthoritySnapshots authoritySnapshots = AuthoritySnapshots.none();
+  private LongSupplier sessionClock = System::nanoTime;
 
   @org.springframework.beans.factory.annotation.Autowired
   public void useSocketAuthorization(SocketAuthorization authorization) {
@@ -613,18 +619,22 @@ public final class EventChannelHandler extends TextWebSocketHandler
   }
 
   /**
-   * Bounds session-check reuse by {@code plowshare.projection-cache.notified.staleness}; with
-   * notifications disabled the operator chose exact checks, so nothing is reused.
+   * Bounds session-check reuse by {@code plowshare.projection-cache.notified.staleness} and the
+   * authority snapshot; with notifications disabled the operator chose exact checks, so nothing is
+   * reused.
    */
   @org.springframework.beans.factory.annotation.Autowired(required = false)
-  public void useSessionCheckBound(
-      io.aeyer.plowshare.server.cache.ProjectionNotificationProperties notified) {
-    this.sessionCheckBound = notified.enabled() ? notified.staleness() : java.time.Duration.ZERO;
+  public void useSessionCheckReuse(
+      ProjectionNotificationProperties notified, AuthoritySnapshots snapshots) {
+    this.sessionCheckBound = notified.enabled() ? notified.staleness() : Duration.ZERO;
+    this.authoritySnapshots = Objects.requireNonNull(snapshots);
   }
 
-  /** Test seam: the clock and bound that {@link RequestSessionValidity} instances use. */
-  void useSessionCheckBound(java.time.Duration bound, java.util.function.LongSupplier nanos) {
+  /** Test seam: the bound, snapshot source and clock that {@link RequestSessionValidity} uses. */
+  void configureSessionCheckReuse(
+      Duration bound, AuthoritySnapshots snapshots, LongSupplier nanos) {
     this.sessionCheckBound = bound;
+    this.authoritySnapshots = snapshots;
     this.sessionClock = nanos;
   }
 
@@ -646,7 +656,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
     return socketAuthorization == null
         ? null
         : new RequestSessionValidity(
-            socketAuthorization, socket, sessionClock, sessionCheckBound, sessionClock.getAsLong());
+            socketAuthorization, socket, sessionClock, sessionCheckBound, authoritySnapshots);
   }
 
   @Override
@@ -880,7 +890,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
                       advertisedRequestDepth());
           // Per socket, not per request: the instance reuses a success only for the bound and
           // rechecks after it, so a long-lived socket still sees a revocation within the bound.
-          // The frame-receipt check that admitted this selection frame seeds it.
+          // Unseeded: its first use checks, and the check then holds for the same bounded interval.
           delivery.validity = fence(socket, delivery, sessionValidity(socket));
         }
       } else {
@@ -935,15 +945,15 @@ public final class EventChannelHandler extends TextWebSocketHandler
       Delivery delivery,
       String frame,
       ConcurrentRequests.Delivery delivered) {
+    var requestSession = sessionValidity(socket);
+    // The entry check is this request's one session check; the instance carries its result to the
+    // handler, the post-handler fence, the disclosure fence and every wait iteration.
     if (!socket.isOpen()
         || !delivery.running
-        || socketAuthorization != null && !socketAuthorization.current(socket)) {
+        || requestSession != null && !requestSession.verify()) {
       delivered.run();
       return java.util.concurrent.CompletableFuture.completedFuture(null);
     }
-    // The entry check above is this request's one session check; the instance carries its result to
-    // the handler, the post-handler fence, the disclosure fence and every wait iteration.
-    var requestSession = sessionValidity(socket);
     try {
       var correlation = correlationOf(frame);
       String id = text(correlation.get("id"));
