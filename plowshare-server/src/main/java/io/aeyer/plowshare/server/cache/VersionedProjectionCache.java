@@ -18,7 +18,9 @@ import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -123,6 +125,12 @@ public final class VersionedProjectionCache<T>
   private final ConcurrentHashMap<SnapshotCache.Dependency, Long> itemChanged =
       new ConcurrentHashMap<>();
   private final ConcurrentHashMap<SnapshotCache.Key, Trusted> trusted = new ConcurrentHashMap<>();
+  // Item-scoped unconfirmed reads only: the counters under which each key's value was last stored,
+  // so a later read can find the stored entry without capturing counters first. A stale or evicted
+  // entry is simply not found and is loaded again; the map vouches for nothing.
+  private final ConcurrentHashMap<SnapshotCache.Key, ProjectionItemVersions.ItemToken> stored =
+      new ConcurrentHashMap<>();
+  private static final int STORED_KEYS = 4096;
   private final ProjectionCacheStatistics statistics = new ProjectionCacheStatistics();
 
   ProjectionCacheStatistics statistics() {
@@ -449,6 +457,125 @@ public final class VersionedProjectionCache<T>
         uncachedLoader);
   }
 
+  @Override
+  public Optional<Unconfirmed<T>> readUnconfirmed(
+      SnapshotCache.Key key,
+      Set<ProjectionVersions.Item> items,
+      Supplier<T> boundedLoader,
+      ToLongFunction<T> weight) {
+    Objects.requireNonNull(key);
+    Objects.requireNonNull(boundedLoader);
+    Objects.requireNonNull(weight);
+    if (itemVersions == null) throw new IllegalStateException("Domain-scoped projection");
+    var selected = Set.copyOf(items);
+    if (selected.isEmpty() || selected.stream().anyMatch(item -> !domains.contains(item.domain())))
+      throw new IllegalArgumentException("Items must belong to this projection's domains");
+    return ReadDeadline.within(budget, () -> unconfirmed(key, selected, boundedLoader, weight));
+  }
+
+  @Override
+  public void invalidate(ProjectionVersions.Item item) {
+    if (itemVersions == null) throw new IllegalStateException("Domain-scoped projection");
+    if (!domains.contains(item.domain()))
+      throw new IllegalArgumentException("Item must belong to this projection's domains");
+    itemChanges(Set.of(item));
+  }
+
+  private Optional<Unconfirmed<T>> unconfirmed(
+      SnapshotCache.Key key,
+      Set<ProjectionVersions.Item> items,
+      Supplier<T> boundedLoader,
+      ToLongFunction<T> weight) {
+    if (!ready()) {
+      statistics.record(BYPASS_NOT_READY);
+      return Optional.empty();
+    }
+    var known = stored.get(key);
+    if (known != null && known.counters().keySet().equals(withFallbacks(items))) {
+      var hit = storedValue(request(key, null, known));
+      if (hit != null && ready()) {
+        statistics.record(VERSIONED_HIT);
+        return Optional.of(new Unconfirmed<>(hit.value(), hit.items()));
+      }
+    }
+    var captured = itemVersions.captureItems(items);
+    if (captured.isEmpty()) {
+      statistics.record(BYPASS_INELIGIBLE);
+      return Optional.empty();
+    }
+    var token = captured.orElseThrow();
+    boolean[] loaded = {false};
+    try (var read =
+        cache.readInline(
+            request(key, null, token),
+            () -> {
+              loaded[0] = true;
+              statistics.record(LOAD);
+              T value = Objects.requireNonNull(boundedLoader.get());
+              long charged = weight.applyAsLong(value);
+              // No counter comparison here: the caller confirms every token it read in one
+              // statement. A value loaded after a later write stays stored under the older
+              // counters and so can never be confirmed.
+              if (charged < 1 || charged > maxWeight || !itemVersions.canShare())
+                throw new Bypass();
+              return new SnapshotCache.Loaded<>(
+                  token.sourceVersion(),
+                  new Versioned<>(null, token, value),
+                  charged + 2048L + 512L * token.counters().size());
+            })) {
+      var value = await(read, loaded[0]).value();
+      if (!ready()) {
+        statistics.record(BYPASS_STALE);
+        return Optional.empty();
+      }
+      if (stored.size() >= STORED_KEYS) stored.clear();
+      stored.put(key, value.items());
+      statistics.record(loaded[0] ? LOADED_RETURN : VERSIONED_HIT);
+      return Optional.of(new Unconfirmed<>(value.value(), value.items()));
+    } catch (CompletionException failed) {
+      Throwable cause = failed.getCause();
+      // The same refusals as a versioned read: capacity and the deadline are busy, never an
+      // extra direct load; an inconsistent or reentrant request is a programming error.
+      if (cause instanceof SnapshotCache.CacheException failure
+          && failure.failure() == SnapshotCache.Failure.CAPACITY) {
+        statistics.record(CAPACITY_REJECTED);
+        throw new ReadUnavailableException();
+      }
+      if (cause instanceof TimeoutException) throw deadlinePassed();
+      if (cause instanceof SnapshotCache.CacheException failure
+          && (failure.failure() == SnapshotCache.Failure.REENTRANT_LOAD
+              || failure.failure() == SnapshotCache.Failure.INCONSISTENT_REQUEST)) throw failure;
+      if (!(cause instanceof Bypass) && !(cause instanceof SnapshotCache.CacheException)) {
+        if (cause instanceof RuntimeException runtime) throw runtime;
+        if (cause instanceof Error fatal) throw fatal;
+        throw failed;
+      }
+      statistics.record(cause instanceof Bypass ? BYPASS_LOAD_REFUSED : BYPASS_CACHE_REFUSED);
+      return Optional.empty();
+    }
+  }
+
+  /** {@code items} plus each of their domains' fallback item, as a captured token holds them. */
+  private static Set<ProjectionVersions.Item> withFallbacks(Set<ProjectionVersions.Item> items) {
+    var all = new HashSet<>(items);
+    for (var item : items) all.add(ProjectionVersions.Item.all(item.domain()));
+    return all;
+  }
+
+  /** The value stored under exactly this request, or null; never starts a load. */
+  private Versioned<T> storedValue(SnapshotCache.Request request) {
+    try (var read =
+        cache.readInline(
+            request,
+            () -> {
+              throw new Bypass();
+            })) {
+      return read.result().toCompletableFuture().join().value();
+    } catch (CompletionException | SnapshotCache.CacheException refused) {
+      return null;
+    }
+  }
+
   private SnapshotCache.Request request(
       SnapshotCache.Key key,
       ProjectionVersions.Token token,
@@ -626,9 +753,10 @@ public final class VersionedProjectionCache<T>
   /**
    * Spring-managed transactions are the only way server code holds a database transaction open
    * across statements. Outside one, every statement commits on its own, so the caller cannot see
-   * writes the cache has not. A read-only READ COMMITTED transaction cannot write.
+   * writes the cache has not. A read-only READ COMMITTED transaction cannot write. Composite
+   * readers of {@link #readUnconfirmed} apply the same rule before they start.
    */
-  private static boolean callerHasNoOwnWrites() {
+  public static boolean callerHasNoOwnWrites() {
     if (!TransactionSynchronizationManager.isActualTransactionActive()) return true;
     if (!TransactionSynchronizationManager.isCurrentTransactionReadOnly()) return false;
     Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();

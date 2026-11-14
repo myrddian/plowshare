@@ -259,6 +259,12 @@ and do not replay a load. Authority snapshot load attempts use
 `projection="authority-snapshot-v1",event="load"`; `loaded_return` counts the subset
 that could be returned through the cache.
 
+`knowledge-facts-v1` holds the shared revision and resource facts of the targeted
+readability check. Its reads are confirmed together, one statement per check, after
+the check has read every fact it needs: there `versioned_hit` and `loaded_return`
+count facts returned before that confirmation. A failed confirmation invalidates the
+stale facts and the check falls back to its SQL statement.
+
 `plowshare.projection.cache.backing` exports existing backing-cache counters with
 `projection` and `event` tags: `hits`, `misses`, `coalesced`, `evictions`, `bypassed`,
 `invalidations` and `load_failures`. These describe activity before final freshness

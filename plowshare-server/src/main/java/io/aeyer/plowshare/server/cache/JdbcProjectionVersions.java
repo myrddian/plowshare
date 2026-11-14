@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -284,6 +285,67 @@ public final class JdbcProjectionVersions implements ProjectionVersions, Project
               statement.setArray(4, statement.getConnection().createArrayOf("bigint", counters));
             },
             (ResultSet row) -> row.next() ? row.getBoolean(1) : null));
+  }
+
+  // Every expected item whose committed counter differs, or every item when the database identity
+  // differs. Each requested item is one primary-key probe; absent rows read as 0. A missing
+  // identity row yields one NULL row, which the caller reads as "everything is stale".
+  private static final String ITEMS_STALE =
+      """
+      SELECT expected.domain,expected.item
+      FROM snapshot_cache_identity identity
+      CROSS JOIN unnest(?::text[],?::text[],?::bigint[]) AS expected(domain,item,counter)
+      LEFT JOIN snapshot_cache_item_versions version
+        ON version.domain=expected.domain AND version.item=expected.item
+      WHERE identity.singleton
+        AND (identity.database_id<>?::uuid OR coalesce(version.counter,0)<>expected.counter)
+      UNION ALL SELECT NULL,NULL
+      WHERE NOT EXISTS(SELECT 1 FROM snapshot_cache_identity WHERE singleton)
+      """;
+
+  @Override
+  public Set<Item> staleItems(Collection<ItemToken> tokens) {
+    if (tokens == null || tokens.isEmpty())
+      throw new IllegalArgumentException("Explicit projection item tokens required");
+    var expected = new HashMap<Item, Long>();
+    var stale = new HashSet<Item>();
+    var databases = new HashSet<UUID>();
+    for (var token : tokens) {
+      databases.add(token.database());
+      token
+          .counters()
+          .forEach(
+              (item, counter) -> {
+                Long previous = expected.putIfAbsent(item, counter);
+                // Two captures of one item disagree: at least one of them is already outdated.
+                if (previous != null && !previous.equals(counter)) stale.add(item);
+              });
+    }
+    if (expected.size() > MAX_CONFIRMED_ITEMS)
+      throw new IllegalArgumentException("Too many projection items to confirm at once");
+    if (databases.size() != 1) return Set.copyOf(expected.keySet());
+    var entries = new ArrayList<>(expected.entrySet());
+    var domains = entries.stream().map(entry -> domainName(entry.getKey().domain())).toArray();
+    var addresses = entries.stream().map(entry -> entry.getKey().address()).toArray();
+    var counters = entries.stream().map(Map.Entry::getValue).toArray();
+    UUID database = databases.iterator().next();
+    authoritative.query(
+        ITEMS_STALE,
+        statement -> {
+          statement.setArray(1, statement.getConnection().createArrayOf("text", domains));
+          statement.setArray(2, statement.getConnection().createArrayOf("text", addresses));
+          statement.setArray(3, statement.getConnection().createArrayOf("bigint", counters));
+          statement.setObject(4, database);
+        },
+        row -> {
+          if (row.getString("domain") == null) {
+            stale.addAll(expected.keySet());
+            return;
+          }
+          var domain = Domain.valueOf(row.getString("domain").toUpperCase(Locale.ROOT));
+          stale.add(new Item(domain, row.getString("item")));
+        });
+    return Set.copyOf(stale);
   }
 
   private static final Comparator<Item> ITEM_ORDER =

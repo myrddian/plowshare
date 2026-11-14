@@ -6,6 +6,7 @@ import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.TR
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -16,7 +17,9 @@ import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.cache.CacheTestSupport.Value;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -80,6 +83,22 @@ class ItemProjectionCacheTest {
       checks.incrementAndGet();
       return token.counters().entrySet().stream()
           .allMatch(entry -> values.getOrDefault(entry.getKey(), 0L).equals(entry.getValue()));
+    }
+
+    final AtomicInteger confirmations = new AtomicInteger();
+
+    @Override
+    public Set<ProjectionVersions.Item> staleItems(Collection<ItemToken> tokens) {
+      confirmations.incrementAndGet();
+      var stale = new HashSet<ProjectionVersions.Item>();
+      for (var token : tokens)
+        token
+            .counters()
+            .forEach(
+                (item, counter) -> {
+                  if (!values.getOrDefault(item, 0L).equals(counter)) stale.add(item);
+                });
+      return stale;
     }
 
     @Override
@@ -166,6 +185,64 @@ class ItemProjectionCacheTest {
       assertEquals(new Value("root-a#2"), f.read(KEY_A, TREE_A), "Read-your-writes");
       assertEquals(new Value("root-b#1"), f.read(KEY_B, TREE_B));
       assertEquals(1, f.loads(KEY_B));
+    }
+  }
+
+  private static Optional<ItemProjectionCache.Unconfirmed<Value>> unconfirmed(
+      Fixture f, SnapshotCache.Key key, ProjectionVersions.Item item) {
+    return f.cache.readUnconfirmed(
+        key,
+        Set.of(item),
+        () ->
+            new Value(
+                key.selection()
+                    + "#"
+                    + f.loads
+                        .computeIfAbsent(key, ignored -> new AtomicInteger())
+                        .incrementAndGet()),
+        ignored -> 100);
+  }
+
+  @Test
+  void unconfirmedReadsServeStoredValuesWithoutAnyVersionStatement() {
+    try (var f = new Fixture()) {
+      var first = unconfirmed(f, KEY_A, TREE_A).orElseThrow();
+      unconfirmed(f, KEY_B, TREE_B).orElseThrow();
+      int captures = f.counters.captures.get();
+      var again = unconfirmed(f, KEY_A, TREE_A).orElseThrow();
+      assertEquals(first, again);
+      assertEquals(1, f.loads(KEY_A));
+      assertEquals(captures, f.counters.captures.get(), "A stored entry needs no capture");
+      assertEquals(0, f.counters.checks.get(), "Nor a per-entry version check");
+      assertEquals(
+          Set.of(), f.counters.staleItems(List.of(first.items(), again.items())), "Confirmed");
+    }
+  }
+
+  @Test
+  void aWriteCommittedAfterTheLoadIsReportedAndInvalidatesOnlyItsOwnEntry() {
+    try (var f = new Fixture()) {
+      var a = unconfirmed(f, KEY_A, TREE_A).orElseThrow();
+      var b = unconfirmed(f, KEY_B, TREE_B).orElseThrow();
+      // Another process commits a write to tree A; no hint has arrived here yet.
+      f.counters.write(TREE_A);
+      var stale = f.counters.staleItems(List.of(a.items(), b.items()));
+      assertEquals(Set.of(TREE_A), stale);
+      stale.forEach(f.cache::invalidate);
+      assertEquals(1, f.backing.statistics().entries(), "Tree B stays");
+      assertEquals(new Value("root-b#1"), unconfirmed(f, KEY_B, TREE_B).orElseThrow().value());
+      var reloaded = unconfirmed(f, KEY_A, TREE_A).orElseThrow();
+      assertEquals(new Value("root-a#2"), reloaded.value());
+      assertEquals(Set.of(), f.counters.staleItems(List.of(reloaded.items())));
+    }
+  }
+
+  @Test
+  void unconfirmedReadsDeclineWhileTheListenerIsNotReady() {
+    try (var f = new Fixture()) {
+      f.signals.state(2, false);
+      assertTrue(unconfirmed(f, KEY_A, TREE_A).isEmpty());
+      assertEquals(0, f.loads(KEY_A));
     }
   }
 

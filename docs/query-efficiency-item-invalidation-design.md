@@ -1,6 +1,7 @@
 # Item-level cache invalidation and shared read data
 
-Status: slice 0 implemented (see [Slice 0 status](#slice-0-status)); later slices proposed. It
+Status: slices 0 and 1 implemented (see [Slice 0 status](#slice-0-status) and
+[Slice 1 status](#slice-1-status)); later slices proposed. It
 extends the [query and cache strategy](query-efficiency-and-cache-design.md) and the
 [deployment follow-ups](query-efficiency-deployment-followups.md). The current projection caches,
 FETCH lane and notification freshness stay in place until each slice below replaces them. An
@@ -119,9 +120,9 @@ log check (`BusyReadRetry`). No existing projection was moved to item scope.
   held for a transaction's lifetime and flushes cannot deadlock on them. Values come from one
   sequence and are never reused. Because the rows are transactional, a versioned check needs no
   pending-transaction evidence.
-- **Items are declared before the load**, as `SnapshotCache.Request` requires. Slice 1's views,
-  whose items are only known after reading (a dependency closure), need a way to record discovered
-  items; that is not built.
+- **Items are declared before the load**, as `SnapshotCache.Request` requires. Slice 1 resolves
+  this without recording discovered items: it caches one fact per item, whose item is known before
+  its load, and walks the closure over those facts.
 - **Not done.** Counter rows are never pruned (open question above); nothing yet sizes the
   trusted map per projection.
 
@@ -144,6 +145,59 @@ log check (`BusyReadRetry`). No existing projection was moved to item scope.
     `knowledge_dependency_revisions`, `information_navigation_head` and `information_privacy_allows`.
 - **Prerequisite.** `contained_principals` has no version trigger, so a direct principal revocation
   would never invalidate a cached copy. Slice 0's migration adds it.
+
+### Slice 1 status
+
+Implemented: `InformationCatalogueRepository.readable` answers from shared facts and the authority
+snapshot (`CachedKnowledgeReadability`, `KnowledgeReadability`), and runs its SQL statement only
+when that declines. No migration; no catalogue list, facet, readiness or log-visibility read moved.
+
+- **Facts.** One item-scoped, versioned projection, `knowledge-facts-v1` (22 of the 24 allowed
+  projections are now in use, so the limit is unchanged). Each fact depends on exactly its own item
+  and is loaded with one indexed statement (`JdbcKnowledgeFactRepository`) through the projection's
+  FETCH slots:
+  - `revision:<id>`: resource, availability, whether `information_revision_allowances` has the
+    row, typed content and `explicit_only` (both immutable once the revision commits, V143/V144),
+    inputs (`information_inputs`) and linked projects (`information_links`);
+  - `resource:<id>`: home scope, root policy (audience, `private_only`, privacy principal), the
+    navigation policy converted to a typed `ownerOnly` at the repository boundary (platform and
+    project policies move `*`), the navigation head, and the reference obligations it is the
+    source of;
+  - absent and oversized rows (more than 1,024 edges of one kind) are cached as such.
+- **Deviation: scopes.** Scope kind, builtin, account, project, container ancestry, project names,
+  personal owners and contained principals come from the authority snapshot, not from `scope:<id>`
+  facts: `authority_scopes`, `projects` and `contained_principals` move the AUTHORITY version, and
+  V257's `scope:<id>` only tracks a resource's home scope, so a `scope:<id>` fact would not be
+  invalidated by a scope change. The snapshot gained `authority_accounts.builtin`,
+  `authority_scopes.container` and `contained_principals`, and Java mirrors of
+  `knowledge_read_authority`, `information_global_read_member`, `contained_knowledge_actor`,
+  `contained_scope_readable`, `contained_scope_ancestors` and `contained_scope_in_home`.
+- **Consistency.** An evaluation reads its facts unconfirmed
+  (`ItemProjectionCache.readUnconfirmed`: a stored fact costs no SQL, a missing one is captured
+  and loaded) and then confirms every item it read with one statement
+  (`ProjectionItemVersions.staleItems`). An empty result proves no fact changed after its load, so
+  data-side writes (availability, quarantine, `private_only`, policies, inputs, links, heads) are
+  seen as soon as they commit, on any process. A stale item is invalidated alone and the check
+  falls back to SQL. The authority half keeps the snapshot's notification-trusted contract: a
+  membership, grant, token or principal change may take up to the staleness bound (2 s) to apply.
+  A warm check therefore issues one statement and no permission SQL.
+- **Fallback to SQL.** A caller in a transaction that may hold its own writes (anything but none or
+  a read-only READ COMMITTED one); no authority snapshot; the fact cache not serving (listener not
+  ready, ineligible caller, refused load); an oversized fact; more facts than the projection's
+  entry limit in one evaluation; or a failed confirmation. A closure past 1,024 nodes is answered
+  `false` in Java, exactly as SQL does, when the walk fits the fact budget.
+- **Rules.** All arms of the targeted check are mirrored; none is left on SQL. The targeted check
+  binds no related resource, kind or heads filter and includes excluded revisions, so those
+  `knowledge_readable_candidates` arms do not apply. `information_readable_input_selections` (V235)
+  is log visibility (slice 2) and is not on this path. V256 added discovery routines only.
+- **Evidence.** `KnowledgeReadabilityDifferentialDatabaseTest` compares Java with the SQL statement
+  for 10 actors (users with and without roles, a server administrator, a service owner and its
+  token principal, a contained principal, its upper-case spelling, an unknown UUID and handle) ×
+  16 selections × 7 ceilings × typed view on and off (2,240 contexts), over 32–33 revisions, in 11
+  fixture states (801,920 comparisons), plus closures of exactly 1,024 and 1,025 nodes and a
+  41-revision mixed chain in four more states (1,440 comparisons).
+  `KnowledgeReadabilityInvalidationDatabaseTest` covers item invalidation and the confirmation;
+  `CachedKnowledgeReadabilityTest` covers each fallback with mocked repositories.
 
 ## Slice 2: log visibility per log
 

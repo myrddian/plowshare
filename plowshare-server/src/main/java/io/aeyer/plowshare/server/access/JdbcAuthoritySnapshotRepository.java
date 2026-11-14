@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.access;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot.Account;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot.Facts;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot.Grant;
+import io.aeyer.plowshare.server.access.AuthoritySnapshot.Knowledge;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot.Member;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot.Project;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot.Role;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -117,7 +119,23 @@ public final class JdbcAuthoritySnapshotRepository implements AuthoritySnapshotR
                     row.getInt(2),
                     row.getString(3),
                     row.getString(4)));
+    // The knowledge-read columns: builtin accounts, scope containers and contained principals.
+    var builtinAccounts =
+        rows(
+            "SELECT id FROM authority_accounts WHERE builtin IS NOT NULL ORDER BY id",
+            (row, n) -> row.getObject(1, UUID.class));
+    var containers =
+        rows(
+            "SELECT id,container FROM authority_scopes WHERE container IS NOT NULL ORDER BY id",
+            (row, n) -> Map.entry(row.getObject(1, UUID.class), row.getObject(2, UUID.class)));
+    var principals =
+        rows(
+            "SELECT id,scope_id FROM contained_principals ORDER BY id",
+            (row, n) -> Map.entry(row.getObject(1, UUID.class), row.getObject(2, UUID.class)));
     if (Objects.isNull(at)
+        || builtinAccounts.isEmpty()
+        || containers.isEmpty()
+        || principals.isEmpty()
         || accounts.isEmpty()
         || authorityAccounts.isEmpty()
         || roles.isEmpty()
@@ -142,7 +160,17 @@ public final class JdbcAuthoritySnapshotRepository implements AuthoritySnapshotR
             tokenScopes.get(),
             members.get(),
             grants.get(),
-            roleActions.get()));
+            roleActions.get(),
+            new Knowledge(
+                Set.copyOf(builtinAccounts.get()),
+                entries(containers.get()),
+                entries(principals.get()))));
+  }
+
+  private static Map<UUID, UUID> entries(List<Map.Entry<UUID, UUID>> rows) {
+    var map = new HashMap<UUID, UUID>();
+    rows.forEach(entry -> map.put(entry.getKey(), entry.getValue()));
+    return map;
   }
 
   /** Empty when the table has more than {@code limit} rows. */

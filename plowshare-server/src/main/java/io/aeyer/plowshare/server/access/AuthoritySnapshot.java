@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Immutable typed copy of the installation's authority tables, with Java evaluations of the SQL
@@ -24,8 +25,9 @@ import java.util.UUID;
  *
  * <p>Each method mirrors one SQL function clause by clause (the migration that last defined it is
  * named on the method). {@code AuthoritySnapshotDifferentialDatabaseTest} compares every method
- * with its function on generated fixtures; a migration that changes one of these functions must
- * change the matching method in the same change.
+ * with its function on generated fixtures, and {@code KnowledgeReadabilityDifferentialDatabaseTest}
+ * the knowledge-read methods ({@link #knowledgeReader} and the containment walks); a migration that
+ * changes one of these functions must change the matching method in the same change.
  *
  * <p>Time-dependent predicates use {@link #at()}, the {@code now()} of the statement that loaded
  * the facts. A snapshot is only served under a {@code ProjectionVersions} token whose window
@@ -126,6 +128,24 @@ public final class AuthoritySnapshot {
     }
   }
 
+  /**
+   * The containment and identity columns the knowledge-read functions use beyond the rows above:
+   * {@code authority_accounts.builtin} (as the set of builtin account ids), {@code
+   * authority_scopes.container} (scope id to container, only non-null rows) and {@code
+   * contained_principals} (principal id to its scope). Every table here moves the AUTHORITY version
+   * (V175, and V257 for {@code contained_principals}).
+   */
+  public record Knowledge(
+      Set<UUID> builtinAccounts, Map<UUID, UUID> containers, Map<UUID, UUID> principals) {
+    public static final Knowledge NONE = new Knowledge(Set.of(), Map.of(), Map.of());
+
+    public Knowledge {
+      builtinAccounts = Set.copyOf(builtinAccounts);
+      containers = Map.copyOf(containers);
+      principals = Map.copyOf(principals);
+    }
+  }
+
   /** The table rows, exactly as loaded. */
   public record Facts(
       Instant at,
@@ -138,7 +158,39 @@ public final class AuthoritySnapshot {
       List<TokenScope> tokenScopes,
       List<Member> members,
       List<Grant> grants,
-      List<RoleAction> roleActions) {
+      List<RoleAction> roleActions,
+      Knowledge knowledge) {
+    /**
+     * Facts without the knowledge-read columns: every knowledge-read decision then treats every
+     * account as non-builtin, every scope as uncontained and no principal as contained.
+     */
+    public Facts(
+        Instant at,
+        List<Account> accounts,
+        Map<UUID, String> authorityAccounts,
+        List<Role> roles,
+        List<Scope> scopes,
+        List<Project> projects,
+        List<ServiceToken> tokens,
+        List<TokenScope> tokenScopes,
+        List<Member> members,
+        List<Grant> grants,
+        List<RoleAction> roleActions) {
+      this(
+          at,
+          accounts,
+          authorityAccounts,
+          roles,
+          scopes,
+          projects,
+          tokens,
+          tokenScopes,
+          members,
+          grants,
+          roleActions,
+          Knowledge.NONE);
+    }
+
     /** Facts without role actions: every system-processing decision is then false. */
     public Facts(
         Instant at,
@@ -177,6 +229,7 @@ public final class AuthoritySnapshot {
       members = List.copyOf(members);
       grants = List.copyOf(grants);
       roleActions = List.copyOf(roleActions);
+      Objects.requireNonNull(knowledge);
     }
 
     /** Approximate retained bytes, for the cache's weight budget. */
@@ -191,7 +244,10 @@ public final class AuthoritySnapshot {
                   + tokens.size()
                   + tokenScopes.size()
                   + members.size()
-                  + roleActions.size())
+                  + roleActions.size()
+                  + knowledge.builtinAccounts().size()
+                  + knowledge.containers().size()
+                  + knowledge.principals().size())
           + 1024L * grants.size();
     }
   }
@@ -210,12 +266,28 @@ public final class AuthoritySnapshot {
   private final Map<UUID, List<TokenScope>> tokenScopes = new HashMap<>();
   private final Map<Long, Map<String, Member>> members = new HashMap<>();
   private final Map<UUID, Grant> grants = new HashMap<>();
+  private final Map<String, UUID> authorityAccountsByHandle = new HashMap<>();
+  private final Map<Long, List<Scope>> scopesByProject = new HashMap<>();
   private final Map<UUID, Integer> live;
   private final boolean systemProcessing;
+  private final boolean globalReadRole;
 
   public AuthoritySnapshot(Facts facts) {
     this.facts = Objects.requireNonNull(facts);
     facts.accounts().forEach(account -> accounts.put(account.handle(), account));
+    // legacy_handle is UNIQUE (V155): at most one authority account per handle.
+    facts.authorityAccounts().forEach((id, handle) -> authorityAccountsByHandle.put(handle, id));
+    facts
+        .scopes()
+        .forEach(
+            scope ->
+                scope
+                    .project()
+                    .ifPresent(
+                        project ->
+                            scopesByProject
+                                .computeIfAbsent(project, id -> new ArrayList<>())
+                                .add(scope)));
     facts.roles().forEach(role -> roles.put(role.id(), role));
     facts.scopes().forEach(scope -> scopes.put(scope.id(), scope));
     for (var project : facts.projects()) {
@@ -241,6 +313,7 @@ public final class AuthoritySnapshot {
     facts.grants().forEach(grant -> grants.put(grant.binding().id(), grant));
     live = Collections.unmodifiableMap(liveGrants());
     systemProcessing = intrinsicProcessingGrant();
+    globalReadRole = globalReadRoleAction();
   }
 
   /** The actions a SYSTEM processing grant's role must carry under the DEFAULT profile. */
@@ -520,6 +593,267 @@ public final class AuthoritySnapshot {
       chains.add(List.copyOf(chain));
     }
     return List.copyOf(chains);
+  }
+
+  /**
+   * The reader half of a knowledge read: {@code knowledge_read_authority(actor)} (V229) as one
+   * value, plus {@code contained_knowledge_actor(actor)}, which {@code
+   * knowledge_readable_candidates} evaluates beside it. {@code actorId} is the {@code
+   * authority_accounts} id of the handle, {@code generalMember} the {@code general_member} column
+   * (false for a contained actor) and {@code readableScopes} the non-null {@code scope_id} rows.
+   */
+  public record KnowledgeReader(
+      Optional<UUID> actorId, boolean generalMember, boolean contained, Set<UUID> readableScopes) {
+    public KnowledgeReader {
+      Objects.requireNonNull(actorId);
+      readableScopes = Set.copyOf(readableScopes);
+    }
+  }
+
+  // contained_knowledge_actor's guard: ~* '^...$' over the whole text, case-insensitive.
+  private static final Pattern UUID_TEXT =
+      Pattern.compile(
+          "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", Pattern.CASE_INSENSITIVE);
+
+  /**
+   * {@code contained_knowledge_actor(actor)} (V229): the text parses as a UUID (tested before the
+   * cast, so a handle such as {@code alice} is simply false) and names a live {@code
+   * contained_principals} row.
+   */
+  public boolean containedKnowledgeActor(String actor) {
+    if (actor == null || !UUID_TEXT.matcher(actor).matches()) return false;
+    return facts.knowledge().principals().containsKey(UUID.fromString(actor));
+  }
+
+  /**
+   * {@code information_global_read_member(account)} (V158): an active, non-bootstrap {@code admins}
+   * row with a non-builtin {@code authority_accounts} row, on an installation whose GLOBAL_READ
+   * role carries READ at version 1 under the DEFAULT profile. The role test is a cross join, not a
+   * grant: it does not depend on the account.
+   */
+  public boolean globalReadMember(String actor) {
+    if (actor == null || !accountActive(actor)) return false;
+    var account = accounts.get(actor);
+    UUID authority = authorityAccountsByHandle.get(actor);
+    return account != null
+        && !account.bootstrap()
+        && authority != null
+        && !facts.knowledge().builtinAccounts().contains(authority)
+        && globalReadRole;
+  }
+
+  private boolean globalReadRoleAction() {
+    for (var action : facts.roleActions()) {
+      var role = roles.get(action.role());
+      if (role != null
+          && role.name().equals("GLOBAL_READ")
+          && action.action().equals("READ")
+          && action.version() == 1
+          && action.profile().equals("DEFAULT")) return true;
+    }
+    return false;
+  }
+
+  /**
+   * {@code knowledge_read_authority(actor)} (V229) with {@code contained_knowledge_actor(actor)}.
+   * Mirrors, clause by clause: {@code actor_fact} (member is pinned false for a contained actor),
+   * {@code project_reads} (live SELF grants of READ-capable roles on a PROJECT scope or the
+   * subject's own PERSONAL scope), and the four {@code readable_scopes} arms: own account
+   * knowledge, the GLOBAL_KNOWLEDGE builtin for a USER holding a live ADMIN grant with READ, a
+   * PROJECT or PERSONAL scope read directly or through a service token's owner (not for client,
+   * personal or personally owned projects), and a CONTAINED scope admitted by {@link
+   * #containedScopeReadable}.
+   */
+  public KnowledgeReader knowledgeReader(String actor) {
+    UUID actorId = actor == null ? null : authorityAccountsByHandle.get(actor);
+    var account = actor == null ? null : accounts.get(actor);
+    boolean contained = containedKnowledgeActor(actor);
+    boolean member = globalReadMember(actor) && !contained;
+    var projectReads = projectReads();
+    var readable = new HashSet<UUID>();
+    for (var scope : facts.scopes()) {
+      boolean memberArm = member && memberReads(actor, actorId, account, scope, projectReads);
+      // The kind test is redundant with containedScopeReadable's own and kept as in SQL.
+      boolean containedArm =
+          scope.kind().equals("CONTAINED") && containedScopeReadable(actor, scope.id(), member);
+      if (memberArm || containedArm) readable.add(scope.id());
+    }
+    return new KnowledgeReader(Optional.ofNullable(actorId), member, contained, readable);
+  }
+
+  /** The {@code a.member AND (...)} arms of {@code readable_scopes} (V229). */
+  private boolean memberReads(
+      String actor, UUID actorId, Account account, Scope scope, Map<UUID, Set<UUID>> projectReads) {
+    if (scope.kind().equals("ACCOUNT_KNOWLEDGE")
+        && scope.builtin().isEmpty()
+        && actorId != null
+        && scope.account().equals(Optional.of(actorId))) return true;
+    if (scope.builtin().equals(Optional.of("GLOBAL_KNOWLEDGE"))
+        && account != null
+        && account.kind().equals("USER")
+        && actorId != null
+        && globalKnowledgeRead(actorId, scope)) return true;
+    if (!scope.kind().equals("PROJECT") && !scope.kind().equals("PERSONAL")) return false;
+    if (actorId != null && projectReads.getOrDefault(actorId, Set.of()).contains(scope.id()))
+      return true;
+    return tokenOwnerReads(actor, scope, projectReads);
+  }
+
+  /**
+   * The GLOBAL_KNOWLEDGE arm's EXISTS (V229): a live SELF grant of the ADMIN role to the account
+   * itself (no agent) on this scope, whose role version carries READ under the DEFAULT profile or
+   * the scope's own builtin profile.
+   */
+  private boolean globalKnowledgeRead(UUID actorId, Scope scope) {
+    for (UUID id : live.keySet()) {
+      var grant = grants.get(id);
+      var binding = grant.binding();
+      var role = roles.get(grant.role());
+      if (role == null
+          || !role.name().equals("ADMIN")
+          || !binding.recipient().account().value().equals(actorId)
+          || binding.recipient().agent().isPresent()
+          || !binding.scope().value().equals(scope.id())
+          || binding.coverage() != Coverage.SELF) continue;
+      for (var action : facts.roleActions())
+        if (action.role().equals(role.id())
+            && action.version() == binding.roleVersion()
+            && action.action().equals("READ")
+            && (action.profile().equals("DEFAULT")
+                || scope.builtin().equals(Optional.of(action.profile())))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * {@code project_reads} (V229), as subject account to scopes: exactly {@code
+   * authority_project_role}'s READ-capable roles, SELF coverage, no agent, on a PROJECT scope or
+   * the subject's own PERSONAL scope, for a subject with an {@code authority_accounts} row.
+   */
+  private Map<UUID, Set<UUID>> projectReads() {
+    var reads = new HashMap<UUID, Set<UUID>>();
+    for (UUID id : live.keySet()) {
+      var grant = grants.get(id);
+      var binding = grant.binding();
+      var role = roles.get(grant.role());
+      var scope = scopes.get(binding.scope().value());
+      UUID subject = binding.recipient().account().value();
+      if (role == null
+          || scope == null
+          || !facts.authorityAccounts().containsKey(subject)
+          || binding.recipient().agent().isPresent()
+          || binding.coverage() != Coverage.SELF
+          || !Set.of("READER", "CONTRIBUTOR", "MANAGER").contains(role.name())) continue;
+      if (scope.kind().equals("PROJECT")
+          || (scope.kind().equals("PERSONAL") && scope.account().equals(Optional.of(subject))))
+        reads.computeIfAbsent(subject, key -> new HashSet<>()).add(scope.id());
+    }
+    return reads;
+  }
+
+  /**
+   * The service-token arm of {@code readable_scopes} (V229): the actor is a token principal whose
+   * token is scoped to this scope's project and whose owner reads the scope, on a project that is
+   * neither personally owned nor named {@code client:} or {@code personal:}. Token liveness is not
+   * re-tested here, exactly as in SQL: general membership already requires an active account.
+   */
+  private boolean tokenOwnerReads(String actor, Scope scope, Map<UUID, Set<UUID>> projectReads) {
+    var token = actor == null ? null : tokensByPrincipal.get(actor);
+    if (token == null || scope.project().isEmpty()) return false;
+    long project = scope.project().get();
+    var named = projectsById.get(project);
+    if (named == null
+        || named.personalOwner().isPresent()
+        || named.name().startsWith("client:")
+        || named.name().startsWith("personal:")) return false;
+    UUID owner = authorityAccountsByHandle.get(token.owner());
+    if (owner == null || !projectReads.getOrDefault(owner, Set.of()).contains(scope.id()))
+      return false;
+    return tokenScopes.getOrDefault(token.id(), List.of()).stream()
+        .anyMatch(granted -> granted.project() == project);
+  }
+
+  /**
+   * {@code contained_scope_readable(actor, scope, general_member)} (V223): a CONTAINED scope read
+   * by its own principal (a handle with no {@code admins} row whose canonical lower-case UUID text
+   * equals the principal id, compared as text), or by a general member holding a project role on a
+   * PROJECT or PERSONAL ancestor.
+   */
+  public boolean containedScopeReadable(String actor, UUID scope, boolean generalMember) {
+    var target = scopes.get(scope);
+    if (target == null || !target.kind().equals("CONTAINED")) return false;
+    if (actor != null && !accounts.containsKey(actor)) {
+      for (var principal : facts.knowledge().principals().entrySet())
+        if (principal.getValue().equals(scope) && principal.getKey().toString().equals(actor))
+          return true;
+    }
+    if (!generalMember) return false;
+    for (UUID id : containedScopeAncestors(scope)) {
+      var ancestor = scopes.get(id);
+      if (ancestor == null
+          || !(ancestor.kind().equals("PROJECT") || ancestor.kind().equals("PERSONAL"))
+          || ancestor.project().isEmpty()) continue;
+      var project = projectsById.get(ancestor.project().get());
+      if (project != null && authorityProjectRole(project.name(), actor).isPresent()) return true;
+    }
+    return false;
+  }
+
+  /**
+   * {@code contained_scope_ancestors(descendant)} (V223): the container chain upwards, nearest
+   * first, at most 64 links. Each link follows an existing scope's non-null container.
+   */
+  public List<UUID> containedScopeAncestors(UUID descendant) {
+    var chain = new ArrayList<UUID>();
+    var containers = facts.knowledge().containers();
+    UUID current = scopes.containsKey(descendant) ? containers.get(descendant) : null;
+    for (int distance = 1; current != null; distance++) {
+      chain.add(current);
+      if (distance >= 64 || !scopes.containsKey(current)) break;
+      current = containers.get(current);
+    }
+    return chain;
+  }
+
+  /**
+   * {@code contained_scope_in_home(scope, home_project)} (V223): a CONTAINED scope with an ancestor
+   * bound to the project named {@code home}. A null home matches nothing.
+   */
+  public boolean containedScopeInHome(UUID scope, String home) {
+    var target = scopes.get(scope);
+    if (home == null || target == null || !target.kind().equals("CONTAINED")) return false;
+    for (UUID id : containedScopeAncestors(scope)) {
+      var ancestor = scopes.get(id);
+      if (ancestor == null || ancestor.project().isEmpty()) continue;
+      var project = projectsById.get(ancestor.project().get());
+      if (project != null && project.name().equals(home)) return true;
+    }
+    return false;
+  }
+
+  /** One {@code authority_scopes} row. */
+  public Optional<Scope> scope(UUID id) {
+    return Optional.ofNullable(scopes.get(id));
+  }
+
+  /** One {@code projects} row by id. */
+  public Optional<Project> project(long id) {
+    return Optional.ofNullable(projectsById.get(id));
+  }
+
+  /** The {@code authority_scopes} rows bound to one project. */
+  public List<Scope> projectScopes(long project) {
+    return List.copyOf(scopesByProject.getOrDefault(project, List.of()));
+  }
+
+  /**
+   * {@code EXISTS(SELECT 1 FROM projects personal WHERE personal.name=name AND
+   * personal.personal_owner=owner)}, as the personal-project arms of V229 write it.
+   */
+  public boolean personalProject(String name, String owner) {
+    if (name == null || owner == null) return false;
+    var project = projectsByName.get(name);
+    return project != null && project.personalOwner().equals(Optional.of(owner));
   }
 
   /** PostgreSQL compares UUIDs as unsigned bytes; Java's {@link UUID#compareTo} is signed. */

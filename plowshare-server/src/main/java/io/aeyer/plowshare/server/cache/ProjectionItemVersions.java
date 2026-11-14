@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.cache;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.Map;
@@ -96,6 +97,20 @@ public interface ProjectionItemVersions {
    * statement on a fresh independent connection, never the caller's historical snapshot.
    */
   boolean currentItems(ItemToken token);
+
+  /** Upper bound on the distinct items one {@link #staleItems} call compares. */
+  int MAX_CONFIRMED_ITEMS = 8192;
+
+  /**
+   * The items among {@code tokens} whose committed counters no longer equal the captured ones,
+   * compared in one indexed statement on a fresh independent connection. An empty result confirms
+   * every token at once: no write to any of their items committed after its capture. An item
+   * captured with two different counters is reported stale without asking the database, and a
+   * database identity mismatch reports every item stale.
+   *
+   * @param tokens one or more tokens naming at most {@link #MAX_CONFIRMED_ITEMS} distinct items
+   */
+  Set<ProjectionVersions.Item> staleItems(Collection<ItemToken> tokens);
 
   /** The caller-bound guard of {@link ProjectionVersions#canShare}. */
   boolean canShare();
