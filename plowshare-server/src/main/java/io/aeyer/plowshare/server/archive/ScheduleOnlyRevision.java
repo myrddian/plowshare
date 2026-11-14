@@ -21,8 +21,16 @@ import java.util.Map;
 final class ScheduleOnlyRevision {
   static final String REFUSAL = "A schedule-only revision may change only schedules/*.json";
 
-  /** Matches the retained-source bound the deployment service reads with. */
-  private static final int MAX_ENTRIES = 128 * 18, MAX_FILE_BYTES = 65536;
+  /**
+   * Per-root caps, the deployment package limits ({@code ApplicationDeployment.validateFiles}): at
+   * most 128 regular files, 64 KiB each and 128 KiB in all. {@code MAX_ENTRIES} only bounds the
+   * walk itself (files plus directories, at most 17 path segments each), so an oversized tree is
+   * refused before it is read.
+   */
+  private static final int MAX_FILES = 128,
+      MAX_FILE_BYTES = 65536,
+      MAX_TOTAL_BYTES = 131072,
+      MAX_ENTRIES = MAX_FILES * 18;
 
   private ScheduleOnlyRevision() {}
 
@@ -51,12 +59,17 @@ final class ScheduleOnlyRevision {
       var entries = paths.limit(MAX_ENTRIES + 1L).toList();
       if (entries.size() > MAX_ENTRIES) throw new CallerFault(REFUSAL);
       Map<String, byte[]> files = new HashMap<>();
+      long total = 0;
       for (Path path : entries) {
         if (Files.isSymbolicLink(path)) throw new CallerFault(REFUSAL);
         if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) continue;
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
             || Files.size(path) > MAX_FILE_BYTES) throw new CallerFault(REFUSAL);
-        files.put(root.relativize(path).toString().replace('\\', '/'), Files.readAllBytes(path));
+        byte[] bytes = Files.readAllBytes(path);
+        total += bytes.length;
+        if (files.size() >= MAX_FILES || bytes.length > MAX_FILE_BYTES || total > MAX_TOTAL_BYTES)
+          throw new CallerFault(REFUSAL);
+        files.put(root.relativize(path).toString().replace('\\', '/'), bytes);
       }
       return files;
     } catch (IOException | java.io.UncheckedIOException unavailable) {

@@ -157,11 +157,12 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
    * schedule-only mutation (ADR 0068) then requires a current project Manager instead of a server
    * administrator, checked here under the project row lock, and activates through {@link
    * ServerProjects#activateScheduleRevision}, after proving with {@link ScheduleOnlyRevision} that
-   * the staged root differs from the current root only in {@code schedules/*.json}. It does not
-   * take the identity administrator lock or touch the owned identity: its manifest is the expected
-   * head's, byte for byte, so the identity cannot change. Acting declarations are re-bound to the
-   * new head as for any activation, because live grants are keyed to the head revision. The release
-   * row, head and receipt are written exactly as for any other deployment.
+   * the staged root differs from the current root only in {@code schedules/*.json} (so {@code
+   * plowshare.json} is the head's, byte for byte) and that the mutation's identity source equals
+   * the one read from the verified root. It does not take the identity administrator lock or touch
+   * the owned identity, which therefore cannot change. Those verified acting declarations are
+   * re-bound to the new head as for any activation, because live grants are keyed to the head
+   * revision. The release row, head and receipt are written exactly as for any other deployment.
    */
   @Override
   public Receipt commit(String account, Mutation mutation) {
@@ -211,19 +212,24 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
             if (previous == null)
               throw new CallerFault("Deploy the Application before revising it");
             requireManager(account, mutation.project());
-            // The flag lowers authority, so the store proves its premise itself: against the
-            // locked row's current root, only schedules/*.json may be added or changed.
-            ScheduleOnlyRevision.requireOnlySchedulesChanged(
+            // The flag lowers authority, so the store proves its premise itself. The row is read
+            // once, under the lock, and handed to the activation below.
+            var current =
                 projects
                     .find(mutation.project())
-                    .orElseThrow(() -> new CallerFault("Application source is unavailable"))
-                    .workspace(),
-                mutation.verifiedRoot());
+                    .orElseThrow(() -> new CallerFault("Application source is unavailable"));
+            // Against the locked row's current root, only schedules/*.json may be added or changed.
+            ScheduleOnlyRevision.requireOnlySchedulesChanged(
+                current.workspace(), mutation.verifiedRoot());
+            // The acting declarations re-bound below come from the mutation. Bind them to the
+            // verified files: they must be exactly what the staged (and so the head's) manifest
+            // declares, or a forged mutation could widen grants over identical files.
+            if (!Objects.equals(
+                mutation.identity(),
+                io.aeyer.plowshare.server.applications.ApplicationIdentitySource.read(
+                    mutation.verifiedRoot()))) throw new CallerFault(ScheduleOnlyRevision.REFUSAL);
             projects.activateScheduleRevision(
-                mutation.project(),
-                release.placement(),
-                previous.placement(),
-                mutation.verifiedRoot());
+                current, release.placement(), previous.placement(), mutation.verifiedRoot());
           } else {
             projects.activateDeployment(
                 mutation.project(),

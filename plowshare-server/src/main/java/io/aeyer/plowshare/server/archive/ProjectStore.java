@@ -614,10 +614,12 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
    */
   @Override
   public ProjectRecord activateScheduleRevision(
-      String name,
+      ProjectRecord current,
       ApplicationPlacement placement,
       ApplicationPlacement expected,
       Path verifiedRoot) {
+    Objects.requireNonNull(current);
+    String name = current.name();
     Objects.requireNonNull(placement);
     Objects.requireNonNull(expected);
     Objects.requireNonNull(verifiedRoot);
@@ -626,17 +628,16 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
         name,
         null,
         () -> {
-          var row =
-              find(name)
-                  .orElseThrow(
-                      () -> new ArchiveRefusedException("Application source is unavailable"));
+          // The caller's row, read under the same project row lock this re-enters; the UPDATE
+          // below repeats the MANAGED predicate in SQL.
+          var row = current;
           if (!row.type().equals("MANAGED") || !expected.equals(row.placement()))
             throw new ArchiveRefusedException(
                 "Application source changed outside its deployment lifecycle");
           var root = placement.applicationRoot();
-          var current = expected.applicationRoot();
-          if (!root.store().equals(current.store())
-              || !revisions(root.path()).equals(revisions(current.path()))
+          var active = expected.applicationRoot();
+          if (!root.store().equals(active.store())
+              || !revisions(root.path()).equals(revisions(active.path()))
               || !placement.writableAreas().equals(expected.writableAreas()))
             throw new ArchiveRefusedException(
                 "A schedule revision keeps the Application's destination and writable areas");
@@ -644,8 +645,8 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
           if (!resolved.equals(verifiedRoot))
             throw new ArchiveRefusedException("FileStore configuration changed before activation");
           // Inside the existing destination: a sibling of the active revision directory.
-          Path active = io.aeyer.plowshare.protocol.FileAccess.canonical(row.workspace());
-          if (resolved.getParent() == null || !resolved.getParent().equals(active.getParent()))
+          Path workspace = io.aeyer.plowshare.protocol.FileAccess.canonical(row.workspace());
+          if (resolved.getParent() == null || !resolved.getParent().equals(workspace.getParent()))
             throw new ArchiveRefusedException(
                 "A schedule revision must stay inside the Application's existing destination");
           validWorkspace(name, resolved);

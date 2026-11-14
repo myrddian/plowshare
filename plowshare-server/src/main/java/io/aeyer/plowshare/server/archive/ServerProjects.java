@@ -41,13 +41,15 @@ public interface ServerProjects extends ProjectWorkspaces {
    * which has already checked the caller is a current project Manager and that the staged root
    * changes only {@code schedules/*.json}, under the same project row lock.
    *
+   * <p>{@code current} is the project row the caller read under that lock; it is not read again.
+   *
    * <p>It refuses unless the project is MANAGED, its stored placement is still {@code expected},
    * {@code placement} keeps {@code expected}'s FileStore, writable areas and revisions directory,
    * and {@code verifiedRoot} is what the placement resolves to now. It then moves the project's
    * workspace and stored placement to the new revision and changes nothing else.
    */
   ProjectRecord activateScheduleRevision(
-      String name,
+      ProjectRecord current,
       ApplicationPlacement placement,
       ApplicationPlacement expected,
       Path verifiedRoot);

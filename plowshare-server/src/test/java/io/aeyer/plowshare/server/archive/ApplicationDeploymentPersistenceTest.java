@@ -391,6 +391,20 @@ class ApplicationDeploymentPersistenceTest {
   }
 
   ApplicationDeploymentStore.Mutation scheduleOnly(UUID head, UUID revision, Path root) {
+    // The declarations a caller claims, read from the head: the staged manifest may differ.
+    return scheduleOnly(
+        head,
+        revision,
+        root,
+        io.aeyer.plowshare.server.applications.ApplicationIdentitySource.read(
+            projects.find(name).orElseThrow().workspace()));
+  }
+
+  ApplicationDeploymentStore.Mutation scheduleOnly(
+      UUID head,
+      UUID revision,
+      Path root,
+      io.aeyer.plowshare.server.applications.ApplicationIdentitySource identity) {
     var previous = store.release(name, head);
     return new ApplicationDeploymentStore.Mutation(
         name,
@@ -405,9 +419,7 @@ class ApplicationDeploymentPersistenceTest {
                 previous.placement().writableAreas())),
         root,
         true,
-        // The declarations a caller claims, read from the head: the staged manifest may differ.
-        io.aeyer.plowshare.server.applications.ApplicationIdentitySource.read(
-            projects.find(name).orElseThrow().workspace()),
+        identity,
         true);
   }
 
@@ -452,6 +464,30 @@ class ApplicationDeploymentPersistenceTest {
           assertThrows(
               CallerFault.class,
               () -> guarded.commit("operator", scheduleOnly(head, revision, root)));
+      assertEquals(
+          "A schedule-only revision may change only schedules/*.json", refusal.getMessage());
+    }
+    // Identical files, but a forged identity source carrying an extra acting grant.
+    {
+      UUID revision = UUID.randomUUID();
+      Path root = stageCopy(head, revision);
+      write(root.resolve("schedules/daily.json"), "{}");
+      var honest = io.aeyer.plowshare.server.applications.ApplicationIdentitySource.read(root);
+      var forged =
+          new io.aeyer.plowshare.server.applications.ApplicationIdentitySource(
+              honest.declaration(),
+              honest.principal(),
+              List.of(
+                  new ActingPolicySource.Grant(
+                      name,
+                      "users",
+                      ProjectRole.CONTRIBUTOR,
+                      true,
+                      Set.of(ActingPolicySource.ProofKind.ACTING_TOKEN))));
+      var refusal =
+          assertThrows(
+              CallerFault.class,
+              () -> guarded.commit("operator", scheduleOnly(head, revision, root, forged)));
       assertEquals(
           "A schedule-only revision may change only schedules/*.json", refusal.getMessage());
     }
