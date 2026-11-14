@@ -200,7 +200,8 @@ class NothingEnumeratesImagesTest {
                 tool ->
                     !tool.equals("run")
                         && !tool.equals("information_write")
-                        && !(tool.startsWith("document_") && !tool.equals("document_ask"))
+                        && !Set.of("document_search", "document_list", "document_rank")
+                            .contains(tool)
                         && !tool.equals(RelayPublishTool.NAME)
                         && !tool.equals("send_message"))
             .toList(),

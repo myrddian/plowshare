@@ -51,6 +51,24 @@ returns through the durable skill lifecycle. Librarian remains exported and
 independently delegable. No new mode enum or durable runtime is needed. The skill
 guides tool use; services and repositories enforce access.
 
+Document evidence capabilities remain separate from corpus discovery. Shipped
+readers and the skill retain `document_retrieve`, `document_outline` and
+`document_citations`, with required explicit `scopes`. Their `document` locator is
+an exact revision UUID, matching discovery results. Semantic passage ranking and
+outline projections apply the same live scope/dependency rules before reading;
+stored projection hashes must match the retained revision. Provider admission,
+allowances and invocation identity stay with the durable execution home. Source
+authorization is independently checked before inference and again at disclosure.
+
+Citation reads require both readable selected sources and owned readable
+conversations. Server confinement also limits citation conversation homes. Missing
+documents cannot establish source authority and are omitted; missing paragraphs
+retain their `paragraph_gone` standing without text. Results retain the cited
+sources and inherit the source conversations' input dependencies, so a citation
+cannot shed a restriction belonging to its conversational context. These bounded
+content reads do not establish inventory completeness. Legacy public transport
+selection and response contracts remain unchanged.
+
 ## Verification
 
 Mocked tests cover strict decoding, query/identity/confinement-bound cursors,

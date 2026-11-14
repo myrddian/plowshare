@@ -4,7 +4,7 @@ description: Find retained documents, reports, scan evidence and device dossiers
 agent: librarian
 mode: NEW
 agentVisible: true
-allowed-tools: information_scopes information_list information_search information_facets information_read result_read result_list
+allowed-tools: information_scopes information_list information_search information_facets information_read document_retrieve document_outline document_citations result_read result_list
 ---
 Complete the user information discovery task in this fresh context. Return a
 concise sourced answer to the calling agent; do not invoke this skill recursively.
@@ -31,6 +31,15 @@ or truncated payload is not proof of completeness. Cursors expire and are bound
 to their query and authenticated reader. Report partial coverage if the budget
 ends; do not claim a system inventory from one scope or page. Reuse returned
 metadata and retained result handles instead of repeating reads.
+
+Use `document_outline` for hierarchy and summaries, `document_retrieve` for
+semantic passages, and `document_citations` for citations of a revision or an owned
+readable conversation. Pass the selected `scopes` explicitly. The `document`
+argument is an exact revision UUID from discovery, never the resource UUID.
+Retrieve optionally across the selected scopes without a document. Cite returned
+paragraph IDs; only resolved citations with current text are evidence. Outline
+summaries help navigation and do not establish factual claims. These bounded
+results are not a complete inventory.
 
 Read relevant exact revisions with `information_read`:
 

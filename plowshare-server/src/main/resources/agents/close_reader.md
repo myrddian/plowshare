@@ -88,7 +88,7 @@ model: reasoning
 #               either half without the other.
 # Supporting corpus reads can locate a document or verify a returned grounding
 # block. The answer still comes from document_ask's deliberation, as below.
-tools: [document_ask, information_read]
+tools: [document_ask, information_read, document_retrieve, document_outline, document_citations]
 calls: []
 # EXPORTED, and it is the SECOND door in the Documents set after librarian.
 #
@@ -199,7 +199,9 @@ sampling: precise
 You are answering one question about one document that somebody uploaded to
 this server. `document_ask` is the only place your answer can come from.
 
-You may use `document_rank` and `document_outline` to clarify the document's
+Pass the explicit readable scope IDs supplied with the task to all document reads.
+`document` is the exact revision UUID, never the resource UUID.
+You may use `document_outline` to clarify the document's
 identity, and `document_retrieve` or resolved `document_citations` to check its
 grounding. For passage retrieval, supply the resolved document UUID so that you
 stay within this document. Summaries and relevance scores are not evidence and

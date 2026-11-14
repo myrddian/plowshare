@@ -4,16 +4,29 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.protocol.InformationDiscovery;
 import io.aeyer.plowshare.protocol.InformationRequest.FacetFilter;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.documents.CitationStore;
+import io.aeyer.plowshare.server.documents.DocumentStore;
+import io.aeyer.plowshare.server.documents.JdbcSelectedDocumentRepository;
+import io.aeyer.plowshare.server.documents.RetrievalService;
+import io.aeyer.plowshare.server.documents.SelectedDocumentReading;
+import io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.information.InformationDiscoveryRepository.Audit;
 import io.aeyer.plowshare.server.information.InformationDiscoveryRepository.Reader;
+import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.testing.AuthorityFixtures;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -357,5 +370,209 @@ class InformationDiscoveryDatabaseTest {
     assertEquals(
         "A😀B",
         service.read(reader, new InformationDiscovery.Read(selected, original, 0, 10)).text());
+  }
+
+  private EmbeddingClient embedding(Function<String, float[]> response) {
+    return new EmbeddingClient() {
+      public float[] embed(String text) {
+        return response.apply(text);
+      }
+
+      public List<float[]> embedAll(List<String> texts) {
+        return texts.stream().map(this::embed).toList();
+      }
+    };
+  }
+
+  private JdbcSelectedDocumentRepository documentReads() {
+    return new JdbcSelectedDocumentRepository(jdbc, new DocumentStore(jdbc, UnitOfWork.NONE));
+  }
+
+  private InformationReadSelection selected(Reader reader, String... projects) {
+    return new InformationReadSelection(reader, Arrays.stream(projects).map(this::scope).toList());
+  }
+
+  private UUID projection(UUID revision) {
+    jdbc.update("UPDATE information_revisions SET text_hash='fixture' WHERE id=?", revision);
+    jdbc.update(
+        "INSERT INTO documents(id,source_name,title,content_hash,text_hash,byte_size,ingested_at,ingested_by,information_namespace) SELECT r.id,q.source_name,r.title,r.content_hash,r.text_hash,r.byte_size,now(),'reader',q.namespace FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE r.id=?",
+        revision);
+    UUID paragraph = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO paragraphs(id,document_id,text,content_hash,occurrence,ordinal) VALUES(?,?,'evidence','fixture',1,1)",
+        paragraph,
+        revision);
+    return paragraph;
+  }
+
+  private void conversation(String id, String owner, String project) {
+    jdbc.update(
+        "INSERT INTO conversations(id,created_at,origin,budget_total,budget_spent,owner_handle,project_id) VALUES(?,now(),'turn',100,0,?,(SELECT id FROM projects WHERE name=?))",
+        id,
+        owner,
+        project);
+  }
+
+  @Test
+  void scoped_outline_reads_another_project_and_retains_its_actual_selection() {
+    UUID document = retained("two", "Device dossier", "source");
+    projection(document);
+    jdbc.update(
+        "INSERT INTO chapters(id,document_id,ordinal,title,summary) VALUES(?,?,1,'Findings','retained summary')",
+        UUID.randomUUID(),
+        document);
+    var selection = selected(new Reader("reader", null, new Audit("outline-log", "reader")), "two");
+    var outline = documentReads().outline(selection, document);
+    assertEquals("Device dossier", outline.title());
+    assertEquals("Findings", outline.chapters().getFirst().title());
+    assertEquals(
+        "two",
+        jdbc.queryForObject(
+            "SELECT project_name FROM information_job_inputs WHERE job_id='outline-log'",
+            String.class));
+    assertThrows(
+        NotFoundFault.class, () -> documentReads().outline(selected(reader, "one"), document));
+    assertThrows(
+        NotFoundFault.class,
+        () ->
+            documentReads().outline(selected(new Reader("reader", "one", null), "two"), document));
+    jdbc.update(
+        "DELETE FROM project_members WHERE handle='reader' AND project_id=(SELECT id FROM projects WHERE name='two')");
+    assertThrows(NotFoundFault.class, () -> documentReads().outline(selection, document));
+  }
+
+  @Test
+  void historical_outline_is_exact_and_never_reuses_a_mismatched_projection() {
+    UUID old = retained("one", "Original", "source");
+    projection(old);
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size,extracted_text) SELECT ?,resource_id,2,'New head','text/plain','next',4,'next' FROM information_revisions WHERE id=?",
+        UUID.randomUUID(),
+        old);
+    assertEquals(old, documentReads().outline(selected(reader, "one"), old).documentId());
+    jdbc.update("UPDATE documents SET text_hash='obsolete' WHERE id=?", old);
+    assertThrows(NotFoundFault.class, () -> documentReads().outline(selected(reader, "one"), old));
+  }
+
+  @Test
+  void semantic_passages_filter_scopes_before_ranking_and_recheck_revocation_after_embedding() {
+    UUID visible = retained("two", "Visible", "source"),
+        secret = retained("secret", "Secret", "source");
+    var vector = new float[768];
+    vector[0] = 1;
+    String stored =
+        "["
+            + IntStream.range(0, 768)
+                .mapToObj(i -> i == 0 ? "1" : "0")
+                .collect(Collectors.joining(","))
+            + "]";
+    for (UUID revision : List.of(secret, visible)) {
+      UUID paragraph = projection(revision);
+      jdbc.update(
+          "INSERT INTO chunks(id,paragraph_id,ordinal,text,byte_size,split_mid_sentence,embedding) VALUES(?,?,1,'evidence',8,false,?::vector)",
+          UUID.randomUUID(),
+          paragraph,
+          stored);
+    }
+    var selection = selected(reader, "two");
+    var home = new InformationContext("reader", InformationContext.Selection.project("one"));
+    EmbeddingClient embeddings = embedding(text -> vector.clone());
+    var service =
+        new SelectedDocumentReading(
+            documentReads(),
+            new RetrievalService(
+                new DocumentStore(jdbc, UnitOfWork.NONE), embeddings, "fixture", 768));
+    var result = service.retrieve(selection, home, Origin.request(() -> {}), "evidence", null, 1);
+    assertEquals(visible, result.hits().getFirst().chunk().documentId());
+    EmbeddingClient revoked =
+        embedding(
+            text -> {
+              jdbc.update(
+                  "DELETE FROM project_members WHERE handle='reader' AND project_id=(SELECT id FROM projects WHERE name='two')");
+              return vector.clone();
+            });
+    var changing =
+        new SelectedDocumentReading(
+            documentReads(),
+            new RetrievalService(
+                new DocumentStore(jdbc, UnitOfWork.NONE), revoked, "fixture", 768));
+    assertThrows(
+        NotFoundFault.class,
+        () -> changing.retrieve(selection, home, Origin.request(() -> {}), "evidence", visible, 1));
+  }
+
+  @Test
+  void
+      scoped_citations_filter_conversation_ownership_and_inputs_before_limit_and_inherit_dependencies() {
+    UUID document = retained("two", "Cited", "source"),
+        dependency = retained("one", "Context", "source");
+    UUID hidden = retained("secret", "Hidden", "source");
+    UUID paragraph = projection(document);
+    conversation("good-citations", "reader", "one");
+    conversation("other-citations", "other", "one");
+    conversation("blocked-citations", "reader", "one");
+    conversation("citation-output", "reader", "one");
+    jdbc.update(
+        "INSERT INTO information_job_inputs(job_id,owner_handle,revision_id,scope,project_name,include_shared) VALUES('good-citations','reader',?,'project','one',false),('blocked-citations','reader',?,'project','secret',false)",
+        dependency,
+        hidden);
+    var citations = new CitationStore(jdbc);
+    assertTrue(citations.record(paragraph, "good-citations", 1, "agent", Instant.now()));
+    assertTrue(
+        citations.record(paragraph, "other-citations", 1, "agent", Instant.now().plusSeconds(1)));
+    assertTrue(
+        citations.record(paragraph, "blocked-citations", 1, "agent", Instant.now().plusSeconds(2)));
+    var selection =
+        selected(new Reader("reader", null, new Audit("citation-output", "reader")), "two");
+    var result = documentReads().citations(selection, document, null, 1);
+    assertEquals(1, result.citations().size());
+    assertEquals("good-citations", result.citations().getFirst().conversationId());
+    assertEquals("resolves", result.citations().getFirst().standing());
+    assertEquals("evidence", result.citations().getFirst().paragraphText());
+    assertEquals(
+        Set.of(document, dependency),
+        Set.copyOf(
+            jdbc.queryForList(
+                "SELECT revision_id FROM information_job_inputs WHERE job_id='citation-output'",
+                UUID.class)));
+    assertThrows(
+        NotFoundFault.class,
+        () -> documentReads().citations(selection, null, "other-citations", 20));
+    assertThrows(
+        NotFoundFault.class,
+        () -> documentReads().citations(selection, null, "blocked-citations", 20));
+    assertThrows(
+        NotFoundFault.class,
+        () -> documentReads().citations(selected(reader, "one"), document, null, 20));
+    // A confined reader cannot learn that its source was cited in a foreign execution home.
+    assertTrue(
+        documentReads()
+            .citations(selected(new Reader("reader", "two", null), "two"), document, null, 20)
+            .citations()
+            .isEmpty());
+    jdbc.update(
+        "DELETE FROM project_members WHERE handle='reader' AND project_id=(SELECT id FROM projects WHERE name='one')");
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_log_readable('citation-output','reader')", Boolean.class));
+  }
+
+  @Test
+  void citations_preserve_paragraph_staleness_but_cannot_disclose_a_missing_source() {
+    UUID document = retained("one", "Citation source", "source");
+    UUID paragraph = projection(document);
+    conversation("stale-citations", "reader", "one");
+    assertTrue(
+        new CitationStore(jdbc).record(paragraph, "stale-citations", 1, "agent", Instant.now()));
+    jdbc.update("DELETE FROM paragraphs WHERE id=?", paragraph);
+    var result = documentReads().citations(selected(reader, "one"), null, "stale-citations", 20);
+    assertEquals("paragraph_gone", result.citations().getFirst().standing());
+    assertNull(result.citations().getFirst().paragraphText());
+    jdbc.update("DELETE FROM documents WHERE id=?", document);
+    assertTrue(
+        documentReads()
+            .citations(selected(reader, "one"), null, "stale-citations", 20)
+            .citations()
+            .isEmpty());
   }
 }

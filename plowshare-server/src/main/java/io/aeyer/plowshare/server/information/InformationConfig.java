@@ -24,6 +24,18 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @Import(InformationFeatureConfig.class)
 public class InformationConfig {
   @Bean
+  public SelectedDocumentRepository selectedDocumentRepository(
+      JdbcTemplate jdbc, DocumentStore documents) {
+    return new JdbcSelectedDocumentRepository(jdbc, documents);
+  }
+
+  @Bean
+  public ScopedDocumentReading scopedDocumentReading(
+      SelectedDocumentRepository repository, RetrievalService passages) {
+    return new SelectedDocumentReading(repository, passages);
+  }
+
+  @Bean
   public InformationDiscoveryRepository informationDiscoveryRepository(JdbcTemplate jdbc) {
     return new JdbcInformationDiscoveryRepository(jdbc);
   }

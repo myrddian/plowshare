@@ -350,6 +350,34 @@ fixtures cover this extension without changing orchestration payload semantics.
 
 ## Controls and adapters
 
+### Scoped document evidence tools
+
+The model-facing `document_retrieve`, `document_outline` and `document_citations`
+remain available to shipped information readers and the information-discovery
+skill. All require `scopes` from discovery. Their `document` parameter is an exact
+**revision** UUID, not a resource UUID. Pass the same scope selection used to find
+that revision:
+
+```json
+{"scopes":["<scope UUID>"],"document":"<revision UUID>","question":"What did the scan find?","limit":5}
+```
+
+The example is `document_retrieve`; it also supports retrieval across the selected
+scopes without `document`. `document_outline` takes `scopes` and `document`.
+`document_citations` takes `scopes`, optionally either `document` or an owned
+readable `conversation`, and a limit up to 20. Retrieve supports up to 10 passages.
+These are bounded content reads, not cursor-based inventories. Use discovery
+pages for inventories and exact `information_read` windows for unindexed text.
+
+Live source RBAC, credential restrictions, privacy, dependency policy and server
+confinement apply before ranking or limits. Semantic query admission and accounting
+stay in the durable run home. Only matching retained/projection hashes expose
+passages or outlines. Citations also require conversation ownership and readable
+inputs; unavailable documents are omitted, while a missing paragraph preserves
+its `paragraph_gone` standing. Cited source revisions and conversation dependencies
+are retained in the receiving log. Legacy WS/HTTP/MCP selection contracts are
+unchanged; these are scoped model-tool bindings.
+
 ### Cursor discovery
 
 The read-only `information.discovery.*` WebSocket operations navigate explicit

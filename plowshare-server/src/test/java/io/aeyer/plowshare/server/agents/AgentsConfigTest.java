@@ -1021,10 +1021,14 @@ class AgentsConfigTest {
                 if (model.path("adapter").asText().equals("registered")) {
                   adapters++;
                   assertTrue(known.contains(name), name);
-                  if (name.startsWith("document_") && !name.equals(AskTool.NAME)) {
-                    // Compatibility remains registered; released agents use information discovery.
+                  if (Set.of("document_search", "document_list", "document_rank").contains(name)) {
+                    // Retired corpus discovery/ranking stays registered for compatibility.
                     assertEquals(0, model.path("shippedGrants").size(), name);
                   } else assertTrue(model.path("shippedGrants").size() > 0, name);
+                  if (ScopedDocumentTool.NAMES.contains(name))
+                    assertTrue(
+                        model.path("selection").asText().contains("explicit RBAC-readable scopes"),
+                        name);
                 } else {
                   boundaries++;
                   if (name.equals("information")) {
