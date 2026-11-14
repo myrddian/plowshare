@@ -6,6 +6,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Internal durable pub/sub capability. Callers must authorize scope access and publisher or
@@ -31,6 +33,34 @@ public interface Relay {
    * conflicting reuse fails. An expired ID is no longer covered by broker deduplication.
    */
   Publication publish(TopicKey key, Draft draft);
+
+  /**
+   * Appends only to the exact retained topic incarnation. The generation check shares append's
+   * existing topic lock after payload staging; callers must not pre-lock the topic and invert that
+   * order. A definitive unavailable result contains no publication or allocated position.
+   * Storage/connection failures still throw and require the owning transaction to roll back.
+   */
+  AppendResult publish(TopicKey key, UUID expectedGeneration, Draft draft);
+
+  sealed interface AppendResult permits Appended, DestinationUnavailable {}
+
+  record Appended(Publication publication) implements AppendResult {
+    public Appended {
+      Objects.requireNonNull(publication);
+    }
+  }
+
+  enum DestinationFailure {
+    MISSING,
+    REPLACED,
+    INVALID_KIND
+  }
+
+  record DestinationUnavailable(DestinationFailure reason) implements AppendResult {
+    public DestinationUnavailable {
+      Objects.requireNonNull(reason);
+    }
+  }
 
   /**
    * Read-only receipt reconciliation by scoped event identity. Empty means not retained and cannot
@@ -153,7 +183,7 @@ public interface Relay {
       Policy policy,
       long lastPosition,
       long expiredThrough,
-      java.util.UUID generation) {
+      UUID generation) {
     public Topic(
         TopicKey key,
         RelayPayload.Kind kind,
@@ -181,8 +211,7 @@ public interface Relay {
       // only the name moved.
       boolean nativeWake =
           key.scope() == SystemScope.SERVER
-              && java.util.Set.of("message.wake.requested", "board.wake.requested")
-                  .contains(key.name());
+              && Set.of("message.wake.requested", "board.wake.requested").contains(key.name());
       if (nativeWake != (kind == RelayPayload.Kind.WAKE_REQUESTED))
         throw new IllegalArgumentException(
             "Native wake families require their private system topics");
@@ -233,8 +262,7 @@ public interface Relay {
     }
   }
 
-  record Subscription(
-      SubscriptionKey key, long seenThrough, Instant seenAt, java.util.UUID generation) {
+  record Subscription(SubscriptionKey key, long seenThrough, Instant seenAt, UUID generation) {
     public Subscription(SubscriptionKey key, long seenThrough, Instant seenAt) {
       this(key, seenThrough, seenAt, null);
     }

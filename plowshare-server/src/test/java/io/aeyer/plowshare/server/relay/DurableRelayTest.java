@@ -1,9 +1,16 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class DurableRelayTest {
@@ -16,8 +23,8 @@ class DurableRelayTest {
         () -> broker.retained(new Relay.TopicKey(1, "release.observed"), "private\n"));
     verifyNoInteractions(repository);
     var topic = new Relay.TopicKey(1, "release.observed");
-    when(repository.retained(topic, "event")).thenReturn(java.util.Optional.empty());
-    assertEquals(java.util.Optional.empty(), broker.retained(topic, "event"));
+    when(repository.retained(topic, "event")).thenReturn(Optional.empty());
+    assertEquals(Optional.empty(), broker.retained(topic, "event"));
     verify(repository).retained(topic, "event");
   }
 
@@ -39,6 +46,30 @@ class DurableRelayTest {
     when(repository.append(key, draft, expected.publishedAt())).thenReturn(expected);
     assertEquals(expected, broker.publish(key, draft));
     verify(repository).append(key, draft, Instant.parse("2026-10-05T01:00:00.123456Z"));
+  }
+
+  @Test
+  void generation_pinned_append_only_emits_a_commit_hint_for_an_actual_publication() {
+    var repository = mock(RelayRepository.class);
+    var now = Instant.parse("2026-10-05T01:00:00Z");
+    var hints = new AtomicInteger();
+    Relay broker = new DurableRelay(repository, () -> now, ignored -> hints.incrementAndGet());
+    var key = new Relay.TopicKey(1, "release.observed");
+    var generation = UUID.randomUUID();
+    var draft =
+        new Relay.Draft("event-1", "source", now, null, null, new RelayPayload.Text("answer"));
+    var unavailable = new Relay.DestinationUnavailable(Relay.DestinationFailure.REPLACED);
+    when(repository.append(key, generation, draft, now)).thenReturn(unavailable);
+    assertEquals(unavailable, broker.publish(key, generation, draft));
+    assertEquals(0, hints.get());
+    var appended = new Relay.Appended(new Relay.Publication(key, 1, now, draft));
+    when(repository.append(key, generation, draft, now)).thenReturn(appended);
+    assertEquals(appended, broker.publish(key, generation, draft));
+    assertEquals(1, hints.get());
+    when(repository.append(key, generation, draft, now))
+        .thenThrow(new IllegalStateException("connection"));
+    assertThrows(IllegalStateException.class, () -> broker.publish(key, generation, draft));
+    assertEquals(1, hints.get());
   }
 
   @Test

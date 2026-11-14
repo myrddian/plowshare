@@ -4,7 +4,9 @@ import io.aeyer.plowshare.server.archive.CachedProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.cache.ProjectionCaches;
 import io.aeyer.plowshare.server.cache.ProjectionVersions;
+import io.aeyer.plowshare.server.information.SystemProcessingAuthority;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
+import java.util.Optional;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
@@ -29,7 +31,7 @@ public class AuthoritySnapshotConfiguration {
         caches.create(
             "authority-snapshot-v1",
             Set.of(ProjectionVersions.Domain.AUTHORITY),
-            io.aeyer.plowshare.server.cache.ProjectionCaches.Freshness.NOTIFIED),
+            ProjectionCaches.Freshness.NOTIFIED),
         new JdbcAuthoritySnapshotRepository(jdbc, ROW_LIMIT),
         admission);
   }
@@ -39,14 +41,13 @@ public class AuthoritySnapshotConfiguration {
    * grants. No snapshot for this caller leaves the decision in SQL.
    */
   @Bean
-  public io.aeyer.plowshare.server.information.SystemProcessingAuthority systemProcessingAuthority(
-      AuthoritySnapshots snapshots) {
-    return new io.aeyer.plowshare.server.information.SystemProcessingAuthority() {
-      public java.util.Optional<Boolean> processing() {
+  public SystemProcessingAuthority systemProcessingAuthority(AuthoritySnapshots snapshots) {
+    return new SystemProcessingAuthority() {
+      public Optional<Boolean> processing() {
         return snapshots.current().map(AuthoritySnapshot::systemProcessingAuthorized);
       }
 
-      public java.util.Optional<Boolean> scopeValid(String project) {
+      public Optional<Boolean> scopeValid(String project) {
         return snapshots.current().map(snapshot -> snapshot.systemScopeValid(project));
       }
     };

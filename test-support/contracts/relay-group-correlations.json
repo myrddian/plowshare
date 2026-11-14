@@ -1,0 +1,151 @@
+[
+  {
+    "operation": "relay.group.delete",
+    "request": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "generation": "11111111-1111-1111-1111-111111111111"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "generation": "11111111-1111-1111-1111-111111111111",
+      "removed": true
+    },
+    "valid": true
+  },
+  {
+    "operation": "relay.group.delete",
+    "request": {
+      "project": "foreign",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "generation": "11111111-1111-1111-1111-111111111111"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "generation": "11111111-1111-1111-1111-111111111111",
+      "removed": true
+    },
+    "valid": false
+  },
+  {
+    "operation": "relay.group.delete",
+    "request": {
+      "project": "fixture",
+      "topic": "foreign",
+      "group": "detectors",
+      "generation": "11111111-1111-1111-1111-111111111111"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "generation": "11111111-1111-1111-1111-111111111111",
+      "removed": true
+    },
+    "valid": false
+  },
+  {
+    "operation": "relay.group.delete",
+    "request": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "foreign",
+      "generation": "11111111-1111-1111-1111-111111111111"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "generation": "11111111-1111-1111-1111-111111111111",
+      "removed": true
+    },
+    "valid": false
+  },
+  {
+    "operation": "relay.group.delete",
+    "request": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "generation": "99999999-9999-9999-9999-999999999999"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "generation": "11111111-1111-1111-1111-111111111111",
+      "removed": true
+    },
+    "valid": false
+  },
+  {
+    "operation": "relay.group.inspect",
+    "request": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "exists": true,
+      "generation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "operation": "relay.group.inspect",
+    "request": {
+      "project": "foreign",
+      "topic": "checks.requests",
+      "group": "detectors"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "exists": true,
+      "generation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": false
+  },
+  {
+    "operation": "relay.group.inspect",
+    "request": {
+      "project": "fixture",
+      "topic": "foreign",
+      "group": "detectors"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "exists": true,
+      "generation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": false
+  },
+  {
+    "operation": "relay.group.inspect",
+    "request": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "foreign"
+    },
+    "reply": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "exists": true,
+      "generation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": false
+  }
+]

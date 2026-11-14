@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.swarm;
 
 import io.aeyer.plowshare.server.agents.RunExtras;
 import io.aeyer.plowshare.server.agents.Scheduling;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
@@ -9,15 +10,14 @@ import java.util.function.Predicate;
 
 /**
  * The turn loop's {@link Scheduling}, answered by a {@link SwarmScheduler}. Which runs are
- * scheduled, and as whose share, is {@code shareOf}'s to say — the board's, from step 2: a seat
- * conversation's run is; everything else answers empty and runs exactly as it always did.
+ * scheduled, and as whose share, belongs to each registered lifecycle owner. Unclaimed contexts run
+ * without a swarm slot, preserving ordinary model scheduling.
  */
 public final class SwarmScheduling implements Scheduling {
 
   private final SwarmScheduler scheduler;
   private final SwarmScheduler.Pools pools;
-  private final Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf;
-  private final Predicate<RunExtras.Context> ordinaryModels;
+  private final RunShareProvider shares;
 
   public SwarmScheduling(
       SwarmScheduler scheduler,
@@ -38,20 +38,41 @@ public final class SwarmScheduling implements Scheduling {
       Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf,
       SwarmScheduler.Pools pools,
       Predicate<RunExtras.Context> ordinaryModels) {
-    this.ordinaryModels = Objects.requireNonNull(ordinaryModels, "ordinaryModels");
+    Objects.requireNonNull(ordinaryModels, "ordinaryModels");
     this.pools = pools;
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
-    this.shareOf = Objects.requireNonNull(shareOf, "shareOf");
+    Objects.requireNonNull(shareOf, "shareOf");
+    this.shares =
+        context ->
+            shareOf
+                .apply(context)
+                .map(share -> new RunShareProvider.Selection(share, ordinaryModels.test(context)));
+  }
+
+  /** Domain owners are ordered by composition and each resolves at most once per run. */
+  public SwarmScheduling(
+      SwarmScheduler scheduler, List<RunShareProvider> providers, SwarmScheduler.Pools pools) {
+    this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.pools = pools;
+    List<RunShareProvider> owners = List.copyOf(providers);
+    this.shares =
+        context -> {
+          for (RunShareProvider owner : owners) {
+            var selection = owner.select(context);
+            if (selection.isPresent()) return selection;
+          }
+          return Optional.empty();
+        };
   }
 
   @Override
   public Turn forRun(RunExtras.Context context) {
-    Optional<SwarmScheduler.Share> share = shareOf.apply(context);
+    Optional<RunShareProvider.Selection> share = shares.select(context);
     if (share.isEmpty()) {
       return Turn.ALWAYS;
     }
-    SwarmScheduler.Turns turns = scheduler.enter(share.get());
-    boolean ordinary = ordinaryModels.test(context);
+    SwarmScheduler.Turns turns = scheduler.enter(share.get().share());
+    boolean ordinary = share.get().ordinaryModels();
     return (specifier, cancelled) -> {
       if (pools != null && pools.serving(specifier).isEmpty()) {
         if (ordinary) return Slot.ANY;

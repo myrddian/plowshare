@@ -1,20 +1,20 @@
 package io.aeyer.plowshare.integrations;
 
 import io.aeyer.plowshare.protocol.Orchestration;
-import io.aeyer.plowshare.protocol.Outgoing;
-import io.aeyer.plowshare.sdk.*;
+import io.aeyer.plowshare.protocol.RelayLog;
+import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.sdk.OrchestrationClient;
+import io.aeyer.plowshare.sdk.Plowshare;
+import io.aeyer.plowshare.sdk.RelayClient;
 import java.io.IOException;
-import java.util.*;
+import java.util.Optional;
+import java.util.UUID;
 
 /** Current public SDK contracts only. A separate seam permits protocol fixtures. */
 public interface Gateway extends AutoCloseable {
-  void advertise(String project, List<String> peers) throws IOException;
+  RelayLog.Page log(RelayLog.Query query) throws IOException;
 
-  Outgoing.Claimed claim(String project, List<String> peers) throws IOException;
-
-  void report(Outgoing.Report report) throws IOException;
-
-  Outgoing.Work outgoing(UUID id) throws IOException;
+  RelayPort.Published publish(RelayPort.Publish publication) throws IOException;
 
   Orchestration.Started start(Orchestration.Start payload) throws IOException;
 
@@ -27,33 +27,19 @@ public interface Gateway extends AutoCloseable {
 
   final class Sdk implements Gateway {
     private final Plowshare sdk;
-    private final OutgoingClient outgoing;
+    private final RelayClient relay;
 
     public Sdk(Plowshare sdk) {
       this.sdk = sdk;
-      outgoing = new OutgoingClient(sdk);
+      relay = new RelayClient(sdk);
     }
 
-    public void advertise(String project, List<String> peers) throws IOException {
-      outgoing.advertise(project, peers);
+    public RelayLog.Page log(RelayLog.Query query) throws IOException {
+      return relay.log(query);
     }
 
-    public Outgoing.Claimed claim(String project, List<String> peers) throws IOException {
-      return outgoing.claim(project, peers);
-    }
-
-    public void report(Outgoing.Report report) throws IOException {
-      Outgoing.Work saved = outgoing.report(report);
-      if (!report.state().equals(saved.state())
-          || saved.revision() != report.revision() + 1
-          || !Objects.equals(saved.remoteTask(), report.remoteTask())
-          || !Objects.equals(saved.remoteContext(), report.remoteContext())
-          || !Objects.equals(saved.result(), report.result()))
-        throw new IOException("outgoing report acknowledgment differs; outcome unconfirmed");
-    }
-
-    public Outgoing.Work outgoing(UUID id) throws IOException {
-      return outgoing.status(id);
+    public RelayPort.Published publish(RelayPort.Publish publication) throws IOException {
+      return relay.publish(publication);
     }
 
     public Orchestration.Started start(Orchestration.Start payload) throws IOException {

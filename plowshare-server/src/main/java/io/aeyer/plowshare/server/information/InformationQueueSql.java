@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
+import java.util.Optional;
+
 /**
  * Repository-only eligibility predicates shared by queue admission and its read-only audit. The
  * fixed r/q/s aliases denote a revision allowance view, its resource, and its current stage. No
@@ -23,7 +25,7 @@ public final class InformationQueueSql {
    * (V241). Only the three fixed literals TRUE, FALSE and NULL are emitted, chosen from a typed
    * boolean, so no caller value enters the statement text; NULL lets SQL decide as before.
    */
-  public static String processingAuthority(java.util.Optional<Boolean> decided) {
+  public static String processingAuthority(Optional<Boolean> decided) {
     String literal = decided.map(value -> value ? "TRUE" : "FALSE").orElse("NULL");
     return "processing_authority AS MATERIALIZED ("
         + "SELECT revision FROM information_system_processing_revisions("

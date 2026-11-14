@@ -36,9 +36,15 @@ from plowshare_privacy.device_profiles import (
     ProfileFields,
 )
 from plowshare_privacy.issue_records import FileIssueIntents, PrivacyIssues
-from plowshare_privacy.native_tools import DECLARATIONS, registered
+from plowshare_privacy.native_tools import ASSISTANT_TOOLS, DECLARATIONS, registered
 from plowshare_privacy.presence import PresenceView, Sighting
-from plowshare_privacy.tools import WorkerTools
+from plowshare_privacy.tools import (
+    ReferenceRequestCall,
+    ReferenceRequestOutcome,
+    ToolRefusal,
+    WorkerTools,
+    decode_call,
+)
 from plowshare_privacy.worker import Worker
 
 DEVICE = "mac:02:00:00:00:01:01"
@@ -79,6 +85,30 @@ class Assessments:
         return assessment_view(device_id)
 
 
+class Library:
+    """Stands for the reference library: a request must never add or fetch a link."""
+
+    def __init__(self) -> None:
+        self.added: list[tuple[str, str, str]] = []
+
+    def add_owner(self, product: str, title: str, url: str) -> None:
+        self.added.append((product, title, url))
+
+
+class References:
+    """A fake request journal: Task 7's real one has its own tests."""
+
+    def __init__(self, library: Library) -> None:
+        self.library = library
+        self.calls: list[tuple[str, str, str | None, str]] = []
+
+    def request(
+        self, product: str, question: str, device_id: str | None, request_id: str
+    ) -> ReferenceRequestOutcome:
+        self.calls.append((product, question, device_id, request_id))
+        return ReferenceRequestOutcome("queued", "Queued for the owner to review.")
+
+
 class AssistantToolsTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -117,6 +147,8 @@ class AssistantToolsTest(unittest.IsolatedAsyncioTestCase):
             lambda: Identities(),
         )
         self.assessments = Assessments()
+        self.library = Library()
+        self.references = References(self.library)
 
     def tools(self, **overrides: object) -> WorkerTools:
         services: dict[str, object] = {
@@ -124,6 +156,7 @@ class AssistantToolsTest(unittest.IsolatedAsyncioTestCase):
             "assessments": self.assessments,
             "profiles": self.profiles,
             "issues": self.issues,
+            "references": self.references,
         }
         services.update(overrides)
         return WorkerTools(
@@ -530,10 +563,11 @@ class AssistantToolsTest(unittest.IsolatedAsyncioTestCase):
             "network_request_assessment",
             "network_note_profile",
             "network_record_issue",
+            "network_request_reference",
         }
         names = {item.name for item in DECLARATIONS}
         self.assertLessEqual(assistant, names)
-        # The whole provider: reads, the scan request and the four above.
+        # The whole provider: reads, the scan request and the five above.
         self.assertEqual(
             names - assistant,
             {
@@ -560,6 +594,8 @@ class AssistantToolsTest(unittest.IsolatedAsyncioTestCase):
             "password",
             "target",
             "recover",
+            "url",
+            "link",
         )
         for item in DECLARATIONS:
             if item.name not in assistant:
@@ -570,7 +606,15 @@ class AssistantToolsTest(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn(term, word.lower(), item.name)
             self.assertLessEqual(
                 {p.name for p in item.parameters},
-                {"device_id", "note", "issue_id", "applicability", "mitigation_status"},
+                {
+                    "device_id",
+                    "note",
+                    "issue_id",
+                    "applicability",
+                    "mitigation_status",
+                    "product",
+                    "question",
+                },
             )
         # The tools are composed from request and record services only.
         self.assertEqual(
@@ -582,6 +626,7 @@ class AssistantToolsTest(unittest.IsolatedAsyncioTestCase):
                 "assessments",
                 "profiles",
                 "issues",
+                "references",
                 "clock",
             },
         )
@@ -593,6 +638,156 @@ class AssistantToolsTest(unittest.IsolatedAsyncioTestCase):
                 if item.name == "network_record_issue"
             ),
         )
+
+    async def test_reference_request_decodes_and_requires_invocation(self) -> None:
+        invocation = str(uuid4())
+        self.assertEqual(
+            decode_call(
+                "network.request_reference",
+                {"product": "acme-cam", "question": "Is UPnP on by default?"},
+                request_id=invocation,
+            ),
+            ReferenceRequestCall(
+                "acme-cam", "Is UPnP on by default?", None, invocation
+            ),
+        )
+        self.assertEqual(
+            decode_call(
+                "network.request_reference",
+                {"product": "acme-cam", "question": "Q?", "device_id": DEVICE},
+                request_id=invocation,
+            ),
+            ReferenceRequestCall("acme-cam", "Q?", DEVICE, invocation),
+        )
+        # The harness invocation is the request's idempotency key; without it
+        # nothing is decoded.
+        with self.assertRaises(ValueError):
+            decode_call(
+                "network.request_reference", {"product": "acme-cam", "question": "Q?"}
+            )
+        for product in ("Acme Cam", "", "-acme", "a" * 49, 7):
+            with self.assertRaisesRegex(ToolRefusal, "A product name must be"):
+                decode_call(
+                    "network.request_reference",
+                    {"product": product, "question": "Q?"},
+                    request_id=invocation,
+                )
+        for question in ("", "  ", "x" * 513, "bell\x07", None):
+            with self.assertRaisesRegex(ToolRefusal, "question must be 1-512"):
+                decode_call(
+                    "network.request_reference",
+                    {"product": "acme-cam", "question": question},
+                    request_id=invocation,
+                )
+        state, text = await self.invoke(
+            "network_request_reference",
+            {"product": "acme-cam", "question": "Is UPnP on by default?"},
+            invocation=invocation,
+        )
+        self.assertEqual(state, "COMPLETED")
+        self.assertEqual(
+            json.loads(text),
+            {
+                "device_id": "",
+                "work": "reference",
+                "state": "queued",
+                "detail": "Queued for the owner to review.",
+            },
+        )
+        self.assertEqual(
+            self.references.calls,
+            [("acme-cam", "Is UPnP on by default?", None, invocation)],
+        )
+        state, text = await self.invoke(
+            "network_request_reference",
+            {"product": "acme-cam", "question": "Q?", "device_id": DEVICE},
+        )
+        self.assertEqual(state, "COMPLETED")
+        self.assertEqual(json.loads(text)["device_id"], DEVICE)
+        state, text = await self.invoke(
+            "network_request_reference",
+            {"product": "acme-cam", "question": "Q?"},
+            tools=self.tools(references=None),
+        )
+        self.assertEqual(
+            (state, text),
+            ("REJECTED", "Reference requests are not enabled on this collector."),
+        )
+        self.assertEqual(len(self.references.calls), 2)
+
+    async def test_reference_request_refuses_url_argument(self) -> None:
+        for extra in ("url", "link", "title"):
+            state, text = await self.invoke(
+                "network_request_reference",
+                {
+                    "product": "acme-cam",
+                    "question": "Q?",
+                    extra: "https://vendor.example/manual",
+                },
+            )
+            self.assertEqual(state, "REJECTED", extra)
+            self.assertEqual(
+                text, "The arguments do not match this tool's parameters; nothing ran."
+            )
+            self.assertNotIn("vendor.example", text)
+        self.assertEqual(self.references.calls, [])
+        self.assertEqual(self.library.added, [])
+
+    async def test_reference_request_never_fetches_question_text(self) -> None:
+        question = (
+            "The manual at https://vendor.example/cam.pdf mentions telnet; is it on?"
+        )
+        invocation = str(uuid4())
+        state, _ = await self.invoke(
+            "network_request_reference",
+            {"product": "acme-cam", "question": question},
+            invocation=invocation,
+        )
+        self.assertEqual(state, "COMPLETED")
+        # The link is queued as the owner's text to read, never as a source.
+        self.assertEqual(
+            self.references.calls, [("acme-cam", question, None, invocation)]
+        )
+        self.assertEqual(self.library.added, [])
+
+    async def test_reference_request_refuses_unknown_device(self) -> None:
+        for device in ("mac:02:00:00:00:09:09", "ip:10.1.4.3", "10.1.3.2"):
+            state, text = await self.invoke(
+                "network_request_reference",
+                {"product": "acme-cam", "question": "Q?", "device_id": device},
+            )
+            self.assertEqual(state, "REJECTED", device)
+            self.assertIn("monitored device", text)
+            self.assertNotIn("09:09", text)
+        self.assertEqual(self.references.calls, [])
+
+    def test_assistant_tools_match_plowshare_json(self) -> None:
+        manifest = json.loads(
+            (
+                Path(__file__).parent.parent / "network-privacy-watch/plowshare.json"
+            ).read_text()
+        )
+        grants = next(
+            scope["grants"]
+            for scope in manifest["toolScopes"]
+            if scope["scope"] == "network_assistant"
+        )
+        expected = {
+            "network_scope",
+            "network_scan_list",
+            "network_evidence",
+            "network_destinations",
+            "network_devices",
+            "network_device",
+            "network_request_deep_scan",
+            "network_request_assessment",
+            "network_note_profile",
+            "network_record_issue",
+            "network_request_reference",
+        }
+        self.assertEqual(len(grants), len(expected))
+        self.assertEqual(set(grants), expected)
+        self.assertEqual(ASSISTANT_TOOLS, expected)
 
 
 if __name__ == "__main__":

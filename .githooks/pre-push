@@ -1,0 +1,30 @@
+#!/bin/sh
+# Verification is read-only: applying formatting here would leave the pushed
+# commits unchanged and give a false impression that they had been repaired.
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+check_needed=false
+while read -r local_ref local_oid remote_ref remote_oid; do
+    case "$local_oid" in
+        *[!0]*)
+            # A formatted but uncommitted edit must not conceal an unformatted
+            # outgoing commit. Check only when the formatter's tracked inputs
+            # match that commit; other branches must be checked in their checkout.
+            if ! git diff --quiet "$local_oid" -- '*.java' '*.ts' '*gradle*' \
+                'gradle/**' 'package.json' 'pnpm-lock.yaml' '.prettier*'; then
+                echo "Push refused: formatting inputs for $local_ref differ from the working tree. Check out that revision, format, review and commit the changes before pushing." >&2
+                exit 1
+            fi
+            check_needed=true
+            ;;
+    esac
+done
+if [ "$check_needed" = false ]; then
+    exit 0
+fi
+
+if ! ./gradlew --console=plain formatCheck </dev/null; then
+    echo 'Push refused: formatting verification failed. Run ./gradlew format, review and commit the changes, then push again.' >&2
+    exit 1
+fi

@@ -1,27 +1,53 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.Mockito.mock;
 
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
+import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.archive.JdbcJobLog;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
-import io.aeyer.plowshare.server.board.MessageWake;
 import io.aeyer.plowshare.server.board.SeatWake;
-import io.aeyer.plowshare.server.events.*;
+import io.aeyer.plowshare.server.events.Dispatcher;
+import io.aeyer.plowshare.server.events.EventPayload;
+import io.aeyer.plowshare.server.events.EventPayloadCodec;
+import io.aeyer.plowshare.server.events.FiringRecord;
+import io.aeyer.plowshare.server.events.FiringStore;
+import io.aeyer.plowshare.server.events.Inbox;
+import io.aeyer.plowshare.server.events.JdbcFiringStore;
+import io.aeyer.plowshare.server.events.TriggerStore;
+import io.aeyer.plowshare.server.messaging.MessageWake;
+import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
+import io.aeyer.plowshare.server.testing.AuthorityFixtures;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -54,12 +80,10 @@ class RelayLifecycleDatabaseTest {
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     Flyway.configure().dataSource(data).load().migrate();
     jdbc = new JdbcTemplate(data);
-    var template =
-        new org.springframework.transaction.support.TransactionTemplate(
-            new DataSourceTransactionManager(data));
+    var template = new TransactionTemplate(new DataSourceTransactionManager(data));
     work =
         new UnitOfWork() {
-          public <T> T inTransaction(java.util.function.Supplier<T> action) {
+          public <T> T inTransaction(Supplier<T> action) {
             return Objects.requireNonNull(template.execute(status -> action.get()));
           }
         };
@@ -67,7 +91,7 @@ class RelayLifecycleDatabaseTest {
 
   @BeforeEach
   void fresh() {
-    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+    AuthorityFixtures.truncate(
         jdbc, "TRUNCATE relay_source_events,relay_topics,relay_payloads,projects,admins CASCADE");
     jdbc.update(
         "INSERT INTO admins(handle,password_hash,server_admin) VALUES('operator','fixture',true)");
@@ -90,11 +114,7 @@ class RelayLifecycleDatabaseTest {
             jdbc,
             work,
             new JdbcRelayPayloadStore(
-                jdbc,
-                work,
-                java.time.Duration.ofHours(1),
-                java.time.Duration.ofHours(24),
-                java.time.Duration.ofDays(30)));
+                jdbc, work, Duration.ofHours(1), Duration.ofHours(24), Duration.ofDays(30)));
     relay = new DurableRelay(repository, Instant::now);
     consumers =
         new JdbcRelayConsumerRepository(
@@ -147,19 +167,14 @@ class RelayLifecycleDatabaseTest {
   @Test
   void causal_job_capture_is_atomic_and_survives_completion_pruning_and_publisher_restart() {
     var cause = RelayCausation.root("external-event").next("external-event", 8);
-    var jobs = new io.aeyer.plowshare.server.archive.JdbcJobLog(jdbc);
+    var jobs = new JdbcJobLog(jdbc);
     assertThrows(
         IllegalStateException.class,
         () ->
             work.inTransaction(
                 () -> {
                   jobs.started(
-                      "job_rollback",
-                      "fixture",
-                      io.aeyer.plowshare.protocol.Home.of("fixture"),
-                      at,
-                      "cnv_fixture",
-                      cause);
+                      "job_rollback", "fixture", Home.of("fixture"), at, "cnv_fixture", cause);
                   throw new IllegalStateException("rollback");
                 }));
     assertNull(
@@ -169,20 +184,8 @@ class RelayLifecycleDatabaseTest {
     assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM relay_source_events", Integer.class));
     work.inTransaction(
         () -> {
-          jobs.started(
-              "job_causal",
-              "fixture",
-              io.aeyer.plowshare.protocol.Home.of("fixture"),
-              at,
-              "cnv_fixture",
-              cause);
-          assertTrue(
-              jobs.ended(
-                  "job_causal",
-                  io.aeyer.plowshare.server.agents.Outcome.Ending.ANSWERED,
-                  1,
-                  1,
-                  at.plusSeconds(1)));
+          jobs.started("job_causal", "fixture", Home.of("fixture"), at, "cnv_fixture", cause);
+          assertTrue(jobs.ended("job_causal", Outcome.Ending.ANSWERED, 1, 1, at.plusSeconds(1)));
           return true;
         });
     assertEquals(
@@ -209,9 +212,9 @@ class RelayLifecycleDatabaseTest {
                     new JdbcRelayPayloadStore(
                         jdbc,
                         work,
-                        java.time.Duration.ofHours(1),
-                        java.time.Duration.ofHours(24),
-                        java.time.Duration.ofDays(30))),
+                        Duration.ofHours(1),
+                        Duration.ofHours(24),
+                        Duration.ofDays(30))),
                 Instant::now),
             nativeInboxes);
     publishAll();
@@ -244,13 +247,12 @@ class RelayLifecycleDatabaseTest {
   @Test
   void orchestration_conductor_and_nested_work_inherit_the_same_causation() {
     var cause = new RelayCausation("root", "parent-event", 4);
-    var store =
-        new io.aeyer.plowshare.server.orchestrations.OrchestrationStore(jdbc, Instant::now, work);
+    var store = new OrchestrationStore(jdbc, Instant::now, work);
     var run =
         store.insert(
-            new io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration(
+            new OrchestrationStore.NewOrchestration(
                 "fixture",
-                io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier.PROJECT,
+                OrchestrationDefinition.Tier.PROJECT,
                 "a".repeat(64),
                 "fixture",
                 "fixture",
@@ -265,14 +267,8 @@ class RelayLifecycleDatabaseTest {
                 null,
                 0,
                 cause));
-    var jobs = new io.aeyer.plowshare.server.archive.JdbcJobLog(jdbc);
-    jobs.started(
-        "job_conductor",
-        "fixture",
-        io.aeyer.plowshare.protocol.Home.of("fixture"),
-        at,
-        "cnv_fixture",
-        null);
+    var jobs = new JdbcJobLog(jdbc);
+    jobs.started("job_conductor", "fixture", Home.of("fixture"), at, "cnv_fixture", null);
     assertEquals(
         cause,
         RelayCausationCodec.read(
@@ -283,9 +279,9 @@ class RelayLifecycleDatabaseTest {
         project);
     var child =
         store.insert(
-            new io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration(
+            new OrchestrationStore.NewOrchestration(
                 "fixture",
-                io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier.PROJECT,
+                OrchestrationDefinition.Tier.PROJECT,
                 "a".repeat(64),
                 "fixture",
                 "fixture",
@@ -317,14 +313,8 @@ class RelayLifecycleDatabaseTest {
 
   @Test
   void independent_jobs_get_roots_and_inconsistent_causation_rolls_back_without_notices() {
-    var jobs = new io.aeyer.plowshare.server.archive.JdbcJobLog(jdbc);
-    jobs.started(
-        "job_independent",
-        "fixture",
-        io.aeyer.plowshare.protocol.Home.of("fixture"),
-        at,
-        "cnv_fixture",
-        null);
+    var jobs = new JdbcJobLog(jdbc);
+    jobs.started("job_independent", "fixture", Home.of("fixture"), at, "cnv_fixture", null);
     assertEquals(
         RelayCausation.root("job:job_independent"),
         RelayCausationCodec.read(
@@ -337,7 +327,7 @@ class RelayLifecycleDatabaseTest {
             jobs.started(
                 "job_conflict",
                 "fixture",
-                io.aeyer.plowshare.protocol.Home.of("fixture"),
+                Home.of("fixture"),
                 at,
                 "cnv_fixture",
                 new RelayCausation("different", "parent", 2)));
@@ -512,10 +502,7 @@ class RelayLifecycleDatabaseTest {
             return false;
           }
 
-          public String start(
-              FiringRecord wake,
-              java.util.function.BiConsumer<String, io.aeyer.plowshare.server.agents.Outcome>
-                  ended) {
+          public String start(FiringRecord wake, BiConsumer<String, Outcome> ended) {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             accepted.incrementAndGet();
             started.countDown();
@@ -629,8 +616,7 @@ class RelayLifecycleDatabaseTest {
       jdbc.execute("SELECT pg_sleep(1.2)");
       release.countDown();
       lock.get(5, TimeUnit.SECONDS);
-      assertThrows(
-          java.util.concurrent.ExecutionException.class, () -> claim.get(5, TimeUnit.SECONDS));
+      assertThrows(ExecutionException.class, () -> claim.get(5, TimeUnit.SECONDS));
     } finally {
       release.countDown();
     }
@@ -701,30 +687,23 @@ class RelayLifecycleDatabaseTest {
     old.update(
         "INSERT INTO jobs(id,agent,project_id,started_at) VALUES('job_historical','fixture',?,clock_timestamp())",
         id);
-    var store = new JdbcFiringStore(old);
-    var queued =
-        store
-            .owe(
-                "brd_upgrade",
-                "conversation:queued",
-                new EventPayload.Seat(new SeatWake("opened", null, null, null)),
-                at)
-            .orElseThrow();
-    var uncertain =
-        store
-            .owe(
-                "brd_upgrade",
-                "conversation:uncertain",
-                new EventPayload.Seat(new SeatWake("opened", null, null, null)),
-                at)
-            .orElseThrow();
-    assertTrue(store.claimStart(uncertain.id(), at));
+    // The fixture represents V123 storage, before message-owned firing columns existed.
+    for (String name : List.of("queued", "uncertain"))
+      old.update(
+          "INSERT INTO firings(id,event,data,target,status,arrived_at,topic,started_at,job_id) VALUES(?, 'board.wake',?::jsonb,?,?,?,'brd_upgrade',?,?)",
+          "fir_" + name,
+          EventPayloadCodec.write(new EventPayload.Seat(new SeatWake("opened", null, null, null))),
+          "conversation:" + name,
+          name.equals("queued") ? "queued" : "started",
+          Timestamp.from(at),
+          name.equals("queued") ? null : Timestamp.from(at),
+          name.equals("queued") ? null : "pending");
     Flyway.configure().dataSource(data).load().migrate();
     assertEquals(
-        List.of(queued.id()),
+        List.of("fir_queued"),
         old.queryForList(
             "SELECT subject FROM relay_source_events ORDER BY sequence", String.class));
-    assertEquals("started", store.find(uncertain.id()).orElseThrow().status());
+    assertEquals("started", new JdbcFiringStore(old).find("fir_uncertain").orElseThrow().status());
     assertEquals(
         -1,
         RelayCausationCodec.read(
@@ -738,7 +717,7 @@ class RelayLifecycleDatabaseTest {
                 old.queryForObject(
                     "SELECT relay_causation::text FROM relay_source_events WHERE subject=?",
                     String.class,
-                    queued.id()))
+                    "fir_queued"))
             .depth());
   }
 
@@ -753,7 +732,7 @@ class RelayLifecycleDatabaseTest {
           """);
           jdbc.update(
               """
-          INSERT INTO board_message_instances(id,account,project,agent,conversation,topic,lifetime)
+          INSERT INTO message_instances(id,account,project,agent,conversation,former_topic,lifetime)
           VALUES('ins_fixture','operator','fixture','fixture','cnv_fixture','brd_private','persistent')
           """);
           return true;

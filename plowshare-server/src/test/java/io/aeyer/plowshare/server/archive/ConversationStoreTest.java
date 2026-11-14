@@ -11,7 +11,9 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.testing.AuthorityFixtures;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -120,9 +122,9 @@ class ConversationStoreTest {
     // calls and other execution evidence beyond turns/compactions. Reset their complete fixture
     // graph with CASCADE, preserving migration-owned builtin authority rows through the shared
     // helper; production retention and deletion keep their own explicit lifecycle rules.
-    io.aeyer.plowshare.server.testing.AuthorityFixtures.truncate(
+    AuthorityFixtures.truncate(
         jdbc,
-        "TRUNCATE TABLE orchestration_resume_receipts, digests_embedding_staging, digests_embedding_failures, relay_executions, jobs, board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
+        "TRUNCATE TABLE orchestration_resume_receipts, digests_embedding_staging, digests_embedding_failures, relay_executions, jobs, message_route_bindings, message_external_tasks, message_external_contexts, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     clock.set(OPENED_AT);
     minted.set(0);
     store =
@@ -412,7 +414,7 @@ class ConversationStoreTest {
         refused.getMessage().contains("conversations_an_allowance_is_both_halves_or_neither"),
         refused.getMessage());
 
-    new io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository(jdbc)
+    new JdbcAllowanceRepository(jdbc)
         .ceiling(store.find("cnv_ordinary").orElseThrow().budget().snapshot().id(), null);
 
     assertFalse(

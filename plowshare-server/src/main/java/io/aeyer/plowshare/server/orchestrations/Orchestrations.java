@@ -27,6 +27,8 @@ import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.StructuredAnswers;
 import io.aeyer.plowshare.server.agents.StructuredQuestions;
 import io.aeyer.plowshare.server.agents.Turn;
+import io.aeyer.plowshare.server.agents.TurnEligibility;
+import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.archive.ArchiveException;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
@@ -35,7 +37,9 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.hooks.Gate;
-import io.aeyer.plowshare.server.llm.accounting.*;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.accounting.UsageAware;
+import io.aeyer.plowshare.server.llm.accounting.UsageOwners;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage.Kind;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
@@ -45,11 +49,13 @@ import io.aeyer.plowshare.server.todos.StageSeeding;
 import io.aeyer.plowshare.server.todos.TodoItem;
 import io.aeyer.plowshare.server.todos.TodoLists;
 import io.aeyer.plowshare.server.todos.TodoStatus;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -129,7 +135,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
 
   @Override
   public void useUsageOwners(UsageOwners source) {
-    usageOwners = java.util.Objects.requireNonNull(source);
+    usageOwners = Objects.requireNonNull(source);
   }
 
   private static final Logger log = LoggerFactory.getLogger(Orchestrations.class);
@@ -389,7 +395,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
   private final Set<String> pendingAcceptanceAnswers = ConcurrentHashMap.newKeySet();
 
   private OperationAuthority operations;
-  private io.aeyer.plowshare.server.allowances.AllowanceRepository allowances;
+  private AllowanceRepository allowances;
 
   /** Production roots retain authority in the existing start transaction, before dispatch. */
   public Orchestrations(
@@ -411,7 +417,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       OrchestrationRecovery recovery,
       ScriptStore scripts,
       OperationAuthority operations,
-      io.aeyer.plowshare.server.allowances.AllowanceRepository allowances) {
+      AllowanceRepository allowances) {
     this(
         store,
         conversations,
@@ -802,7 +808,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
   public OrchestrationRecord repair(
       Orchestration.Repair ask,
       String account,
-      java.util.function.Function<OrchestrationRecord, OrchestrationDefinition> replacementFor) {
+      Function<OrchestrationRecord, OrchestrationDefinition> replacementFor) {
     return resume(ask.id(), ask.requestId(), ask.checkpoint(), account, replacementFor);
   }
 
@@ -811,7 +817,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       UUID requestId,
       Orchestration.CheckpointRepair requestedRepair,
       String account,
-      java.util.function.Function<OrchestrationRecord, OrchestrationDefinition> replacementFor) {
+      Function<OrchestrationRecord, OrchestrationDefinition> replacementFor) {
     var run =
         store
             .find(id)
@@ -990,8 +996,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
             conversation,
             message,
             next,
-            UUID.nameUUIDFromBytes(
-                (conversation + ":" + next).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+            UUID.nameUUIDFromBytes((conversation + ":" + next).getBytes(StandardCharsets.UTF_8)),
             checkpoint.sequence(),
             checkpoint.result(),
             todos.list(conversation),
@@ -1008,7 +1013,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
   private record CommittedStart(OrchestrationRecord run, boolean created) {}
 
   /** A caller-supplied durable key; repeated submissions never speak another first turn. */
-  public OrchestrationRecord start(Start start, java.util.UUID requestId, String payload) {
+  public OrchestrationRecord start(Start start, UUID requestId, String payload) {
     return start(start, requestId, payload, null);
   }
 
@@ -1378,9 +1383,9 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
     }
     announce(parent.id());
     if (store.find(child.id()).filter(fresh -> fresh.endedAt() != null).isPresent()) {
-      // The child was over before the wait landed, so its report — if it had one — has
-      // already been spoken to a parent that was still running. Nothing will report again,
-      // and a row left waiting here is a row nothing would ever wake.
+      // A child already terminal when the wait lands leaves no live reason to park. Its
+      // report may still be pending with the leased Relay consumer; clearing this start-time
+      // race neither delivers that report nor schedules a duplicate child or parent turn.
       wake(parent.id());
       return new Started(null, child, false);
     }
@@ -1467,7 +1472,8 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
               + ", so its conductor"
               + " cannot be spoken to");
     }
-    if (parent.endedAt() != null) {
+    var gate = eligibility(parent, false);
+    if (gate.reason() == TurnEligibility.Reason.TERMINAL) {
       throw new Turn.Refused(
           "orchestration "
               + parentId
@@ -1475,7 +1481,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
               + parent.state().wire()
               + ", so its conductor cannot be spoken to");
     }
-    if (parent.state() == OrchestrationState.ASKING) {
+    if (gate.reason() == TurnEligibility.Reason.ANSWER) {
       throw new Turn.Refused(
           "orchestration "
               + parentId
@@ -2445,7 +2451,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    */
   public Chosen answerChosen(
       String orchestration,
-      List<io.aeyer.plowshare.server.agents.StructuredAnswers.Choice> choices,
+      List<StructuredAnswers.Choice> choices,
       String note,
       String author,
       boolean byPerson) {
@@ -2742,11 +2748,25 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
         .ifPresent(now -> approvalDrain.accept(now.conductorConversation()));
   }
 
+  /**
+   * Existing domain holds become scheduling facts; legality and durable wait transitions stay here.
+   */
+  private static TurnEligibility eligibility(OrchestrationRecord run, boolean occupied) {
+    var hold =
+        switch (run.state()) {
+          case WAITING -> TurnEligibility.Reason.CHILD;
+          case ASKING -> TurnEligibility.Reason.ANSWER;
+          case FINISHED, FAILED, CAPPED, CANCELLED -> TurnEligibility.Reason.TERMINAL;
+          case RUNNING -> TurnEligibility.Reason.READY;
+        };
+    return TurnEligibility.decide(hold, () -> occupied, () -> false);
+  }
+
   private void routeFrom(OrchestrationRecord run, Outcome outcome) {
     String orchestration = run.id();
     Outcome.Ending ending = outcome.ending();
     OrchestrationState state = run.state();
-    if (state == OrchestrationState.WAITING) {
+    if (eligibility(run, false).reason() == TurnEligibility.Reason.CHILD) {
       routeWhileWaiting(run, outcome);
       return;
     }
@@ -2768,10 +2788,12 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
         if (state == OrchestrationState.FINISHED) {
           delivery.runEnded(run);
         } else if (state == OrchestrationState.RUNNING) {
+          var children = store.childTurnSnapshot(run.id());
+          if (!childReportGate(children).eligible()) return;
           if (outcome.requested()) {
-            endedOnAChildStillOut(run);
+            nudgeOrRestart(run, nudge(run), false, null, children);
           } else if (!finishedInPlainText(run, outcome)) {
-            nudgeOrRestart(run, nudge(run), false, outcome.text());
+            nudgeOrRestart(run, nudge(run), false, outcome.text(), children);
           }
         } else if (state == OrchestrationState.ASKING) {
           // orchestration_ask wrote its question, but the turn was already ending for
@@ -3402,36 +3424,12 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
     return true;
   }
 
-  /**
-   * A running conductor whose turn a tool ended {@code ANSWERED} without finishing the run — rule 1
-   * (spec 2026-09-27 §2): it checked on a child it started while that child was still going, and
-   * was told its result would come to it. {@code orchestration_finish} is the only other tool that
-   * ends a turn {@code ANSWERED}, and it leaves the row {@code finished}, not here.
-   *
-   * <p><b>Never the conductor's prose, so never finished on.</b> The text is the harness's own
-   * sentence about the child. Measured by the final review: with every stage done and the child
-   * ending between the status call and this route, {@link #finishedInPlainText} found no live child
-   * and finished the tree with that sentence as its result, delivered to the person, while the
-   * child's real report landed on a finished run.
-   *
-   * <p><b>What wakes it is the child's report.</b> A child that ended while this turn was going had
-   * its report held, since a report is not spoken into a turn in flight ({@link Delivery}), and
-   * {@code Turn}'s free normally speaks it before this runs. A report still held here is delivered
-   * now, so a conductor with nothing left running is not left with nothing to wake it. Then the
-   * ordinary nudge, whose own guards make it nothing while a child still runs or the report's turn
-   * is already speaking, and a nudge only for a conductor with neither — which would otherwise be a
-   * running row with no turn on it.
-   */
-  private void endedOnAChildStillOut(OrchestrationRecord run) {
-    for (OrchestrationRecord child : store.children(run.id())) {
-      if (child.endedAt() != null && child.resultDeliveredAt() == null) {
-        delivery.runEnded(child);
-      }
-    }
-    store
-        .find(run.id())
-        .filter(now -> now.state() == OrchestrationState.RUNNING)
-        .ifPresent(now -> nudgeOrRestart(now, nudge(now), false, null));
+  /** A pending child report drives the next turn; a nudge must not overtake its Relay arrival. */
+  private static TurnEligibility childReportGate(OrchestrationStore.ChildTurnSnapshot children) {
+    return TurnEligibility.decide(
+        children.pendingReport() ? TurnEligibility.Reason.CHILD : TurnEligibility.Reason.READY,
+        () -> false,
+        () -> false);
   }
 
   /**
@@ -3475,7 +3473,17 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    *     first line of; {@code null} for a restart, or a turn whose text was the harness's own
    */
   boolean nudgeOrRestart(OrchestrationRecord run, String notice, boolean restart, String said) {
-    List<OrchestrationRecord> live = store.liveChildren(run.id());
+    return nudgeOrRestart(run, notice, restart, said, store.childTurnSnapshot(run.id()));
+  }
+
+  private boolean nudgeOrRestart(
+      OrchestrationRecord run,
+      String notice,
+      boolean restart,
+      String said,
+      OrchestrationStore.ChildTurnSnapshot children) {
+    if (!childReportGate(children).eligible()) return false;
+    List<OrchestrationRecord> live = children.live();
     boolean counted = true;
     OrchestrationRecord capChild = null;
     String capQuestion = null;
@@ -4744,11 +4752,11 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       return Optional.empty();
     }
     List<TodoItem> items = todos.list(conversation);
-    java.util.Set<String> stageItems =
+    Set<String> stageItems =
         items.stream()
             .filter(item -> item.stageId() != null)
             .map(TodoItem::id)
-            .collect(java.util.stream.Collectors.toSet());
+            .collect(Collectors.toSet());
     List<TodoItem> going =
         items.stream()
             .filter(
@@ -4757,8 +4765,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                         && stageItems.contains(item.parent())
                         && item.status() == TodoStatus.IN_PROGRESS)
             .toList();
-    TodoItem phase =
-        going.stream().max(java.util.Comparator.comparing(TodoItem::updatedAt)).orElse(null);
+    TodoItem phase = going.stream().max(Comparator.comparing(TodoItem::updatedAt)).orElse(null);
     if (phase == null
         || going.stream()
             .filter(item -> item != phase)
@@ -4788,7 +4795,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
               List<TodoItem> siblings =
                   items.stream()
                       .filter(item -> phase.parent().equals(item.parent()))
-                      .sorted(java.util.Comparator.comparingInt(TodoItem::position))
+                      .sorted(Comparator.comparingInt(TodoItem::position))
                       .toList();
               return String.format("%02d-%s", siblings.indexOf(phase) + 1, slug);
             })

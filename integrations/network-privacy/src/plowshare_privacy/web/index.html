@@ -446,6 +446,27 @@
             <div class="actions"><button id="open-background" type="button" class="secondary">Open background work on Devices</button></div>
           </div>
         </section>
+        <section id="reference-requests" class="panel" hidden>
+          <div class="panel-heading"><h2>Documentation requests</h2><span>Asked for by the Ask assistant</span></div>
+          <div class="panel-body">
+            <p class="hint">The assistant could not answer from what it has. Add links to the product's own documentation and the collector fetches them into the Library, or dismiss the request.</p>
+            <div id="reference-request-list" class="entries"></div>
+          </div>
+        </section>
+        <section id="reference-library" class="panel" hidden>
+          <div class="panel-heading"><h2>Reference library</h2><span>Vendor documentation for the assistant</span></div>
+          <div class="panel-body">
+            <p class="hint">The collector fetches these pages into the Plowshare Library. A page that fails or is held is not retried until you choose Retry.</p>
+            <div id="reference-list" class="entries"></div>
+            <p id="reference-detail" role="status" class="hint"></p>
+            <form id="reference-settings" class="inline-form">
+              <label>Refresh each page every (days)<input id="reference-refresh-days" type="number" min="1" max="365" step="1" inputmode="numeric" required></label>
+              <button type="submit">Save interval</button>
+            </form>
+            <p class="hint">Each ready page is fetched again after this many days, as a new revision of the same Library source. 1 to 365; 90 by default.</p>
+            <p id="reference-settings-detail" role="status" class="hint"></p>
+          </div>
+        </section>
         <details class="panel">
           <summary class="panel-heading"><h2>Connect Pi-hole v6</h2><span>Optional device identity and DNS evidence</span></summary>
           <div class="panel-body">

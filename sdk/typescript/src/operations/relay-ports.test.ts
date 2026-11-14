@@ -25,6 +25,91 @@ const empty = {
   events: [],
 };
 describe('Relay topic port reply boundaries', () => {
+  it('inspects exact group state without consumption or cursor creation', () => {
+    const query = {
+      project: 'fixture',
+      topic: 'checks.requests',
+      group: 'detectors',
+    };
+    const asked = request('relay.group.inspect', query);
+    const state = { ...query, exists: true, generation: id };
+    expect(resultOf(asked, { code: 'OK', payload: state }).kind).toBe(
+      'completed',
+    );
+    expect(
+      decodeReply('relay.group.inspect', {
+        ...query,
+        exists: false,
+        generation: null,
+      }).exists,
+    ).toBe(false);
+    for (const change of [
+      { project: 'foreign' },
+      { topic: 'foreign' },
+      { group: 'foreign' },
+      { exists: false },
+      { generation: null },
+      { generation: 'bad' },
+    ])
+      expect(
+        resultOf(asked, { code: 'OK', payload: { ...state, ...change } }).kind,
+      ).toBe('invalid-response');
+    expect(() =>
+      decodePayload('relay.group.inspect', { ...query, generation: id }),
+    ).toThrow();
+  });
+  it('exposes an inspected cursor generation without requiring another log read', () => {
+    expect(
+      decodeReply('relay.consume', { ...empty, generation: id }).generation,
+    ).toBe(id);
+    expect(decodeReply('relay.consume', empty).generation).toBeUndefined();
+    expect(
+      decodeReply('relay.consume', { ...empty, generation: null }).generation,
+    ).toBeNull();
+    for (const generation of ['bad', 1, true])
+      expect(() =>
+        decodeReply('relay.consume', { ...empty, generation }),
+      ).toThrow();
+  });
+  it('retires only an inspected group and binds the result to that generation', () => {
+    const payload = {
+      project: 'fixture',
+      topic: 'checks.requests',
+      group: 'detectors',
+      generation: id,
+    };
+    const asked = request('relay.group.delete', payload);
+    const reply = { ...payload, removed: true };
+    expect(resultOf(asked, { code: 'OK', payload: reply }).kind).toBe(
+      'completed',
+    );
+    expect(
+      resultOf(asked, { code: 'OK', payload: { ...reply, removed: false } })
+        .kind,
+    ).toBe('completed');
+    for (const change of [
+      { project: 'foreign' },
+      { topic: 'foreign' },
+      { group: 'foreign' },
+      { generation: '22222222-2222-2222-2222-222222222222' },
+      { removed: 'true' },
+    ])
+      expect(
+        resultOf(asked, { code: 'OK', payload: { ...reply, ...change } }).kind,
+      ).toBe('invalid-response');
+    for (const change of [
+      { generation: 'bad' },
+      { group: ' ' },
+      { topic: 'x'.repeat(1025) },
+      { unexpected: true },
+    ])
+      expect(() =>
+        decodePayload('relay.group.delete', { ...payload, ...change }),
+      ).toThrow();
+    expect(() =>
+      decodeReply('relay.group.delete', { ...reply, generation: null }),
+    ).toThrow();
+  });
   it('validates publication text once per decoded request', () => {
     const validation = vi.spyOn(relayText, 'validRelayText');
     try {

@@ -1,9 +1,24 @@
 package io.aeyer.plowshare.server.access;
 
-import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.*;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.APPROVAL;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.CONVERSATION;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.INSTANCE;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.JOB;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.MEMORY;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.MESSAGE;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.ORCHESTRATION;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.ORCHESTRATION_RECEIPT;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.PROPOSAL;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.SCHEDULE;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.TOPIC;
+import static io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind.TRIGGER;
 
 import io.aeyer.plowshare.server.faults.CallerFault;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** Transport codec for authorization references. Raw payloads never reach authorization policy. */
 public final class AccessRequestDecoder {
@@ -72,7 +87,6 @@ public final class AccessRequestDecoder {
       add(resources, JOB, payload.get("run"));
       add(resources, ORCHESTRATION, payload.get("orchestration"));
     }
-    if (operation.startsWith("outgoing.")) add(resources, OUTGOING, payload.get("id"));
     Object paused = payload.get("paused");
     if (operation.equals("schedule.pause") && paused != null && !(paused instanceof Boolean))
       throw new CallerFault("paused must be a boolean");

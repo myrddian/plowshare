@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.information;
 import io.aeyer.plowshare.server.cache.*;
 import io.aeyer.plowshare.server.reads.*;
 import java.util.*;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -67,8 +68,7 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
    * memory, so nothing can change between that validation and the verdict.
    */
   @Override
-  public boolean readable(
-      String account, String log, java.util.function.BooleanSupplier authoritative) {
+  public boolean readable(String account, String log, BooleanSupplier authoritative) {
     Objects.requireNonNull(authoritative);
     if (account == null || log == null) return authoritative.getAsBoolean();
     if (account.isBlank())

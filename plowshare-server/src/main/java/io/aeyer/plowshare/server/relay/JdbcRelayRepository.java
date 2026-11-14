@@ -1,15 +1,21 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.protocol.transport.SegmentedMessages;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.blobs.BlobKey;
+import io.aeyer.plowshare.server.blobs.BlobRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Stream;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -35,7 +41,7 @@ public final class JdbcRelayRepository implements RelayRepository {
   private final UnitOfWork transactions;
   private final RelayPayloadStore payloads;
   private final RelayTextLimit textLimit;
-  private final Optional<io.aeyer.plowshare.server.blobs.BlobRepository> blobs;
+  private final Optional<BlobRepository> blobs;
 
   public JdbcRelayRepository(
       JdbcTemplate jdbc, UnitOfWork transactions, RelayPayloadStore payloads) {
@@ -55,7 +61,7 @@ public final class JdbcRelayRepository implements RelayRepository {
       UnitOfWork transactions,
       RelayPayloadStore payloads,
       RelayTextLimit textLimit,
-      io.aeyer.plowshare.server.blobs.BlobRepository blobs) {
+      BlobRepository blobs) {
     this(jdbc, transactions, payloads, textLimit, Optional.of(blobs));
   }
 
@@ -64,7 +70,7 @@ public final class JdbcRelayRepository implements RelayRepository {
       UnitOfWork transactions,
       RelayPayloadStore payloads,
       RelayTextLimit textLimit,
-      Optional<io.aeyer.plowshare.server.blobs.BlobRepository> blobs) {
+      Optional<BlobRepository> blobs) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.payloads = Objects.requireNonNull(payloads, "payloads");
@@ -112,10 +118,11 @@ public final class JdbcRelayRepository implements RelayRepository {
           changed(
               jdbc.update(
                   """
-          UPDATE relay_topics SET retention_seconds=?,max_records=? WHERE scope_key=? AND name=?
+          UPDATE relay_topics SET retention_seconds=?,max_records=?,prune_at=oldest_published_at+? * interval '1 second' WHERE scope_key=? AND name=?
           """,
                   policy.retention().getSeconds(),
                   policy.maxRecords(),
+                  policy.retention().getSeconds(),
                   RelayScopeCodec.write(key),
                   key.name()));
           return new Relay.Topic(
@@ -130,6 +137,23 @@ public final class JdbcRelayRepository implements RelayRepository {
 
   @Override
   public Relay.Publication append(Relay.TopicKey key, Relay.Draft draft, Instant publishedAt) {
+    var result = appendChecked(key, Optional.empty(), draft, publishedAt);
+    if (result instanceof Relay.Appended appended) return appended.publication();
+    throw new IllegalStateException("An unpinned append returned no publication");
+  }
+
+  @Override
+  public Relay.AppendResult append(
+      Relay.TopicKey key, UUID expectedGeneration, Relay.Draft draft, Instant publishedAt) {
+    return appendChecked(
+        key, Optional.of(Objects.requireNonNull(expectedGeneration)), draft, publishedAt);
+  }
+
+  private Relay.AppendResult appendChecked(
+      Relay.TopicKey key,
+      Optional<UUID> expectedGeneration,
+      Relay.Draft draft,
+      Instant publishedAt) {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(draft, "draft");
     Instant admittedAt = RelayValues.time(publishedAt);
@@ -191,9 +215,21 @@ public final class JdbcRelayRepository implements RelayRepository {
     String payloadDigest = digest;
     return transactions.inTransaction(
         () -> {
-          Relay.Topic topic = topic(key, true);
-          if (topic.kind() != draft.payload().kind())
-            throw new IllegalArgumentException("Relay payload differs from the topic family");
+          Relay.Topic topic;
+          if (expectedGeneration.isPresent()) {
+            var selected = findTopic(key, true);
+            if (selected.isEmpty())
+              return new Relay.DestinationUnavailable(Relay.DestinationFailure.MISSING);
+            topic = selected.orElseThrow();
+            if (!expectedGeneration.orElseThrow().equals(topic.generation()))
+              return new Relay.DestinationUnavailable(Relay.DestinationFailure.REPLACED);
+            if (topic.kind() != draft.payload().kind())
+              return new Relay.DestinationUnavailable(Relay.DestinationFailure.INVALID_KIND);
+          } else {
+            topic = topic(key, true);
+            if (topic.kind() != draft.payload().kind())
+              throw new IllegalArgumentException("Relay payload differs from the topic family");
+          }
           var retained =
               jdbc.query(
                   "SELECT "
@@ -209,7 +245,7 @@ public final class JdbcRelayRepository implements RelayRepository {
             if (!original.event().equals(draft))
               throw new IllegalArgumentException("Relay event ID conflicts with retained content");
             claimBlob(original);
-            return original;
+            return new Relay.Appended(original);
           }
           // The probe saw a retained event that pruning removed before the topic lock was taken, so
           // nothing was stored. This is a genuinely new append: validate and store it here. It is
@@ -222,8 +258,15 @@ public final class JdbcRelayRepository implements RelayRepository {
           long position = Math.addExact(topic.lastPosition(), 1);
           changed(
               jdbc.update(
-                  "UPDATE relay_topics SET last_position=? WHERE scope_key=? AND name=?",
+                  """
+                  UPDATE relay_topics SET last_position=?,
+                    oldest_published_at=CASE WHEN last_position=expired_through THEN ? ELSE oldest_published_at END,
+                    prune_at=CASE WHEN last_position=expired_through THEN CAST(? AS timestamptz)+retention_seconds*interval '1 second' ELSE prune_at END
+                  WHERE scope_key=? AND name=?
+                  """,
                   position,
+                  timestamp(admittedAt),
+                  timestamp(admittedAt),
                   RelayScopeCodec.write(key),
                   key.name()));
           changed(
@@ -247,7 +290,7 @@ public final class JdbcRelayRepository implements RelayRepository {
                   digestToWrite));
           var publication = new Relay.Publication(key, position, admittedAt, draft);
           claimBlob(publication);
-          return publication;
+          return new Relay.Appended(publication);
         });
   }
 
@@ -314,9 +357,7 @@ public final class JdbcRelayRepository implements RelayRepository {
     String scope = RelayBlobClaims.scope(publication.topic());
     var claim = RelayBlobClaims.claim(publication.topic(), publication.position());
     repository.acquire(
-        new io.aeyer.plowshare.server.blobs.BlobKey(scope, binary.blob().sha256()),
-        claim,
-        binary.blob().byteLength());
+        new BlobKey(scope, binary.blob().sha256()), claim, binary.blob().byteLength());
     int inserted =
         jdbc.update(
             """
@@ -451,8 +492,7 @@ public final class JdbcRelayRepository implements RelayRepository {
                   key.topic().name(),
                   subscription.seenThrough(),
                   limit,
-                  io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_MESSAGE_BYTES
-                      - 1024 * 1024);
+                  SegmentedMessages.MAX_MESSAGE_BYTES - 1024 * 1024);
           return new Relay.Read(subscription, gap(topic, subscription), publications);
         });
   }
@@ -513,21 +553,43 @@ public final class JdbcRelayRepository implements RelayRepository {
   public List<Relay.TopicKey> topicsToPrune(Instant now, int limit) {
     Instant at = RelayValues.time(now);
     RelayValues.limit(limit, 100);
-    return List.copyOf(
+    // Separate index-driven reads avoid an OR across expiry and count pressure. Each returns
+    // at most limit metadata rows, never publication bodies or one probe per live topic. A count
+    // excess is immediately due; otherwise the retention deadline determines urgency.
+    var expired =
         jdbc.query(
             """
-        SELECT t.scope_key,t.name FROM relay_topics t
-        JOIN relay_publications p ON p.scope_key=t.scope_key AND p.topic=t.name
-            AND p.position=t.expired_through+1
-        WHERE p.published_at <= CAST(? AS timestamptz) - t.retention_seconds * interval '1 second'
-            OR (t.max_records IS NOT NULL AND t.last_position-t.expired_through > t.max_records)
-        ORDER BY p.published_at,t.scope_key,t.name LIMIT ?
+        SELECT scope_key,name,prune_at AS due_at FROM relay_topics
+        WHERE prune_at<=? ORDER BY prune_at,scope_key,name LIMIT ?
         """,
-            (row, index) ->
-                new Relay.TopicKey(
-                    RelayScopeCodec.read(row.getString("scope_key")), row.getString("name")),
+            JdbcRelayRepository::dueRow,
             timestamp(at),
-            limit));
+            limit);
+    var excess =
+        jdbc.query(
+            """
+        SELECT scope_key,name,oldest_published_at AS due_at FROM relay_topics
+        WHERE over_record_limit ORDER BY oldest_published_at,scope_key,name LIMIT ?
+        """,
+            JdbcRelayRepository::dueRow,
+            limit);
+    return Stream.concat(expired.stream(), excess.stream())
+        .sorted(
+            Comparator.comparing(Due::at)
+                .thenComparing(value -> RelayScopeCodec.write(value.topic()))
+                .thenComparing(value -> value.topic().name()))
+        .map(Due::topic)
+        .distinct()
+        .limit(limit)
+        .toList();
+  }
+
+  private record Due(Relay.TopicKey topic, Instant at) {}
+
+  private static Due dueRow(ResultSet row, int index) throws SQLException {
+    return new Due(
+        new Relay.TopicKey(RelayScopeCodec.read(row.getString("scope_key")), row.getString("name")),
+        instant(row, "due_at"));
   }
 
   @Override
@@ -537,7 +599,11 @@ public final class JdbcRelayRepository implements RelayRepository {
     RelayValues.limit(limit, 1000);
     return transactions.inTransaction(
         () -> {
-          Relay.Topic topic = topic(key, true);
+          var found = findTopic(key, true);
+          // Candidates are hints. An owner may retire an empty topic after discovery; its absence
+          // is normal progress, while all database failures still propagate.
+          if (found.isEmpty()) return 0;
+          Relay.Topic topic = found.get();
           Instant cutoff = at.minus(topic.policy().retention());
           long excessThrough =
               topic.policy().maxRecords() == null
@@ -571,10 +637,21 @@ public final class JdbcRelayRepository implements RelayRepository {
                   through);
           if (deleted != count)
             throw new IllegalStateException("Relay retained prefix changed under lock");
+          var next =
+              jdbc
+                  .query(
+                      "SELECT published_at FROM relay_publications WHERE scope_key=? AND topic=? ORDER BY position LIMIT 1",
+                      (row, index) -> instant(row, "published_at"),
+                      RelayScopeCodec.write(key),
+                      key.name())
+                  .stream()
+                  .findFirst();
           changed(
               jdbc.update(
-                  "UPDATE relay_topics SET expired_through=? WHERE scope_key=? AND name=?",
+                  "UPDATE relay_topics SET expired_through=?,oldest_published_at=?,prune_at=CAST(? AS timestamptz)+retention_seconds*interval '1 second' WHERE scope_key=? AND name=?",
                   through,
+                  timestamp(next.orElse(null)),
+                  timestamp(next.orElse(null)),
                   RelayScopeCodec.write(key),
                   key.name()));
           return deleted;
@@ -582,6 +659,11 @@ public final class JdbcRelayRepository implements RelayRepository {
   }
 
   private Relay.Topic topic(Relay.TopicKey key, boolean exclusive) {
+    return findTopic(key, exclusive)
+        .orElseThrow(() -> new IllegalStateException("Relay topic does not exist"));
+  }
+
+  private Optional<Relay.Topic> findTopic(Relay.TopicKey key, boolean exclusive) {
     // The lock keyword is selected only by this code-owned boolean, never by external input.
     return jdbc
         .query(
@@ -593,8 +675,7 @@ public final class JdbcRelayRepository implements RelayRepository {
             RelayScopeCodec.write(key),
             key.name())
         .stream()
-        .findFirst()
-        .orElseThrow(() -> new IllegalStateException("Relay topic does not exist"));
+        .findFirst();
   }
 
   private Relay.Subscription subscription(Relay.SubscriptionKey key) {
@@ -633,7 +714,7 @@ public final class JdbcRelayRepository implements RelayRepository {
         key,
         row.getLong("seen_through"),
         instant(row, "seen_at"),
-        row.getObject("generation", java.util.UUID.class));
+        row.getObject("generation", UUID.class));
   }
 
   private static Optional<Relay.Gap> gap(Relay.Topic topic, Relay.Subscription subscription) {
@@ -651,7 +732,7 @@ public final class JdbcRelayRepository implements RelayRepository {
             row.getObject("max_records", Long.class)),
         row.getLong("last_position"),
         row.getLong("expired_through"),
-        row.getObject("generation", java.util.UUID.class));
+        row.getObject("generation", UUID.class));
   }
 
   private static Relay.Publication publication(ResultSet row, Relay.Topic topic)
@@ -676,7 +757,7 @@ public final class JdbcRelayRepository implements RelayRepository {
   }
 
   private static Timestamp timestamp(Instant instant) {
-    return Timestamp.from(instant);
+    return instant == null ? null : Timestamp.from(instant);
   }
 
   private static void changed(int rows) {

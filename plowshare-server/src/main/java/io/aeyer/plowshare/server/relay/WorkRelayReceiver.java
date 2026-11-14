@@ -1,15 +1,25 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.agents.*;
+import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.EventRuns;
+import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
+import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.agents.WorkCallers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
-import io.aeyer.plowshare.server.board.BoardMessaging;
-import io.aeyer.plowshare.server.orchestrations.*;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.orchestrations.GrantedOrchestrations;
+import io.aeyer.plowshare.server.orchestrations.OrchestrationStarts;
+import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
+import io.aeyer.plowshare.server.orchestrations.Orchestrations;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
+import io.aeyer.plowshare.server.requests.RequestedHome;
 import io.aeyer.plowshare.server.session.ProjectPresences;
 import io.aeyer.plowshare.server.session.SessionOwners;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /** Adapts pinned Relay work to normal event jobs and idempotent orchestration starts. */
 public final class WorkRelayReceiver implements RelayReceiver {
@@ -26,7 +36,7 @@ public final class WorkRelayReceiver implements RelayReceiver {
   private final ProjectWorkspaces projects;
   private final ProjectPresences presences;
   private final SessionOwners sessions;
-  private final BoardMessaging.Routing routing;
+  private final MessageService.Routing routing;
 
   public WorkRelayReceiver(
       String receiver,
@@ -40,10 +50,10 @@ public final class WorkRelayReceiver implements RelayReceiver {
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      BoardMessaging.Routing routing,
+      MessageService.Routing routing,
       RelayForwardingHistory history,
       int maximum) {
-    if (!java.util.Set.of("agent.run", "script.run", "orchestration.start").contains(receiver))
+    if (!Set.of("agent.run", "script.run", "orchestration.start").contains(receiver))
       throw new IllegalArgumentException("unsupported work receiver");
     this.receiver = receiver;
     this.history = Objects.requireNonNull(history);
@@ -100,7 +110,7 @@ public final class WorkRelayReceiver implements RelayReceiver {
     }
     callers.requireSession(session, account);
     var agent = callers.requireAgent(work.agent(), callers.callerFor(project, session, account));
-    Home home = io.aeyer.plowshare.server.requests.RequestedHome.in(project);
+    Home home = RequestedHome.in(project);
     OrchestrationDefinition definition = null;
     if (receiver.equals("orchestration.start")) {
       definition = grants.granted(agent, home, null, session, account).get(work.definition());

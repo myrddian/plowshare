@@ -9,6 +9,8 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.delivery.PersonDelivery;
 import io.aeyer.plowshare.server.delivery.PersonDelivery.Result;
 import io.aeyer.plowshare.server.hooks.Handover;
+import io.aeyer.plowshare.server.information.InformationJobs;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -25,6 +27,11 @@ import org.slf4j.LoggerFactory;
  * Takes an orchestration's question or ending to its caller — spoken into its parent conductor's
  * own conversation, into the caller's own TURN conversation, or left in its account's inbox —
  * Decisions 3 and 4.
+ *
+ * <p>Terminal child results enter only through {@link #childCompleted}, under the single leased
+ * Relay consumer group (decision 0064). The engine callback and ordinary drains deliver root
+ * results and questions, never child endings. The routing and refusal rules below are shared by
+ * that leased path and the existing question/person paths.
  *
  * <h2>Where it goes</h2>
  *
@@ -67,7 +74,8 @@ import org.slf4j.LoggerFactory;
  *
  * <p>The engine calls it after its own state has committed, and {@code Turn}'s free calls the
  * drains. A throw from the voice, the inbox or the store is logged, and the item is left
- * undelivered for the next drain or the next boot.
+ * undelivered for the next drain or the next boot. The leased child entry checks initial ownership
+ * before this callback guard, and the consumer rechecks ownership before advancing availability.
  *
  * <h2>A question only the person may answer skips every model</h2>
  *
@@ -97,7 +105,7 @@ import org.slf4j.LoggerFactory;
  * <p>Only a question or an ending is ever delivered here. An answer is the conductor's to hear, and
  * {@code Orchestrations.speakAnswerIfPending} speaks it.
  */
-public final class Delivery implements DeliveryPort {
+public final class Delivery implements DeliveryPort, ChildCompletionDelivery {
 
   private static final Logger log = LoggerFactory.getLogger(Delivery.class);
 
@@ -163,10 +171,9 @@ public final class Delivery implements DeliveryPort {
             });
   }
 
-  private io.aeyer.plowshare.server.information.InformationJobs information;
+  private InformationJobs information;
 
-  public void useInformationInputs(
-      io.aeyer.plowshare.server.information.InformationJobs information) {
+  public void useInformationInputs(InformationJobs information) {
     this.information = information;
     people.useInformationInputs(information);
   }
@@ -193,7 +200,21 @@ public final class Delivery implements DeliveryPort {
 
   @Override
   public void runEnded(OrchestrationRecord run) {
-    guarded("ending of " + run.id(), () -> deliverEnding(run));
+    // Child terminal results have exactly one transport: the leased Relay consumer. Neither the
+    // engine callback, a freed conversation nor boot recovery may bypass that ownership.
+    if (run.parent() != null) return;
+    guarded("ending of " + run.id(), () -> deliverEnding(run, () -> {}));
+  }
+
+  /** Delivers only the named terminal attempt, under the consumer's live ownership checks. */
+  public void childCompleted(ChildCompletions.Completion completion, Runnable requireLease) {
+    Objects.requireNonNull(completion);
+    Objects.requireNonNull(requireLease).run();
+    guarded(
+        "child ending of " + completion.child(),
+        () ->
+            deliverEnding(
+                completion.child(), completion.parent(), completion.endedAt(), requireLease));
   }
 
   /**
@@ -300,7 +321,7 @@ public final class Delivery implements DeliveryPort {
     drain("for " + conversation, run -> conversation.equals(run.callerConversation()));
   }
 
-  /** Every undelivered question and ending, for boot. */
+  /** Undelivered questions and root endings at boot; child results remain with their consumer. */
   public void drainAll() {
     drain("at boot", run -> true);
   }
@@ -424,21 +445,27 @@ public final class Delivery implements DeliveryPort {
     }
   }
 
-  private void deliverEnding(OrchestrationRecord run) {
+  private void deliverEnding(OrchestrationRecord run, Runnable requireLease) {
+    deliverEnding(run.id(), run.parent(), run.endedAt(), requireLease);
+  }
+
+  private void deliverEnding(String child, String parent, Instant endedAt, Runnable requireLease) {
+    // Read the complete owning record once, inside the in-flight guard. The trusted reference
+    // already supplies identity/version; hydrating before this guard would discard and refetch it.
     deliver(
-        "ending:" + run.id(),
+        "ending:" + child,
         RESULT,
         () ->
             store
-                .find(run.id())
-                .filter(
-                    r ->
-                        r.resultDeliveredAt() == null
-                            && run.endedAt() != null
-                            && run.endedAt().equals(r.endedAt())),
+                .find(child)
+                .filter(run -> Objects.equals(parent, run.parent()))
+                .filter(run -> endedAt != null && endedAt.equals(run.endedAt()))
+                .filter(run -> run.state().terminal() && run.resultDeliveredAt() == null),
         Utterances::endingForCaller,
-        () -> store.resultDelivered(run.id(), run.endedAt()),
-        null);
+        () -> store.resultDelivered(child, endedAt),
+        null,
+        true,
+        requireLease);
   }
 
   /**
@@ -456,7 +483,7 @@ public final class Delivery implements DeliveryPort {
       Function<OrchestrationRecord, String> text,
       Runnable markDelivered,
       OrchestrationMessage question) {
-    deliver(id, what, undelivered, text, markDelivered, question, true);
+    deliver(id, what, undelivered, text, markDelivered, question, true, () -> {});
   }
 
   private void deliver(
@@ -466,12 +493,14 @@ public final class Delivery implements DeliveryPort {
       Function<OrchestrationRecord, String> text,
       Runnable markDelivered,
       OrchestrationMessage question,
-      boolean retryOnceFree) {
+      boolean retryOnceFree,
+      Runnable requireLease) {
     if (!inFlight.add(id)) {
       return;
     }
     BooleanSupplier stillBusy = null;
     try {
+      requireLease.run();
       Optional<OrchestrationRecord> current = undelivered.get();
       if (current.isEmpty()) {
         return;
@@ -496,7 +525,9 @@ public final class Delivery implements DeliveryPort {
         }
         String said =
             anEnding ? logStages.deliveryPre(source, Handover.PARENT, utterance) : utterance;
+        requireLease.run();
         if (spokenToParent(fresh, parent, said, what)) {
+          requireLease.run();
           markDelivered.run();
           if (anEnding) {
             logStages.deliveryPost(source, Handover.PARENT, said);
@@ -527,6 +558,7 @@ public final class Delivery implements DeliveryPort {
                   people.routeFor(fresh.callerConversation(), fresh.callerHandle()),
                   utterance)
               : utterance;
+      requireLease.run();
       PersonDelivery.Sent sent =
           people.sendFromLog(
               fresh.callerConversation(),
@@ -543,6 +575,7 @@ public final class Delivery implements DeliveryPort {
         return;
       }
       if (sent.result() == Result.DELIVERED) {
+        requireLease.run();
         markDelivered.run();
         if (anEnding) {
           logStages.deliveryPost(source, sent.destination(), said);
@@ -552,6 +585,7 @@ public final class Delivery implements DeliveryPort {
         }
         return;
       }
+      requireLease.run();
       markDelivered.run();
       log.warn(
           "orchestration {} has no conversation or account to tell; its {} stays on its" + " row",
@@ -560,7 +594,7 @@ public final class Delivery implements DeliveryPort {
     } finally {
       inFlight.remove(id);
       if (retryOnceFree && stillBusy != null && !stillBusy.getAsBoolean()) {
-        deliver(id, what, undelivered, text, markDelivered, question, false);
+        deliver(id, what, undelivered, text, markDelivered, question, false, requireLease);
       }
     }
   }

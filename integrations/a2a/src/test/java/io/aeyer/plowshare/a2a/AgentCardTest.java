@@ -1,12 +1,18 @@
 package io.aeyer.plowshare.a2a;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.a2a.model.AgentCardCodec;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.*;
-import okhttp3.mockwebserver.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.Test;
 
 class AgentCardTest {
@@ -54,15 +60,9 @@ class AgentCardTest {
               .setHeader("Cache-Control", "max-age=0"));
       server.enqueue(
           new MockResponse().setResponseCode(304).setHeader("Cache-Control", "max-age=300"));
-      assertEquals(
-          io.aeyer.plowshare.sdk.AgentCardCodec.read(JSON.writeValueAsString(data)),
-          client.agentCard());
-      assertEquals(
-          io.aeyer.plowshare.sdk.AgentCardCodec.read(JSON.writeValueAsString(data)),
-          client.agentCard());
-      assertEquals(
-          io.aeyer.plowshare.sdk.AgentCardCodec.read(JSON.writeValueAsString(data)),
-          client.agentCard());
+      assertEquals(AgentCardCodec.read(JSON.writeValueAsString(data)), client.agentCard());
+      assertEquals(AgentCardCodec.read(JSON.writeValueAsString(data)), client.agentCard());
+      assertEquals(AgentCardCodec.read(JSON.writeValueAsString(data)), client.agentCard());
       assertEquals(2, server.getRequestCount());
       var first = server.takeRequest();
       assertEquals("GET", first.getMethod());

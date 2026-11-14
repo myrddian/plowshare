@@ -14,11 +14,14 @@ import io.aeyer.plowshare.server.archive.EntryRecord;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
 import io.aeyer.plowshare.server.llm.dispatch.CallerAbandonedException;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.Embeddings;
+import io.aeyer.plowshare.server.llm.dispatch.InferenceObserver;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
 import io.aeyer.plowshare.server.llm.dispatch.LlmTransport;
@@ -38,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import org.flywaydb.core.Flyway;
@@ -108,7 +112,7 @@ class FoldInsideATurnTest {
     // into `board_topics`, and `user_inbox` one into `firings`, so all five are named here
     // or Postgres refuses to empty `conversations` at all.
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_route_bindings, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans,"
+        "TRUNCATE TABLE message_route_bindings, message_external_tasks, message_external_contexts, message_route_bindings, message_routes, message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans,"
             + " digest_revisions, memory_provenance, conversations, turns, compactions,"
             + " entries, citations, orchestrations, orchestration_messages, board_topics,"
             + " board_messages, board_seats, firings, user_inbox CASCADE");
@@ -132,30 +136,22 @@ class FoldInsideATurnTest {
         new Model().stepping(6).costing(10_000, 20_000, 30_000, 40_000, 50_000, 85_000, 30_000);
     String id = open(7);
     var owner =
-        io.aeyer.plowshare.server.llm.accounting.UsageAttribution.project(
-                "alice",
-                "42",
-                io.aeyer.plowshare.server.llm.accounting.UsageAttribution.Operation.AGENT_CHAT)
+        UsageAttribution.project("alice", "42", UsageAttribution.Operation.AGENT_CHAT)
             .withExecution(
-                io.aeyer.plowshare.server.llm.accounting.UsageLineage.root(id),
-                io.aeyer.plowshare.server.llm.accounting.UsageLineage.root("execution"),
-                io.aeyer.plowshare.server.llm.accounting.UsageLineage.NONE,
+                UsageLineage.root(id),
+                UsageLineage.root("execution"),
+                UsageLineage.NONE,
                 "worker",
                 1L,
                 null);
-    var captures =
-        new java.util.concurrent.CopyOnWriteArrayList<
-            io.aeyer.plowshare.server.llm.accounting.UsageAttribution>();
+    var captures = new CopyOnWriteArrayList<UsageAttribution>();
     var fixture = new Fixture(model, worker(7), owner, captures);
     Outcome result = fixture.speakAndWait(id, "build the thing");
     assertEquals(Ending.ANSWERED, result.ending());
     assertEquals(8, captures.size());
     var folds =
         captures.stream()
-            .filter(
-                capture ->
-                    capture.operation()
-                        == io.aeyer.plowshare.server.llm.accounting.UsageAttribution.Operation.FOLD)
+            .filter(capture -> capture.operation() == UsageAttribution.Operation.FOLD)
             .toList();
     assertEquals(1, folds.size());
     assertEquals(folder().name(), folds.getFirst().agentName());
@@ -166,11 +162,7 @@ class FoldInsideATurnTest {
     assertEquals(
         7,
         captures.stream()
-            .filter(
-                capture ->
-                    capture.operation()
-                        == io.aeyer.plowshare.server.llm.accounting.UsageAttribution.Operation
-                            .AGENT_CHAT)
+            .filter(capture -> capture.operation() == UsageAttribution.Operation.AGENT_CHAT)
             .count());
   }
 
@@ -652,8 +644,8 @@ class FoldInsideATurnTest {
     Fixture(
         Model model,
         AgentDefinition definition,
-        io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner,
-        java.util.List<io.aeyer.plowshare.server.llm.accounting.UsageAttribution> captures) {
+        UsageAttribution owner,
+        List<UsageAttribution> captures) {
       this.definition = definition;
       LlmDispatcher models =
           new LlmDispatcher(
@@ -672,7 +664,7 @@ class FoldInsideATurnTest {
                 if (captures != null) {
                   captures.add(attribution);
                 }
-                return io.aeyer.plowshare.server.llm.dispatch.InferenceObserver.NONE;
+                return InferenceObserver.NONE;
               });
       JobRuntime runtime =
           new JobRuntime(
@@ -684,10 +676,7 @@ class FoldInsideATurnTest {
         runtime.useRunUsage(
             (home, transcript, agent, account) -> {
               transcript.accounted(owner);
-              return new AttributedTranscript(
-                  transcript,
-                  owner,
-                  io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY);
+              return new AttributedTranscript(transcript, owner, UsageAttribution.LEGACY);
             });
       }
       this.jobs = new JobStore(runtime);

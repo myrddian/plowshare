@@ -16,6 +16,7 @@ import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
 import io.aeyer.plowshare.server.orchestrations.Orchestrations;
 import io.aeyer.plowshare.server.requests.RequestedProjectId;
 import io.aeyer.plowshare.server.todos.TodoLists;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -242,7 +243,7 @@ public class OrchestrationFrames implements FrameArea {
     if (inputs != null && !store.filtersReadableLogs()) {
       page = page.stream().filter(run -> inputs.logAllowed(run.id(), handle)).toList();
     }
-    Map<String, java.time.Instant> stalled =
+    Map<String, Instant> stalled =
         store.stalledSince(page.stream().map(OrchestrationRecord::id).toList());
     List<RunView> runs = page.stream().map(run -> viewOf(run, stalled.get(run.id()))).toList();
     return Outcome.ok(new Listed(runs));
@@ -416,7 +417,7 @@ public class OrchestrationFrames implements FrameArea {
     return viewOf(run, store.stalledSince(run.id()).orElse(null));
   }
 
-  private static RunView viewOf(OrchestrationRecord run, java.time.Instant stalledSince) {
+  private static RunView viewOf(OrchestrationRecord run, Instant stalledSince) {
     return new RunView(
         run.id(),
         run.definitionName(),

@@ -1,14 +1,25 @@
 package io.aeyer.plowshare.a2a;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.*;
-import io.aeyer.plowshare.protocol.Incoming;
-import io.aeyer.plowshare.sdk.IncomingClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.a2a.model.ExternalMessage;
+import java.io.IOException;
 import java.net.URI;
-import java.net.http.*;
-import java.time.*;
-import java.util.*;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /** Real HTTP binding; durable messaging is independently tested against Postgres. */
@@ -17,17 +28,17 @@ class ReceiverTest {
   static final HttpClient HTTP = HttpClient.newHttpClient();
 
   static class Bridge implements Receiver.Bridge {
-    final Map<UUID, Incoming.Task> tasks = new HashMap<>();
+    final Map<UUID, Ingress.Task> tasks = new HashMap<>();
     final Map<UUID, String> owners = new HashMap<>();
-    Incoming.Receive received;
+    Ingress.Receive received;
     int calls;
     boolean complete;
 
-    public synchronized Incoming.Task receive(Incoming.Receive request) {
+    public synchronized Ingress.Task receive(Ingress.Receive request) {
       calls++;
       received = request;
       var task =
-          new Incoming.Task(
+          new Ingress.Task(
               request.requestId(),
               request.context() == null ? UUID.randomUUID() : request.context(),
               request.agent(),
@@ -42,16 +53,16 @@ class ReceiverTest {
       return task;
     }
 
-    public synchronized Incoming.Task status(Incoming.Id id) throws java.io.IOException {
+    public synchronized Ingress.Task status(Ingress.Id id) throws IOException {
       if (!Objects.equals(id.client(), owners.get(id.id())))
-        throw new IncomingClient.Refused("BAD_REQUEST");
+        throw new IngressRefused("BAD_REQUEST");
       return tasks.get(id.id());
     }
 
-    public synchronized Incoming.Task cancel(Incoming.Id id) throws java.io.IOException {
+    public synchronized Ingress.Task cancel(Ingress.Id id) throws IOException {
       var task = status(id);
       var next =
-          new Incoming.Task(
+          new Ingress.Task(
               task.id(),
               task.context(),
               task.agent(),
@@ -65,26 +76,24 @@ class ReceiverTest {
       return next;
     }
 
-    public JsonNode catalog() {
-      return JSON.valueToTree(
-          Map.of(
-              "name",
-              "reviewer",
-              "description",
-              "Review work",
-              "served",
-              true,
-              "commands",
-              List.of(
-                  Map.of(
-                      "command",
-                      "/skill:review",
-                      "name",
-                      "Review",
-                      "description",
-                      "Review inputs",
-                      "kind",
-                      "skill"))));
+    public Ingress.Catalog catalog() {
+      return new Ingress.Catalog(
+          "reviewer",
+          "Review work",
+          true,
+          List.of(
+              new Ingress.Command(
+                  "/skill:review",
+                  List.of(),
+                  "skill",
+                  "review",
+                  "Review inputs",
+                  null,
+                  null,
+                  null,
+                  "GLOBAL",
+                  "sha256:" + "a".repeat(64),
+                  true)));
     }
   }
 
@@ -348,14 +357,14 @@ class ReceiverTest {
       var sent =
           client.send(
               UUID.randomUUID(),
-              new io.aeyer.plowshare.protocol.ExternalMessage(
+              new ExternalMessage(
                   null,
                   null,
-                  List.of(io.aeyer.plowshare.protocol.ExternalMessage.Part.text("Review")),
+                  List.of(ExternalMessage.Part.text("Review")),
                   null,
                   null,
                   null,
-                  new io.aeyer.plowshare.protocol.ExternalMessage.Metadata("/skill:review")));
+                  new ExternalMessage.Metadata("/skill:review")));
       assertEquals("WORKING", sent.state());
       assertEquals("/skill:review", bridge.received.command());
       assertEquals("WORKING", client.status(sent.task(), sent.context()).state());

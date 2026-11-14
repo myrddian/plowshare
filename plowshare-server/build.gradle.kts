@@ -25,7 +25,6 @@ dependencies {
     implementation("com.twelvemonkeys.imageio:imageio-webp:$twelveMonkeysVersion")
     // Only the tokenizer runtime; model files are explicit local, checksum-pinned configuration.
     implementation("ai.djl.huggingface:tokenizers:$huggingFaceTokenizersVersion")
-    testImplementation(project(":plowshare-a2a"))
     implementation(project(":plowshare-protocol"))
 
     // Syntax-only code navigation on the server's Java 21 runtime. These JNI
@@ -56,6 +55,8 @@ dependencies {
     // publishes hikaricp.connections.pending/active, the database pool pressure
     // that connection starvation is diagnosed from.
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    // Boot manages the compatible registry version. HTTP exposure remains an operator opt-in.
+    implementation("io.micrometer:micrometer-registry-prometheus")
 
     implementation("org.flywaydb:flyway-core:$flywayVersion")
     // Flyway 10 moved Postgres support out of core; without this the migration

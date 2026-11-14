@@ -7,7 +7,7 @@ import type {
   DirectDestination,
   GuildDestination,
   Gateway,
-  IncomingTask,
+  MessageTask,
   State,
   StateRepository,
   Submission,
@@ -19,6 +19,8 @@ import type {
   RelayConsumeRequest,
 } from 'plowshare-client-node';
 import { decodeConfig } from './config.ts';
+import { messagingIdentity } from './state.ts';
+import { MessagingRefusal } from './messaging-codec.ts';
 
 export const GUILD = '100000000000000001';
 export const CHANNEL = '100000000000000002';
@@ -33,6 +35,14 @@ export function configuration(): Configuration {
     discordTokenEnvironment: 'DISCORD_BOT_TOKEN',
     stateDirectory: '/tmp/discord-test-fixture',
     allowedUserIds: [USER, OTHER],
+    messaging: [
+      {
+        project: 'research',
+        bot: 'researcher',
+        requests: 'discord.requests',
+        replies: 'discord.replies',
+      },
+    ],
     routes: [
       {
         guildId: GUILD,
@@ -48,7 +58,10 @@ export function configuration(): Configuration {
 }
 export function emptyState(config = configuration()): State {
   return {
-    version: 2,
+    version: 3,
+    messaging: messagingIdentity(config),
+    relayGenerations: [],
+    messageTraversals: [],
     origin: config.origin,
     principal: PRINCIPAL,
     discordBotId: BOT,
@@ -118,15 +131,17 @@ export function directInput(
     ...overrides,
   };
 }
-export function task(agent = 'researcher'): IncomingTask {
+export function task(agent = 'researcher'): MessageTask {
   return {
     id: randomUUID(),
+    requestId: randomUUID(),
+    cursor: null,
     context: randomUUID(),
     agent,
     message: 'bdm_fixture',
     state: 'WORKING',
     ending: null,
-    source: null,
+    revision: '1',
     replies: [],
     createdAt: '2026-01-01T00:00:00Z',
   };
@@ -137,6 +152,7 @@ export class FakeGateway implements Gateway {
   readonly cancellations: TaskReference[] = [];
   readonly acknowledgements: RelayAckRequest[] = [];
   failure: Error | null = null;
+  recoveryAvailable = false;
   ackFailure: Error | null = null;
   result = task();
   batch: RelayBatch | null = null;
@@ -153,19 +169,29 @@ export class FakeGateway implements Gateway {
       id: randomUUID(),
       context: request.context ?? randomUUID(),
       agent: request.agent,
+      requestId: request.requestId,
     };
     return this.result;
   }
   async status(reference: TaskReference) {
     this.statuses.push(reference);
-    return { ...this.result, id: reference.id };
+    if (reference.id === null && !this.recoveryAvailable)
+      throw new MessagingRefusal('NOT_ACCESSIBLE');
+    return {
+      ...this.result,
+      id: reference.id ?? this.result.id,
+      requestId:
+        reference.id === null
+          ? (reference.requestId ?? this.result.requestId)
+          : this.result.requestId,
+    };
   }
-  async cancel(reference: TaskReference) {
+  async cancel(reference: TaskReference): Promise<MessageTask> {
     this.cancellations.push(reference);
     if (this.failure !== null) throw this.failure;
     return {
       ...this.result,
-      id: reference.id,
+      id: reference.id ?? this.result.id,
       state: 'CANCELED',
       ending: 'CANCELED',
     };

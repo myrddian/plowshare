@@ -1,17 +1,45 @@
 package io.aeyer.plowshare.integrations.privacy;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aeyer.plowshare.server.agents.*;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aeyer.plowshare.server.agents.AgentRegistry;
+import io.aeyer.plowshare.server.agents.ApplicationPolicy;
+import io.aeyer.plowshare.server.agents.DefinitionChecks;
+import io.aeyer.plowshare.server.agents.FilesystemDefinitions;
+import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
+import io.aeyer.plowshare.server.agents.OrchestrationRegistry;
+import io.aeyer.plowshare.server.agents.RuntimeApplicationPackageValidator;
+import io.aeyer.plowshare.server.agents.WorkspaceApplicationPolicy;
+import io.aeyer.plowshare.server.applications.ApplicationServerSettings;
+import io.aeyer.plowshare.server.applications.ApplicationServiceManifest;
+import io.aeyer.plowshare.server.applications.ApplicationToolScopes;
 import io.aeyer.plowshare.server.events.ScheduleDefinitionCodec;
+import io.aeyer.plowshare.server.hooks.script.HookEngine;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
-import io.aeyer.plowshare.server.relay.*;
+import io.aeyer.plowshare.server.relay.GraalRelayRouteProgram;
+import io.aeyer.plowshare.server.relay.Relay;
+import io.aeyer.plowshare.server.relay.RelayDeliveries;
+import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayRouting;
+import io.aeyer.plowshare.server.relay.tools.RelayToolDefinition;
+import io.aeyer.plowshare.server.relay.tools.RelayToolProperties;
+import io.aeyer.plowshare.server.swarm.SwarmScheduler;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** Verifies the deployable Python Application with actual parsers and sandboxes; no database. */
 class NetworkPrivacyWatchTest {
@@ -29,39 +57,37 @@ class NetworkPrivacyWatchTest {
           "relay_tool_read");
   private final Path application = Path.of(System.getProperty("privacy.application"));
 
-  private static io.aeyer.plowshare.server.swarm.SwarmScheduler.Pools emptyPools() {
-    return new io.aeyer.plowshare.server.swarm.SwarmScheduler.Pools() {
-      public java.util.List<String> serving(String specifier) {
-        return java.util.List.of();
+  private static SwarmScheduler.Pools emptyPools() {
+    return new SwarmScheduler.Pools() {
+      public List<String> serving(String specifier) {
+        return List.of();
       }
 
       public int slots(String pool) {
         return 0;
       }
 
-      public java.util.List<String> all() {
-        return java.util.List.of();
+      public List<String> all() {
+        return List.of();
       }
     };
   }
 
   @Test
   void application_scope_loads_without_external_names_or_provider_schemas() throws Exception {
-    var settings =
-        io.aeyer.plowshare.server.applications.ApplicationServerSettings.read(
-            "network-privacy-watch", application);
+    var settings = ApplicationServerSettings.read("network-privacy-watch", application);
     assertEquals(0, settings.tools().size());
     assertEquals(4, settings.ports().size());
     assertEquals(1, settings.providers().size());
     var loaded =
         AgentRegistry.read(
             new FilesystemDefinitions(application.resolve("agents")), TOOLS, Set.of());
-    assertEquals(java.util.Map.of(), loaded.withheldTools());
-    assertEquals(java.util.Map.of(), loaded.disabled());
+    assertEquals(Map.of(), loaded.withheldTools());
+    assertEquals(Map.of(), loaded.disabled());
     var coordinator = loaded.enabled().get("privacy_coordinator");
     assertTrue(coordinator.dynamic());
     assertFalse(coordinator.tools().stream().anyMatch(name -> name.startsWith("network_")));
-    var policy = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
+    var policy = ApplicationToolScopes.read(application);
     assertEquals(8, policy.toolScopes().getFirst().grants().size());
     assertEquals(6, policy.toolScopes().get(1).grants().size());
     assertTrue(
@@ -89,22 +115,17 @@ class NetworkPrivacyWatchTest {
 
   @Test
   void complete_application_passes_the_deployment_resource_validator() throws Exception {
-    try (var hooks = new io.aeyer.plowshare.server.hooks.script.HookEngine();
+    try (var hooks = new HookEngine();
         var relay = new GraalRelayRouteProgram()) {
       new RuntimeApplicationPackageValidator(
-              new AgentRegistry(java.util.Map.of()),
-              TOOLS,
-              DefinitionChecks.NONE,
-              emptyPools(),
-              hooks,
-              relay)
+              new AgentRegistry(Map.of()), TOOLS, DefinitionChecks.NONE, emptyPools(), hooks, relay)
           .validate("network-privacy-watch", application);
     }
   }
 
   @Test
-  void owned_source_can_be_admitted_before_its_execution_account_exists(
-      @org.junit.jupiter.api.io.TempDir Path root) throws Exception {
+  void owned_source_can_be_admitted_before_its_execution_account_exists(@TempDir Path root)
+      throws Exception {
     try (var files = Files.walk(application)) {
       for (Path file : files.toList()) {
         Path target = root.resolve(application.relativize(file));
@@ -113,29 +134,19 @@ class NetworkPrivacyWatchTest {
       }
     }
     var json = new ObjectMapper();
-    var manifest =
-        (com.fasterxml.jackson.databind.node.ObjectNode)
-            json.readTree(Files.readString(root.resolve("plowshare.json")));
+    var manifest = (ObjectNode) json.readTree(Files.readString(root.resolve("plowshare.json")));
     manifest.remove("executionAccount");
     manifest.putObject("service").put("handle", "privacy-worker").put("role", "CONTRIBUTOR");
-    String principal = "@service/" + java.util.UUID.randomUUID();
+    String principal = "@service/" + UUID.randomUUID();
     Files.writeString(
         root.resolve("plowshare.json"),
-        io.aeyer.plowshare.server.applications.ApplicationServiceManifest.resolve(
-            json.writeValueAsString(manifest), principal));
-    var settings =
-        io.aeyer.plowshare.server.applications.ApplicationServerSettings.read(
-            "network-privacy-watch", root);
+        ApplicationServiceManifest.resolve(json.writeValueAsString(manifest), principal));
+    var settings = ApplicationServerSettings.read("network-privacy-watch", root);
     assertEquals(principal, settings.providers().getFirst().account());
-    try (var hooks = new io.aeyer.plowshare.server.hooks.script.HookEngine();
+    try (var hooks = new HookEngine();
         var relay = new GraalRelayRouteProgram()) {
       new RuntimeApplicationPackageValidator(
-              new AgentRegistry(java.util.Map.of()),
-              TOOLS,
-              DefinitionChecks.NONE,
-              emptyPools(),
-              hooks,
-              relay)
+              new AgentRegistry(Map.of()), TOOLS, DefinitionChecks.NONE, emptyPools(), hooks, relay)
           .validate("network-privacy-watch", root);
     }
   }
@@ -151,19 +162,16 @@ class NetworkPrivacyWatchTest {
             .path("relay")
             .path("tools")
             .path("bindings");
-    java.util.List<io.aeyer.plowshare.server.relay.tools.RelayToolDefinition> bindings =
+    List<RelayToolDefinition> bindings =
         json.readValue(
             source.toString(),
-            json.getTypeFactory()
-                .constructCollectionType(
-                    java.util.List.class,
-                    io.aeyer.plowshare.server.relay.tools.RelayToolDefinition.class));
-    var properties = new io.aeyer.plowshare.server.relay.tools.RelayToolProperties();
+            json.getTypeFactory().constructCollectionType(List.class, RelayToolDefinition.class));
+    var properties = new RelayToolProperties();
     properties.setBindings(bindings);
     assertEquals(8, properties.getBindings().size());
     var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
     var coordinator = agents.get("privacy_coordinator");
-    var scopes = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
+    var scopes = ApplicationToolScopes.read(application);
     for (var binding : bindings) {
       assertEquals("network-privacy-watch", binding.project());
       assertFalse(coordinator.tools().contains(binding.name()));
@@ -234,11 +242,9 @@ class NetworkPrivacyWatchTest {
     var manifest =
         ScriptProgram.manifest(
             Files.readString(application.resolve("orchestrations/assess_network_device.js")));
+    assertEquals(List.of("information_read", "information_write"), json(manifest.path("tools")));
     assertEquals(
-        java.util.List.of("information_read", "information_write"), json(manifest.path("tools")));
-    assertEquals(
-        java.util.List.of("privacy_device_assessor", "privacy_reviewer"),
-        json(manifest.path("calls")));
+        List.of("privacy_device_assessor", "privacy_reviewer"), json(manifest.path("calls")));
     assertTrue(manifest.path("scopes").isEmpty());
     // Three agent runs normally, four with a correction and at most one repair
     // run (which may be a reviewer run); each run's own tool turns also draw on
@@ -269,7 +275,7 @@ class NetworkPrivacyWatchTest {
 
     var manifest =
         new ObjectMapper().readTree(Files.readString(application.resolve("plowshare.json")));
-    var grants = new java.util.ArrayList<String>();
+    var grants = new ArrayList<String>();
     manifest
         .path("toolGrants")
         .forEach(
@@ -278,7 +284,7 @@ class NetworkPrivacyWatchTest {
                 grants.add(grant.path("toolScope").asText());
               }
             });
-    assertEquals(java.util.List.of("network_assistant"), grants);
+    assertEquals(List.of("network_assistant"), grants);
     var allowed =
         Set.of(
             "network_scope",
@@ -290,8 +296,9 @@ class NetworkPrivacyWatchTest {
             "network_request_deep_scan",
             "network_request_assessment",
             "network_note_profile",
-            "network_record_issue");
-    var scopes = new java.util.ArrayList<String>();
+            "network_record_issue",
+            "network_request_reference");
+    var scopes = new ArrayList<String>();
     manifest
         .path("toolScopes")
         .forEach(
@@ -305,8 +312,8 @@ class NetworkPrivacyWatchTest {
     assertFalse(scopes.contains("network_scan"));
   }
 
-  private static java.util.List<String> json(com.fasterxml.jackson.databind.JsonNode array) {
-    var result = new java.util.ArrayList<String>();
+  private static List<String> json(JsonNode array) {
+    var result = new ArrayList<String>();
     array.forEach(value -> result.add(value.asText()));
     return result;
   }
@@ -416,7 +423,7 @@ class NetworkPrivacyWatchTest {
     try (var program = new GraalRelayRouteProgram()) {
       var relay = new RelayRouting.Package("privacy", pin, program.manifest(pin));
       var subscription = relay.manifest().subscriptions().getFirst();
-      for (String requested : java.util.List.of("false", "\"false\"")) {
+      for (String requested : List.of("false", "\"false\"")) {
         String completion =
             """
           {"version":1,"scan_id":"00000000-0000-0000-0000-000000000001",
@@ -461,7 +468,7 @@ class NetworkPrivacyWatchTest {
       var relay = new RelayRouting.Package("privacy", pin, program.manifest(pin));
       var subscription = relay.manifest().subscriptions().getFirst();
       for (String extension :
-          java.util.List.of(
+          List.of(
               ",\"baseline\":true",
               ",\"investigation\":{\"requested\":true,\"reason\":\"operator policy\",\"decided_at\":\"2026-01-01T00:00:00Z\"}")) {
         var input = completion(subscription.topic(), base.formatted(extension));
@@ -501,7 +508,7 @@ class NetworkPrivacyWatchTest {
       var relay = new RelayRouting.Package("privacy", pin, program.manifest(pin));
       var subscription = relay.manifest().subscriptions().getFirst();
       for (String malformed :
-          java.util.List.of(
+          List.of(
               "{",
               "null",
               "[]",

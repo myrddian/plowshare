@@ -19,6 +19,7 @@ select AOSP style or disable formatting to preserve a preferred layout.
 ./gradlew :plowshare-server:spotlessApply # One module while iterating.
 ./gradlew :plowshare-server:check         # Includes that module's formatting check.
 ./gradlew check                          # Repository verification, including formatting.
+./gradlew installGitHooks                # Once per clone; enable the pre-push gate.
 ```
 
 Formatting targets `src/*/java/**/*.java` in every Gradle subproject. Build outputs,
@@ -28,6 +29,18 @@ same requirement applies locally and in pull requests. Keep mass formatting
 separate from behavior changes. Formatter version upgrades require their own
 reviewable pass.
 
+The tracked `.githooks/pre-push` runs `./gradlew formatCheck` before a push and
+refuses the push if verification fails. It checks the working tree without
+rewriting or committing files. Each outgoing revision must match the working tree
+for Java/TypeScript source and formatter configuration, so an uncommitted fix
+cannot hide bad formatting in a pushed commit. Check out a differing revision
+separately. Run `./gradlew format`, review and commit the result, then push again.
+Install the hook once per clone with the command above;
+linked worktrees share the repository-local Git setting. Installation refuses to
+replace an existing custom hooks path or executable pre-push hook. Git does not
+activate tracked hooks when cloning, and local hooks can be bypassed, so `check`
+remains required in CI. A push deleting only remote refs needs no formatting run.
+
 TypeScript follows the mandatory [TypeScript standard](typescript-standards.md),
 with shared strict compiler settings, typed ESLint checks and pinned Prettier.
 The Java formatter does not format Python, SQL or Gradle Kotlin files.
@@ -36,6 +49,26 @@ Follow the surrounding language conventions there. In every language, use clear
 names, cohesive methods and explicit error handling. Avoid compressed one-line
 classes, deeply nested control flow, boolean-heavy APIs and clever expressions
 that conceal lifecycle or authorization decisions.
+
+### Java imports and type names
+
+Import types and use their simple names everywhere in Java code, including field
+and parameter declarations, generic arguments, annotations, constructors, class
+literals and static member access. For example, import `ConcurrentLinkedQueue`,
+`Supplier`, `MessageService` and `ApplicationResources` instead of spelling their
+packages at each use. Use explicit imports rather than wildcard imports.
+
+The **only exception** for a fully qualified type name outside an import is an
+actual name clash: two required types have the same simple name, or a declaration
+in scope shadows the imported name. Import one and qualify the other, with an
+adjacent comment naming the clash. Do not qualify types to avoid adding imports,
+to shorten an import list or as a matter of taste. Nested types may use the
+imported enclosing type, such as `ScheduleDefinitions.Authority`. Package names
+in strings and Javadoc links are not Java type uses.
+
+This rule applies equally to production code and tests. Google Java Format owns
+layout and import ordering; it does not replace qualified type names with imports
+or prove that a name clash exists. Review import usage separately from formatting.
 
 ## Interfaces first at system boundaries
 

@@ -1,18 +1,37 @@
 package io.aeyer.plowshare.integrations.ha;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.aeyer.plowshare.integrations.*;
-import io.aeyer.plowshare.protocol.Outgoing;
-import io.aeyer.plowshare.sdk.*;
+import io.aeyer.plowshare.integrations.Configuration;
+import io.aeyer.plowshare.integrations.Gateway;
+import io.aeyer.plowshare.integrations.IntegrationCodec;
+import io.aeyer.plowshare.integrations.IntegrationRuntime;
+import io.aeyer.plowshare.integrations.Journal;
+import io.aeyer.plowshare.integrations.Json;
+import io.aeyer.plowshare.integrations.RelayRequests;
+import io.aeyer.plowshare.integrations.ScriptHost;
+import io.aeyer.plowshare.protocol.Orchestration;
+import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.protocol.RelayLog;
+import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.sdk.Plowshare;
+import io.aeyer.plowshare.sdk.RelayClient;
 import java.nio.file.Path;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
-import okhttp3.*;
-import okhttp3.mockwebserver.*;
-import org.junit.jupiter.api.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -25,15 +44,16 @@ class PipelineTest {
   @ValueSource(longs = {0, 5})
   void real_ha_event_js_pipeline_outbox_read_and_completion_notification(long holdSeconds)
       throws Exception {
-    var clock =
-        new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-10-04T00:00:00Z"));
+    var clock = new AtomicReference<>(Instant.parse("2026-10-04T00:00:00Z"));
     try (MockWebServer ha = new MockWebServer();
         MockWebServer plowshare = new MockWebServer()) {
       var haFixture = new HomeAssistantAdapterTest.HaFixture();
       ha.enqueue(new MockResponse().withWebSocketUpgrade(haFixture));
       List<String> frames = new CopyOnWriteArrayList<>();
       Map<String, JsonNode> starts = new ConcurrentHashMap<>();
-      var outbox = new java.util.concurrent.atomic.AtomicReference<Outgoing.Work>();
+      Map<String, List<RelayLog.Event>> logs = new ConcurrentHashMap<>();
+      String publisher = RelayPort.publisher("fixture-sdk");
+      UUID requestGeneration = UUID.randomUUID(), returnGeneration = UUID.randomUUID();
       plowshare.enqueue(
           new MockResponse()
               .withWebSocketUpgrade(
@@ -46,81 +66,73 @@ class PipelineTest {
                         frames.add(type);
                         JsonNode result = Json.object();
                         switch (type) {
-                          case "outgoing.advertise" -> {}
-                          case "outgoing.peers" ->
-                              result =
-                                  Json.object()
-                                      .set("peers", Json.MAPPER.createArrayNode().add("ha-house"));
-                          case "outgoing.send" -> {
-                            Outgoing.Work work =
-                                new Outgoing.Work(
-                                    UUID.randomUUID(),
-                                    UUID.fromString(payload.path("requestId").asText()),
-                                    "ha-house",
-                                    "home",
-                                    null,
-                                    io.aeyer.plowshare.sdk.ExternalPayloadCodec.message(
-                                        payload.path("message").toString()),
-                                    "QUEUED",
-                                    false,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    0,
-                                    Instant.now());
-                            outbox.set(work);
-                            result = Json.MAPPER.valueToTree(work);
+                          case "relay.log" -> {
+                            String topic = payload.path("topic").asText();
+                            var events = logs.getOrDefault(topic, List.of());
+                            String after = payload.path("after").asText();
+                            var rows =
+                                events.stream()
+                                    .filter(
+                                        event ->
+                                            Long.parseLong(event.position())
+                                                > Long.parseLong(after))
+                                    .limit(payload.path("limit").asInt())
+                                    .toList();
+                            String through = events.isEmpty() ? "0" : events.getLast().position();
+                            result =
+                                Json.MAPPER.valueToTree(
+                                    new RelayLog.Page(
+                                        new RelayLog.Scope("home", false),
+                                        new RelayLog.Topic(
+                                            topic,
+                                            "TEXT",
+                                            "3600",
+                                            null,
+                                            through,
+                                            "0",
+                                            (topic.equals("house.requests")
+                                                    ? requestGeneration
+                                                    : returnGeneration)
+                                                .toString()),
+                                        after,
+                                        rows.isEmpty() ? after : rows.getLast().position(),
+                                        null,
+                                        rows,
+                                        List.of(),
+                                        List.of()));
                           }
-                          case "outgoing.claim" -> {
-                            var old = outbox.get();
-                            if (old == null || !old.state().equals("QUEUED"))
-                              result = Json.object().putNull("work").putNull("action");
-                            else {
-                              var work =
-                                  new Outgoing.Work(
-                                      old.id(),
-                                      old.requestId(),
-                                      old.peer(),
-                                      old.project(),
-                                      null,
-                                      old.message(),
-                                      "DISPATCHED",
-                                      false,
-                                      null,
-                                      null,
-                                      null,
-                                      null,
-                                      1,
-                                      old.createdAt());
-                              outbox.set(work);
-                              result = Json.MAPPER.valueToTree(new Outgoing.Claimed(work, "send"));
-                            }
+                          case "relay.publish" -> {
+                            String topic = payload.path("topic").asText();
+                            var events =
+                                logs.computeIfAbsent(
+                                    topic, ignored -> new CopyOnWriteArrayList<>());
+                            String position = Integer.toString(events.size() + 1);
+                            String id = payload.path("requestId").asText();
+                            Instant at = Instant.parse(payload.path("occurredAt").asText());
+                            String correlation =
+                                payload.hasNonNull("correlationId")
+                                    ? payload.path("correlationId").asText()
+                                    : null;
+                            String parent =
+                                payload.hasNonNull("parentEventId")
+                                    ? payload.path("parentEventId").asText()
+                                    : null;
+                            events.add(
+                                new RelayLog.Event(
+                                    position,
+                                    id,
+                                    publisher,
+                                    at,
+                                    at,
+                                    correlation,
+                                    parent,
+                                    new RelayLog.Payload(
+                                        "TEXT", payload.path("text").asText(), null, null, null),
+                                    RelayCausation.root(id)));
+                            result =
+                                Json.MAPPER.valueToTree(
+                                    new RelayPort.Published(id, "home", topic, position, at));
                           }
-                          case "outgoing.report" -> {
-                            var old = outbox.get();
-                            assertEquals(1, payload.path("revision").asInt());
-                            var work =
-                                new Outgoing.Work(
-                                    old.id(),
-                                    old.requestId(),
-                                    old.peer(),
-                                    old.project(),
-                                    null,
-                                    old.message(),
-                                    payload.path("state").asText(),
-                                    false,
-                                    null,
-                                    null,
-                                    io.aeyer.plowshare.sdk.ExternalPayloadCodec.result(
-                                        payload.path("result").toString()),
-                                    null,
-                                    2,
-                                    old.createdAt());
-                            outbox.set(work);
-                            result = Json.MAPPER.valueToTree(work);
-                          }
-                          case "outgoing.status" -> result = Json.MAPPER.valueToTree(outbox.get());
                           case "orchestration.start" -> {
                             String id = payload.path("requestId").asText();
                             assertEquals("home", payload.path("project").asText());
@@ -147,7 +159,7 @@ class PipelineTest {
                             Json.object()
                                 .put(
                                     "code",
-                                    type.equals("outgoing.send")
+                                    type.equals("relay.publish")
                                             || type.equals("orchestration.start")
                                         ? "ACCEPTED"
                                         : "OK")
@@ -182,7 +194,6 @@ export default {
               "house",
               "home-assistant",
               "home",
-              "ha-house",
               new HomeAssistantFactory()
                   .decode(
                       HomeAssistantAdapterTest.configuration(ha.url("/").toString()).toString()),
@@ -191,7 +202,17 @@ export default {
               script,
               "fixture-config",
               Configuration.QueuePolicy.defaults(),
-              new Configuration.FeedbackPolicy(true, 300, 3));
+              new Configuration.FeedbackPolicy(true, 300, 3),
+              new RelayRequests.Policy(
+                  "house.requests",
+                  requestGeneration,
+                  "house.returns",
+                  returnGeneration,
+                  "house",
+                  publisher,
+                  Set.of(publisher),
+                  8,
+                  65536));
       var config =
           new Configuration(
               plowshare.url("/").toString(),
@@ -286,51 +307,67 @@ export default {
                 .orElseThrow();
         assertEquals(2, grandchild.path("causality").path("depth").asInt());
         assertEquals("action-context", grandchild.path("causality").path("rootContext").asText());
-        OutgoingClient requests = new OutgoingClient(sdk);
-        var message =
-            io.aeyer.plowshare.sdk.ExternalPayloadCodec.message(
-                "{\"parts\":[{\"data\":{\"schema\":\"plowshare-integration/1\",\"binding\":\"house\",\"operation\":\"states.read\",\"arguments\":{\"entities\":[\"office.temperature\"]}}}]}");
-        var receipt =
-            requests.send(new Outgoing.Send(UUID.randomUUID(), "ha-house", message, "home", null));
+        RelayClient requests = new RelayClient(sdk);
+        var read =
+            request(
+                requests, clock.get(), "states.read", "{\"entities\":[\"office.temperature\"]}");
         runtime.tick();
-        var read = requests.status(receipt.id());
-        assertEquals("COMPLETED", read.state());
-        assertTrue(
-            read.result()
-                    instanceof io.aeyer.plowshare.protocol.ExternalResult.IntegrationResult result
-                && result.states() != null);
+        assertTrue(runtime.relayAttention().isEmpty(), () -> runtime.relayAttention().toString());
+        var readResult = outcome(requests, read);
+        assertEquals("COMPLETED", readResult.path("state").asText());
+        assertTrue(readResult.path("result").path("states").has("office.temperature"));
         assertEquals(1, haFixture.actions());
-        var selectedAction =
-            io.aeyer.plowshare.sdk.ExternalPayloadCodec.message(
-                """
-{"parts":[{"data":{"schema":"plowshare-integration/1","binding":"house","operation":"actions.execute","arguments":{"action":"notify","parameters":{"message":"Selected action"}}}}]}
-""");
         var action =
-            requests.send(
-                new Outgoing.Send(UUID.randomUUID(), "ha-house", selectedAction, "home", null));
+            request(
+                requests,
+                clock.get(),
+                "actions.execute",
+                "{\"action\":\"notify\",\"parameters\":{\"message\":\"Selected action\"}}");
         runtime.tick();
-        assertEquals("COMPLETED", requests.status(action.id()).state());
+        assertTrue(runtime.relayAttention().isEmpty(), () -> runtime.relayAttention().toString());
+        assertEquals("COMPLETED", outcome(requests, action).path("state").asText());
         assertEquals(2, haFixture.actions());
-        var deniedAction =
-            io.aeyer.plowshare.sdk.ExternalPayloadCodec.message(
-                """
-{"parts":[{"data":{"schema":"plowshare-integration/1","binding":"house","operation":"actions.execute","arguments":{"action":"notify","parameters":{"message":"Denied action","entity_id":"light.foreign"}}}}]}
-""");
         var denied =
-            requests.send(
-                new Outgoing.Send(UUID.randomUUID(), "ha-house", deniedAction, "home", null));
+            request(
+                requests,
+                clock.get(),
+                "actions.execute",
+                "{\"action\":\"notify\",\"parameters\":{\"message\":\"Denied action\",\"entity_id\":\"light.foreign\"}}");
         runtime.tick();
-        assertEquals("REJECTED", requests.status(denied.id()).state());
+        assertTrue(runtime.relayAttention().isEmpty(), () -> runtime.relayAttention().toString());
+        assertEquals("REJECTED", outcome(requests, denied).path("state").asText());
         assertEquals(2, haFixture.actions());
         assertTrue(
             frames.containsAll(
                 List.of(
-                    "orchestration.start",
-                    "orchestration.status",
-                    "outgoing.claim",
-                    "outgoing.report")));
+                    "orchestration.start", "orchestration.status", "relay.log", "relay.publish")));
       }
     }
+  }
+
+  private static UUID request(
+      RelayClient sdk, Instant occurredAt, String operation, String arguments) throws Exception {
+    UUID id = UUID.randomUUID();
+    String text =
+        "{\"schema\":\"plowshare-integration/1\",\"binding\":\"house\",\"operation\":\""
+            + operation
+            + "\",\"arguments\":"
+            + arguments
+            + "}";
+    sdk.publish(
+        new RelayPort.Publish(
+            id.toString(), "home", "house.requests", text, occurredAt, null, null, null));
+    return id;
+  }
+
+  private static JsonNode outcome(RelayClient sdk, UUID source) throws Exception {
+    for (var event :
+        sdk.log(new RelayLog.Query("home", false, "house.returns", "0", 100)).events()) {
+      var payload = Json.parse(event.payload().text());
+      if (payload.path("sourceEvent").asText().equals(source.toString()))
+        return Json.parse(payload.path("body").asText());
+    }
+    throw new AssertionError("No correlated integration result");
   }
 
   private static void awaitReading(HomeAssistantAdapter adapter, String value) throws Exception {
@@ -351,7 +388,7 @@ export default {
 
   private static JsonNode status() {
     var run =
-        new io.aeyer.plowshare.protocol.Orchestration.RunView(
+        new Orchestration.RunView(
             "run-fixture",
             "fixture",
             "shipped",
@@ -370,11 +407,9 @@ export default {
             null,
             0,
             null,
-            java.time.Instant.parse("2026-10-04T00:00:00Z"),
+            Instant.parse("2026-10-04T00:00:00Z"),
             null,
             null);
-    return Json.MAPPER.valueToTree(
-        new io.aeyer.plowshare.protocol.Orchestration.Status(
-            run, java.util.List.of(), java.util.List.of(), java.util.List.of()));
+    return Json.MAPPER.valueToTree(new Orchestration.Status(run, List.of(), List.of(), List.of()));
   }
 }

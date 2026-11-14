@@ -6,11 +6,7 @@ import { problem } from './payload-validation.ts';
 export { problem } from './payload-validation.ts';
 import { decodeRequest } from './schema.ts';
 import { isList, displayText } from '../binding/values.ts';
-import {
-  OUTGOING_OPERATIONS,
-  isOutgoingOperation,
-  outgoingReply,
-} from './outgoing.ts';
+
 import {
   MESSAGING_OPERATIONS,
   isMessagingOperation,
@@ -228,7 +224,6 @@ export const VALIDATED_OPERATIONS: readonly Operation[] = [
   'proc.calls',
   'proc.queues',
   'proc.tools',
-  ...OUTGOING_OPERATIONS,
   ...MESSAGING_OPERATIONS,
   ...USAGE_FRAMES.filter(
     (type) => type !== 'usage.subscribe' && type !== 'usage.unsubscribe',
@@ -248,6 +243,8 @@ export const VALIDATED_OPERATIONS: readonly Operation[] = [
   'relay.publish',
   'relay.consume',
   'relay.ack',
+  'relay.group.delete',
+  'relay.group.inspect',
   'relay.process',
   'relay.topics',
   'relay.log',
@@ -397,7 +394,9 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
   if (
     asked.type === 'relay.publish' ||
     asked.type === 'relay.consume' ||
-    asked.type === 'relay.ack'
+    asked.type === 'relay.ack' ||
+    asked.type === 'relay.group.delete' ||
+    asked.type === 'relay.group.inspect'
   ) {
     if (outcome.code !== 'OK') return { kind: 'refused', outcome };
     try {
@@ -415,6 +414,16 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
           batch.group === asked.payload.group &&
           batch.consumerId === asked.payload.consumerId &&
           batch.events.length <= (asked.payload.limit ?? 100);
+      }
+      if (asked.type === 'relay.group.inspect')
+        matches &&=
+          decodeReply('relay.group.inspect', outcome.payload).group ===
+          asked.payload.group;
+      if (asked.type === 'relay.group.delete') {
+        const deleted = decodeReply('relay.group.delete', outcome.payload);
+        matches &&=
+          deleted.group === asked.payload.group &&
+          deleted.generation === asked.payload.generation;
       }
       if (asked.type === 'relay.ack') {
         const ack = decodeReply('relay.ack', outcome.payload);
@@ -473,43 +482,6 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
     } catch {
       return { kind: 'invalid-response', outcome };
     }
-  }
-  if (isOutgoingOperation(asked.type)) {
-    const expected = asked.type === 'outgoing.send' ? 'ACCEPTED' : 'OK';
-    if (outcome.code !== expected)
-      return {
-        kind: ['OK', 'CREATED', 'ACCEPTED', 'NO_CONTENT'].includes(outcome.code)
-          ? 'invalid-response'
-          : 'refused',
-        outcome,
-      };
-    if (!outgoingReply(asked.type, outcome))
-      return { kind: 'invalid-response', outcome };
-    if (
-      asked.type === 'outgoing.send' &&
-      (body?.['requestId'] !== asked.payload.requestId ||
-        body['peer'] !== asked.payload.peer)
-    )
-      return { kind: 'invalid-response', outcome };
-    if (
-      (asked.type === 'outgoing.status' || asked.type === 'outgoing.cancel') &&
-      body?.['id'] !== asked.payload.id
-    )
-      return { kind: 'invalid-response', outcome };
-    if (asked.type === 'outgoing.send') return { kind: 'accepted', outcome };
-    if (asked.type === 'outgoing.peers') return { kind: 'completed', outcome };
-    const state = body?.['state'];
-    return {
-      kind:
-        state === 'COMPLETED' || state === 'CANCELED'
-          ? 'completed'
-          : state === 'FAILED' || state === 'REJECTED'
-            ? 'refused'
-            : ['QUEUED', 'DISPATCHED', 'WORKING'].includes(String(state))
-              ? 'running'
-              : 'incomplete',
-      outcome,
-    };
   }
   if (isMessagingOperation(asked.type)) {
     if (outcome.code !== 'OK') return { kind: 'refused', outcome };

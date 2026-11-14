@@ -29,6 +29,14 @@ public interface FiringStore {
 
   Optional<FiringRecord> owe(String topic, String target, EventPayload data, Instant at);
 
+  /** Messaging's own instance owns this wake; no board topic or seat is created. */
+  Optional<FiringRecord> oweMessage(
+      String instance, String target, EventPayload.Message data, Instant at);
+
+  /** Records original inbox order independently of timestamps or firing IDs. */
+  Optional<FiringRecord> oweMessage(
+      String instance, String target, EventPayload.Message data, Instant at, Long position);
+
   /** Read-only inventory of every retained payload, including terminal rows. */
   EventCompatibility preflight();
 

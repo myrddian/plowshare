@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "product": "caddy",
+      "title": "Caddy API",
+      "url": "https://caddyserver.com/docs/api",
+      "topics": ["admin-api"]
+    },
+    {
+      "product": "caddy",
+      "title": "Caddyfile global options",
+      "url": "https://caddyserver.com/docs/caddyfile/options",
+      "topics": ["admin-api"]
+    },
+    {
+      "product": "pi-hole",
+      "title": "Pi-hole prerequisites",
+      "url": "https://docs.pi-hole.net/main/prerequisites/",
+      "topics": ["ports"]
+    },
+    {
+      "product": "unifi",
+      "title": "UniFi required ports reference",
+      "url": "https://help.ui.com/hc/en-us/articles/218506997-Required-Ports-Reference",
+      "topics": ["ports"]
+    },
+    {
+      "product": "home-assistant",
+      "title": "Securing your Home Assistant",
+      "url": "https://www.home-assistant.io/docs/configuration/securing/",
+      "topics": ["security"]
+    }
+  ]
+}

@@ -232,6 +232,10 @@ public interface RelayDeliveries {
     }
   }
 
+  /**
+   * Internal dispatch snapshot. Source generation is read alongside the retained delivery; it is
+   * never inferred later from a topic name that might have been deleted and recreated.
+   */
   record Delivery(
       DeliveryKey key,
       AdmissionKey admission,
@@ -245,7 +249,40 @@ public interface RelayDeliveries {
       Instant admittedAt,
       Instant updatedAt,
       Receipt receipt,
-      String failureCode) {
+      String failureCode,
+      UUID sourceGeneration) {
+    /** Compatibility for non-messaging fixtures; native ingress requires a proven incarnation. */
+    public Delivery(
+        DeliveryKey key,
+        AdmissionKey admission,
+        Relay.Publication publication,
+        SourcePin routing,
+        Branch branch,
+        State state,
+        long fence,
+        String worker,
+        Instant leaseUntil,
+        Instant admittedAt,
+        Instant updatedAt,
+        Receipt receipt,
+        String failureCode) {
+      this(
+          key,
+          admission,
+          publication,
+          routing,
+          branch,
+          state,
+          fence,
+          worker,
+          leaseUntil,
+          admittedAt,
+          updatedAt,
+          receipt,
+          failureCode,
+          null);
+    }
+
     public Delivery {
       Objects.requireNonNull(key, "key");
       Objects.requireNonNull(admission, "admission");

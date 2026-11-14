@@ -1,9 +1,19 @@
 package io.aeyer.plowshare.server.agents;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.AdditionalAnswers.delegatesTo;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.calls;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
@@ -286,6 +296,7 @@ class CompactionSystemScopeTest {
     private final List<ChatMessage> history = new ArrayList<>();
 
     Fixture(Home home) {
+      when(turns.reserve(anyString())).thenReturn(1);
       IdentityRepository identities = mock(IdentityRepository.class);
       ScopedGrantRepository grants = mock(ScopedGrantRepository.class);
       ScopedAuthority authority = mock(ScopedAuthority.class);

@@ -1,9 +1,21 @@
 package io.aeyer.plowshare.server.applications;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.protocol.ApplicationDeployment;
 import io.aeyer.plowshare.protocol.ApplicationIdentity;
 import io.aeyer.plowshare.protocol.ContainedProjects;
 import io.aeyer.plowshare.protocol.HostedToolScopes;
@@ -20,9 +32,6 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.auth.ServiceAccountRepository;
 import io.aeyer.plowshare.server.auth.ServiceAccounts;
-import io.aeyer.plowshare.server.board.Board;
-import io.aeyer.plowshare.server.board.MessagingProperties;
-import io.aeyer.plowshare.server.board.ProjectMessageRouting;
 import io.aeyer.plowshare.server.events.FileScheduleDefinitions;
 import io.aeyer.plowshare.server.events.ScheduleControlAuthority;
 import io.aeyer.plowshare.server.events.ScheduleDefinitionStore;
@@ -32,12 +41,18 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.FileStores;
 import io.aeyer.plowshare.server.information.InformationEventRecords;
 import io.aeyer.plowshare.server.information.JdbcInformationEventRecords;
+import io.aeyer.plowshare.server.messaging.MessageRefused;
+import io.aeyer.plowshare.server.messaging.MessagingProperties;
+import io.aeyer.plowshare.server.messaging.ProjectMessageRouting;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -82,7 +97,7 @@ class ContainedAddressabilityTest {
   @Test
   void projectMembershipRefusesAContainedProject() {
     var jdbc = mock(JdbcTemplate.class);
-    when(jdbc.getDataSource()).thenReturn(mock(javax.sql.DataSource.class));
+    when(jdbc.getDataSource()).thenReturn(mock(DataSource.class));
     var members = new JdbcProjectMembers(jdbc);
     assertTrue(
         assertThrows(RuntimeException.class, () -> members.add(CHILD, "alice"))
@@ -109,7 +124,7 @@ class ContainedAddressabilityTest {
     when(repository.account(eq("@service/worker"), anyBoolean()))
         .thenReturn(
             new ServiceAccounts.Account(
-                "@service/worker", true, java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC)));
+                "@service/worker", true, OffsetDateTime.now(ZoneOffset.UTC)));
     var service = new ServiceAccounts(repository, transactions, accounts, members, null);
     var scope = new ServiceAccounts.Scope(CHILD, ProjectRole.VIEWER);
     assertThrows(
@@ -136,7 +151,7 @@ class ContainedAddressabilityTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new io.aeyer.plowshare.protocol.ApplicationDeployment.Activate(
+            new ApplicationDeployment.Activate(
                 CHILD, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()));
   }
 
@@ -202,7 +217,7 @@ class ContainedAddressabilityTest {
     // wrong reason.
     var refusal =
         assertThrows(
-            Board.Refused.class,
+            MessageRefused.class,
             () -> routing(openProjects(), openMembers()).require("@service/child", CHILD, PARENT));
     assertTrue(refusal.getMessage().contains("contained"), refusal.getMessage());
   }
@@ -211,7 +226,7 @@ class ContainedAddressabilityTest {
   void messagingRefusesAContainedProjectAsToProject() {
     var refusal =
         assertThrows(
-            Board.Refused.class,
+            MessageRefused.class,
             () -> routing(openProjects(), openMembers()).require("alice", PARENT, CHILD));
     assertTrue(refusal.getMessage().contains("contained"), refusal.getMessage());
   }
@@ -223,12 +238,12 @@ class ContainedAddressabilityTest {
     // is no forwarding path in this capability and a child's reach is not its container's.
     assertDoesNotThrow(() -> routing.require("alice", PARENT, PARENT));
     assertTrue(
-        assertThrows(Board.Refused.class, () -> routing.require("@service/child", CHILD, CHILD))
+        assertThrows(MessageRefused.class, () -> routing.require("@service/child", CHILD, CHILD))
             .getMessage()
             .contains("contained"));
     assertTrue(
         assertThrows(
-                Board.Refused.class,
+                MessageRefused.class,
                 () -> routing.require("@service/child", CHILD, "somewhere-else"))
             .getMessage()
             .contains("contained"));
@@ -258,7 +273,7 @@ class ContainedAddressabilityTest {
 
     for (String[] pair : List.of(new String[] {CHILD, CHILD}, new String[] {CHILD, PARENT})) {
       var refusal =
-          assertThrows(Board.Refused.class, () -> routing.require(principal, pair[0], pair[1]));
+          assertThrows(MessageRefused.class, () -> routing.require(principal, pair[0], pair[1]));
       assertTrue(refusal.getMessage().contains("contained"), refusal.getMessage());
     }
   }

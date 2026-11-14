@@ -1,12 +1,14 @@
 package io.aeyer.plowshare.server.information;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.access.AuthoritySnapshot;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -38,7 +40,7 @@ class SystemProcessingAuthorityTest {
                 List.of(),
                 List.of(
                     new AuthoritySnapshot.Scope(
-                        new java.util.UUID(0, 1),
+                        new UUID(0, 1),
                         "KNOWLEDGE",
                         Optional.empty(),
                         Optional.empty(),

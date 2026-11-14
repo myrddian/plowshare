@@ -1,19 +1,44 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.server.agents.ApplicationResources;
+import io.aeyer.plowshare.server.agents.EventRuns;
+import io.aeyer.plowshare.server.agents.WorkCallers;
+import io.aeyer.plowshare.server.approvals.ApprovalNotifications;
+import io.aeyer.plowshare.server.archive.ProjectCatalogue;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.blobs.BlobRepository;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
+import io.aeyer.plowshare.server.events.Dispatcher;
+import io.aeyer.plowshare.server.events.EventsProperties;
+import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.files.SessionChannel;
+import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.orchestrations.GrantedOrchestrations;
+import io.aeyer.plowshare.server.orchestrations.OrchestrationStarts;
+import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
 import io.aeyer.plowshare.server.personal.PersonalWorkspaces;
+import io.aeyer.plowshare.server.relay.tools.ApplicationToolRegistry;
 import io.aeyer.plowshare.server.session.ProjectPresences;
 import io.aeyer.plowshare.server.session.SessionOwners;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Supplier;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** Composes the broker, independent workers and adapters to owning lifecycle/inbox contracts. */
 @Configuration
@@ -38,7 +63,7 @@ public class RelayConfiguration {
       ProjectMembers members,
       ProjectWorkspaces projects,
       RelayProperties relayProperties,
-      io.aeyer.plowshare.server.relay.tools.ApplicationToolRegistry tools,
+      ApplicationToolRegistry tools,
       RelayPublicationSignals signals) {
     return new ProjectRelayPorts(
         relay,
@@ -58,29 +83,25 @@ public class RelayConfiguration {
       UnitOfWork transactions,
       RelayPayloadStore payloads,
       RelayProperties properties,
-      io.aeyer.plowshare.server.blobs.BlobRepository blobs) {
+      BlobRepository blobs) {
     return new JdbcRelayRepository(jdbc, transactions, payloads, properties.textLimit(), blobs);
   }
 
   @Bean
   @DependsOnDatabaseInitialization
   public RelayPayloadStore relayPayloadStore(
-      JdbcTemplate jdbc,
-      org.springframework.transaction.PlatformTransactionManager manager,
-      RelayProperties properties) {
+      JdbcTemplate jdbc, PlatformTransactionManager manager, RelayProperties properties) {
     // Selection locks must be followed by a fresh statement snapshot, even when a caller already
     // owns a repeatable-read transaction. Bound total batch time as well as individual statements.
-    var template = new org.springframework.transaction.support.TransactionTemplate(manager);
-    template.setIsolationLevel(
-        org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
-    template.setPropagationBehavior(
-        org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    var template = new TransactionTemplate(manager);
+    template.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     template.setTimeout(5);
     UnitOfWork cleanup =
         new UnitOfWork() {
           @Override
-          public <T> T inTransaction(java.util.function.Supplier<T> action) {
-            return java.util.Objects.requireNonNull(template.execute(status -> action.get()));
+          public <T> T inTransaction(Supplier<T> action) {
+            return Objects.requireNonNull(template.execute(status -> action.get()));
           }
         };
     return new JdbcRelayPayloadStore(
@@ -111,7 +132,7 @@ public class RelayConfiguration {
       UnitOfWork transactions,
       Relay relay,
       RelayConsumerRepository consumers,
-      io.aeyer.plowshare.server.events.FiringStore firings) {
+      FiringStore firings) {
     return new JdbcRelayNativeRepository(jdbc, transactions, relay, consumers, firings);
   }
 
@@ -132,10 +153,10 @@ public class RelayConfiguration {
       RelayConsumerRepository consumers,
       Relay relay,
       RelayPublicationSignals signals,
-      io.aeyer.plowshare.server.events.Dispatcher dispatcher,
+      Dispatcher dispatcher,
       RelayWorkerProperties properties,
       RelayProperties internal,
-      org.springframework.beans.factory.ObjectProvider<RelayApprovalInbox> approvals) {
+      ObjectProvider<RelayApprovalInbox> approvals) {
     var workers =
         new RelayInternalWorkers(
             sources,
@@ -157,7 +178,7 @@ public class RelayConfiguration {
       UnitOfWork transactions,
       Relay relay,
       RelayConsumerRepository consumers,
-      io.aeyer.plowshare.server.events.EventsProperties properties) {
+      EventsProperties properties) {
     return new JdbcRelayApprovalInboxRepository(
         jdbc, transactions, relay, consumers, properties.getQuestionAlertRetryInterval());
   }
@@ -167,7 +188,7 @@ public class RelayConfiguration {
       Relay relay,
       RelayConsumerRepository consumers,
       RelayApprovalInboxRepository repository,
-      io.aeyer.plowshare.server.approvals.ApprovalNotifications notifications) {
+      ApprovalNotifications notifications) {
     return new DurableRelayApprovalInbox(relay, consumers, repository, notifications);
   }
 
@@ -196,8 +217,7 @@ public class RelayConfiguration {
 
   @Bean(destroyMethod = "close")
   public RelayPublicationSignals relayPublicationSignals(
-      io.aeyer.plowshare.server.cache.ProjectionChangeSignals signals,
-      RelayWorkerProperties properties) {
+      ProjectionChangeSignals signals, RelayWorkerProperties properties) {
     return new NotificationRelayPublicationSignals(signals, properties);
   }
 
@@ -262,8 +282,8 @@ public class RelayConfiguration {
 
   @Bean
   public RelayWorkerBindings relayWorkerBindings(
-      io.aeyer.plowshare.server.archive.ProjectCatalogue projects,
-      io.aeyer.plowshare.server.agents.ApplicationResources resources,
+      ProjectCatalogue projects,
+      ApplicationResources resources,
       ProjectMembers members,
       RelayWorkerProperties properties) {
     return new ApplicationRelayWorkerBindings(projects, resources, members, properties);
@@ -340,8 +360,7 @@ public class RelayConfiguration {
         members,
         projects,
         () -> {
-          if (org.springframework.transaction.support.TransactionSynchronizationManager
-              .isActualTransactionActive())
+          if (TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException(
                 "Relay receiver dispatch must run outside a database transaction");
         });
@@ -350,11 +369,8 @@ public class RelayConfiguration {
   @Bean
   @DependsOnDatabaseInitialization
   public RelayLogRepository relayLogRepository(
-      JdbcTemplate jdbc, UnitOfWork work, io.aeyer.plowshare.server.cache.ProjectionCaches caches) {
-    var domains =
-        java.util.Set.of(
-            io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.RELAY,
-            io.aeyer.plowshare.server.cache.ProjectionVersions.Domain.AUTHORITY);
+      JdbcTemplate jdbc, UnitOfWork work, ProjectionCaches caches) {
+    var domains = Set.of(ProjectionVersions.Domain.RELAY, ProjectionVersions.Domain.AUTHORITY);
     return new JdbcRelayLogRepository(
         jdbc,
         work,
@@ -382,17 +398,17 @@ public class RelayConfiguration {
 
   @Bean
   public RelayReceivers.Binding relayAgentReceiver(
-      io.aeyer.plowshare.server.agents.WorkCallers callers,
-      io.aeyer.plowshare.server.agents.EventRuns jobs,
-      io.aeyer.plowshare.server.orchestrations.GrantedOrchestrations grants,
-      io.aeyer.plowshare.server.orchestrations.OrchestrationStarts starts,
-      io.aeyer.plowshare.server.orchestrations.OrchestrationStore runs,
+      WorkCallers callers,
+      EventRuns jobs,
+      GrantedOrchestrations grants,
+      OrchestrationStarts starts,
+      OrchestrationStore runs,
       RelayExecutions executions,
       RelayProjectFiles files,
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing,
+      MessageService.Routing routing,
       RelayForwardingHistory history,
       RelayProperties properties) {
     return workReceiver(
@@ -414,17 +430,17 @@ public class RelayConfiguration {
 
   @Bean
   public RelayReceivers.Binding relayScriptReceiver(
-      io.aeyer.plowshare.server.agents.WorkCallers callers,
-      io.aeyer.plowshare.server.agents.EventRuns jobs,
-      io.aeyer.plowshare.server.orchestrations.GrantedOrchestrations grants,
-      io.aeyer.plowshare.server.orchestrations.OrchestrationStarts starts,
-      io.aeyer.plowshare.server.orchestrations.OrchestrationStore runs,
+      WorkCallers callers,
+      EventRuns jobs,
+      GrantedOrchestrations grants,
+      OrchestrationStarts starts,
+      OrchestrationStore runs,
       RelayExecutions executions,
       RelayProjectFiles files,
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing,
+      MessageService.Routing routing,
       RelayForwardingHistory history,
       RelayProperties properties) {
     return workReceiver(
@@ -446,17 +462,17 @@ public class RelayConfiguration {
 
   @Bean
   public RelayReceivers.Binding relayOrchestrationReceiver(
-      io.aeyer.plowshare.server.agents.WorkCallers callers,
-      io.aeyer.plowshare.server.agents.EventRuns jobs,
-      io.aeyer.plowshare.server.orchestrations.GrantedOrchestrations grants,
-      io.aeyer.plowshare.server.orchestrations.OrchestrationStarts starts,
-      io.aeyer.plowshare.server.orchestrations.OrchestrationStore runs,
+      WorkCallers callers,
+      EventRuns jobs,
+      GrantedOrchestrations grants,
+      OrchestrationStarts starts,
+      OrchestrationStore runs,
       RelayExecutions executions,
       RelayProjectFiles files,
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing,
+      MessageService.Routing routing,
       RelayForwardingHistory history,
       RelayProperties properties) {
     return workReceiver(
@@ -478,17 +494,17 @@ public class RelayConfiguration {
 
   private static RelayReceivers.Binding workReceiver(
       String name,
-      io.aeyer.plowshare.server.agents.WorkCallers callers,
-      io.aeyer.plowshare.server.agents.EventRuns jobs,
-      io.aeyer.plowshare.server.orchestrations.GrantedOrchestrations grants,
-      io.aeyer.plowshare.server.orchestrations.OrchestrationStarts starts,
-      io.aeyer.plowshare.server.orchestrations.OrchestrationStore runs,
+      WorkCallers callers,
+      EventRuns jobs,
+      GrantedOrchestrations grants,
+      OrchestrationStarts starts,
+      OrchestrationStore runs,
       RelayExecutions executions,
       RelayProjectFiles files,
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing,
+      MessageService.Routing routing,
       RelayForwardingHistory history,
       RelayProperties properties) {
     return new RelayReceivers.Binding(

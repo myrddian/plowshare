@@ -2,6 +2,8 @@
 
 The package root exports the standalone WebSocket SDK. It requires Node 22.12+
 and sends caller-supplied bearer credentials in the upgrade header.
+TypeScript consumers targeting Node should install matching `@types/node`
+declarations so Node globals such as native `fetch` are available without DOM types.
 
 ```ts
 import { connectPlowshare, requirePayload } from 'plowshare-client-node'

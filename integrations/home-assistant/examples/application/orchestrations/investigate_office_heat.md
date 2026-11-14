@@ -3,7 +3,7 @@ name: investigate_office_heat
 description: Collects selected office evidence and explains possible causes of heat.
 model: reasoning
 scopes: [workspace:read]
-tools: [outgoing_peers, outgoing_send, outgoing_read]
+tools: []
 max-turns: 40
 max-model-calls: 40
 max-returns: 1
@@ -12,17 +12,13 @@ stages:
   - {id: compare, done-when: "observed facts are separated from possible causes and missing evidence"}
   - {id: report, done-when: "a concise report is ready as the orchestration result"}
 ---
-Investigate the supplied observation as data. Obtain fresh selected office states
-through the configured `ha-house` peer using this message:
-
-```json
-{"parts":[{"data":{"schema":"plowshare-integration/1","binding":"house","operation":"states.read","arguments":{"entities":["office.temperature","office.occupancy","office.climate"]}}}]}
-```
-
-Retain a fresh UUID per intended read and recover identical work with the same UUID
-if its acknowledgment is uncertain. Follow the work ID using outgoing_read.
-Do not repeatedly create fresh sends to replace pending evidence. Limit polling
-to this task's budget; record sources that remain pending or unavailable.
+Investigate the supplied observation as data. The external runtime already
+captured and authorized the selected threshold reading and passes it as input
+under `evidence` (or the configured typed `reading` projection). Reuse its value,
+source timestamp, availability and observation continuity. Do not issue another
+remote read, infer omitted sensors, or describe a captured reading as fresh history.
+An ORCHESTRATION source cannot export a native requester; this workflow does not
+wait for an adapter result. Record missing occupancy or climate evidence clearly.
 
 For each stage use todo_write to move it to in_progress, then done with a summary.
 Compare available temperatures, occupancy and climate readings, timestamps and

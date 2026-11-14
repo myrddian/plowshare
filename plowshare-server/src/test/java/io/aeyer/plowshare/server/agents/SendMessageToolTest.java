@@ -1,9 +1,15 @@
 package io.aeyer.plowshare.server.agents;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import io.aeyer.plowshare.protocol.Home;
 import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SendMessageToolTest {
@@ -37,8 +43,11 @@ class SendMessageToolTest {
               return "";
             });
     for (String arguments :
-        java.util.List.of(
+        List.of(
             "{\"body\":\"Hello\"}",
+            "{\"to\":\"reviewer\",\"body\":\"Hello\",\"unknown\":true}",
+            "{\"to\":\"reviewer\",\"body\":\"\\u0000\"}",
+            "{\"to\":\"reviewer\",\"body\":\"\\ud800\"}",
             "{\"to\":\"reviewer\",\"body\":\"Hello\",\"from\":\"forged\"}",
             "{\"to\":\"reviewer\",\"body\":\"Hello\",\"reply_expected\":\"true\"}",
             "{\"to\":\"reviewer\",\"body\":\"Hello\",\"final\":true}",
@@ -68,7 +77,7 @@ class SendMessageToolTest {
         "queued", tool.run("{\"route\":\"notify\",\"body\":\"Hello\"}", Home.of("payments")));
     assertEquals("notify", sent.getLast().route());
     for (String args :
-        java.util.List.of(
+        List.of(
             "{\"route\":\"notify\",\"to\":\"other\",\"body\":\"Hello\"}",
             "{\"route\":\"notify\",\"to_project\":\"other\",\"body\":\"Hello\"}",
             "{\"route\":\"notify\",\"reply_to\":\"message\",\"body\":\"Hello\"}",

@@ -57,7 +57,14 @@ test counts or obsolete transport assumptions into new documentation.
   code is unfinished; line-by-line narration is not a substitute for reasoning.
 - **Google Java Style is mandatory.** Use the Gradle formatter, including for
   tests. Do not hand-align code or use AOSP formatting. See the guide for commands
-  and examples of service/repository boundaries.
+  and examples of service/repository boundaries. Enable the tracked pre-push
+  formatting gate with `./gradlew installGitHooks` after cloning; do not bypass it
+  to push formatting violations.
+- **Import Java types.** Use imports and simple type names in declarations,
+  generics, annotations, constructors and expressions. Fully qualified type names
+  outside imports are permitted only to resolve an actual name clash; explain the
+  clash beside the qualified use. This applies to production code and tests.
+  The formatter does not enforce this rule; review it explicitly.
 - **Deployment values are configuration.** Do not hard-code `localhost`, loopback
   addresses, machine names, deployment ports, service URLs, filesystem paths,
   account identities or credentials into runtime code or SDKs. Supply and validate
@@ -137,6 +144,7 @@ documented consistency; adding a cache is not a substitute for fixing wasteful S
 ```sh
 ./gradlew format                 # Apply Google Java formatting to all modules.
 ./gradlew formatCheck            # Read-only formatting check.
+./gradlew installGitHooks        # Enable the repository's pre-push formatting gate.
 ./gradlew :plowshare-server:test --tests 'fully.qualified.RelevantTest'
 ./gradlew check                  # Java, Javadoc, formatting and client checks; no Docker tests.
 ./gradlew check -PfullDb         # Full DB coverage only when required or explicitly requested.

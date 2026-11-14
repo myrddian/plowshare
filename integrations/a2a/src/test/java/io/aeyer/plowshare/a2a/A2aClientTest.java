@@ -1,11 +1,25 @@
 package io.aeyer.plowshare.a2a;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.a2a.model.ExternalMessage;
+import io.aeyer.plowshare.a2a.model.ExternalPayloadCodec;
+import java.io.IOException;
 import java.time.Duration;
-import java.util.*;
-import okhttp3.mockwebserver.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import okhttp3.mockwebserver.Dispatcher;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.mockwebserver.SocketPolicy;
 import org.junit.jupiter.api.Test;
 
 class A2aClientTest {
@@ -77,9 +91,7 @@ class A2aClientTest {
           });
       try (var client =
           new A2aClient(server.url("/rpc").toString(), "peer-token", Duration.ofSeconds(3))) {
-        var work =
-            client.send(
-                UUID.randomUUID(), io.aeyer.plowshare.protocol.ExternalMessage.text("hello"));
+        var work = client.send(UUID.randomUUID(), ExternalMessage.text("hello"));
         assertEquals("WORKING", work.state());
         assertEquals("remote-context", work.context());
         assertTrue(
@@ -102,11 +114,11 @@ class A2aClientTest {
     try (var server = new MockWebServer();
         var client = new A2aClient(server.url("/rpc").toString(), null, Duration.ofSeconds(3))) {
       assertThrows(
-          java.io.IOException.class,
+          IOException.class,
           () ->
               client.send(
                   UUID.randomUUID(),
-                  io.aeyer.plowshare.sdk.ExternalPayloadCodec.message(
+                  ExternalPayloadCodec.message(
                       "{\"parts\":[{\"text\":\"one\",\"url\":\"two\"}]}")));
       assertEquals(0, server.getRequestCount());
     }
@@ -119,10 +131,7 @@ class A2aClientTest {
       server.enqueue(new MockResponse().setResponseCode(503).setHeader("Retry-After", "0"));
       server.enqueue(new MockResponse().setBody("a second request must never reach this response"));
       assertThrows(
-          java.io.IOException.class,
-          () ->
-              client.send(
-                  UUID.randomUUID(), io.aeyer.plowshare.protocol.ExternalMessage.text("hello")));
+          IOException.class, () -> client.send(UUID.randomUUID(), ExternalMessage.text("hello")));
       assertEquals(1, server.getRequestCount());
     }
   }
@@ -160,11 +169,8 @@ class A2aClientTest {
           });
       try (var client = new A2aClient(server.url("/rpc").toString(), null, Duration.ofSeconds(3))) {
         assertEquals(
-            "COMPLETED",
-            client
-                .send(UUID.randomUUID(), io.aeyer.plowshare.protocol.ExternalMessage.text("hello"))
-                .state());
-        assertThrows(java.io.IOException.class, () -> client.status("ours", null));
+            "COMPLETED", client.send(UUID.randomUUID(), ExternalMessage.text("hello")).state());
+        assertThrows(IOException.class, () -> client.status("ours", null));
       }
     }
   }
@@ -175,21 +181,15 @@ class A2aClientTest {
         var client = new A2aClient(server.url("/rpc").toString(), null, Duration.ofMillis(250))) {
       server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST));
       assertThrows(
-          java.io.IOException.class,
-          () ->
-              client.send(
-                  UUID.randomUUID(), io.aeyer.plowshare.protocol.ExternalMessage.text("hello")));
+          IOException.class, () -> client.send(UUID.randomUUID(), ExternalMessage.text("hello")));
       assertEquals(1, server.getRequestCount());
       server.enqueue(
           new MockResponse().setResponseCode(307).setHeader("Location", server.url("/elsewhere")));
       try (var redirectClient =
           new A2aClient(server.url("/rpc").toString(), null, Duration.ofSeconds(3))) {
         assertThrows(
-            java.io.IOException.class,
-            () ->
-                redirectClient.send(
-                    UUID.randomUUID(),
-                    io.aeyer.plowshare.protocol.ExternalMessage.text("another")));
+            IOException.class,
+            () -> redirectClient.send(UUID.randomUUID(), ExternalMessage.text("another")));
       }
       assertEquals(2, server.getRequestCount());
     }

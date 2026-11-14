@@ -1,6 +1,21 @@
 package io.aeyer.plowshare.server.cache;
 
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_CACHE_REFUSED;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_INELIGIBLE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_LOAD_REFUSED;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_NOT_CACHEABLE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_NOT_READY;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.BYPASS_STALE;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.CAPACITY_REJECTED;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOAD;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOADED_RETURN;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.TRUSTED_HIT;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
+
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import java.sql.Connection;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
@@ -60,6 +75,11 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
   // before their versioned read began.
   private final AtomicLong changes = new AtomicLong();
   private final ConcurrentHashMap<SnapshotCache.Key, Trusted> trusted = new ConcurrentHashMap<>();
+  private final ProjectionCacheStatistics statistics = new ProjectionCacheStatistics();
+
+  ProjectionCacheStatistics statistics() {
+    return statistics;
+  }
 
   /** A value that passed its version check at {@code changes == epoch}. Holds no DTO. */
   private record Trusted(ProjectionVersions.Token token, long epoch) {}
@@ -178,14 +198,18 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
     Objects.requireNonNull(boundedLoader);
     Objects.requireNonNull(uncachedLoader);
     Objects.requireNonNull(weight);
-    if (!ready() || !cacheable) return uncachedLoader.get();
+    if (!ready()) return bypass(BYPASS_NOT_READY, uncachedLoader);
+    if (!cacheable) return bypass(BYPASS_NOT_CACHEABLE, uncachedLoader);
     if (notifiedNanos > 0) {
       var hit = trustedHit(key);
-      if (hit != null) return hit;
+      if (hit != null) {
+        statistics.record(TRUSTED_HIT);
+        return hit;
+      }
     }
     long epoch = changes.get();
     var captured = versions.capture(domains);
-    if (captured.isEmpty()) return uncachedLoader.get();
+    if (captured.isEmpty()) return bypass(BYPASS_INELIGIBLE, uncachedLoader);
     var token = captured.orElseThrow();
     var request =
         new SnapshotCache.Request(
@@ -193,10 +217,16 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
             token.sourceVersion(),
             token.dependencies(),
             Math.addExact(maxWeight, TOKEN_RESERVATION));
+    // readInline elects its loader on this caller's thread. A joining caller does not set this
+    // flag, so a successful coalesced return counts as reuse, not another physical load.
+    boolean[] loaded = {false};
+    var fallback = BYPASS_STALE;
     try (var read =
         cache.readInline(
             request,
             () -> {
+              loaded[0] = true;
+              statistics.record(LOAD);
               // capture already checked this caller's transaction. No owner code or SQL runs
               // between capture and an elected inline loader; do not repeat those probes here.
               T value = Objects.requireNonNull(boundedLoader.get());
@@ -218,6 +248,7 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
       // dirty state before publication; expiry is covered by the stored token's time window.
       if (ready() && versions.current(stored.token())) {
         if (notifiedNanos > 0) remember(key, stored.token(), epoch);
+        statistics.record(loaded[0] ? LOADED_RETURN : VERSIONED_HIT);
         return stored.value();
       }
       cache.invalidate(key);
@@ -227,8 +258,10 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
       // creates one new SQL load per rejected waiter. This is not a transport admission refusal:
       // an enclosing mutation may already have completed, so its client must not auto-replay it.
       if (cause instanceof SnapshotCache.CacheException failure
-          && failure.failure() == SnapshotCache.Failure.CAPACITY)
-        throw new io.aeyer.plowshare.server.reads.ReadUnavailableException();
+          && failure.failure() == SnapshotCache.Failure.CAPACITY) {
+        statistics.record(CAPACITY_REJECTED);
+        throw new ReadUnavailableException();
+      }
       if (cause instanceof SnapshotCache.CacheException failure
           && (failure.failure() == SnapshotCache.Failure.REENTRANT_LOAD
               || failure.failure() == SnapshotCache.Failure.INCONSISTENT_REQUEST)) throw failure;
@@ -237,9 +270,17 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
         if (cause instanceof Error fatal) throw fatal;
         throw failed;
       }
+      fallback = cause instanceof Bypass ? BYPASS_LOAD_REFUSED : BYPASS_CACHE_REFUSED;
     }
     // Only pure repository projections are repeated here. Provider work, authorization admission,
     // mutation decisions and per-reader auditing are outside this capability and never replayed.
+    return bypass(fallback, uncachedLoader);
+  }
+
+  private T bypass(ProjectionCacheStatistics.Event reason, Supplier<T> uncachedLoader) {
+    // Count the fallback attempt even if the owner's ordinary SQL path fails. Some owners use
+    // an unavailable marker here and decide their SQL fallback later; this is not a SQL count.
+    statistics.record(reason);
     return uncachedLoader.get();
   }
 
@@ -260,7 +301,7 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
       return null;
     if (!callerHasNoOwnWrites()) return null;
     var token = entry.token();
-    var now = java.time.Instant.now();
+    var now = Instant.now();
     if (token.windowStart() != null && now.isBefore(token.windowStart().plus(margin))) return null;
     if (token.validUntil() != null && !now.plus(margin).isBefore(token.validUntil())) return null;
     var request =
@@ -293,7 +334,7 @@ public final class VersionedProjectionCache<T> implements ProjectionCache<T>, Au
     if (!TransactionSynchronizationManager.isActualTransactionActive()) return true;
     if (!TransactionSynchronizationManager.isCurrentTransactionReadOnly()) return false;
     Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
-    return isolation == null || isolation == java.sql.Connection.TRANSACTION_READ_COMMITTED;
+    return isolation == null || isolation == Connection.TRANSACTION_READ_COMMITTED;
   }
 
   public void close() {

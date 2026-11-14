@@ -1,33 +1,36 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.agents.CallerAccess;
-import io.aeyer.plowshare.server.board.BoardMessaging;
+import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageService;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Account and project scoped controls for the messaging abstraction. WS is the only front door. */
 @Component
 public class MessageFrames implements FrameArea {
-  private final java.util.function.Supplier<BoardMessaging> transport;
+  private final Supplier<MessageService> transport;
   private final CallerAccess access;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  public MessageFrames(
-      org.springframework.beans.factory.ObjectProvider<BoardMessaging> provider,
-      CallerAccess access) {
+  @Autowired
+  public MessageFrames(ObjectProvider<MessageService> provider, CallerAccess access) {
     this.transport = provider::getObject;
     this.access = access;
   }
 
-  public MessageFrames(BoardMessaging messages, CallerAccess access) {
+  public MessageFrames(MessageService messages, CallerAccess access) {
     this.transport = () -> messages;
     this.access = access;
   }
 
-  private BoardMessaging messages() {
+  private MessageService messages() {
     return transport.get();
   }
 
@@ -64,9 +67,9 @@ public class MessageFrames implements FrameArea {
 
   record DeliveriesBody(String instance, Integer offset, Integer limit) {}
 
-  public record Instances(List<BoardMessaging.InstanceView> instances, boolean more, int offset) {}
+  public record Instances(List<MessageService.InstanceView> instances, boolean more, int offset) {}
 
-  public record Deliveries(List<BoardMessaging.Delivery> deliveries, boolean more, int offset) {}
+  public record Deliveries(List<MessageService.Delivery> deliveries, boolean more, int offset) {}
 
   private String account(Asking asking, String type) {
     String handle = asking.requireHandle(type);
@@ -78,8 +81,7 @@ public class MessageFrames implements FrameArea {
     String account = account(asking, type);
     String instance = Payloads.required(payload, "instance", type, "the instance address");
     String project = messages().owned(instance, account).project();
-    if (io.aeyer.plowshare.server.access.ProjectAuthorization.required(type)
-        == io.aeyer.plowshare.server.archive.ProjectRole.VIEWER)
+    if (ProjectAuthorization.required(type) == ProjectRole.VIEWER)
       access.requireProject(project, account);
     else access.requireWork(project, account);
     return account;

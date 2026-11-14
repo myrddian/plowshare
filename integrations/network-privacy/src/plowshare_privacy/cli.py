@@ -51,13 +51,15 @@ from .journal import FileReceipts
 from .monitor import FileMonitorSettings
 from .native_tools import DECLARATIONS, CataloguedProvider, registered
 from .operator_state import FileOperatorStore
-from .peer import IntegrationPeer, SdkOutgoingPort
-from .peer_journal import FilePeerReceipts
+from .peer_journal import require_settled_legacy_peer
 from .ports import SdkPrivacyPort
 from .presence import PresenceHistory, PresenceView, PresenceWatch
 from .profile_port import SdkProfilePort
 from .profile_research import ProfileResearch, ResearchJournal, reviewed_model
 from .profile_research_port import SdkResearchPort
+from .reference_port import SdkReferencePort
+from .reference_requests import AssistantReferenceRequests, ReferenceRequests
+from .reference_service import open_references, project_scope
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
 from .tool_journal_upgrade import open_tool_journal
@@ -189,6 +191,9 @@ async def execute(args: argparse.Namespace) -> None:
             )
             return
         with FileReceipts(config) as receipts, ExitStack() as stores:
+            # Old work IDs are not native invocation IDs. Refuse unresolved evidence before
+            # catalogue publication, intake or collection; never migrate it by replaying effects.
+            require_settled_legacy_peer(receipts)
             operator_store = (
                 FileOperatorStore(Path(args.config).parent)
                 if getattr(args, "dashboard_settings", False)
@@ -202,7 +207,7 @@ async def execute(args: argparse.Namespace) -> None:
                 operator_store,
                 PresenceWatch(PresenceHistory(config.state_directory)),
             )
-            # The record and request services are composed before the tool
+            # The record and request services are composed before the native tool
             # provider, whose assistant tools use them (see assistant_tools).
             issues = (
                 PrivacyIssues(
@@ -247,6 +252,24 @@ async def execute(args: argparse.Namespace) -> None:
             deep_scans, deep_scans_detail = compose_scanner(
                 worker, config.state_directory, operator_store is not None
             )
+            # Vendor documentation for the assistant. The seed is queued once here;
+            # the loop below fetches it and nothing retries without the owner.
+            references, references_detail = open_references(
+                config.state_directory,
+                SdkReferencePort(client, project_scope(config.project)),
+            )
+            # The agent's requests for missing docs; disabled with the library.
+            # The dashboard and the agent share one instance over the journal.
+            request_journal = (
+                ReferenceRequests(config.state_directory, references.library)
+                if references is not None
+                else None
+            )
+            reference_requests = (
+                AssistantReferenceRequests(request_journal)
+                if request_journal is not None
+                else None
+            )
             # The household's Ask conversation. An unreadable journal disables it
             # only; collection starts and /api/status says why.
             ask, ask_detail = compose_ask(
@@ -284,8 +307,8 @@ async def execute(args: argparse.Namespace) -> None:
             def assistant_tools() -> WorkerTools:
                 """The native provider's tools, with the assistant's services.
 
-                The peer keeps the read and scan tools only; only the native
-                provider serves the assistant's request and record tools.
+                The native provider serves both retained scan reads and the
+                assistant's request and record tools through the public SDK.
                 """
                 return WorkerTools(
                     worker,
@@ -293,26 +316,13 @@ async def execute(args: argparse.Namespace) -> None:
                     assessments=assessments,
                     profiles=profiles,
                     issues=issues,
+                    references=reference_requests,
                 )
 
-            peer = (
-                IntegrationPeer(
-                    config,
-                    SdkOutgoingPort(client, config),
-                    WorkerTools(worker),
-                    FilePeerReceipts(config, receipts),
-                )
-                if config.outgoing_peer is not None
-                else None
-            )
-            external: ExternalRequests | None = peer
+            external: ExternalRequests | None = None
             native: ToolProvider | None = None
             native_journal: SqliteToolJournal | None = None
             if args.tool_provider is not None:
-                if peer is not None:
-                    raise ValueError(
-                        "Choose either native tools or the outgoing compatibility peer"
-                    )
                 native_journal = stores.enter_context(
                     open_tool_journal(
                         config.state_directory / "relay-tools",
@@ -340,8 +350,6 @@ async def execute(args: argparse.Namespace) -> None:
                 return
             if args.command == "reconcile":
                 await worker.reconcile()
-                if peer is not None:
-                    await peer.reconcile()
                 if native is not None:
                     await native.reconcile()
                 print("Retained evidence reconciled; no mutation was replayed.")
@@ -417,12 +425,14 @@ async def execute(args: argparse.Namespace) -> None:
                             console.port = SdkConsolePort(
                                 replacement, worker.config, assistant_conversation
                             )
+                        if references is not None:
+                            references.library.port = SdkReferencePort(
+                                replacement, project_scope(worker.config.project)
+                            )
                         if dossiers is not None:
                             dossiers.port = SdkDossierPort(
                                 replacement, worker.config, worker.port
                             )
-                        if peer is not None:
-                            peer.port = SdkOutgoingPort(replacement, worker.config)
                         if native_journal is not None:
                             native = ToolProvider(
                                 replacement,
@@ -441,8 +451,6 @@ async def execute(args: argparse.Namespace) -> None:
                             )
                         await old.close()
                     await worker.reconcile()
-                    if peer is not None:
-                        await peer.reconcile()
                     if native is not None:
                         await native.reconcile()
                     topics = await worker.port.available_topics()
@@ -557,6 +565,9 @@ async def execute(args: argparse.Namespace) -> None:
                     assessments=assessments,
                     deep_scans=deep_scans,
                     deep_scans_detail=deep_scans_detail,
+                    references=references,
+                    references_detail=references_detail,
+                    reference_requests=request_journal,
                     ask=ask,
                     ask_detail=ask_detail,
                     advisory_origin=advisory_origin,
@@ -573,6 +584,7 @@ async def execute(args: argparse.Namespace) -> None:
             research_task: asyncio.Task[None] | None = None
             assessment_task: asyncio.Task[None] | None = None
             deep_scan_task: asyncio.Task[None] | None = None
+            reference_task: asyncio.Task[None] | None = None
             ask_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
@@ -622,6 +634,8 @@ async def execute(args: argparse.Namespace) -> None:
                     assessment_task = asyncio.create_task(assessments.run(stop))
                 if deep_scans is not None:
                     deep_scan_task = asyncio.create_task(deep_scans.run(stop))
+                if references is not None:
+                    reference_task = asyncio.create_task(references.run(stop))
                 if ask is not None:
                     ask_task = asyncio.create_task(ask.run(stop))
                 await stop.wait()
@@ -630,6 +644,7 @@ async def execute(args: argparse.Namespace) -> None:
                 await stop_tasks(
                     (
                         ask_task,
+                        reference_task,
                         deep_scan_task,
                         assessment_task,
                         research_task,

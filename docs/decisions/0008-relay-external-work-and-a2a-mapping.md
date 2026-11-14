@@ -1,22 +1,29 @@
 # Relay delivery for external work and A2A identity mapping
 
-Status: architecture direction agreed; implementation planned. Recorded on
-2026-10-09 after the user requested one outbound mechanism, explicit correlation
-and conversation mappings, a design document and planning tickets. This document
-describes the target and implementation gates; it does not claim the migration
-or additional A2A capabilities have shipped.
+Status: superseded by [0058 — Rebuild A2A as a public-SDK consumer of
+Relay](0058-a2a-rebuild-on-relay.md), recorded 13 November 2026 during Slice 0 of
+[Finishing Relay](../relay-finishing.md). The EW01–EW08 implementation plan is
+retired. The sections below preserve the earlier proposal as historical input,
+not instructions to extend core or preserve the current adapter-driven surface.
+A2A remains a feature; its implementation is to be rewritten because adapter
+responsibilities entered Plowshare core.
 
-The inspected source snapshot is `35ffa6e06578576e5af19728b08658b22384801c`.
-Implementation must recheck current main and reconcile changes before proceeding.
+Originally recorded on 2026-10-09 against source snapshot
+`35ffa6e06578576e5af19728b08658b22384801c`. The Relay external-work migration
+proposed here has not shipped; later generic transport/size work has shipped
+independently. Current adapters still use the existing incoming/outgoing APIs.
 
-## Later records that govern this one
+## Governing replacement
 
-This record's own instruction — recheck current main and reconcile before proceeding — is overdue.
-`0037-events-and-messaging-on-relay.md` states the general rule for every family moving onto Relay
-and carries the reconciliation table for EW01–EW08; `0040-relay-is-the-boards-substrate-rebuilt.md`
-records what Relay may and may not be asked to do, and that messaging still runs the previous
-generation of the substrate. Read both before starting EW01. Nothing in this record has shipped:
-`server/outgoing/` contains no Relay reference.
+Read [0057](0057-board-forum-and-relay-messaging-substrate.md) for the independent
+board forum, Relay messaging substrate and project-wide agent inbox direction.
+0058 records the replacement direction for Slice 5: rebuild A2A from requirements
+as a public-SDK Relay consumer after Slices 1–3. Identity mappings, external crash
+windows and acceptance requirements below are evidence for that review, not a
+requirement to retain today's queue, tables or core APIs. Any missing public
+capability remains subject to [0001](0001-integration-boundary.md).
+
+## Historical proposal (superseded)
 
 ## Problem and decision
 

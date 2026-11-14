@@ -1,6 +1,9 @@
 package io.aeyer.plowshare.server.ws;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import io.aeyer.plowshare.protocol.ActingContext;
 import io.aeyer.plowshare.protocol.frames.Envelope;
@@ -39,8 +42,7 @@ class DispatcherReadAuditTest {
       proposal.list provider.list trigger.list
       firing.list union.conflict.list message.instances
       message.instance message.deliveries message.delivery
-      incoming.catalog incoming.status outgoing.status
-      outgoing.peers application.files application.file.read
+      application.files application.file.read
       application.identity.status application.token.receipt application.deployment.status
       application.deployment.receipt filestore.list provider.connection.list
       provider.connection.status provider.connection.receipt tool.scope.list
@@ -142,7 +144,6 @@ class DispatcherReadAuditTest {
         "project.member.remove",
         "approval.answer",
         "inbox.read",
-        "outgoing.claim",
         "future.read"
       })
   void effectful_and_unknown_operations_keep_barriers(String type) {
