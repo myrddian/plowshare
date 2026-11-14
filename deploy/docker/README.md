@@ -138,6 +138,46 @@ The live deployment is validated on Linux amd64; Linux arm64 remains a separate
 acceptance run. Registry publication and multi-host Swarm deployment are later
 pipeline steps; these files target Docker Compose.
 
+## Monitoring
+
+The shipped telemetry is opt-in and has no default addresses.
+
+- **PostgreSQL** always preloads `pg_stat_statements` and `auto_explain` (a restart is
+  needed to change this). `pg_stat_statements` is optional: migration V260 creates its
+  views only when the migration role is a superuser (the extension is not trusted) and
+  otherwise logs a notice and continues. Only the exporter and
+  `deploy/monitoring/pg-stat-snapshot.sh` read it; the server does not need it. Logging of
+  statements slower than `PLOWSHARE_PG_SLOW_MS` and plans slower than
+  `PLOWSHARE_PG_AUTO_EXPLAIN_MS` is **off by default** (-1). Enabling either writes
+  SQL statement text to the PostgreSQL container log; bind parameters are never
+  logged. PostgreSQL's default `log_min_error_statement=error` still logs the SQL text
+  of failing statements, never their parameters (`log_parameter_max_length_on_error=0`).
+- **Server metrics**: set `PLOWSHARE_MANAGEMENT_PORT` and `PLOWSHARE_MANAGEMENT_BIND`
+  together in the server environment (an overlay adds them to the `server` service)
+  to serve `/actuator/prometheus` on a separate listener; the entrypoint refuses one
+  without the other. Compose does not publish that port. The endpoint has no
+  authentication, so make it reachable only by Prometheus (shared network or an
+  overlay `ports` entry bound to a private address).
+- **PostgreSQL metrics**: `docker compose --profile monitoring up -d postgres-exporter`
+  starts the pinned exporter. It publishes no host port and connects as its own
+  role, not the owner. Before starting it, create the role once as the database
+  owner (placeholder password only) and put the same password in
+  `secrets/monitoring-database-password` under the state root:
+  `CREATE ROLE plowshare_monitor LOGIN PASSWORD '<from the secret>'; GRANT pg_monitor TO plowshare_monitor;`
+  (set `PLOWSHARE_MONITORING_DB_USER` to use another role name); Prometheus reaches it on the compose network at port 9187, or an
+  operator overlay adds `ports`. Its custom queries export `queryid` (never statement
+  text), counts, time, rows and buffer blocks for the top 50 statements by total
+  time, plus table scan counters.
+- **Flight recording**: set `PLOWSHARE_JFR_DIR` to a writable mounted directory to
+  record continuously (6 hours or 512 MB, dumped on exit) with the settings in
+  `deploy/monitoring/plowshare.jfc`, which add `plowshare.JdbcExecute` stack traces.
+  `plowshare.jfc` was derived from the JDK 17 `profile.jfc` and can be regenerated
+  from a Java 21 JDK.
+- **Files**: [scrape example](../monitoring/prometheus-scrape.example.yaml),
+  [Grafana dashboard](../monitoring/grafana-plowshare.json) (import into Grafana and
+  select the Prometheus data source) and `deploy/monitoring/pg-stat-snapshot.sh`
+  (`snapshot DIR` writes a CSV, `delta BEFORE AFTER` compares two by `queryid`).
+
 ## Prepare state and providers
 
 Run as the deployment user:

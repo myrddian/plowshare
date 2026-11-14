@@ -26,10 +26,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * PostgreSQL proves V261 against data written under V259's lineage rules: live person-issued grants
- * are reissued from the SYSTEM root through the V260 trigger, lineage-dead ones are revoked rather
+ * PostgreSQL proves V262 against data written under V259's lineage rules: live person-issued grants
+ * are reissued from the SYSTEM root through the V261 trigger, lineage-dead ones are revoked rather
  * than revived, and delegated, self-issued and system-minted grants are left byte-identical. Each
- * test migrates its own schema to V259, seeds it, then migrates to V261.
+ * test migrates its own schema to V259, seeds it, then migrates to V262.
  */
 @Tag("full-db")
 @Testcontainers
@@ -159,7 +159,7 @@ class RerootPersonIssuedGrantsMigrationTest {
 
   /**
    * The whole row as text, so "untouched" means every column, including version and revocation.
-   * V260 adds exercised_grant after the seed was written, so the comparison drops that one key.
+   * V261 adds exercised_grant after the seed was written, so the comparison drops that one key.
    */
   private String row(UUID grant) {
     return jdbc.queryForObject(
@@ -235,7 +235,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     assertNotNull(expiry);
     assertEquals(mia, uuidColumn("issuing_grant", sam));
 
-    migrateTo("261");
+    migrateTo("262");
 
     // sam's grant was exercised from mia's original grant, which was still live when sam was
     // reissued because children are re-rooted before their parents.
@@ -273,7 +273,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     assertFalse(live(sam));
     assertNull(timestamp("revoked_at", sam));
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertRevokedBySystem(sam);
     assertEquals(0, liveGrantsOn("one", "sam"));
@@ -303,7 +303,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     String miaBefore = row(mia);
     String samBefore = row(sam);
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(miaBefore, row(mia));
     assertEquals(samBefore, row(sam));
@@ -326,7 +326,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     assertFalse(live(tom));
     List<String> rows = List.of(row(mia), row(sam), row(tom));
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(rows, List.of(row(mia), row(sam), row(tom)));
     enabled("mia", true);
@@ -354,7 +354,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     String ownerBefore = row(owner);
     String samBefore = row(sam);
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(ownerBefore, row(owner));
     assertEquals(samBefore, row(sam));
@@ -379,7 +379,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     jdbc.update("UPDATE service_tokens SET revoked_at=now() WHERE id=?", token);
     assertFalse(live(sam));
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertFalse(live(sam));
     assertTrue(live(current("MEMBERSHIP", "one", "service")));
@@ -433,7 +433,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     String agentBefore = row(agentGrant);
     String agentIssuedBefore = row(agentIssued);
     String tokenIssuedBefore = row(tokenIssued);
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(agentBefore, row(agentGrant));
     assertEquals(agentIssuedBefore, row(agentIssued));
@@ -450,7 +450,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     assertEquals(current("MEMBERSHIP", "one", "service"), uuidColumn("issuing_grant", sam));
     String before = row(sam);
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(before, row(sam));
     assertTrue(live(sam));
@@ -469,7 +469,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     String adminBefore = row(adminOwn);
     String miaBefore = row(miaOwn);
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(adminBefore, row(adminOwn));
     assertEquals(miaBefore, row(miaOwn));
@@ -489,7 +489,7 @@ class RerootPersonIssuedGrantsMigrationTest {
             root());
     assertTrue(before.size() >= 3);
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(
         before,
@@ -538,7 +538,7 @@ class RerootPersonIssuedGrantsMigrationTest {
         grant);
   }
 
-  /** The unrevoked successor of a grant: the same attributes, written by V261. */
+  /** The unrevoked successor of a grant: the same attributes, written by V262. */
   private UUID successor(UUID grant) {
     return jdbc.queryForObject(
         "SELECT n.id FROM authority_grants o JOIN authority_grants n ON n.revoked_at IS NULL"
@@ -582,7 +582,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     String attributes = attributes(agent);
     assertTrue(live(agent));
 
-    migrateTo("261");
+    migrateTo("262");
 
     UUID samReissued = successor(sam);
     assertEquals(root(), uuidColumn("issuing_grant", samReissued));
@@ -603,7 +603,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     assertEquals(owner, uuidColumn("issuing_grant", sam));
     String attributes = attributes(sam);
 
-    migrateTo("261");
+    migrateTo("262");
 
     UUID ownerReissued = current("MEMBERSHIP", "one", "service");
     assertEquals(root(), uuidColumn("issuing_grant", ownerReissued));
@@ -640,7 +640,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     var before = liveAccess();
     assertTrue(before.size() >= 10, () -> "fixture too small: " + before);
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(before, liveAccess());
     assertRevokedBySystem(samTwo);
@@ -665,7 +665,7 @@ class RerootPersonIssuedGrantsMigrationTest {
         jdbc.queryForObject(
             "SELECT count(*) FROM authority_grants WHERE provenance='ROOT_POLICY'", Integer.class));
 
-    var failure = assertThrows(FlywayException.class, () -> migrateTo("261"));
+    var failure = assertThrows(FlywayException.class, () -> migrateTo("262"));
     assertTrue(
         failure.getMessage().contains("query returned no rows"),
         () -> "expected a STRICT root failure but was: " + failure.getMessage());
@@ -682,7 +682,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     assertTrue(live(sam));
     var before = liveAccess();
 
-    migrateTo("261");
+    migrateTo("262");
 
     assertEquals(before, liveAccess());
     UUID samReissued = successor(sam);
@@ -707,7 +707,7 @@ class RerootPersonIssuedGrantsMigrationTest {
     UUID tom = roleGrant("tom", null, "one", "MANAGER", "mia", null, mia, false);
     UUID sam = roleGrant("sam", null, "one", "READER", "tom", null, tom, false);
 
-    migrateTo("261");
+    migrateTo("262");
 
     UUID miaReissued = current("MEMBERSHIP", "one", "mia");
     UUID tomReissued = successor(tom);

@@ -6619,6 +6619,7 @@ type AgentRunPayloadDto struct {
 	Agent           string          `json:"agent"`
 	Conversation    *TierDtoProject `json:"conversation,omitempty"`
 	Images          *[]string       `json:"images,omitempty"`
+	MaxModelCalls   *float64        `json:"maxModelCalls,omitempty"`
 	MaxTurns        *float64        `json:"maxTurns,omitempty"`
 	NewConversation *bool           `json:"newConversation,omitempty"`
 	NoTurnCap       *bool           `json:"noTurnCap,omitempty"`
@@ -9703,6 +9704,7 @@ type AgentRunRequest struct {
 	Agent           string          `json:"agent"`
 	Conversation    *TierDtoProject `json:"conversation,omitempty"`
 	Images          *[]string       `json:"images,omitempty"`
+	MaxModelCalls   *float64        `json:"maxModelCalls,omitempty"`
 	MaxTurns        *float64        `json:"maxTurns,omitempty"`
 	NewConversation *bool           `json:"newConversation,omitempty"`
 	NoTurnCap       *bool           `json:"noTurnCap,omitempty"`

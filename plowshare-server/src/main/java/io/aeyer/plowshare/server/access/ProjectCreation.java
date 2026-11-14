@@ -7,7 +7,7 @@ package io.aeyer.plowshare.server.access;
  */
 public interface ProjectCreation {
   /**
-   * {@code authority_may_create_projects(handle)} (V262): true only for an active, non-bootstrap
+   * {@code authority_may_create_projects(handle)} (V263): true only for an active, non-bootstrap
    * USER account holding a live (unrevoked, unexpired, lineage live) {@code PROJECT_CREATOR} grant.
    * A null or blank handle is false.
    */

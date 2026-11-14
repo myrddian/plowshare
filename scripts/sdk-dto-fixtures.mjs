@@ -341,6 +341,29 @@ input(
   { agent: 'fixture', task: 'free text', maxModelCalls: 1 },
   false,
 );
+// ADR 0069: a raise names an existing conversation's new positive total.
+input(
+  'agent.run',
+  { agent: 'fixture', task: 'free text', conversation: 'c', maxModelCalls: 60 },
+  true,
+);
+for (const maxModelCalls of [0, -1, 1.5])
+  input(
+    'agent.run',
+    { agent: 'fixture', task: 'free text', conversation: 'c', maxModelCalls },
+    false,
+  );
+input(
+  'agent.run',
+  {
+    agent: 'fixture',
+    task: 'free text',
+    project: 'p',
+    newConversation: true,
+    maxModelCalls: 60,
+  },
+  false,
+);
 input('schedule.pause', { schedule: 'fixture' }, false);
 input('schedule.pause', { schedule: 'fixture', paused: false }, true);
 input('information.status', { scope: { kind: 'personal' } }, false);

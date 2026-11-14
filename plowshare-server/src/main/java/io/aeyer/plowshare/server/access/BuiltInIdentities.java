@@ -20,7 +20,7 @@ public final class BuiltInIdentities {
 
   /**
    * The isolated scope that {@link #PROJECT_CREATOR} grants target. It contains no resource, and no
-   * other role may be granted at it (V262).
+   * other role may be granted at it (V263).
    */
   public static final ScopeId PROJECT_CREATION = new ScopeId(id(11));
 

@@ -1,0 +1,14 @@
+# Example scrape configuration. Replace every <placeholder> with deployment values;
+# nothing here is a default. The server target needs PLOWSHARE_MANAGEMENT_PORT and
+# PLOWSHARE_MANAGEMENT_BIND set; the exporter needs the compose `monitoring` profile
+# and a route from Prometheus to it (shared compose network or an operator overlay).
+scrape_configs:
+  - job_name: plowshare-server
+    metrics_path: /actuator/prometheus
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["<plowshare-management-host>:<management-port>"]
+  - job_name: plowshare-postgres
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["<postgres-exporter-host>:<exporter-port>"]

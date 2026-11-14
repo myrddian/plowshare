@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
@@ -45,10 +46,17 @@ public final class RelayPublishTool implements AgentTool {
   private final String session;
   private final RelayPublishing.DefinitionKind kind;
   private final BooleanSupplier cancelled;
+  private final OperationFence fence;
   private String call;
 
   public RelayPublishTool(RelayPublishing publishing) {
-    this(publishing, null, null, RelayPublishing.DefinitionKind.AGENT, () -> false);
+    this(
+        publishing,
+        null,
+        null,
+        RelayPublishing.DefinitionKind.AGENT,
+        () -> false,
+        OperationFence.none());
   }
 
   private RelayPublishTool(
@@ -56,12 +64,14 @@ public final class RelayPublishTool implements AgentTool {
       String definition,
       String session,
       RelayPublishing.DefinitionKind kind,
-      BooleanSupplier cancelled) {
+      BooleanSupplier cancelled,
+      OperationFence fence) {
     this.publishing = Objects.requireNonNull(publishing);
     this.definition = definition;
     this.session = session;
     this.kind = Objects.requireNonNull(kind);
     this.cancelled = Objects.requireNonNull(cancelled);
+    this.fence = Objects.requireNonNull(fence);
   }
 
   /** Mutable call identity belongs only to this run; concurrent jobs never share it. */
@@ -70,8 +80,21 @@ public final class RelayPublishTool implements AgentTool {
       String session,
       RelayPublishing.DefinitionKind kind,
       BooleanSupplier cancelled) {
+    return forRun(definition, session, kind, cancelled, OperationFence.none());
+  }
+
+  /**
+   * Binds a run whose publications run {@code fence} inside the publication transaction, so an
+   * operation revoked after the call began cannot append or receive a receipt.
+   */
+  public RelayPublishTool forRun(
+      String definition,
+      String session,
+      RelayPublishing.DefinitionKind kind,
+      BooleanSupplier cancelled,
+      OperationFence fence) {
     return new RelayPublishTool(
-        publishing, Objects.requireNonNull(definition), session, kind, cancelled);
+        publishing, Objects.requireNonNull(definition), session, kind, cancelled, fence);
   }
 
   @Override
@@ -118,7 +141,10 @@ public final class RelayPublishTool implements AgentTool {
     try {
       receipt =
           publishing.publish(
-              home.project(), new RelayPublishing.Execution(owner, session, call, kind), request);
+              home.project(),
+              new RelayPublishing.Execution(owner, session, call, kind),
+              request,
+              fence);
     } catch (CallerFault | IllegalArgumentException refused) {
       return "Relay publication refused: " + refused.getMessage();
     }

@@ -29,12 +29,113 @@ class JdbcInformationCatalogueReadBudgetTest {
           .within(KnowledgeReadScope.homeOnly(Home.of("one")));
   final UUID revision = UUID.randomUUID(), resource = UUID.randomUUID();
 
+  /**
+   * The fallback of a single-revision read: one statement-local admission over a one-element target
+   * list joined to the row, never the per-row {@code information_readable} predicate.
+   */
   void assertSelection(String sql, Object[] arguments) {
-    var selected = InformationSql.read(context, "r");
-    assertTrue(sql.contains("r.availability='active' AND " + selected.sql() + " AND r.id=?"));
-    var expected = new java.util.ArrayList<>(selected.arguments());
-    expected.add(revision);
-    assertEquals(expected, Arrays.asList(arguments));
+    var content = InformationSql.content(context, "r");
+    assertTrue(
+        sql.startsWith(
+            "WITH admitted AS MATERIALIZED (SELECT revision FROM knowledge_readable_targets("),
+        sql);
+    assertTrue(
+        sql.contains(
+            " JOIN admitted ON admitted.revision=r.id WHERE r.availability='active' AND "
+                + content.sql()
+                + " AND r.id=?"),
+        sql);
+    assertFalse(sql.contains("information_readable("), "no per-row permission predicate");
+    var bound = Arrays.asList(arguments);
+    assertEquals(9, bound.size(), "seven target arguments, the typed view, the revision");
+    assertEquals(context.account(), bound.getFirst());
+    assertEquals("one", bound.get(4), "the read ceiling's home project");
+    assertEquals("{" + revision + "}", bound.get(6));
+    assertEquals(content.arguments(), bound.subList(7, 8));
+    assertEquals(revision, bound.getLast());
+  }
+
+  /** A check that has decided {@code readable}, fetching only then, as the cached check does. */
+  static KnowledgeReadabilityCheck decided(boolean readable) {
+    return new KnowledgeReadabilityCheck() {
+      public java.util.Optional<Boolean> readable(InformationContext context, UUID revision) {
+        return java.util.Optional.of(readable);
+      }
+
+      public <T> Guarded<T> fetchIfReadable(
+          InformationContext context,
+          UUID revision,
+          java.util.function.Supplier<java.util.Optional<T>> fetch) {
+        return new Guarded.Answered<>(readable ? fetch.get() : java.util.Optional.empty());
+      }
+    };
+  }
+
+  JdbcInformationCatalogueRepository with(KnowledgeReadabilityCheck check) {
+    return new JdbcInformationCatalogueRepository(
+        jdbc,
+        Clock.systemUTC(),
+        mock(io.aeyer.plowshare.server.allowances.AllowanceRepository.class),
+        io.aeyer.plowshare.server.cache.ProjectionCache.direct(),
+        io.aeyer.plowshare.server.cache.ProjectionCache.direct(),
+        io.aeyer.plowshare.server.cache.ProjectionCache.direct(),
+        io.aeyer.plowshare.server.cache.ProjectionCache.direct(),
+        io.aeyer.plowshare.server.cache.ProjectionCache.direct(),
+        check,
+        new RecordedInformationEvents());
+  }
+
+  @Test
+  void aRevisionDecidedUnreadableIsAbsentWithoutAnyRowStatement() {
+    var decided = with(decided(false));
+    assertTrue(decided.authorizedMetadata(context, revision).isEmpty());
+    assertTrue(decided.authorizedText(context, revision).isEmpty());
+    assertTrue(decided.textBytes(context, revision).isEmpty());
+    assertThrows(
+        io.aeyer.plowshare.server.cache.ProjectionCache.Bypass.class,
+        () -> decided.loadText(context, revision, 4096L),
+        "a bounded load never caches an absence");
+    verifyNoInteractions(jdbc);
+  }
+
+  @Test
+  void aRevisionDecidedReadableIsFetchedByIdWithoutPermissionSql() {
+    when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of());
+    when(jdbc.queryForList(anyString(), eq(Long.class), any(Object[].class)))
+        .thenReturn(List.of(12L));
+    var decided = with(decided(true));
+    assertTrue(decided.authorizedMetadata(context, revision).isEmpty());
+    assertEquals(java.util.Optional.of(12L), decided.textBytes(context, revision));
+    assertThrows(
+        io.aeyer.plowshare.server.cache.ProjectionCache.Bypass.class,
+        () -> decided.loadMetadata(context, revision, 2048L));
+    var sql = ArgumentCaptor.forClass(String.class);
+    var args = ArgumentCaptor.forClass(Object[].class);
+    verify(jdbc, times(2)).queryForList(sql.capture(), args.capture());
+    verify(jdbc).queryForList(sql.capture(), eq(Long.class), args.capture());
+    var statements = sql.getAllValues();
+    assertEquals(
+        JdbcInformationCatalogueRepository.SELECT + " WHERE r.availability='active' AND r.id=?",
+        statements.get(0));
+    assertEquals(
+        "WITH projected AS MATERIALIZED ("
+            + JdbcInformationCatalogueRepository.SELECT
+            + " WHERE r.availability='active' AND r.id=?)"
+            + " SELECT * FROM projected WHERE octet_length(to_jsonb(projected)::text)<=?",
+        statements.get(1));
+    assertEquals(
+        "SELECT "
+            + JdbcInformationCatalogueRepository.TEXT_BYTES
+            + " FROM information_revision_allowances r WHERE r.availability='active' AND r.id=?",
+        statements.get(2));
+    for (String statement : statements) {
+      assertFalse(statement.contains("information_readable("), statement);
+      assertFalse(statement.contains("knowledge_"), statement);
+      assertFalse(statement.contains("typed_content"), "typed content is decided in code");
+    }
+    assertEquals(List.of(revision), Arrays.asList(args.getAllValues().get(0)));
+    assertEquals(List.of(revision, 2048L), Arrays.asList(args.getAllValues().get(1)));
+    assertEquals(List.of(revision), Arrays.asList(args.getAllValues().get(2)));
   }
 
   @Test

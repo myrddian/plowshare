@@ -259,7 +259,7 @@ does not contain every tenant/project's content by implication.
 | Define server schedules or admit maintenance/event effects | Named operational-control action | No | No | No |
 | Run retention/buffer maintenance or quarantine adoption/release | Named maintenance action and targets | No | No | No |
 | Manage the SYSTEM-owned installed definition catalogue | Named catalogue-management action | No | No | No |
-| Create a project by rooting an unregistered folder (`PROJECT_CREATE`) | Issues the PROJECT_CREATOR role; no implicit grant ([ADR 0069](decisions/0069-role-exercised-issuance-and-project-creator.md)) | Not delegable; the holder, on the isolated PROJECT_CREATION scope, becomes sole MANAGER of the new project | No | No |
+| Create a project by rooting an unregistered folder (`PROJECT_CREATE`) | Issues the PROJECT_CREATOR role; no implicit grant ([ADR 0071](decisions/0071-role-exercised-issuance-and-project-creator.md)) | Not delegable; the holder, on the isolated PROJECT_CREATION scope, becomes sole MANAGER of the new project | No | No |
 | Manage Deployment defaults and permitted SYSTEM worker overrides | Named deployment/worker-configuration action | No | No | No |
 | Read private project/Personal bodies merely because server administration is granted | No | No | No | No |
 | Log in as SYSTEM, assign SYSTEM or grant ADMIN to an agent | No | No | No | No |

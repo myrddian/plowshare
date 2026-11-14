@@ -4,7 +4,7 @@
 -- it can never be read as authority over an existing project, the administration scope or any
 -- knowledge home. Its single action is PROJECT_CREATE; it issues nothing. Only an active server
 -- administrator, exercising their own live ADMIN_CONTROL grant at the ADMINISTRATION scope, may
--- issue it, and (as V260 established for every person-issued grant) the grant hangs off the
+-- issue it, and (as V261 established for every person-issued grant) the grant hangs off the
 -- SYSTEM root, so it outlives the issuing administrator's later demotion. An administrator may
 -- also grant the role to themselves; that self-grant hangs off their own ADMIN_CONTROL grant
 -- instead (delegated lineage) and ends when they stop being an administrator, as self-assignment
@@ -223,9 +223,9 @@ CREATE FUNCTION authority_holds_project_creator(handle TEXT) RETURNS BOOLEAN LAN
             AND NOT u.bootstrap AND u.account_kind='USER');
 $$;
 
--- authority_grant_insert(): V260's definition with the PROJECT_CREATOR branch added. Every V260
+-- authority_grant_insert(): V261's definition with the PROJECT_CREATOR branch added. Every V261
 -- line is kept unchanged and in order; the additions are the `creator` variable, the branch, and
--- the IF NOT creator ... END IF that wraps V260's role-ceiling and scope-coverage checks.
+-- the IF NOT creator ... END IF that wraps V261's role-ceiling and scope-coverage checks.
 CREATE OR REPLACE FUNCTION authority_grant_insert() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE parent authority_grants; parent_role TEXT; requested TEXT; effective TEXT; destination authority_scopes;
     subject_kind TEXT; issuer_kind TEXT; parent_depth INTEGER; rooted BOOLEAN;
@@ -289,13 +289,13 @@ BEGIN
         RAISE EXCEPTION 'Agent cannot propagate administrative exceptions'; END IF;
     requested := CASE WHEN NEW.subject_agent IS NOT NULL AND NEW.requested_role='MANAGER' AND NOT NEW.manager_forced
         THEN 'CONTRIBUTOR' ELSE NEW.requested_role END;
-    -- V262: PROJECT_CREATOR exists only at the PROJECT_CREATION scope and that scope holds only
+    -- V263: PROJECT_CREATOR exists only at the PROJECT_CREATION scope and that scope holds only
     -- PROJECT_CREATOR, so either fact puts the grant on this branch and both must hold. No issuing
     -- grant covers the creation scope and ADMIN is not a ceiling over a role outside the chain, so
     -- for this role (and only this role) the branch replaces the general role-ceiling and
     -- scope-coverage checks below: the authority is the issuer's own live ADMIN_CONTROL grant at
     -- ADMINISTRATION, in one of two shapes.
-    --   * For another account, it is exercised on V260's SYSTEM-rooted path (which already proved
+    --   * For another account, it is exercised on V261's SYSTEM-rooted path (which already proved
     --     that grant live, held by issuer_account with no agent, the issuing grant the live root,
     --     the issuer a USER and not the subject), so the grant outlives the issuing administrator.
     --   * For the administrator themselves, it is the issuing grant (delegated lineage, no
@@ -319,8 +319,8 @@ BEGIN
             WHERE a.id=NEW.issuer_account AND u.account_kind='USER' AND u.server_admin
                 AND NOT u.bootstrap AND account_active(u.handle))) IS NOT TRUE THEN
         RAISE EXCEPTION 'Role exceeds issuing authority'; END IF;
-    -- V260's role-ceiling and scope-coverage checks follow byte-for-byte (deliberately not
-    -- re-indented, so a line diff against V260 shows only additions); PROJECT_CREATOR skips them.
+    -- V261's role-ceiling and scope-coverage checks follow byte-for-byte (deliberately not
+    -- re-indented, so a line diff against V261 shows only additions); PROJECT_CREATOR skips them.
     IF NOT creator THEN
     IF effective IS DISTINCT FROM requested OR parent_role NOT IN ('SYSTEM','ADMIN','MANAGER')
         OR (parent_role='MANAGER' AND effective='ADMIN') THEN RAISE EXCEPTION 'Role exceeds issuing authority'; END IF;

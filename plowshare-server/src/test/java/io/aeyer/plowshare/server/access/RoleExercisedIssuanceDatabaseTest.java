@@ -25,7 +25,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * PostgreSQL proves the V260 trigger branch and membership issuance: a person exercising a live
+ * PostgreSQL proves the V261 trigger branch and membership issuance: a person exercising a live
  * grant issues a SYSTEM-rooted grant that records the exercised grant, while every authorization
  * check still runs against the exercised grant and delegated (token) issuance keeps its lineage.
  */

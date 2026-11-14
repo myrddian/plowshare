@@ -25,7 +25,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * PostgreSQL proves {@link JdbcProjectCreatorGrants} against the V262 trigger, the
+ * PostgreSQL proves {@link JdbcProjectCreatorGrants} against the V263 trigger, the
  * one-unrevoked-creator-grant index and the grant audit trigger: what the service writes is what
  * the database admits, and the grant outlives its issuer.
  */

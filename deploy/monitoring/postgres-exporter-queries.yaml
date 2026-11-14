@@ -1,0 +1,61 @@
+# Custom queries for prometheuscommunity/postgres-exporter (--extend.query-path).
+# Statement text is never selected: statements are identified by queryid only, and
+# only the 50 costliest by total time are exported to bound series cardinality.
+pg_statements:
+  query: |
+    SELECT queryid::text AS queryid,
+           calls::float8 AS calls,
+           total_exec_time AS total_exec_time_ms,
+           mean_exec_time AS mean_exec_time_ms,
+           rows::float8 AS rows,
+           shared_blks_hit::float8 AS shared_blks_hit,
+           shared_blks_read::float8 AS shared_blks_read
+    FROM pg_stat_statements
+    WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+    ORDER BY total_exec_time DESC
+    LIMIT 50
+  metrics:
+    - queryid:
+        usage: LABEL
+        description: Statement identifier from pg_stat_statements
+    - calls:
+        usage: COUNTER
+        description: Executions
+    - total_exec_time_ms:
+        usage: COUNTER
+        description: Total execution time in milliseconds
+    - mean_exec_time_ms:
+        usage: GAUGE
+        description: Mean execution time in milliseconds
+    - rows:
+        usage: COUNTER
+        description: Rows returned or affected
+    - shared_blks_hit:
+        usage: COUNTER
+        description: Shared buffer hits
+    - shared_blks_read:
+        usage: COUNTER
+        description: Shared blocks read from disk or the OS cache
+
+pg_user_tables_scans:
+  query: |
+    SELECT relname,
+           seq_scan::float8 AS seq_scan,
+           seq_tup_read::float8 AS seq_tup_read,
+           COALESCE(idx_scan, 0)::float8 AS idx_scan
+    FROM pg_stat_user_tables
+    ORDER BY seq_tup_read DESC
+    LIMIT 50
+  metrics:
+    - relname:
+        usage: LABEL
+        description: Table name
+    - seq_scan:
+        usage: COUNTER
+        description: Sequential scans
+    - seq_tup_read:
+        usage: COUNTER
+        description: Rows read by sequential scans
+    - idx_scan:
+        usage: COUNTER
+        description: Index scans

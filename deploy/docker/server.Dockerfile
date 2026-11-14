@@ -5,6 +5,7 @@ LABEL org.opencontainers.image.title="Plowshare server" \
       org.opencontainers.image.revision=$SOURCE_REVISION
 WORKDIR /opt/plowshare
 COPY ${SERVER_JAR} server.jar
+COPY deploy/monitoring/plowshare.jfc /opt/plowshare/plowshare.jfc
 COPY deploy/docker/server-entrypoint.sh /usr/local/bin/server-entrypoint
 COPY deploy/docker/server-filestores.sh /usr/local/bin/server-filestores.sh
 COPY deploy/docker/server-healthcheck.sh /usr/local/bin/server-healthcheck

@@ -8,6 +8,7 @@ import io.aeyer.plowshare.server.reads.ReadAdmission;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * The targeted readability check from shared, item-cached facts and the in-memory authority
@@ -33,6 +34,10 @@ import java.util.UUID;
  * committed membership, grant or principal change may be reflected up to {@code
  * plowshare.projection-cache.notified.staleness} (2 s) later, as for every other authority-snapshot
  * decision.
+ *
+ * <p>{@link #fetchIfReadable} serves the catalogue's single-revision row reads with the same
+ * statement: the row is fetched between the evaluation and the confirmation, so the confirmation
+ * also vouches for the fetched row.
  *
  * <h2>When SQL answers instead</h2>
  *
@@ -81,20 +86,55 @@ public final class CachedKnowledgeReadability implements KnowledgeReadabilityChe
 
   @Override
   public Optional<Boolean> readable(InformationContext context, UUID revision) {
+    return switch (fetchIfReadable(context, revision, () -> Optional.of(Boolean.TRUE))) {
+      case Guarded.Answered<Boolean> answered -> Optional.of(answered.row().isPresent());
+      case Guarded.Declined<Boolean> declined -> Optional.empty();
+    };
+  }
+
+  /**
+   * Evaluates the rule on unconfirmed facts, runs {@code fetch} only for a readable verdict, and
+   * then confirms every fact the evaluation read with the one {@link
+   * ProjectionItemVersions#staleItems} statement this check always issues.
+   *
+   * <h2>The gap between the decision and the fetch</h2>
+   *
+   * <p>The confirmation runs after the fetch, on a fresh connection, so its empty result proves
+   * that no write to any fact the verdict depends on committed between that fact's load and the
+   * confirmation. The fetch's own statement snapshot lies inside that interval (the caller holds no
+   * transaction or a read-only READ COMMITTED one, so its statement sees everything committed
+   * before it), hence every data-side input of the verdict (availability, the allowance row,
+   * exclusion and quarantine, root and navigation policies, inputs, links, navigation heads and
+   * reference obligations, over the whole dependency closure) was, at the fetch, exactly what the
+   * verdict used: the row is returned only if the permission-filtered statement, run in place of
+   * the fetch, would have returned it. A stale item is invalidated and the read is declined, so the
+   * caller's permission-filtered statement answers and the fetched row is discarded. Confirming
+   * before the fetch would not be enough: a dependency withdrawn after that confirmation is not on
+   * the fetched row, so no predicate of the fetch could catch it. The authority half is the
+   * snapshot's notification-trusted contract, as for {@link #readable}: a committed membership,
+   * grant, token or principal change may apply up to the staleness bound (2 s) later.
+   *
+   * <p>An exception from {@code fetch} propagates unconfirmed; nothing was returned to disclose.
+   */
+  @Override
+  public <T> Guarded<T> fetchIfReadable(
+      InformationContext context, UUID revision, Supplier<Optional<T>> fetch) {
     Objects.requireNonNull(context);
     Objects.requireNonNull(revision);
-    if (!VersionedProjectionCache.callerHasNoOwnWrites()) return Optional.empty();
+    Objects.requireNonNull(fetch);
+    if (!VersionedProjectionCache.callerHasNoOwnWrites()) return new Guarded.Declined<>();
     var snapshot = authority.current();
-    if (snapshot.isEmpty()) return Optional.empty();
+    if (snapshot.isEmpty()) return new Guarded.Declined<>();
     var reads = facts.reads();
     var verdict =
         KnowledgeReadability.readable(
             KnowledgeReadability.Request.of(context, revision), snapshot.get(), reads);
-    if (verdict.isEmpty()) return verdict;
+    if (verdict.isEmpty()) return new Guarded.Declined<>();
+    Optional<T> row = verdict.get() ? Objects.requireNonNull(fetch.get()) : Optional.empty();
     var stale = versions.staleItems(reads.tokens());
-    if (stale.isEmpty()) return verdict;
+    if (stale.isEmpty()) return new Guarded.Answered<>(row);
     // Drop exactly the outdated facts; the next check reloads them and keeps the rest.
     stale.forEach(facts::invalidate);
-    return Optional.empty();
+    return new Guarded.Declined<>();
   }
 }

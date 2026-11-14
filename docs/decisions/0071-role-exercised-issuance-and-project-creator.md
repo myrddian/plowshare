@@ -1,9 +1,9 @@
-# ADR 0069: Role-exercised issuance and the project creator role
+# ADR 0071: Role-exercised issuance and the project creator role
 
 Status: accepted (2026-11-14, amended 2026-11-15 for Application manifests). This
 is a platform change to the authority model. Two things drive it: an ordinary
 account could not add a new project folder, and a grant a manager issued fell
-whenever that manager's own grant fell. Migrations V260, V261 and V262 implement
+whenever that manager's own grant fell. Migrations V261, V262 and V263 implement
 it. The design is in `docs/superpowers/specs/2026-11-14-project-creator-role-design.md`.
 
 ## Problem
@@ -84,7 +84,7 @@ own role, capped only by the manifest's entry for the child. `ApplicationGrantLi
 still narrows through delegated (agent or token) lineage, because those grants
 keep their issuer in `issuing_grant`.
 
-### 5. V261 re-roots existing grants
+### 5. V262 re-roots existing grants
 
 - Live person-issued grants are re-issued from SYSTEM. Grants that are already
   dead by lineage are explicitly revoked, never revived.
@@ -97,16 +97,16 @@ keep their issuer in `issuing_grant`.
 - Dormant grants are kept. A grant that is not live only because an account on
   its path is disabled (its subject, an ancestor's subject, or an issuing
   token's principal or owning service) revives when that account is re-enabled,
-  so V261 neither revokes nor re-roots it. It also leaves every live ancestor of
+  so V262 neither revokes nor re-roots it. It also leaves every live ancestor of
   a dormant grant on its old lineage, so the dormant subtree stays intact. Only
   grants that are dead even with every account enabled (revoked or expired
   lineage, a revoked token) are revoked. A second self-check compares access
   over "live if every account were enabled" before and after.
-- Operator note: a kept live grant still depends on its issuer, as before V261.
+- Operator note: a kept live grant still depends on its issuer, as before V262.
   Accounts disabled at deploy time keep that old shape; re-enabling them does
   not re-root anything. Re-issue such a grant (remove and add the member again)
   if it must outlive its issuer.
-- Operator note: V261 re-checks each moved grant through the grant trigger. Time
+- Operator note: V262 re-checks each moved grant through the grant trigger. Time
   it against a pre-deploy dump before a production rollout.
 - Operator note: the audit log records the revoke and the re-issue, but has no
   direct old-to-new id link.
@@ -177,11 +177,11 @@ keep their issuer in `issuing_grant`.
 
 ## Compatibility and tests
 
-- Migrations V260 (exercised issuance), V261 (re-root) and V262 (scope, role,
+- Migrations V261 (exercised issuance), V262 (re-root) and V263 (scope, role,
   trigger branch, registry self-check). Shipped migrations are unchanged.
 - Administrators grant or revoke the role with `admin account update` and
   `projectCreator`; the account listing reports it, and the desktop server
   administration dialog has a control for it.
 - Mocked tests cover the rooting handler, policy, snapshot and clients. Real
   PostgreSQL tests (`@Tag("full-db")`) cover the migrations, trigger checks,
-  the creation race and the V261 live-set invariant.
+  the creation race and the V262 live-set invariant.

@@ -123,7 +123,7 @@ DEFINITIONS = (
     ),
     ToolDefinition(
         "network.devices",
-        "List monitored devices with a confirmed MAC (offset/limit): device_id, name, address and attention signals. Follow next_offset.",
+        "List monitored devices with a confirmed MAC (offset/limit, at most 32 per page): device_id, name, address, vendor, likely type and attention signals. Give query to find devices by name, hostname, vendor, likely type, address or MAC instead of paging; otherwise follow next_offset to the end.",
         "read",
     ),
     ToolDefinition(
@@ -258,14 +258,37 @@ class DestinationsCall:
             raise ValueError("Invalid destination page intent")
 
 
+# A device search term: short, printable, matched case-insensitively.
+QUERY_LIMIT = 64
+
+
+def device_query(value: object) -> str:
+    """A ``network_devices`` search term, or a refusal naming the rule broken."""
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > QUERY_LIMIT
+        or any(not ch.isprintable() for ch in value)
+    ):
+        raise ToolRefusal(
+            f"query must be 1-{QUERY_LIMIT} printable characters; nothing ran."
+        )
+    return value.strip()
+
+
 @dataclass(frozen=True)
 class DevicesCall:
+    """A page of monitored devices; ``query`` narrows them to matching ones."""
+
     offset: int = 0
     limit: int = BATCH_SIZE
+    query: str | None = None
 
     def __post_init__(self) -> None:
         integer(self.offset, 0, MAX_TARGETS)
         integer(self.limit, 1, BATCH_SIZE)
+        if self.query is not None:
+            device_query(self.query)
 
 
 @dataclass(frozen=True)
@@ -479,10 +502,11 @@ def decode_call(
             else ListCall(offset, limit)
         )
     if name == "network.devices":
-        row = object_fields(arguments, set(), {"offset", "limit"})
+        row = object_fields(arguments, set(), {"offset", "limit", "query"})
         return DevicesCall(
             integer(row.get("offset", 0), 0, MAX_TARGETS),
             integer(row.get("limit", BATCH_SIZE), 1, BATCH_SIZE),
+            device_query(row["query"]) if row.get("query") is not None else None,
         )
     if name == "network.device":
         row = object_fields(arguments, {"device_id"})
@@ -615,9 +639,15 @@ class EvidenceCounts:
 
 @dataclass(frozen=True)
 class DeviceSummary:
+    """One listed device. ``vendor`` is the network-interface maker a source
+    reported, or None when none did; ``device_type`` is the dashboard's
+    tentative guess from names and ports ("Unknown" when there is none)."""
+
     device_id: str
     name: str
     address: str
+    vendor: str | None
+    device_type: str
     signals: tuple[SignalCode, ...]
 
 
@@ -625,9 +655,11 @@ class DeviceSummary:
 class DevicesResult:
     """A page of the monitored inventory in configured target order.
 
-    ``total`` counts devices with exactly one current confirmed-MAC card.
+    ``total`` counts devices with exactly one current confirmed-MAC card, or
+    only those matching the query when one was given (``filtered``).
     ``unavailable`` counts inventory devices without one (address-only, or the
-    same MAC currently seen at two addresses); they have no dossier.
+    same MAC currently seen at two addresses); they have no dossier and are
+    never matched.
     """
 
     devices: tuple[DeviceSummary, ...]
@@ -635,6 +667,7 @@ class DevicesResult:
     unavailable: int
     offset: int
     next_offset: int | None
+    filtered: bool = False
 
 
 @dataclass(frozen=True)
@@ -711,6 +744,28 @@ ToolResult = (
     | WorkRequestResult
     | ProfileWriteResult
 )
+
+
+def _matches(card: DeviceCard, query: str) -> bool:
+    """Whether ``query`` names the card: a case-insensitive substring of its
+    name, hostname, vendor, likely type, address or MAC. Each word must match
+    some field, so "sony tv" finds "Sony BRAVIA SmartTV". MAC separators are
+    ignored, so "8a33" and "8a:33" both match."""
+    identity = card.identity
+    fields = [
+        card.name,
+        card.address,
+        card.detection.device_type,
+        identity.hostname if identity else None,
+        identity.vendor if identity else None,
+        identity.mac if identity else None,
+    ]
+    haystack = " ".join(f.casefold() for f in fields if f)
+    compact = haystack.replace(":", "").replace("-", "")
+    return all(
+        word in haystack or word.replace(":", "").replace("-", "") in compact
+        for word in query.casefold().split()
+    )
 
 
 def monitored_devices(
@@ -1222,6 +1277,13 @@ class WorkerTools:
     def devices(self, call: DevicesCall) -> DevicesResult:
         inventory = self.inventory()
         cards = monitored_devices(inventory)
+        unavailable = len(inventory.devices) - len(cards)
+        if call.query is not None:
+            cards = tuple(
+                (device_id, card)
+                for device_id, card in cards
+                if _matches(card, call.query)
+            )
         if not 0 <= call.offset <= len(cards):
             raise ValueError("Device page offset is unavailable")
         selected = cards[call.offset : call.offset + call.limit]
@@ -1231,16 +1293,19 @@ class WorkerTools:
                     device_id,
                     card.name,
                     card.address,
+                    card.identity.vendor if card.identity else None,
+                    card.detection.device_type,
                     tuple(signal.code for signal in device_signals(card)),
                 )
                 for device_id, card in selected
             ),
             len(cards),
-            len(inventory.devices) - len(cards),
+            unavailable,
             call.offset,
             call.offset + len(selected)
             if call.offset + len(selected) < len(cards)
             else None,
+            call.query is not None,
         )
         while not tool_fits(listing) and len(listing.devices) > 1:
             listing = replace(

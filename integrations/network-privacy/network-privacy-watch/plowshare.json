@@ -7,7 +7,7 @@
   "caps": {
     "steps": 256,
     "budget": 200,
-    "autoIncrease": false
+    "autoIncrease": true
   },
   "commands": {
     "local": {

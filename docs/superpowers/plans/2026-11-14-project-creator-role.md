@@ -485,7 +485,7 @@ git commit -m "feat(clients): explain a refused project folder claim"
 ### Task 10: Documentation and ADR
 
 **Files:**
-- Create: `docs/decisions/0069-role-exercised-issuance-and-project-creator.md`
+- Create: `docs/decisions/0071-role-exercised-issuance-and-project-creator.md`
 - Modify:
   - `docs/server-administration.md` ("Project access and Personal scopes": the role, who issues it, what it does not grant, the role-exercised issuance rule)
   - `docs/projects.md` (creating a project by rooting a folder; the refusal hint)

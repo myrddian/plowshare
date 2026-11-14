@@ -83,7 +83,7 @@
             "provider": "privacy-scanner",
             "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
             "name": "network_devices",
-            "description": "List monitored devices with a confirmed MAC (offset/limit): device_id, name, address and attention signals. Follow next_offset.",
+            "description": "List monitored devices with a confirmed MAC (offset/limit, at most 32 per page): device_id, name, address, vendor, likely type and attention signals. Give query to find devices by name, hostname, vendor, likely type, address or MAC instead of paging; otherwise follow next_offset to the end.",
             "parameters": [
               {
                 "name": "offset",
@@ -95,6 +95,12 @@
                 "name": "limit",
                 "type": "INTEGER",
                 "description": "Maximum page records: 1-32.",
+                "required": false
+              },
+              {
+                "name": "query",
+                "type": "STRING",
+                "description": "Optional search, 1-64 characters: words matched case-insensitively against each device's name, hostname, vendor, likely type, address and MAC. Use it to find a device the user names.",
                 "required": false
               }
             ],

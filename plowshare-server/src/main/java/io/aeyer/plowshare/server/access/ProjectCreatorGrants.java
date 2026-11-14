@@ -4,7 +4,7 @@ import java.util.Collection;
 import java.util.Set;
 
 /**
- * Issues and revokes the {@code PROJECT_CREATOR} role (V262) on the ADMIN role's authority.
+ * Issues and revokes the {@code PROJECT_CREATOR} role (V263) on the ADMIN role's authority.
  *
  * <p>The acting account must currently exercise the ADMIN role: an active, non-bootstrap USER
  * server administrator holding a live {@code ADMIN_CONTROL} grant at the ADMINISTRATION scope.

@@ -6,16 +6,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.server.access.AuthoritySnapshot;
+import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.access.JdbcAuthoritySnapshotRepository;
 import io.aeyer.plowshare.server.access.KnowledgeReadScope;
+import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
+import io.aeyer.plowshare.server.cache.JdbcProjectionVersions;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.ProjectionCacheProperties;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
+import io.aeyer.plowshare.server.cache.ProjectionTelemetry;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
 import io.aeyer.plowshare.server.testing.AuthorityFixtures;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -23,15 +36,23 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -700,5 +721,425 @@ class KnowledgeReadabilityDifferentialDatabaseTest {
             + " JOIN information_resources q ON q.id=r.resource_id WHERE q.source_name LIKE ?||'-%'",
         root.revision(), root.revision().toString());
     return root.revision();
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Single-revision reads: the decided plain fetch and the batched fallback against the per-row
+  // predicate they replaced.
+  // ---------------------------------------------------------------------------------------------
+
+  /** The size guard both bounded loads are given; the oversized fixture exceeds it. */
+  private static final long BOUND = 2048;
+
+  /** Marks a bounded load that refused to cache ({@link ProjectionCache.Bypass}). */
+  private static final String BYPASS = "BYPASS";
+
+  /** A ready listener that delivers no hints: freshness rests on the confirmation alone. */
+  private static final class SilentSignals implements ProjectionChangeSignals {
+    public Subscription subscribe(Set<ProjectionVersions.Domain> domains, Observer observer) {
+      observer.stateChanged(new State(1, true));
+      return () -> {};
+    }
+
+    public void start() {}
+
+    public boolean healthy() {
+      return true;
+    }
+
+    public OptionalLong deliveredThrough() {
+      return OptionalLong.empty();
+    }
+
+    public void close() {}
+  }
+
+  /** Counts how often the cached check answered and declined a guarded read. */
+  private static final class Counted implements KnowledgeReadabilityCheck {
+    final KnowledgeReadabilityCheck delegate;
+    final AtomicInteger answered = new AtomicInteger();
+    final AtomicInteger declined = new AtomicInteger();
+
+    Counted(KnowledgeReadabilityCheck delegate) {
+      this.delegate = delegate;
+    }
+
+    public Optional<Boolean> readable(InformationContext context, UUID revision) {
+      return delegate.readable(context, revision);
+    }
+
+    public <T> Guarded<T> fetchIfReadable(
+        InformationContext context, UUID revision, Supplier<Optional<T>> fetch) {
+      var outcome = delegate.fetchIfReadable(context, revision, fetch);
+      (outcome instanceof Guarded.Answered<T> ? answered : declined).incrementAndGet();
+      return outcome;
+    }
+  }
+
+  private static ProjectionCacheProperties cacheProperties() {
+    return new ProjectionCacheProperties(
+        256,
+        33_554_432,
+        8,
+        67_108_864,
+        256,
+        64,
+        8192,
+        8_388_608,
+        Duration.ofSeconds(2),
+        Duration.ofSeconds(1),
+        Duration.ofSeconds(1),
+        128,
+        4,
+        1L << 40);
+  }
+
+  private JdbcInformationCatalogueRepository catalogue(KnowledgeReadabilityCheck check) {
+    return new JdbcInformationCatalogueRepository(
+        jdbc,
+        Clock.systemUTC(),
+        new JdbcAllowanceRepository(jdbc),
+        ProjectionCache.direct(),
+        ProjectionCache.direct(),
+        ProjectionCache.direct(),
+        ProjectionCache.direct(),
+        ProjectionCache.direct(),
+        check,
+        mock(InformationEvents.class));
+  }
+
+  /** The production cached check over a projection cache whose confirmations use {@code fresh}. */
+  private Counted cachedCheck(
+      ProjectionCaches caches, JdbcProjectionVersions versions, AuthoritySnapshot[] current) {
+    AuthoritySnapshots snapshots = () -> Optional.of(current[0]);
+    return new Counted(
+        new CachedKnowledgeReadability(
+            caches.createItemScoped(
+                "knowledge-facts-v1",
+                Set.of(ProjectionVersions.Domain.READABILITY),
+                ProjectionCaches.Freshness.VERSIONED),
+            facts,
+            versions,
+            snapshots,
+            ReadAdmission.direct(),
+            256));
+  }
+
+  /** A revision whose metadata and text projections both exceed {@link #BOUND}. */
+  private void oversized() {
+    var doc = resource("project:one", "one", "alice");
+    jdbc.update("DELETE FROM information_revisions WHERE id=?", doc.revision());
+    UUID revision = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,content_hash,byte_size,extracted_text,allowance_total) VALUES(?,?,1,repeat('t',3000),'text/plain','fixture',1,repeat('x',3000),10)",
+        revision,
+        doc.resource());
+    revisions.put("one/oversized", revision);
+  }
+
+  /**
+   * The five reads of the statements this change replaced ({@code readableSql} with {@code r.id}),
+   * for every revision at once: the per-row predicate is evaluated row by row, so {@code r.id =
+   * ANY(?)} admits exactly the rows {@code r.id=?} admits one at a time. Each bounded outcome is
+   * derived from the row's projected size, as the old bounded statements' guards computed it.
+   */
+  private Map<UUID, List<Object>> oracle(InformationContext context, Collection<UUID> targets) {
+    var read = InformationSql.read(context, "r");
+    String filter = "r.availability='active' AND " + read.sql() + " AND r.id=ANY(?::uuid[])";
+    var args = new ArrayList<Object>(read.arguments());
+    args.add("{" + String.join(",", targets.stream().map(UUID::toString).toList()) + "}");
+    var metadata = new HashMap<UUID, Map<String, Object>>();
+    for (var row :
+        jdbc.queryForList(
+            "WITH projected AS MATERIALIZED ("
+                + JdbcInformationCatalogueRepository.SELECT
+                + " WHERE "
+                + filter
+                + ") SELECT *,octet_length(to_jsonb(projected)::text) AS projected_bytes FROM projected",
+            args.toArray())) metadata.put((UUID) row.get("id"), row);
+    var text = new HashMap<UUID, Map.Entry<InformationCatalogueRepository.AuthorizedText, Long>>();
+    jdbc.query(
+        "SELECT r.id,r.resource_id,r.document_type,r.document_subtype,r.content_hash,r.text_hash,r.generation,r.extracted_text,"
+            + JdbcInformationCatalogueRepository.TEXT_BYTES
+            + " AS text_bytes FROM information_revision_allowances r WHERE "
+            + filter,
+        (org.springframework.jdbc.core.RowCallbackHandler)
+            rs ->
+                text.put(
+                    rs.getObject(1, UUID.class),
+                    Map.entry(
+                        new InformationCatalogueRepository.AuthorizedText(
+                            context,
+                            rs.getObject(1, UUID.class),
+                            rs.getObject(2, UUID.class),
+                            rs.getString(3),
+                            rs.getString(4),
+                            rs.getString(5),
+                            rs.getString(6),
+                            rs.getLong(7),
+                            rs.getString(8)),
+                        rs.getLong("text_bytes"))),
+        args.toArray());
+    var expected = new HashMap<UUID, List<Object>>();
+    for (UUID revision : targets) {
+      var row = Optional.ofNullable(metadata.get(revision));
+      var textRow = Optional.ofNullable(text.get(revision));
+      Optional<InformationCatalogueRepository.AuthorizedMetadata> metadataRow =
+          row.map(
+              found -> {
+                var copy = new LinkedHashMap<>(found);
+                copy.remove("projected_bytes");
+                return new InformationCatalogueRepository.AuthorizedMetadata(
+                    context,
+                    JdbcInformationCatalogueRepository.decode(copy, Information.Revision.class));
+              });
+      expected.put(
+          revision,
+          Arrays.asList(
+              metadataRow,
+              row.isEmpty() || ((Number) row.get().get("projected_bytes")).longValue() > BOUND
+                  ? BYPASS
+                  : metadataRow,
+              textRow.map(Map.Entry::getValue),
+              textRow.map(Map.Entry::getKey),
+              textRow.isEmpty() || textRow.get().getValue() > BOUND
+                  ? BYPASS
+                  : textRow.map(Map.Entry::getKey)));
+    }
+    return expected;
+  }
+
+  /** The same five reads through the repository under test. */
+  private static List<Object> reads(
+      JdbcInformationCatalogueRepository repository, InformationContext context, UUID revision) {
+    return Arrays.asList(
+        repository.loadMetadata(context, revision, null),
+        bypassOr(() -> repository.loadMetadata(context, revision, BOUND)),
+        repository.textBytes(context, revision),
+        repository.loadText(context, revision, null),
+        bypassOr(() -> repository.loadText(context, revision, BOUND)));
+  }
+
+  private static Object bypassOr(Supplier<Object> read) {
+    try {
+      return read.get();
+    } catch (ProjectionCache.Bypass bypass) {
+      return BYPASS;
+    }
+  }
+
+  /** Which single-revision path a parity run drives. */
+  enum ReadPath {
+    /** Decided by {@link CachedKnowledgeReadability}, then a plain fetch by id. */
+    CACHED,
+    /** {@link KnowledgeReadabilityCheck#none}: the statement-local admission fallback. */
+    FALLBACK
+  }
+
+  /** Withdraws a public revision's input, removes a membership, publishes and excludes. */
+  private void write() {
+    jdbc.update(
+        "UPDATE information_revisions SET availability='withdrawn' WHERE id=?",
+        revisions.get("one/published"));
+    jdbc.update(
+        "DELETE FROM project_members WHERE handle='bob' AND project_id=(SELECT id FROM projects WHERE name='one')");
+    policy(resourceOf("one/plain"), "GLOBAL_READ", false, "alice");
+    jdbc.update(
+        "UPDATE information_revisions SET excluded=true WHERE id=?",
+        revisions.get("one/oversized"));
+  }
+
+  /**
+   * Each changed read through one path returns exactly what the replaced per-row statement returns
+   * (present or absent, identical row content, and the same size-guard refusal) for every actor,
+   * for the typed view on and off, against every revision, in the fixture state and after writes.
+   * Each invocation takes one ceiling to stay within the per-test bound: the cached path covers 7
+   * selections under 3 ceilings; the fallback costs one admission per read, so it covers 4
+   * selections under 2 ceilings. The fixture has an unreadable dependency ({@code
+   * one/foreign-input}), excluded, withdrawn and quarantined rows, explicit-only and typed content,
+   * and a row over the size guard.
+   *
+   * <p>On the cached path after writes, the facts were loaded before the writes and no notification
+   * arrives ({@link SilentSignals}): only the confirmation after each fetch can see the writes, so
+   * every read must still match, with some declined to the fallback.
+   */
+  @ParameterizedTest(name = "{0} path, after writes: {1}, ceilings: {2}")
+  @CsvSource({
+    "CACHED,false,NONE",
+    "CACHED,false,HOME",
+    "CACHED,false,GLOBAL",
+    "CACHED,true,NONE",
+    "CACHED,true,HOME",
+    "CACHED,true,GLOBAL",
+    "FALLBACK,false,NONE",
+    "FALLBACK,false,HOME",
+    "FALLBACK,true,NONE",
+    "FALLBACK,true,HOME"
+  })
+  void singleRevisionReadsMatchThePerRowPredicate(
+      ReadPath path, boolean written, String ceilingSet) {
+    fixture();
+    oversized();
+    var ceilings =
+        switch (ceilingSet) {
+          case "GLOBAL" -> List.of(new KnowledgeReadScope(Home.global(), true));
+          case "NONE" -> Arrays.asList((KnowledgeReadScope) null);
+          case "HOME" -> List.of(KnowledgeReadScope.homeOnly(Home.of("one")));
+          default -> throw new IllegalArgumentException(ceilingSet);
+        };
+    var contexts =
+        contexts(
+            actors,
+            path == ReadPath.CACHED
+                ? List.of(
+                    InformationContext.Selection.personal(),
+                    new InformationContext.Selection(
+                        InformationContext.Scope.PERSONAL, null, false),
+                    InformationContext.Selection.project("one"),
+                    InformationContext.Selection.project("two"),
+                    InformationContext.Selection.project(child),
+                    InformationContext.Selection.globalRead(),
+                    InformationContext.Selection.account(UUID.fromString(GLOBAL_ACCOUNT)))
+                : List.of(
+                    InformationContext.Selection.personal(),
+                    InformationContext.Selection.project("one"),
+                    InformationContext.Selection.project(child),
+                    InformationContext.Selection.globalRead()),
+            ceilings);
+    var versions = new JdbcProjectionVersions(jdbc, freshSource(), 128);
+    var current = new AuthoritySnapshot[] {new AuthoritySnapshot(authority.load().orElseThrow())};
+    long present = 0;
+    long absent = 0;
+    long refusedForSize = 0;
+    try (var signals = new SilentSignals();
+        var caches =
+            new ProjectionCaches(
+                versions, versions, signals, cacheProperties(), null, ProjectionTelemetry.NONE)) {
+      var cached = cachedCheck(caches, versions, current);
+      var repository =
+          catalogue(path == ReadPath.CACHED ? cached : KnowledgeReadabilityCheck.none());
+      // Facts carry no account, so one context loads every fact the others read.
+      if (path == ReadPath.CACHED)
+        for (UUID revision : revisions.values()) cached.readable(contexts.getFirst(), revision);
+      if (written) {
+        write();
+        current[0] = new AuthoritySnapshot(authority.load().orElseThrow());
+      }
+      cached.answered.set(0);
+      cached.declined.set(0);
+      long started = System.nanoTime();
+      for (var context : contexts)
+        for (boolean typed : List.of(false, true)) {
+          var viewed = context.withView(typed);
+          var expected = oracle(viewed, revisions.values());
+          for (var entry : revisions.entrySet()) {
+            var want = expected.get(entry.getValue());
+            assertEquals(
+                want,
+                reads(repository, viewed, entry.getValue()),
+                () ->
+                    entry.getKey()
+                        + " for "
+                        + viewed.account()
+                        + " "
+                        + viewed.selection()
+                        + " ceiling "
+                        + viewed.readBoundary()
+                        + " typed "
+                        + typed);
+            comparisons += want.size();
+            if (((Optional<?>) want.getFirst()).isPresent()) {
+              present++;
+              if (want.get(1) == BYPASS) refusedForSize++;
+            } else absent++;
+          }
+        }
+      if (path == ReadPath.CACHED) {
+        if (written)
+          assertTrue(cached.declined.get() > 0, "Writes after the load are caught by confirmation");
+        else assertEquals(0, cached.declined.get(), "Every cached read was decided in code");
+        assertTrue(cached.answered.get() > 0);
+      }
+      System.out.printf(
+          "Single-revision reads, %s path, after writes %s: %d contexts, %d revisions,"
+              + " %d comparisons, %d present, %d absent, %d refused by the size guard,"
+              + " %d answered and %d declined by the cached check, %d ms%n",
+          path,
+          written,
+          2 * contexts.size(),
+          revisions.size(),
+          comparisons,
+          present,
+          absent,
+          refusedForSize,
+          cached.answered.get(),
+          cached.declined.get(),
+          (System.nanoTime() - started) / 1_000_000);
+    }
+    assertTrue(present > 0 && absent > 0);
+    // The oversized row lives in project one, which a global-read-only ceiling never admits.
+    if (!ceilingSet.equals("GLOBAL"))
+      assertTrue(refusedForSize > 0, "the size guard was exercised");
+  }
+
+  /** An independent connection for confirmations, as production's fresh connections are. */
+  private static SingleConnectionDataSource freshSource() {
+    var fresh =
+        new SingleConnectionDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
+    fresh.setAutoCommit(true);
+    return fresh;
+  }
+
+  private long userFunctionCalls(String pattern) {
+    return jdbc.queryForObject(
+        "SELECT coalesce(sum(calls),0)::bigint FROM pg_stat_xact_user_functions WHERE funcname LIKE ?",
+        Long.class,
+        pattern);
+  }
+
+  @Test
+  void aWarmCachedReadIssuesNoPermissionSql() {
+    fixture();
+    UUID revision = revisions.get("one/plain");
+    var alice = new InformationContext("alice", InformationContext.Selection.project("one"));
+    var versions = new JdbcProjectionVersions(jdbc, freshSource(), 128);
+    var current = new AuthoritySnapshot[] {new AuthoritySnapshot(authority.load().orElseThrow())};
+    try (var signals = new SilentSignals();
+        var caches =
+            new ProjectionCaches(
+                versions, versions, signals, cacheProperties(), null, ProjectionTelemetry.NONE)) {
+      var cached = cachedCheck(caches, versions, current);
+      var viaCache = catalogue(cached);
+      var viaFallback = catalogue(KnowledgeReadabilityCheck.none());
+      assertTrue(viaCache.loadMetadata(alice, revision, null).isPresent(), "warms the facts");
+      var transaction = new DataSourceTransactionManager(source);
+      var readOnly = new TransactionTemplate(transaction);
+      readOnly.setReadOnly(true);
+      readOnly.executeWithoutResult(
+          status -> {
+            jdbc.execute("SET LOCAL track_functions='all'");
+            int answered = cached.answered.get();
+            assertTrue(viaCache.loadMetadata(alice, revision, null).isPresent());
+            assertTrue(viaCache.loadMetadata(alice, revision, BOUND).isPresent());
+            assertTrue(viaCache.textBytes(alice, revision).isPresent());
+            assertTrue(viaCache.loadText(alice, revision, null).isPresent());
+            assertTrue(viaCache.loadText(alice, revision, BOUND).isPresent());
+            assertEquals(answered + 5, cached.answered.get(), "all five decided in code");
+            // Only the projection's own tag functions run; no permission routine at all.
+            assertEquals(
+                Set.of("information_visible_tags", "information_visible_tag_groups"),
+                Set.copyOf(
+                    jdbc.queryForList(
+                        "SELECT funcname FROM pg_stat_xact_user_functions WHERE calls>0",
+                        String.class)),
+                "a warm cached read calls no permission function");
+            assertTrue(viaFallback.loadMetadata(alice, revision, null).isPresent());
+            assertTrue(viaFallback.loadText(alice, revision, null).isPresent());
+            assertEquals(2, userFunctionCalls("knowledge_readable_targets"));
+            assertEquals(
+                0, userFunctionCalls("information_readable"), "no per-row predicate on fallback");
+          });
+    }
   }
 }

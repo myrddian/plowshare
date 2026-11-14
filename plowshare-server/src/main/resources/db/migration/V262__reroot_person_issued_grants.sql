@@ -1,4 +1,4 @@
--- Re-root existing person-issued grants. V260 makes new person-issued grants SYSTEM-rooted
+-- Re-root existing person-issued grants. V261 makes new person-issued grants SYSTEM-rooted
 -- (role-exercised issuance); this migration brings grants written under the old V156 lineage into
 -- the same shape, so a member no longer falls with the person who added them.
 --
@@ -33,10 +33,10 @@
 -- kept (dormant, or an ancestor of a dormant grant), whose issuing grant is not the root, issued by
 -- a person (issuer account_kind='USER', no issuer_agent, no
 -- issuing_token) to someone else. Self-issued grants (subject_account = issuer_account, including
--- grants to one's own agents) are not candidates: V260 refuses exercised self-issuance so a
+-- grants to one's own agents) are not candidates: V261 refuses exercised self-issuance so a
 -- temporary grant cannot reissue itself as a permanent one.
 --   * Live: revoke, then insert a copy with issuing_grant = root and exercised_grant = the old
---     issuing grant (V260's role-exercised branch). Processed deepest first: a child's exercised
+--     issuing grant (V261's role-exercised branch). Processed deepest first: a child's exercised
 --     grant is its old parent, which must still be live when the child is reissued, and re-rooting
 --     the parent revokes the old parent id.
 --   * Dead (not viable: lineage already fell, or expired): revoke only, so re-rooting revives

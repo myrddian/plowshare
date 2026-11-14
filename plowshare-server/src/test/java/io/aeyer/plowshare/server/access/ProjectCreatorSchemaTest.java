@@ -29,7 +29,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * PostgreSQL proves the V262 schema: the reserved creator role and creation scope, the trigger
+ * PostgreSQL proves the V263 schema: the reserved creator role and creation scope, the trigger
  * branch that admits a creator grant only when an active administrator exercises their live
  * ADMIN_CONTROL grant, the one-live-grant index, {@code authority_may_create_projects}, and that
  * the role confers nothing beyond itself.
@@ -285,7 +285,7 @@ class ProjectCreatorSchemaTest {
   @Test
   void creator_grant_shape_is_self_role_and_not_self_issued() {
     // A self-grant is admitted only bound to the admin's control (see the bound tests), never
-    // exercised: V260's refusal of exercised self-issuance still applies to this role.
+    // exercised: V261's refusal of exercised self-issuance still applies to this role.
     assertRefused(
         "Cannot exercise a grant for yourself",
         () -> insert("admin", CREATION, "PROJECT_CREATOR", "admin", control("admin"), null));

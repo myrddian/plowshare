@@ -581,7 +581,10 @@ public final class DefinitionResolver implements SessionCloseListener {
     if (!projectExists.test(caller.projectId()))
       throw new io.aeyer.plowshare.server.faults.CallerFault(
           "The selected definition project is unavailable");
-    if (!data.keepsAnything() && applicationResources.root(caller.projectId()).isEmpty()) {
+    // One root resolution per tier for this call: the key, both stamps' directories and the tool
+    // revision all ask for the same roots. Never retained beyond this method.
+    ApplicationResources roots = new ResolvedApplicationRoots(applicationResources);
+    if (!data.keepsAnything() && roots.root(caller.projectId()).isEmpty()) {
       // No data directory means no tree to hold a project tier at all --
       // every caller for every project resolves to the boot set, exactly
       // as AgentsConfig.agentRegistry's own global-tier guard means no
@@ -592,9 +595,10 @@ public final class DefinitionResolver implements SessionCloseListener {
       // answer different.
       return inherited;
     }
-    CacheKey key = keyFor(caller);
-    Stamp ownStamp = stamp(caller.projectId());
-    Stamp inheritedStamp = key.personalId() == null ? new Stamp("", "") : stamp(key.personalId());
+    CacheKey key = keyFor(caller, roots);
+    Stamp ownStamp = stamp(caller.projectId(), roots);
+    Stamp inheritedStamp =
+        key.personalId() == null ? new Stamp("", "") : stamp(key.personalId(), roots);
     Stamp stamp =
         new Stamp(
             ownStamp.agents() + inheritedStamp.agents(), ownStamp.bots() + inheritedStamp.bots());
@@ -613,7 +617,7 @@ public final class DefinitionResolver implements SessionCloseListener {
         Optional.ofNullable(key.sessionId())
             .map(id -> Objects.requireNonNull(channel.bound(id), "bound channel"));
     currentInputs(key, inputs);
-    AgentRegistry built = readProject(key, inherited);
+    AgentRegistry built = readProject(key, inherited, roots);
     currentInputs(key, inputs);
     var loaded = new Cached(stamp, inherited, built, inputs);
     byProject.put(key, loaded);
@@ -796,8 +800,12 @@ public final class DefinitionResolver implements SessionCloseListener {
    * answers in B.
    */
   private CacheKey keyFor(Caller caller) {
+    return keyFor(caller, applicationResources);
+  }
+
+  private CacheKey keyFor(Caller caller, ApplicationResources resources) {
     String sessionId = caller.sessionId();
-    if (applicationResources.root(caller.projectId()).isPresent()
+    if (resources.root(caller.projectId()).isPresent()
         || sessionId == null
         || !sessionLive.test(sessionId)
         || !sessionRoots.test(caller.projectId(), sessionId)) {
@@ -815,10 +823,11 @@ public final class DefinitionResolver implements SessionCloseListener {
    * {@link #refusalsFor} and the log — and this method must not pre-empt it with an exception out
    * of {@link #forCaller}.
    */
-  private Stamp stamp(Long projectId) {
+  private Stamp stamp(Long projectId, ApplicationResources resources) {
     return new Stamp(
-        fingerprint(agentsDirectory(projectId)) + scopedTools.revision(projectId),
-        fingerprint(botsDirectory(projectId)));
+        fingerprint(agentsDirectory(projectId, resources))
+            + scopedTools.revision(projectId, resources),
+        fingerprint(botsDirectory(projectId, resources)));
   }
 
   /** Package-private so OrchestrationResolver stamps its directory the same way. */
@@ -872,19 +881,20 @@ public final class DefinitionResolver implements SessionCloseListener {
    * authoritative tier failure refuses the lookup rather than replacing the requested definition
    * with the deployment tier. Channel availability remains governed by its existing provider fence.
    */
-  private AgentRegistry readProject(CacheKey key, AgentRegistry inherited) {
+  private AgentRegistry readProject(
+      CacheKey key, AgentRegistry inherited, ApplicationResources resources) {
     Long projectId = key.projectId();
     List<DefinitionSource> layers =
         new ArrayList<>(
             List.of(
-                new FilesystemDefinitions(agentsDirectory(projectId)),
-                new FilesystemDefinitions(botsDirectory(projectId))));
+                new FilesystemDefinitions(agentsDirectory(projectId, resources)),
+                new FilesystemDefinitions(botsDirectory(projectId, resources))));
     if (key.sessionId() != null) {
       layers.add(new ChannelDefinitions(channel, key.sessionId()));
     }
     if (key.personalId() != null && !key.personalId().equals(projectId)) {
-      layers.add(new FilesystemDefinitions(agentsDirectory(key.personalId())));
-      layers.add(new FilesystemDefinitions(botsDirectory(key.personalId())));
+      layers.add(new FilesystemDefinitions(agentsDirectory(key.personalId(), resources)));
+      layers.add(new FilesystemDefinitions(botsDirectory(key.personalId(), resources)));
     }
     DefinitionSource tier = new LayeredDefinitions(List.copyOf(layers));
 
@@ -997,11 +1007,15 @@ public final class DefinitionResolver implements SessionCloseListener {
     return registry;
   }
 
-  private java.nio.file.Path agentsDirectory(Long id) {
-    return applicationResources.directory(id, "agents").orElseGet(() -> data.agentsFor(id));
+  private Path agentsDirectory(Long id, ApplicationResources resources) {
+    return resources.directory(id, "agents").orElseGet(() -> data.agentsFor(id));
   }
 
-  private java.nio.file.Path botsDirectory(Long id) {
-    return applicationResources.directory(id, "bots").orElseGet(() -> data.botsFor(id));
+  private Path botsDirectory(Long id) {
+    return botsDirectory(id, applicationResources);
+  }
+
+  private Path botsDirectory(Long id, ApplicationResources resources) {
+    return resources.directory(id, "bots").orElseGet(() -> data.botsFor(id));
   }
 }

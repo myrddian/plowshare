@@ -201,6 +201,54 @@ SQL-decided form.
 SQL functions in every fixture state and asserts that a decided call reads
 `admins` zero times.
 
+## Live grants, lineage and socket sessions from the snapshot
+
+On PROD after `2c305443`, three agent jobs spent about half of 26.7 s of
+top-level statement time in three statements, each re-walking
+`authority_live_grants()` or calling `account_active()` per row:
+`ScopedGrantRepository.live(recipient)` (5,149 calls), `lineage(id)` (5,052
+calls) and the socket session checks `AdminStore.currentSessions` /
+`sessionCurrent` (11,659 calls).
+
+**What moved.**
+- `CachedScopedGrantRepository`, the primary `ScopedGrantRepository` bean,
+  answers `live` and `lineage` from `AuthoritySnapshot`. Its grant rows were
+  already the full `authority_grant_records` bindings, so no grant column was
+  added. `live` keeps `ORDER BY created_at, id` with PostgreSQL's unsigned UUID
+  order; `lineage` is empty unless the grant is live, then follows
+  `issuing_grant` for at most 32 links, live or not, as the CTE does.
+- `CachedSessionAuthority`, under the socket session queue, accepts a session
+  when the snapshot's account is active and its new `session_version` field
+  equals the session's version.
+- `projectLineages` was already answered from the snapshot by
+  `ApplicationGrantLineage`, and `projectBindings` has no production caller;
+  both are unchanged.
+
+**Versioning.** Every `admins` update, including a bare `session_version` bump,
+moves AUTHORITY: V175's statement triggers are not column-sensitive for the
+authority tables, and no later migration narrowed them. No migration was needed.
+
+**Freshness.** These answers inherit the snapshot's notification-trusted bound,
+`plowshare.projection-cache.notified.staleness` (2 s by default). A revoked
+grant may still be returned as live, a new grant may still be missing, and a
+revoked session, password change or disabled account may still be honoured by
+the socket sweep for up to that bound. A session the snapshot refuses is
+rechecked in SQL, so a fresh login is never refused because of the snapshot's
+age.
+
+**Fallbacks.** SQL answers, exactly as before, when no snapshot may be used (the
+conditions above) or the caller holds a Spring transaction that may contain its
+own writes. Issuance and revocation keep their in-transaction SQL recheck.
+
+`AuthoritySnapshotDifferentialDatabaseTest` compares, in each of its 25 fixture
+states, `live` for every account with no agent and three agent keys, `lineage`
+for every grant and an unknown id, and session facts for every account at
+several versions. The fixture adds delegated agent grants, including an
+agent-issued, two-link chain and an expiring grant, session revocations and the
+revocation of a delegation. It also checks that a session revocation and a grant
+revocation through the real repositories move the AUTHORITY version and force a
+reload.
+
 ## Targeted readability shares the readiness admission
 
 On PROD at `bb075d37`, the single most expensive top-level statement was the
@@ -222,6 +270,34 @@ exclusion, explicit-only content, an unreadable dependency and membership remova
 The test also asserts that the number of `account_active` calls does not grow when
 the closure grows from 1 to 49 revisions; it fails against the previous
 implementation. The PROD latency after deployment has not been measured.
+
+## Single-revision catalogue reads decided in code
+
+On PROD (28-minute sample), the catalogue's projected row read averaged about
+195 ms over 215 calls (14.7% of statement time) and the text-size read took
+14.5 s over 534 calls. Both still applied the per-row `information_readable`
+predicate, which walks the dependency closure once per row.
+
+`JdbcInformationCatalogueRepository` now reads one revision (`loadMetadata`,
+`textBytes`, `loadText`) in one of two ways. When slice 1's cached check can
+decide, an unreadable revision is absent without any row SQL, and a readable one
+is fetched by id with only `r.availability='active'` and the size guard. The
+fetch runs between the check's evaluation and its one confirmation statement, so
+a data-side write between decision and fetch (including a dependency's
+availability, which no predicate on the fetched row could see) declines the read
+to the fallback. Authority may lag by the snapshot's 2 s bound, as for every
+snapshot decision. Otherwise the fallback admits the target through
+`knowledge_readable_targets` with a one-element list, as `readable()` does, plus
+the typed-content filter. `evidence` (keyed by evidence id) and the code
+outline/projection reads are unchanged; catalogue pages, lists and facets are
+unchanged.
+
+`KnowledgeReadabilityDifferentialDatabaseTest` compares both paths with the
+replaced per-row statements, row content and size-guard refusals included, and
+asserts that a warm cached read calls no permission function. Each fallback
+statement still costs a few milliseconds on the small fixture, about the same as
+the per-row predicate there; the saving is expected on large closures. The PROD
+latency after deployment has not been measured.
 
 ## Retrieval poll under a generic plan
 
@@ -247,6 +323,50 @@ states cover pending, failed and in-flight rows, NULL, older and newer
 generations, and a full generation change. It also asserts that an idle poll
 over 3,000 current sources visits fewer than 50 rows under a generic plan; the
 previous statement visits all 3,000 and fails that assertion.
+
+## Repeated operation rechecks answered from memory
+
+On PROD (28-minute sample) agent tool calls drove about 47,000 `grants.live` and
+46,000 `grants.lineage` calls. `JobRuntime` rechecks one operation admission
+four times per tool call: at the top of the step, after pre-tool hooks, through
+`requireTargets` or `requireReadTargets`, and after the tool returns. Each
+`PinnedOperationAuthority.require` walks the admission's ancestry and, per
+ancestor, re-reads accounts, the scope and home, the member role (Application
+boundary, project record and manifest) and `allowsUsing` for every supporting
+grant. Every call site stays: pre-tool hooks run between them, and the
+after-tool check is what notices a revocation during a long tool.
+
+**What changed.** `require` now asks `VerifiedAdmissions` before walking.
+Composition supplies `BoundedVerifiedAdmissions`, a per-process LRU of at most
+1,024 admissions that passed the full walk. An entry is keyed on the whole
+`Admission` value (id, executor, account, scope, home, source, ordered support
+and `globalRead`), so no other admission can reuse it. It answers only while the
+caller's authority snapshot is the very instance it was verified under (one per
+AUTHORITY version) and it is younger than
+`plowshare.projection-cache.notified.staleness`, 2 s by default, measured from
+before its walk. The age bound covers inputs that do not move the AUTHORITY
+version: the Application manifest, operation records and resource scopes.
+`requireTargets` and `requireReadTargets` still call `require` and still check
+their targets and home on every call. A tool step therefore walks once instead
+of four times (`VerifiedAdmissionsTest`).
+
+**Freshness.** A revocation, membership or role change, manifest change or
+operation record change may let an admission that already passed keep running
+for up to the bound, on top of the snapshot's own notification lag. A fresh
+admission is never admitted from memory.
+
+**Fallbacks.** Every recheck walks, and nothing is recorded, when no snapshot
+may be used, when the caller holds a Spring transaction that may contain its own
+writes, or when `plowshare.projection-cache.notified.enabled` is false. A walk
+that refuses throws as before and leaves no entry.
+
+**Not changed.** The admitted turn's own check (`RunAdmission.check`, from
+`PersonalActingWork`) re-verifies the delegated acting policy, the binding's
+ownership and activity and the agent definition; SYSTEM work's `require` runs
+its purpose's validity fence and the retained-envelope check. Both have their own
+authority contracts and fences that are not keyed by an operation admission, so
+they still run in full. `allowsUsing` still re-reads `live` per supporting grant;
+those reads already come from the snapshot.
 
 ## Regression provenance and validation
 

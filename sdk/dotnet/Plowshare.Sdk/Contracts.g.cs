@@ -4737,6 +4737,7 @@ public sealed record AgentRunPayloadDto {
  [JsonPropertyName("agent")] public required string Agent { get; init; }
  [JsonPropertyName("conversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<TierDtoProject> Conversation { get; init; }
  [JsonPropertyName("images")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<IReadOnlyList<string>> Images { get; init; }
+ [JsonPropertyName("maxModelCalls")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> MaxModelCalls { get; init; }
  [JsonPropertyName("maxTurns")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> MaxTurns { get; init; }
  [JsonPropertyName("newConversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> NewConversation { get; init; }
  [JsonPropertyName("noTurnCap")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> NoTurnCap { get; init; }
@@ -7236,6 +7237,7 @@ public sealed record AgentRunRequest {
  [JsonPropertyName("agent")] public required string Agent { get; init; }
  [JsonPropertyName("conversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<TierDtoProject> Conversation { get; init; }
  [JsonPropertyName("images")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<IReadOnlyList<string>> Images { get; init; }
+ [JsonPropertyName("maxModelCalls")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> MaxModelCalls { get; init; }
  [JsonPropertyName("maxTurns")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<double> MaxTurns { get; init; }
  [JsonPropertyName("newConversation")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> NewConversation { get; init; }
  [JsonPropertyName("noTurnCap")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<bool> NoTurnCap { get; init; }

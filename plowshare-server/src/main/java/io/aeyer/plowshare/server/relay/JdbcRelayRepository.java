@@ -659,8 +659,7 @@ public final class JdbcRelayRepository implements RelayRepository {
   }
 
   private Relay.Topic topic(Relay.TopicKey key, boolean exclusive) {
-    return findTopic(key, exclusive)
-        .orElseThrow(() -> new IllegalStateException("Relay topic does not exist"));
+    return findTopic(key, exclusive).orElseThrow(RelayTopicMissingException::new);
   }
 
   private Optional<Relay.Topic> findTopic(Relay.TopicKey key, boolean exclusive) {

@@ -50,55 +50,65 @@ public final class WorkspaceApplicationResources implements ApplicationResources
 
   @Override
   public Optional<Path> directory(Long id, String relative) {
+    requireKnownDirectory(relative);
+    return directory(id, relative, root(id));
+  }
+
+  /**
+   * Walks and fences the directory under a root the caller already resolved. The walk's own final
+   * re-check of the project name, row and exclusions always runs here, whoever resolved the root.
+   */
+  @Override
+  public Optional<Path> directory(Long id, String relative, Optional<Path> resolvedRoot) {
+    requireKnownDirectory(relative);
+    return resolvedRoot.map(root -> scanned(id, relative, root));
+  }
+
+  private static void requireKnownDirectory(String relative) {
     if (!java.util.Set.of(
             "", "agents", "bots", "skills", "orchestrations", "hooks", "schedules", "server")
         .contains(relative))
       throw new IllegalArgumentException("Unknown Application resource directory");
-    return root(id)
-        .map(
-            root -> {
-              Path directory = root.resolve(relative);
-              try {
-                Path at = root;
-                for (Path segment : root.relativize(directory)) {
-                  at = at.resolve(segment);
-                  if (Files.isSymbolicLink(at)) throw new IOException("Linked resource directory");
-                }
-                if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
-                  if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS))
-                    throw new IOException("Resource directory unavailable");
-                  try (var paths = resourcePaths(directory, relative.isEmpty())) {
-                    var entries = paths.limit(4097).toList();
-                    if (entries.size() > 4096 || entries.stream().anyMatch(Files::isSymbolicLink))
-                      throw new IOException("Linked or oversized resources");
-                    // Discovery performs filesystem IO. A workspace move or exclusion change
-                    // during that IO must still fence the discovered paths. Reuse the initial
-                    // policy/project resolution above, but retain this distinct current check.
-                    var currentName =
-                        names
-                            .nameForId(id)
-                            .orElseThrow(
-                                () ->
-                                    new WorkspaceRefusedException(
-                                        "Application project is unavailable"));
-                    var row =
-                        projects
-                            .find(currentName)
-                            .orElseThrow(
-                                () ->
-                                    new WorkspaceRefusedException(
-                                        "Application source is unavailable"));
-                    var fence = row.reach(projects.effectiveExclusions(row));
-                    for (Path path : entries)
-                      if (!fence.permits(path)) throw new IOException("Excluded resource");
-                  }
-                }
-                return directory;
-              } catch (IOException invalid) {
-                throw new WorkspaceRefusedException(
-                    "Application resources are unavailable or outside their workspace fence");
-              }
-            });
+  }
+
+  private Path scanned(Long id, String relative, Path root) {
+    Path directory = root.resolve(relative);
+    try {
+      Path at = root;
+      for (Path segment : root.relativize(directory)) {
+        at = at.resolve(segment);
+        if (Files.isSymbolicLink(at)) throw new IOException("Linked resource directory");
+      }
+      if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS))
+          throw new IOException("Resource directory unavailable");
+        try (var paths = resourcePaths(directory, relative.isEmpty())) {
+          var entries = paths.limit(4097).toList();
+          if (entries.size() > 4096 || entries.stream().anyMatch(Files::isSymbolicLink))
+            throw new IOException("Linked or oversized resources");
+          // Discovery performs filesystem IO. A workspace move or exclusion change
+          // during that IO must still fence the discovered paths. Reuse the initial
+          // policy/project resolution above, but retain this distinct current check.
+          var currentName =
+              names
+                  .nameForId(id)
+                  .orElseThrow(
+                      () -> new WorkspaceRefusedException("Application project is unavailable"));
+          var row =
+              projects
+                  .find(currentName)
+                  .orElseThrow(
+                      () -> new WorkspaceRefusedException("Application source is unavailable"));
+          var fence = row.reach(projects.effectiveExclusions(row));
+          for (Path path : entries)
+            if (!fence.permits(path)) throw new IOException("Excluded resource");
+        }
+      }
+      return directory;
+    } catch (IOException invalid) {
+      throw new WorkspaceRefusedException(
+          "Application resources are unavailable or outside their workspace fence");
+    }
   }
 
   /**

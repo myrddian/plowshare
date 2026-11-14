@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.time.Instant;
 import java.util.Objects;
@@ -13,7 +14,16 @@ public interface RelayPublishing {
    * even after broker expiry; changed work is refused. Infrastructure failures propagate without
    * automatic replay. Project, session and attribution come from the harness, not tool arguments.
    */
-  Receipt publish(String project, Execution execution, Request request);
+  default Receipt publish(String project, Execution execution, Request request) {
+    return publish(project, execution, request, OperationFence.none());
+  }
+
+  /**
+   * Publishes as {@link #publish(String, Execution, Request)}, and runs {@code fence} inside the
+   * publication transaction before anything is appended. A fence that throws rolls the whole
+   * publication back, including its receipt; the refusal propagates unchanged.
+   */
+  Receipt publish(String project, Execution execution, Request request, OperationFence fence);
 
   /**
    * Distinguishes independently authored agent and orchestration definitions with the same name.

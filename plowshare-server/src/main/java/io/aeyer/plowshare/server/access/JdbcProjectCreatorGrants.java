@@ -13,12 +13,12 @@ import org.springframework.jdbc.support.SqlArrayValue;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Specialist store for {@code PROJECT_CREATOR} grants (V262).
+ * Specialist store for {@code PROJECT_CREATOR} grants (V263).
  *
  * <p>Neither {@code JdbcScopedGrantRepository} path fits this role: no grant covers the
  * PROJECT_CREATION scope (an administrator's {@code ADMIN_CONTROL} grant is
  * ORDINARY_PROJECT_CONTROL at ADMINISTRATION) and nobody holds MANAGE_ACCESS there. So issue and
- * revoke are authorized here by the actor's own live {@code ADMIN_CONTROL} grant, and the V262
+ * revoke are authorized here by the actor's own live {@code ADMIN_CONTROL} grant, and the V263
  * trigger branch re-checks the same facts on insert.
  *
  * <p>Each mutation is one transaction (joining the caller's, such as account administration's) that
@@ -35,7 +35,7 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
 
   /**
    * The actor's live {@code ADMIN_CONTROL} grant at ADMINISTRATION, held by an active,
-   * non-bootstrap USER server administrator with no agent: the authority the V262 trigger requires.
+   * non-bootstrap USER server administrator with no agent: the authority the V263 trigger requires.
    */
   private static final String ADMIN_CONTROL =
       "SELECT g.id,g.subject_account FROM authority_grants g JOIN authority_live_grants() l ON l.id=g.id"

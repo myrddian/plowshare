@@ -231,7 +231,7 @@ One mechanism serves both this role and the correction:
   agent-issued grants keep their caps. A person holding a token-issued (so
   expiring) membership can still issue permanent grants; that laundering path
   is a known, accepted, open risk, and its remedy is an open question in
-  ADR 0069 §3.
+  ADR 0071 §3.
 - **Application manifest narrowing (decided, user, 2026-11-15):** narrowing
   no longer follows the issuer for person-issued grants. A person-issued
   membership in an Application project does not fall when the manifest demotes

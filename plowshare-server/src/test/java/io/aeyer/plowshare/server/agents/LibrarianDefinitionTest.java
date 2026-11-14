@@ -27,7 +27,8 @@ class LibrarianDefinitionTest {
         librarian.tools());
     assertTrue(librarian.scopes().isEmpty());
     assertTrue(librarian.calls().isEmpty());
-    assertTrue(librarian.skills().isEmpty());
+    // Granted only so SkillRuntime admits it as the skill's executor; see below.
+    assertEquals(List.of("information-discovery"), librarian.skills());
     assertFalse(librarian.canDelegate());
     assertFalse(librarian.dynamic());
   }
@@ -50,6 +51,36 @@ class LibrarianDefinitionTest {
       assertTrue(definition.canUseSkill(skill.name()));
       assertTrue(AgentRegistry.escalatingGrant(definition, librarian).isEmpty());
     }
+  }
+
+  @Test
+  void every_shipped_skill_executor_is_granted_its_skill() {
+    // SkillRuntime refuses a NEW-mode executor that is not granted the skill ("The selected
+    // executor is not granted that skill"), so a shipped skill naming an ungranted agent can
+    // never run. information-discovery shipped that way.
+    var registry = ShippedDefinitions.registry(BoundTools.boundByThisServer());
+    var catalog =
+        SkillResolver.load(
+            List.of(
+                new SkillResolver.Layer(
+                    OrchestrationDefinition.Tier.SHIPPED, SkillSource.shipped())));
+    assertFalse(catalog.skills().isEmpty());
+    catalog
+        .skills()
+        .forEach(
+            (name, resolved) -> {
+              var skill = resolved.definition();
+              if (skill.agentSpecified()) {
+                var executor = registry.get(skill.agent());
+                assertTrue(executor.canUseSkill(name), skill.agent() + " is not granted " + name);
+                assertTrue(executor.delegable(), skill.agent());
+              }
+            });
+  }
+
+  @Test
+  void the_executor_is_told_not_to_reinvoke_its_own_skill() {
+    assertTrue(librarian.prompt().contains("Never call skill_run"));
   }
 
   @Test

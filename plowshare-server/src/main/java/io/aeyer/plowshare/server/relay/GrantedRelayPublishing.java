@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -42,8 +43,10 @@ public final class GrantedRelayPublishing implements RelayPublishing {
   }
 
   @Override
-  public Receipt publish(String project, Execution execution, Request request) {
+  public Receipt publish(
+      String project, Execution execution, Request request, OperationFence fence) {
     Objects.requireNonNull(execution);
+    Objects.requireNonNull(fence);
     var owner = execution.owner();
     String call = execution.call();
     Objects.requireNonNull(request);
@@ -106,6 +109,7 @@ public final class GrantedRelayPublishing implements RelayPublishing {
     String fingerprint = RelayPort.hash(identity + "\n" + request.topic() + "\n" + request.text());
     return repository.publish(
         new RelayPublishingRepository.Intent(
-            event, id, project, owner, call, request, fingerprint, clock.get(), causation));
+            event, id, project, owner, call, request, fingerprint, clock.get(), causation),
+        fence);
   }
 }

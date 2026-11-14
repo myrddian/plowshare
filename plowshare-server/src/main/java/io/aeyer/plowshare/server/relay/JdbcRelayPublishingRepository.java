@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.archive.JdbcTurnRelaySources;
 import io.aeyer.plowshare.server.archive.TurnRelaySources;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
@@ -56,8 +57,9 @@ public final class JdbcRelayPublishingRepository implements RelayPublishingRepos
   }
 
   @Override
-  public RelayPublishing.Receipt publish(Intent intent) {
+  public RelayPublishing.Receipt publish(Intent intent, OperationFence fence) {
     Objects.requireNonNull(intent);
+    Objects.requireNonNull(fence);
     return transactions.inTransaction(
         () -> {
           var owner = intent.owner();
@@ -82,6 +84,10 @@ public final class JdbcRelayPublishingRepository implements RelayPublishingRepos
                       intent.request().topic(),
                       intent.fingerprint())
                   == 1;
+          // The run's live authority, inside this transaction and after the receipt-row insert
+          // (the lock this unit takes) but before any append or receipt read. A refusal rolls the
+          // inserted row back with the rest of the unit, and a retained receipt is not disclosed.
+          fence.require();
           if (inserted) {
             // Native requester allocation precedes export, joining this same rollback boundary.
             // Retained repeats return their old receipt without minting another native request.

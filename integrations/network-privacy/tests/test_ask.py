@@ -61,6 +61,8 @@ class FakePort:
         self.open_error: Exception | None = None
         self.opened: list[tuple[str, int, int]] = []
         self.runs: list[tuple[str, str, str]] = []
+        # The new total each run carried, None when it carried none.
+        self.raised: list[int | None] = []
         self.resumes: list[tuple[str, str, int, int]] = []
         self.states: dict[str, JobState] = {}
         self.log: list[AskEntry] = []
@@ -76,10 +78,18 @@ class FakePort:
             raise self.open_error
         return "conv-1"
 
-    async def run(self, agent: str, conversation: str, task: str) -> str:
+    async def run(
+        self,
+        agent: str,
+        conversation: str,
+        task: str,
+        max_model_calls: int | None = None,
+    ) -> str:
         self.runs.append((agent, conversation, task))
+        self.raised.append(max_model_calls)
         if self.run_error is not None:
-            raise self.run_error
+            error, self.run_error = self.run_error, None
+            raise error
         self.jobs += 1
         job = f"job-{self.jobs}"
         self.states[job] = "running"
@@ -342,6 +352,34 @@ class AskServiceTest(unittest.IsolatedAsyncioTestCase):
         for _ in range(3):
             await self.service.poll()
         self.assertEqual(len(self.port.resumes), 1)
+
+    async def test_a_question_refused_for_a_spent_allowance_offers_a_top_up(
+        self,
+    ) -> None:
+        # The conversation spent its whole allowance in earlier turns, so the
+        # server refuses the question before it runs; resume has nothing to
+        # continue. Top up sends the question again with the higher total.
+        self.port.latest_found = AskConversation("conv-1", 40, 30, 40)
+        self.port.run_error = Refusal("CONFLICT", "has spent all 40 model calls")
+        view = await self.service.ask("Is the TV the Sony?")
+        self.assertEqual((view.turn_state, view.paused), ("capped", True))
+        self.assertIn("used its allowance of 40", view.detail or "")
+        view = await self.service.top_up()
+        self.assertEqual(self.port.resumes, [])
+        self.assertEqual(
+            self.port.runs[-1], ("privacy_assistant", "conv-1", "Is the TV the Sony?")
+        )
+        self.assertEqual(self.port.raised[-1], 60)
+        self.assertEqual((view.paused, view.turn_state), (False, "running"))
+        self.assertEqual(AskJournal(self.root).read().totals, (60, 30))
+
+    async def test_another_conflict_is_shown_as_a_refusal(self) -> None:
+        self.port.latest_found = AskConversation("conv-1", 40, 30, 12)
+        self.port.run_error = Refusal("CONFLICT", "busy")
+        view = await self.service.ask("Hello")
+        self.assertEqual((view.turn_state, view.paused), ("failed", False))
+        with self.assertRaises(AskConflict):
+            await self.service.top_up()
 
     async def test_an_uncertain_top_up_is_not_resent(self) -> None:
         await self.service.ask("Investigate")
@@ -742,7 +780,7 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
         self.client.request.return_value = reply(view)
         self.assertEqual(
             await self.port.latest("privacy_assistant"),
-            AskConversation("conv-1", 40, 30),
+            AskConversation("conv-1", 40, 30, 0),
         )
         self.assertEqual(
             self.sent(),
@@ -755,7 +793,7 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
         self.client.request.return_value = reply(replace(view, max_model_calls=None))
         self.assertEqual(
             await self.port.latest("privacy_assistant"),
-            AskConversation("conv-1", None, 30),
+            AskConversation("conv-1", None, 30, 0),
         )
         self.client.request.return_value = reply(view)
         self.assertEqual(await self.port.open("privacy_assistant", 40, 30), "conv-1")
@@ -775,6 +813,19 @@ class SdkAskPortTest(unittest.IsolatedAsyncioTestCase):
             self.sent(),
             AgentRunRequest(
                 agent="privacy_assistant", conversation="conv-1", task="Hello"
+            ),
+        )
+        # A top-up of a refused question names the conversation's new total.
+        self.assertEqual(
+            await self.port.run("privacy_assistant", "conv-1", "Hello", 60), "job-1"
+        )
+        self.assertEqual(
+            self.sent(),
+            AgentRunRequest(
+                agent="privacy_assistant",
+                conversation="conv-1",
+                task="Hello",
+                max_model_calls=60,
             ),
         )
         self.client.request.return_value = reply(

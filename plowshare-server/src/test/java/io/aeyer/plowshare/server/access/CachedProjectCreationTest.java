@@ -91,10 +91,10 @@ class CachedProjectCreationTest {
         new AuthoritySnapshot.Facts(
             AT,
             List.of(
-                new AuthoritySnapshot.Account(system.toString(), "BUILTIN", false, false, false),
-                new AuthoritySnapshot.Account("sam", "USER", true, false, false),
-                new AuthoritySnapshot.Account("mia", "USER", true, false, false),
-                new AuthoritySnapshot.Account("admin", "USER", true, false, true)),
+                new AuthoritySnapshot.Account(system.toString(), "BUILTIN", false, false, false, 0),
+                new AuthoritySnapshot.Account("sam", "USER", true, false, false, 0),
+                new AuthoritySnapshot.Account("mia", "USER", true, false, false, 0),
+                new AuthoritySnapshot.Account("admin", "USER", true, false, true, 0)),
             Map.of(system, system.toString(), SAM, "sam", MIA, "mia", ADMIN, "admin"),
             List.of(
                 new AuthoritySnapshot.Role(

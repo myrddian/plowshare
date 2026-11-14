@@ -31,13 +31,30 @@ def identity(
 
 
 class MergeIdentitiesTest(unittest.TestCase):
-    def test_higher_precedence_wins_whole_record(self) -> None:
-        unifi = identity(source="unifi")
+    def test_higher_precedence_wins_and_keeps_a_same_mac_vendor(self) -> None:
+        # A controller reports no vendor; Pi-hole's network table does. The
+        # winner keeps its own fields and takes only the vendor.
+        unifi = replace(identity(source="unifi"), hostname="Living-room")
+        pihole = replace(identity(source="pihole-v6", vendor="Acme"), hostname="other")
+        result = merge_identities(
+            [IdentitySample((pihole,)), IdentitySample((unifi,))], SCOPE
+        )
+        self.assertEqual(result.devices, (replace(unifi, vendor="Acme"),))
+
+    def test_winner_vendor_is_never_overwritten(self) -> None:
+        unifi = identity(source="unifi", vendor="Own")
         pihole = identity(source="pihole-v6", vendor="Acme")
         result = merge_identities(
             [IdentitySample((pihole,)), IdentitySample((unifi,))], SCOPE
         )
         self.assertEqual(result.devices, (unifi,))
+
+    def test_record_without_a_mac_lends_no_vendor(self) -> None:
+        unifi = identity(source="unifi")
+        named = identity(source="pihole-v6", mac=None, vendor="Acme")
+        result = merge_identities(
+            [IdentitySample((named,)), IdentitySample((unifi,))], SCOPE
+        )
         self.assertIsNone(result.devices[0].vendor)
 
     def test_managed_device_beats_controller_client(self) -> None:

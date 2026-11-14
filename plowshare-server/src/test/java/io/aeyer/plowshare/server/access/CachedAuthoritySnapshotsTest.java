@@ -98,7 +98,7 @@ class CachedAuthoritySnapshotsTest {
   private static AuthoritySnapshot.Facts facts() {
     return new AuthoritySnapshot.Facts(
         Instant.parse("2026-11-13T00:00:00Z"),
-        List.of(new AuthoritySnapshot.Account("reader", "USER", true, false, true)),
+        List.of(new AuthoritySnapshot.Account("reader", "USER", true, false, true, 0)),
         Map.of(),
         List.of(),
         List.of(),

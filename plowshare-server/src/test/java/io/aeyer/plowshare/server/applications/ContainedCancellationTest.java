@@ -8,6 +8,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.access.*;
 import io.aeyer.plowshare.server.access.AuthorityIds.*;
+import io.aeyer.plowshare.server.access.ScopedAuthorityMocks;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.allowances.*;
 import io.aeyer.plowshare.server.archive.*;
@@ -466,7 +467,7 @@ class ContainedCancellationTest {
   @Test
   void aRevokedContainerStopsItsDescendantsWork() {
     var grants = mock(ScopedGrantRepository.class);
-    var scoped = mock(ScopedAuthority.class);
+    var scoped = ScopedAuthorityMocks.mockAuthority();
     var members = mock(ProjectMembers.class);
     var operations = mock(OperationRecords.class);
     var resources = mock(ResourceScopeRepository.class);
@@ -509,7 +510,8 @@ class ContainedCancellationTest {
     when(binding.id()).thenReturn(grant);
     when(grants.live(subject)).thenReturn(List.of(binding));
     for (var action : actions)
-      when(scoped.allowsUsing(subject, container, action, grant)).thenReturn(true);
+      when(scoped.allowsUsing(eq(subject), eq(container), eq(action), eq(grant), anyList()))
+          .thenReturn(true);
 
     var containerAdmission = policy.admit("alice", container, actions);
     var descendant = policy.contain(containerAdmission, confined, actions);
@@ -531,7 +533,9 @@ class ContainedCancellationTest {
               // MID-RUN, and from outside: the container's own grant stops allowing the actions it
               // lent. Nothing about the child's stored row changes and nobody tells the run.
               for (var action : actions)
-                when(scoped.allowsUsing(subject, container, action, grant)).thenReturn(false);
+                when(scoped.allowsUsing(
+                        eq(subject), eq(container), eq(action), eq(grant), anyList()))
+                    .thenReturn(false);
               return new Completion(
                   null,
                   "tool_calls",

@@ -370,7 +370,7 @@ class IdentityMigrationTest {
     new JdbcIdentityRepository(jdbc).verifyBuiltIns();
   }
 
-  /** V262 widens the registry; startup verification must still accept the migrated records. */
+  /** V263 widens the registry; startup verification must still accept the migrated records. */
   @Test
   void latestRegistryIncludesTheCreatorRoleAndScopeAndStillVerifies() {
     Flyway.configure().dataSource(source).load().migrate();

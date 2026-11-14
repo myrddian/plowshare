@@ -477,11 +477,16 @@ class AskView:
 
 @dataclass(frozen=True)
 class AskConversation:
-    """A conversation and its caps; a cap is None when Plowshare reports none."""
+    """A conversation and its caps; a cap is None when Plowshare reports none.
+
+    ``spent`` is the model calls the conversation has used, or None when not
+    reported. It tells an exhausted allowance apart from other refusals.
+    """
 
     id: str
     max_model_calls: int | None
     max_turns: int | None
+    spent: int | None = None
 
 
 @dataclass(frozen=True)
@@ -506,8 +511,18 @@ class AskPort(Protocol):
         """Open a conversation with these caps; returns its ID."""
         ...
 
-    async def run(self, agent: str, conversation: str, task: str) -> str:
-        """Speak ``task`` into the conversation as a new turn; returns the job ID."""
+    async def run(
+        self,
+        agent: str,
+        conversation: str,
+        task: str,
+        max_model_calls: int | None = None,
+    ) -> str:
+        """Speak ``task`` into the conversation as a new turn; returns the job ID.
+
+        ``max_model_calls``, when given, is the conversation's new total
+        allowance, raised before the turn is admitted (ADR 0069).
+        """
         ...
 
     async def job_state(self, job: str) -> JobState:
@@ -557,6 +572,7 @@ class SdkAskPort:
             identifier(view.id),
             _cap(view.max_model_calls, MAX_TOTAL_CALLS),
             _cap(view.max_turns, MAX_SETTING),
+            _spent(view.model_calls_spent),
         )
 
     async def open(self, agent: str, max_model_calls: int, max_turns: int) -> str:
@@ -574,15 +590,26 @@ class SdkAskPort:
             raise ValueError("Unexpected opened conversation reply")
         return identifier(view.id)
 
-    async def run(self, agent: str, conversation: str, task: str) -> str:
+    async def run(
+        self,
+        agent: str,
+        conversation: str,
+        task: str,
+        max_model_calls: int | None = None,
+    ) -> str:
         # No project: the turn's home is the conversation's, and agent.run
         # refuses a project beside a conversation.
-        started = (
-            await self.client().request(
-                AgentRunRequest(agent=agent, conversation=conversation, task=task),
-                timeout=15,
+        request = (
+            AgentRunRequest(agent=agent, conversation=conversation, task=task)
+            if max_model_calls is None
+            else AgentRunRequest(
+                agent=agent,
+                conversation=conversation,
+                task=task,
+                max_model_calls=max_model_calls,
             )
-        ).require_payload()
+        )
+        started = (await self.client().request(request, timeout=15)).require_payload()
         return _started(started, agent, conversation)
 
     async def job_state(self, job: str) -> JobState:
@@ -651,6 +678,15 @@ def _cap(value: object, maximum: int) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     if value % 1 or not MIN_SETTING <= value <= maximum:
+        return None
+    return int(value)
+
+
+def _spent(value: object) -> int | None:
+    """Model calls a conversation reports spent (zero allowed), or None when unusable."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value % 1 or not 0 <= value <= MAX_TOTAL_CALLS:
         return None
     return int(value)
 
@@ -1014,8 +1050,30 @@ class AskService:
                     await self.port.run(self.agent, conversation, question)
                 )
             except Refusal as error:
-                self._detail = refusal_detail(error, "the question")
-                self._set_turn(turn.request_id, state="failed")
+                spent = (
+                    await self._spent_allowance(conversation)
+                    if error.code == "CONFLICT"
+                    else None
+                )
+                if spent is not None:
+                    # Refused before it ran: the allowance is used up. Offer
+                    # a top-up, which sends this question with a higher total.
+                    self._store(
+                        replace(
+                            self._ledger,
+                            totals=(spent, self._ledger.totals[1]),
+                        )
+                    )
+                    self._detail = (
+                        f"The assistant has used its allowance of {spent} model"
+                        " calls. Top up to send this question."
+                    )
+                    self._set_turn(
+                        turn.request_id, state="capped", ending="call_budget"
+                    )
+                else:
+                    self._detail = refusal_detail(error, "the question")
+                    self._set_turn(turn.request_id, state="failed")
             except TransportError as error:
                 if error.delivery == Delivery.NOT_SUBMITTED:
                     self._detail = "The question was not sent to Plowshare. Ask again when the connection is back."
@@ -1037,6 +1095,27 @@ class AskService:
             else:
                 self._set_turn(turn.request_id, state="running", job=job)
         return self.view()
+
+    async def _spent_allowance(self, conversation: str) -> int | None:
+        """The conversation's total when it has spent all of it, else None.
+
+        Read after a CONFLICT refusal so an exhausted allowance is recognised
+        from Plowshare's numbers, not its wording. Any failure to read means
+        "not known to be exhausted", and the question is shown as refused.
+        """
+        try:
+            found = await self.port.latest(self.agent)
+        except (Refusal, TransportError, ValueError):
+            return None
+        if (
+            found is None
+            or found.id != conversation
+            or found.max_model_calls is None
+            or found.spent is None
+            or found.spent < found.max_model_calls
+        ):
+            return None
+        return found.max_model_calls
 
     async def _conversation(self) -> str | None:
         """The journalled conversation, else the agent's latest, else a new one.
@@ -1133,9 +1212,21 @@ class AskService:
                     turn.request_id, state="sending", ending=None, resumed_at=now
                 )
             try:
-                job = identifier(
-                    await self.port.resume(conversation, self.agent, raised, turns)
-                )
+                if turn is not None and turn.job is None:
+                    # The question was refused before it ran, so there is no
+                    # stopped run to resume: send it again with the new total.
+                    job = identifier(
+                        await self.port.run(
+                            self.agent,
+                            conversation,
+                            turn.question,
+                            max_model_calls=raised,
+                        )
+                    )
+                else:
+                    job = identifier(
+                        await self.port.resume(conversation, self.agent, raised, turns)
+                    )
             except (Refusal, TransportError) as error:
                 if isinstance(error, Refusal) or (
                     error.delivery == Delivery.NOT_SUBMITTED

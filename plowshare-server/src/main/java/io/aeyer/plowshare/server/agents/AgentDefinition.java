@@ -1264,7 +1264,8 @@ public record AgentDefinition(
 
   /**
    * This definition with a person's caps in place of its own {@code max-turns} and {@code
-   * max-model-calls} — spec 2026-09-29 §2. A null keeps the definition's own.
+   * max-model-calls} — spec 2026-09-29 §2. A null keeps the definition's own. A native-only
+   * definition keeps its zero model calls whatever {@code budget} says; only steps apply to it.
    *
    * <p>On {@link #withTools}' shape, for its reason: one copy of nineteen components, here. Neither
    * number is re-checked: {@code EnvironmentFile} refuses a non-positive cap as it parses, and
@@ -1275,6 +1276,12 @@ public record AgentDefinition(
    * @return the capped definition, or this one when neither is set
    */
   public AgentDefinition withCaps(Integer steps, Integer budget) {
+    // A native-only definition (a script conductor) spends no model calls of its own, so a
+    // model-call cap has nothing to bound; its agent runs spend their own allowances. Applying it
+    // would make a model budget with no model, which the constructor rightly refuses.
+    if (nativeOnly()) {
+      budget = null;
+    }
     if (steps == null && budget == null) {
       return this;
     }

@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.protocol.ToolScopes;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -13,6 +14,7 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.relay.*;
 import java.nio.file.*;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.*;
@@ -286,6 +288,91 @@ class ApplicationToolRegistryTest {
     assertNotEquals(changed, withdrawn);
     head.set(new RelayLogRepository.Head(head.get().position(), Optional.empty()));
     assertNotEquals(withdrawn, registry.revision(1L));
+  }
+
+  @Test
+  void revision_resolves_the_root_through_the_resources_it_is_given() {
+    var asked = new AtomicInteger();
+    ApplicationResources perCall =
+        id -> {
+          asked.incrementAndGet();
+          return Optional.empty();
+        };
+    registry.revision(1L, perCall);
+    assertEquals(1, asked.get());
+  }
+
+  private static final String THREE_TOOLS =
+      """
+      {"name":"network_a","description":"A","parameters":[],"timeoutSeconds":30},
+      {"name":"network_b","description":"B","parameters":[],"timeoutSeconds":30},
+      {"name":"network_c","description":"C","parameters":[],"timeoutSeconds":30}
+      """;
+
+  private static ToolScopes.Connection hosted(String scope) {
+    return new ToolScopes.Connection(
+        "fixture",
+        scope,
+        "scanner",
+        "scanner",
+        "provider",
+        "network_",
+        List.of("*"),
+        List.of("coordinator"),
+        30);
+  }
+
+  private ApplicationToolRegistry registryOver(ToolScopeConnections hostedScopes) {
+    return new ApplicationToolRegistry(
+        id -> id == 1L ? Optional.of(root) : Optional.empty(),
+        projects,
+        members,
+        names,
+        logs,
+        new RelayToolProperties(),
+        invocations,
+        new ToolGrants() {
+          public boolean permits(Long p, String a, String n, String s, String t) {
+            return true;
+          }
+
+          public boolean acceptsDynamic(Long p, String a, String n, String s) {
+            return true;
+          }
+        },
+        () -> Set.of("memory_read"),
+        clock::get,
+        hostedScopes);
+  }
+
+  @Test
+  void hostedListIsReadOnceForAllCatalogueTools() {
+    catalogue(THREE_TOOLS);
+    var hostedScopes = mock(ToolScopeConnections.class);
+    when(hostedScopes.connections("fixture", null)).thenReturn(List.of(hosted("scans")));
+
+    registryOver(hostedScopes).revision(1L);
+
+    // One read serves every tool of every provider and the revision stamp.
+    verify(hostedScopes, times(1)).connections("fixture", null);
+  }
+
+  @Test
+  void firstConnectionPerProviderWinsAfterHoist() {
+    catalogue(THREE_TOOLS);
+    var first = hosted("first");
+    var second = hosted("second");
+    var hostedScopes = mock(ToolScopeConnections.class);
+    when(hostedScopes.connections("fixture", null)).thenReturn(List.of(first, second));
+    when(hostedScopes.permits(any(), anyString(), any(), any(), anyString())).thenReturn(false);
+    when(hostedScopes.permits(eq(first), anyString(), any(), any(), anyString())).thenReturn(true);
+
+    var tools =
+        registryOver(hostedScopes)
+            .tools(Home.of("fixture"), "coordinator", null, () -> false, "provider");
+
+    // Only the first connection is permitted, so all three tools prove each entry carries it.
+    assertEquals(3, tools.size());
   }
 
   @Test
@@ -592,5 +679,89 @@ class ApplicationToolRegistryTest {
   void built_in_collisions_are_refused_before_deployment() {
     assertThrows(
         CallerFault.class, () -> registry.stagedNames("fixture", root, Set.of("network_scope")));
+  }
+
+  private ApplicationToolRegistry boundedRegistry(ToolScopeConnections hostedScopes) {
+    return new ApplicationToolRegistry(
+        id -> id == 1L ? Optional.of(root) : Optional.empty(),
+        projects,
+        members,
+        names,
+        logs,
+        new RelayToolProperties(),
+        invocations,
+        new ToolGrants() {
+          public boolean permits(Long p, String a, String n, String s, String t) {
+            return true;
+          }
+
+          public boolean acceptsDynamic(Long p, String a, String n, String s) {
+            return grant.get();
+          }
+        },
+        () -> Set.of("memory_read"),
+        clock::get,
+        hostedScopes,
+        Duration.ofSeconds(2));
+  }
+
+  private void completes() {
+    when(invocations.invoke(any(), any(), eq(owner), eq("call"), any()))
+        .thenReturn(
+            new RelayToolInvocations.Outcome(
+                UUID.randomUUID(), RelayToolCodec.State.COMPLETED, "scope"));
+  }
+
+  @Test
+  void runReusesListingContextInsideTheBound() {
+    catalogue(DECLARATION);
+    var hostedScopes = mock(ToolScopeConnections.class);
+    var bounded = boundedRegistry(hostedScopes);
+    var tool =
+        bounded.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").getFirst();
+    tool.calledAs("call");
+    completes();
+    clearInvocations(hostedScopes, projects, members, logs);
+    clock.set(clock.get().plusMillis(500));
+
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).contains("COMPLETED"));
+
+    verify(hostedScopes, never()).connections(any(), any());
+    verify(logs, never()).latest(any());
+    verify(projects, times(1)).id("fixture");
+    // The authority recheck stays: membership is consulted for the caller and the provider.
+    verify(members, times(2)).mayWork("fixture", "provider");
+  }
+
+  @Test
+  void runStillRefusesARevokedGrantInsideTheBound() {
+    catalogue(DECLARATION);
+    var tool =
+        boundedRegistry(ToolScopeConnections.NONE)
+            .tools(Home.of("fixture"), "coordinator", null, () -> false, "provider")
+            .getFirst();
+    tool.calledAs("call");
+    grant.set(false);
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    verifyNoInteractions(invocations);
+  }
+
+  @Test
+  void runRebuildsAfterTheBound() {
+    catalogue(DECLARATION);
+    var hostedScopes = mock(ToolScopeConnections.class);
+    var bounded = boundedRegistry(hostedScopes);
+    var tool =
+        bounded.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").getFirst();
+    tool.calledAs("call");
+    completes();
+    clearInvocations(hostedScopes, logs);
+    clock.set(clock.get().plusSeconds(3));
+    catalogue(DECLARATION.replace("Scope", "Changed"));
+
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).startsWith("E_NO_EXEC"));
+
+    verify(logs, times(1)).latest(any());
+    verify(hostedScopes, atLeastOnce()).connections(eq("fixture"), any());
   }
 }

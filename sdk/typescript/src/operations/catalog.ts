@@ -62,7 +62,8 @@ export interface ExtendedPayloads
     readonly overwrite?: boolean;
   };
   'agent.run': Tier &
-    Turns & {
+    Turns &
+    Budget & {
       readonly agent: string;
       readonly task: string;
       readonly session?: string | null;

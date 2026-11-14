@@ -557,7 +557,7 @@ public final class ProjectStore
                 .findFirst());
   }
 
-  /** {@code authority_may_create_projects} (V262): the live PROJECT_CREATOR decision. */
+  /** {@code authority_may_create_projects} (V263): the live PROJECT_CREATOR decision. */
   private boolean mayCreate(String handle) {
     if (handle == null || handle.isBlank()) return false;
     return ArchiveUnavailableException.translating(

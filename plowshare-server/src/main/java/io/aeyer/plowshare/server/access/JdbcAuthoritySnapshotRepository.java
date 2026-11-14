@@ -45,14 +45,16 @@ public final class JdbcAuthoritySnapshotRepository implements AuthoritySnapshotR
     OffsetDateTime at = jdbc.queryForObject("SELECT now()", OffsetDateTime.class);
     var accounts =
         rows(
-            "SELECT handle,account_kind,enabled,bootstrap,server_admin FROM admins ORDER BY handle",
+            "SELECT handle,account_kind,enabled,bootstrap,server_admin,session_version FROM admins"
+                + " ORDER BY handle",
             (row, n) ->
                 new Account(
                     row.getString(1),
                     row.getString(2),
                     row.getBoolean(3),
                     row.getBoolean(4),
-                    row.getBoolean(5)));
+                    row.getBoolean(5),
+                    row.getLong(6)));
     var authorityAccounts =
         rows(
             "SELECT id,legacy_handle FROM authority_accounts ORDER BY id",

@@ -62,6 +62,7 @@ from .system_view import describe
 from .tools import (
     AGENT_ONLY,
     DEFINITIONS,
+    QUERY_LIMIT,
     PrivacyTools,
     WorkerTools,
     decode_call,
@@ -1099,6 +1100,12 @@ def application(
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 50 if definition.name == "network.scan_list" else 32,
+                }
+            if definition.name == "network.devices":
+                properties["query"] = {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": QUERY_LIMIT,
                 }
             if definition.name == "network.evidence":
                 properties["section"] = {

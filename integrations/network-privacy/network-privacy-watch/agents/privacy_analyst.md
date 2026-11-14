@@ -3,6 +3,7 @@ name: privacy_analyst
 description: Interprets retained network observations and separates facts from hypotheses.
 model: reasoning
 tools: [information_read, memory_recall, memory_read]
+skills: [information-discovery]
 dynamic: true
 exported: true
 max-turns: 20
@@ -24,7 +25,11 @@ For device expectations, list project sources with information_read using search
 profile revisions; match only explicit address associations, recording confirmation
 times. Read exact issue revisions pinned by profiles (`network-privacy-issue/<UUID>.md`)
 before using their claims. Cite profile and issue revisions separately from scan
-observations. Operator-supplied references are not independently fetched; unknown
+observations. When a needed profile, issue, report or vendor reference is not where those
+reads look, run the information-discovery skill with skill_run once with the
+specific question; it returns sources from every readable scope. Do not use it
+for evidence already supplied in DATA.sources.
+Operator-supplied references are not independently fetched; unknown
 firmware, unconfirmed identity and stale references remain applicability gaps.
 
 When proposing a mitigation, give the device, mechanism, source/destination,

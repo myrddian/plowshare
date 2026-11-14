@@ -96,22 +96,49 @@ ASSISTANT_TOOLS = frozenset(
 # the second reviewed non-read addition: it only records a request for the
 # owner, starts with empty history and is keyed by its invocation.
 REFERENCE_TOOLS = frozenset({"network_request_reference"})
+# ``network_devices`` as every binding before the lookup step declared it: no
+# search. Its exact text is history, like LEGACY_DECLARATIONS; editing it would
+# orphan the journals deployments already hold.
+DEVICES_BEFORE_LOOKUP = ToolDeclaration(
+    "network_devices",
+    "List monitored devices with a confirmed MAC (offset/limit): device_id, name, address and attention signals. Follow next_offset.",
+    (
+        Parameter(
+            "offset",
+            "INTEGER",
+            "Page offset; follow the returned next_offset.",
+            required=False,
+        ),
+        Parameter("limit", "INTEGER", "Maximum page records: 1-32.", required=False),
+    ),
+    timeout_seconds=30,
+)
+# The exact thirteen-tool reference binding: the current declarations with the
+# pre-lookup ``network_devices``. A test pins its digest.
+REFERENCE_DECLARATIONS = tuple(
+    DEVICES_BEFORE_LOOKUP if tool.name == "network_devices" else tool
+    for tool in DECLARATIONS
+)
 # The exact six-tool paged binding that deployments already hold. It is the
-# current declarations without the later tools; a test pins its digest so an
+# reference binding without the later tools; a test pins its digest so an
 # edit to an older tool cannot silently orphan existing paged journals.
 PAGED_DECLARATIONS = tuple(
     tool
-    for tool in DECLARATIONS
+    for tool in REFERENCE_DECLARATIONS
     if tool.name not in DEVICE_TOOLS | ASSISTANT_TOOLS | REFERENCE_TOOLS
 )
 # The exact eight-tool device binding, pinned the same way.
 DEVICE_DECLARATIONS = tuple(
-    tool for tool in DECLARATIONS if tool.name not in ASSISTANT_TOOLS | REFERENCE_TOOLS
+    tool
+    for tool in REFERENCE_DECLARATIONS
+    if tool.name not in ASSISTANT_TOOLS | REFERENCE_TOOLS
 )
 # The exact twelve-tool assistant binding, pinned the same way.
 ASSISTANT_DECLARATIONS = tuple(
-    tool for tool in DECLARATIONS if tool.name not in REFERENCE_TOOLS
+    tool for tool in REFERENCE_DECLARATIONS if tool.name not in REFERENCE_TOOLS
 )
+# The lookup step's one reviewed addition: an optional search on a read tool.
+_LOOKUP_ADDITIONS = {"network_devices": {"query": "STRING"}}
 # Optional read-page arguments reviewed for the v1 to paged transition.
 _PAGE_ADDITIONS = {
     "network_scope": {"offset": "INTEGER", "limit": "INTEGER"},
@@ -169,7 +196,7 @@ def _compatible(
 
 def compatible_descriptors() -> None:
     """Each transition step may add only reviewed arguments, read tools or the
-    reviewed assistant and reference tools."""
+    reviewed assistant and reference tools; descriptions may change."""
     _compatible(LEGACY_DECLARATIONS, PAGED_DECLARATIONS, _PAGE_ADDITIONS, frozenset())
     _compatible(PAGED_DECLARATIONS, DEVICE_DECLARATIONS, {}, DEVICE_TOOLS)
     _compatible(
@@ -180,8 +207,13 @@ def compatible_descriptors() -> None:
         ASSISTANT_TOOLS,
     )
     _compatible(
-        ASSISTANT_DECLARATIONS, DECLARATIONS, {}, REFERENCE_TOOLS, REFERENCE_TOOLS
+        ASSISTANT_DECLARATIONS,
+        REFERENCE_DECLARATIONS,
+        {},
+        REFERENCE_TOOLS,
+        REFERENCE_TOOLS,
     )
+    _compatible(REFERENCE_DECLARATIONS, DECLARATIONS, _LOOKUP_ADDITIONS, frozenset())
 
 
 def receipt_stages(receipt: ToolReceipt) -> tuple[ToolReceipt, ...]:
@@ -288,7 +320,8 @@ def open_tool_journal(
     The chain is v1 ``directory`` -> ``<directory>-paged`` (six tools with read
     pagination) -> ``<directory>-devices`` (adds the device read tools) ->
     ``<directory>-assistant`` (adds the assistant's request and record tools) ->
-    ``<directory>-references`` (adds the assistant's reference request). Each
+    ``<directory>-references`` (adds the assistant's reference request) ->
+    ``<directory>-lookup`` (adds the optional device search). Each
     step copies public typed receipts before admitting the new provider. Partial
     copies are checked and resumed locally; neither handlers nor Relay mutations
     run. A durable marker fences each step once its complete copy is confirmed.
@@ -301,6 +334,7 @@ def open_tool_journal(
     devices = directory.parent / (directory.name + "-devices")
     assistant = directory.parent / (directory.name + "-assistant")
     references = directory.parent / (directory.name + "-references")
+    lookup = directory.parent / (directory.name + "-lookup")
     with ExitStack() as stores:
         legacy = None
         if (directory / "relay-tools.sqlite").exists():
@@ -336,9 +370,20 @@ def open_tool_journal(
                 assistant,
                 deployment_config(project, provider, account, ASSISTANT_DECLARATIONS),
             )
+        reference_journal = None
+        if (
+            assistant_journal is not None
+            or (references / "relay-tools.sqlite").exists()
+        ):
+            reference_journal = _transition(
+                stores,
+                assistant_journal,
+                references,
+                deployment_config(project, provider, account, REFERENCE_DECLARATIONS),
+            )
         yield _transition(
             stores,
-            assistant_journal,
-            references,
+            reference_journal,
+            lookup,
             deployment_config(project, provider, account, DECLARATIONS),
         )

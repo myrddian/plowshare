@@ -91,7 +91,7 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(schemas["network.device"]["required"], ["device_id"])
         self.assertEqual(
-            set(schemas["network.devices"]["properties"]), {"offset", "limit"}
+            set(schemas["network.devices"]["properties"]), {"offset", "limit", "query"}
         )
         self.assertEqual(
             schemas["network.devices"]["properties"]["limit"]["maximum"], 32

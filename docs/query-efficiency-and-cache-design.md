@@ -34,6 +34,10 @@ The proposed [item-level invalidation and shared read data](query-efficiency-ite
 design makes a write invalidate only the cached items that read the changed rows, instead of
 emptying whole projections, and derives per-account views in server memory from shared data.
 
+The proposed [operation read pipeline](query-efficiency-operation-pipeline-design.md) resolves an
+operation's identity, project, Application and authority once and passes them along, removing
+repeated fetches and permission checks within one tool call, job step or request.
+
 The [asynchronous request dispatch plan](async-request-dispatch-plan.md) extends
 bounded read concurrency into actor-owned request coordination, explicit resource
 ordering, typed SDK completions and independent client rendering. It preserves

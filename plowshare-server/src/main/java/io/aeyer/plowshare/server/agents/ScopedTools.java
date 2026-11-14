@@ -31,6 +31,15 @@ public interface ScopedTools {
 
   String revision(Long project);
 
+  /**
+   * The revision, resolving the project's Application root through {@code resources} so a caller
+   * that already resolved it within one operation does not resolve it again. Implementations that
+   * read no Application root keep this default.
+   */
+  default String revision(Long project, ApplicationResources resources) {
+    return revision(project);
+  }
+
   List<AgentTool> tools(Home home, String agent, String session, BooleanSupplier cancelled);
 
   /** Owner-aware projection; implementations must filter runtime scope assignments here. */

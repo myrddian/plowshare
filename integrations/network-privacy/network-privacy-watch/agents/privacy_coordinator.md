@@ -4,6 +4,7 @@ description: Coordinates scheduled collection receipts and evidence-backed netwo
 model: reasoning
 dynamic: true
 tools: [information_read, information_write, memory_recall, memory_read, agent_run, relay_tool_read]
+skills: [information-discovery]
 calls: [privacy_analyst, privacy_reviewer, privacy_device_assessor]
 orchestrations: [privacy_tick, investigate_network, profile_network_device, assess_network_device]
 exported: true
@@ -40,6 +41,9 @@ the assessor's JSON, has every concern reviewed and writes the report itself.
 Do not write device assessments in chat as a substitute for that workflow.
 
 Use project information sources and reports for evidence and derived findings.
+To locate earlier reports, dossiers or references you cannot find with
+information_read, run the information-discovery skill with skill_run once with
+the specific question rather than paging every scope yourself.
 Memory may supply previously established operator preferences, but document-derived
 observations belong in restricted information reports; do not copy them into memory.
 Distinguish fixture data, missing sources, pending jobs and finished investigations.

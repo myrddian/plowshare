@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Along delegated (agent- or token-issued) lineage, an issuing MANAGER must still be a manager
- * under the current deployed manifest. Person-issued grants are rooted at SYSTEM (V260), so their
+ * under the current deployed manifest. Person-issued grants are rooted at SYSTEM (V261), so their
  * chain carries no issuer to narrow. They keep their own role, capped only by the manifest's entry
  * for the grant's own recipient.
  */

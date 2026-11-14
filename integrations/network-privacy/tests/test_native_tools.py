@@ -262,11 +262,14 @@ class DeviceToolsTest(unittest.IsolatedAsyncioTestCase):
                     "device_id": "mac:02:00:00:00:01:01",
                     "name": "Lounge TV 1",
                     "address": listed.address,
+                    "vendor": "Sony",
+                    "device_type": "TV or streaming player",
                     "signals": ["measurement_dns"],
                 }
             ],
         )
         self.assertEqual((page["total"], page["unavailable"]), (1, 1))
+        self.assertFalse(page["filtered"])
         self.assertIsNone(page["next_offset"])
         state, text = await self.invoke(
             "network_device", {"device_id": "mac:02:00:00:00:01:01"}
@@ -275,6 +278,61 @@ class DeviceToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text, encode_dossier(build_dossier(listed)))
         # One inventory projection per call; the dossier reuses it.
         self.assertEqual(self.reads, 2)
+
+    async def test_device_query_finds_a_named_device_past_the_first_page(
+        self,
+    ) -> None:
+        # The assistant once paged 70 of 89 devices and missed the TV at the
+        # end of the list; a query reaches it in one call.
+        def plug(n: int) -> DeviceCard:
+            value = mac_card(n, name="Plug")
+            assert value.identity is not None
+            return replace(
+                value,
+                identity=replace(value.identity, vendor=None),
+                detection=replace(value.detection, device_type="Unknown"),
+            )
+
+        cards = [plug(n) for n in range(1, 39)] + [
+            mac_card(39, name="Sony BRAVIA SmartTV")
+        ]
+        self.inventory = DeviceInventory(tuple(cards))
+        for query in ("sony", "BRAVIA tv", "01:27", "0127"):
+            state, text = await self.invoke("network_devices", {"query": query})
+            self.assertEqual(state, "COMPLETED", query)
+            page = json.loads(text)
+            self.assertEqual(
+                [d["name"] for d in page["devices"]], ["Sony BRAVIA SmartTV 39"], query
+            )
+            self.assertEqual((page["total"], page["filtered"]), (1, True))
+        state, text = await self.invoke("network_devices", {"query": "printer"})
+        page = json.loads(text)
+        self.assertEqual((page["devices"], page["total"]), ([], 0))
+        self.assertIsNone(page["next_offset"])
+
+    async def test_bad_device_arguments_are_refused_not_uncertain(self) -> None:
+        # An escaped exception becomes "external effects may have occurred";
+        # malformed reads must be a plain refusal that restates the limits.
+        self.inventory = DeviceInventory((mac_card(1),))
+        cases: tuple[dict[str, ToolValue], ...] = (
+            {"limit": 89},
+            {"limit": 0},
+            {"offset": -1},
+            {"query": ""},
+            {"query": "x" * 65},
+            {"query": "tv\x00"},
+            {"unknown": 1},
+        )
+        for arguments in cases:
+            state, text = await self.invoke("network_devices", arguments)
+            self.assertEqual(state, "REJECTED", arguments)
+            self.assertIn("nothing ran", text)
+            self.assertNotIn("x" * 65, text)
+        state, text = await self.invoke("network_devices", {"limit": 89})
+        self.assertIn("1-32", text)
+        state, text = await self.invoke("network_device", {"device_id": "nope"})
+        self.assertEqual(state, "REJECTED")
+        self.assertNotIn("nope", text)
 
     async def test_device_dossier_carries_the_workers_retained_facts(self) -> None:
         from test_device_dossier import facts

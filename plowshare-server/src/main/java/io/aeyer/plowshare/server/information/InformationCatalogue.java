@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.information;
 import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.protocol.InformationContent;
 import io.aeyer.plowshare.protocol.InformationReportDetails;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
@@ -14,7 +15,9 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * Durable catalogue. All mutations are short transactions; extraction, models and hooks run outside
@@ -39,9 +42,9 @@ public final class InformationCatalogue implements InformationReadAccess {
   }
 
   private java.util.function.IntSupplier allowance = () -> 1000;
-  private java.util.function.Supplier<Map<String, String>> configuration = Map::of;
+  private Supplier<Map<String, String>> configuration = Map::of;
 
-  public void useConfiguration(java.util.function.Supplier<Map<String, String>> configuration) {
+  public void useConfiguration(Supplier<Map<String, String>> configuration) {
     this.configuration = configuration;
   }
 
@@ -121,11 +124,35 @@ public final class InformationCatalogue implements InformationReadAccess {
       List<UUID> sources,
       String session,
       Class<T> type,
-      java.util.function.Supplier<T> transition) {
-    return writeGates == null
-        ? transition.get()
-        : writeGates.execute(
-            context, request, operation, identity, sources, session, type, transition);
+      Supplier<T> transition) {
+    return prepared(
+        context,
+        request,
+        operation,
+        identity,
+        sources,
+        session,
+        type,
+        transition,
+        OperationFence.none());
+  }
+
+  private <T extends InformationGateResult> T prepared(
+      InformationContext context,
+      UUID request,
+      String operation,
+      InformationGateIdentity identity,
+      List<UUID> sources,
+      String session,
+      Class<T> type,
+      Supplier<T> transition,
+      OperationFence fence) {
+    if (writeGates == null) {
+      // No gate transaction to place it in; the transition's own transaction runs the fence.
+      return transition.get();
+    }
+    return writeGates.execute(
+        context, request, operation, identity, sources, session, type, transition, fence);
   }
 
   private InformationAcquisitions acquisitions;
@@ -215,7 +242,8 @@ public final class InformationCatalogue implements InformationReadAccess {
         syntaxOnly,
         null,
         null,
-        null);
+        null,
+        OperationFence.none());
   }
 
   private Admission admit(
@@ -234,7 +262,9 @@ public final class InformationCatalogue implements InformationReadAccess {
       boolean syntaxOnly,
       InformationContent.Binding binding,
       UUID expectedRevision,
-      InformationContent.Typing typing) {
+      InformationContent.Typing typing,
+      OperationFence fence) {
+    Objects.requireNonNull(fence);
     access.requireWork(context);
     if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new CallerFault(
@@ -293,6 +323,9 @@ public final class InformationCatalogue implements InformationReadAccess {
           access.requireWork(context);
           if (binding != null)
             contentAuthority.recheck(context, binding, typing.mode().equals("inherit"));
+          // After the registry-authority lock, before the revision row: a revoked run operation
+          // aborts this whole admission, including a report's dependency and detail rows.
+          fence.require();
           return repository.admit(
               context,
               request,
@@ -402,11 +435,50 @@ public final class InformationCatalogue implements InformationReadAccess {
       String session,
       UUID expectedRevision,
       InformationContent.Typing typing) {
+    return admitForSession(
+        context,
+        request,
+        name,
+        bytes,
+        mediaType,
+        sourceUri,
+        session,
+        expectedRevision,
+        typing,
+        OperationFence.none());
+  }
+
+  /**
+   * Admits a source as {@link #admitForSession(InformationContext, UUID, String, byte[], String,
+   * String, String, UUID, InformationContent.Typing)}, running {@code fence} inside the admission
+   * transaction after the registry-authority lock and before the revision is written.
+   */
+  public Admission admitForSession(
+      InformationContext context,
+      UUID request,
+      String name,
+      byte[] bytes,
+      String mediaType,
+      String sourceUri,
+      String session,
+      UUID expectedRevision,
+      InformationContent.Typing typing,
+      OperationFence fence) {
+    Objects.requireNonNull(fence);
     if (expectedRevision != null && typing == null)
       throw new CallerFault("expectedRevision requires explicit typing");
     if (typing != null)
       return typedSource(
-          context, request, name, bytes, mediaType, sourceUri, session, expectedRevision, typing);
+          context,
+          request,
+          name,
+          bytes,
+          mediaType,
+          sourceUri,
+          session,
+          expectedRevision,
+          typing,
+          fence);
     if (bytes == null
         || bytes.length == 0
         || bytes.length > 32 * 1024 * 1024
@@ -432,9 +504,10 @@ public final class InformationCatalogue implements InformationReadAccess {
                 () ->
                     admit(
                         context, request, name, retained, mediaType, sourceUri, "source", List.of(),
-                        List.of(), null, session, 0),
+                        List.of(), null, session, 0, false, null, null, null, fence),
                 null);
-          });
+          },
+          fence);
     }
     return prepared(
         context,
@@ -447,7 +520,8 @@ public final class InformationCatalogue implements InformationReadAccess {
         () ->
             admit(
                 context, request, name, retained, mediaType, sourceUri, "source", List.of(),
-                List.of(), null, session, 0));
+                List.of(), null, session, 0, false, null, null, null, fence),
+        fence);
   }
 
   private Admission typedSource(
@@ -459,7 +533,8 @@ public final class InformationCatalogue implements InformationReadAccess {
       String sourceUri,
       String session,
       UUID expected,
-      InformationContent.Typing typing) {
+      InformationContent.Typing typing,
+      OperationFence fence) {
     if (contentAuthority == null || writeGates == null)
       throw new CallerFault("Typed information is unavailable");
     if (bytes == null
@@ -495,9 +570,10 @@ public final class InformationCatalogue implements InformationReadAccess {
               () ->
                   admit(
                       context, request, name, retained, mediaType, sourceUri, "source", List.of(),
-                      List.of(), null, session, 0, false, binding, expected, typing),
+                      List.of(), null, session, 0, false, binding, expected, typing, fence),
               candidate);
-        });
+        },
+        fence);
   }
 
   /**
@@ -509,6 +585,22 @@ public final class InformationCatalogue implements InformationReadAccess {
       UUID expected,
       InformationContent.Typing typing,
       String session) {
+    return reviseMetadata(context, request, expected, typing, session, OperationFence.none());
+  }
+
+  /**
+   * Revises metadata as {@link #reviseMetadata(InformationContext, UUID, UUID,
+   * InformationContent.Typing, String)}, running {@code fence} inside the gated commit transaction
+   * after the registry-authority and resource locks and before any revision row is copied.
+   */
+  public Admission reviseMetadata(
+      InformationContext context,
+      UUID request,
+      UUID expected,
+      InformationContent.Typing typing,
+      String session,
+      OperationFence fence) {
+    Objects.requireNonNull(fence);
     if (contentAuthority == null || projections == null || writeGates == null)
       throw new CallerFault("Typed information is unavailable");
     access.requireWork(context);
@@ -528,9 +620,12 @@ public final class InformationCatalogue implements InformationReadAccess {
           var binding = contentAuthority.resolve(context, name, expected, typing).orElse(null);
           var prepared =
               transactions.inTransaction(
-                  () ->
-                      projections.prepare(
-                          context, request, expected, binding, configuration.get()));
+                  () -> {
+                    // Preparation retains snapshot rows; a revoked run retains none.
+                    fence.require();
+                    return projections.prepare(
+                        context, request, expected, binding, configuration.get());
+                  });
           var candidate =
               new InformationContent.Candidate(
                   expected,
@@ -547,6 +642,9 @@ public final class InformationCatalogue implements InformationReadAccess {
                   contentAuthority.recheck(context, binding, typing.mode().equals("inherit"));
                 requireWrite(context, expected);
                 requireReadable(context, expected);
+                // After the registry and resource locks, inside the gate's committing transaction,
+                // before any revision row is copied.
+                fence.require();
                 var admission = projections.copy(context, request, prepared, configuration.get());
                 repository.event(
                     admission.revision(),
@@ -558,7 +656,8 @@ public final class InformationCatalogue implements InformationReadAccess {
                 return admission;
               },
               candidate);
-        });
+        },
+        fence);
   }
 
   public InformationContent.View content(InformationContext context, UUID revision) {
@@ -610,7 +709,10 @@ public final class InformationCatalogue implements InformationReadAccess {
         false,
         intent.binding(),
         intent.expectedRevision(),
-        intent.typing());
+        intent.typing(),
+        // Asynchronous acquisition admits under the worker's own receipt fence and live work check;
+        // no run operation reaches it.
+        OperationFence.none());
   }
 
   Admission acquired(
@@ -1345,6 +1447,26 @@ public final class InformationCatalogue implements InformationReadAccess {
       String locator,
       UUID request,
       String session) {
+    return evidenceForSession(
+        context, revision, start, end, quote, locator, request, session, OperationFence.none());
+  }
+
+  /**
+   * Records evidence as {@link #evidenceForSession(InformationContext, UUID, int, int, String,
+   * String, UUID, String)}, running {@code fence} first inside the recording transaction, which
+   * takes no row lock of its own.
+   */
+  public UUID evidenceForSession(
+      InformationContext context,
+      UUID revision,
+      int start,
+      int end,
+      String quote,
+      String locator,
+      UUID request,
+      String session,
+      OperationFence fence) {
+    Objects.requireNonNull(fence);
     String retained = text(context, revision);
     if (start < 0
         || end <= start
@@ -1353,7 +1475,7 @@ public final class InformationCatalogue implements InformationReadAccess {
         || !"extracted-text:utf16".equals(locator))
       throw new CallerFault("evidence must quote retained UTF-16 text at valid offsets");
     if (request == null && writeGates == null)
-      return evidenceUnchecked(context, revision, start, end, quote, locator, null);
+      return evidenceUnchecked(context, revision, start, end, quote, locator, null, fence);
     return prepared(
             context,
             request,
@@ -1364,7 +1486,9 @@ public final class InformationCatalogue implements InformationReadAccess {
             InformationGateResult.Recorded.class,
             () ->
                 new InformationGateResult.Recorded(
-                    evidenceUnchecked(context, revision, start, end, quote, locator, request)))
+                    evidenceUnchecked(
+                        context, revision, start, end, quote, locator, request, fence)),
+            fence)
         .id();
   }
 
@@ -1375,9 +1499,12 @@ public final class InformationCatalogue implements InformationReadAccess {
       int end,
       String quote,
       String locator,
-      UUID request) {
+      UUID request,
+      OperationFence fence) {
     return transactions.inTransaction(
         () -> {
+          // This unit takes no row lock of its own, so the fence runs first.
+          fence.require();
           requireReadable(context, revision);
           return repository.recordEvidence(context, revision, start, end, quote, locator, request);
         });
@@ -1453,6 +1580,42 @@ public final class InformationCatalogue implements InformationReadAccess {
       String producer,
       UUID expected,
       InformationContent.Typing typing) {
+    return reportDetailsForSession(
+        context,
+        request,
+        name,
+        text,
+        inputs,
+        evidence,
+        feedback,
+        session,
+        details,
+        producer,
+        expected,
+        typing,
+        OperationFence.none());
+  }
+
+  /**
+   * Records a report as the twelve-argument overload does, passing {@code fence} to the admission
+   * transaction that writes the report revision: it runs after the registry-authority lock and
+   * before the revision, its dependencies and its report details are written.
+   */
+  public Admission reportDetailsForSession(
+      InformationContext context,
+      UUID request,
+      String name,
+      String text,
+      List<UUID> inputs,
+      List<UUID> evidence,
+      UUID feedback,
+      String session,
+      InformationReportDetails details,
+      String producer,
+      UUID expected,
+      InformationContent.Typing typing,
+      OperationFence fence) {
+    Objects.requireNonNull(fence);
     if (expected != null && typing == null)
       throw new CallerFault("expectedRevision requires explicit typing");
     if (typing != null
@@ -1522,9 +1685,11 @@ public final class InformationCatalogue implements InformationReadAccess {
                         producer,
                         binding,
                         expected,
-                        typing),
+                        typing,
+                        fence),
                 candidate);
-          });
+          },
+          fence);
     }
     if (typing != null) throw new CallerFault("Typed information is unavailable");
     return prepared(
@@ -1553,7 +1718,9 @@ public final class InformationCatalogue implements InformationReadAccess {
                 feedback,
                 session,
                 details,
-                producer));
+                producer,
+                fence),
+        fence);
   }
 
   private Admission reportUnchecked(
@@ -1566,10 +1733,11 @@ public final class InformationCatalogue implements InformationReadAccess {
       UUID feedback,
       String session,
       InformationReportDetails details,
-      String producer) {
+      String producer,
+      OperationFence fence) {
     return reportUnchecked(
         context, request, name, text, inputs, evidence, feedback, session, details, producer, null,
-        null, null);
+        null, null, fence);
   }
 
   private Admission reportUnchecked(
@@ -1585,7 +1753,8 @@ public final class InformationCatalogue implements InformationReadAccess {
       String producer,
       InformationContent.Binding binding,
       UUID expected,
-      InformationContent.Typing typing) {
+      InformationContent.Typing typing,
+      OperationFence fence) {
     if (text == null || text.isBlank() || inputs.isEmpty())
       throw new CallerFault("a research report needs text and input revisions");
     return transactions.inTransaction(
@@ -1614,7 +1783,8 @@ public final class InformationCatalogue implements InformationReadAccess {
                   false,
                   binding,
                   expected,
-                  typing);
+                  typing,
+                  fence);
           if (result.created()) {
             repository.recordReport(result, feedback, details, producer, evidence);
           }

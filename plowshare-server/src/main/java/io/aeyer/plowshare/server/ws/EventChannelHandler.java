@@ -9,15 +9,20 @@ import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.protocol.transport.ConcurrentDispatch;
+import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.agents.JobEvents;
 import io.aeyer.plowshare.server.agents.Watchers;
+import io.aeyer.plowshare.server.cache.ProjectionNotificationProperties;
 import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.events.SpeakerHandles;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.pool.OperationStatements;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -25,12 +30,16 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -597,9 +606,59 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
   private SocketAuthorization socketAuthorization;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  /**
+   * How long one request (or one socket's delivery fence) may reuse a session check that succeeded,
+   * and the snapshot source that gates it; see {@link RequestSessionValidity}. Zero, the default
+   * for fixtures and for disabled notifications, checks every time.
+   */
+  private Duration sessionCheckBound = Duration.ZERO;
+
+  private AuthoritySnapshots authoritySnapshots = AuthoritySnapshots.none();
+  private LongSupplier sessionClock = System::nanoTime;
+
+  @Autowired
   public void useSocketAuthorization(SocketAuthorization authorization) {
     this.socketAuthorization = authorization;
+  }
+
+  /**
+   * Bounds session-check reuse by {@code plowshare.projection-cache.notified.staleness} and the
+   * authority snapshot; with notifications disabled the operator chose exact checks, so nothing is
+   * reused.
+   */
+  @Autowired(required = false)
+  public void useSessionCheckReuse(
+      ProjectionNotificationProperties notified, AuthoritySnapshots snapshots) {
+    this.sessionCheckBound = notified.enabled() ? notified.staleness() : Duration.ZERO;
+    this.authoritySnapshots = Objects.requireNonNull(snapshots);
+  }
+
+  /** Test seam: the bound, snapshot source and clock that {@link RequestSessionValidity} uses. */
+  void configureSessionCheckReuse(
+      Duration bound, AuthoritySnapshots snapshots, LongSupplier nanos) {
+    this.sessionCheckBound = bound;
+    this.authoritySnapshots = snapshots;
+    this.sessionClock = nanos;
+  }
+
+  /**
+   * The account fence for one request or delivery: open socket and running delivery are cheap local
+   * facts and always read; the session itself goes through {@code session}, which reuses a success
+   * inside the bound. Null {@code session} means no authorization is composed.
+   */
+  private static Runnable fence(
+      WebSocketSession socket, Delivery delivery, RequestSessionValidity session) {
+    return () -> {
+      if (!delivery.running || !socket.isOpen()) throw new CallerFault("Query connection ended");
+      if (session != null) session.run();
+    };
+  }
+
+  private RequestSessionValidity sessionValidity(WebSocketSession socket) {
+    return socketAuthorization == null
+        ? null
+        : new RequestSessionValidity(
+            socketAuthorization, socket, sessionClock, sessionCheckBound, authoritySnapshots);
   }
 
   @Override
@@ -831,13 +890,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
                       (value, delivered) -> routeConcurrent(socket, delivery, value, delivered),
                       () -> delivery.disconnect("request execution"),
                       advertisedRequestDepth());
-          delivery.validity =
-              () -> {
-                if (!delivery.running
-                    || !socket.isOpen()
-                    || socketAuthorization != null && !socketAuthorization.current(socket))
-                  throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
-              };
+          // Per socket, not per request: the instance reuses a success only for the bound and
+          // rechecks after it, so a long-lived socket still sees a revocation within the bound.
+          // Unseeded: its first use checks, and the check then holds for the same bounded interval.
+          delivery.validity = fence(socket, delivery, sessionValidity(socket));
         }
       } else {
         delivery.domainSeen = true;
@@ -885,16 +941,20 @@ public final class EventChannelHandler extends TextWebSocketHandler
             Code.CAPACITY_EXHAUSTED, "Request queue is full; nothing was started, retry later"));
   }
 
-  private java.util.concurrent.CompletionStage<Void> routeConcurrent(
+  @SuppressWarnings("try")
+  private CompletionStage<Void> routeConcurrent(
       WebSocketSession socket,
       Delivery delivery,
       String frame,
       ConcurrentRequests.Delivery delivered) {
+    var requestSession = sessionValidity(socket);
+    // The entry check is this request's one session check; the instance carries its result to the
+    // handler, the post-handler fence, the disclosure fence and every wait iteration.
     if (!socket.isOpen()
         || !delivery.running
-        || socketAuthorization != null && !socketAuthorization.current(socket)) {
+        || requestSession != null && !requestSession.verify()) {
       delivered.run();
-      return java.util.concurrent.CompletableFuture.completedFuture(null);
+      return CompletableFuture.completedFuture(null);
     }
     try {
       var correlation = correlationOf(frame);
@@ -908,21 +968,22 @@ public final class EventChannelHandler extends TextWebSocketHandler
               delivery.transport instanceof PacketEventTransport
                   ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
                   : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
-              () -> {
-                if (!socket.isOpen()
-                    || !delivery.running
-                    || socketAuthorization != null && !socketAuthorization.current(socket))
-                  throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
-              });
-      var answer =
-          ConcurrentDispatch.TYPE.equals(type)
-              ? java.util.concurrent.CompletableFuture.completedFuture(
-                  Outcome.ok(
-                      new ConcurrentDispatch.Selected(
-                          ConcurrentDispatch.MODE,
-                          advertisedRequestDepth(),
-                          ConcurrentDispatch.MAX_ID_BYTES)))
-              : router().routeAsync(frame, asking);
+              fence(socket, delivery, requestSession));
+      CompletionStage<Outcome> answer;
+      // One socket request, counted on this request's own virtual thread (ConcurrentRequests starts
+      // one per request). Only the synchronous part of the handler is counted; work a handler
+      // completes on another thread is not part of this scope.
+      try (var ignored = OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
+        answer =
+            ConcurrentDispatch.TYPE.equals(type)
+                ? CompletableFuture.completedFuture(
+                    Outcome.ok(
+                        new ConcurrentDispatch.Selected(
+                            ConcurrentDispatch.MODE,
+                            advertisedRequestDepth(),
+                            ConcurrentDispatch.MAX_ID_BYTES)))
+                : router().routeAsync(frame, asking);
+      }
       return answer.thenAccept(
           outcome -> {
             if (!delivery.running || !socket.isOpen()) {
@@ -944,11 +1005,12 @@ public final class EventChannelHandler extends TextWebSocketHandler
               usageSubscriptions.ready(socket.getId(), initial.subscription());
           });
     } catch (RuntimeException invalid) {
-      return java.util.concurrent.CompletableFuture.failedFuture(invalid);
+      return CompletableFuture.failedFuture(invalid);
     }
   }
 
   /** Recheck authority at execution, because a queued operation may outlive its account session. */
+  @SuppressWarnings("try")
   private void routeFrame(WebSocketSession socket, Delivery delivery, String frame) {
     if (!socket.isOpen() || !delivery.running) return;
     if (socketAuthorization != null && !socketAuthorization.current(socket)) return;
@@ -963,11 +1025,11 @@ public final class EventChannelHandler extends TextWebSocketHandler
                 ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
                 : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
             () -> {
-              if (!socket.isOpen())
-                throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+              if (!socket.isOpen()) throw new CallerFault("Query connection ended");
             });
     Outcome outcome;
-    try {
+    // One socket request, counted on this thread, which runs it to completion here.
+    try (var ignored = OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
       outcome = router().route(frame, asking);
     } catch (RuntimeException unexpected) {
       // A SAFETY NET, NOT A SECOND MAPPING. FrameRouter already turns
@@ -999,7 +1061,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
               if (!delivery.running
                   || !socket.isOpen()
                   || socketAuthorization != null && !socketAuthorization.current(socket))
-                throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+                throw new CallerFault("Query connection ended");
               router().requireDisclosure(frame, asking, answer);
             }
             : delivery.validity);
@@ -1133,7 +1195,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
   private io.aeyer.plowshare.server.access.ProjectAuthorization projectAuthorization;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useProjectAuthorization(
       io.aeyer.plowshare.server.access.ProjectAuthorization authorization) {
     projectAuthorization = authorization;

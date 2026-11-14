@@ -22,6 +22,7 @@ from plowshare_privacy.tool_journal_upgrade import (
     DEVICE_DECLARATIONS,
     LEGACY_DECLARATIONS,
     PAGED_DECLARATIONS,
+    REFERENCE_DECLARATIONS,
     open_tool_journal,
     receipt_stages,
 )
@@ -34,6 +35,8 @@ PAGED_BINDING = "c2374bb551061811a7287459a45aa0a0cdbe83002e134de0effc09bdba3c55a
 DEVICE_BINDING = "4f96e9bae4283288546bf98b39386e13f2043d54054cc70a5444272794f753ea"
 # The twelve-tool assistant binding, frozen the same way.
 ASSISTANT_BINDING = "28bf816e886374905526e1658ac0a8b64373da1745eb496282f8cc07c8d651ea"
+# The thirteen-tool reference binding (before the device search), frozen the same way.
+REFERENCE_BINDING = "4e1e8e4c9eebc37e9026b6ab5296f003be2949555d2edc84c245d5b73d8a9e99"
 
 
 def binding(declarations: tuple[ToolDeclaration, ...]) -> str:
@@ -265,7 +268,8 @@ class DeviceToolTransitionTest(unittest.TestCase):
             self.assertFalse((directory.parent / "relay-tools-paged").exists())
             self.assertFalse((directory.parent / "relay-tools-devices").exists())
             self.assertFalse((directory.parent / "relay-tools-assistant").exists())
-            self.assertTrue((directory.parent / "relay-tools-references").is_dir())
+            self.assertFalse((directory.parent / "relay-tools-references").exists())
+            self.assertTrue((directory.parent / "relay-tools-lookup").is_dir())
 
 
 class AssistantToolTransitionTest(unittest.TestCase):
@@ -411,6 +415,11 @@ class ReferenceToolTransitionTest(unittest.TestCase):
             references = directory.parent / "relay-tools-references"
             marker = json.loads((references / "transition.json").read_text())
             self.assertEqual(marker["receipts"], len(retained))
+            self.assertEqual(marker["target"], REFERENCE_BINDING)
+            marker = json.loads(
+                (directory.parent / "relay-tools-lookup/transition.json").read_text()
+            )
+            self.assertEqual(marker["receipts"], len(retained))
             self.assertEqual(marker["target"], binding(DECLARATIONS))
             # The newest journal holds the full binding, so the SDK fence
             # refuses to open it with the older one.
@@ -427,3 +436,65 @@ class ReferenceToolTransitionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Foreign tool transition"):
                 with open_tool_journal(directory, "fixture", "scanner", "owner"):
                     self.fail("changed assistant history admitted")
+
+
+class LookupTransitionTest(unittest.TestCase):
+    def test_reference_binding_is_frozen_and_only_query_is_added(self) -> None:
+        self.assertEqual(binding(REFERENCE_DECLARATIONS), REFERENCE_BINDING)
+        self.assertNotEqual(binding(DECLARATIONS), REFERENCE_BINDING)
+        before = {tool.name: tool for tool in REFERENCE_DECLARATIONS}
+        after = {tool.name: tool for tool in DECLARATIONS}
+        self.assertEqual(set(before), set(after))
+        changed = {name for name in after if after[name] != before[name]}
+        self.assertEqual(changed, {"network_devices"})
+        added = {p.name: p for p in after["network_devices"].parameters}.keys() - {
+            p.name for p in before["network_devices"].parameters
+        }
+        self.assertEqual(added, {"query"})
+        query = next(
+            p for p in after["network_devices"].parameters if p.name == "query"
+        )
+        self.assertEqual((query.type, query.required), ("STRING", False))
+
+    def test_references_journal_moves_to_lookup_without_losing_receipts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "relay-tools"
+            references = directory.parent / "relay-tools-references"
+            configuration = deployment_config(
+                "fixture", "scanner", "owner", REFERENCE_DECLARATIONS
+            )
+            # A deployment whose fresh install ran the thirteen-tool collector,
+            # with work in every phase, including uncertain ones.
+            with SqliteToolJournal(references, configuration=configuration) as store:
+                for phase in range(4):
+                    for stage in receipt_stages(receipt())[: phase + 1]:
+                        store.save(stage)
+                retained = store.all()
+            (references / "transition.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "source": None,
+                        "target": REFERENCE_BINDING,
+                        "receipts": 0,
+                        "digest": hashlib.sha256(b"[]").hexdigest(),
+                    }
+                )
+            )
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(current.all(), retained)
+            lookup = directory.parent / "relay-tools-lookup"
+            marker = json.loads((lookup / "transition.json").read_text())
+            self.assertEqual(marker["receipts"], len(retained))
+            self.assertEqual(marker["target"], binding(DECLARATIONS))
+            # Reopening is stable; new work after the copy means an older
+            # binary ran against the reference journal, and it is refused.
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(current.all(), retained)
+            with SqliteToolJournal(references, configuration=configuration) as store:
+                store.save(receipt_stages(receipt())[0])
+            with self.assertRaisesRegex(ValueError, "Foreign tool transition"):
+                with open_tool_journal(directory, "fixture", "scanner", "owner"):
+                    self.fail("changed reference history admitted")
