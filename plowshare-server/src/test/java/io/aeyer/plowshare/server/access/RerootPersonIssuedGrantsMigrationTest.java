@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.archive.ProjectRole;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -541,5 +543,86 @@ class RerootPersonIssuedGrantsMigrationTest {
 
     assertEquals(before, liveAccess());
     assertRevokedBySystem(samTwo);
+  }
+
+  @Test
+  void migration_refuses_a_missing_root() {
+    // The root is immutable and referenced, so it cannot be deleted. Instead this test schema is
+    // tampered with directly: drop the root/lineage CHECK, suspend the grant triggers, and turn the
+    // root into an ordinary row so no ROOT_POLICY grant remains.
+    UUID root = root();
+    jdbc.execute(
+        "DO $$ DECLARE c TEXT; BEGIN SELECT conname INTO STRICT c FROM pg_constraint"
+            + " WHERE conrelid='authority_grants'::regclass AND contype='c'"
+            + " AND pg_get_constraintdef(oid) LIKE '%ROOT_POLICY%issuing_grant IS NULL%';"
+            + " EXECUTE format('ALTER TABLE authority_grants DROP CONSTRAINT %I',c); END $$");
+    jdbc.execute("ALTER TABLE authority_grants DISABLE TRIGGER USER");
+    jdbc.update("UPDATE authority_grants SET provenance='ROLE' WHERE id=?", root);
+    jdbc.execute("ALTER TABLE authority_grants ENABLE TRIGGER USER");
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM authority_grants WHERE provenance='ROOT_POLICY'", Integer.class));
+
+    var failure = assertThrows(FlywayException.class, () -> migrateTo("261"));
+    assertTrue(
+        failure.getMessage().contains("query returned no rows"),
+        () -> "expected a STRICT root failure but was: " + failure.getMessage());
+  }
+
+  @Test
+  void person_issued_grant_under_delegated_grant_is_rerooted() {
+    // admin control -> mia (person) -> mia/helper (self, forced MANAGER) -> tom (agent-issued)
+    // -> sam (person-issued by tom). Pass 1 re-roots mia and sam; pass 2 re-parents helper and tom.
+    UUID mia = issueMembership("one", "mia", "admin", "MANAGER");
+    UUID helper = roleGrant("mia", "helper", "one", "MANAGER", "mia", null, mia, true);
+    UUID tom = roleGrant("tom", null, "one", "MANAGER", "mia", "helper", helper, false);
+    UUID sam = roleGrant("sam", null, "one", "READER", "tom", null, tom, false);
+    assertTrue(live(sam));
+    var before = liveAccess();
+
+    migrateTo("261");
+
+    assertEquals(before, liveAccess());
+    UUID samReissued = successor(sam);
+    assertTrue(live(samReissued));
+    assertEquals(root(), uuidColumn("issuing_grant", samReissued));
+    // sam was reissued while tom's original grant was still live; that grant is recorded as the
+    // authority even though pass 2 later re-parents tom.
+    assertEquals(tom, uuidColumn("exercised_grant", samReissued));
+    assertRevokedBySystem(sam);
+    UUID helperReissued = successor(helper);
+    UUID tomReissued = successor(tom);
+    assertEquals(current("MEMBERSHIP", "one", "mia"), uuidColumn("issuing_grant", helperReissued));
+    assertEquals(helperReissued, uuidColumn("issuing_grant", tomReissued));
+    assertTrue(live(tomReissued));
+    revoke(tomReissued);
+    assertTrue(live(samReissued));
+  }
+
+  @Test
+  void three_level_person_chain_reroots() {
+    UUID mia = issueMembership("one", "mia", "admin", "MANAGER");
+    UUID tom = roleGrant("tom", null, "one", "MANAGER", "mia", null, mia, false);
+    UUID sam = roleGrant("sam", null, "one", "READER", "tom", null, tom, false);
+
+    migrateTo("261");
+
+    UUID miaReissued = current("MEMBERSHIP", "one", "mia");
+    UUID tomReissued = successor(tom);
+    UUID samReissued = successor(sam);
+    assertEquals(control(), uuidColumn("exercised_grant", miaReissued));
+    assertEquals(mia, uuidColumn("exercised_grant", tomReissued));
+    assertEquals(tom, uuidColumn("exercised_grant", samReissued));
+    for (UUID reissued : List.of(miaReissued, tomReissued, samReissued)) {
+      assertEquals(root(), uuidColumn("issuing_grant", reissued));
+      assertTrue(live(reissued));
+    }
+    for (UUID old : List.of(mia, tom, sam)) {
+      assertRevokedBySystem(old);
+    }
+    revoke(miaReissued);
+    revoke(tomReissued);
+    assertTrue(live(samReissued));
   }
 }

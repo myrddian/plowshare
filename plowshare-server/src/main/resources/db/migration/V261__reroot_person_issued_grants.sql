@@ -34,6 +34,9 @@
 -- subject, agent, role, scope and expiry as the old parent, so the unchanged trigger admits it.
 -- Processed shallowest first, so a parent's new id exists before its children are copied.
 --
+-- Self-check: before committing, the multiset of live (subject_account, subject_agent, scope_id,
+-- role_id) is compared with the snapshot's; any difference raises and rolls the migration back.
+--
 -- Revoke always precedes insert so the one-current MEMBERSHIP / ADMIN_CONTROL per scope and
 -- subject indexes hold. Revocations and issues are recorded in authority_grant_audit by the
 -- existing triggers (an exercised reissue's audit authority is the exercised grant).
@@ -41,9 +44,14 @@ DO $$
 DECLARE root authority_grants; old authority_grants; plan UUID[]; alive BOOLEAN[]; i INTEGER;
     parent UUID; reissued UUID;
 BEGIN
-    SELECT * INTO root FROM authority_grants WHERE provenance='ROOT_POLICY';
-    -- Both tables live only for this migration's transaction.
-    CREATE TEMP TABLE reroot_live ON COMMIT DROP AS SELECT id,depth FROM authority_live_grants();
+    -- STRICT: a missing or duplicated root must fail the migration, not make every comparison
+    -- with root.id NULL and silently select nothing.
+    SELECT * INTO STRICT root FROM authority_grants WHERE provenance='ROOT_POLICY';
+    -- Both tables live only for this migration's transaction. The snapshot keeps each live grant's
+    -- access tuple for the closing self-check.
+    CREATE TEMP TABLE reroot_live ON COMMIT DROP AS
+        SELECT l.id,l.depth,g.subject_account,g.subject_agent,g.scope_id,g.role_id
+        FROM authority_live_grants() l JOIN authority_grants g ON g.id=l.id;
     ALTER TABLE reroot_live ADD PRIMARY KEY (id);
     CREATE TEMP TABLE reroot_moved(old_id UUID PRIMARY KEY, new_id UUID NOT NULL) ON COMMIT DROP;
 
@@ -94,4 +102,13 @@ BEGIN
         RETURNING id INTO reissued;
         INSERT INTO reroot_moved VALUES(old.id,reissued);
     END LOOP;
+
+    -- Self-check: live access must be exactly the snapshot's, as a multiset (EXCEPT ALL treats
+    -- NULL subject_agent values as equal).
+    CREATE TEMP TABLE reroot_after ON COMMIT DROP AS
+        SELECT g.subject_account,g.subject_agent,g.scope_id,g.role_id
+        FROM authority_live_grants() l JOIN authority_grants g ON g.id=l.id;
+    IF EXISTS((SELECT subject_account,subject_agent,scope_id,role_id FROM reroot_live) EXCEPT ALL TABLE reroot_after)
+        OR EXISTS(TABLE reroot_after EXCEPT ALL (SELECT subject_account,subject_agent,scope_id,role_id FROM reroot_live)) THEN
+        RAISE EXCEPTION 'Re-root changed the live grant set'; END IF;
 END $$;
