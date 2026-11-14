@@ -4088,11 +4088,7 @@ public final class JobRuntime {
                     // The result and tool.post are both skipped: nothing the tool
                     // returned reaches the model or a hook. The run ends at the next
                     // step's check, as it would for any other revocation.
-                    result =
-                        "the result of '"
-                            + wanted.name()
-                            + "' was withheld because this run's authority changed while it"
-                            + " ran. Any change the tool made has already happened.";
+                    result = withheldForAuthority(wanted.name());
                     told = ToolLines.ERROR;
                   } else {
                     ToolPost postTool =
@@ -4152,6 +4148,12 @@ public final class JobRuntime {
                       steps - 1,
                       modelCalls,
                       child.detail());
+                } catch (OperationFence.Withdrawn withdrawn) {
+                  // The tool's in-transaction write fence refused: its transaction rolled back,
+                  // but earlier committed units (a receipt, a log) may stand. Same words as the
+                  // after-tool check, never the tool's own "refused", and tool.post is skipped.
+                  result = withheldForAuthority(wanted.name());
+                  told = ToolLines.ERROR;
                 } catch (RuntimeException failed) {
                   if (failed instanceof SessionGoneException) {
                     // ABOVE dependencyFailure AND NOT INSIDE IT, AND THE
@@ -4717,10 +4719,17 @@ public final class JobRuntime {
     // RunAdmission, then the retained operation when there is one -- but inside the write, where
     // a revocation still rolls the write back. Read through the field at call time, as the other
     // checks here are. docs/operation-write-fences.md lists which tools are fenced.
+    // With no admission and no operation it does nothing, exactly as the after-tool block. A
+    // refusal is rethrown as OperationFence.Withdrawn, which tools cannot mistake for an ordinary
+    // CallerFault "refused" result; the tool loop maps it to the withheld-result wording.
     OperationFence writeFence =
         () -> {
-          admittedAuthority.run();
-          if (operation != null) operations.require(operation);
+          try {
+            admittedAuthority.run();
+            if (operation != null) operations.require(operation);
+          } catch (CallerFault withdrawn) {
+            throw new OperationFence.Withdrawn(withdrawn);
+          }
         };
     Map<String, AgentTool> offered = new LinkedHashMap<>();
     for (String name : definition.tools()) {
@@ -5103,6 +5112,14 @@ public final class JobRuntime {
           (name, tool) -> messaging.protect(tool, definition, transcript.conversationId()));
     reads.offered(offered.keySet());
     return offered;
+  }
+
+  /** What the model is told when authority changed while a tool ran. */
+  private static String withheldForAuthority(String tool) {
+    return "the result of '"
+        + tool
+        + "' was withheld because this run's authority changed while it"
+        + " ran. Any change the tool made has already happened.";
   }
 
   /**

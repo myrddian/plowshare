@@ -167,7 +167,7 @@ public final class InformationTool implements AgentTool {
    * durable ticket that a worker admits later, so it is not fenced here.
    */
   public InformationTool withWriteFence(OperationFence fence) {
-    this.writeFence = java.util.Objects.requireNonNull(fence);
+    this.writeFence = Objects.requireNonNull(fence);
     return this;
   }
 

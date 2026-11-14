@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
 import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
@@ -107,6 +109,21 @@ class RelayPublishToolTest {
     tool.calledAs("call");
     tool.run("{\"topic\":\"input\",\"text\":\"text\"}", Home.of("research"), owner);
     verify(publishing).publish(eq("research"), any(), any(), eq(fence));
+  }
+
+  @Test
+  void a_fence_refusal_is_not_reported_as_a_refused_publication() {
+    var withdrawn = new OperationFence.Withdrawn(new AuthorityWithdrawnException("revoked"));
+    when(publishing.publish(any(), any(), any(), any())).thenThrow(withdrawn);
+    // A replay of a committed call may be refused here; "refused" would tell the model it did not
+    // happen, so the refusal propagates for JobRuntime to report as withheld.
+    assertSame(
+        withdrawn,
+        assertThrows(
+            OperationFence.Withdrawn.class,
+            () ->
+                tool("call")
+                    .run("{\"topic\":\"input\",\"text\":\"text\"}", Home.of("research"), owner)));
   }
 
   @Test

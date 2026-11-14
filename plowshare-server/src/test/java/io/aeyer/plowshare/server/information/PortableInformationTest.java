@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.*;
 import io.aeyer.plowshare.server.access.EffectiveProjectPermissions;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.faults.*;
 import java.nio.charset.StandardCharsets;
@@ -160,7 +161,8 @@ class PortableInformationTest {
             List<UUID> sources,
             String session,
             Class<T> resultType,
-            Supplier<T> transition) {
+            Supplier<T> transition,
+            OperationFence fence) {
           return transition.get();
         }
 
@@ -173,7 +175,8 @@ class PortableInformationTest {
             List<UUID> sources,
             String session,
             Class<T> resultType,
-            Supplier<Prepared<T>> prepare) {
+            Supplier<Prepared<T>> prepare,
+            OperationFence fence) {
           return prepare.get().transition().get();
         }
       };

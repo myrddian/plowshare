@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -123,10 +124,34 @@ public final class InformationCatalogue implements InformationReadAccess {
       String session,
       Class<T> type,
       java.util.function.Supplier<T> transition) {
-    return writeGates == null
-        ? transition.get()
-        : writeGates.execute(
-            context, request, operation, identity, sources, session, type, transition);
+    return prepared(
+        context,
+        request,
+        operation,
+        identity,
+        sources,
+        session,
+        type,
+        transition,
+        OperationFence.none());
+  }
+
+  private <T extends InformationGateResult> T prepared(
+      InformationContext context,
+      UUID request,
+      String operation,
+      InformationGateIdentity identity,
+      List<UUID> sources,
+      String session,
+      Class<T> type,
+      java.util.function.Supplier<T> transition,
+      OperationFence fence) {
+    if (writeGates == null) {
+      // No gate transaction to place it in; the transition's own transaction runs the fence.
+      return transition.get();
+    }
+    return writeGates.execute(
+        context, request, operation, identity, sources, session, type, transition, fence);
   }
 
   private InformationAcquisitions acquisitions;
@@ -238,7 +263,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       UUID expectedRevision,
       InformationContent.Typing typing,
       OperationFence fence) {
-    java.util.Objects.requireNonNull(fence);
+    Objects.requireNonNull(fence);
     access.requireWork(context);
     if (context.selection().scope() == InformationContext.Scope.GLOBAL_READ)
       throw new CallerFault(
@@ -438,7 +463,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       UUID expectedRevision,
       InformationContent.Typing typing,
       OperationFence fence) {
-    java.util.Objects.requireNonNull(fence);
+    Objects.requireNonNull(fence);
     if (expectedRevision != null && typing == null)
       throw new CallerFault("expectedRevision requires explicit typing");
     if (typing != null)
@@ -480,7 +505,8 @@ public final class InformationCatalogue implements InformationReadAccess {
                         context, request, name, retained, mediaType, sourceUri, "source", List.of(),
                         List.of(), null, session, 0, false, null, null, null, fence),
                 null);
-          });
+          },
+          fence);
     }
     return prepared(
         context,
@@ -493,7 +519,8 @@ public final class InformationCatalogue implements InformationReadAccess {
         () ->
             admit(
                 context, request, name, retained, mediaType, sourceUri, "source", List.of(),
-                List.of(), null, session, 0, false, null, null, null, fence));
+                List.of(), null, session, 0, false, null, null, null, fence),
+        fence);
   }
 
   private Admission typedSource(
@@ -544,7 +571,8 @@ public final class InformationCatalogue implements InformationReadAccess {
                       context, request, name, retained, mediaType, sourceUri, "source", List.of(),
                       List.of(), null, session, 0, false, binding, expected, typing, fence),
               candidate);
-        });
+        },
+        fence);
   }
 
   /**
@@ -571,7 +599,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       InformationContent.Typing typing,
       String session,
       OperationFence fence) {
-    java.util.Objects.requireNonNull(fence);
+    Objects.requireNonNull(fence);
     if (contentAuthority == null || projections == null || writeGates == null)
       throw new CallerFault("Typed information is unavailable");
     access.requireWork(context);
@@ -591,9 +619,12 @@ public final class InformationCatalogue implements InformationReadAccess {
           var binding = contentAuthority.resolve(context, name, expected, typing).orElse(null);
           var prepared =
               transactions.inTransaction(
-                  () ->
-                      projections.prepare(
-                          context, request, expected, binding, configuration.get()));
+                  () -> {
+                    // Preparation retains snapshot rows; a revoked run retains none.
+                    fence.require();
+                    return projections.prepare(
+                        context, request, expected, binding, configuration.get());
+                  });
           var candidate =
               new InformationContent.Candidate(
                   expected,
@@ -624,7 +655,8 @@ public final class InformationCatalogue implements InformationReadAccess {
                 return admission;
               },
               candidate);
-        });
+        },
+        fence);
   }
 
   public InformationContent.View content(InformationContext context, UUID revision) {
@@ -1433,7 +1465,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       UUID request,
       String session,
       OperationFence fence) {
-    java.util.Objects.requireNonNull(fence);
+    Objects.requireNonNull(fence);
     String retained = text(context, revision);
     if (start < 0
         || end <= start
@@ -1454,7 +1486,8 @@ public final class InformationCatalogue implements InformationReadAccess {
             () ->
                 new InformationGateResult.Recorded(
                     evidenceUnchecked(
-                        context, revision, start, end, quote, locator, request, fence)))
+                        context, revision, start, end, quote, locator, request, fence)),
+            fence)
         .id();
   }
 
@@ -1581,7 +1614,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       UUID expected,
       InformationContent.Typing typing,
       OperationFence fence) {
-    java.util.Objects.requireNonNull(fence);
+    Objects.requireNonNull(fence);
     if (expected != null && typing == null)
       throw new CallerFault("expectedRevision requires explicit typing");
     if (typing != null
@@ -1654,7 +1687,8 @@ public final class InformationCatalogue implements InformationReadAccess {
                         typing,
                         fence),
                 candidate);
-          });
+          },
+          fence);
     }
     if (typing != null) throw new CallerFault("Typed information is unavailable");
     return prepared(
@@ -1684,7 +1718,8 @@ public final class InformationCatalogue implements InformationReadAccess {
                 session,
                 details,
                 producer,
-                fence));
+                fence),
+        fence);
   }
 
   private Admission reportUnchecked(

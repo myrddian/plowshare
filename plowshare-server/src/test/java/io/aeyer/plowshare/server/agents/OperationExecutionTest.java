@@ -9,6 +9,7 @@ import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.access.AuthorityAction;
 import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
 import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.hooks.HookContext;
 import io.aeyer.plowshare.server.hooks.Hooks;
@@ -173,6 +174,76 @@ class OperationExecutionTest {
     assertFalse(second.contains("fault in the tool"), second);
     assertFalse(second.contains("private tool result"), second);
     assertEquals(0, postCalls.get(), "tool.post must not see a withheld result");
+  }
+
+  @Test
+  void a_write_fence_refusal_inside_a_tool_reaches_the_model_as_withheld_not_refused() {
+    var dispatcher = mock(LlmDispatcher.class);
+    var authority = mock(OperationAuthority.class);
+    var admission = mock(OperationAuthority.Admission.class);
+    when(admission.executor()).thenReturn("alice");
+    when(admission.home()).thenReturn(Home.of("one"));
+    when(admission.actions())
+        .thenReturn(Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.RUN_MODEL));
+    when(authority.admit(any(), any(), any())).thenReturn(admission);
+    // The tool's in-transaction fence refused; the tool's own CallerFault handling must not see it.
+    AgentTool fenced =
+        new AgentTool() {
+          public ToolSchema schema() {
+            return ToolSchema.from("fenced", "fixture", Map.of("type", "object"));
+          }
+
+          public String run(String arguments, Home home) {
+            throw new OperationFence.Withdrawn(new AuthorityWithdrawnException("revoked"));
+          }
+        };
+    var histories = new ArrayList<String>();
+    var calls = new AtomicInteger();
+    when(dispatcher.stream(any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              histories.add(String.valueOf(call.getArguments()[0]));
+              return calls.incrementAndGet() == 1
+                  ? new Completion(
+                      "",
+                      "tool_calls",
+                      TokenUsage.UNKNOWN,
+                      List.of(new ToolCall("c1", "fenced", "{}")))
+                  : new Completion("done", "stop", TokenUsage.UNKNOWN, List.of());
+            });
+    var runtime = new JobRuntime(authority, dispatcher, List.of(fenced));
+    var postCalls = new AtomicInteger();
+    runtime.useHooks(
+        new Hooks() {
+          @Override
+          public ToolPost toolPost(
+              HookContext context, String tool, String argumentsJson, String result) {
+            postCalls.incrementAndGet();
+            return new ToolPost(result, List.of());
+          }
+        });
+    var definition =
+        new AgentDefinition(
+            "chat", "chat", "fast", List.of("fenced"), List.of(), List.of(), 4, 4, "Answer");
+    runtime.run(
+        definition,
+        "hello",
+        Home.of("one"),
+        Budget.of(4),
+        () -> false,
+        null,
+        JobWatch.UNWATCHED,
+        mock(Transcript.class, CALLS_REAL_METHODS),
+        TurnCap.of(4),
+        List.of(),
+        "alice",
+        false);
+    String second = histories.get(1);
+    assertTrue(second.contains("withheld because this run's authority changed"), second);
+    assertTrue(second.contains("Any change the tool made has already happened."), second);
+    assertFalse(second.contains("refused"), second);
+    assertFalse(second.contains("fault in the tool"), second);
+    assertEquals(0, postCalls.get(), "tool.post must not see a fence refusal");
   }
 
   @Test

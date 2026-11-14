@@ -60,7 +60,7 @@ class InformationCatalogueFenceTest {
     recording(gateWork, "gate");
     // The write gate's committing transaction, reduced to its shape: prepare outside, then run
     // the prepared transition inside one unit of work.
-    when(gates.executePrepared(any(), any(), anyString(), any(), any(), any(), any(), any()))
+    when(gates.executePrepared(any(), any(), anyString(), any(), any(), any(), any(), any(), any()))
         .thenAnswer(
             call -> {
               Supplier<InformationTransitions.Prepared<InformationGateResult>> prepare =
@@ -68,7 +68,7 @@ class InformationCatalogueFenceTest {
               var prepared = prepare.get();
               return gateWork.inTransaction(() -> prepared.transition().get());
             });
-    when(gates.execute(any(), any(), anyString(), any(), any(), any(), any(), any()))
+    when(gates.execute(any(), any(), anyString(), any(), any(), any(), any(), any(), any()))
         .thenAnswer(
             call -> {
               Supplier<InformationGateResult> transition = call.getArgument(7);
@@ -159,6 +159,20 @@ class InformationCatalogueFenceTest {
             fence);
 
     assertEquals(admitted, result);
+    // The gate receives the run's fence for its own transactions and hook chain.
+    verify(gates)
+        .executePrepared(
+            eq(context),
+            eq(request),
+            eq("content.revise"),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            eq(fence));
+    // Snapshot preparation, a transaction of the catalogue's own, is fenced too.
+    assertEquals(List.of("lock", "tx:begin", "fence", "tx:commit"), events.subList(0, 4));
     var order = inOrder(gateWork, repository, fence, projections);
     order.verify(gateWork).inTransaction(any());
     order.verify(repository).lockResource(context, expected, false);
@@ -174,10 +188,13 @@ class InformationCatalogueFenceTest {
   @Test
   void informationReviseRefusedByTheFenceRollsBackBeforeCopying() {
     preparedRevision();
+    // The snapshot preparation passes; the revocation lands before the commit transaction.
+    var checks = new int[] {0};
     doAnswer(
             call -> {
               events.add("fence");
-              throw new AuthorityWithdrawnException("revoked");
+              if (checks[0]++ > 0) throw new AuthorityWithdrawnException("revoked");
+              return null;
             })
         .when(fence)
         .require();

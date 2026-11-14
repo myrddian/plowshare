@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.OperationFence;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -60,7 +61,8 @@ public final class InformationWriteGates implements UsageAware, InformationTrans
       List<UUID> sources,
       String session,
       Class<T> resultType,
-      Supplier<T> transition) {
+      Supplier<T> transition,
+      OperationFence fence) {
     return executePrepared(
         context,
         request,
@@ -69,7 +71,8 @@ public final class InformationWriteGates implements UsageAware, InformationTrans
         sources,
         session,
         resultType,
-        () -> new InformationTransitions.Prepared<>(transition, null));
+        () -> new InformationTransitions.Prepared<>(transition, null),
+        fence);
   }
 
   @Override
@@ -81,13 +84,23 @@ public final class InformationWriteGates implements UsageAware, InformationTrans
       List<UUID> sources,
       String session,
       Class<T> resultType,
-      Supplier<InformationTransitions.Prepared<T>> prepare) {
+      Supplier<InformationTransitions.Prepared<T>> prepare,
+      OperationFence fence) {
+    Objects.requireNonNull(fence);
     access.requireSelection(context);
     if (request == null) throw new CallerFault("stage transition needs a stable requestId");
     String fingerprint = InformationGateFingerprint.of(operation, context.selection(), identity);
     var receipt =
         work.inTransaction(
-            () -> repository.claim(context.account(), request, fingerprint, operation, resultType));
+            () -> {
+              var claimed =
+                  repository.claim(context.account(), request, fingerprint, operation, resultType);
+              // After the claim's request lock and before a completed receipt is replayed: a
+              // revoked run neither claims new work nor learns a retained outcome here. The
+              // refusal rolls the claim back, so no receipt row is left.
+              fence.require();
+              return claimed;
+            });
     if (receipt.state() == InformationGateRepository.State.COMPLETED) return receipt.response();
     final InformationTransitions.Prepared<T> prepared;
     try {
@@ -105,6 +118,8 @@ public final class InformationWriteGates implements UsageAware, InformationTrans
       if (receipt.state() != InformationGateRepository.State.APPROVED) {
         String log = receipt.log();
         if (log == null) {
+          // The log is created outside any transaction, so it is fenced just before it.
+          fence.require();
           // The selection's own execution home, not its project column: a PERSONAL selection is
           // forbidden to name a project, so reading the column alone sent every personal upload's
           // pipeline log to the global tier, which is no execution scope and is refused at
@@ -129,6 +144,7 @@ public final class InformationWriteGates implements UsageAware, InformationTrans
           work.inTransaction(
               () -> {
                 fence(context, request, receipt);
+                fence.require();
                 repository.opened(context.account(), request, opened);
                 return null;
               });
@@ -150,18 +166,31 @@ public final class InformationWriteGates implements UsageAware, InformationTrans
                         prepared.candidate()));
         Hooks chain = Hooks.chain(run.forModel(null), configured);
         var shown = new StageShown(operation, operation, 0, 1);
+        // No hook (which may call a model) fires for a revoked run.
+        fence.require();
         Gate pre = chain.stagePre(hookContext, new StageStart(shown, null, null));
-        repository.preGate(context.account(), request, receipt.token(), pre);
+        work.inTransaction(
+            () -> {
+              fence.require();
+              repository.preGate(context.account(), request, receipt.token(), pre);
+              return null;
+            });
         if (pre.isDenied()) throw new CallerFault(pre.denied());
         Gate post =
             chain.stagePost(
                 hookContext,
                 new StageDone(shown, "validated information transition prepared", null));
-        repository.postGate(context.account(), request, receipt.token(), post);
+        work.inTransaction(
+            () -> {
+              fence.require();
+              repository.postGate(context.account(), request, receipt.token(), post);
+              return null;
+            });
         if (post.isDenied()) throw new CallerFault(post.denied());
         work.inTransaction(
             () -> {
               fence(context, request, receipt);
+              fence.require();
               inputs.requireLog(openedLog(context, request), context.account());
               repository.approved(context.account(), request);
               return null;
@@ -170,6 +199,7 @@ public final class InformationWriteGates implements UsageAware, InformationTrans
       return work.inTransaction(
           () -> {
             fence(context, request, receipt);
+            fence.require();
             access.requireSelection(context);
             inputs.requireLog(openedLog(context, request), context.account());
             T result = prepared.transition().get();
