@@ -34,7 +34,7 @@ from typing import Protocol, runtime_checkable
 
 import aiohttp
 
-from .addressing import AddressingSample, DhcpScope, Lease, Reservation
+from .addressing import AddressingSample, DhcpScope, Lease, Reservation, dhcp_lan
 from .contracts import (
     Capability,
     DeviceIdentity,
@@ -170,13 +170,18 @@ def _dhcp_network(router: object, netmask: object) -> ipaddress.IPv4Network:
 
     The netmask must be a contiguous, nonzero netmask (Pi-hole reports an empty
     or zero netmask when it is left to interface discovery, which this read
-    cannot see); a hostmask is not accepted.
+    cannot see); a hostmask is not accepted. The network must pass the same
+    private-LAN allowlist as every connector (``dhcp_lan``); anything else
+    raises ValueError, which the caller reports as an invalid range.
     """
     gateway, mask = _ipv4(router), int(_ipv4(netmask))
     hosts = ~mask & 0xFFFFFFFF
     if gateway.is_unspecified or mask == 0 or hosts & (hosts + 1):
         raise ValueError("Invalid Pi-hole DHCP network")
-    return ipaddress.IPv4Network((gateway, 32 - hosts.bit_length()), strict=False)
+    network = ipaddress.IPv4Network((gateway, 32 - hosts.bit_length()), strict=False)
+    if not dhcp_lan(network):
+        raise ValueError("Pi-hole DHCP network is not a private LAN")
+    return network
 
 
 def _reservation(entry: object) -> tuple[str, str]:

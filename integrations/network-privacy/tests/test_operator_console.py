@@ -43,6 +43,7 @@ from plowshare_privacy.contracts import (
     DeviceIdentity,
     DeviceLabel,
     PiHolePlan,
+    ServicePlan,
     TcpObservation,
 )
 from plowshare_privacy.device_assessments import AssessmentJournal, DeviceAssessments
@@ -787,6 +788,39 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
             await self.console.accept_move(old, new, identity.device_id)
             self.assertEqual(settings.save.await_args.args[0].targets, (new,))
             self.assertEqual(identify.await_count, 4)
+            # The configured service's capabilities and id, not the defaults.
+            [service] = self.worker.config.collection.sources
+            source.assert_called_with(
+                plan, capabilities=service.capabilities, service=service.id
+            )
+
+    async def test_move_detection_needs_the_pihole_network_table(self) -> None:
+        plan = PiHolePlan.decode(
+            {
+                "origin": "http://pihole.invalid",
+                "passwordEnvironment": "PRIVACY_FIXTURE_PASSWORD",
+            }
+        )
+        self.worker.config = replace(
+            self.config,
+            collection=replace(
+                self.config.collection,
+                sources=(
+                    ServicePlan(
+                        "pihole", "dns", frozenset({"dns_queries", "dhcp_leases"}), plan
+                    ),
+                ),
+            ),
+        )
+        discovery = AsyncMock(spec=LocalDeviceDiscovery)
+        discovery.latest = lambda: DiscoveryReport(
+            "10.1.2.0/24", (443,), 254, (DiscoveredDevice("10.1.2.22", (443,), ()),), 0
+        )
+        self.console.discovery = discovery
+        with patch("plowshare_privacy.console.PiHoleV6") as source:
+            with self.assertRaisesRegex(ValueError, "Pi-hole network table"):
+                await self.console.moved_devices()
+            source.assert_not_called()
 
     async def test_pihole_save_never_tests_connection_and_can_wait_for_activation(
         self,

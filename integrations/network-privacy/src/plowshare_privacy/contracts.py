@@ -757,8 +757,11 @@ def legacy_capabilities(
 class ServicePlan:
     """One configured external service and the capabilities enabled on it.
 
-    ``legacy`` marks a service decoded from the old ``pihole``/``unifi`` keys,
-    whose scope fingerprint keeps its historical encoding.
+    ``legacy`` records that a service was decoded from the old
+    ``pihole``/``unifi`` keys. It is informational only: it does not drive the
+    scope fingerprint. ``scope_fingerprint`` keeps the historical encoding
+    whenever every service reads exactly its kind's legacy capabilities
+    (ignoring ``traffic_counters``), whether or not this flag is set.
     """
 
     kind: ConnectorKind

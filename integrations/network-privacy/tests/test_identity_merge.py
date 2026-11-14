@@ -1,8 +1,9 @@
 import unittest
 from dataclasses import replace
 
+from plowshare_privacy import collection
 from plowshare_privacy.contracts import DeviceIdentity
-from plowshare_privacy.identity_merge import PRECEDENCE, merge_identities
+from plowshare_privacy.identity_merge import PRECEDENCE, merge_identities, rank
 from plowshare_privacy.identity_source import IdentitySample
 
 SCOPE = frozenset({"192.0.2.10", "192.0.2.11"})
@@ -136,6 +137,15 @@ class MergeIdentitiesTest(unittest.TestCase):
             [IdentitySample((configured,)), IdentitySample((dns,))], SCOPE
         )
         self.assertEqual(result.devices, (dns,))
+
+    def test_rank_follows_precedence_and_is_shared(self) -> None:
+        lease = identity(evidence="dhcp_lease")
+        configured = identity(source="configured", mac=None)
+        self.assertEqual(rank(lease), PRECEDENCE.index("dhcp_lease"))
+        self.assertEqual(rank(configured), len(PRECEDENCE))
+        # The collector ranks with the same function, not a copy.
+        self.assertIs(vars(collection)["rank"], rank)
+        self.assertFalse(hasattr(collection, "_rank"))
 
 
 if __name__ == "__main__":

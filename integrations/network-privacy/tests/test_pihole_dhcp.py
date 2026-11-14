@@ -312,6 +312,57 @@ class PiHoleDhcpTest(PiHoleServerCase):
                 self.assertIsNone(offered.scope)
                 self.assertEqual(offered.issues, (INVALID_RANGE,))
 
+    async def test_dhcp_network_must_be_a_private_lan(self) -> None:
+        # Router/netmask pairs whose network is not a private unicast IPv4 LAN
+        # from /8 to /30, and a range inside each so only the network decides.
+        cases = {
+            "public": ("8.8.8.1", "255.255.255.0", "8.8.8.10"),
+            "loopback": ("127.0.0.1", "255.0.0.0", "127.0.0.10"),
+            "link-local": ("169.254.1.1", "255.255.0.0", "169.254.1.10"),
+            "multicast": ("224.0.0.1", "255.255.255.0", "224.0.0.10"),
+            "reserved": ("240.0.0.1", "255.255.255.0", "240.0.0.10"),
+            "this network": ("0.0.0.1", "255.255.255.0", "0.0.0.10"),
+            "/7": ("10.0.0.1", "254.0.0.0", "10.0.0.10"),
+            "/31": ("10.0.0.0", "255.255.255.254", "10.0.0.1"),
+            "/32": ("10.0.0.1", "255.255.255.255", "10.0.0.1"),
+        }
+        original = dict(self.settings())
+        for name, (router, netmask, address) in cases.items():
+            with self.subTest(name):
+                self.settings().update(
+                    original,
+                    router=router,
+                    netmask=netmask,
+                    start=address,
+                    end=address,
+                )
+                offered = await self.source().offered()
+                self.assertIs(offered.active, True)
+                self.assertIsNone(offered.scope)
+                self.assertEqual(offered.issues, (INVALID_RANGE,))
+                data = await self.source().read((ADDRESS,), utc_now())
+                assert data.addressing is not None
+                self.assertEqual(data.addressing.scopes, ())
+                self.assertEqual(data.addressing.issues, (INVALID_RANGE,))
+        accepted = {
+            "10/8": ("10.0.0.1", "255.0.0.0", "10.0.0.10"),
+            "172.16/12": ("172.16.0.1", "255.240.0.0", "172.16.0.10"),
+            "192.168/30": ("192.168.1.1", "255.255.255.252", "192.168.1.2"),
+        }
+        for name, (router, netmask, address) in accepted.items():
+            with self.subTest(name):
+                self.settings().update(
+                    original,
+                    router=router,
+                    netmask=netmask,
+                    start=address,
+                    end=address,
+                )
+                offered = await self.source().offered()
+                assert offered.scope is not None
+                self.assertTrue(offered.scope.complete)
+                self.assertEqual(offered.issues, ())
+
     async def test_reservations_skipped_when_capability_off(self) -> None:
         self.settings()["hosts"] = ["00:11:22:33:44:55,192.0.2.12", "invalid"]
         data = await self.source(frozenset({"dhcp_scope"})).read((ADDRESS,), utc_now())
@@ -1074,10 +1125,14 @@ class DhcpOnlyServiceTest(unittest.TestCase):
                     NetworkCollector("fixture", plan, sources)
 
     def test_dhcp_capability_without_a_reader_is_refused(self) -> None:
-        with self.assertRaisesRegex(ValueError, "has no bound reader"):
-            NetworkCollector(
-                "fixture", self.plan(frozenset({"dhcp_scope"})), SourceSet()
-            )
+        for capability in ("dhcp_scope", "local_dns_names"):
+            with (
+                self.subTest(capability),
+                self.assertRaisesRegex(ValueError, "has no bound reader"),
+            ):
+                NetworkCollector(
+                    "fixture", self.plan(frozenset({capability})), SourceSet()
+                )
 
 
 NAMES: frozenset[Capability] = frozenset({"local_dns_names"})

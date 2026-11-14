@@ -47,7 +47,8 @@ class IdentityMerge:
     ambiguous: frozenset[str]
 
 
-def _rank(identity: DeviceIdentity) -> int:
+def rank(identity: DeviceIdentity) -> int:
+    """``identity``'s index in ``PRECEDENCE`` (lower wins); ``len(PRECEDENCE)`` if absent."""
     kind = evidence_kind(identity)
     return PRECEDENCE.index(kind) if kind in PRECEDENCE else len(PRECEDENCE)
 
@@ -80,5 +81,5 @@ def merge_identities(
         if len(macs) > 1:
             conflicts.add(address)
             continue
-        devices.append(min(records, key=_rank))
+        devices.append(min(records, key=rank))
     return IdentityMerge(tuple(devices), frozenset(conflicts), frozenset(ambiguous))

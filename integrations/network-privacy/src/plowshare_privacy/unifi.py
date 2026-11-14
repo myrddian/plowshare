@@ -18,7 +18,7 @@ from aiohttp import (
     ServerFingerprintMismatch,
 )
 
-from .addressing import AddressingSample, DhcpScope, Reservation
+from .addressing import AddressingSample, DhcpScope, Reservation, dhcp_lan
 from .contracts import (
     Capability,
     DeviceIdentity,
@@ -53,9 +53,6 @@ _MAX_FIXED_IP_CLIENTS = 4096
 _MAX_USER_BYTES = 4 * 1024 * 1024
 _MAX_NETWORKS = 64
 _MAX_NETWORK_BYTES = 1024 * 1024
-# A DHCP network is a private unicast LAN of this prefix length.
-_MIN_PREFIX, _MAX_PREFIX = 8, 30
-_THIS_NETWORK = ipaddress.IPv4Network("0.0.0.0/8")
 FIXED_IP_UNAVAILABLE = (
     "addressing_unavailable: UniFi fixed IP settings could not be read"
 )
@@ -862,16 +859,7 @@ def _network_scope(row: object, service: str) -> DhcpScope | None:
     network = ipaddress.ip_network(text(row.get("ip_subnet"), 64), strict=False)
     if not isinstance(network, ipaddress.IPv4Network):
         return None
-    if (
-        not _MIN_PREFIX <= network.prefixlen <= _MAX_PREFIX
-        or not network.is_private
-        or network.is_loopback
-        or network.is_link_local
-        or network.is_multicast
-        or network.is_unspecified
-        or network.is_reserved
-        or network.overlaps(_THIS_NETWORK)
-    ):
+    if not dhcp_lan(network):
         raise ValueError("UniFi DHCP network is not a private LAN")
     start = ipaddress.IPv4Address(text(row.get("dhcpd_start"), 15))
     end = ipaddress.IPv4Address(text(row.get("dhcpd_stop"), 15))

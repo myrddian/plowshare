@@ -503,14 +503,26 @@ class OperatorConsole:
             return PiHoleCheck(connected, False, issues, dhcp=offered.active)
 
     async def moved_devices(self) -> tuple[DeviceMove, ...]:
-        plan = self.worker.config.collection.pihole
+        # The configured Pi-hole service with its settings, typed.
+        configured = next(
+            (
+                (item, item.settings)
+                for item in self.worker.config.collection.sources
+                if isinstance(item.settings, PiHolePlan)
+            ),
+            None,
+        )
         discovered = self.discovery.latest()
-        if plan is None or discovered is None:
+        if configured is None or discovered is None:
             raise ValueError("Configure Pi-hole and find devices first")
+        service, plan = configured
+        if "network_table" not in service.capabilities:
+            raise ValueError("Moved-device detection needs the Pi-hole network table")
         candidates = tuple(item.address for item in discovered.devices)
         # Identity lookups share the collector batch boundary, not a global
         # inventory ceiling. Confirmation still never retargets devices automatically.
-        source = PiHoleV6(plan)
+        # Only the configured service's enabled capabilities are read.
+        source = PiHoleV6(plan, capabilities=service.capabilities, service=service.id)
         identities: list[DeviceIdentity] = []
         for start in range(0, len(candidates), 32):
             current = await source.identify(candidates[start : start + 32], utc_now())

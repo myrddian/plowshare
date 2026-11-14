@@ -24,14 +24,13 @@ from .contracts import (
     Evidence,
     Snapshot,
     TcpObservation,
-    evidence_kind,
     legacy_capabilities,
     load_json,
     private_ipv4,
     utc_now,
 )
 from .dns_activity import DnsActivityWindow
-from .identity_merge import PRECEDENCE, merge_identities
+from .identity_merge import merge_identities, rank
 from .identity_source import IdentitySample, ManagedProductLookup
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .presence import MAX_ATTRIBUTION_GAP, PresenceSample, Sighting, epoch
@@ -67,9 +66,9 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
         values.pop("enabled")
     if not plan.labels:
         values.pop("labels")
+    values.pop("sources")
     # ``traffic_counters`` reads local presence data, like quick checks, so it
     # never changes full collection evidence or the receipt journal identity.
-    values.pop("sources")
     scoped = [(s, s.capabilities - {"traffic_counters"}) for s in plan.sources]
     if all(
         caps == legacy_capabilities(s.kind, s.settings) - {"traffic_counters"}
@@ -160,10 +159,15 @@ def changes(
 
 # Capabilities whose binding yields a reader tagged with its service id. A
 # configured service enabling one of them must be bound; adopted inventory
-# alone binds only an untagged lookup, and opt-in capabilities without a
-# reader yet bind nothing.
+# alone binds only an untagged lookup, so ``managed_inventory`` is not here.
 _TAGGED_CAPABILITIES: frozenset[Capability] = frozenset(
-    {"network_table", "dns_queries", "controller_clients", "traffic_counters"}
+    {
+        "network_table",
+        "dns_queries",
+        "controller_clients",
+        "traffic_counters",
+        "local_dns_names",
+    }
 )
 # Any of these enabled on a service turns on the Addressing bucket.
 _ADDRESSING_CAPABILITIES: frozenset[Capability] = frozenset(
@@ -192,18 +196,13 @@ def _disagreeing_kinds(
     Each kind ranks by its best record there, as ``merge_identities`` ranks
     records; ties keep sample order.
     """
-    rank: dict[ConnectorKind, int] = {}
+    best: dict[ConnectorKind, int] = {}
     for kind, sample in samples:
         for device in sample.devices:
             if device.address == address and device.mac:
-                kind_rank = _rank(device)
-                rank[kind] = min(rank.get(kind, kind_rank), kind_rank)
-    return tuple(sorted(rank, key=rank.__getitem__))
-
-
-def _rank(identity: DeviceIdentity) -> int:
-    kind = evidence_kind(identity)
-    return PRECEDENCE.index(kind) if kind in PRECEDENCE else len(PRECEDENCE)
+                kind_rank = rank(device)
+                best[kind] = min(best.get(kind, kind_rank), kind_rank)
+    return tuple(sorted(best, key=best.__getitem__))
 
 
 async def _read_batches(
