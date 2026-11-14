@@ -40,34 +40,47 @@ How the change lands depends on the project type:
     `schedules/<name>.json` added or replaced.
   - It is staged and validated like any deployment and committed through the
     existing deployment store, under the head-revision fence, with a generated
-    request id and a receipt.
+    request id and a receipt. The deployment limits apply: 128 files, 64 KiB per
+    file and 128 KiB total.
   - The destination, writable areas, placement, service identity and
     `plowshare.json` are unchanged. The manifest is copied, never re-resolved.
+    Acting grants are re-bound to the new head from the unchanged manifest.
   - The deployment history therefore records every timing change.
-  - The deployment store admits this schedule-only revision for a project Manager.
-    Every other deployment still requires server administration.
+  - The deployment store itself enforces the invariant under the project lock:
+    only `schedules/*.json` differ from the head, `plowshare.json` and the service
+    identity are byte-identical to the head, and the caller is a current project
+    Manager. A violation is refused with "A schedule-only revision may change only
+    schedules/*.json". Every other deployment still requires server administration.
+    A later administrator deploy or rollback works as before.
 - **Any other Application root (DISJOINT, or STANDARD with an Application
   manifest):** the file is written **in place** in the registered root's
   `schedules/` folder, with an atomic temporary file and rename.
   - The existing `safe()` path checks apply: the path must stay inside the root
     and no segment may be a symlink.
-  - So do the size and count limits.
+  - So do the size and count limits: 64 KiB per file, 256 files, 1 MiB.
+  - `schedules/` is created inside the root if missing, and the real path is
+    re-checked before the temporary file is created and again before the move.
 
 In both cases:
 
 - `overwrite: false` refuses an existing file and `overwrite: true` replaces it,
   as for other sources.
 - The cron is parsed and the actions are validated before anything is written.
+- The save is refused before writing if the registered owner has lost execution
+  access, with the same message reconcile gives. With no registered source the
+  refusal is "No registered schedule source for this Application".
 - The source is reconciled immediately, and the effective file is returned.
 - As today, a changed definition clears any pause override (ADR 0014). The
   saved `definition.paused` value then applies.
 - Every Application schedule save writes an `admin_audit` row: actor,
-  `schedule.save.application`, and target `<project>/<name>`, plus the revision
-  for MANAGED projects.
+  `schedule.save.application`, and target `<project>/<name>`, plus `@<revision>`
+  for MANAGED projects. A save whose commit outcome is uncertain is not audited
+  and is never retried; the caller inspects state before deciding.
 
 Unchanged:
 
-- `schedule.forget` and deletes of Application schedules are still refused.
+- `schedule.forget` and deletes of Application schedules are still refused: "Application
+  schedules cannot be deleted; save a replacement definition instead".
 - Files other than `schedules/*.json` are never written by this path.
 - Workspace and global schedules behave as before.
 - The refusal message for any path that still refuses names the route that

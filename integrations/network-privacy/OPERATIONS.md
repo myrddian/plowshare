@@ -55,6 +55,12 @@ Use the arrow keys, Home and End to move between the dashboard tabs.
    Choose a managed FileStore from the dropdown, enter the password again, then
    **Deploy reviewed revision**.
 
+A project Manager can also change the schedule frequency on any install with
+Plowshare CLI `schedule save` (`plowshare-cli --project <project> --payload -
+schedule save < request.json`, with `source: "server"` and `overwrite: true`); it
+needs no deployment administrator and no bootstrap layout. The dashboard editor
+below still needs the bootstrap `deployment/` layout.
+
 Application schedules are immutable source definitions. This dashboard editor
 changes the source timing and initial pause setting through a reviewed Application
 deployment, with the reviewed revision as a concurrency fence. Overview's
@@ -609,6 +615,7 @@ separately from failed connection or permission checks. Operational pause/resume
 uses a project manager's Plowshare CLI, TUI, desktop or web-console session;
 it does not redeploy the Application. The dashboard's schedule revision editor
 requires a deployment-administrator login because it changes Application source.
+A project Manager's `schedule save` changes frequency without that login.
 Tool visibility comes from a current unmeasured
 context projection of an existing project conversation, not declared agent grants.
 Before a project conversation exists, visibility remains unknown.

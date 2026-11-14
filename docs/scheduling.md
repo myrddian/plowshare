@@ -40,8 +40,31 @@ and both runtime rows together for mutable file definitions. Deployed Applicatio
 files remain immutable: an operational pause override updates both runtime rows
 without a new release. Legacy schedule/trigger definitions still work.
 
+A current project Manager can change an Application's schedule definition (timing,
+actions, initial pause state) with `schedule.save` and `source: "server"`, with no
+server administration. Contributors, non-members and service tokens are refused.
+The save never changes the registered source or its owner; actions are validated
+under the registered owner, and the save is refused if that owner has lost
+execution access. It writes only `schedules/<name>.json`:
+
+- **MANAGED project:** a schedule-only deployment revision is created under the
+  head-revision fence. The deployment store enforces that only `schedules/*.json`
+  differ from the head and that `plowshare.json` and the service identity are
+  byte-identical. Deployment limits apply (128 files, 64 KiB per file, 128 KiB
+  total). The history records the change, and a later admin deploy or rollback
+  still works.
+- **DISJOINT or hand-registered root:** the file is replaced in place in
+  `schedules/` with an atomic temporary file and rename. Symlinks are refused; the
+  limits are 64 KiB per file, 256 files and 1 MiB.
+
+Each save is audited as `schedule.save.application` with target
+`<project>/<name>` (MANAGED adds `@<revision>`). A save with an uncertain commit
+outcome is not audited and is never retried. Deleting an Application schedule is
+still refused: save a replacement definition instead.
+
 Application overrides survive unchanged source reconciliation and restart. A
-changed schedule definition or removal clears the override. `schedule.files`
+changed schedule definition (including a Manager `schedule.save`) or removal
+clears the override. `schedule.files`
 reports the effective pause state while the deployed JSON retains its source
 default. Resuming a paused Application schedule uses the next future occurrence;
 missed ticks are not replayed, and existing runs are neither resumed nor cancelled.
@@ -179,6 +202,32 @@ plowshare-cli schedule files
 plowshare-cli schedule pause scheduled-1-weekday
 plowshare-cli schedule resume scheduled-1-weekday
 plowshare-cli schedule forget '{"schedule":"scheduled-1-weekday"}'
+```
+
+To change an Application's schedule as a project Manager, save the whole definition
+with `overwrite` true. `request.json` (copy `definition` from the Application's
+`schedules/<name>.json`):
+
+```json
+{
+  "name": "network_scan",
+  "project": "P",
+  "source": "server",
+  "overwrite": true,
+  "definition": {
+    "version": 1,
+    "cron": "0 */30 * * * *",
+    "zone": "UTC",
+    "paused": true,
+    "action": {"kind": "orchestration", "agent": "privacy_coordinator", "name": "privacy_tick", "input": "A collection occurrence is available through Relay.", "mode": null},
+    "target": {"kind": "mailbox", "project": null, "conversation": null, "to": null, "route": null},
+    "limits": {"maxModelCalls": 1, "maxTurns": 8, "queueCap": 1}
+  }
+}
+```
+
+```sh
+plowshare-cli --project P --payload - schedule save < request.json
 ```
 
 Use the actual `internalName` returned by `schedule.files` for pause/forget. `--root`

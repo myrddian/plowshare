@@ -459,9 +459,10 @@ intent and reconcile it first. The script never reconnects or replays mutations.
 5. The package contains a paused server schedule named `network_scan`. After deployment
    and source reconciliation, inspect `schedule.files` for its actual internal name
    and set `config.schedule` to that name. Review timing and resume it through the
-   app dashboard’s **Resume monitoring** control, the Schedule UI, or `schedule.pause`. Change packaged timing through a new Application
-   deployment. The separate `install-schedule` SDK command remains useful for a
-   manually managed source tier; deployment-managed source refuses direct edits.
+   app dashboard’s **Resume monitoring** control, the Schedule UI, or `schedule.pause`. Change packaged timing with a project Manager's `schedule save` (works on any
+   install) or through a new Application deployment. The separate `install-schedule` SDK command remains useful for a
+   manually managed source tier; deployment-managed source refuses direct file edits
+   (use `schedule save` or a deployment).
    Server schedules retain the authenticated installer's project permissions.
 
 The native schedule action is `privacy_tick`, a deterministic JavaScript
