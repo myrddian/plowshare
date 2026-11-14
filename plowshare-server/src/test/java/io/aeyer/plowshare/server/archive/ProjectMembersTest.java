@@ -226,6 +226,32 @@ class ProjectMembersTest {
   }
 
   @Test
+  void creator_does_not_adopt_a_racing_orphan_row() {
+    creator("carol");
+    ProjectStore projects = store();
+    // rootOn read "no row" for 'sundial' and chose creation; before creation runs, another writer
+    // (a memory write, say) registers the name. Entering the creation branch directly with that
+    // row in place is the race, made deterministic.
+    Long racing = ProjectIds.toWrite(jdbc, Home.of("sundial"));
+    ArchiveRefusedException refused =
+        assertThrows(
+            ArchiveRefusedException.class,
+            () -> projects.createByRooting("sundial", "laptop", "/repo", "carol"));
+    assertEquals("A project with this name was just created; try again", refused.getMessage());
+    assertTrue(members.members("sundial").isEmpty());
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM project_members WHERE project_id = ?", Long.class, racing));
+    // The racing writer's row is untouched: same id, still claimed by no machine.
+    assertEquals(racing, projects.id("sundial"));
+    assertEquals(1, rows("sundial"));
+    assertTrue(projects.rootedElsewhere("sundial").isEmpty());
+    assertNull(
+        jdbc.queryForObject("SELECT machine FROM projects WHERE id = ?", String.class, racing));
+  }
+
+  @Test
   void orphan_row_stays_admin_only() {
     creator("carol");
     ProjectStore projects = store();
@@ -249,10 +275,13 @@ class ProjectMembersTest {
     assertThrows(
         ArchiveRefusedException.class,
         () -> projects.rootOn("client:x", "laptop", "/repo", "carol"));
+    assertThrows(
+        ArchiveRefusedException.class,
+        () -> projects.rootOn("PERSONAL:x", "laptop", "/repo", "carol"));
     assertEquals(
         0L,
         jdbc.queryForObject(
-            "SELECT count(*) FROM projects WHERE name IN (' sundial', 'personal:x', 'client:x')",
+            "SELECT count(*) FROM projects WHERE name IN (' sundial', 'personal:x', 'client:x', 'PERSONAL:x')",
             Long.class));
   }
 

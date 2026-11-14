@@ -478,18 +478,7 @@ public final class ProjectStore
     }
     Optional<Boolean> hasMembers = membership(name);
     if (hasMembers.isEmpty()) {
-      // Unregistered: no row at all. Rooting creates the project, and only a PROJECT_CREATOR
-      // holder may. Server administration alone does not create; reserved names never do.
-      ordinary(name);
-      if (!mayCreate(handle))
-        throw new ArchiveRefusedException("This account may not create projects");
-      withSoleCreator(
-          name,
-          handle,
-          () -> {
-            rootOn(name, machine, root);
-            return null;
-          });
+      createByRooting(name, machine, root, handle);
       return;
     }
     if (!hasMembers.get()) {
@@ -511,6 +500,27 @@ public final class ProjectStore
     if (!new JdbcProjectMembers(jdbc).mayUse(name, handle))
       throw new ArchiveRefusedException("This account may not attach this project");
     rootOn(name, machine, root);
+  }
+
+  /**
+   * Create an unregistered project by rooting it: the branch {@link #rootOn(String, String, String,
+   * String)} takes once it has read that no row has this name. Only a PROJECT_CREATOR holder may;
+   * server administration alone does not create, and reserved names never do.
+   *
+   * <p>Package-private only so a test can enter it after that read, with a row already inserted in
+   * between, which is the race {@link #withSoleCreator} must refuse rather than adopt.
+   */
+  void createByRooting(String name, String machine, String root, String handle) {
+    ordinary(name);
+    if (!mayCreate(handle))
+      throw new ArchiveRefusedException("This account may not create projects");
+    withSoleCreator(
+        name,
+        handle,
+        () -> {
+          rootOn(name, machine, root);
+          return null;
+        });
   }
 
   /**
@@ -750,17 +760,40 @@ public final class ProjectStore
   }
 
   /**
-   * {@link #withCreator}, for a project being created rather than adopted: the creator must end the
-   * transaction as its first member.
+   * {@link #withCreator}, for a project being created rather than adopted: the row must be new, and
+   * the creator must end the transaction as its first member.
    *
-   * <p>Two creators racing for one unregistered name both reach here. The second blocks on the
-   * first's row (the {@code projects} name upsert, then {@code FOR UPDATE}) until it commits, then
-   * finds a member already present, so its conditional insert writes nothing. That is detected
-   * after the insert, inside the same transaction, and refused; the refusal rolls back the second
-   * writer's claim on the row, so the first creator stays the sole manager.
+   * <p><b>The row is inserted, never upserted.</b> {@link #withCreator} registers through {@link
+   * ProjectIds#toWrite}, which answers with an existing row's id. Here that would let a row created
+   * after the caller read "no row" (a racing creator, or a memory, conversation or job-log write
+   * that registered the name) be adopted, making the creator manager of another writer's data. An
+   * insert that returns no id means some row now exists, and creation is refused; the caller may
+   * retry, and then takes the existing-row branches of {@code rootOn}. A racing creator blocks on
+   * the first one's uncommitted insert and is refused the same way once it commits.
+   *
+   * <p>The sole-membership check after the member insert stays as defence in depth.
    */
   private <T> T withSoleCreator(String name, String handle, Supplier<T> write) {
     return founding(name, handle, true, write);
+  }
+
+  /**
+   * The id of a row this transaction inserted for {@code name}, or a refusal if one existed. The
+   * same insert {@link ProjectIds} registers a new row with (only the name; every other column
+   * keeps its default), without the upsert that would answer with an existing row's id.
+   */
+  private Long inserted(String name) {
+    return jdbc
+        .queryForList(
+            "INSERT INTO projects (name) VALUES (?) ON CONFLICT (name) DO NOTHING RETURNING id",
+            Long.class,
+            name)
+        .stream()
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new ArchiveRefusedException(
+                    "A project with this name was just created; try again"));
   }
 
   private <T> T founding(String name, String handle, boolean sole, Supplier<T> write) {
@@ -771,7 +804,10 @@ public final class ProjectStore
                     new DataSourceTransactionManager(Objects.requireNonNull(jdbc.getDataSource())))
                 .execute(
                     status -> {
-                      Long id = ProjectIds.toWrite(jdbc, Home.of(named(name)));
+                      Long id =
+                          sole
+                              ? inserted(named(name))
+                              : ProjectIds.toWrite(jdbc, Home.of(named(name)));
                       jdbc.queryForObject(
                           "SELECT id FROM projects WHERE id = ? FOR UPDATE", Long.class, id);
                       T result = write.get();
@@ -1517,7 +1553,9 @@ public final class ProjectStore
     if (ClientProjects.privateProject(name))
       throw new ArchiveRefusedException(
           "Client projects cannot be published or administered as server projects");
-    if (name != null && (name.startsWith("personal:") || name.startsWith("Personal:"))) {
+    // Case-insensitive, as ContainedProjects reserves its prefix: no spelling of "personal:" may be
+    // created or changed as an ordinary project.
+    if (name != null && name.regionMatches(true, 0, "personal:", 0, "personal:".length())) {
       throw new ArchiveRefusedException(
           "Personal space is managed by its account and cannot be changed as an ordinary project");
     }

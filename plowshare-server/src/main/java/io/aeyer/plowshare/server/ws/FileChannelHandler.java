@@ -9,6 +9,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.archive.ArchiveRefusedException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
+import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.files.SessionChannel;
@@ -1121,9 +1122,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
     boolean creating;
     try {
       String handle = handleOn(socket);
-      boolean visible =
-          io.aeyer.plowshare.server.archive.ClientProjects.visible(
-              claim.project(), sessionId(socket.getUri()), handle);
+      boolean visible = ClientProjects.visible(claim.project(), sessionId(socket.getUri()), handle);
       // Membership first, so a member's reconnect asks nothing else. Only a name with no row at
       // all may be created, and only by a PROJECT_CREATOR holder; a registered project without
       // this account as a member is refused with the same sentence either way.
