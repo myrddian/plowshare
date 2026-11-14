@@ -138,6 +138,34 @@ The live deployment is validated on Linux amd64; Linux arm64 remains a separate
 acceptance run. Registry publication and multi-host Swarm deployment are later
 pipeline steps; these files target Docker Compose.
 
+## Monitoring
+
+The shipped telemetry is opt-in and has no default addresses.
+
+- **PostgreSQL** always preloads `pg_stat_statements` and `auto_explain` (a restart is
+  needed to change this; migration V259 creates the extension's views). Statements
+  slower than `PLOWSHARE_PG_SLOW_MS` and plans slower than
+  `PLOWSHARE_PG_AUTO_EXPLAIN_MS` (both default 1000 ms) are logged.
+- **Server metrics**: set `PLOWSHARE_MANAGEMENT_PORT` and `PLOWSHARE_MANAGEMENT_BIND`
+  together in the server environment (an overlay adds them to the `server` service)
+  to serve `/actuator/prometheus` on a separate listener; the entrypoint refuses one
+  without the other. Compose does not publish that port. The endpoint has no
+  authentication, so make it reachable only by Prometheus (shared network or an
+  overlay `ports` entry bound to a private address).
+- **PostgreSQL metrics**: `docker compose --profile monitoring up -d postgres-exporter`
+  starts the pinned exporter. It publishes no host port and reuses the database
+  password secret; Prometheus reaches it on the compose network at port 9187, or an
+  operator overlay adds `ports`. Its custom queries export `queryid` (never statement
+  text), counts, time, rows and buffer blocks for the top 50 statements by total
+  time, plus table scan counters.
+- **Flight recording**: set `PLOWSHARE_JFR_DIR` to a writable mounted directory to
+  record continuously (6 hours or 512 MB, dumped on exit) with the settings in
+  `deploy/monitoring/plowshare.jfc`, which add `plowshare.JdbcExecute` stack traces.
+- **Files**: [scrape example](../monitoring/prometheus-scrape.example.yaml),
+  [Grafana dashboard](../monitoring/grafana-plowshare.json) (import into Grafana and
+  select the Prometheus data source) and `deploy/monitoring/pg-stat-snapshot.sh`
+  (`snapshot DIR` writes a CSV, `delta BEFORE AFTER` compares two by `queryid`).
+
 ## Prepare state and providers
 
 Run as the deployment user:

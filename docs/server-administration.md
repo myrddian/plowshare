@@ -454,7 +454,18 @@ by the intended monitoring system. A separate port does not add authentication;
 restrict network/proxy access as well. A configured Prometheus scraper and persistent
 time-series storage retain samples across server restarts; Grafana can query that
 history. Bundling the registry alone does not collect history. Container publishing,
-ingress, scrapes, alerts and PostgreSQL instrumentation remain deployment work.
+ingress, scrapes and alerts remain deployment work.
+
+The Docker deployment wires this up without defaults: when
+`PLOWSHARE_MANAGEMENT_PORT` and `PLOWSHARE_MANAGEMENT_BIND` are both set, the
+entrypoint passes the settings above (one without the other stops startup), and
+`PLOWSHARE_JFR_DIR` starts a bounded flight recording that includes the opt-in
+`plowshare.JdbcExecute` event. PostgreSQL preloads `pg_stat_statements` and
+`auto_explain`, and an optional exporter profile exposes top statements by `queryid`.
+The statement-count meters `plowshare.jdbc.statements`,
+`plowshare.authority.admission.checks`, `plowshare.authority.session.checks` and
+`plowshare.operation.statements` are charted in `deploy/monitoring/grafana-plowshare.json`.
+See the [Docker README](../deploy/docker/README.md#monitoring).
 
 ## Information feature switches
 
