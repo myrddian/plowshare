@@ -30,6 +30,10 @@ The [deployment follow-ups](query-efficiency-deployment-followups.md) address
 legacy discovery permission costs, unnecessary empty-search inference, reconnect
 credentials, worker shutdown and verified Manual publication.
 
+The proposed [item-level invalidation and shared read data](query-efficiency-item-invalidation-design.md)
+design makes a write invalidate only the cached items that read the changed rows, instead of
+emptying whole projections, and derives per-account views in server memory from shared data.
+
 The [asynchronous request dispatch plan](async-request-dispatch-plan.md) extends
 bounded read concurrency into actor-owned request coordination, explicit resource
 ordering, typed SDK completions and independent client rendering. It preserves
