@@ -116,7 +116,7 @@ All paths are relative to `integrations/network-privacy/` unless they start with
 
 - [ ] **Step 1: Write the failing tests** in `tests/web_addressing.test.cjs`.
   - `addressing labels follow the mode and basis table`: every row of the copy table, plus `{mode:'static', basis:'novel'}` and `{mode:'novel'}`, both giving `Unknown`.
-  - `the pane shows assignment, lease end and change`: `renderAddressing({mode:'dhcp_dynamic', basis:'dhcp_lease', services:['pihole'], expires_at:'2026-11-14T04:02:45Z', observed_at:'…', previous_mode:'dhcp_reserved', changed_at:'2026-11-14T03:10:11Z', changed_in_latest:true})`. The text contains `Dynamic (DHCP lease)`, `Lease ends `, `Changed from Reserved to Dynamic` and `Source: pihole`.
+  - `the pane shows assignment, lease end and change`: `renderAddressing({mode:'dhcp_dynamic', basis:'dhcp_lease', services:['pihole'], expires_at:'2026-11-14T04:02:45Z', observed_at:'…', previous_mode:'dhcp_reserved', changed_at:'2026-11-14T03:10:11Z', changed_in_latest:true})`. The text contains `Lease recorded to end `, `Recorded `, `Changed from Reserved to Dynamic` and `Source: pihole` (the label itself is the pane's `Assignment` fact).
   - `no addressing renders nothing`: `renderAddressing(null) === null`.
   - `the device list can be searched by assignment`: after `renderInventory` with one device whose `addressing.mode` is `static`, `card.dataset.search` includes `static`. A device with `basis` `no_lease_or_reservation` gets a tag whose text is `Static in DHCP range`.
   - `the Evidence view lists assignments`: `showEvidence` with `snapshot.addressing` of two rows renders a list titled `Address assignment` with `192.0.2.10 · Reserved (DHCP reservation)`.
