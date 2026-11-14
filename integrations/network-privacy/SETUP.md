@@ -276,7 +276,9 @@ Pi-hole's DHCP netmask is empty by default on a directly connected LAN: dnsmasq
 takes the subnet from the Pi-hole host's own interface, which the collector
 cannot see. In that case set `dhcpNetwork` in the Pi-hole service's `settings`
 (for example `"dhcpNetwork": "192.168.1.0/24"`), or pass `--dhcp-network` to
-`enable-capability`. The router, `start` and `end` must lie inside it. Without
+`enable-capability`. The router, `start` and `end` must lie inside it, and it
+must match the Pi-hole interface's real subnet exactly: a wider network would
+let an address outside the LAN be labelled `static`. Without
 it, reservations and leases still classify addresses, but no Pi-hole address is
 ever `static`; this is not reported as an issue. When Pi-hole's netmask is set,
 `dhcpNetwork` is optional and, if present, must name the same network, or the

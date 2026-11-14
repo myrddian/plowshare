@@ -441,7 +441,7 @@ part of the receipt journal's identity.
     ipv6, rapidCommit, multiDNS, logging, ignoreUnknownClients, hosts}},
     "took"}`. `start`, `end`, `router` and `netmask` are IPv4 strings or `""`;
     an empty netmask means "taken from the interface", which a read cannot see,
-    so the scope is then not decodable.
+    so the network comes from the optional `dhcpNetwork` setting (below).
   - Confirmed on a live Pi-hole v6: with DHCP active, `GET config/dhcp`
     returned `start`, `end` and `router` set and `netmask: ""`, Pi-hole's
     documented default for a directly connected network. Treating that as an
