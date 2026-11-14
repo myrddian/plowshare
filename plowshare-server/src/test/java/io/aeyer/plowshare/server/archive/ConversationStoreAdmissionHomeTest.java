@@ -111,7 +111,12 @@ class ConversationStoreAdmissionHomeTest {
     var binding = mock(ScopedGrantRepository.Binding.class);
     when(binding.id()).thenReturn(grant);
     when(grants.live(recipient)).thenReturn(List.of(binding));
-    when(authority.allowsUsing(recipient, project, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient),
+            eq(project),
+            eq(AuthorityAction.CONVERSATION_CREATE),
+            eq(grant),
+            anyList()))
         .thenReturn(true);
     when(allowances.attach(any(Budget.class)))
         .thenAnswer(invocation -> invocation.getArgument(0, Budget.class));
@@ -121,7 +126,12 @@ class ConversationStoreAdmissionHomeTest {
     when(identities.project(PERSONAL)).thenReturn(personal);
     when(identities.home(personal)).thenReturn(Home.of(PERSONAL));
     when(members.role(PERSONAL, "alice")).thenReturn(Optional.of(ProjectRole.MANAGER));
-    when(authority.allowsUsing(recipient, personal, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient),
+            eq(personal),
+            eq(AuthorityAction.CONVERSATION_CREATE),
+            eq(grant),
+            anyList()))
         .thenReturn(true);
   }
 
@@ -222,7 +232,8 @@ class ConversationStoreAdmissionHomeTest {
     when(identities.project(other)).thenReturn(bobs);
     when(identities.home(bobs)).thenReturn(Home.of(other));
     when(members.role(other, "alice")).thenReturn(Optional.of(ProjectRole.MANAGER));
-    when(authority.allowsUsing(recipient, bobs, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient), eq(bobs), eq(AuthorityAction.CONVERSATION_CREATE), eq(grant), anyList()))
         .thenReturn(true);
 
     CallerFault refused = assertThrows(CallerFault.class, () -> logPipeline(Home.of(other)));

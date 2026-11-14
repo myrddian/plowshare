@@ -586,7 +586,9 @@ class ContainedDestructionTest {
     var binding = mock(ScopedGrantRepository.Binding.class);
     when(binding.id()).thenReturn(grant);
     when(grants.live(subject)).thenReturn(List.of(binding));
-    when(scoped.allowsUsing(subject, container, AuthorityAction.RUN_MODEL, grant)).thenReturn(true);
+    when(scoped.allowsUsing(
+            eq(subject), eq(container), eq(AuthorityAction.RUN_MODEL), eq(grant), anyList()))
+        .thenReturn(true);
 
     var holderAdmission = policy.admit("alice", container, Set.of(AuthorityAction.RUN_MODEL));
     var descendant = policy.contain(holderAdmission, confined, Set.of(AuthorityAction.RUN_MODEL));
@@ -594,7 +596,8 @@ class ContainedDestructionTest {
     when(operations.find(holderAdmission.id())).thenReturn(Optional.of(holderAdmission));
     assertDoesNotThrow(() -> policy.require(descendant));
     // Mid-execution revocation of the PARENT's grant. Nothing about the child row changes.
-    when(scoped.allowsUsing(subject, container, AuthorityAction.RUN_MODEL, grant))
+    when(scoped.allowsUsing(
+            eq(subject), eq(container), eq(AuthorityAction.RUN_MODEL), eq(grant), anyList()))
         .thenReturn(false);
     assertThrows(CallerFault.class, () -> policy.require(descendant));
   }

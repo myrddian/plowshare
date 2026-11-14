@@ -2,7 +2,10 @@ package io.aeyer.plowshare.server.access;
 
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.archive.ProjectRole;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /** Reads live lineage on every decision; failures never turn into permission or a cached allow. */
@@ -48,16 +51,39 @@ public final class LiveScopedAuthority implements ScopedAuthority {
 
   @Override
   public boolean allowsUsing(
-      GrantRecipient recipient,
-      AuthorityScope target,
-      AuthorityAction action,
-      java.util.UUID grant) {
+      GrantRecipient recipient, AuthorityScope target, AuthorityAction action, UUID grant) {
     Objects.requireNonNull(recipient);
     Objects.requireNonNull(target);
     Objects.requireNonNull(action);
     Objects.requireNonNull(grant);
+    // The scope check precedes the grant read so an unknown target costs no grant query.
     if (!target.equals(identities.scope(target.id()))) return false;
-    return grants.live(recipient).stream()
+    return usable(recipient, target, action, grant, grants.live(recipient));
+  }
+
+  @Override
+  public boolean allowsUsing(
+      GrantRecipient recipient,
+      AuthorityScope target,
+      AuthorityAction action,
+      UUID grant,
+      List<ScopedGrantRepository.Binding> live) {
+    Objects.requireNonNull(recipient);
+    Objects.requireNonNull(target);
+    Objects.requireNonNull(action);
+    Objects.requireNonNull(grant);
+    Objects.requireNonNull(live);
+    if (!target.equals(identities.scope(target.id()))) return false;
+    return usable(recipient, target, action, grant, live);
+  }
+
+  private boolean usable(
+      GrantRecipient recipient,
+      AuthorityScope target,
+      AuthorityAction action,
+      UUID grant,
+      List<ScopedGrantRepository.Binding> live) {
+    return live.stream()
         .filter(binding -> binding.id().equals(grant))
         .anyMatch(
             binding ->
@@ -81,7 +107,7 @@ public final class LiveScopedAuthority implements ScopedAuthority {
         };
     return applications
         .read(binding.project().orElseThrow())
-        .limit(binding.recipientHandle(), java.util.Optional.of(stored))
+        .limit(binding.recipientHandle(), Optional.of(stored))
         .filter(
             role ->
                 switch (action) {

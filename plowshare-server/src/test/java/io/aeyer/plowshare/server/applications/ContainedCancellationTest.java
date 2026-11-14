@@ -509,7 +509,8 @@ class ContainedCancellationTest {
     when(binding.id()).thenReturn(grant);
     when(grants.live(subject)).thenReturn(List.of(binding));
     for (var action : actions)
-      when(scoped.allowsUsing(subject, container, action, grant)).thenReturn(true);
+      when(scoped.allowsUsing(eq(subject), eq(container), eq(action), eq(grant), anyList()))
+          .thenReturn(true);
 
     var containerAdmission = policy.admit("alice", container, actions);
     var descendant = policy.contain(containerAdmission, confined, actions);
@@ -531,7 +532,9 @@ class ContainedCancellationTest {
               // MID-RUN, and from outside: the container's own grant stops allowing the actions it
               // lent. Nothing about the child's stored row changes and nobody tells the run.
               for (var action : actions)
-                when(scoped.allowsUsing(subject, container, action, grant)).thenReturn(false);
+                when(scoped.allowsUsing(
+                        eq(subject), eq(container), eq(action), eq(grant), anyList()))
+                    .thenReturn(false);
               return new Completion(
                   null,
                   "tool_calls",

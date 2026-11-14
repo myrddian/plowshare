@@ -1086,7 +1086,8 @@ class ContainedRuntimeReachTest {
               AuthorityAction.WRITE,
               AuthorityAction.RUN_MODEL,
               AuthorityAction.CONVERSATION_CREATE))
-        when(scoped.allowsUsing(recipient, container, action, grant)).thenReturn(true);
+        when(scoped.allowsUsing(eq(recipient), eq(container), eq(action), eq(grant), anyList()))
+            .thenReturn(true);
     }
 
     /**

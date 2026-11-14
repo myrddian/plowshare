@@ -86,7 +86,8 @@ class ContainmentHopTest {
             AuthorityAction.WRITE,
             AuthorityAction.RUN_MODEL,
             AuthorityAction.CONVERSATION_CREATE))
-      when(authority.allowsUsing(recipient, target, action, grant)).thenReturn(true);
+      when(authority.allowsUsing(eq(recipient), eq(target), eq(action), eq(grant), anyList()))
+          .thenReturn(true);
   }
 
   /** A live parent holding three of the four derivable actions. */
@@ -190,9 +191,11 @@ class ContainmentHopTest {
             .map(OperationAuthority.Support::grant)
             .collect(java.util.stream.Collectors.toSet()));
     // The immutable parent edge, as derive records it. No new grant was resolved for the child:
-    // the only live-grant read in this test belongs to the parent's own admission.
+    // the only live-grant reads in this test are the parent's admission (one in admit, one in the
+    // walk admit ends with) and the single walk of the contained admission: GATE ONE reads the
+    // source's grants once per walk and shares that list between its support items.
     verify(records).retainChild(contained, parent.id());
-    verify(grants, times(1)).live(recipient);
+    verify(grants, times(3)).live(recipient);
   }
 
   /**
@@ -391,8 +394,8 @@ class ContainmentHopTest {
     verify(identities, atLeastOnce()).scope(target.id());
     verify(identities, never()).scope(enclosing.id());
     verify(identities, never()).scope(grandchild.id());
-    verify(authority, never()).allowsUsing(any(), eq(grandchild), any(), any());
-    verify(authority, never()).allowsUsing(any(), eq(enclosing), any(), any());
+    verify(authority, never()).allowsUsing(any(), eq(grandchild), any(), any(), any());
+    verify(authority, never()).allowsUsing(any(), eq(enclosing), any(), any(), any());
 
     // The same walk refuses when a hop's recorded container is not the ancestor it climbs to:
     // two hops are two chances to refuse, not a relaxation that compounds.

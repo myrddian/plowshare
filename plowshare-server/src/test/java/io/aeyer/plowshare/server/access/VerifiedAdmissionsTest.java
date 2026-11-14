@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -113,7 +115,12 @@ class VerifiedAdmissionsTest {
     when(identities.project("one")).thenReturn(target);
     when(members.authorityAccount("alice")).thenReturn(Optional.of("alice"));
     when(members.role("one", "alice")).thenReturn(Optional.of(ProjectRole.CONTRIBUTOR));
-    when(authority.allowsUsing(recipient, target, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient),
+            eq(target),
+            eq(AuthorityAction.CONVERSATION_CREATE),
+            eq(grant),
+            anyList()))
         .thenReturn(true);
   }
 
@@ -125,7 +132,7 @@ class VerifiedAdmissionsTest {
   private void assertWalks(int walks) {
     verify(identities, times(2 * walks)).account("alice");
     verify(members, times(walks)).role("one", "alice");
-    verify(authority, times(walks)).allowsUsing(any(), any(), any(), any());
+    verify(authority, times(walks)).allowsUsing(any(), any(), any(), any(), any());
   }
 
   @Test
@@ -183,7 +190,12 @@ class VerifiedAdmissionsTest {
   void anAuthorityVersionChangeForcesAWalkAndARevocationIsThenDenied() {
     var admitted = admission();
     policy.require(admitted);
-    when(authority.allowsUsing(recipient, target, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient),
+            eq(target),
+            eq(AuthorityAction.CONVERSATION_CREATE),
+            eq(grant),
+            anyList()))
         .thenReturn(false);
     // Same snapshot: the revocation has not reached this process yet, and the bound allows that.
     assertDoesNotThrow(() -> policy.require(admitted));
@@ -319,7 +331,9 @@ class VerifiedAdmissionsTest {
         CallerFault.class, () -> policy.requireTargets(admitted, Home.of("two"), List.of()));
     // A cached admission without READ is still refused a read; one with READ is still fenced.
     assertThrows(CallerFault.class, () -> policy.requireReadTargets(admitted, home, List.of(own)));
-    when(authority.allowsUsing(recipient, target, AuthorityAction.READ, grant)).thenReturn(true);
+    when(authority.allowsUsing(
+            eq(recipient), eq(target), eq(AuthorityAction.READ), eq(grant), anyList()))
+        .thenReturn(true);
     var reader = admission(List.of(new Support(AuthorityAction.READ, grant)));
     policy.require(reader);
     assertDoesNotThrow(() -> policy.requireReadTargets(reader, home, List.of(own)));
@@ -396,6 +410,6 @@ class VerifiedAdmissionsTest {
         () -> new BoundedVerifiedAdmissions(none, Duration.ofMinutes(2), 8));
     assertThrows(
         IllegalArgumentException.class, () -> new BoundedVerifiedAdmissions(none, BOUND, 0));
-    verify(authority, never()).allowsUsing(any(), any(), any(), any());
+    verify(authority, never()).allowsUsing(any(), any(), any(), any(), any());
   }
 }

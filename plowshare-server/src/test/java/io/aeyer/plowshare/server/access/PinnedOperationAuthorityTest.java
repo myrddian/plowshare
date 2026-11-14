@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.access;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
@@ -40,8 +41,43 @@ class PinnedOperationAuthorityTest {
     var binding = mock(ScopedGrantRepository.Binding.class);
     when(binding.id()).thenReturn(grant);
     when(grants.live(recipient)).thenReturn(List.of(binding));
-    when(authority.allowsUsing(recipient, target, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient),
+            eq(target),
+            eq(AuthorityAction.CONVERSATION_CREATE),
+            eq(grant),
+            anyList()))
         .thenReturn(true);
+  }
+
+  /** The live grants read once by admission are the ones every support item is checked against. */
+  @Test
+  void admitReadsLiveGrantsOnce() {
+    var actions =
+        Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.CONVERSATION_CREATE);
+    for (var action : actions)
+      when(authority.allowsUsing(eq(recipient), eq(target), eq(action), eq(grant), anyList()))
+          .thenReturn(true);
+    clearInvocations(grants);
+    policy.admit("alice", target, actions);
+    // admit itself reads once and the post-admission require() reads once more for its own gate.
+    verify(grants, times(2)).live(recipient);
+  }
+
+  /** GATE ONE reads the source's live grants once however many support items it checks. */
+  @Test
+  void walkReadsLiveGrantsOncePerAdmission() {
+    var actions =
+        Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.CONVERSATION_CREATE);
+    for (var action : actions)
+      when(authority.allowsUsing(eq(recipient), eq(target), eq(action), eq(grant), anyList()))
+          .thenReturn(true);
+    var admitted = policy.admit("alice", target, actions);
+    assertEquals(3, admitted.support().size());
+    clearInvocations(grants, authority);
+    policy.require(admitted);
+    verify(grants, times(1)).live(recipient);
+    verify(authority, times(3)).allowsUsing(eq(recipient), eq(target), any(), eq(grant), any());
   }
 
   @Test
@@ -100,7 +136,9 @@ class PinnedOperationAuthorityTest {
     when(identities.home(own)).thenReturn(home);
     when(identities.project("personal:alice")).thenReturn(own);
     when(members.role("personal:alice", "alice")).thenReturn(Optional.of(ProjectRole.MANAGER));
-    when(authority.allowsUsing(recipient, own, AuthorityAction.WRITE, grant)).thenReturn(true);
+    when(authority.allowsUsing(
+            eq(recipient), eq(own), eq(AuthorityAction.WRITE), eq(grant), anyList()))
+        .thenReturn(true);
     var admitted = policy.admit("alice", own, Set.of(AuthorityAction.WRITE));
     assertEquals(own.id(), admitted.scope());
     assertEquals(home, admitted.home());
@@ -130,12 +168,22 @@ class PinnedOperationAuthorityTest {
   @Test
   void replacement_grant_cannot_repair_revocation_and_current_role_can_only_narrow() {
     var admitted = policy.admit("alice", target, Set.of(AuthorityAction.CONVERSATION_CREATE));
-    when(authority.allowsUsing(recipient, target, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient),
+            eq(target),
+            eq(AuthorityAction.CONVERSATION_CREATE),
+            eq(grant),
+            anyList()))
         .thenReturn(false);
     var replacement = mock(ScopedGrantRepository.Binding.class);
     when(grants.live(recipient)).thenReturn(List.of(replacement));
     assertThrows(CallerFault.class, () -> policy.require(admitted));
-    when(authority.allowsUsing(recipient, target, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient),
+            eq(target),
+            eq(AuthorityAction.CONVERSATION_CREATE),
+            eq(grant),
+            anyList()))
         .thenReturn(true);
     when(members.role("one", "alice")).thenReturn(Optional.of(ProjectRole.VIEWER));
     assertThrows(CallerFault.class, () -> policy.require(admitted));
@@ -164,7 +212,8 @@ class PinnedOperationAuthorityTest {
   void children_retain_the_exact_parent_grants_and_cannot_inherit_management_actions() {
     for (var action :
         Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.RUN_MODEL))
-      when(authority.allowsUsing(recipient, target, action, grant)).thenReturn(true);
+      when(authority.allowsUsing(eq(recipient), eq(target), eq(action), eq(grant), anyList()))
+          .thenReturn(true);
     var parent =
         policy.admit(
             "alice",
@@ -200,10 +249,17 @@ class PinnedOperationAuthorityTest {
             AuthorityAction.SET_AUDIENCE))
       assertThrows(CallerFault.class, () -> policy.derive(parent, Set.of(action)));
     // An ancestor action not used by the leaf still constrains the whole tree.
-    when(authority.allowsUsing(recipient, target, AuthorityAction.CONVERSATION_CREATE, grant))
+    when(authority.allowsUsing(
+            eq(recipient),
+            eq(target),
+            eq(AuthorityAction.CONVERSATION_CREATE),
+            eq(grant),
+            anyList()))
         .thenReturn(false);
     assertThrows(CallerFault.class, () -> policy.require(child));
-    verify(grants, times(1)).live(recipient);
+    // Never fewer than the admission's own read; every walk since reads the list once per
+    // admission checked, not once per support item.
+    verify(grants, atLeastOnce()).live(recipient);
   }
 
   @Test
@@ -250,8 +306,12 @@ class PinnedOperationAuthorityTest {
     var live =
         new PinnedOperationAuthority(
             identities, grants, authority, members, records, resources, knowledge);
-    when(authority.allowsUsing(recipient, target, AuthorityAction.READ, grant)).thenReturn(true);
-    when(authority.allowsUsing(recipient, target, AuthorityAction.WRITE, grant)).thenReturn(true);
+    when(authority.allowsUsing(
+            eq(recipient), eq(target), eq(AuthorityAction.READ), eq(grant), anyList()))
+        .thenReturn(true);
+    when(authority.allowsUsing(
+            eq(recipient), eq(target), eq(AuthorityAction.WRITE), eq(grant), anyList()))
+        .thenReturn(true);
     var root = live.admit("alice", target, Set.of(AuthorityAction.READ, AuthorityAction.WRITE));
     assertTrue(root.globalRead());
     var memory = new AccessRequest.Resource(ResourceScopeRepository.Kind.MEMORY, "global-memory");
