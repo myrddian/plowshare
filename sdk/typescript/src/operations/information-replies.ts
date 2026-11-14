@@ -1,5 +1,6 @@
 import type { InterchangeReplies } from './information-interchange.ts';
 import type { NavigationReplies } from './information-navigation.ts';
+import type { DiscoveryReplies } from './information-discovery.ts';
 import { isNavigationOperation } from './information-navigation.ts';
 import type {
   InformationContentCapabilities,
@@ -231,7 +232,7 @@ export interface InformationFence {
   readonly outcomes: readonly InformationAwaitOutcome[];
 }
 export interface InformationReplies
-  extends NavigationReplies, InterchangeReplies {
+  extends NavigationReplies, InterchangeReplies, DiscoveryReplies {
   'information.types.capabilities': InformationContentCapabilities;
   'information.types.list': InformationTypeVersions;
   'information.types.get': InformationTypeContract;
@@ -285,6 +286,11 @@ export interface InformationReplies
 }
 export type InformationFrame = keyof InformationReplies;
 export const INFORMATION_FRAMES = [
+  'information.discovery.scopes',
+  'information.discovery.list',
+  'information.discovery.search',
+  'information.discovery.facets',
+  'information.discovery.read',
   'information.interchange.capabilities',
   'information.interchange.export',
   'information.interchange.readable',
@@ -415,7 +421,11 @@ function legacyInformationReply(
     return undefined;
   const value = outcome.payload,
     verb = type.slice('information.'.length);
-  if (isNavigationOperation(verb) || verb.startsWith('interchange.'))
+  if (
+    isNavigationOperation(verb) ||
+    verb.startsWith('interchange.') ||
+    verb.startsWith('discovery.')
+  )
     return value;
   if (verb.startsWith('types.') || verb.startsWith('content.')) return value;
   if (verb === 'rank') return retrievalReply('document.rank', value);

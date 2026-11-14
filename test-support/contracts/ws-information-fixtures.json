@@ -945,5 +945,71 @@
     "payload": {
       "changed": true
     }
+  },
+  "information.discovery.list": {
+    "code": "OK",
+    "payload": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "items": [],
+      "nextCursor": null,
+      "hasMore": false
+    }
+  },
+  "information.discovery.search": {
+    "code": "OK",
+    "payload": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "items": [],
+      "nextCursor": null,
+      "hasMore": false
+    }
+  },
+  "information.discovery.scopes": {
+    "code": "OK",
+    "payload": {
+      "items": [
+        {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "kind": "PROJECT",
+          "name": "research",
+          "project": "research"
+        }
+      ],
+      "nextCursor": null,
+      "hasMore": false
+    }
+  },
+  "information.discovery.facets": {
+    "code": "OK",
+    "payload": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "facet": "tags",
+      "items": [
+        {
+          "value": "network",
+          "count": 1
+        }
+      ],
+      "nextCursor": null,
+      "hasMore": false
+    }
+  },
+  "information.discovery.read": {
+    "code": "OK",
+    "payload": {
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "start": 0,
+      "end": 4,
+      "total": 4,
+      "text": "text",
+      "document_type": "document",
+      "document_subtype": "text"
+    }
   }
 }

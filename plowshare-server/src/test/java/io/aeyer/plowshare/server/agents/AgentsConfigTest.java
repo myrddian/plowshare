@@ -946,7 +946,7 @@ class AgentsConfigTest {
                   runtime.schemasOfferedTo(registry.get("interlocutor")).stream()
                       .map(ToolSchema::name)
                       .toList();
-              assertTrue(offered.containsAll(RetrievalTools.NAMES));
+              assertTrue(offered.containsAll(InformationDiscoveryTool.NAMES));
               assertTrue(offered.containsAll(ArchiveReadTools.NAMES));
               assertTrue(offered.contains(ConversationSearchTool.NAME));
               assertTrue(offered.contains(ConversationContextTool.NAME));
@@ -954,7 +954,7 @@ class AgentsConfigTest {
                   runtime.schemasOfferedTo(registry.get("librarian")).stream()
                       .map(ToolSchema::name)
                       .toList()
-                      .containsAll(RetrievalTools.NAMES));
+                      .containsAll(InformationDiscoveryTool.NAMES));
               for (String name :
                   List.of(
                       "coder",
@@ -1021,7 +1021,10 @@ class AgentsConfigTest {
                 if (model.path("adapter").asText().equals("registered")) {
                   adapters++;
                   assertTrue(known.contains(name), name);
-                  assertTrue(model.path("shippedGrants").size() > 0, name);
+                  if (name.startsWith("document_") && !name.equals(AskTool.NAME)) {
+                    // Compatibility remains registered; released agents use information discovery.
+                    assertEquals(0, model.path("shippedGrants").size(), name);
+                  } else assertTrue(model.path("shippedGrants").size() > 0, name);
                 } else {
                   boundaries++;
                   if (name.equals("information")) {
@@ -1103,7 +1106,11 @@ class AgentsConfigTest {
                         "file_roots",
                         "file_stat",
                         "get_date",
+                        "information_facets",
+                        "information_list",
                         "information_read",
+                        "information_scopes",
+                        "information_search",
                         "information_write",
                         "memory_index",
                         "memory_navigate",

@@ -193,14 +193,7 @@ class ShippedExposureTest {
   @Test
   void the_close_reader_holds_deliberation_and_document_evidence_without_corpus_search() {
     AgentDefinition reader = shipped().get("close_reader");
-    assertEquals(
-        List.of(
-            AskTool.NAME,
-            RetrievalTools.RETRIEVE,
-            RetrievalTools.RANK,
-            RetrievalTools.OUTLINE,
-            RetrievalTools.CITATIONS),
-        reader.tools());
+    assertEquals(List.of(AskTool.NAME, InformationTool.READ), reader.tools());
     assertFalse(reader.tools().contains(DocumentTools.SEARCH_NAME));
     assertTrue(reader.calls().isEmpty(), "a leaf: calls: is empty and agent_run is not held");
     assertTrue(

@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.sdk;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.*;
 import io.aeyer.plowshare.protocol.*;
 import io.aeyer.plowshare.protocol.fetch.FetchWindow;
@@ -7,6 +9,7 @@ import io.aeyer.plowshare.protocol.search.SearchPage;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CompletionStage;
 import okhttp3.*;
 
 /**
@@ -15,6 +18,53 @@ import okhttp3.*;
  */
 public class WsServerClient implements ServerClient, AsyncServerClient, AutoCloseable {
   private static final ObjectMapper JSON = SdkJson.mapper();
+  private static final ObjectMapper DISCOVERY_JSON =
+      SdkJson.mapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+
+  @Override
+  public InformationDiscoveryClient informationDiscovery() {
+    return new InformationDiscoveryClient() {
+      public CompletionStage<InformationDiscovery.Scopes> scopes(
+          InformationDiscovery.ScopesRequest request, RequestOptions options) {
+        return discovery("scopes", request, InformationDiscovery.Scopes.class, options);
+      }
+
+      public CompletionStage<InformationDiscovery.Page> list(
+          InformationDiscovery.Query request, RequestOptions options) {
+        if (request.query() != null || request.facet() != null)
+          throw new IllegalArgumentException("Listing does not accept query/facet");
+        return discovery("list", request, InformationDiscovery.Page.class, options);
+      }
+
+      public CompletionStage<InformationDiscovery.Page> search(
+          InformationDiscovery.Query request, RequestOptions options) {
+        if (request.query() == null || request.facet() != null)
+          throw new IllegalArgumentException("Search requires query only");
+        return discovery("search", request, InformationDiscovery.Page.class, options);
+      }
+
+      public CompletionStage<InformationDiscovery.Facets> facets(
+          InformationDiscovery.Query request, RequestOptions options) {
+        if (request.facet() == null || request.query() != null)
+          throw new IllegalArgumentException("Facets requires facet only");
+        return discovery("facets", request, InformationDiscovery.Facets.class, options);
+      }
+
+      public CompletionStage<Information.Window> read(
+          InformationDiscovery.Read request, RequestOptions options) {
+        return discovery("read", request, Information.Window.class, options);
+      }
+    };
+  }
+
+  private <T> CompletionStage<T> discovery(
+      String operation, Object request, Class<T> result, RequestOptions options) {
+    Objects.requireNonNull(request, "request");
+    Map<String, Object> fields =
+        DISCOVERY_JSON.convertValue(request, new TypeReference<Map<String, Object>>() {});
+    return askAsync("information.discovery." + operation, fields, result, options);
+  }
+
   private final String origin;
   private final String bearer;
   private final Plowshare.TransportMode transportMode;

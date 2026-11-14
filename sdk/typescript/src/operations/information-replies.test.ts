@@ -25,7 +25,18 @@ const asked = (type: InformationFrame): Request =>
   ({
     type,
     payload: {
-      scope: { kind: 'personal' },
+      ...(type.startsWith('information.discovery.')
+        ? {}
+        : { scope: { kind: 'personal' } }),
+      ...(type.startsWith('information.discovery.') &&
+      type !== 'information.discovery.scopes'
+        ? { scopes: ['11111111-1111-1111-1111-111111111111'] }
+        : {}),
+      ...(type === 'information.discovery.search' ? { query: 'network' } : {}),
+      ...(type === 'information.discovery.facets' ? { facet: 'tags' } : {}),
+      ...(type === 'information.discovery.read'
+        ? { revision: '11111111-1111-1111-1111-111111111111' }
+        : {}),
       ...(type === 'information.symbols' ? { query: 'load' } : {}),
     },
   }) as Request;

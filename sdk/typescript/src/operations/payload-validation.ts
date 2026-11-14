@@ -558,6 +558,20 @@ export const SHAPES: Record<
   'conversation.context.snapshot': [['conversation', 'agent'], ['measure']],
   'conversation.context.count': [['conversation', 'agent'], []],
   'information.interchange.capabilities': [['scope'], []],
+  'information.discovery.scopes': [[], ['limit', 'cursor']],
+  'information.discovery.list': [['scopes'], ['filter', 'limit', 'cursor']],
+  'information.discovery.search': [
+    ['scopes', 'query'],
+    ['filter', 'limit', 'cursor'],
+  ],
+  'information.discovery.facets': [
+    ['scopes', 'facet'],
+    ['filter', 'limit', 'cursor'],
+  ],
+  'information.discovery.read': [
+    ['scopes', 'revision'],
+    ['offset', 'limit'],
+  ],
   'information.interchange.export': [['scope', 'revisions'], []],
   'information.interchange.readable': [['scope', 'revision'], []],
   'information.interchange.origin': [['scope', 'revision'], []],

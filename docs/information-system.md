@@ -350,6 +350,68 @@ fixtures cover this extension without changing orchestration payload semantics.
 
 ## Controls and adapters
 
+### Cursor discovery
+
+The read-only `information.discovery.*` WebSocket operations navigate explicit
+readable scope IDs. `discovery.scopes` discovers IDs, kinds, names and project names,
+including empty readable projects. Generally readable resources are the separate
+`global_read` choice; selecting a project does not implicitly include manuals.
+
+| Operation suffix | Input | Result |
+| --- | --- | --- |
+| `discovery.scopes` | optional `limit`, `cursor` | `items`, `nextCursor`, `hasMore` |
+| `discovery.list` | `scopes`, optional `filter`, `limit`, `cursor` | selected `scopes`, current-head metadata `items`, `nextCursor`, `hasMore` |
+| `discovery.search` | list fields plus required `query` | same metadata page, newest first |
+| `discovery.facets` | `scopes`, required `facet`, optional `filter`, `limit`, `cursor` | selected `scopes`, `facet`, value/count `items`, `nextCursor`, `hasMore` |
+| `discovery.read` | `scopes`, exact `revision`, optional `offset`, `limit` | UTF-16 text window with `start`, `end`, `total` |
+
+Metadata pages default to 10 items, maximum 50. Select 1–32 distinct discovered
+IDs. Filters intersect using the existing metadata vocabulary; use search's
+`query` rather than `filter.search`. Facets select `kind`, `tags`, `autoTag`,
+`tagGroup`, `documentAuthor`, `subtype`, or `when`. Counts describe unique current
+heads, including readable draft and final reports. Lists expose report status
+and `contentIndexed`. Exact reads may follow retained history; text windows
+default to 8192 UTF-16 positions and are bounded to 32768.
+
+Search is lexical document discovery over names, titles, manual/automatic tags
+and current indexed content, not semantic passage ranking. Content uses the
+existing stored chunk search index. Metadata remains searchable before content
+processing finishes. Read exact revisions to support content claims;
+`contentIndexed: false` makes content-search absence inconclusive.
+
+`nextCursor` is signed and bound to the acting principal, confinement, operation,
+selected scopes, query and filters. Keep those unchanged. Cursors expire fifteen
+minutes after the first page or on server restart; invalid/expired/mismatched
+cursors refuse explicitly. Documents order by creation time and UUID, scopes and
+facet values by their exact IDs/values. Keysets avoid offset shifts from newer
+inserts. This is live pagination: edits, new heads and revocation can change later
+pages. It is not a frozen snapshot. Page size may change.
+
+Current scoped RBAC, token/owner limits, privacy and dependency/reference policy
+are checked before counts and paging. Unknown/unreadable explicit scopes refuse
+generically rather than quietly returning an empty page. Ordinary discovery uses
+the acting identity's accessible information, independently of execution and write
+home. Confined/contained work keeps its server-owned home/subtree and cannot select
+general knowledge. Document reads retain the disclosed revisions; facets retain
+all contributors server-side in the same statement as the aggregate.
+
+Agents use `information_scopes`, `information_list`, `information_search`,
+`information_facets` and `information_read` with `operation: "read"`, discovered
+`scopes` and an exact `revision`. Other information controls keep their run-home
+contract. Shipped agents use this suite instead of deprecated `document_*`
+discovery grants. Java exposes `informationDiscovery()` on its socket client;
+other SDKs expose generated typed operations. CLI examples:
+
+```sh
+bin/plowshare-cli information discovery scopes '{"limit":10}'
+bin/plowshare-cli information discovery list '{"scopes":["<scope UUID>"],"filter":{"kind":"report"},"limit":10}'
+```
+
+The [information-discovery skill](skills-and-agent-rules.md#information-discovery)
+uses the independently available Librarian in a fresh context.
+[ADR 0067](decisions/0067-information-discovery-and-read-selection.md) records
+the separation of read selection from execution home.
+
 The canonical [operation list](../plowshare-protocol/src/main/java/io/aeyer/plowshare/protocol/frames/InformationOperations.java)
 is registered by `InformationFrames`; all registered controls have a neutral TypeScript
 socket adapter and Java socket transport. TUI `/information` and the standalone

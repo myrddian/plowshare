@@ -1,5 +1,6 @@
 import type { InterchangePayloads } from './information-interchange.ts';
 import type { NavigationPayloads } from './information-navigation.ts';
+import type { DiscoveryPayloads } from './information-discovery.ts';
 import type {
   InformationTyping,
   InformationProcessingStage,
@@ -42,7 +43,7 @@ export interface InformationFilter {
 
 /** Authenticated information frame payloads; publication and migration remain operator controls. */
 export interface InformationPayloads
-  extends NavigationPayloads, InterchangePayloads {
+  extends NavigationPayloads, InterchangePayloads, DiscoveryPayloads {
   'information.types.capabilities': {
     readonly scope: InformationScope;
     readonly view?: 'content-types-v1';

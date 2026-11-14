@@ -11,6 +11,11 @@ import java.util.List;
 import java.util.UUID;
 
 public interface ServerClient {
+  /** Discover readable scopes and page retained information; no execution/write home is changed. */
+  default InformationDiscoveryClient informationDiscovery() {
+    throw new UnsupportedOperationException("Information discovery is unavailable");
+  }
+
   /** Explicit binary HTTP publication; never redirect or replay uncertain writes. */
   default io.aeyer.plowshare.protocol.RelayBlob.Published publishRelayBlob(
       io.aeyer.plowshare.protocol.RelayBlob.Publish request, byte[] bytes) throws IOException {

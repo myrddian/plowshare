@@ -24,12 +24,11 @@ import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
  *
  * <h2>{@code home} is passed by the runtime, never chosen by the model</h2>
  *
- * <p>It is a parameter of {@link #run} rather than an argument in {@link #schema}, and that is the
- * whole of the enforcement: <b>a tool must not let an agent name its own tier.</b> An agent runs
- * against the home its job was started for. The MCP surface's equivalent tools do take a {@code
- * project} argument, because their caller is a person's session saying what it is working on; an
- * agent has no such standing, and copying the argument across would let one widen its own reach to
- * global by typing a word.
+ * <p>Execution, filesystem access and write destinations remain bound to the server-supplied home;
+ * a model argument cannot relocate them. Read-only information discovery may select explicit scope
+ * identifiers under the acting principal's current RBAC and credential limits. Those selectors
+ * grant no access, and confined/contained work additionally retains its server-owned read boundary.
+ * This separates knowledge navigation from changing where an agent executes or writes.
  *
  * <h2>The names here are the registry's {@code knownTools}</h2>
  *

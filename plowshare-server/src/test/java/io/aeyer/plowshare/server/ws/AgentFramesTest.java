@@ -787,10 +787,10 @@ class AgentFramesTest {
     for (JsonNode row : rows) {
       String name = row.path("name").asText();
       assertEquals(
-          name.equals("figure_reader") ? 0 : name.equals("aristoxenus") ? 2 : 1,
+          name.equals("figure_reader") ? 0 : name.equals("aristoxenus") ? 3 : 1,
           row.path("commands").size());
       if (!name.equals("figure_reader")) {
-        JsonNode review = row.path("commands").get(name.equals("aristoxenus") ? 1 : 0);
+        JsonNode review = row.path("commands").get(name.equals("aristoxenus") ? 2 : 0);
         assertEquals("/skill:review", review.path("command").asText());
         assertEquals(name, review.path("executor").asText());
         assertTrue(row.path("withheld").toString().contains("broken"));
@@ -804,7 +804,7 @@ class AgentFramesTest {
     FrameParity.assertSameAnswer(http, outcome);
     for (JsonNode row : FrameJson.answering().readTree(http.getContentAsString())) {
       assertEquals(
-          row.path("name").asText().equals("aristoxenus") ? 1 : 0, row.path("commands").size());
+          row.path("name").asText().equals("aristoxenus") ? 2 : 0, row.path("commands").size());
     }
   }
 

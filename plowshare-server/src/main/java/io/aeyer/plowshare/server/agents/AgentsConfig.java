@@ -56,6 +56,7 @@ import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationCatalogue;
 import io.aeyer.plowshare.server.information.InformationContentTypes;
 import io.aeyer.plowshare.server.information.InformationContext;
+import io.aeyer.plowshare.server.information.InformationDiscoveryService;
 import io.aeyer.plowshare.server.information.InformationNavigationService;
 import io.aeyer.plowshare.server.llm.LlmProperties;
 import io.aeyer.plowshare.server.llm.SamplingProfiles;
@@ -774,6 +775,7 @@ public class AgentsConfig {
       ObjectProvider<InformationCatalogue> information,
       ObjectProvider<InformationContentTypes> informationTypes,
       ObjectProvider<InformationNavigationService> informationNavigation,
+      ObjectProvider<InformationDiscoveryService> informationDiscovery,
       DocumentStore documents,
       CitationStore citations,
       TurnStore turns,
@@ -850,12 +852,17 @@ public class AgentsConfig {
                     new RetrievalTools.Outline(documents),
                     new RetrievalTools.Citations(citations, conversations),
                     new DocumentTools.Search(corpus),
+                    new InformationDiscoveryTool("scopes", informationDiscovery::getObject),
+                    new InformationDiscoveryTool("list", informationDiscovery::getObject),
+                    new InformationDiscoveryTool("search", informationDiscovery::getObject),
+                    new InformationDiscoveryTool("facets", informationDiscovery::getObject),
                     new InformationTool(
                             false,
                             information::getObject,
                             informationTypes::getObject,
                             informationNavigation::getObject)
-                        .withRetrieval(corpus),
+                        .withRetrieval(corpus)
+                        .withDiscovery(informationDiscovery::getObject, null),
                     new InformationTool(
                         true,
                         information::getObject,

@@ -341,6 +341,10 @@ class ModelSurfaceTest {
                     () -> io.aeyer.plowshare.server.documents.Deliberation.A_PASS),
                 new InformationTool(false, () -> null),
                 new InformationTool(true, () -> null),
+                new InformationDiscoveryTool("scopes", () -> null),
+                new InformationDiscoveryTool("list", () -> null),
+                new InformationDiscoveryTool("search", () -> null),
+                new InformationDiscoveryTool("facets", () -> null),
                 new GetDateTool(java.time.Instant::now, java.time.ZoneId.systemDefault()),
                 // fetch and search, mocked for the same reason as the
                 // corpus above and never reached for the same one: a

@@ -1,4 +1,5 @@
 import { validateInformationTagVersions } from './information-validation.ts';
+import { validateDiscoveryReply } from './information-discovery.ts';
 import { interchangeProblem } from './interchange-validation.ts';
 import { validateNavigationMetadata } from './navigation-validation.ts';
 import { validateToolInvocationResult } from './tool-results.ts';
@@ -263,6 +264,7 @@ export function decodeReply<K extends keyof Replies>(
   validateActingReply(type, decoded);
   validateNavigationMetadata(type, decoded);
   validateInformationTagVersions(type, decoded);
+  validateDiscoveryReply(type, decoded);
   validateProviderCredentialReply(type, decoded);
   const portableFailure = interchangeProblem(type, decoded, true);
   if (portableFailure) throw new Error(portableFailure);

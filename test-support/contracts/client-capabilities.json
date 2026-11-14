@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 285,
+    "registeredRequestFrames": 290,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 279,
-    "headlessCliOneShotFrames": 269,
+    "headlessCliRequestFrames": 284,
+    "headlessCliOneShotFrames": 274,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 285,
+    "typedRequestFrames": 290,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -1362,14 +1362,7 @@
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
         "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/DocumentTools.java",
-        "shippedGrants": [
-          "plowshare-server/src/main/resources/agents/critic.md",
-          "plowshare-server/src/main/resources/agents/interlocutor.md",
-          "plowshare-server/src/main/resources/agents/librarian.md",
-          "plowshare-server/src/main/resources/agents/researcher.md",
-          "plowshare-server/src/main/resources/bots/aristoxenus.md",
-          "plowshare-server/src/main/resources/bots/farnsworth.md"
-        ]
+        "shippedGrants": []
       },
       "work": [
         "live-mcp-deployment-validation",
@@ -1417,12 +1410,7 @@
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
         "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RetrievalTools.java",
-        "shippedGrants": [
-          "plowshare-server/src/main/resources/agents/close_reader.md",
-          "plowshare-server/src/main/resources/agents/interlocutor.md",
-          "plowshare-server/src/main/resources/agents/librarian.md",
-          "plowshare-server/src/main/resources/bots/farnsworth.md"
-        ]
+        "shippedGrants": []
       },
       "work": [
         "live-mcp-deployment-validation",
@@ -1446,6 +1434,11 @@
         "frame": "information.list",
         "serverSource": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
         "frames": [
+          "information.discovery.scopes",
+          "information.discovery.list",
+          "information.discovery.search",
+          "information.discovery.facets",
+          "information.discovery.read",
           "information.interchange.capabilities",
           "information.interchange.export",
           "information.interchange.readable",
@@ -1637,12 +1630,7 @@
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
         "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RetrievalTools.java",
-        "shippedGrants": [
-          "plowshare-server/src/main/resources/agents/close_reader.md",
-          "plowshare-server/src/main/resources/agents/interlocutor.md",
-          "plowshare-server/src/main/resources/agents/librarian.md",
-          "plowshare-server/src/main/resources/bots/farnsworth.md"
-        ]
+        "shippedGrants": []
       },
       "work": [
         "live-mcp-deployment-validation",
@@ -1690,14 +1678,7 @@
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
         "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/DocumentTools.java",
-        "shippedGrants": [
-          "plowshare-server/src/main/resources/agents/critic.md",
-          "plowshare-server/src/main/resources/agents/interlocutor.md",
-          "plowshare-server/src/main/resources/agents/librarian.md",
-          "plowshare-server/src/main/resources/agents/researcher.md",
-          "plowshare-server/src/main/resources/bots/aristoxenus.md",
-          "plowshare-server/src/main/resources/bots/farnsworth.md"
-        ]
+        "shippedGrants": []
       },
       "work": [
         "live-mcp-deployment-validation",
@@ -1745,12 +1726,7 @@
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
         "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RetrievalTools.java",
-        "shippedGrants": [
-          "plowshare-server/src/main/resources/agents/close_reader.md",
-          "plowshare-server/src/main/resources/agents/interlocutor.md",
-          "plowshare-server/src/main/resources/agents/librarian.md",
-          "plowshare-server/src/main/resources/bots/farnsworth.md"
-        ]
+        "shippedGrants": []
       },
       "work": [
         "live-mcp-deployment-validation",
@@ -1798,12 +1774,7 @@
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
         "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RetrievalTools.java",
-        "shippedGrants": [
-          "plowshare-server/src/main/resources/agents/close_reader.md",
-          "plowshare-server/src/main/resources/agents/interlocutor.md",
-          "plowshare-server/src/main/resources/agents/librarian.md",
-          "plowshare-server/src/main/resources/bots/farnsworth.md"
-        ]
+        "shippedGrants": []
       },
       "work": [
         "live-mcp-deployment-validation",
@@ -4107,6 +4078,101 @@
     },
     {
       "frame": "information.delete",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.discovery.facets",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.discovery.list",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.discovery.read",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.discovery.scopes",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.discovery.search",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -8530,7 +8596,13 @@
             "PortableImported",
             "PortableOrigin",
             "PortableReadable",
-            "PortableCapabilities"
+            "PortableCapabilities",
+            "DiscoveryScope",
+            "DiscoveryScopes",
+            "DiscoveryItem",
+            "DiscoveryPage",
+            "DiscoveryFacets",
+            "DiscoverySelection"
           ],
           "operations": [
             "information.types.capabilities",
@@ -8600,7 +8672,12 @@
             "information.interchange.export",
             "information.interchange.readable",
             "information.interchange.origin",
-            "information.interchange.import"
+            "information.interchange.import",
+            "information.discovery.scopes",
+            "information.discovery.list",
+            "information.discovery.search",
+            "information.discovery.facets",
+            "information.discovery.read"
           ],
           "fixtures": "test-support/contracts/ws-information-fixtures.json"
         },
@@ -8719,6 +8796,11 @@
           "information.content.get",
           "information.content.revise",
           "information.delete",
+          "information.discovery.facets",
+          "information.discovery.list",
+          "information.discovery.read",
+          "information.discovery.scopes",
+          "information.discovery.search",
           "information.documents.facets",
           "information.documents.get",
           "information.documents.list",
@@ -8900,7 +8982,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 269,
+        "count": 274,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -8912,9 +8994,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 285 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 290 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "279 WS operations: 269 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "284 WS operations: 274 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "acting.context.open": "physical-connection-subject-context",
         "acting.context.close": "physical-connection-subject-context",
@@ -9044,6 +9126,11 @@
   "informationSystem": {
     "implementation": "docs/information-system.md",
     "operations": [
+      "information.discovery.scopes",
+      "information.discovery.list",
+      "information.discovery.search",
+      "information.discovery.facets",
+      "information.discovery.read",
       "information.interchange.capabilities",
       "information.interchange.export",
       "information.interchange.readable",

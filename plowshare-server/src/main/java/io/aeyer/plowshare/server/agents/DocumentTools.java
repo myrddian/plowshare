@@ -835,6 +835,9 @@ public final class DocumentTools {
 
   static final String SEARCH_DESCRIPTION =
       """
+            Legacy document retrieval compatibility tool. Use information_scopes and
+            information_search for current scoped information discovery.
+
             Ask the document corpus a question in plain language and get back \
             the passages that answer it, with their text. Takes a moment — the \
             question is matched both by meaning and by its exact words, so a \
@@ -858,8 +861,8 @@ public final class DocumentTools {
             the question, nothing ingested at all, or a corpus that holds text \
             no search can reach. Only the first is worth rephrasing for.
 
-            The corpus is not scoped to a project and there is nothing to \
-            choose: every project reads the same documents.""";
+            Reads are limited by the authenticated run's selection and current permissions.
+            This projection is not a system-wide inventory of retained information.""";
 
   /*
    * What this description has to do that SEARCH_DESCRIPTION does not: draw
@@ -874,6 +877,10 @@ public final class DocumentTools {
 
   static final String LIST_DESCRIPTION =
       """
+            Legacy document projection compatibility tool. Use information_scopes and
+            information_list to discover retained sources and reports with real metadata
+            filters and cursor pagination. This listing is not a system-wide inventory.
+
             List what the corpus holds: every document's name, its title, the \
             id for asking it, and how much of it there is. No passage text and \
             no summary — this says what exists, not what any of it argues.
