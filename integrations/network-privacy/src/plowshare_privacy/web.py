@@ -743,6 +743,8 @@ def application(
                         "error": item.error,
                         "retired": item.retired,
                         "untag_failed": item.untag_failed,
+                        "waiting_minutes": service.waiting_minutes(item),
+                        "slow": service.slow(item),
                     }
                     for item in service.view()
                 ],
@@ -814,6 +816,7 @@ def application(
                 "failed": 0,
                 "blocked": 0,
                 "unresolved": 0,
+                "slow": 0,
                 "detail": JOURNAL_UNREADABLE,
             }
         return {**asdict(counts), "detail": None}

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -33,6 +33,12 @@ from .reference_seed import load_seed
 
 # The same cadence as the deep scan loop (DeepScanner polls every 5 seconds).
 POLL_SECONDS = 5
+
+# The server fetches one page at a time and finishes a ticket once the page is
+# saved (summaries run later), so a page normally waits seconds. Past this, the
+# owner is told; nothing is re-sent, because a re-sent fetch would queue behind
+# the same server work.
+SLOW_AFTER = timedelta(minutes=10)
 
 PHASE_LABELS = {
     "queued": "Waiting to be fetched",
@@ -59,11 +65,14 @@ class ReferenceCounts:
     ``unresolved`` is a ``submitted`` receipt with an error: its acquire's delivery
     was uncertain and no matching ticket was found, so only the owner's Retry (an
     idempotent replay with the same request id) moves it on.
+    ``slow`` is an ``awaiting`` receipt the server has held for ``SLOW_AFTER`` or
+    longer; it has no Retry, only an explanation.
     """
 
     failed: int
     blocked: int
     unresolved: int
+    slow: int
 
 
 class ReferenceService:
@@ -87,7 +96,22 @@ class ReferenceService:
             unresolved=sum(
                 r.phase == "submitted" and r.error is not None for r in live
             ),
+            slow=sum(self.slow(r) for r in live),
         )
+
+    def waiting_minutes(self, receipt: ReferenceReceipt) -> int | None:
+        """Whole minutes the server has held an ``awaiting`` fetch, else None.
+
+        A clock behind the recorded start reads as zero rather than negative.
+        """
+        if receipt.phase != "awaiting" or receipt.awaiting_since is None:
+            return None
+        since = datetime.fromisoformat(receipt.awaiting_since.replace("Z", "+00:00"))
+        return max(0, int((self.now() - since).total_seconds() // 60))
+
+    def slow(self, receipt: ReferenceReceipt) -> bool:
+        minutes = self.waiting_minutes(receipt)
+        return minutes is not None and minutes >= SLOW_AFTER.total_seconds() // 60
 
     async def retry(self, url: str) -> None:
         await self.library.retry(url)

@@ -232,6 +232,11 @@ class ReferenceReceipt:
     ``attempt_started_at`` is when the current attempt was requeued; an
     uncertainly delivered acquire only matches tickets created after it (less
     ``CLOCK_SKEW``). It is absent for a first attempt, whose name is unique.
+    ``awaiting_since`` is when the receipt last entered ``awaiting``, so the
+    dashboard can show how long the server has held the fetch. ``_store`` keeps
+    it only in ``awaiting`` (a transition may briefly carry it, so it is not an
+    invariant here); a journal written before it existed is filled in from the
+    ticket's ``created_at`` on the next pass.
     """
 
     url: str
@@ -251,6 +256,7 @@ class ReferenceReceipt:
     untag_failed: bool = False
     resource_name: str | None = None
     attempt_started_at: str | None = None
+    awaiting_since: str | None = None
 
     def __post_init__(self) -> None:
         reference_url(self.url)
@@ -269,6 +275,7 @@ class ReferenceReceipt:
         _optional(self.fetched_at, timestamp)
         _optional(self.resource_name, _resource_name)
         _optional(self.attempt_started_at, timestamp)
+        _optional(self.awaiting_since, timestamp)
         if any(
             type(flag) is not bool
             for flag in (self.retired, self.retired_tagged, self.untag_failed)
@@ -316,8 +323,9 @@ class ReferenceReceipt:
                 "superseded",
                 "untag_failed",
             },
-            # Absent from journals written before refresh existed.
-            {"resource_name", "attempt_started_at"},
+            # Absent from journals written before refresh, or waiting times,
+            # existed.
+            {"resource_name", "attempt_started_at", "awaiting_since"},
         )
         retired, retired_tagged = row["retired"], row["retired_tagged"]
         untag_failed = row["untag_failed"]
@@ -345,6 +353,7 @@ class ReferenceReceipt:
             untag_failed,
             _optional(row.get("resource_name"), _resource_name),
             _optional(row.get("attempt_started_at"), timestamp),
+            _optional(row.get("awaiting_since"), timestamp),
         )
 
 
@@ -743,9 +752,17 @@ class ReferenceLibrary:
                 error=None,
             )
         else:
-            # Queued, running, or succeeded without a visible revision yet.
+            # Queued, running, or succeeded without a visible revision yet. A
+            # receipt already awaiting keeps its start; one journaled before
+            # waiting times existed takes the ticket's creation (``_store`` stamps
+            # a receipt that has only now entered ``awaiting``).
             current = replace(
-                receipt, phase="awaiting", acquisition_id=acquisition, error=None
+                receipt,
+                phase="awaiting",
+                acquisition_id=acquisition,
+                error=None,
+                awaiting_since=receipt.awaiting_since
+                or (_ticket_created(ticket) if receipt.phase == "awaiting" else None),
             )
         if current != receipt:
             self._store(current)
@@ -832,7 +849,15 @@ class ReferenceLibrary:
         awaited. A receipt revived while it was being tagged without
         ``device-reference`` goes back to ``retained`` so the tag is restored; one
         retired while being tagged keeps ``tagged`` and is untagged next.
+
+        ``awaiting_since`` is kept only in ``awaiting``, and a receipt entering
+        ``awaiting`` without one is stamped with the collector's clock, so every
+        path into that phase (an acquire, an owner retry) starts the wait.
         """
+        if receipt.phase != "awaiting":
+            receipt = replace(receipt, awaiting_since=None)
+        elif receipt.awaiting_since is None:
+            receipt = replace(receipt, awaiting_since=self.clock())
         ledger = self.journal.read()
         receipts = list(ledger.receipts)
         for index, stored in enumerate(receipts):
@@ -914,6 +939,14 @@ def _attempt_floor(receipt: ReferenceReceipt) -> datetime:
         return datetime.min.replace(tzinfo=timezone.utc)
     started = datetime.fromisoformat(receipt.attempt_started_at.replace("Z", "+00:00"))
     return started - CLOCK_SKEW
+
+
+def _ticket_created(ticket: InformationAcquisitionDto) -> str | None:
+    """The ticket's ``created_at`` as journaled, or None when it is malformed."""
+    try:
+        return timestamp(ticket.created_at)
+    except ValueError:
+        return None
 
 
 def _created(ticket: InformationAcquisitionDto) -> datetime:
