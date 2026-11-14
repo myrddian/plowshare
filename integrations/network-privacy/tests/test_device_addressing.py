@@ -43,6 +43,7 @@ def receipt(
     *addressing: AddressAssignment,
     scope: str = SCOPE,
     issues: tuple[str, ...] = (),
+    probed: bool = True,
 ) -> Receipt:
     finished = f"2026-01-0{day}T00:00:00Z"
     evidence = Evidence(
@@ -54,7 +55,12 @@ def receipt(
         started_at=finished,
         finished_at=finished,
         snapshot=Snapshot(
-            finished, (TcpObservation(ADDRESS, 443, "open"),), (), (), None, addressing
+            finished,
+            (TcpObservation(ADDRESS, 443, "open"),) if probed else (),
+            (),
+            (),
+            None,
+            addressing,
         ),
         issues=issues,
         changes=(),
@@ -158,10 +164,54 @@ class DeviceAddressingTest(unittest.TestCase):
             receipt(3, assignment("static")),
         )
 
+    def test_newest_collection_decides_even_without_probes(self) -> None:
+        self.assertIsNone(
+            card(receipt(1, assignment("static")), receipt(2, probed=False)).addressing
+        )
+
+    def test_change_followed_by_unknown_is_not_shown(self) -> None:
+        self.assertNoChange(*self.changed(), receipt(3, assignment("unknown")))
+
+    def test_change_followed_by_incomparable_other_mode_is_not_shown(self) -> None:
+        gap = ("addressing_partial:home-dns",)
+        self.assertNoChange(
+            *self.changed(), receipt(3, assignment("dhcp_dynamic"), issues=gap)
+        )
+        self.assertNoChange(
+            *self.changed(), receipt(3, assignment("dhcp_dynamic"), scope="b" * 64)
+        )
+        # Returning to the changed-to mode does not revive the dropped change.
+        self.assertNoChange(
+            *self.changed(),
+            receipt(3, assignment("dhcp_dynamic"), issues=gap),
+            receipt(4, assignment("static"), issues=gap),
+        )
+
+    def test_change_followed_by_incomparable_same_mode_is_kept(self) -> None:
+        gap = ("addressing_partial:home-dns",)
+        kept = card(
+            *self.changed(), receipt(3, assignment("static"), issues=gap)
+        ).addressing
+        assert kept is not None
+        self.assertEqual("dhcp_reserved", kept.previous_mode)
+        self.assertEqual("2026-01-02T00:00:00Z", kept.changed_at)
+        self.assertFalse(kept.changed_in_latest)
+
+    def test_change_is_not_shown_again_after_mac_handover(self) -> None:
+        self.assertNoChange(
+            *self.changed(),
+            receipt(3, assignment("static", OTHER_MAC)),
+            receipt(4, assignment("static")),
+        )
+
     def test_overview_json_carries_addressing(self) -> None:
         encoded = json.dumps(asdict(card(receipt(1, assignment("static")))))
         self.assertIn('"addressing": {"mode": "static"', encoded)
         self.assertIn('"addressing": null', json.dumps(asdict(card(receipt(1)))))
+
+    def changed(self) -> tuple[Receipt, Receipt]:
+        """A recorded reserved -> static change on day 2."""
+        return receipt(1, assignment("dhcp_reserved")), receipt(2, assignment("static"))
 
     def assertNoChange(self, *receipts: Receipt) -> None:
         latest = card(*receipts).addressing
