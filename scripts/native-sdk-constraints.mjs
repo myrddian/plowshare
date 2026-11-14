@@ -237,6 +237,11 @@ export function constrain(graph) {
           or(eq('newConversation', true), present('conversation')),
           not(present('images')),
         ),
+        // ADR 0069: a raise names an existing conversation's new total and nothing else.
+        implies(
+          present('maxModelCalls'),
+          and(present('conversation'), not(eq('newConversation', true))),
+        ),
       );
     rules(
       s,

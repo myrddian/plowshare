@@ -195,6 +195,9 @@ a project name or `project:null` for Global history. Java image uploads require
 their destination project. Missing/null execution destinations are refused locally
 before submitting the operation.
 These checks apply with human credentials as well as service credentials.
+`agent.run` accepts `maxModelCalls`, a conversation's new total model-call
+allowance, only beside an existing `conversation`. SDKs refuse it locally with
+`newConversation:true` or without a conversation.
 
 ```ts
 await client.request('agent.run', {

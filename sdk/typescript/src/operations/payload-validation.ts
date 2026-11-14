@@ -238,8 +238,8 @@ export function problem(
 }
 
 type ExtendedOperation = keyof ExtendedPayloads;
-// Required text fields, followed by optional fields. Unknown keys are refused,
-// particularly agent.run.maxModelCalls, which the server cannot honour.
+// Required text fields, followed by optional fields. Unknown keys are refused.
+// agent.run.maxModelCalls is known, but only beside an existing conversation.
 export const SHAPES: Record<
   ExtendedOperation,
   readonly [readonly string[], readonly string[]]
@@ -791,6 +791,7 @@ export const SHAPES: Record<
       'maxTurns',
       'noTurnCap',
       'images',
+      'maxModelCalls',
     ],
   ],
   'job.list': [[], []],
@@ -1563,6 +1564,13 @@ export function commandProblem(
     if (isList(body['images']) && body['images'].length > 0)
       return 'a new conversation cannot carry images; use --standalone';
   }
+  // ADR 0069: the existing conversation's new total; a new or standalone run has none to raise.
+  if (
+    type === 'agent.run' &&
+    'maxModelCalls' in body &&
+    (body['conversation'] == null || body['newConversation'] === true)
+  )
+    return 'maxModelCalls raises an existing conversation; name its conversation id';
   if (type === 'agent.run' && body['conversation'] != null) {
     if (body['project'] != null)
       return 'conversation owns its project; omit project for a conversation turn';
