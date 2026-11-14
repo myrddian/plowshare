@@ -1,0 +1,400 @@
+package io.aeyer.plowshare.server.access;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import io.aeyer.plowshare.server.archive.ProjectRole;
+import io.aeyer.plowshare.server.auth.JdbcServiceAccountRepository;
+import io.aeyer.plowshare.server.auth.ServiceAccounts;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Properties;
+import java.util.UUID;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+/**
+ * PostgreSQL proves V261 against data written under V259's lineage rules: live person-issued grants
+ * are reissued from the SYSTEM root through the V260 trigger, lineage-dead ones are revoked rather
+ * than revived, and delegated, self-issued and system-minted grants are left byte-identical. Each
+ * test migrates its own schema to V259, seeds it, then migrates to V261.
+ */
+@Tag("full-db")
+@Testcontainers
+class RerootPersonIssuedGrantsMigrationTest {
+  @Container
+  static final PostgreSQLContainer<?> POSTGRES =
+      new PostgreSQLContainer<>("pgvector/pgvector:pg16")
+          .withUrlParam("sslmode", "disable")
+          .withUrlParam("gssEncMode", "disable");
+
+  private DriverManagerDataSource source;
+  private String schema;
+  private JdbcTemplate jdbc;
+
+  @BeforeEach
+  void migrateToV259() {
+    source =
+        new DriverManagerDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+    schema = "reroot_" + UUID.randomUUID().toString().replace("-", "");
+    new JdbcTemplate(source).execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public");
+    new JdbcTemplate(source).execute("CREATE SCHEMA " + schema);
+    var properties = new Properties();
+    properties.setProperty("currentSchema", schema + ",public");
+    source.setConnectionProperties(properties);
+    migrateTo("259");
+    jdbc = new JdbcTemplate(source);
+    user("admin", true);
+    user("mia", false);
+    user("sam", false);
+    user("tom", false);
+    jdbc.update("INSERT INTO projects(name) VALUES ('one'),('two')");
+  }
+
+  private void migrateTo(String target) {
+    Flyway.configure()
+        .dataSource(source)
+        .schemas(schema)
+        .defaultSchema(schema)
+        .target(target)
+        .load()
+        .migrate();
+  }
+
+  private void user(String handle, boolean admin) {
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,must_change_password,server_admin) VALUES (?,'fixture',FALSE,?)",
+        handle,
+        admin);
+  }
+
+  private UUID account(String handle) {
+    return jdbc.queryForObject(
+        "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, handle);
+  }
+
+  private UUID scope(String project) {
+    return jdbc.queryForObject(
+        "SELECT s.id FROM authority_scopes s JOIN projects p ON p.id=s.project_id WHERE p.name=?",
+        UUID.class,
+        project);
+  }
+
+  private UUID root() {
+    return jdbc.queryForObject(
+        "SELECT id FROM authority_grants WHERE provenance='ROOT_POLICY'", UUID.class);
+  }
+
+  private UUID systemAccount() {
+    return jdbc.queryForObject(
+        "SELECT subject_account FROM authority_grants WHERE provenance='ROOT_POLICY'", UUID.class);
+  }
+
+  /** The admin's ORDINARY_PROJECT_CONTROL grant (ROOT_POLICY-parented). */
+  private UUID control() {
+    return jdbc.queryForObject(
+        "SELECT id FROM authority_grants WHERE provenance='ADMIN_CONTROL' AND revoked_at IS NULL"
+            + " AND coverage='ORDINARY_PROJECT_CONTROL' AND subject_account=?",
+        UUID.class,
+        account("admin"));
+  }
+
+  /** V259's authority_issue_membership: every issue hangs off the authorizing grant. */
+  private UUID issueMembership(String project, String target, String actor, String role) {
+    return jdbc.queryForObject(
+        "SELECT authority_issue_membership(?,?,?,?)", UUID.class, project, target, actor, role);
+  }
+
+  /** A SYSTEM-rooted membership written through the project_members bridge. */
+  private void member(String project, String handle, String role) {
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,?,? FROM projects WHERE name=?",
+        handle,
+        role,
+        project);
+  }
+
+  /** A ROLE MANAGER grant on project one that expires in a day, issued under admin control. */
+  private UUID temporaryManager(String handle) {
+    UUID grant = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO authority_grants(id,subject_account,scope_id,role_id,requested_role,issuer_account,"
+            + "issuing_grant,expires_at,provenance) VALUES (?,?,?,?,'MANAGER',?,?,now()+interval '1 day','ROLE')",
+        grant,
+        account(handle),
+        scope("one"),
+        BuiltInIdentities.MANAGER.value(),
+        account("admin"),
+        control());
+    return grant;
+  }
+
+  /** Revokes a grant under the admin's control grant, as an administrator removal would. */
+  private void revoke(UUID grant) {
+    jdbc.update(
+        "UPDATE authority_grants SET revoked_at=now(),version=version+1,revoked_by=?,revoking_grant=?"
+            + " WHERE id=?",
+        account("admin"),
+        control(),
+        grant);
+  }
+
+  private boolean live(UUID grant) {
+    return jdbc.queryForObject(
+        "SELECT EXISTS(SELECT 1 FROM authority_live_grants() WHERE id=?)", Boolean.class, grant);
+  }
+
+  /**
+   * The whole row as text, so "untouched" means every column, including version and revocation.
+   * V260 adds exercised_grant after the seed was written, so the comparison drops that one key.
+   */
+  private String row(UUID grant) {
+    return jdbc.queryForObject(
+        "SELECT (to_jsonb(g)-'exercised_grant')::text FROM authority_grants g WHERE id=?",
+        String.class,
+        grant);
+  }
+
+  private UUID uuidColumn(String column, UUID grant) {
+    return switch (column) {
+      case "issuing_grant" ->
+          jdbc.queryForObject(
+              "SELECT issuing_grant FROM authority_grants WHERE id=?", UUID.class, grant);
+      case "exercised_grant" ->
+          jdbc.queryForObject(
+              "SELECT exercised_grant FROM authority_grants WHERE id=?", UUID.class, grant);
+      case "issuing_token" ->
+          jdbc.queryForObject(
+              "SELECT issuing_token FROM authority_grants WHERE id=?", UUID.class, grant);
+      case "revoked_by" ->
+          jdbc.queryForObject(
+              "SELECT revoked_by FROM authority_grants WHERE id=?", UUID.class, grant);
+      case "revoking_grant" ->
+          jdbc.queryForObject(
+              "SELECT revoking_grant FROM authority_grants WHERE id=?", UUID.class, grant);
+      default -> throw new IllegalArgumentException(column);
+    };
+  }
+
+  private OffsetDateTime timestamp(String column, UUID grant) {
+    return switch (column) {
+      case "expires_at" ->
+          jdbc.queryForObject(
+              "SELECT expires_at FROM authority_grants WHERE id=?", OffsetDateTime.class, grant);
+      case "revoked_at" ->
+          jdbc.queryForObject(
+              "SELECT revoked_at FROM authority_grants WHERE id=?", OffsetDateTime.class, grant);
+      default -> throw new IllegalArgumentException(column);
+    };
+  }
+
+  /** The single unrevoked grant of a provenance held by a person (not an agent) on a project. */
+  private UUID current(String provenance, String project, String handle) {
+    return jdbc.queryForObject(
+        "SELECT id FROM authority_grants WHERE provenance=? AND revoked_at IS NULL AND scope_id=?"
+            + " AND subject_account=? AND subject_agent IS NULL",
+        UUID.class,
+        provenance,
+        scope(project),
+        account(handle));
+  }
+
+  private int liveGrantsOn(String project, String handle) {
+    return jdbc.queryForObject(
+        "SELECT count(*) FROM authority_grants g JOIN authority_live_grants() l ON l.id=g.id"
+            + " WHERE g.scope_id=? AND g.subject_account=?",
+        Integer.class,
+        scope(project),
+        account(handle));
+  }
+
+  private void assertRevokedBySystem(UUID grant) {
+    assertNotNull(timestamp("revoked_at", grant));
+    assertEquals(systemAccount(), uuidColumn("revoked_by", grant));
+    assertEquals(root(), uuidColumn("revoking_grant", grant));
+  }
+
+  @Test
+  void live_person_issued_grants_are_reissued_from_root() {
+    UUID mia = temporaryManager("mia");
+    UUID sam = issueMembership("one", "sam", "mia", "CONTRIBUTOR");
+    var expiry = timestamp("expires_at", sam);
+    assertNotNull(expiry);
+    assertEquals(mia, uuidColumn("issuing_grant", sam));
+
+    migrateTo("261");
+
+    // sam's grant was exercised from mia's original grant, which was still live when sam was
+    // reissued because children are re-rooted before their parents.
+    UUID reissued = current("MEMBERSHIP", "one", "sam");
+    assertEquals(1, liveGrantsOn("one", "sam"));
+    assertTrue(live(reissued));
+    assertEquals(root(), uuidColumn("issuing_grant", reissued));
+    assertEquals(mia, uuidColumn("exercised_grant", reissued));
+    assertEquals(expiry.toInstant(), timestamp("expires_at", reissued).toInstant());
+    assertRevokedBySystem(sam);
+
+    // mia's own grant was person-issued by the admin under control, so it is re-rooted too.
+    UUID miaReissued = current("ROLE", "one", "mia");
+    assertEquals(root(), uuidColumn("issuing_grant", miaReissued));
+    assertEquals(control(), uuidColumn("exercised_grant", miaReissued));
+    assertRevokedBySystem(mia);
+
+    // Removing mia no longer removes sam.
+    revoke(miaReissued);
+    assertTrue(live(reissued));
+
+    var audit =
+        jdbc.queryForMap(
+            "SELECT actor_account,authority FROM authority_grant_audit WHERE grant_id=? AND event='ISSUE'",
+            reissued);
+    assertEquals(account("mia"), audit.get("actor_account"));
+    assertEquals(mia, audit.get("authority"));
+  }
+
+  @Test
+  void lineage_dead_grants_are_revoked_not_revived() {
+    UUID mia = issueMembership("one", "mia", "admin", "MANAGER");
+    UUID sam = issueMembership("one", "sam", "mia", "CONTRIBUTOR");
+    revoke(mia);
+    assertFalse(live(sam));
+    assertNull(timestamp("revoked_at", sam));
+
+    migrateTo("261");
+
+    assertRevokedBySystem(sam);
+    assertEquals(0, liveGrantsOn("one", "sam"));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM authority_grants WHERE subject_account=? AND revoked_at IS NULL",
+            Integer.class,
+            account("sam")));
+  }
+
+  @Test
+  void agent_and_token_issued_grants_are_untouched() {
+    // tom's root-issued membership authorizes a forced MANAGER grant for his agent, which is a
+    // self-issue; the agent then issues sam a grant on project two.
+    member("one", "tom", "MANAGER");
+    member("two", "tom", "MANAGER");
+    UUID agentGrant = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO authority_grants(id,subject_account,subject_agent,scope_id,role_id,requested_role,"
+            + "issuer_account,issuing_grant,manager_forced,provenance)"
+            + " VALUES (?,?,'helper',?,?,'MANAGER',?,?,TRUE,'ROLE')",
+        agentGrant,
+        account("tom"),
+        scope("two"),
+        BuiltInIdentities.MANAGER.value(),
+        account("tom"),
+        current("MEMBERSHIP", "two", "tom"));
+    UUID agentIssued = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO authority_grants(id,subject_account,scope_id,role_id,requested_role,issuer_account,"
+            + "issuer_agent,issuing_grant,provenance) VALUES (?,?,?,?,'READER',?,'helper',?,'ROLE')",
+        agentIssued,
+        account("sam"),
+        scope("two"),
+        BuiltInIdentities.READER.value(),
+        account("tom"),
+        agentGrant);
+
+    var services = new JdbcServiceAccountRepository(jdbc);
+    services.create("service");
+    member("one", "service", "MANAGER");
+    UUID token = UUID.randomUUID();
+    String principal = "@service/" + token;
+    services.issue(
+        token,
+        "service",
+        "manager",
+        principal,
+        "1".repeat(64),
+        OffsetDateTime.now().plusDays(1),
+        List.of(new ServiceAccounts.Scope("one", ProjectRole.MANAGER)));
+    UUID tokenIssued = issueMembership("one", "sam", principal, "CONTRIBUTOR");
+    assertEquals(token, uuidColumn("issuing_token", tokenIssued));
+
+    String agentBefore = row(agentGrant);
+    String agentIssuedBefore = row(agentIssued);
+    String tokenIssuedBefore = row(tokenIssued);
+    migrateTo("261");
+
+    assertEquals(agentBefore, row(agentGrant));
+    assertEquals(agentIssuedBefore, row(agentIssued));
+    assertEquals(tokenIssuedBefore, row(tokenIssued));
+    assertTrue(live(agentIssued));
+    assertTrue(live(tokenIssued));
+  }
+
+  @Test
+  void service_issued_grants_are_untouched() {
+    new JdbcServiceAccountRepository(jdbc).create("service");
+    member("one", "service", "MANAGER");
+    UUID sam = issueMembership("one", "sam", "service", "CONTRIBUTOR");
+    assertEquals(current("MEMBERSHIP", "one", "service"), uuidColumn("issuing_grant", sam));
+    String before = row(sam);
+
+    migrateTo("261");
+
+    assertEquals(before, row(sam));
+    assertTrue(live(sam));
+  }
+
+  @Test
+  void self_issued_grants_are_untouched() {
+    // A live self-assignment under admin control, and a lineage-dead one under a revoked
+    // temporary grant: neither may become a permanent SYSTEM-rooted grant.
+    UUID adminOwn = issueMembership("one", "admin", "admin", "MANAGER");
+    UUID temporary = temporaryManager("mia");
+    UUID miaOwn = issueMembership("one", "mia", "mia", "MANAGER");
+    revoke(temporary);
+    assertTrue(live(adminOwn));
+    assertFalse(live(miaOwn));
+    String adminBefore = row(adminOwn);
+    String miaBefore = row(miaOwn);
+
+    migrateTo("261");
+
+    assertEquals(adminBefore, row(adminOwn));
+    assertEquals(miaBefore, row(miaOwn));
+    assertTrue(live(adminOwn));
+    assertFalse(live(miaOwn));
+  }
+
+  @Test
+  void system_minted_grants_are_untouched() {
+    member("one", "mia", "MANAGER");
+    member("two", "sam", "VIEWER");
+    List<String> before =
+        jdbc.queryForList(
+            "SELECT (to_jsonb(g)-'exercised_grant')::text FROM authority_grants g"
+                + " WHERE g.issuing_grant=? OR g.provenance='ADMIN_CONTROL' ORDER BY g.id",
+            String.class,
+            root());
+    assertTrue(before.size() >= 3);
+
+    migrateTo("261");
+
+    assertEquals(
+        before,
+        jdbc.queryForList(
+            "SELECT (to_jsonb(g)-'exercised_grant')::text FROM authority_grants g"
+                + " WHERE (g.issuing_grant=? AND g.exercised_grant IS NULL)"
+                + " OR g.provenance='ADMIN_CONTROL' ORDER BY g.id",
+            String.class,
+            root()));
+  }
+}
