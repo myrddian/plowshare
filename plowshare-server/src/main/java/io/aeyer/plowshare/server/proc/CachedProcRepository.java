@@ -46,9 +46,15 @@ public final class CachedProcRepository implements ProcRepository {
         key,
         true,
         () ->
-            // The cache's fill uses its own FETCH slots; a requester on a miss waits for it
-            // instead of being refused for its account's report seat.
-            admission.read(FETCHER, ReadAdmission.Work.FETCH, () -> source.queues(account, query)),
+            // Queue keys include the account, so one account could start many distinct fills.
+            // The fill first holds that account's REPORT seat (which queues rather than refuses)
+            // and only then one of the cache's FETCH slots, so no tenant can take every slot.
+            admission.read(
+                account,
+                ReadAdmission.Work.REPORT,
+                () ->
+                    admission.read(
+                        FETCHER, ReadAdmission.Work.FETCH, () -> source.queues(account, query))),
         value -> 4096L + 4L * canonical(value).length());
   }
 

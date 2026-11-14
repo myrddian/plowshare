@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class BoundedReadAdmission implements ReadAdmission {
   private record Key(String principal, Work work) {}
 
+  private static final int MAX_FETCH_WAITERS = 256;
+
   private final ReadCapacityProperties limits;
   private final ReadSchedulingProperties scheduling;
   private final java.util.ArrayList<Key> waiting = new java.util.ArrayList<>();
@@ -112,6 +114,9 @@ public final class BoundedReadAdmission implements ReadAdmission {
   private synchronized Lease awaitFetch(String principal) {
     var key = key(principal, Work.FETCH);
     if (!fetching.contains(key) && available(key, Work.FETCH)) return reserve(key, Work.FETCH);
+    // Every fetch is a cache loader, so the cache's own load limits already bound this queue;
+    // the cap keeps that true even for a caller outside a cache.
+    if (fetching.size() >= MAX_FETCH_WAITERS) throw rejectedRead();
     var ticket = new Key(principal, Work.FETCH);
     fetching.add(ticket);
     long deadline =

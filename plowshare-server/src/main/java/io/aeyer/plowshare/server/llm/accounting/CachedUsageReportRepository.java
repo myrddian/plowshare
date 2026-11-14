@@ -53,13 +53,21 @@ public final class CachedUsageReportRepository implements UsageReportRepository 
     return reports.read(
         key,
         true,
-        // A foreground fill uses the cache's own FETCH slots and waits; a background refresh
-        // keeps REPORT_REFRESH, which yields to foreground reports and may simply be skipped.
+        // Report keys include the account, so a foreground fill first holds that account's
+        // REPORT seat (which queues rather than refuses) and only then one of the cache's FETCH
+        // slots, so no tenant can take every slot. A background refresh keeps REPORT_REFRESH,
+        // which yields to foreground reports and may simply be skipped.
         () ->
-            admission.read(
-                work == ReadAdmission.Work.REPORT_REFRESH ? account : FETCHER,
-                work == ReadAdmission.Work.REPORT_REFRESH ? work : ReadAdmission.Work.FETCH,
-                () -> source.report(account, query)),
+            work == ReadAdmission.Work.REPORT_REFRESH
+                ? admission.read(account, work, () -> source.report(account, query))
+                : admission.read(
+                    account,
+                    ReadAdmission.Work.REPORT,
+                    () ->
+                        admission.read(
+                            FETCHER,
+                            ReadAdmission.Work.FETCH,
+                            () -> source.report(account, query))),
         value -> 4096L + 4L * canonical(value).length());
   }
 
