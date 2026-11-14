@@ -599,9 +599,54 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
   private SocketAuthorization socketAuthorization;
 
+  /**
+   * How long one request (or one socket's delivery fence) may reuse a session check that succeeded.
+   * Zero, the default for fixtures and for disabled notifications, checks every time.
+   */
+  private java.time.Duration sessionCheckBound = java.time.Duration.ZERO;
+
+  private java.util.function.LongSupplier sessionClock = System::nanoTime;
+
   @org.springframework.beans.factory.annotation.Autowired
   public void useSocketAuthorization(SocketAuthorization authorization) {
     this.socketAuthorization = authorization;
+  }
+
+  /**
+   * Bounds session-check reuse by {@code plowshare.projection-cache.notified.staleness}; with
+   * notifications disabled the operator chose exact checks, so nothing is reused.
+   */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  public void useSessionCheckBound(
+      io.aeyer.plowshare.server.cache.ProjectionNotificationProperties notified) {
+    this.sessionCheckBound = notified.enabled() ? notified.staleness() : java.time.Duration.ZERO;
+  }
+
+  /** Test seam: the clock and bound that {@link RequestSessionValidity} instances use. */
+  void useSessionCheckBound(java.time.Duration bound, java.util.function.LongSupplier nanos) {
+    this.sessionCheckBound = bound;
+    this.sessionClock = nanos;
+  }
+
+  /**
+   * The account fence for one request or delivery: open socket and running delivery are cheap local
+   * facts and always read; the session itself goes through {@code session}, which reuses a success
+   * inside the bound. Null {@code session} means no authorization is composed.
+   */
+  private static Runnable fence(
+      WebSocketSession socket, Delivery delivery, RequestSessionValidity session) {
+    return () -> {
+      if (!delivery.running || !socket.isOpen())
+        throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+      if (session != null) session.run();
+    };
+  }
+
+  private RequestSessionValidity sessionValidity(WebSocketSession socket) {
+    return socketAuthorization == null
+        ? null
+        : new RequestSessionValidity(
+            socketAuthorization, socket, sessionClock, sessionCheckBound, sessionClock.getAsLong());
   }
 
   @Override
@@ -833,13 +878,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
                       (value, delivered) -> routeConcurrent(socket, delivery, value, delivered),
                       () -> delivery.disconnect("request execution"),
                       advertisedRequestDepth());
-          delivery.validity =
-              () -> {
-                if (!delivery.running
-                    || !socket.isOpen()
-                    || socketAuthorization != null && !socketAuthorization.current(socket))
-                  throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
-              };
+          // Per socket, not per request: the instance reuses a success only for the bound and
+          // rechecks after it, so a long-lived socket still sees a revocation within the bound.
+          // The frame-receipt check that admitted this selection frame seeds it.
+          delivery.validity = fence(socket, delivery, sessionValidity(socket));
         }
       } else {
         delivery.domainSeen = true;
@@ -899,6 +941,9 @@ public final class EventChannelHandler extends TextWebSocketHandler
       delivered.run();
       return java.util.concurrent.CompletableFuture.completedFuture(null);
     }
+    // The entry check above is this request's one session check; the instance carries its result to
+    // the handler, the post-handler fence, the disclosure fence and every wait iteration.
+    var requestSession = sessionValidity(socket);
     try {
       var correlation = correlationOf(frame);
       String id = text(correlation.get("id"));
@@ -911,12 +956,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
               delivery.transport instanceof PacketEventTransport
                   ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
                   : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
-              () -> {
-                if (!socket.isOpen()
-                    || !delivery.running
-                    || socketAuthorization != null && !socketAuthorization.current(socket))
-                  throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
-              });
+              fence(socket, delivery, requestSession));
       CompletionStage<Outcome> answer;
       // One socket request, counted on this request's own virtual thread (ConcurrentRequests starts
       // one per request). Only the synchronous part of the handler is counted; work a handler
