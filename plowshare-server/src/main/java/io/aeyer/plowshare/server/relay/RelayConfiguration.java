@@ -55,6 +55,12 @@ public class RelayConfiguration {
     return new JdbcRelayPortRepository(jdbc, transactions, relay);
   }
 
+  /** One memo shared by publication and topic removal so removal invalidates it. */
+  @Bean
+  public RegisteredTopics registeredRelayTopics() {
+    return new LruRegisteredTopics();
+  }
+
   @Bean
   public RelayPorts relayPorts(
       Relay relay,
@@ -64,7 +70,8 @@ public class RelayConfiguration {
       ProjectWorkspaces projects,
       RelayProperties relayProperties,
       ApplicationToolRegistry tools,
-      RelayPublicationSignals signals) {
+      RelayPublicationSignals signals,
+      RegisteredTopics registered) {
     return new ProjectRelayPorts(
         relay,
         repository,
@@ -73,7 +80,8 @@ public class RelayConfiguration {
         projects,
         relayProperties.getMaxForwardingHops(),
         tools,
-        signals);
+        signals,
+        registered);
   }
 
   @Bean
@@ -210,9 +218,10 @@ public class RelayConfiguration {
       RelayDispatch dispatch,
       RelayOperationRepository repository,
       RelayPublicationSignals signals,
-      UnitOfWork transactions) {
+      UnitOfWork transactions,
+      RegisteredTopics registered) {
     return new ProjectRelayOperations(
-        members, projects, routing, dispatch, repository, signals, transactions);
+        members, projects, routing, dispatch, repository, signals, transactions, registered);
   }
 
   @Bean(destroyMethod = "close")

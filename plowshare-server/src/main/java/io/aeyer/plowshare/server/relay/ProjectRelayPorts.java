@@ -28,6 +28,11 @@ public final class ProjectRelayPorts implements RelayPorts {
   private final int maxDepth;
   private final RelayPublicationSignals signals;
   private final RelayToolAuthority tools;
+  private final RegisteredTopics registered;
+  // Accounts whose publisher row exists. Same bound as the topic memo; a row is never deleted
+  // by this process, so no invalidation is needed.
+  private final BoundedRecents<String> publishers =
+      new BoundedRecents<>(LruRegisteredTopics.DEFAULT_CAPACITY);
 
   public ProjectRelayPorts(
       Relay relay,
@@ -70,6 +75,33 @@ public final class ProjectRelayPorts implements RelayPorts {
       int maxDepth,
       RelayToolAuthority tools,
       RelayPublicationSignals signals) {
+    this(
+        relay,
+        repository,
+        properties,
+        members,
+        projects,
+        maxDepth,
+        tools,
+        signals,
+        new LruRegisteredTopics());
+  }
+
+  /**
+   * {@code registered} lets this process skip re-registering a topic it already registered; it is
+   * only a hint, repaired by one register-and-retry when a publish finds the topic row gone.
+   */
+  public ProjectRelayPorts(
+      Relay relay,
+      RelayPortRepository repository,
+      RelayPortProperties properties,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      int maxDepth,
+      RelayToolAuthority tools,
+      RelayPublicationSignals signals,
+      RegisteredTopics registered) {
+    this.registered = Objects.requireNonNull(registered);
     this.signals = Objects.requireNonNull(signals);
     this.tools = Objects.requireNonNull(tools);
     this.relay = Objects.requireNonNull(relay);
@@ -88,6 +120,13 @@ public final class ProjectRelayPorts implements RelayPorts {
       RelayPortProperties.Direction direction,
       String group) {
     return require(account, project, topic, direction, group, true);
+  }
+
+  /** Registers once per process; the memo is recorded only after registration succeeds. */
+  private void register(Relay.TopicKey key) {
+    if (registered.known(key)) return;
+    relay.registerTopic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    registered.remember(key);
   }
 
   @Override
@@ -148,8 +187,7 @@ public final class ProjectRelayPorts implements RelayPorts {
     var key = new Relay.TopicKey(id, topic);
     if (direction == RelayPortProperties.Direction.EGRESS
         && topic.startsWith("tool.")
-        && tools.permits(account, project, topic, direction, group))
-      relay.registerTopic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+        && tools.permits(account, project, topic, direction, group)) register(key);
     return key;
   }
 
@@ -208,20 +246,32 @@ public final class ProjectRelayPorts implements RelayPorts {
             RelayPortProperties.Direction.INGRESS,
             null);
     if (!topic.equals(current)) throw new CallerFault("Relay publication project changed");
-    repository.rememberPublisher(account);
-    relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    if (!publishers.contains(account)) {
+      repository.rememberPublisher(account);
+      publishers.add(account);
+    }
+    register(topic);
     Instant occurred = RelayValues.time(request.occurredAt());
-    var publication =
-        relay.publish(
-            topic,
-            new Relay.Draft(
-                request.requestId(),
-                RelayPort.publisher(account),
-                occurred,
-                request.correlationId(),
-                request.parentEventId(),
-                new RelayPayload.Text(request.text()),
-                causation));
+    var draft =
+        new Relay.Draft(
+            request.requestId(),
+            RelayPort.publisher(account),
+            occurred,
+            request.correlationId(),
+            request.parentEventId(),
+            new RelayPayload.Text(request.text()),
+            causation);
+    Relay.Publication publication;
+    try {
+      publication = relay.publish(topic, draft);
+    } catch (RelayTopicMissingException missing) {
+      // The topic was deleted elsewhere after it was memoized. The failed append found no topic
+      // row under its lock and rolled back before appending, so one register-and-retry cannot
+      // duplicate a publication. A second miss propagates.
+      registered.forget(topic);
+      register(topic);
+      publication = relay.publish(topic, draft);
+    }
     return new RelayPort.Published(
         request.requestId(),
         request.project(),

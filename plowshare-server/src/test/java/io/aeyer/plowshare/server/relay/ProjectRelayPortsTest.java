@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -253,6 +254,63 @@ class ProjectRelayPortsTest {
                 "reviewer",
                 new RelayPort.Ack("project", "source.topic", "filters", id, id, "1", null)));
     verifyNoInteractions(relay, repository);
+  }
+
+  @Test
+  void secondPublishToSameTopicDoesNotRegisterAgain() {
+    allow();
+    when(relay.publish(any(), any()))
+        .thenAnswer(
+            call ->
+                new Relay.Publication(call.getArgument(0), 1, Instant.EPOCH, call.getArgument(1)));
+    ports.publish("reviewer", request());
+    ports.publish("reviewer", request());
+    verify(relay, times(1)).registerTopic(any(), any(), any());
+    verify(repository, times(1)).rememberPublisher("reviewer");
+    verify(relay, times(2)).publish(any(), any());
+  }
+
+  @Test
+  void topicDeletedElsewhereIsReRegisteredOnce() {
+    allow();
+    when(relay.publish(any(), any()))
+        .thenThrow(new RelayTopicMissingException())
+        .thenAnswer(
+            call ->
+                new Relay.Publication(call.getArgument(0), 1, Instant.EPOCH, call.getArgument(1)));
+    assertEquals("1", ports.publish("reviewer", request()).position());
+    verify(relay, times(2)).registerTopic(any(), any(), any());
+    verify(relay, times(2)).publish(any(), any());
+  }
+
+  @Test
+  void secondMissPropagates() {
+    allow();
+    when(relay.publish(any(), any())).thenThrow(new RelayTopicMissingException());
+    assertThrows(RelayTopicMissingException.class, () -> ports.publish("reviewer", request()));
+    verify(relay, times(2)).publish(any(), any());
+    verify(relay, times(2)).registerTopic(any(), any(), any());
+  }
+
+  @Test
+  void failedRegistrationIsNotRemembered() {
+    allow();
+    when(relay.registerTopic(any(), any(), any()))
+        .thenThrow(new IllegalStateException("db down"))
+        .thenReturn(
+            new Relay.Topic(
+                new Relay.TopicKey(7, "custom.topic"),
+                RelayPayload.Kind.TEXT,
+                Relay.Policy.systemDefault(),
+                0,
+                0));
+    when(relay.publish(any(), any()))
+        .thenAnswer(
+            call ->
+                new Relay.Publication(call.getArgument(0), 1, Instant.EPOCH, call.getArgument(1)));
+    assertThrows(IllegalStateException.class, () -> ports.publish("reviewer", request()));
+    ports.publish("reviewer", request());
+    verify(relay, times(2)).registerTopic(any(), any(), any());
   }
 
   @Test
