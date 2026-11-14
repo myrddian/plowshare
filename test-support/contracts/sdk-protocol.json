@@ -2633,6 +2633,9 @@
           "images": {
             "$ref": "#/$defs/shape47"
           },
+          "maxModelCalls": {
+            "$ref": "#/$defs/shape16"
+          },
           "maxTurns": {
             "$ref": "#/$defs/shape16"
           },

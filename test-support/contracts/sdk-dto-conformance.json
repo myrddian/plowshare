@@ -8780,6 +8780,62 @@
   },
   {
     "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "free text",
+      "conversation": "c",
+      "maxModelCalls": 60
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "free text",
+      "conversation": "c",
+      "maxModelCalls": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "free text",
+      "conversation": "c",
+      "maxModelCalls": -1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "free text",
+      "conversation": "c",
+      "maxModelCalls": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "free text",
+      "project": "p",
+      "newConversation": true,
+      "maxModelCalls": 60
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "schedule.pause",
     "value": {
       "schedule": "fixture"

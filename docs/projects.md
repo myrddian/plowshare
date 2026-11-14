@@ -666,6 +666,15 @@ available for orchestration caps when automatic increases are off. Grants never
 reset spending or lift a ceiling entirely; integer accounting bounds still stop
 further growth. Each approved model-call chunk permits additional model use.
 
+Without `autoIncrease`, a person raises an exhausted conversation explicitly. Send
+`maxModelCalls` with the next `agent.run` into that conversation, naming its new
+total allowance ([ADR 0069](decisions/0069-raise-allowance-with-the-next-utterance.md)).
+The total is committed before the turn starts, so a conversation whose last turn
+answered accepts the new utterance. It must not be below what the conversation has
+already spent, and it is refused without an existing `conversation` or beside
+`newConversation`. The value is absolute, so a repeated request does not raise it
+twice. `conversation.resume` takes the same field for a run that stopped mid-turn.
+
 ## Project roles
 
 Accounts receive explicit Viewer, Contributor or Manager data access per project.

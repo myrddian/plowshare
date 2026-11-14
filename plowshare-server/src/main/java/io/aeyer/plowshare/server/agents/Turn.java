@@ -299,7 +299,8 @@ public final class Turn {
    * is this turn's and does not touch the row. <b>There is no budget override beside it</b>: a
    * conversation's allowance is shared by every turn in it by reference, and what an operator can
    * do is raise it on the run, through {@code POST /v1/jobs/&#123;id&#125;/limits}, which is
-   * committed to the canonical allowance when the authorized change is made.
+   * committed to the canonical allowance when the authorized change is made — or, between runs,
+   * name the conversation's new total on the next utterance through the overload below (ADR 0069).
    *
    * <p><b>Why the speaker is an argument here and not read off the session.</b> The log is what a
    * reader rebuilds the conversation from, and an utterance whose speaker is guessed afterwards is
@@ -330,6 +331,41 @@ public final class Turn {
       TurnCap turnCap,
       Speaker speaker,
       Consumer<Outcome> alsoEnded) {
+    return speak(conversation, definition, utterance, sessionId, turnCap, null, speaker, alsoEnded);
+  }
+
+  /**
+   * The same utterance, carrying the conversation's new model-call total with it (ADR 0069).
+   *
+   * <p><b>The person's remedy for an exhausted conversation.</b> A conversation's allowance is
+   * lifetime, and {@link #resume} continues only a run that stopped mid-turn: a conversation whose
+   * last turn ended {@code ANSWERED} with nothing left to spend had no door through which a person
+   * could raise it. This is that door. {@code maxModelCalls} is applied through the private {@link
+   * #grant} that {@link #resume} uses, after this conversation is claimed and {@link
+   * #requireSpeakable} has admitted it, and <em>before</em> the exhausted-budget refusal and the
+   * project's automatic increase read the allowance — so the raise lands ahead of the very check it
+   * exists to get past, on {@link #resume}'s ordering.
+   *
+   * <p><b>An absolute total and never an increment</b>, so a replayed request writes the same
+   * ceiling again and never raises twice. Authorization is the caller's, exactly as for any other
+   * utterance: {@link Runs#start} has already required work authority over this conversation before
+   * reaching here, and there is no weaker path to a raise than the one that speaks.
+   *
+   * @param maxModelCalls what the conversation's whole model-call budget should now total, or
+   *     {@code null} to leave it alone
+   * @throws CallerFault if {@code maxModelCalls} is below what the conversation has already spent,
+   *     or names a number for a conversation whose allowance has no ceiling — {@link #grant}'s
+   *     refusals, unchanged; nothing is run
+   */
+  public String speak(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      Speaker speaker,
+      Consumer<Outcome> alsoEnded) {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(speaker, "speaker");
     Objects.requireNonNull(alsoEnded, "alsoEnded");
@@ -342,7 +378,7 @@ public final class Turn {
         utterance,
         sessionId,
         turnCap,
-        null,
+        maxModelCalls,
         alsoEnded,
         Turn::requireSpeakable,
         true,
@@ -1158,9 +1194,10 @@ public final class Turn {
    * @param admissible thrown if not, before anything is spent — {@link #requireSpeakable} for
    *     {@link #speak}, {@link #requireConductor} for {@link #speakToConductor}
    * @param maxModelCalls what the conversation's whole model-call budget should now total, or
-   *     {@code null} to leave it alone — {@link #speak}'s public overloads always pass {@code
-   *     null}; only {@link #speakToConductor}'s 6-argument door ever passes a number, on Decision
-   *     7's terms
+   *     {@code null} to leave it alone — passed by {@link #speakToConductor}, on Decision 7's
+   *     terms, and by the person's own {@link #speak} overload that carries it (ADR 0069); refused
+   *     when {@code given} is a lease. A refusal reaches a person's door as {@link CallerFault} and
+   *     the harness's as {@link Refused}
    * @param incoming whether this utterance is one of the doors spec §6 names — {@code true} for
    *     every public {@link #speak} overload, {@code false} for {@link #deliver}, {@link
    *     #speakToConductor} and {@link #speakToApprovedRun}. Threaded straight to {@link
@@ -1335,16 +1372,28 @@ public final class Turn {
       // right for resume()'s door, an operator's own HTTP request -- but
       // this door is the harness driving a conductor, and a caller that
       // only ever sees Refused should not have to catch a second type
-      // for the one path that also grants a budget. speak()'s public
-      // overloads never reach here with a non-null maxModelCalls, so
-      // this catch is silent dead code from every one of them. A lease
-      // is never granted either: it is what the board handed this turn,
-      // fixed for the wake, and the row it would otherwise raise holds
-      // no budget for a seat to begin with.
+      // for the one path that also grants a budget. A person's own
+      // utterance (incoming) is the other door that may carry a total
+      // (ADR 0069), and for it the refusal stays the CallerFault resume()
+      // answers with: the number is an argument that person sent.
+      //
+      // A lease is never granted: it is what the board or a message
+      // handed this turn, fixed for the wake, and the row it would
+      // otherwise raise holds no budget of its own. No door passes both
+      // today; refusing the pair keeps a future one from having a raise
+      // silently dropped instead of applied.
+      if (given != null && maxModelCalls != null) {
+        throw new CallerFault(
+            "conversation "
+                + id
+                + " spends an allowance handed to this turn rather than its own, so"
+                + " 'maxModelCalls' has nothing here to raise. Nothing was run.");
+      }
       if (given == null) {
         try {
           grant(id, budget, maxModelCalls);
         } catch (CallerFault badGrant) {
+          if (incoming) throw badGrant;
           throw new Refused(badGrant.getMessage());
         }
       }
@@ -1377,9 +1426,9 @@ public final class Turn {
                 + budget.limit()
                 + " model calls of its budget, so there is nothing left for this"
                 + " turn to spend. Turns spend a conversation's allowance and no turn"
-                + " raises it, and there is no run in flight for anyone else to raise it"
-                + " on, so what happens next is a person's decision and not this"
-                + " server's.");
+                + " raises it, so what happens next is a person's decision and not this"
+                + " server's: send 'maxModelCalls' with the next agent.run, naming the"
+                + " conversation's new total, to raise it. Nothing was run.");
       }
       Compaction.TurnTranscript transcript =
           causation == null
@@ -2136,7 +2185,8 @@ public final class Turn {
               case ANSWERED ->
                   "so there is nothing to continue. The run reached an answer and"
                       + " stopped because it was finished. What comes next is another utterance,"
-                      + " not more allowance for one that is over.";
+                      + " not more allowance for one that is over; if the conversation has"
+                      + " spent its allowance, send 'maxModelCalls' with that agent.run.";
               case STUCK ->
                   "which is a run that kept asking for the same call and was stopped for"
                       + " it. Allowance was not the constraint, so granting more would buy the"

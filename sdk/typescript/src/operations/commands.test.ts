@@ -91,6 +91,22 @@ describe('operator WS boundaries', () => {
     expect(parseDirect('project list').kind).toBe('unhandled');
     expect(parseDirect('conversation list').kind).toBe('unhandled');
   });
+  it('carries a new allowance total only into an existing conversation (ADR 0069)', () => {
+    expect(
+      parseCommand(
+        'agent run {"agent":"a","task":"work","conversation":"c","maxModelCalls":60}',
+        'repo',
+      ),
+    ).toEqual({
+      kind: 'request',
+      request: request('agent.run', {
+        agent: 'a',
+        task: 'work',
+        conversation: 'c',
+        maxModelCalls: 60,
+      }),
+    });
+  });
   it('requires explicit runtime destinations without adding projects to corpus reads', () => {
     expect(parseCommand('conversation open').kind).toBe('usage');
     expect(parseCommand('conversation list', null)).toEqual({
@@ -146,6 +162,9 @@ describe('operator WS boundaries', () => {
   });
   it.each([
     'agent run {"agent":"a","task":"x","maxModelCalls":10}',
+    'agent run {"agent":"a","task":"x","project":"p","newConversation":true,"maxModelCalls":10}',
+    'agent run {"agent":"a","task":"x","conversation":"c","maxModelCalls":0}',
+    'agent run {"agent":"a","task":"x","conversation":"c","maxModelCalls":1.5}',
     'agent run {"agent":"a","task":"x","conversation":"c","project":"p"}',
     'agent run {"agent":"a","task":"x","conversation":"c","images":["i"]}',
     'agent run {"agent":"a","task":"x","noTurnCap":true,"maxTurns":4}',

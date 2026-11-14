@@ -51,6 +51,8 @@ Approval, continuation, budget top-up and retry are explicit actions on existing
 work. They are not synonyms for starting a new task. Use the current pending
 identity and current effective state so an old UI selection cannot answer a newer
 request. The server remains authoritative if a client view is stale.
+An idle conversation refused for having spent all its model calls is topped up by
+sending `maxModelCalls`, its new total, with the next `agent.run` into it.
 
 Compaction and skill-context summaries do not consume the conversation's task
 allowance. They run as bounded SYSTEM operations with their own spending policy:
