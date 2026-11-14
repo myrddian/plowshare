@@ -19,6 +19,9 @@ class LibrarianDefinitionTest {
             "information_search",
             "information_facets",
             "information_read",
+            "document_retrieve",
+            "document_outline",
+            "document_citations",
             "result_read",
             "result_list"),
         librarian.tools());

@@ -143,6 +143,10 @@ instructions in a fresh conversation, sharing the parent's allowance, cancellati
 and approval lifecycle. Retrieved source bodies stay out of the parent's context;
 the worker returns a concise answer with exact references and coverage. Invocation
 is `/skill:information-discovery <question or inventory request>`.
+The skill also retains scoped `document_retrieve`, `document_outline` and
+`document_citations` for passage evidence, hierarchy and citation relationships.
+Each receives explicit readable scopes; its document locator is a revision UUID.
+The same capabilities are granted to the independent Librarian.
 
 The same exported Librarian remains independently selectable/delegable. Both paths
 use `information_scopes`, `information_list`, `information_search`,

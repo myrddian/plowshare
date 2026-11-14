@@ -2,7 +2,7 @@
 name: critic
 description: Challenge unsupported assumptions and test the project board proposal against its evidence.
 model: reasoning
-tools: [code_map, file_roots, file_glob, file_grep, file_read, file_stat, memory_recall, memory_read, search, fetch, information_scopes, information_list, information_search, information_facets, information_read]
+tools: [code_map, file_roots, file_glob, file_grep, file_read, file_stat, memory_recall, memory_read, search, fetch, information_scopes, information_list, information_search, information_facets, information_read, document_retrieve, document_outline, document_citations]
 calls: []
 scopes: [workspace:read]
 exported: false

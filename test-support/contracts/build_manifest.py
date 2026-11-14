@@ -29,10 +29,10 @@ INTERNAL_BINDINGS = {
     "document_search": ("DocumentTools", "DocumentTools.Search"),
     "document_list": ("DocumentTools", "DocumentTools.AgentList"),
     "document_ask": ("AskTool", "AskTool"),
-    "document_retrieve": ("RetrievalTools", "RetrievalTools.Retrieve"),
+    "document_retrieve": ("ScopedDocumentTool", "ScopedDocumentTool"),
     "document_rank": ("RetrievalTools", "RetrievalTools.Rank"),
-    "document_outline": ("RetrievalTools", "RetrievalTools.Outline"),
-    "document_citations": ("RetrievalTools", "RetrievalTools.Citations"),
+    "document_outline": ("ScopedDocumentTool", "ScopedDocumentTool"),
+    "document_citations": ("ScopedDocumentTool", "ScopedDocumentTool"),
     "conversation_trajectory": ("ConversationTrajectoryTool", "ConversationTrajectoryTool"),
     "conversation_search": ("ConversationSearchTool", "ConversationSearchTool"),
     "conversation_list": ("ArchiveReadTools", "ArchiveReadTools.Conversations"),
@@ -190,6 +190,8 @@ def inventory():
             schema_source = read(f"{AGENTS}/AgentRegistry.java")
         assert f'"{name}"' in schema_source, f"missing model schema name: {name}"
         assert f"new {constructor}(" in assembly, f"unbound model adapter: {name}"
+        if source == "ScopedDocumentTool":
+            assert f'new ScopedDocumentTool("{name}",' in assembly, f"unbound scoped model adapter: {name}"
     grants = {name: [] for name in INTERNAL_BINDINGS}
     for directory in ["agents", "bots"]:
         for path in sorted((ROOT / f"plowshare-server/src/main/resources/{directory}").glob("*.md")):
@@ -385,6 +387,8 @@ def inventory():
             "internalAgent": {
                 "adapter": "registered" if name in INTERNAL_BINDINGS else "operator-or-platform-boundary",
                 "grant": "definition-dependent; registration does not grant every agent access",
+                **({"selection": "required explicit RBAC-readable scopes; document is an exact revision UUID; execution and write home stay unchanged"}
+                   if name in {"document_retrieve", "document_outline", "document_citations"} else {}),
                 **({"source": f"{AGENTS}/{INTERNAL_BINDINGS[name][0]}.java", "shippedGrants": grants[name]}
                    if name in INTERNAL_BINDINGS else {"reason": OPERATOR_BOUNDARIES[name]}),
             },
