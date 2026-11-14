@@ -510,6 +510,74 @@ class NetworkDeviceAssessmentTest {
     }
   }
 
+  @Test
+  void v4_dossier_with_addressing_is_accepted() throws Exception {
+    var host = Host.of(PREVIOUS, resource("tv-dossier-v4.json"));
+    host.setRequest(
+        request(
+            Map.of(
+                "version",
+                2,
+                "time_zone",
+                "Australia/Sydney",
+                "requested_local",
+                "2026-11-11 20:30 AEDT")));
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    assertEquals(1, host.writes);
+    var addressing = payload(host.assessorTasks.getFirst()).path("dossier").path("addressing");
+    assertEquals("static", addressing.path("mode").asText());
+    assertEquals("no_lease_or_reservation", addressing.path("basis").asText());
+    assertEquals(
+        addressing, payload(host.reviewerTasks.getFirst()).path("dossier").path("addressing"));
+    String text = host.report.path("text").asText();
+    assertTrue(
+        text.contains("Between 2026-01-01 11:00 AEDT and 2026-01-01 19:00 AEDT, the network"),
+        text);
+    // Address assignment is context: it raises nothing in the report on its own.
+    assertFalse(text.toLowerCase().contains("static"), text);
+
+    // A null assignment is accepted too; an older version may not carry the key at all.
+    var unknown = (ObjectNode) JSON.readTree(resource("tv-dossier-v4.json"));
+    ((ObjectNode) unknown.path("dossier")).putNull("addressing");
+    var plain = Host.of(PREVIOUS, unknown.toString());
+    plain.assessor.add(assessment().toString());
+    plain.reviewer.add(review("accepted", "c1", "holds").toString());
+    plain.finish();
+    assertEquals(1, plain.writes);
+    var older = (ObjectNode) JSON.readTree(resource("tv-dossier-v4.json"));
+    older.put("version", 3);
+    var refused = Host.of(PREVIOUS, older.toString());
+    var failure = assertThrows(IllegalStateException.class, refused::finish);
+    assertTrue(failure.getMessage().contains("addressing"), failure.getMessage());
+    assertEquals(0, refused.assessorTasks.size());
+  }
+
+  @Test
+  void v4_dossier_with_invalid_addressing_mode_is_rejected() throws Exception {
+    List<Consumer<ObjectNode>> edits =
+        List.of(
+            a -> a.put("mode", "novel"),
+            a -> a.remove("mode"),
+            a -> a.put("basis", "guessed"),
+            a -> a.put("mode", 1));
+    for (var edit : edits) {
+      var document = (ObjectNode) JSON.readTree(resource("tv-dossier-v4.json"));
+      edit.accept((ObjectNode) document.path("dossier").path("addressing"));
+      var invalid = Host.of(PREVIOUS, document.toString());
+      var failure = assertThrows(IllegalStateException.class, invalid::finish);
+      assertTrue(failure.getMessage().contains("Invalid dossier addressing"), failure.getMessage());
+      assertEquals(0, invalid.assessorTasks.size());
+      assertEquals(0, invalid.writes);
+    }
+    var document = (ObjectNode) JSON.readTree(resource("tv-dossier-v4.json"));
+    ((ObjectNode) document.path("dossier")).put("addressing", "static");
+    var invalid = Host.of(PREVIOUS, document.toString());
+    assertThrows(IllegalStateException.class, invalid::finish);
+    assertEquals(0, invalid.assessorTasks.size());
+  }
+
   /**
    * The dashboard preview serves preview-tv-assessment.md as its sample report. It must be this
    * script's output for the run tests/preview_report.py builds from the preview's own sample data,

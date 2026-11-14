@@ -25,8 +25,12 @@ from_device_bytes is what it sent; weaken a concern that reverses them. Treat
 DATA.dossier.supplemental as context: a device-reported model or firmware is
 the device's claim, an advisory concerns the model rather than proving this
 device vulnerable, and a vendor note is something to check. Weaken or refute a
-concern that restates them as observed behaviour or rests on them alone. Write
-notes as plain sentences without identifiers, HTML or tables.
+concern that restates them as observed behaviour or rests on them alone.
+DATA.dossier.addressing (when present) says how the device's address was
+assigned and whether that changed. It is network-configuration context: a
+static address inside the DHCP range or a recent change may be mentioned in
+plain words, but refute a concern that rests on it alone. Write notes as plain
+sentences without identifiers, HTML or tables.
 
 Verify dates, collection scope, fixture labels, timeouts and incomplete DNS history.
 Listening ports do not prove outbound flows or vulnerabilities; DNS queries do not

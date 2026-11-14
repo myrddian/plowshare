@@ -49,6 +49,9 @@ const DESCRIBED_BY = {upnp: 'UPnP', mdns: 'mDNS'};
 const ADVISORY_STATUS = ['searched', 'unavailable', 'model_unknown', 'not_configured'];
 const MODEL_FROM = {profile: 'your profile', unifi: 'the UniFi controller', device: 'the device\'s own description'};
 const SEVERITY = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NONE'];
+// Mirrors contracts.AssignmentMode and contracts.AssignmentBasis.
+const ASSIGNMENT_MODES = ['dhcp_dynamic', 'dhcp_reserved', 'static', 'unknown'];
+const ASSIGNMENT_BASES = ['dhcp_lease', 'dhcp_reservation', 'controller_fixed_ip', 'inside_dhcp_range', 'outside_dhcp_range', 'no_lease_or_reservation'];
 
 function fail(message) { throw new Error(message); }
 function text(value, field, limit) {
@@ -213,17 +216,29 @@ function supplementalRecord(value) {
   return section;
 }
 
+// The version 4 addressing (device_inventory.AddressingView): null, or an
+// object with a known mode and a known or null basis. The other fields are
+// left to the assessor as data, like the rest of the dossier.
+function addressingRecord(value) {
+  if (value === null || value === undefined) return;
+  if (typeof value !== 'object' || Array.isArray(value)) fail('Invalid dossier addressing');
+  member(value.mode, 'dossier addressing mode', ASSIGNMENT_MODES);
+  if (value.basis !== null && value.basis !== undefined) member(value.basis, 'dossier addressing basis', ASSIGNMENT_BASES);
+}
+
 // The collector's document (dossier_port.DossierDocument). Only the fields the
 // script relies on are checked; the assessor reads the rest as data. Version 2
 // added the supplemental section; a version 1 document has none (null here).
 // Version 3 adds the clock: each printed timestamp in the household zone.
+// Version 4 adds addressing: how the device's address was assigned. It is
+// configuration context for the agents; the report does not print it.
 function dossierRecord(source, request) {
   const raw = json(source, 'retained dossier');
   const keys = ['version', 'write_id', 'device_id', 'dossier'];
-  const document = record(raw, 'retained dossier', raw?.version === 3 ? [...keys, 'clock'] : keys);
-  if (document.version !== 1 && document.version !== 2 && document.version !== 3) fail('Unsupported dossier document version');
+  const document = record(raw, 'retained dossier', raw?.version >= 3 ? [...keys, 'clock'] : keys);
+  if (![1, 2, 3, 4].includes(document.version)) fail('Unsupported dossier document version');
   let clock = null;
-  if (document.version === 3) {
+  if (document.version >= 3) {
     record(document.clock, 'dossier clock', ['zone', 'times']);
     const times = document.clock.times;
     if (times === null || typeof times !== 'object' || Array.isArray(times) || Object.keys(times).length > 64) fail('Invalid dossier clock times');
@@ -253,6 +268,8 @@ function dossierRecord(source, request) {
   if (document.version >= 2) supplementalRecord(dossier.supplemental);
   else if (Object.prototype.hasOwnProperty.call(dossier, 'supplemental')) fail('Invalid version 1 dossier: unexpected supplemental');
   else dossier.supplemental = null;
+  if (document.version >= 4) addressingRecord(dossier.addressing);
+  else if (Object.prototype.hasOwnProperty.call(dossier, 'addressing')) fail('Invalid version ' + document.version + ' dossier: unexpected addressing');
   // Profile and pinned issue revisions come from the retained record, so report
   // inputs always match what the assessor read.
   const inputs = [request.dossier];

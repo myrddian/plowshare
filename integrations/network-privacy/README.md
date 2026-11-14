@@ -185,6 +185,33 @@ to set `trafficSite`, and it also turns UniFi traffic counters on. Confirm the
 UniFi API key can read those endpoints before enabling them; a refused read is
 an addressing gap.
 
+The dashboard shows what the latest collection recorded and nothing older. The
+device pane labels each address's assignment (for example `Reserved (DHCP
+reservation)` or `Static inside the DHCP range (no lease or reservation)`),
+with when it was recorded, the lease end the collection recorded when there is
+one and the latest mode change (`Changed from Dynamic to Static …`). The device
+list can be searched by mode (`dynamic`, `reserved`, `static`) and tags a
+static address inside the DHCP range. An assignment recorded for another MAC
+than the device now at the address is not shown. A change counts only under the
+`collection.changes` rule: the same scope, both modes known, the same MAC and no
+`addressing_` issue in either collection. The overview counts devices by mode,
+and the attention band lists a static address inside the DHCP range and a
+change made in the latest collection. Address assignment is configuration
+context, never evidence of compromise. Device dossiers carry the same record as
+`addressing` for the agents (dossier version 4; see the upgrade note below).
+
+#### Upgrade to dossier version 4
+
+The collector now retains dossiers as version 4 documents, which add
+`addressing`. Deploy the updated Application first, so its
+`assess_network_device.js` accepts version 4, and only then upgrade the
+collector that writes it; an older script refuses a version 4 dossier and the
+assessment stops before any model call. Retained version 1 to 3 dossiers are
+still read unchanged. Rolling the collector back after it has written version 4
+dossiers stops retention for those devices until a newer collector rewrites
+them. Follow
+[upgrade the Application and collector](SETUP.md#upgrade-the-application-and-collector).
+
 ## Guided setup
 
 Use the [guided start walkthrough](SETUP.md#start-and-use-the-dashboard). The
@@ -648,7 +675,7 @@ properties and identifies read versus Relay submission effects. Invoke it with
 | `network.evidence` | `scan_id`; optional `section`, `offset`, `limit` | Small complete evidence or a large-scan summary; explicit sections return pages |
 | `network.destinations` | `scan_id`; optional `offset`, `limit` | Small legacy observations or paged DNS destinations |
 | `network.devices` | Optional `offset`, `limit` | Page of monitored devices with a confirmed MAC: `device_id`, name, address and signal codes; `unavailable` counts devices without one |
-| `network.device` | `{"device_id":"mac:<canonical MAC>"}` from `network.devices` | One device dossier: identity, detection, presence, open ports, DNS purpose groups, Pi-hole silence, traffic volume, supplemental context, coverage and signals |
+| `network.device` | `{"device_id":"mac:<canonical MAC>"}` from `network.devices` | One device dossier: identity, detection, presence, open ports, DNS purpose groups, Pi-hole silence, traffic volume, supplemental context, address assignment, coverage and signals |
 
 Read pages default to 32 records (scan lists: 50); serialized size may produce
 smaller pages. Follow `next_offset` until null, using the same retained scan UUID
@@ -672,7 +699,9 @@ documented in `src/plowshare_privacy/device_dossier.py`; they are not findings.
 for its model (at most five advisories; the rest are counted in `omitted`) and
 curated vendor features worth checking. It is context, not observation; a
 device that never described itself is a coverage line. Advisories are dropped
-before destinations when the reply budget is tight.
+before destinations when the reply budget is tight. `addressing` is the
+device's address assignment from the latest collection (or null), counted in the
+reply budget; it is network-configuration context and never a signal.
 
 All calls require the configured web bearer. Scan calls retain the caller's
 request identity before SDK publication and use the same Relay pipeline as the

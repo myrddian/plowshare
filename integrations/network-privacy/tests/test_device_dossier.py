@@ -34,7 +34,7 @@ from plowshare_privacy.device_facts import (
     DeviceDescription,
     DeviceFacts,
 )
-from plowshare_privacy.device_inventory import DeviceCard
+from plowshare_privacy.device_inventory import AddressingView, DeviceCard
 from plowshare_privacy.dns_activity import (
     MIN_SILENT_SECONDS,
     MIN_SILENT_WINDOWS,
@@ -406,6 +406,35 @@ class DeviceDossierTest(unittest.TestCase):
             OperatorProfile(str(uuid4()), "x" * 513, "", ())
         with self.assertRaises(ValueError):
             LinkedIssue(str(uuid4()), str(uuid4()), "maybe", "proposed")
+
+    def test_dossier_carries_addressing(self) -> None:
+        addressing = AddressingView(
+            "static",
+            "no_lease_or_reservation",
+            ("home-dns",),
+            None,
+            UNTIL_AT,
+            "dhcp_dynamic",
+            UNTIL_AT,
+            True,
+        )
+        value = replace(card(), addressing=addressing)
+        dossier = build_dossier(value)
+        self.assertEqual(dossier.addressing, value.addressing)
+        encoded = encode_dossier(dossier)
+        self.assertIn('"addressing":{"mode":"static"', encoded)
+        # It is context, never a signal: the same card without it has the same ones.
+        self.assertEqual(dossier.signals, build_dossier(card()).signals)
+        self.assertIsNone(build_dossier(card()).addressing)
+        self.assertIn('"addressing":null', encode_dossier(build_dossier(card())))
+        # The reply budget counts it, so a trimmed record still fits.
+        domains = [(f"host{i:02d}-{'x' * 50}.example.net", 100, 0) for i in range(40)]
+        trimmed = build_dossier(
+            replace(card(dns=activity(domains)), addressing=addressing), budget=3600
+        )
+        self.assertEqual(trimmed.addressing, addressing)
+        self.assertGreater(trimmed.trimmed_destinations, 0)
+        self.assertLessEqual(len(encode_dossier(trimmed).encode()), 3600)
 
     def test_encoding_is_deterministic_compact_json(self) -> None:
         value = card(

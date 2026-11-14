@@ -61,9 +61,12 @@ PREFIX = "network-privacy-dossier/"
 # Version 2 added the dossier's ``supplemental`` section. Version 3 adds the
 # envelope ``clock``: the household zone and each dossier timestamp the report
 # prints, written in that zone, so the report needs no time zone data of its
-# own. Older revisions are still read (for comparison and receipts) but never
+# own. Version 4 adds the dossier's ``addressing``: how the device's address was
+# assigned (always present in the payload, null when nothing was recorded).
+# Older revisions are still read (for comparison and receipts) but never
 # written; they never equal a newer document, so the next retention revises it.
-DOCUMENT_VERSION = 3
+# The Application script must accept a version before the collector writes it.
+DOCUMENT_VERSION = 4
 _DOSSIER_FIELDS = {
     1: frozenset(
         {
@@ -83,6 +86,7 @@ _DOSSIER_FIELDS = {
 }
 _DOSSIER_FIELDS[2] = _DOSSIER_FIELDS[1] | {"supplemental"}
 _DOSSIER_FIELDS[3] = _DOSSIER_FIELDS[2]
+_DOSSIER_FIELDS[4] = _DOSSIER_FIELDS[3] | {"addressing"}
 
 
 def _report_times(dossier: dict[str, object]) -> tuple[str, ...]:

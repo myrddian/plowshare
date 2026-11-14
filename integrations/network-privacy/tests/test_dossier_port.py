@@ -26,7 +26,9 @@ from plowshare_privacy.device_dossier import (
     build_dossier,
     encode_dossier,
 )
+from plowshare_privacy.device_inventory import AddressingView
 from plowshare_privacy.dossier_port import (
+    DOCUMENT_VERSION,
     DeviceDossiers,
     DossierDocument,
     DossierVersion,
@@ -47,6 +49,22 @@ def dossier(queries: int = 3, *, device: str = DEVICE) -> DeviceDossier:
     )
     mac = device.removeprefix("mac:")
     return replace(value, identity=replace(value.identity, device_id=device, mac=mac))
+
+
+RETAINED_V2 = (
+    Path(__file__).resolve().parents[1]
+    / "src/test/resources/io/aeyer/plowshare/integrations/privacy/tv-dossier.json"
+)
+
+
+def addressed() -> DeviceDossier:
+    """A dossier whose device holds a static address inside the DHCP range."""
+    return replace(
+        dossier(),
+        addressing=AddressingView(
+            "static", "no_lease_or_reservation", ("home-dns",), None, STAMP
+        ),
+    )
 
 
 class Sources:
@@ -239,11 +257,11 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
         document = DossierDocument(str(uuid4()), DEVICE, payload)
         self.assertEqual(DossierDocument.read(document.text()), document)
         self.assertEqual(json.loads(document.text())["dossier"], json.loads(payload))
-        self.assertTrue(document.text().startswith('{"version":3,'))
+        self.assertTrue(document.text().startswith('{"version":4,'))
         for invalid in (
-            # Version 2 has no clock; version 4 is unknown.
-            document.text().replace('"version":3', '"version":2'),
-            document.text().replace('"version":3', '"version":4'),
+            # Version 2 has no clock or addressing; version 5 is unknown.
+            document.text().replace('"version":4', '"version":2'),
+            document.text().replace('"version":4', '"version":5'),
             document.text()[:-1] + ',"extra":true}',
             document.text().replace(',"', ', "', 1),
             json.dumps({**json.loads(document.text()), "device_id": "ip:10.0.0.1"}),
@@ -254,6 +272,60 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
             DossierDocument(str(uuid4()), OTHER, payload)
         with self.assertRaises(ValueError):
             DossierDocument(str(uuid4()), DEVICE, payload, zone="Not/AZone")
+
+    def test_v4_document_round_trips(self) -> None:
+        payload = encode_dossier(addressed())
+        document = DossierDocument(
+            str(uuid4()), DEVICE, payload, zone="Australia/Sydney"
+        )
+        text = document.text()
+        self.assertTrue(text.startswith('{"version":4,'))
+        self.assertEqual(document.version, DOCUMENT_VERSION)
+        read = DossierDocument.read(text)
+        self.assertEqual(read, document)
+        self.assertEqual(read.text(), text)
+        self.assertEqual(
+            json.loads(text)["dossier"]["addressing"]["basis"],
+            "no_lease_or_reservation",
+        )
+        # The Application test's version 4 fixture is a document this code reads.
+        fixture = RETAINED_V2.with_name("tv-dossier-v4.json").read_text("utf-8")
+        self.assertEqual(DossierDocument.read(fixture).text(), fixture)
+
+    def test_v1_to_v3_documents_still_read_byte_for_byte(self) -> None:
+        current = json.loads(encode_dossier(dossier()))
+        del current["addressing"]
+        older = {**current}
+        del older["supplemental"]
+        payloads = {1: older, 2: current, 3: current}
+        for version, value in payloads.items():
+            payload = json.dumps(value, separators=(",", ":"))
+            for zone in ("UTC", "Australia/Sydney") if version == 3 else ("UTC",):
+                text = DossierDocument(
+                    str(uuid4()), DEVICE, payload, version, zone
+                ).text()
+                self.assertTrue(text.startswith('{"version":%d,' % version))
+                read = DossierDocument.read(text)
+                self.assertEqual(read.version, version)
+                self.assertEqual(read.text(), text)
+        # A version 2 document retained by an earlier release, verbatim.
+        retained = RETAINED_V2.read_text(encoding="utf-8").strip()
+        self.assertEqual(DossierDocument.read(retained).text(), retained)
+
+    def test_v3_document_with_addressing_is_rejected(self) -> None:
+        payload = encode_dossier(addressed())
+        with self.assertRaises(ValueError):
+            DossierDocument(str(uuid4()), DEVICE, payload, 3)
+        text = DossierDocument(str(uuid4()), DEVICE, payload).text()
+        with self.assertRaises(ValueError):
+            DossierDocument.read(text.replace('"version":4', '"version":3', 1))
+        # And a version 4 document must carry the key, even when it is null.
+        value = json.loads(encode_dossier(dossier()))
+        del value["addressing"]
+        with self.assertRaises(ValueError):
+            DossierDocument(
+                str(uuid4()), DEVICE, json.dumps(value, separators=(",", ":"))
+            )
 
     def test_the_clock_writes_each_printed_time_in_the_household_zone(self) -> None:
         value = json.loads(encode_dossier(dossier()))
@@ -297,11 +369,12 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
         written = DossierDocument.read(self.remote.texts[moved.revision])
         self.assertEqual(written.zone, "Australia/Sydney")
 
-    async def test_a_version_1_revision_is_read_and_revised_to_version_3(
+    async def test_a_version_1_revision_is_read_and_revised_to_version_4(
         self,
     ) -> None:
         current = json.loads(encode_dossier(dossier()))
         del current["supplemental"]
+        del current["addressing"]
         legacy = DossierDocument(
             str(uuid4()), DEVICE, json.dumps(current, separators=(",", ":")), 1
         )
@@ -314,7 +387,7 @@ class DossierRetentionTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(retained.changed)
         self.assertEqual(self.remote.writes[-1][2], revision)
         written = DossierDocument.read(self.remote.texts[retained.revision])
-        self.assertEqual(written.version, 3)
+        self.assertEqual(written.version, 4)
 
     def test_journal_is_bound_to_project_collector_and_settled_receipts(self) -> None:
         document = DossierDocument(str(uuid4()), DEVICE, encode_dossier(dossier()))

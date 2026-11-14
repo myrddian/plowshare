@@ -51,7 +51,7 @@ from __future__ import annotations
 import ipaddress
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Mapping, Sequence
+from typing import Iterable, Literal, Mapping, Sequence
 
 from .contracts import (
     AddressAssignment,
@@ -204,6 +204,31 @@ def assign_addresses(
             else _known(address, mac, decided[0], decided[1], decided[2])
         )
     return tuple(assignments), tuple(dict.fromkeys(issues))
+
+
+def addressing_comparable(issues: Iterable[str]) -> bool:
+    """Whether a collection's assignments may be compared with another's.
+
+    Any addressing gap or conflict (an issue starting with ``addressing_``)
+    makes every mode in that collection incomparable. Callers also require the
+    two collections to share one scope; that check lives with the evidence.
+    """
+    return not any(issue.startswith("addressing_") for issue in issues)
+
+
+def assignment_changed(prior: AddressAssignment, current: AddressAssignment) -> bool:
+    """Whether the mode at one address changed between two comparable collections.
+
+    Only two known modes recorded for the same, non-null MAC count, so an
+    ``unknown`` mode or a different device holding the address never reads as a
+    change. ``collection.changes`` and the device inventory both use this rule.
+    """
+    return (
+        current.mac is not None
+        and prior.mac == current.mac
+        and "unknown" not in (prior.mode, current.mode)
+        and prior.mode != current.mode
+    )
 
 
 _Decision = tuple[AssignmentMode, AssignmentBasis, tuple[DhcpScope, ...]]
