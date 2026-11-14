@@ -8,7 +8,9 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from plowshare import Client, Delivery, Refusal, Reply, TransportError
 from plowshare.contracts import (
@@ -29,10 +31,12 @@ from support import EXAMPLES, STAMP, CountingCollector, configuration
 from plowshare_privacy.bootstrap import (
     SetupProblem,
     application_files,
+    bind_unifi_gateway,
     configure,
     connect_pihole,
     connect_unifi,
     deploy,
+    enable_capability,
     enable_unifi_traffic,
     inspect,
     install,
@@ -43,7 +47,7 @@ from plowshare_privacy.bootstrap import (
     wait_for_schedule,
 )
 from plowshare_privacy.collection import scope_fingerprint
-from plowshare_privacy.contracts import Configuration, utc_now
+from plowshare_privacy.contracts import CollectionPlan, Configuration, utc_now
 from plowshare_privacy.journal import FileReceipts, Publication, Receipt
 from plowshare_privacy.setup import Setup, bind_provider, prepare, private_write
 
@@ -758,3 +762,321 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             scope_fingerprint(after.collection), scope_fingerprint(before.collection)
         )
         self.assertNotEqual(config, after)
+
+    UNIFI_BASE = "https://192.168.1.1/proxy/network/integration/v1"
+    UNIFI_SITE = "00000000-0000-4000-8000-000000000001"
+
+    def sources_configuration(self, *sources: dict[str, object]) -> Configuration:
+        """A TCP collector whose services are written in the ``sources`` form.
+
+        Each call uses a fresh state directory, as a new installation would,
+        so an earlier step's journal never fences the hand-written scope.
+        """
+        self.tcp_configuration()
+        row = json.loads(self.config.read_text())
+        row["stateDirectory"] = str(self.root / ("state-" + str(uuid4())))
+        row["collection"]["sources"] = list(sources)
+        self.config.write_text(json.dumps(row))
+        return Configuration.read(self.config)
+
+    def unifi_settings(self, **extra: object) -> dict[str, object]:
+        return {
+            "apiBase": self.UNIFI_BASE,
+            "siteId": self.UNIFI_SITE,
+            "apiKeyEnvironment": "UNIFI_TEST_KEY",
+            **extra,
+        }
+
+    def collection_row(self) -> dict[str, Any]:
+        collection = json.loads(self.config.read_text())["collection"]
+        assert isinstance(collection, dict)
+        return collection
+
+    def test_enable_dhcp_rewrites_to_sources_form_under_scope_fence(self) -> None:
+        self.tcp_configuration()
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        legacy = Configuration.read(self.config)
+        legacy_row = self.collection_row()
+        fenced: list[str] = []
+
+        def prepare(receipts: FileReceipts, plan: CollectionPlan) -> None:
+            # The fence opens before the configuration is replaced.
+            fenced.append("prepare")
+            self.assertIn("pihole", self.collection_row())
+            prepare_scope_change(receipts, plan)
+
+        def complete(receipts: FileReceipts, plan: CollectionPlan) -> None:
+            fenced.append("complete")
+            self.assertIn("sources", self.collection_row())
+            complete_scope_change(receipts, plan)
+
+        prepare_scope_change = FileReceipts.prepare_scope_change
+        complete_scope_change = FileReceipts.complete_scope_change
+        with (
+            patch.object(
+                FileReceipts, "prepare_scope_change", autospec=True, side_effect=prepare
+            ),
+            patch.object(
+                FileReceipts,
+                "complete_scope_change",
+                autospec=True,
+                side_effect=complete,
+            ),
+            patch("plowshare_privacy.bootstrap.administrator_login") as login,
+        ):
+            enable_capability(self.setup, "pihole", "dhcp_leases", True)
+            login.assert_not_called()
+        self.assertEqual(fenced, ["prepare", "complete"])
+        collection = self.collection_row()
+        self.assertNotIn("pihole", collection)
+        self.assertNotIn("unifi", collection)
+        self.assertEqual(
+            collection["sources"],
+            [
+                {
+                    "kind": "pihole",
+                    "id": "pihole",
+                    "capabilities": ["dhcp_leases", "dns_queries", "network_table"],
+                    "settings": legacy_row["pihole"],
+                },
+                {
+                    "kind": "unifi",
+                    "id": "unifi",
+                    "capabilities": ["controller_clients", "managed_inventory"],
+                    "settings": legacy_row["unifi"],
+                },
+            ],
+        )
+        configured = Configuration.read(self.config)
+        self.assertNotEqual(
+            scope_fingerprint(configured.collection),
+            scope_fingerprint(legacy.collection),
+        )
+        with FileReceipts(configured) as receipts:
+            self.assertEqual(
+                receipts.collection_scope, scope_fingerprint(configured.collection)
+            )
+
+    def test_enabling_an_enabled_capability_writes_nothing(self) -> None:
+        self.tcp_configuration()
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        retained = self.config.read_bytes()
+        with patch.object(FileReceipts, "prepare_scope_change") as prepare:
+            enable_capability(self.setup, "pihole", "dns_queries", True)
+            enable_capability(self.setup, "pihole", "dhcp_scope", False)
+            prepare.assert_not_called()
+        self.assertEqual(self.config.read_bytes(), retained)
+
+    def test_turning_a_capability_off_removes_it_from_sources(self) -> None:
+        self.sources_configuration(
+            {
+                "kind": "pihole",
+                "id": "home-dns",
+                "capabilities": ["network_table", "dns_queries", "dhcp_leases"],
+                "settings": {
+                    "origin": "https://pihole.example",
+                    "passwordEnvironment": "FIXTURE_PIHOLE_PASSWORD",
+                },
+            }
+        )
+        enable_capability(self.setup, "home-dns", "dhcp_leases", False)
+        entry = self.collection_row()["sources"][0]
+        self.assertEqual(entry["capabilities"], ["dns_queries", "network_table"])
+        self.assertEqual(entry["id"], "home-dns")
+
+    def test_rejects_unknown_service_and_removing_the_last_capability(self) -> None:
+        self.sources_configuration(
+            {
+                "kind": "pihole",
+                "id": "home-dns",
+                "capabilities": ["network_table"],
+                "settings": {
+                    "origin": "https://pihole.example",
+                    "passwordEnvironment": "FIXTURE_PIHOLE_PASSWORD",
+                },
+            }
+        )
+        retained = self.config.read_bytes()
+        with self.assertRaisesRegex(SetupProblem, "No configured service has id dns"):
+            enable_capability(self.setup, "dns", "dhcp_leases", True)
+        with self.assertRaisesRegex(
+            SetupProblem,
+            "A service needs at least one capability; remove the service instead",
+        ):
+            enable_capability(self.setup, "home-dns", "network_table", False)
+        self.assertEqual(self.config.read_bytes(), retained)
+
+    def test_rejects_dns_queries_off_while_dns_profiles_are_on(self) -> None:
+        self.tcp_configuration()
+        row = json.loads(self.config.read_text())
+        row["collection"].update(targets=["192.168.1.12"], quickScan=True)
+        self.config.write_text(json.dumps(row))
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        row = json.loads(self.config.read_text())
+        # DNS profiles are local presence work, outside the scope fingerprint.
+        row["collection"]["dnsProfiles"] = True
+        self.config.write_text(json.dumps(row))
+        retained = self.config.read_bytes()
+        with self.assertRaisesRegex(SetupProblem, "DNS activity profiles"):
+            enable_capability(self.setup, "pihole", "dns_queries", False)
+        self.assertEqual(self.config.read_bytes(), retained)
+
+    def test_rejects_capability_the_kind_does_not_offer(self) -> None:
+        self.tcp_configuration()
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        retained = self.config.read_bytes()
+        with self.assertRaisesRegex(SetupProblem, "kind does not offer"):
+            enable_capability(self.setup, "pihole", "traffic_counters", True)
+        self.assertEqual(self.config.read_bytes(), retained)
+
+    def test_rejects_unifi_dhcp_without_traffic_site(self) -> None:
+        self.tcp_configuration()
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        retained = self.config.read_bytes()
+        with self.assertRaisesRegex(SetupProblem, "require trafficSite"):
+            enable_capability(self.setup, "unifi", "dhcp_scope", True)
+        self.assertEqual(self.config.read_bytes(), retained)
+        enable_unifi_traffic(self.setup, "default")
+        enable_capability(self.setup, "unifi", "dhcp_scope", True)
+        configured = Configuration.read(self.config)
+        self.assertIn("dhcp_scope", configured.collection.sources[0].capabilities)
+
+    def test_rejects_changed_configuration(self) -> None:
+        self.tcp_configuration()
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        config = Configuration.read(self.config)
+        retained = self.config.read_bytes()
+        with patch.object(
+            Configuration,
+            "read",
+            side_effect=[config, replace(config, schedule="changed-elsewhere")],
+        ):
+            with self.assertRaisesRegex(
+                SetupProblem, "Collector configuration changed"
+            ):
+                enable_capability(self.setup, "pihole", "dhcp_leases", True)
+        self.assertEqual(self.config.read_bytes(), retained)
+
+    def test_running_collector_refused(self) -> None:
+        self.tcp_configuration()
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        config = Configuration.read(self.config)
+        retained = self.config.read_bytes()
+        with FileReceipts(config):
+            with self.assertRaises(BlockingIOError):
+                enable_capability(self.setup, "pihole", "dhcp_leases", True)
+        self.assertEqual(self.config.read_bytes(), retained)
+
+    def test_connect_pihole_adds_a_service_in_either_form(self) -> None:
+        # Legacy form: the key is added beside the existing legacy UniFi key.
+        self.tcp_configuration()
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        self.assertIn("pihole", self.collection_row())
+        self.assertNotIn("sources", self.collection_row())
+        # Sources form: Pi-hole becomes the first entry, with explicit capabilities.
+        self.sources_configuration(
+            {"kind": "unifi", "id": "gateway", "settings": self.unifi_settings()}
+        )
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        collection = self.collection_row()
+        self.assertNotIn("pihole", collection)
+        entry = collection["sources"][0]
+        self.assertEqual(
+            (entry["kind"], entry["id"], entry["capabilities"]),
+            ("pihole", "pihole", ["dns_queries", "network_table"]),
+        )
+        self.assertEqual(entry["settings"]["origin"], "https://pihole.example")
+        configured = Configuration.read(self.config)
+        assert configured.collection.pihole is not None
+        self.assertEqual(
+            [source.id for source in configured.collection.sources],
+            ["pihole", "gateway"],
+        )
+        with self.assertRaisesRegex(SetupProblem, "already configured"):
+            connect_pihole(self.setup, "https://other.example", "new-password")
+
+    def test_connect_unifi_adds_a_service_in_either_form(self) -> None:
+        self.tcp_configuration()
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        self.assertIn("unifi", self.collection_row())
+        self.sources_configuration(
+            {
+                "kind": "pihole",
+                "id": "home-dns",
+                "settings": {
+                    "origin": "https://pihole.example",
+                    "passwordEnvironment": "FIXTURE_PIHOLE_PASSWORD",
+                },
+            }
+        )
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        collection = self.collection_row()
+        self.assertNotIn("unifi", collection)
+        self.assertEqual(
+            [(entry["kind"], entry["id"]) for entry in collection["sources"]],
+            [("pihole", "home-dns"), ("unifi", "unifi")],
+        )
+        configured = Configuration.read(self.config)
+        assert configured.collection.unifi is not None
+        self.assertEqual(configured.collection.unifi.site_id, self.UNIFI_SITE)
+
+    def test_bind_unifi_gateway_in_either_form(self) -> None:
+        device = "00000000-0000-4000-8000-000000000002"
+        self.tcp_configuration()
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        bind_unifi_gateway(self.setup, device, "02:00:00:00:00:01")
+        legacy = Configuration.read(self.config).collection.unifi
+        assert legacy is not None and legacy.gateway is not None
+        self.assertEqual(legacy.gateway.device_id, device)
+        self.sources_configuration(
+            {"kind": "unifi", "id": "gateway", "settings": self.unifi_settings()}
+        )
+        bind_unifi_gateway(self.setup, device, "02:00:00:00:00:01")
+        collection = self.collection_row()
+        self.assertNotIn("unifi", collection)
+        unifi = Configuration.read(self.config).collection.unifi
+        assert unifi is not None and unifi.gateway is not None
+        self.assertEqual(unifi.gateway.device_id, device)
+
+    def test_enable_unifi_traffic_in_either_form(self) -> None:
+        self.tcp_configuration()
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        enable_unifi_traffic(self.setup, "default")
+        legacy = Configuration.read(self.config).collection.sources[0]
+        self.assertIn("traffic_counters", legacy.capabilities)
+        # Explicit capabilities gain traffic_counters with the site name.
+        before = self.sources_configuration(
+            {
+                "kind": "unifi",
+                "id": "gateway",
+                "capabilities": ["controller_clients", "managed_inventory"],
+                "settings": self.unifi_settings(),
+            }
+        )
+        enable_unifi_traffic(self.setup, "default")
+        collection = self.collection_row()
+        self.assertNotIn("unifi", collection)
+        after = Configuration.read(self.config)
+        service = after.collection.sources[0]
+        assert after.collection.unifi is not None
+        self.assertEqual(after.collection.unifi.traffic_site, "default")
+        self.assertIn("traffic_counters", service.capabilities)
+        self.assertEqual(
+            scope_fingerprint(after.collection), scope_fingerprint(before.collection)
+        )

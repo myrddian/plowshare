@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from .collector_factory import configured_collector
+from .config_rows import put_service
 from .contracts import (
     Configuration,
     DeviceLabel,
@@ -305,6 +306,7 @@ class FileMonitorSettings:
                     "deviceLabels",
                     "pihole",
                     "unifi",
+                    "sources",
                     "quickScan",
                     "dnsProfiles",
                     "deviceDescriptions",
@@ -352,7 +354,9 @@ class FileMonitorSettings:
                         maxIdentityAgeSeconds=tuning.max_identity_age,
                         timeoutSeconds=tuning.timeout,
                     )
-                plan["pihole"] = connection
+                # Edit the service in whichever form the file uses; a sources
+                # entry keeps its id and enabled capabilities.
+                put_service(plan, "pihole", connection)
             row["collection"] = plan
             config = Configuration.decode(row, self.path)
             # Decode fully before the durable save. Activation and connectivity are

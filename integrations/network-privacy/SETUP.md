@@ -180,6 +180,101 @@ the saved collection scope. Keep Pi-hole connected for DNS observations.
    sweep. Adding the source starts a new collection baseline. Rotate the key by
    updating the same environment secret and restarting the collector.
 
+## Turn capabilities on
+
+Each connected service offers named capabilities. Pi-hole offers
+`network_table`, `dns_queries`, `dhcp_leases`, `dhcp_reservations`, `dhcp_scope`
+and `local_dns_names`. UniFi offers `controller_clients`, `managed_inventory`,
+`traffic_counters`, `dhcp_reservations` and `dhcp_scope`. The DHCP capabilities
+and `local_dns_names` add new evidence, so they stay off until you turn them on,
+including on a configuration upgraded from an earlier release.
+
+Stop the collector and let outstanding scans and publications finish. Then run:
+
+```sh
+build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
+  --directory "$PRIVACY_PRIVATE" enable-capability \
+  --service pihole --capability dhcp_leases
+```
+
+Add `--off` to turn a capability off. `--service` is the service's id: `pihole`
+or `unifi` for a service added by `connect-pihole` or `connect-unifi`. The
+command checks the change offline and contacts no service or Plowshare server.
+It refuses a running collector, unsettled receipts, pending dashboard settings,
+a configuration that changed while it ran, a capability the service does not
+offer, and the last capability of a service (remove the service instead). It
+also refuses to turn off `dns_queries` while DNS activity profiles are on.
+Asking for a capability that is already on (or already off) writes nothing.
+
+The first change rewrites `collection` in private `collector.json` from the
+older `pihole` and `unifi` keys to a `sources` list, which is the only form that
+can hold the opt-in capabilities. Each entry keeps its settings unchanged and
+lists its enabled capabilities explicitly:
+
+```json
+"sources": [
+  {
+    "kind": "pihole",
+    "id": "pihole",
+    "capabilities": ["dhcp_leases", "dns_queries", "network_table"],
+    "settings": {
+      "origin": "https://pihole.example.invalid",
+      "passwordFile": "/absolute/private/pihole-password-UUID"
+    }
+  },
+  {
+    "kind": "unifi",
+    "id": "unifi",
+    "capabilities": ["controller_clients", "managed_inventory"],
+    "settings": {
+      "apiBase": "https://UNIFI_CONSOLE/proxy/network/integration/v1",
+      "siteId": "UNIFI_SITE_UUID",
+      "apiKeyEnvironment": "PRIVACY_UNIFI_API_KEY"
+    }
+  }
+]
+```
+
+A configuration uses either `sources` or the older keys, never both. When an
+entry omits `capabilities`, every capability its service offers is on except the
+DHCP capabilities and `local_dns_names`. Turning a DHCP capability or local
+names on or off changes collection scope: the next scan starts a new baseline,
+and earlier scans stay readable. `connect-pihole`, `connect-unifi`,
+`bind-unifi-gateway`, `enable-unifi-traffic` and the dashboard settings keep
+working on a `sources` configuration.
+
+### Address assignment
+
+With DHCP capabilities on, each selected address with a confirmed MAC gets an
+assignment mode and the basis for it:
+
+| Mode | Basis | Meaning |
+|---|---|---|
+| `dhcp_reserved` | `dhcp_reservation` or `controller_fixed_ip` | A Pi-hole reservation or UniFi fixed IP names this address and this MAC. |
+| `dhcp_dynamic` | `dhcp_lease` | An active Pi-hole lease hands this address to this MAC. |
+| `dhcp_dynamic` | `inside_dhcp_range` | The address is inside a complete UniFi DHCP range; UniFi has no lease table to check. |
+| `static` | `outside_dhcp_range` | A complete DHCP scope covers the subnet and the address is outside its range. |
+| `static` | `no_lease_or_reservation` | The address is inside the range, and that service's complete lease table and reservations do not include it. |
+| `unknown` | — | Anything else, including addresses without a confirmed MAC. |
+
+`static` is only claimed from a complete DHCP scope for the address's subnet. It
+is never a default: a missing, partial or failed read gives `unknown`. A lease is
+identity and addressing evidence, not presence; it shows an address was handed to
+a MAC, not that the device is online now. A reservation or fixed IP is intent
+only: it says which address a MAC should get, so it feeds addressing and never
+identity. A reservation naming a different MAC from the address's holder, or two
+services naming different MACs, is reported as an addressing conflict.
+
+Pi-hole reads its DHCP settings and reservations from `config/dhcp` and, while
+its DHCP server is active, active leases from `dhcp/leases`. `local_dns_names`
+reads `config/dns/hosts` and only ever supplies a name. UniFi reads fixed IPs
+from its known-client list (`rest/user`, which includes offline clients) and
+DHCP settings from `rest/networkconf`. Both UniFi reads use the controller's
+legacy endpoints, so they need `trafficSite`; run `enable-unifi-traffic` first.
+Before enabling them, confirm with your controller that the configured API key
+can read those two endpoints for your site; a refused read appears as an
+addressing gap, not as a static address.
+
 ## Understand the two parts
 
 | Part | Where it runs | What it does |

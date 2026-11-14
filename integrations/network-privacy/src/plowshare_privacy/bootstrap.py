@@ -20,6 +20,7 @@ from dataclasses import asdict
 from getpass import getpass
 from ipaddress import IPv4Network, ip_address
 from pathlib import Path
+from typing import get_args
 from uuid import uuid4
 
 from aiohttp import ClientError
@@ -37,7 +38,15 @@ from plowshare.contracts import (
 from plowshare.tools import ToolAttention
 
 from .cli import execute
-from .contracts import Configuration, integer, load_json, object_fields, text
+from .config_rows import put_service, service_entry, service_settings, to_sources_form
+from .contracts import (
+    Capability,
+    Configuration,
+    integer,
+    load_json,
+    object_fields,
+    text,
+)
 from .dashboard import reopen
 from .discovery import DiscoveryPlan, discover
 from .journal import FileReceipts
@@ -756,20 +765,25 @@ def connect_pihole(setup: Setup, origin: str, application_password: str) -> None
             "enabled",
             "deviceLabels",
             "unifi",
+            "sources",
             "quickScan",
             "dnsProfiles",
             "deviceDescriptions",
         },
     )
     path = setup.collector.parent / ("pihole-password-" + str(uuid4()))
-    plan["pihole"] = {
-        "origin": origin,
-        "passwordFile": str(path),
-        "lookbackSeconds": 3600,
-        "queryLimit": 64,
-        "maxIdentityAgeSeconds": 86400,
-        "timeoutSeconds": 5,
-    }
+    put_service(
+        plan,
+        "pihole",
+        {
+            "origin": origin,
+            "passwordFile": str(path),
+            "lookbackSeconds": 3600,
+            "queryLimit": 64,
+            "maxIdentityAgeSeconds": 86400,
+            "timeoutSeconds": 5,
+        },
+    )
     row["collection"] = plan
     configured = Configuration.decode(row, setup.collector)
     with FileReceipts(config) as receipts:
@@ -807,7 +821,7 @@ def connect_unifi(
     row = load_json(setup.collector)
     if not isinstance(row, dict) or not isinstance(plan := row.get("collection"), dict):
         raise SetupProblem("Invalid collector configuration.")
-    source = {
+    source: dict[str, object] = {
         "apiBase": api_base,
         "siteId": site_id,
         "apiKeyEnvironment": key_environment,
@@ -816,7 +830,7 @@ def connect_unifi(
         source["caFile"] = str(ca_file)
     if certificate_sha256 is not None:
         source["certificateSha256"] = certificate_sha256
-    plan["unifi"] = source
+    put_service(plan, "unifi", source)
     configured = Configuration.decode(row, setup.collector)
     with FileReceipts(config) as receipts:
         if Configuration.read(setup.collector) != config:
@@ -844,8 +858,8 @@ def bind_unifi_gateway(setup: Setup, device_id: str, lan_mac: str) -> None:
     row = load_json(setup.collector)
     if not isinstance(row, dict) or not isinstance(plan := row.get("collection"), dict):
         raise SetupProblem("Invalid collector configuration")
-    unifi = plan.get("unifi")
-    if not isinstance(unifi, dict):
+    unifi = service_settings(plan, "unifi")
+    if unifi is None:
         raise SetupProblem("Missing UniFi configuration")
     unifi["gateway"] = {"deviceId": device_id, "lanMac": lan_mac}
     Configuration.decode(row, setup.collector)
@@ -880,10 +894,16 @@ def enable_unifi_traffic(setup: Setup, site: str) -> None:
     row = load_json(setup.collector)
     if not isinstance(row, dict) or not isinstance(plan := row.get("collection"), dict):
         raise SetupProblem("Invalid collector configuration")
-    unifi = plan.get("unifi")
-    if not isinstance(unifi, dict):
+    unifi = service_settings(plan, "unifi")
+    if unifi is None:
         raise SetupProblem("Missing UniFi configuration")
     unifi["trafficSite"] = site
+    entry = service_entry(plan, "unifi")
+    # Explicit sources capabilities name traffic_counters; an omitted list
+    # (and the legacy key) already enable it once the site name is set.
+    if entry is not None and isinstance(listed := entry.get("capabilities"), list):
+        if "traffic_counters" not in listed:
+            listed.append("traffic_counters")
     try:
         Configuration.decode(row, setup.collector)
     except ValueError as error:
@@ -896,6 +916,83 @@ def enable_unifi_traffic(setup: Setup, site: str) -> None:
         replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
     print(
         "UniFi traffic counters enabled. Start the collector; volumes appear after two quick checks."
+    )
+
+
+def enable_capability(
+    setup: Setup, service: str, capability: Capability, enabled: bool
+) -> None:
+    """Turn one capability of a configured service on or off on a stopped collector.
+
+    Only the ``sources`` form can hold opt-in capabilities, so a legacy
+    ``pihole``/``unifi`` configuration is rewritten to it: each key becomes an
+    entry with the kind as its id, its currently enabled capabilities listed
+    explicitly, and its settings verbatim. Enabling or disabling a capability
+    changes what is read, so the write uses the same scope-change fence as
+    ``connect_pihole``. A request that changes nothing writes nothing. This
+    never contacts a service or the Plowshare server.
+    """
+    config = Configuration.read(setup.collector)
+    current = next((s for s in config.collection.sources if s.id == service), None)
+    if current is None:
+        raise SetupProblem("No configured service has id " + service)
+    wanted = (
+        current.capabilities | {capability}
+        if enabled
+        else current.capabilities - {capability}
+    )
+    if wanted == current.capabilities:
+        print(
+            "Capability "
+            + capability
+            + " is already "
+            + ("on" if enabled else "off")
+            + "; nothing changed."
+        )
+        return
+    if not wanted:
+        raise SetupProblem(
+            "A service needs at least one capability; remove the service instead"
+        )
+    if not enabled and capability == "dns_queries" and config.collection.dns_profiles:
+        raise SetupProblem("Turn off DNS activity profiles before dns_queries.")
+    pending = setup.collector.with_name(
+        setup.collector.stem + ".pending" + setup.collector.suffix
+    )
+    if pending.exists():
+        # Applying older pending settings would silently undo this change.
+        raise SetupProblem(
+            "Apply or review pending collector settings before changing capabilities."
+        )
+    row = load_json(setup.collector)
+    if not isinstance(row, dict) or not isinstance(plan := row.get("collection"), dict):
+        raise SetupProblem("Invalid collector configuration")
+    to_sources_form(plan, config.collection.sources)
+    entries = plan["sources"]
+    if not isinstance(entries, list):
+        raise SetupProblem("Invalid collector configuration")
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("id") == current.id:
+            entry["capabilities"] = sorted(wanted)
+    try:
+        configured = Configuration.decode(row, setup.collector)
+    except ValueError as error:
+        raise SetupProblem(str(error)) from None
+    with FileReceipts(config) as receipts:
+        if Configuration.read(setup.collector) != config:
+            raise SetupProblem(
+                "Collector configuration changed; review it before changing capabilities."
+            )
+        receipts.prepare_scope_change(configured.collection)
+        replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
+        receipts.complete_scope_change(configured.collection)
+    print(
+        "Capability "
+        + capability
+        + (" enabled" if enabled else " disabled")
+        + " on "
+        + current.id
+        + ". Start the collector; the next scan begins a new baseline."
     )
 
 
@@ -969,6 +1066,19 @@ def main() -> None:
         "--site",
         required=True,
         help="UniFi legacy site name, usually 'default'",
+    )
+    capability = commands.add_parser(
+        "enable-capability",
+        help="Turn a configured service's capability on or off on a stopped collector",
+    )
+    capability.add_argument(
+        "--service", required=True, help="Configured service id, such as pihole"
+    )
+    capability.add_argument(
+        "--capability", required=True, choices=sorted(get_args(Capability))
+    )
+    capability.add_argument(
+        "--off", action="store_true", help="Turn the capability off instead"
     )
     commands.add_parser(
         "install",
@@ -1128,6 +1238,9 @@ def main() -> None:
             return
         if args.command == "enable-unifi-traffic":
             enable_unifi_traffic(setup, args.site)
+            return
+        if args.command == "enable-capability":
+            enable_capability(setup, args.service, args.capability, not args.off)
             return
         if args.command == "start":
             saved = (
