@@ -144,6 +144,37 @@ class ProjectCreatorGrantsDatabaseTest {
     assertEquals(NOT_ADMIN, refused.getMessage());
   }
 
+  /** Unlike a grant to another account, an administrator's self-grant ends with their control. */
+  @Test
+  void admin_self_grant_is_bound_to_admin_control() {
+    UUID authority = control("admin");
+    grants.grant("admin", "admin");
+    assertTrue(grants.holds("admin"));
+    var row = creatorRows("admin").getFirst();
+    assertEquals(account("admin"), row.get("subject_account"));
+    assertEquals(account("admin"), row.get("issuer_account"));
+    assertEquals(authority, row.get("issuing_grant"));
+    assertEquals(null, row.get("exercised_grant"));
+    grants.grant("admin", "admin");
+    assertEquals(1, creatorRows("admin").size());
+
+    jdbc.update("UPDATE admins SET server_admin=FALSE WHERE handle='admin'");
+    assertFalse(mayCreate("admin"));
+    assertFalse(grants.holds("admin"));
+    assertEquals(Set.of(), grants.holdersAmong(List.of("admin")));
+
+    // Promoted again, the administrator holds a new ADMIN_CONTROL grant; the dead self-grant
+    // still occupies the slot, so a new self-grant revokes it first and binds to the new control.
+    jdbc.update("UPDATE admins SET server_admin=TRUE WHERE handle='admin'");
+    assertFalse(grants.holds("admin"));
+    grants.grant("admin", "admin");
+    assertTrue(grants.holds("admin"));
+    var rows = creatorRows("admin");
+    assertEquals(2, rows.size());
+    assertEquals(account("admin"), rows.getFirst().get("revoked_by"));
+    assertEquals(control("admin"), rows.getLast().get("issuing_grant"));
+  }
+
   @Test
   void any_admin_may_revoke() {
     grants.grant("admin", "sam");
@@ -252,10 +283,6 @@ class ProjectCreatorGrantsDatabaseTest {
           "The project creator role can only be granted to an active user account",
           refused.getMessage());
     }
-    var self = assertThrows(CallerFault.class, () -> grants.grant("admin", "admin"));
-    assertEquals(
-        "A server administrator cannot grant the project creator role to themselves",
-        self.getMessage());
     assertEquals(
         0L,
         jdbc.queryForObject(

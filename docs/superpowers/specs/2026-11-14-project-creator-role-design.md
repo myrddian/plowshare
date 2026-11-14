@@ -179,6 +179,9 @@ What the code does today, checked:
   the admin.
 - **Revocation:** any account currently exercising the ADMIN role, not only the
   original issuer, attributed the same way.
+- An admin may grant the role to themselves; that self-grant is bound to their
+  ADMIN_CONTROL grant (delegated lineage) and ends if they stop being an admin,
+  matching self-assignment of memberships.
 - **Issue/revoke path:** a narrow service for this role. It doesn't go through
   `AuthorizedRoleGrants` and its `MANAGE_ACCESS`-on-scope check, because
   nobody, admins included, holds `MANAGE_ACCESS` at `PROJECT_CREATION`.

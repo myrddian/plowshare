@@ -9,9 +9,11 @@ import java.util.Set;
  * <p>The acting account must currently exercise the ADMIN role: an active, non-bootstrap USER
  * server administrator holding a live {@code ADMIN_CONTROL} grant at the ADMINISTRATION scope.
  * Otherwise both mutations throw {@code CallerFault("Only a server administrator may manage server
- * resources")} before writing anything. An issued grant hangs off the SYSTEM root and records the
- * administrator only as issuer and exercised grant, so it outlives that administrator's later
- * demotion or disablement; any current administrator may revoke it.
+ * resources")} before writing anything. A grant to another account hangs off the SYSTEM root and
+ * records the administrator only as issuer and exercised grant, so it outlives that administrator's
+ * later demotion or disablement. A grant to the administrator themselves hangs off their own
+ * ADMIN_CONTROL grant instead and ends when they stop being an administrator, as self-assignment of
+ * memberships does. Any current administrator may revoke either.
  *
  * <p>Both mutations are idempotent and run in one transaction, joining the caller's when one is
  * active. Creator mutations are serialized on the PROJECT_CREATION scope row.
@@ -28,9 +30,10 @@ public interface ProjectCreatorGrants {
 
   /**
    * Grants the role to {@code handle}, which must be an existing, active, non-bootstrap USER
-   * account other than {@code actor}. A live holder is left unchanged. An expired but unrevoked
-   * grant still occupies the one-creator-grant slot, so it is revoked (attributed to {@code actor})
-   * in the same transaction before the new grant is written.
+   * account; it may be {@code actor}. A live holder is left unchanged. A dead (expired, or a
+   * self-grant whose ADMIN_CONTROL lineage fell) but unrevoked grant still occupies the
+   * one-creator-grant slot, so it is revoked (attributed to {@code actor}) in the same transaction
+   * before the new grant is written.
    */
   void grant(String actor, String handle);
 

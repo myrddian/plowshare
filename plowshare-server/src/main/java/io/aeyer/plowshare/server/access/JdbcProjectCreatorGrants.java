@@ -98,12 +98,14 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
           UUID subject = recipient(handle);
           Optional<UUID> existing = unrevoked(subject);
           if (existing.isPresent() && holds(handle)) return;
-          if (subject.equals(authority.account()))
-            throw new CallerFault(
-                "A server administrator cannot grant the project creator role to themselves");
-          // An unrevoked grant that does not hold has expired: the recipient is active, USER and
-          // non-bootstrap, and the root is immutable. It still occupies the unique slot.
+          // An unrevoked grant that does not hold is dead although the recipient is active, USER
+          // and non-bootstrap: it expired, or (a self-grant) its ADMIN_CONTROL lineage was revoked.
+          // It still occupies the unique slot.
           existing.ifPresent(stale -> revokeRow(stale, authority));
+          // A self-grant is bound: it hangs off the actor's ADMIN_CONTROL grant and ends with it,
+          // because the database refuses exercised self-issuance. Any other recipient's grant is
+          // SYSTEM-rooted and records the exercised ADMIN_CONTROL grant, so it outlives the actor.
+          boolean self = subject.equals(authority.account());
           jdbc.update(
               "INSERT INTO authority_grants(subject_account,scope_id,role_id,requested_role,"
                   + "issuer_account,issuing_grant,exercised_grant,provenance)"
@@ -112,8 +114,8 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
               CREATION,
               BuiltInIdentities.PROJECT_CREATOR.value(),
               authority.account(),
-              root(),
-              authority.grant());
+              self ? authority.grant() : root(),
+              self ? null : authority.grant());
         });
   }
 

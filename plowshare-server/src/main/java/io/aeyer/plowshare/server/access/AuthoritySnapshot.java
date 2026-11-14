@@ -554,9 +554,9 @@ public final class AuthoritySnapshot {
 
   /**
    * {@code authority_may_create_projects(handle)} (V262): {@code account_active(handle)} and a live
-   * grant (so unrevoked, unexpired and SYSTEM-rooted) of the {@code PROJECT_CREATOR} role at the
-   * PROJECT_CREATION scope, to the account with that legacy handle and no agent, where that account
-   * is a non-bootstrap USER. Server administration is not consulted.
+   * grant (unrevoked, unexpired, lineage live to the root) of the {@code PROJECT_CREATOR} role at
+   * the PROJECT_CREATION scope, to the account with that legacy handle and no agent, where that
+   * account is a non-bootstrap USER. Server administration is not consulted.
    */
   public boolean projectCreator(String handle) {
     if (handle == null || !accountActive(handle)) return false;

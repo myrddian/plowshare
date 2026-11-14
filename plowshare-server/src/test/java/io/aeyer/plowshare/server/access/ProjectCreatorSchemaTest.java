@@ -284,6 +284,8 @@ class ProjectCreatorSchemaTest {
 
   @Test
   void creator_grant_shape_is_self_role_and_not_self_issued() {
+    // A self-grant is admitted only bound to the admin's control (see the bound tests), never
+    // exercised: V260's refusal of exercised self-issuance still applies to this role.
     assertRefused(
         "Cannot exercise a grant for yourself",
         () -> insert("admin", CREATION, "PROJECT_CREATOR", "admin", control("admin"), null));
@@ -313,6 +315,80 @@ class ProjectCreatorSchemaTest {
                 account("admin"),
                 root(),
                 control("admin")));
+  }
+
+  /**
+   * Inserts a bound self-grant: issuer and subject are {@code handle}, the issuing grant is {@code
+   * issuing} and nothing is exercised.
+   */
+  private UUID bound(String handle, UUID scope, String role, UUID issuing) {
+    UUID id = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO authority_grants(id,subject_account,scope_id,role_id,requested_role,"
+            + "issuer_account,issuing_grant,provenance)"
+            + " SELECT ?,?,?,r.id,r.name,?,?,'ROLE' FROM authority_roles r WHERE r.name=?",
+        id,
+        account(handle),
+        scope,
+        account(handle),
+        issuing,
+        role);
+    return id;
+  }
+
+  @Test
+  void admin_self_grant_is_bound_to_admin_control() {
+    UUID grant = bound("admin", CREATION, "PROJECT_CREATOR", control("admin"));
+    assertEquals(
+        control("admin"),
+        jdbc.queryForObject(
+            "SELECT issuing_grant FROM authority_grants WHERE id=?", UUID.class, grant));
+    assertTrue(mayCreate("admin"));
+    jdbc.update("UPDATE admins SET server_admin=FALSE WHERE handle='admin'");
+    assertFalse(mayCreate("admin"));
+  }
+
+  @Test
+  void self_grant_shape_rejected_for_other_roles() {
+    // Any non-creator role at the creation scope, bound to the admin's own control.
+    for (String role : List.of("READER", "CONTRIBUTOR", "MANAGER", "ADMIN"))
+      assertThrows(
+          DataAccessException.class, () -> bound("admin", CREATION, role, control("admin")), role);
+    assertRefused(
+        "Role exceeds issuing authority",
+        () -> bound("admin", CREATION, "READER", control("admin")));
+    // The creator role, bound, at any other scope.
+    assertRefused(
+        "Role exceeds issuing authority",
+        () -> bound("admin", projectScope("one"), "PROJECT_CREATOR", control("admin")));
+    // Bound to anything but ADMIN_CONTROL at ADMINISTRATION: a project manager's membership, or
+    // admin control at the global knowledge scope.
+    UUID manager = membership("one", "mia", "admin", "MANAGER");
+    assertRefused(
+        "Role exceeds issuing authority", () -> bound("mia", CREATION, "PROJECT_CREATOR", manager));
+    assertRefused(
+        "Role exceeds issuing authority",
+        () -> bound("admin", CREATION, "PROJECT_CREATOR", knowledgeControl("admin")));
+    // Bound to another administrator's control: the delegated path refuses a foreign issuing grant.
+    assertRefused(
+        "Issuing grant belongs to a different principal",
+        () -> bound("admin", CREATION, "PROJECT_CREATOR", control("other")));
+    // A bound grant to someone else is not a self-grant.
+    assertRefused(
+        "Role exceeds issuing authority",
+        () ->
+            jdbc.update(
+                "INSERT INTO authority_grants(subject_account,scope_id,role_id,requested_role,"
+                    + "issuer_account,issuing_grant,provenance) VALUES (?,?,?,'PROJECT_CREATOR',?,?,'ROLE')",
+                account("sam"),
+                CREATION,
+                BuiltInIdentities.PROJECT_CREATOR.value(),
+                account("admin"),
+                control("admin")));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM authority_grants WHERE scope_id=?", Integer.class, CREATION));
   }
 
   @Test

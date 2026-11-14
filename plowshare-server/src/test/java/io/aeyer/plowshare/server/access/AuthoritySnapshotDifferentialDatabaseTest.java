@@ -294,8 +294,11 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     var creators = new JdbcProjectCreatorGrants(jdbc);
     creators.grant("admin", "alice");
     creators.grant("admin", "carol");
+    // The admin's own grant is bound to their ADMIN_CONTROL grant, so demotion below ends it.
+    creators.grant("admin", "admin");
     parity("creators granted");
     assertTrue(snapshot().projectCreator("alice"));
+    assertTrue(snapshot().projectCreator("admin"));
     var mutations = new LinkedHashMap<String, String>();
     mutations.put("alice disabled", "UPDATE admins SET enabled=false WHERE handle='alice'");
     mutations.put("alice enabled", "UPDATE admins SET enabled=true WHERE handle='alice'");
@@ -312,6 +315,8 @@ class AuthoritySnapshotDifferentialDatabaseTest {
     for (var mutation : mutations.entrySet()) {
       jdbc.update(mutation.getValue());
       parity(mutation.getKey());
+      if (mutation.getKey().equals("issuer demoted"))
+        assertFalse(snapshot().projectCreator("admin"));
     }
     assertTrue(snapshot().projectCreator("alice"));
     creators.revoke("admin", "carol");

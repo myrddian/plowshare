@@ -5,7 +5,10 @@
 -- knowledge home. Its single action is PROJECT_CREATE; it issues nothing. Only an active server
 -- administrator, exercising their own live ADMIN_CONTROL grant at the ADMINISTRATION scope, may
 -- issue it, and (as V260 established for every person-issued grant) the grant hangs off the
--- SYSTEM root, so it outlives the issuing administrator's later demotion.
+-- SYSTEM root, so it outlives the issuing administrator's later demotion. An administrator may
+-- also grant the role to themselves; that self-grant hangs off their own ADMIN_CONTROL grant
+-- instead (delegated lineage) and ends when they stop being an administrator, as self-assignment
+-- of memberships does.
 --
 -- Reserved identities: ...000b is the PROJECT_CREATION scope, ...000c the PROJECT_CREATOR role.
 -- Shipped migrations are not edited; every constraint below is replaced by a superset of its
@@ -164,8 +167,9 @@ CREATE OR REPLACE FUNCTION authority_builtin_registry_valid() RETURNS BOOLEAN LA
 $$;
 
 -- Whether an account may create projects: an active, non-bootstrap USER holding a live (unrevoked,
--- unexpired, SYSTEM-rooted) PROJECT_CREATOR grant at the creation scope. Server administration is
--- deliberately not consulted: administrators hold the role only when it is granted to them.
+-- unexpired, lineage live to the SYSTEM root) PROJECT_CREATOR grant at the creation scope. Server
+-- administration is deliberately not consulted: administrators hold the role only when it is
+-- granted to them (by themselves or another administrator).
 -- Positional $1 because a SQL function's column names (admins.handle) shadow its parameter names.
 CREATE FUNCTION authority_may_create_projects(handle TEXT) RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
     SELECT account_active($1) AND EXISTS(
@@ -249,16 +253,26 @@ BEGIN
     -- grant covers the creation scope and ADMIN is not a ceiling over a role outside the chain, so
     -- for this role (and only this role) the branch replaces the general role-ceiling and
     -- scope-coverage checks below: the authority is the issuer's own live ADMIN_CONTROL grant at
-    -- ADMINISTRATION, exercised on V260's SYSTEM-rooted path (which already proved that grant live,
-    -- held by issuer_account with no agent, the issuing grant the live root, the issuer a USER and
-    -- not the subject). The issuer must also be an active, non-bootstrap server administrator now.
+    -- ADMINISTRATION, in one of two shapes.
+    --   * For another account, it is exercised on V260's SYSTEM-rooted path (which already proved
+    --     that grant live, held by issuer_account with no agent, the issuing grant the live root,
+    --     the issuer a USER and not the subject), so the grant outlives the issuing administrator.
+    --   * For the administrator themselves, it is the issuing grant (delegated lineage, no
+    --     exercised grant), which the delegated path above already proved live and held by
+    --     issuer_account with no agent and no token. Such a self-grant is bound to that
+    --     ADMIN_CONTROL grant and ends when its holder stops being an administrator, as
+    --     self-assignment of memberships does. Exercised self-issuance stays refused above.
+    -- Either way the issuer must also be an active, non-bootstrap server administrator now.
     -- IS NOT TRUE so an unknown (NULL) fact refuses rather than admits.
     creator := coalesce(effective='PROJECT_CREATOR' OR destination.kind='PROJECT_CREATION',FALSE);
     IF creator AND (effective='PROJECT_CREATOR' AND destination.kind='PROJECT_CREATION'
         AND NEW.requested_role='PROJECT_CREATOR'
         AND subject_kind='USER' AND NEW.subject_agent IS NULL
         AND NEW.coverage='SELF' AND NEW.provenance='ROLE'
-        AND NEW.exercised_grant IS NOT NULL AND parent.provenance='ADMIN_CONTROL' AND parent_role='ADMIN'
+        AND (NEW.exercised_grant IS NOT NULL
+            OR (NEW.subject_account=NEW.issuer_account AND NEW.issuer_agent IS NULL
+                AND NEW.issuing_token IS NULL))
+        AND parent.provenance='ADMIN_CONTROL' AND parent_role='ADMIN'
         AND parent.scope_id='00000000-0000-0000-0000-000000000003' AND parent.subject_agent IS NULL
         AND EXISTS(SELECT 1 FROM authority_accounts a JOIN admins u ON u.handle=a.legacy_handle
             WHERE a.id=NEW.issuer_account AND u.account_kind='USER' AND u.server_admin
