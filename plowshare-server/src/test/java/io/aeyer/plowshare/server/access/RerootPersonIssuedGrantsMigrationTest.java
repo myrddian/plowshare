@@ -397,4 +397,149 @@ class RerootPersonIssuedGrantsMigrationTest {
             String.class,
             root()));
   }
+
+  /** Inserts a ROLE grant directly so V259's delegated lineage rules admit it. */
+  private UUID roleGrant(
+      String subject,
+      String subjectAgent,
+      String project,
+      String role,
+      String issuer,
+      String issuerAgent,
+      UUID issuingGrant,
+      boolean managerForced) {
+    UUID grant = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO authority_grants(id,subject_account,subject_agent,scope_id,role_id,requested_role,"
+            + "issuer_account,issuer_agent,issuing_grant,manager_forced,provenance)"
+            + " SELECT ?,?,?,?,r.id,r.name,?,?,?,?,'ROLE' FROM authority_roles r WHERE r.name=?",
+        grant,
+        account(subject),
+        subjectAgent,
+        scope(project),
+        account(issuer),
+        issuerAgent,
+        issuingGrant,
+        managerForced,
+        role);
+    return grant;
+  }
+
+  /** Every column that a re-parenting must preserve: all but identity, lineage and revocation. */
+  private String attributes(UUID grant) {
+    return jdbc.queryForObject(
+        "SELECT (to_jsonb(g)-'id'-'created_at'-'issuing_grant'-'exercised_grant'-'revoked_at'"
+            + "-'revoked_by'-'revoked_by_agent'-'revoking_grant'-'version')::text"
+            + " FROM authority_grants g WHERE id=?",
+        String.class,
+        grant);
+  }
+
+  /** The unrevoked successor of a grant: the same attributes, written by V261. */
+  private UUID successor(UUID grant) {
+    return jdbc.queryForObject(
+        "SELECT n.id FROM authority_grants o JOIN authority_grants n ON n.revoked_at IS NULL"
+            + " AND n.id<>o.id AND (to_jsonb(n)-'id'-'created_at'-'issuing_grant'-'exercised_grant'"
+            + "-'revoked_at'-'revoked_by'-'revoked_by_agent'-'revoking_grant'-'version')"
+            + "=(to_jsonb(o)-'id'-'created_at'-'issuing_grant'-'exercised_grant'-'revoked_at'"
+            + "-'revoked_by'-'revoked_by_agent'-'revoking_grant'-'version') WHERE o.id=?",
+        UUID.class,
+        grant);
+  }
+
+  /** Live access as (subject, agent, scope, role) tuples, independent of grant identity. */
+  private List<String> liveAccess() {
+    return jdbc.queryForList(
+        "SELECT concat_ws('/',g.subject_account,coalesce(g.subject_agent,'-'),g.scope_id,g.role_id)"
+            + " FROM authority_grants g JOIN authority_live_grants() l ON l.id=g.id ORDER BY 1",
+        String.class);
+  }
+
+  private UUID serviceToken(String project) {
+    var services = new JdbcServiceAccountRepository(jdbc);
+    UUID token = UUID.randomUUID();
+    services.issue(
+        token,
+        "service",
+        "manager",
+        "@service/" + token,
+        "1".repeat(64),
+        OffsetDateTime.now().plusDays(1),
+        List.of(new ServiceAccounts.Scope(project, ProjectRole.MANAGER)));
+    return token;
+  }
+
+  @Test
+  void delegated_descendants_of_rerooted_grants_stay_live() {
+    member("one", "mia", "MANAGER");
+    UUID sam =
+        roleGrant(
+            "sam", null, "one", "MANAGER", "mia", null, current("MEMBERSHIP", "one", "mia"), false);
+    UUID agent = roleGrant("sam", "agent-1", "one", "READER", "sam", null, sam, false);
+    String attributes = attributes(agent);
+    assertTrue(live(agent));
+
+    migrateTo("261");
+
+    UUID samReissued = successor(sam);
+    assertEquals(root(), uuidColumn("issuing_grant", samReissued));
+    UUID agentReissued = successor(agent);
+    assertTrue(live(agentReissued));
+    assertEquals(samReissued, uuidColumn("issuing_grant", agentReissued));
+    assertNull(uuidColumn("exercised_grant", agentReissued));
+    assertEquals(attributes, attributes(agentReissued));
+    assertRevokedBySystem(agent);
+  }
+
+  @Test
+  void token_issued_membership_under_rerooted_grant_stays_live() {
+    new JdbcServiceAccountRepository(jdbc).create("service");
+    UUID owner = issueMembership("one", "service", "admin", "MANAGER");
+    UUID token = serviceToken("one");
+    UUID sam = issueMembership("one", "sam", "@service/" + token, "CONTRIBUTOR");
+    assertEquals(owner, uuidColumn("issuing_grant", sam));
+    String attributes = attributes(sam);
+
+    migrateTo("261");
+
+    UUID ownerReissued = current("MEMBERSHIP", "one", "service");
+    assertEquals(root(), uuidColumn("issuing_grant", ownerReissued));
+    UUID samReissued = current("MEMBERSHIP", "one", "sam");
+    assertTrue(live(samReissued));
+    assertEquals(ownerReissued, uuidColumn("issuing_grant", samReissued));
+    assertEquals(token, uuidColumn("issuing_token", samReissued));
+    assertEquals(attributes, attributes(samReissued));
+    assertRevokedBySystem(sam);
+  }
+
+  @Test
+  void no_grant_live_before_migration_is_dead_after() {
+    // Person chain: admin control -> mia -> sam, plus a ROLE grant sam holds from mia.
+    UUID mia = issueMembership("one", "mia", "admin", "MANAGER");
+    issueMembership("one", "sam", "mia", "CONTRIBUTOR");
+    UUID samRole = roleGrant("sam", null, "one", "MANAGER", "mia", null, mia, false);
+    // Self-issued agent grant under a re-rooted grant.
+    roleGrant("sam", "agent-1", "one", "READER", "sam", null, samRole, false);
+    // Agent-issued grant: mia's forced MANAGER agent issues tom a READER role.
+    UUID helper = roleGrant("mia", "helper", "one", "MANAGER", "mia", null, mia, true);
+    roleGrant("tom", null, "one", "READER", "mia", "helper", helper, false);
+    // Token-issued and SERVICE-issued grants under the service's person-issued membership.
+    new JdbcServiceAccountRepository(jdbc).create("service");
+    UUID service = issueMembership("one", "service", "admin", "MANAGER");
+    issueMembership("one", "tom", "@service/" + serviceToken("one"), "CONTRIBUTOR");
+    roleGrant("tom", null, "one", "CONTRIBUTOR", "service", null, service, false);
+    // A live admin self-assignment and a person chain that is already dead by lineage.
+    issueMembership("two", "admin", "admin", "MANAGER");
+    UUID miaTwo = issueMembership("two", "mia", "admin", "MANAGER");
+    UUID samTwo = issueMembership("two", "sam", "mia", "READER");
+    revoke(miaTwo);
+    assertFalse(live(samTwo));
+    var before = liveAccess();
+    assertTrue(before.size() >= 10, () -> "fixture too small: " + before);
+
+    migrateTo("261");
+
+    assertEquals(before, liveAccess());
+    assertRevokedBySystem(samTwo);
+  }
 }
