@@ -8,12 +8,15 @@ from plowshare_privacy.contracts import (
     AddressAssignment,
     AssignmentBasis,
     AssignmentMode,
+    DeviceIdentity,
     Evidence,
     Snapshot,
     TcpObservation,
 )
+from plowshare_privacy.device_dossier import build_dossier
 from plowshare_privacy.device_inventory import DeviceCard, device_inventory
 from plowshare_privacy.journal import Receipt
+from plowshare_privacy.presence import PresenceView, Sighting
 
 ADDRESS = "192.0.2.12"
 MAC = "aa:bb:cc:dd:ee:ff"
@@ -71,9 +74,27 @@ def receipt(
     )
 
 
-def card(*receipts: Receipt) -> DeviceCard:
-    (result,) = device_inventory((ADDRESS,), (), receipts).devices
+def card(*receipts: Receipt, presence: PresenceView | None = None) -> DeviceCard:
+    (result,) = device_inventory((ADDRESS,), (), receipts, presence).devices
     return result
+
+
+def sighted(mac: str) -> PresenceView:
+    """A quick sighting of ``mac`` at the address, newer than every receipt."""
+    identity = DeviceIdentity(
+        ADDRESS,
+        "mac:" + mac,
+        None,
+        None,
+        mac,
+        None,
+        "pihole-v6",
+        "2026-01-09T12:00:00Z",
+        "2026-01-09T12:00:00Z",
+    )
+    return PresenceView(
+        "2026-01-09T12:00:00Z", 1, {ADDRESS: Sighting(ADDRESS, identity)}
+    )
 
 
 class DeviceAddressingTest(unittest.TestCase):
@@ -202,6 +223,26 @@ class DeviceAddressingTest(unittest.TestCase):
             *self.changed(),
             receipt(3, assignment("static", OTHER_MAC)),
             receipt(4, assignment("static")),
+        )
+
+    def test_assignment_is_not_attributed_to_a_newer_device(self) -> None:
+        moved = card(*self.changed(), presence=sighted(OTHER_MAC))
+        assert moved.identity is not None
+        self.assertEqual(OTHER_MAC, moved.identity.mac)
+        self.assertIsNone(moved.addressing)
+        self.assertIsNone(build_dossier(moved).addressing)
+
+    def test_assignment_is_kept_when_the_same_device_is_sighted(self) -> None:
+        same = card(*self.changed(), presence=sighted(MAC))
+        assert same.addressing is not None
+        self.assertEqual("static", same.addressing.mode)
+        self.assertEqual("dhcp_reserved", same.addressing.previous_mode)
+        dossier = build_dossier(same)
+        self.assertEqual(same.addressing, dossier.addressing)
+
+    def test_collection_without_the_address_clears_the_change(self) -> None:
+        self.assertNoChange(
+            *self.changed(), receipt(3), receipt(4, assignment("static"))
         )
 
     def test_overview_json_carries_addressing(self) -> None:

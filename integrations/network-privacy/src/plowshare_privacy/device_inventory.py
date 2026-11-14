@@ -240,7 +240,7 @@ def device_inventory(
                 traffic=presence.traffic.get(quick.key)
                 if quick and quick.identity and history.identity == quick.identity
                 else None,
-                addressing=_addressing_view(history),
+                addressing=_addressing_view(history, history.identity),
             )
         )
     return DeviceInventory(tuple(devices), tuple(candidates))
@@ -260,14 +260,15 @@ def _fold_assignment(
     A stored change is dropped as soon as any later collection records a
     different mode (including ``unknown``) or a different MAC, comparable or
     not, so it can never be paired with a mode it did not change to. A
-    collection with no assignment leaves it in place; the card shows nothing
-    then anyway.
+    collection with no assignment for the address also drops it: the history
+    is broken there, so a later collection in the same mode cannot revive it.
     """
     prior = history.assignment
     history.changed_in_latest = False
-    if (
-        current is not None
-        and prior is not None
+    if current is None:
+        history.mode_change = None
+    elif (
+        prior is not None
         and history.assignment_scope == evidence.scope
         and history.assignment_comparable
         and comparable
@@ -277,13 +278,9 @@ def _fold_assignment(
             prior.mode, current.mode, evidence.finished_at, current.mac
         )
         history.changed_in_latest = True
-    elif (
-        current is not None
-        and history.mode_change is not None
-        and (
-            current.mode != history.mode_change.mode
-            or current.mac != history.mode_change.mac
-        )
+    elif history.mode_change is not None and (
+        current.mode != history.mode_change.mode
+        or current.mac != history.mode_change.mac
     ):
         history.mode_change = None
     history.assignment = current
@@ -292,8 +289,15 @@ def _fold_assignment(
     history.assignment_comparable = comparable
 
 
-def _addressing_view(history: _AddressHistory) -> AddressingView | None:
+def _addressing_view(
+    history: _AddressHistory, identity: DeviceIdentity | None
+) -> AddressingView | None:
     """Show only what the newest done collection recorded, never a stale value.
+
+    ``identity`` is the card's final identity, which a quick sighting newer
+    than the last full collection may have replaced. When both it and the
+    assignment name a MAC and they differ, another device now holds the
+    address, so the assignment (and its change) is not shown for it.
 
     A change is shown only while the same MAC holds the address in the mode it
     changed to, so the card never reads "changed from A to B" about another
@@ -301,6 +305,13 @@ def _addressing_view(history: _AddressHistory) -> AddressingView | None:
     """
     current = history.assignment
     if current is None or history.assignment_at is None:
+        return None
+    if (
+        current.mac is not None
+        and identity is not None
+        and identity.mac is not None
+        and current.mac != identity.mac
+    ):
         return None
     change = history.mode_change
     if change is not None and (
