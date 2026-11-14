@@ -6,6 +6,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.access.AccessRequest;
 import io.aeyer.plowshare.server.access.AuthorityAction;
+import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
 import io.aeyer.plowshare.server.access.InferenceCalls;
 import io.aeyer.plowshare.server.access.KnowledgeReadScope;
 import io.aeyer.plowshare.server.access.OperationAuthority;
@@ -4066,37 +4067,59 @@ public final class JobRuntime {
                             wanted.name());
                   }
                   String providerText = result;
-                  admittedAuthority.run();
-                  if (operation != null) operations.require(operation);
-                  if (confined)
-                    retainedResources.require(
-                        home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
-                  ToolPost postTool =
-                      toolPost(
-                          activeHooks(route, harnessRun, skillChecks),
-                          hookContext,
-                          wanted.name(),
-                          preTool.arguments(),
-                          result);
-                  toolRecords.addAll(postTool.records());
-                  // Through usable again: a hook that redacts to nothing
-                  // must not hand the model the blank result usable
-                  // exists to replace.
-                  result = usable(postTool.result(), wanted.name());
-                  if (observation != null)
-                    observation =
-                        observation.afterHook(!withheld(postTool) && result.equals(providerText));
-                  // A result a tool.post hook withheld is an error whatever it read;
-                  // a delegate's call is its ending; anything else is read off what
-                  // the model is shown, a redaction included.
-                  Outcome.Ending delegate =
-                      tool instanceof AgentRunTool runner ? runner.returned() : null;
-                  told =
-                      withheld(postTool)
-                          ? ToolLines.ERROR
-                          : delegate != null
-                              ? ToolLines.delegation(delegate)
-                              : ToolLines.outcome(wanted.name(), result);
+                  // The after-tool check is a disclosure gate: it decides whether the
+                  // model may see what the tool returned, and cannot undo what the tool
+                  // did (writes are fenced in their own transactions). Only a refusal
+                  // that says authority was withdrawn gets the model-facing explanation
+                  // below; any other failure keeps the generic tool-fault wording.
+                  boolean authorityWithdrawn = false;
+                  try {
+                    admittedAuthority.run();
+                    if (operation != null) operations.require(operation);
+                    if (confined)
+                      retainedResources.require(
+                          home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
+                  } catch (AuthorityWithdrawnException withdrawn) {
+                    authorityWithdrawn = true;
+                  }
+                  if (authorityWithdrawn) {
+                    // The result and tool.post are both skipped: nothing the tool
+                    // returned reaches the model or a hook. The run ends at the next
+                    // step's check, as it would for any other revocation.
+                    result =
+                        "the result of '"
+                            + wanted.name()
+                            + "' was withheld because this run's authority changed while it"
+                            + " ran. Any change the tool made has already happened.";
+                    told = ToolLines.ERROR;
+                  } else {
+                    ToolPost postTool =
+                        toolPost(
+                            activeHooks(route, harnessRun, skillChecks),
+                            hookContext,
+                            wanted.name(),
+                            preTool.arguments(),
+                            result);
+                    toolRecords.addAll(postTool.records());
+                    // Through usable again: a hook that redacts to nothing
+                    // must not hand the model the blank result usable
+                    // exists to replace.
+                    result = usable(postTool.result(), wanted.name());
+                    if (observation != null)
+                      observation =
+                          observation.afterHook(!withheld(postTool) && result.equals(providerText));
+                    // A result a tool.post hook withheld is an error whatever it read;
+                    // a delegate's call is its ending; anything else is read off what
+                    // the model is shown, a redaction included.
+                    Outcome.Ending delegate =
+                        tool instanceof AgentRunTool runner ? runner.returned() : null;
+                    told =
+                        withheld(postTool)
+                            ? ToolLines.ERROR
+                            : delegate != null
+                                ? ToolLines.delegation(delegate)
+                                : ToolLines.outcome(wanted.name(), result);
+                  }
                 } catch (AgentRunTool.SubAgentFailed child) {
                   // Its own clause, above the general one, and not folded
                   // into dependencyFailure: the ending differs. A child

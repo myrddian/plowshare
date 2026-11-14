@@ -9,7 +9,9 @@ import io.aeyer.plowshare.server.access.OperationAuthority.Admission;
  *
  * <p>An agent tool call rechecks its admission several times on purpose (before the step, after
  * pre-tool hooks, around target checks and after the tool returns). Each recheck is kept; this
- * contract only makes a repeat cheap. It never grants anything: an admission is answered from
+ * contract only makes a repeat cheap. The after-tool recheck is a disclosure gate: it withholds the
+ * result from the model and cannot undo writes, which are fenced in their own transactions (see
+ * docs/operation-write-fences.md). Reuse never grants anything: an admission is answered from
  * memory only after an equal admission passed the walk, and a walk that refuses throws as it always
  * did and leaves nothing behind.
  *

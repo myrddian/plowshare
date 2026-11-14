@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
 import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.dispatch.*;
@@ -68,6 +70,78 @@ class OperationExecutionTest {
     verify(dispatcher, times(1)).stream(any(), any(), any());
     verify(transcript, never())
         .record(argThat(entry -> entry.toString().contains("private answer")));
+  }
+
+  @Test
+  void revokedDuringToolWithholdsResultAndSaysWhy() {
+    var dispatcher = mock(LlmDispatcher.class);
+    var authority = mock(OperationAuthority.class);
+    var admission = mock(OperationAuthority.Admission.class);
+    when(admission.executor()).thenReturn("alice");
+    when(admission.home()).thenReturn(Home.of("one"));
+    when(admission.actions())
+        .thenReturn(
+            Set.of(
+                io.aeyer.plowshare.server.access.AuthorityAction.READ,
+                io.aeyer.plowshare.server.access.AuthorityAction.WRITE,
+                io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL));
+    AtomicBoolean revoked = new AtomicBoolean();
+    doAnswer(
+            call -> {
+              // Withdrawn once, by the tool; later checks pass so the history can be inspected.
+              if (revoked.getAndSet(false)) throw new AuthorityWithdrawnException("withdrawn");
+              return null;
+            })
+        .when(authority)
+        .require(admission);
+    when(authority.admit(any(), any(), any())).thenReturn(admission);
+    AgentTool probe =
+        new AgentTool() {
+          public ToolSchema schema() {
+            return ToolSchema.from("probe", "fixture", Map.of("type", "object"));
+          }
+
+          public String run(String arguments, Home home) {
+            revoked.set(true);
+            return "private tool result";
+          }
+        };
+    var histories = new ArrayList<String>();
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    when(dispatcher.stream(any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              histories.add(String.valueOf(call.getArguments()[0]));
+              return calls.incrementAndGet() == 1
+                  ? new Completion(
+                      "",
+                      "tool_calls",
+                      TokenUsage.UNKNOWN,
+                      List.of(new ToolCall("c1", "probe", "{}")))
+                  : new Completion("done", "stop", TokenUsage.UNKNOWN, List.of());
+            });
+    var runtime = new JobRuntime(authority, dispatcher, List.of(probe));
+    var definition =
+        new AgentDefinition(
+            "chat", "chat", "fast", List.of("probe"), List.of(), List.of(), 4, 4, "Answer");
+    runtime.run(
+        definition,
+        "hello",
+        Home.of("one"),
+        Budget.of(4),
+        () -> false,
+        null,
+        JobWatch.UNWATCHED,
+        mock(Transcript.class, CALLS_REAL_METHODS),
+        TurnCap.of(4),
+        List.of(),
+        "alice",
+        false);
+    String second = histories.get(1);
+    assertTrue(second.contains("withheld because this run's authority changed"), second);
+    assertTrue(second.contains("Any change the tool made has already happened."), second);
+    assertFalse(second.contains("fault in the tool"), second);
+    assertFalse(second.contains("private tool result"), second);
   }
 
   @Test

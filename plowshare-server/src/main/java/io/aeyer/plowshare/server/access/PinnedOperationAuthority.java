@@ -3,7 +3,6 @@ package io.aeyer.plowshare.server.access;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
-import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.*;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -581,7 +580,7 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     records.started(admission.id(), job);
   }
 
-  private static CallerFault denied() {
-    return new CallerFault("Operation is outside its retained scoped authority");
+  private static AuthorityWithdrawnException denied() {
+    return new AuthorityWithdrawnException("Operation is outside its retained scoped authority");
   }
 }
