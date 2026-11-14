@@ -1,4 +1,4 @@
-# ADR 0068: Readability is decided per document, with cross-boundary content enforced at write time
+# ADR 0070: Readability is decided per document, with cross-boundary content enforced at write time
 
 Status: accepted. This records the user's decisions, including owner ejection of restricting revisions through the same staged archive and export as conversations. Implementation has not started.
 

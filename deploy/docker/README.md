@@ -143,7 +143,7 @@ pipeline steps; these files target Docker Compose.
 The shipped telemetry is opt-in and has no default addresses.
 
 - **PostgreSQL** always preloads `pg_stat_statements` and `auto_explain` (a restart is
-  needed to change this). `pg_stat_statements` is optional: migration V259 creates its
+  needed to change this). `pg_stat_statements` is optional: migration V260 creates its
   views only when the migration role is a superuser (the extension is not trusted) and
   otherwise logs a notice and continues. Only the exporter and
   `deploy/monitoring/pg-stat-snapshot.sh` read it; the server does not need it. Logging of

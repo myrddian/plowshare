@@ -128,7 +128,7 @@ log check (`BusyReadRetry`). No existing projection was moved to item scope.
 
 ## Slice 1: targeted readability from shared data
 
-[ADR 0068](decisions/0068-document-level-readability.md) later decides readability per document,
+[ADR 0070](decisions/0070-document-level-readability.md) later decides readability per document,
 with cross-boundary content enforced at write time; it replaces this slice's per-revision closure
 walk once implemented.
 

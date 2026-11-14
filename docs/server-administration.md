@@ -475,7 +475,7 @@ entrypoint passes the settings above (one without the other stops startup), and
 `auto_explain`, both slow-statement logging thresholds are off by default (enabling them
 writes SQL statement text, not parameters, to the PostgreSQL container log), and an optional
 exporter profile, using its own `pg_monitor` role, exposes top statements by `queryid`.
-`pg_stat_statements` is optional: V259 installs it only for a superuser migration role and
+`pg_stat_statements` is optional: V260 installs it only for a superuser migration role and
 otherwise continues with a notice; only the exporter and snapshot script use it.
 PostgreSQL's default `log_min_error_statement=error` still logs the SQL text of failing
 statements (never parameters, since `log_parameter_max_length_on_error=0`).

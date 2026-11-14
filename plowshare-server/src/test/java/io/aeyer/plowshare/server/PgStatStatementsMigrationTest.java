@@ -11,7 +11,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** Verifies that V259 installs pg_stat_statements from the pgvector image and is idempotent. */
+/** Verifies that V260 installs pg_stat_statements from the pgvector image and is idempotent. */
 @Tag("full-db")
 @Testcontainers
 class PgStatStatementsMigrationTest {

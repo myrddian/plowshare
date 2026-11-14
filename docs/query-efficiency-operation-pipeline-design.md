@@ -68,7 +68,7 @@ request ─► 1 resolve ─► 2 authorize ─► 3 fetch ─► 4 assemble ─
   directories, and the member role. These are typed values; nothing in the context is a raw map.
 - **2 Authorize.** Decide in code against the context and the authority snapshot: tool assignment,
   scope admission, readability, log visibility. Readability is decided per document from its
-  required-scope set ([ADR 0068](decisions/0068-document-level-readability.md)), with no per-revision
+  required-scope set ([ADR 0070](decisions/0070-document-level-readability.md)), with no per-revision
   checks or closure walk at read time. Each decision is memoised in the context for the
   operation's lifetime, so a second asker gets the same answer without recomputing it.
 - **3 Fetch.** Plain object fetches by id for what stage 2 admitted, from the item-scoped object
