@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import tempfile
 import unittest
 from dataclasses import replace
@@ -10,6 +11,7 @@ from pathlib import Path
 from support import configuration, with_sources
 
 from plowshare_privacy.collection import scope_fingerprint
+from plowshare_privacy.connectors import REGISTRY
 from plowshare_privacy.contracts import (
     Capability,
     CollectionPlan,
@@ -152,6 +154,36 @@ class ScopeFingerprintTest(unittest.TestCase):
         )
         second = replace(first, sources=tuple(reversed(first.sources)))
         self.assertEqual(scope_fingerprint(first), scope_fingerprint(second))
+
+    def test_dhcp_network_is_pihole_scope_only_when_set(self) -> None:
+        # Unset, the key is left out, so the pinned fingerprints hold.
+        self.assertNotIn("dhcp_network", REGISTRY["pihole"].scope_settings(PIHOLE_PLAN))
+        lan = replace(PIHOLE_PLAN, dhcp_network=ipaddress.IPv4Network("192.168.1.0/24"))
+        self.assertEqual(
+            REGISTRY["pihole"].scope_settings(lan)["dhcp_network"], "192.168.1.0/24"
+        )
+        # Set, it decides what is inferred static, so it changes the scope in
+        # either form, and a different network is a different scope.
+        legacy = with_sources(self.plan, pihole=lan)
+        self.assertNotEqual(PIHOLE, scope_fingerprint(legacy))
+        dhcp = frozenset[Capability]({"dhcp_scope", "dhcp_reservations"})
+        plain = replace(
+            self.plan, sources=(service("pihole", "dns", PIHOLE_PLAN, dhcp),)
+        )
+        with_lan = replace(self.plan, sources=(service("pihole", "dns", lan, dhcp),))
+        other = replace(
+            self.plan,
+            sources=(
+                service(
+                    "pihole",
+                    "dns",
+                    replace(lan, dhcp_network=ipaddress.IPv4Network("10.0.0.0/24")),
+                    dhcp,
+                ),
+            ),
+        )
+        fingerprints = {scope_fingerprint(p) for p in (plain, with_lan, other)}
+        self.assertEqual(len(fingerprints), 3)
 
 
 if __name__ == "__main__":

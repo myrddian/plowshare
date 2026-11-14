@@ -110,6 +110,17 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(REGISTRY["unifi"].display_name, "UniFi")
         self.assertEqual(REGISTRY["unifi"].source, "unifi")
 
+    def test_pihole_offers_an_optional_dhcp_network_field(self) -> None:
+        [field] = [
+            field
+            for field in REGISTRY["pihole"].settings_fields
+            if field.key == "dhcpNetwork"
+        ]
+        self.assertEqual(
+            (field.label, field.kind, field.required),
+            ("DHCP network (when Pi-hole's netmask is empty)", "text", False),
+        )
+
     def test_settings_fields_name_keys_the_decoder_accepts(self) -> None:
         private = Path(tempfile.gettempdir()).resolve()
         minimal: dict[str, dict[str, object]] = {
@@ -128,6 +139,7 @@ class RegistryTest(unittest.TestCase):
             "caFile": str(private / "unifi-ca.pem"),
             "certificateSha256": "a" * 64,
             "trafficSite": "default",
+            "dhcpNetwork": "192.168.1.0/24",
         }
         required = {
             "pihole": {"origin"},

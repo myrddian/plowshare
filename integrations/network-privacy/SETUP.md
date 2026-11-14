@@ -206,6 +206,13 @@ offer, and the last capability of a service (remove the service instead). It
 also refuses to turn off `dns_queries` while DNS activity profiles are on.
 Asking for a capability that is already on (or already off) writes nothing.
 
+`--dhcp-network CIDR` also sets a Pi-hole service's `settings.dhcpNetwork` in
+the same write, such as `--capability dhcp_scope --dhcp-network
+192.168.1.0/24`. It must be a private IPv4 network from /8 to /30 written with
+its prefix, and is refused for a UniFi service. With the capability already on,
+the command changes only `dhcpNetwork`; repeating the same value writes nothing.
+See [address assignment](#address-assignment) for when it is needed.
+
 The first change rewrites `collection` in private `collector.json` from the
 older `pihole` and `unifi` keys to a `sources` list, which is the only form that
 can hold the opt-in capabilities. Each entry keeps its settings unchanged and
@@ -263,7 +270,21 @@ complete only when `dhcp_reservations` is on for that service as well as
 `dhcp_scope`, on Pi-hole and UniFi alike, because an unread reservation or fixed
 IP could hold any address; with `dhcp_scope` alone no address is ever `static`.
 If complete scopes from different services cover an address and disagree, it is
-`unknown` with an addressing conflict. A lease is
+`unknown` with an addressing conflict.
+
+Pi-hole's DHCP netmask is empty by default on a directly connected LAN: dnsmasq
+takes the subnet from the Pi-hole host's own interface, which the collector
+cannot see. In that case set `dhcpNetwork` in the Pi-hole service's `settings`
+(for example `"dhcpNetwork": "192.168.1.0/24"`), or pass `--dhcp-network` to
+`enable-capability`. The router, `start` and `end` must lie inside it. Without
+it, reservations and leases still classify addresses, but no Pi-hole address is
+ever `static`; this is not reported as an issue. When Pi-hole's netmask is set,
+`dhcpNetwork` is optional and, if present, must name the same network, or the
+range is reported invalid. Setting or changing `dhcpNetwork` changes collection
+scope, so the next scan starts a new baseline; the dashboard keeps it when it
+saves the Pi-hole connection.
+
+A lease is
 identity and addressing evidence, not presence; it shows an address was handed to
 a MAC, not that the device is online now. A reservation or fixed IP is intent
 only: it says which address a MAC should get, so it feeds addressing and never

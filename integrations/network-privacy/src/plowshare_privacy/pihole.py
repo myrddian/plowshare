@@ -168,11 +168,11 @@ def _ipv4(value: object) -> ipaddress.IPv4Address:
 def _dhcp_network(router: object, netmask: object) -> ipaddress.IPv4Network:
     """The network of ``router``/``netmask``.
 
-    The netmask must be a contiguous, nonzero netmask (Pi-hole reports an empty
-    or zero netmask when it is left to interface discovery, which this read
-    cannot see); a hostmask is not accepted. The network must pass the same
-    private-LAN allowlist as every connector (``dhcp_lan``); anything else
-    raises ValueError, which the caller reports as an invalid range.
+    The netmask must be a contiguous, nonzero netmask; a hostmask is not
+    accepted. (An empty netmask is not passed here: ``_dhcp`` treats it as
+    unset.) The network must pass the same private-LAN allowlist as every
+    connector (``dhcp_lan``); anything else raises ValueError, which the
+    caller reports as an invalid range.
     """
     gateway, mask = _ipv4(router), int(_ipv4(netmask))
     hosts = ~mask & 0xFFFFFFFF
@@ -784,10 +784,18 @@ class PiHoleV6:
         """One ``GET config/dhcp``, decoded for the enabled DHCP capabilities.
 
         The settings object must hold a boolean ``active``, or the read is a gap
-        (``addressing_unavailable``). With DHCP active, the scope is built from
-        ``router``/``netmask`` and ``start``-``end``: undecodable range settings
-        give no scope, and a range outside the network or reversed gives an
-        incomplete one, both with ``addressing_partial``. Its lease table is
+        (``addressing_unavailable``). With DHCP active, the scope's network is
+        ``router``/``netmask``. An empty netmask is Pi-hole's default for a
+        directly connected LAN (dnsmasq takes the subnet from the host's own
+        interface, which this read cannot see), so the configured
+        ``dhcp_network`` is used instead; without one there is no scope and no
+        issue, because nothing failed: the range just cannot be used for
+        inference, while reservations and leases still classify addresses.
+        When both a netmask and ``dhcp_network`` are present they must name the
+        same network. Undecodable range settings give no scope; a router or
+        range outside the network, a reversed range, or a netmask that
+        disagrees with ``dhcp_network`` gives an incomplete scope; each is an
+        ``addressing_partial`` invalid range. Its lease table is
         ``incomplete`` here; only a complete lease read in the same session
         (``_read``) marks it ``complete``. Reservations are kept only for
         ``targets``; at most ``MAX_RESERVATIONS`` entries are decoded and an
@@ -815,14 +823,29 @@ class PiHoleV6:
             return PiHoleDhcp(False, None, (), ())
         issues: list[str] = []
         scope: DhcpScope | None = None
-        if "dhcp_scope" in self.capabilities:
+        # An empty netmask leaves the network to the configured dhcp_network;
+        # with neither, there is no network and so no scope (and no issue).
+        configured = self.plan.dhcp_network
+        unset = settings.get("netmask") == ""
+        if "dhcp_scope" in self.capabilities and not (unset and configured is None):
             try:
-                network = _dhcp_network(settings.get("router"), settings.get("netmask"))
+                router = _ipv4(settings.get("router"))
+                network = (
+                    configured
+                    if configured is not None and unset
+                    else _dhcp_network(settings.get("router"), settings.get("netmask"))
+                )
                 start, end = _ipv4(settings.get("start")), _ipv4(settings.get("end"))
             except ValueError:
                 issues.append(DHCP_INVALID_RANGE)
             else:
-                valid = start in network and end in network and start <= end
+                valid = (
+                    (configured is None or configured == network)
+                    and router in network
+                    and start in network
+                    and end in network
+                    and start <= end
+                )
                 if not valid:
                     issues.append(DHCP_INVALID_RANGE)
                 scope = DhcpScope(

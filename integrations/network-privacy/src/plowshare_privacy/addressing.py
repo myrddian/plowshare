@@ -60,6 +60,7 @@ from .contracts import (
     DeviceIdentity,
     timestamp,
 )
+from .contracts import dhcp_lan as dhcp_lan  # One allowlist, shared with decoding.
 
 HOLDER_CONFLICT = (
     "addressing_conflict: a DHCP reservation names a different device than"
@@ -72,29 +73,6 @@ SCOPE_CONFLICT = (
     "addressing_conflict: DHCP scopes from different services disagree on a"
     " selected address"
 )
-
-
-# A DHCP network is a private unicast LAN of this prefix length.
-_MIN_PREFIX, _MAX_PREFIX = 8, 30
-_THIS_NETWORK = ipaddress.IPv4Network("0.0.0.0/8")
-
-
-def dhcp_lan(network: ipaddress.IPv4Network) -> bool:
-    """Whether ``network`` can be a DHCP scope: a private unicast IPv4 LAN, /8 to /30.
-
-    Loopback, link-local, multicast, unspecified, reserved and ``0.0.0.0/8``
-    networks are rejected. Every connector applies this one allowlist.
-    """
-    return (
-        _MIN_PREFIX <= network.prefixlen <= _MAX_PREFIX
-        and network.is_private
-        and not network.is_loopback
-        and not network.is_link_local
-        and not network.is_multicast
-        and not network.is_unspecified
-        and not network.is_reserved
-        and not network.overlaps(_THIS_NETWORK)
-    )
 
 
 @dataclass(frozen=True)

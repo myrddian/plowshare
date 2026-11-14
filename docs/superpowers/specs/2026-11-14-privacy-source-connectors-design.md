@@ -442,6 +442,24 @@ part of the receipt journal's identity.
     "took"}`. `start`, `end`, `router` and `netmask` are IPv4 strings or `""`;
     an empty netmask means "taken from the interface", which a read cannot see,
     so the scope is then not decodable.
+  - Confirmed on a live Pi-hole v6: with DHCP active, `GET config/dhcp`
+    returned `start`, `end` and `router` set and `netmask: ""`, Pi-hole's
+    documented default for a directly connected network. Treating that as an
+    invalid range reported `addressing_partial` on every collection, so no
+    scope was ever complete, `static` was never inferred, and the
+    `addressing_` gap switched off every "Address assignment changed" line.
+    The reader now treats an empty netmask as unset: it uses the optional
+    Pi-hole setting `dhcpNetwork` (a private IPv4 CIDR from /8 to /30,
+    checked by the same `dhcp_lan` allowlist) when configured, and otherwise
+    builds no scope and reports no issue, while reservations and leases still
+    classify addresses. A non-empty netmask is decoded as before and, when
+    `dhcpNetwork` is also set, must name the same network. In every case the
+    router, `start` and `end` must lie inside the chosen network with
+    `start` <= `end`, or the range is invalid and the scope incomplete. A
+    zero netmask (`0.0.0.0`) is still an invalid range. `dhcpNetwork` is
+    scope: it enters the Pi-hole scope settings only when set, so untouched
+    configurations keep their fingerprints. `enable-capability
+    --dhcp-network CIDR` sets it under the scope-change fence.
   - A `dhcp.hosts` entry is a dnsmasq `dhcp-host` string, documented as
     `[<hwaddr>][,id:<client_id>|*][,set:<tag>][,tag:<tag>][,<ipaddr>][,<hostname>][,<lease_time>][,ignore]`,
     with examples `"MAC,IP"`, `"MAC,IP,NAME"` and `"MAC,IP,NAME,24h"`. The

@@ -160,8 +160,9 @@ class MonitorSettings(Protocol):
     async def save_pihole(self, origin: str, password_file: Path) -> MonitorView:
         """Replace the Pi-hole connection: its origin and its password file.
 
-        The saved tuning (lookback, lookup limit, identity age and timeout) is
-        kept; a first connection takes the defaults. A password previously
+        The saved tuning (lookback, lookup limit, identity age and timeout) and
+        any configured DHCP network are kept; a first connection takes the
+        defaults. A password previously
         read from an environment variable is replaced by ``password_file``.
         """
         ...
@@ -354,6 +355,9 @@ class FileMonitorSettings:
                         maxIdentityAgeSeconds=tuning.max_identity_age,
                         timeoutSeconds=tuning.timeout,
                     )
+                    # Set from the command line; the dashboard does not edit it.
+                    if tuning.dhcp_network is not None:
+                        connection["dhcpNetwork"] = str(tuning.dhcp_network)
                 # Edit the service in whichever form the file uses; a sources
                 # entry keeps its id and enabled capabilities.
                 put_service(plan, "pihole", connection)

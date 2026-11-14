@@ -9,7 +9,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
 
 from plowshare import Client, Delivery, Refusal, Reply, TransportError
@@ -40,6 +40,7 @@ from plowshare_privacy.bootstrap import (
     enable_unifi_traffic,
     inspect,
     install,
+    main,
     private_root,
     resolve_schedule,
     serve,
@@ -971,6 +972,140 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(BlockingIOError):
                 enable_capability(self.setup, "pihole", "dhcp_leases", True)
         self.assertEqual(self.config.read_bytes(), retained)
+
+    def legacy_pihole_with_network(self, network: str) -> None:
+        """A legacy ``pihole`` key carrying ``dhcpNetwork``, on a fresh journal."""
+        self.tcp_configuration()
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        row = json.loads(self.config.read_text())
+        row["stateDirectory"] = str(self.root / ("state-" + str(uuid4())))
+        row["collection"]["pihole"]["dhcpNetwork"] = network
+        self.config.write_text(json.dumps(row))
+
+    def test_writers_keep_an_existing_dhcp_network(self) -> None:
+        self.legacy_pihole_with_network("192.168.1.0/24")
+        retained = self.config.read_bytes()
+        # connect_pihole never replaces a configured Pi-hole.
+        with self.assertRaisesRegex(SetupProblem, "already configured"):
+            connect_pihole(self.setup, "https://other.example", "new-password")
+        self.assertEqual(self.config.read_bytes(), retained)
+        # The rewrite to the sources form moves the settings verbatim.
+        enable_capability(self.setup, "pihole", "dhcp_leases", True)
+        (entry,) = self.collection_row()["sources"]
+        self.assertEqual(entry["settings"]["dhcpNetwork"], "192.168.1.0/24")
+        configured = Configuration.read(self.config).collection.pihole
+        assert configured is not None
+        self.assertEqual(str(configured.dhcp_network), "192.168.1.0/24")
+        # Connecting UniFi beside it leaves the Pi-hole settings alone.
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        self.assertEqual(
+            self.collection_row()["sources"][0]["settings"]["dhcpNetwork"],
+            "192.168.1.0/24",
+        )
+
+    def test_enable_capability_sets_the_dhcp_network_under_the_fence(self) -> None:
+        self.tcp_configuration()
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        legacy = Configuration.read(self.config)
+        with patch.object(
+            FileReceipts,
+            "prepare_scope_change",
+            autospec=True,
+            side_effect=FileReceipts.prepare_scope_change,
+        ) as prepare:
+            enable_capability(
+                self.setup, "pihole", "dhcp_scope", True, dhcp_network="192.168.1.0/24"
+            )
+            prepare.assert_called_once()
+        (entry,) = self.collection_row()["sources"]
+        self.assertEqual(entry["settings"]["dhcpNetwork"], "192.168.1.0/24")
+        self.assertIn("dhcp_scope", entry["capabilities"])
+        configured = Configuration.read(self.config)
+        assert configured.collection.pihole is not None
+        self.assertEqual(
+            str(configured.collection.pihole.dhcp_network), "192.168.1.0/24"
+        )
+        with FileReceipts(configured) as receipts:
+            self.assertEqual(
+                receipts.collection_scope, scope_fingerprint(configured.collection)
+            )
+        self.assertNotEqual(
+            scope_fingerprint(configured.collection),
+            scope_fingerprint(legacy.collection),
+        )
+        # With the capability already on, it is a pure dhcpNetwork change.
+        before = scope_fingerprint(configured.collection)
+        enable_capability(
+            self.setup, "pihole", "dhcp_scope", True, dhcp_network="10.20.0.0/16"
+        )
+        (entry,) = self.collection_row()["sources"]
+        self.assertEqual(entry["settings"]["dhcpNetwork"], "10.20.0.0/16")
+        self.assertEqual(
+            entry["capabilities"], ["dhcp_scope", "dns_queries", "network_table"]
+        )
+        changed = Configuration.read(self.config)
+        self.assertNotEqual(scope_fingerprint(changed.collection), before)
+        with FileReceipts(changed) as receipts:
+            self.assertEqual(
+                receipts.collection_scope, scope_fingerprint(changed.collection)
+            )
+        # The same value again writes nothing.
+        retained = self.config.read_bytes()
+        with patch.object(FileReceipts, "prepare_scope_change") as prepare:
+            enable_capability(
+                self.setup, "pihole", "dhcp_scope", True, dhcp_network="10.20.0.0/16"
+            )
+            prepare.assert_not_called()
+        self.assertEqual(self.config.read_bytes(), retained)
+
+    def test_dhcp_network_refused_for_unifi_and_invalid_networks(self) -> None:
+        self.tcp_configuration()
+        connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        connect_unifi(
+            self.setup, self.UNIFI_BASE, self.UNIFI_SITE, "UNIFI_TEST_KEY", None
+        )
+        retained = self.config.read_bytes()
+        with self.assertRaisesRegex(SetupProblem, "only for a Pi-hole service"):
+            enable_capability(
+                self.setup,
+                "unifi",
+                "controller_clients",
+                True,
+                dhcp_network="192.168.1.0/24",
+            )
+        for network in ("8.8.8.0/24", "192.168.1.0/31", "fd00::/64", "lan"):
+            with self.subTest(network=network):
+                with self.assertRaisesRegex(SetupProblem, "dhcpNetwork"):
+                    enable_capability(
+                        self.setup, "pihole", "dhcp_scope", True, dhcp_network=network
+                    )
+        self.assertEqual(self.config.read_bytes(), retained)
+
+    def test_enable_capability_command_passes_the_dhcp_network(self) -> None:
+        arguments = [
+            "bootstrap",
+            "--directory",
+            str(self.root),
+            "enable-capability",
+            "--service",
+            "pihole",
+            "--capability",
+            "dhcp_scope",
+            "--dhcp-network",
+            "192.168.1.0/24",
+        ]
+        with (
+            patch("sys.argv", arguments),
+            patch("plowshare_privacy.bootstrap.private_root", return_value=self.root),
+            patch.object(Setup, "read", return_value=self.setup),
+            patch("plowshare_privacy.bootstrap.enable_capability") as enable,
+        ):
+            main()
+        enable.assert_called_once_with(
+            ANY, "pihole", "dhcp_scope", True, dhcp_network="192.168.1.0/24"
+        )
 
     def test_connect_pihole_adds_a_service_in_either_form(self) -> None:
         # Legacy form: the key is added beside the existing legacy UniFi key.
