@@ -131,18 +131,23 @@ class RegisteredScheduleFilesTest {
     // The folder's count limit is checked before a new file would make it unreadable.
     Path folder = Files.createDirectories(root.resolve("schedules"));
     for (int i = 0; i < 256; i++) Files.writeString(folder.resolve("s" + i + ".json"), "{}");
-    assertThrows(
-        WorkspaceUnavailableException.class,
-        () -> files.writeApplication(SOURCE, "extra", "{}", false));
+    // A write that would cross a limit is the caller's fault, not an unavailable workspace.
+    var count =
+        assertThrows(
+            io.aeyer.plowshare.server.faults.CallerFault.class,
+            () -> files.writeApplication(SOURCE, "extra", "{}", false));
+    assertEquals("Schedule folder exceeds its file or byte limit", count.getMessage());
     assertFalse(Files.exists(folder.resolve("extra.json")));
     // Replacing an existing file does not add to the count.
     files.writeApplication(SOURCE, "s0", "{\"v\":1}", true);
     // The 1 MiB folder total is enforced too.
     for (int i = 0; i < 17; i++)
       Files.writeString(folder.resolve("s" + i + ".json"), "x".repeat(60000));
-    assertThrows(
-        WorkspaceUnavailableException.class,
-        () -> files.writeApplication(SOURCE, "s20", "x".repeat(60000), true));
+    var total =
+        assertThrows(
+            io.aeyer.plowshare.server.faults.CallerFault.class,
+            () -> files.writeApplication(SOURCE, "s20", "x".repeat(60000), true));
+    assertEquals("Schedule folder exceeds its file or byte limit", total.getMessage());
     assertEquals("{}", Files.readString(folder.resolve("s20.json")));
   }
 
@@ -151,10 +156,21 @@ class RegisteredScheduleFilesTest {
    * concurrent writer on the host could, and asserts nothing lands outside the root.
    */
   private void refusesFolderSwappedAt(String point) throws Exception {
+    Path elsewhere = Files.createTempDirectory("elsewhere");
+    try {
+      refusesFolderSwappedAt(point, elsewhere.resolve("moved"));
+    } finally {
+      Files.deleteIfExists(elsewhere);
+    }
+  }
+
+  /**
+   * Swaps {@code schedules/} for a link to {@code moved} at one checkpoint and asserts the write is
+   * refused, nothing lands in {@code moved} and the staged file is removed.
+   */
+  private void refusesFolderSwappedAt(String point, Path moved) throws Exception {
     var files = application();
     Path folder = Files.createDirectories(root.resolve("schedules"));
-    Path elsewhere = Files.createTempDirectory("elsewhere");
-    Path moved = elsewhere.resolve("moved");
     files.checkpoint =
         at -> {
           if (!at.equals(point)) return;
@@ -178,7 +194,6 @@ class RegisteredScheduleFilesTest {
         for (Path path : left.toList()) Files.delete(path);
       }
       Files.deleteIfExists(moved);
-      Files.deleteIfExists(elsewhere);
     }
   }
 
@@ -190,6 +205,20 @@ class RegisteredScheduleFilesTest {
   @Test
   void applicationWriteRefusesFolderSwappedForALinkBeforeTheMove() throws Exception {
     refusesFolderSwappedAt("move");
+  }
+
+  /**
+   * A link to another folder inside the same root ({@code agents/}) is refused too: the folder's
+   * real path must be the root's own {@code schedules/}, not merely somewhere under the root.
+   */
+  @Test
+  void applicationWriteRefusesFolderSwappedForALinkInsideTheRootBeforeStaging() throws Exception {
+    refusesFolderSwappedAt("stage", root.resolve("agents"));
+  }
+
+  @Test
+  void applicationWriteRefusesFolderSwappedForALinkInsideTheRootBeforeTheMove() throws Exception {
+    refusesFolderSwappedAt("move", root.resolve("agents"));
   }
 
   private static final ScheduleDefinitionStore.Source SOURCE =

@@ -76,10 +76,11 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
   /**
    * A project Manager's save on an Application root (ADR 0068).
    *
-   * <p>Order: the caller is already authorized as a current project Manager; resolve the project
-   * type and the existing registered source, which is never created or reassigned here; require the
-   * registered owner's execution access and validate the actions under that owner and parse the
-   * cron; write; reconcile; audit. Nothing is written until every check has passed.
+   * <p>Order: the caller is already authorized as a current project Manager and is refused if it is
+   * a service principal; resolve the project type and the existing registered source, which is
+   * never created or reassigned here; require the registered owner's execution access and validate
+   * the actions under that owner and parse the cron; write; reconcile; audit. Nothing is written
+   * until every check has passed.
    *
    * <p>The write depends on the project type. A MANAGED project's save becomes a schedule-only
    * deployment revision ({@link
@@ -96,6 +97,10 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
    */
   private ScheduledWork.File saveApplication(
       String account, ScheduledWork.Save request, ScheduleDefinitionStore.Source pending) {
+    // Service principals never author Application schedules, on either path. The MANAGED revision
+    // path refuses them too; checking here keeps the in-place path from relying on membership.
+    if (io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account))
+      throw new CallerFault("Saving an Application schedule requires a project Manager");
     var project =
         applications
             .find(pending.projectId())

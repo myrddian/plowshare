@@ -488,6 +488,23 @@ class ScheduleDefinitionsTest {
   }
 
   @Test
+  void servicePrincipalCannotSaveAnInPlaceApplicationSchedule() {
+    // A service token that somehow holds Manager membership is still refused before any write,
+    // matching the MANAGED revision path.
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "@service/bot")).thenReturn(true);
+    var refusal =
+        assertThrows(
+            io.aeyer.plowshare.server.faults.CallerFault.class,
+            () -> saveApplication("@service/bot", definition));
+    assertEquals("Saving an Application schedule requires a project Manager", refusal.getMessage());
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+    verify(store, never()).register(anyString(), any(), anyString());
+    verifyNoInteractions(authority, audit, revisions);
+  }
+
+  @Test
   void missingRegisteredSourceIsRefused() {
     application(ApplicationProjects.ProjectType.DISJOINT);
     when(members.mayManage("project", "owner")).thenReturn(true);
