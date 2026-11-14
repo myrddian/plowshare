@@ -22,6 +22,8 @@ class FileChangeHintTest {
           presences,
           mock(ProjectRoots.class),
           TestProjectMembers.allowed(),
+          TestProjectMembers.noCreation(),
+          TestProjectMembers.allRegistered(),
           Duration.ofSeconds(1));
 
   private WebSocketSession connect(String session) throws Exception {

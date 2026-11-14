@@ -11,7 +11,9 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.agents.Watchers;
+import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.session.ProjectRoots;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
@@ -19,6 +21,7 @@ import io.aeyer.plowshare.server.ws.EventChannelConfig;
 import io.aeyer.plowshare.server.ws.EventChannelHandler;
 import io.aeyer.plowshare.server.ws.FileChannelConfig;
 import io.aeyer.plowshare.server.ws.FileChannelHandler;
+import io.aeyer.plowshare.server.ws.TestProjectMembers;
 import jakarta.servlet.FilterChain;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -1661,6 +1664,17 @@ class AuthFilterTest {
     @Bean
     ProjectRoots projectRoots() {
       return (project, machine, root, handle) -> {};
+    }
+
+    /** Transport fixtures: nothing is created by rooting, so membership alone decides. */
+    @Bean
+    ProjectCreation projectCreation() {
+      return TestProjectMembers.noCreation();
+    }
+
+    @Bean
+    ProjectRegistry projectRegistry() {
+      return TestProjectMembers.allRegistered();
     }
   }
 }

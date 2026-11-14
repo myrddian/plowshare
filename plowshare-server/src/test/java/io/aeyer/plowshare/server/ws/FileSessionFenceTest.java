@@ -43,6 +43,8 @@ class FileSessionFenceTest {
           new PresenceRegistry(),
           mock(ProjectRoots.class),
           TestProjectMembers.allowed(),
+          TestProjectMembers.noCreation(),
+          TestProjectMembers.allRegistered(),
           Duration.ofSeconds(3));
 
   private WebSocketSession connect(String session, String account) throws Exception {

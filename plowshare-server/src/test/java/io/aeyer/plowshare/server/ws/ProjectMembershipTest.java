@@ -4,8 +4,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.server.access.ProjectCreation;
+import io.aeyer.plowshare.server.archive.ArchiveRefusedException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.auth.AuthProperties;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.session.*;
@@ -22,8 +25,10 @@ class ProjectMembershipTest {
   private final PresenceRegistry presences = new PresenceRegistry();
   private final ProjectMembers members = mock(ProjectMembers.class);
   private final ProjectRoots roots = mock(ProjectRoots.class);
+  private final ProjectCreation creation = mock(ProjectCreation.class);
+  private final ProjectRegistry registry = mock(ProjectRegistry.class);
   private final FileChannelHandler channel =
-      new FileChannelHandler(sessions, presences, roots, members);
+      new FileChannelHandler(sessions, presences, roots, members, creation, registry);
 
   private WebSocketSession socket(String id, String handle) {
     WebSocketSession socket = mock(WebSocketSession.class);
@@ -62,6 +67,87 @@ class ProjectMembershipTest {
     assertTrue(presences.serving("ledger").isEmpty());
     verifyNoInteractions(roots);
     assertFalse(channel.isConnected("desk"));
+  }
+
+  @Test
+  void creator_roots_an_unregistered_project() throws Exception {
+    when(registry.registered("ledger")).thenReturn(false);
+    when(creation.mayCreate("carol")).thenReturn(true);
+    var socket = socket("desk", "carol");
+    channel.afterConnectionEstablished(socket);
+    verify(socket, never()).close(any());
+    assertEquals("desk", presences.serving("ledger").orElseThrow().session());
+    verify(roots).rootOn("ledger", "new-machine", "/repo", "carol");
+    ArgumentCaptor<TextMessage> frame = ArgumentCaptor.forClass(TextMessage.class);
+    verify(socket).sendMessage(frame.capture());
+    assertTrue(frame.getValue().getPayload().toString().contains("\"project\":\"ledger\""));
+  }
+
+  @Test
+  void non_creator_is_refused_for_unregistered_project() throws Exception {
+    when(registry.registered("ledger")).thenReturn(false);
+    var socket = socket("desk", "dave");
+    channel.afterConnectionEstablished(socket);
+    ArgumentCaptor<CloseStatus> status = ArgumentCaptor.forClass(CloseStatus.class);
+    verify(socket).close(status.capture());
+    assertEquals(1008, status.getValue().getCode());
+    assertEquals("this account may not root 'ledger'", status.getValue().getReason());
+    assertTrue(presences.serving("ledger").isEmpty());
+    verifyNoInteractions(roots);
+  }
+
+  @Test
+  void creator_is_refused_for_existing_project_without_membership() throws Exception {
+    when(registry.registered("ledger")).thenReturn(true);
+    when(creation.mayCreate("carol")).thenReturn(true);
+    var socket = socket("desk", "carol");
+    channel.afterConnectionEstablished(socket);
+    ArgumentCaptor<CloseStatus> status = ArgumentCaptor.forClass(CloseStatus.class);
+    verify(socket).close(status.capture());
+    assertEquals(1008, status.getValue().getCode());
+    assertEquals("this account may not root 'ledger'", status.getValue().getReason());
+    assertTrue(presences.serving("ledger").isEmpty());
+    verifyNoInteractions(roots);
+  }
+
+  @Test
+  void member_permit_does_not_consult_creation() throws Exception {
+    when(members.mayUse("ledger", "alice")).thenReturn(true);
+    channel.afterConnectionEstablished(socket("desk", "alice"));
+    verifyNoInteractions(registry, creation);
+  }
+
+  @Test
+  void creation_refusal_withdraws_presence() throws Exception {
+    when(registry.registered("ledger")).thenReturn(false);
+    when(creation.mayCreate("carol")).thenReturn(true);
+    doThrow(new ArchiveRefusedException("Another account created this project first"))
+        .when(roots)
+        .rootOn("ledger", "new-machine", "/repo", "carol");
+    var socket = socket("desk", "carol");
+    channel.afterConnectionEstablished(socket);
+    ArgumentCaptor<CloseStatus> status = ArgumentCaptor.forClass(CloseStatus.class);
+    verify(socket).close(status.capture());
+    assertEquals(1003, status.getValue().getCode());
+    assertEquals("Another account created this project first", status.getValue().getReason());
+    assertTrue(presences.serving("ledger").isEmpty());
+  }
+
+  @Test
+  void creation_outage_roots_nothing() throws Exception {
+    when(registry.registered("ledger")).thenReturn(false);
+    when(creation.mayCreate("carol")).thenReturn(true);
+    doThrow(new ArchiveUnavailableException("down", new IllegalStateException()))
+        .when(roots)
+        .rootOn("ledger", "new-machine", "/repo", "carol");
+    var socket = socket("desk", "carol");
+    channel.afterConnectionEstablished(socket);
+    verify(socket, never()).close(any());
+    assertTrue(channel.isConnected("desk"));
+    assertTrue(presences.serving("ledger").isEmpty());
+    ArgumentCaptor<TextMessage> frame = ArgumentCaptor.forClass(TextMessage.class);
+    verify(socket).sendMessage(frame.capture());
+    assertEquals("{\"ready\":true}", frame.getValue().getPayload());
   }
 
   @Test

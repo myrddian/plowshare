@@ -15,10 +15,12 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Needle;
 import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
+import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.agents.FileTools;
 import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.archive.ArchiveRefusedException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
+import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.auth.AuthFilter;
 import io.aeyer.plowshare.server.files.Grant;
 import io.aeyer.plowshare.server.files.Mode;
@@ -2665,7 +2667,13 @@ class FileChannelTest {
 
     static final FileChannelHandler FAST_HANDLER =
         new FileChannelHandler(
-            FAST_SESSIONS, FAST_PRESENCES, ROOTED, TestProjectMembers.allowed(), FAST);
+            FAST_SESSIONS,
+            FAST_PRESENCES,
+            ROOTED,
+            TestProjectMembers.allowed(),
+            TestProjectMembers.noCreation(),
+            TestProjectMembers.allRegistered(),
+            FAST);
 
     @Bean
     io.aeyer.plowshare.server.archive.ProjectMembers projectMembers() {
@@ -2675,6 +2683,17 @@ class FileChannelTest {
     @Bean
     ProjectRoots projectRoots() {
       return ROOTED;
+    }
+
+    /** Transport fixtures: nothing is created by rooting, so membership alone decides. */
+    @Bean
+    ProjectCreation projectCreation() {
+      return TestProjectMembers.noCreation();
+    }
+
+    @Bean
+    ProjectRegistry projectRegistry() {
+      return TestProjectMembers.allRegistered();
     }
 
     /** What was written down, and a switch for each of the two ways writing it down can fail. */

@@ -1,12 +1,27 @@
 package io.aeyer.plowshare.server.archive;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.JdbcProjectCreatorGrants;
+import io.aeyer.plowshare.server.session.PresenceRegistry;
+import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.server.ws.EventChannelHandler;
+import io.aeyer.plowshare.server.ws.FileChannelHandler;
+import java.net.URI;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -16,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.web.socket.WebSocketSession;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -95,16 +111,161 @@ class ProjectMembersTest {
     }
   }
 
+  private ProjectStore store() {
+    return new ProjectStore(jdbc, tmp.resolve("config"), tmp.resolve("sampling"), null, null, null);
+  }
+
+  /** A regular account holding the creator role, granted by the server admin alice. */
+  private void creator(String handle) {
+    jdbc.update(
+        "INSERT INTO admins (handle, password_hash, must_change_password, server_admin)"
+            + " VALUES (?, 'hash', FALSE, FALSE) ON CONFLICT DO NOTHING",
+        handle);
+    assertTrue(new JdbcProjectCreatorGrants(jdbc).grant("alice", handle));
+  }
+
+  private long rows(String name) {
+    return jdbc.queryForObject("SELECT count(*) FROM projects WHERE name = ?", Long.class, name);
+  }
+
+  @Test
+  void a_file_channel_creates_an_unregistered_project_for_a_creator() throws Exception {
+    creator("carol");
+    var presences = new PresenceRegistry();
+    ProjectStore projects = store();
+    var channel =
+        new FileChannelHandler(
+            new SessionRegistry(),
+            presences,
+            projects::rootOn,
+            members,
+            new JdbcProjectCreatorGrants(jdbc)::holds,
+            projects);
+    var socket = mock(WebSocketSession.class);
+    when(socket.getUri())
+        .thenReturn(
+            URI.create(
+                "ws://localhost/v1/files?session=desk&project=sundial&machine=laptop&root=/repo"));
+    var attributes = new HashMap<String, Object>();
+    attributes.put(EventChannelHandler.HANDLE, "carol");
+    when(socket.getAttributes()).thenReturn(attributes);
+    channel.afterConnectionEstablished(socket);
+    verify(socket, never()).close(any());
+    assertEquals(List.of("carol"), members.members("sundial"));
+    assertEquals("desk", presences.serving("sundial").orElseThrow().session());
+    assertEquals("laptop", projects.rootedElsewhere("sundial").orElseThrow());
+  }
+
+  @Test
+  void creator_becomes_sole_manager() {
+    creator("carol");
+    store().rootOn("sundial", "laptop", "/repo", "carol");
+    assertEquals(List.of("carol"), members.members("sundial"));
+    assertEquals(ProjectRole.MANAGER, members.role("sundial", "carol").orElseThrow());
+    assertEquals("laptop", store().rootedElsewhere("sundial").orElseThrow());
+  }
+
+  @Test
+  void second_concurrent_creator_is_refused() throws Exception {
+    creator("carol");
+    creator("dave");
+    ProjectStore projects = store();
+    try (var pool = Executors.newFixedThreadPool(2)) {
+      CountDownLatch start = new CountDownLatch(1);
+      List<Future<Void>> attempts =
+          List.of("carol", "dave").stream()
+              .map(
+                  handle ->
+                      pool.submit(
+                          (Callable<Void>)
+                              () -> {
+                                start.await();
+                                projects.rootOn("sundial", "laptop", "/repo", handle);
+                                return null;
+                              }))
+              .toList();
+      start.countDown();
+      int succeeded = 0;
+      int refused = 0;
+      for (Future<Void> attempt : attempts) {
+        try {
+          attempt.get(10, TimeUnit.SECONDS);
+          succeeded++;
+        } catch (ExecutionException failed) {
+          assertInstanceOf(ArchiveRefusedException.class, failed.getCause());
+          refused++;
+        }
+      }
+      assertEquals(1, succeeded);
+      assertEquals(1, refused);
+    }
+    assertEquals(1, members.members("sundial").size());
+    assertEquals(1, rows("sundial"));
+  }
+
+  @Test
+  void member_reroots_after_creator_role_revoked() {
+    creator("carol");
+    ProjectStore projects = store();
+    projects.rootOn("sundial", "laptop", "/repo", "carol");
+    assertTrue(new JdbcProjectCreatorGrants(jdbc).revoke("alice", "carol"));
+    projects.rootOn("sundial", "laptop", "/elsewhere", "carol");
+    assertEquals(List.of("carol"), members.members("sundial"));
+    assertEquals("laptop", projects.rootedElsewhere("sundial").orElseThrow());
+  }
+
+  @Test
+  void non_member_creator_cannot_attach_a_client_rooted_project() {
+    creator("carol");
+    creator("dave");
+    ProjectStore projects = store();
+    projects.rootOn("sundial", "laptop", "/repo", "carol");
+    assertThrows(
+        ArchiveRefusedException.class, () -> projects.rootOn("sundial", "laptop", "/repo", "dave"));
+    assertEquals(List.of("carol"), members.members("sundial"));
+  }
+
+  @Test
+  void orphan_row_stays_admin_only() {
+    creator("carol");
+    ProjectStore projects = store();
+    // "ledger" is registered by reset() through ProjectIds.toWrite and has no members.
+    assertThrows(
+        ArchiveRefusedException.class, () -> projects.rootOn("ledger", "laptop", "/repo", "carol"));
+    assertTrue(members.members("ledger").isEmpty());
+    projects.rootOn("ledger", "laptop", "/repo", "alice");
+    assertEquals(List.of("alice"), members.members("ledger"));
+  }
+
+  @Test
+  void creator_cannot_create_reserved_or_unnormalised_names() {
+    creator("carol");
+    ProjectStore projects = store();
+    assertThrows(
+        ValidationException.class, () -> projects.rootOn(" sundial", "laptop", "/repo", "carol"));
+    assertThrows(
+        ArchiveRefusedException.class,
+        () -> projects.rootOn("personal:x", "laptop", "/repo", "carol"));
+    assertThrows(
+        ArchiveRefusedException.class,
+        () -> projects.rootOn("client:x", "laptop", "/repo", "carol"));
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM projects WHERE name IN (' sundial', 'personal:x', 'client:x')",
+            Long.class));
+  }
+
   @Test
   void creators_are_members_and_failed_writes_roll_back_membership_and_project() {
-    ProjectStore projects =
-        new ProjectStore(jdbc, tmp.resolve("config"), tmp.resolve("sampling"), null, null, null);
+    ProjectStore projects = store();
     projects.define("created", tmp, List.of(), "alice");
+    creator("bob");
     projects.rootOn("remote", "laptop", "/repo", "bob");
     assertEquals(List.of("alice"), members.members("created"));
     assertEquals(List.of("bob"), members.members("remote"));
     assertThrows(
-        RuntimeException.class, () -> projects.rootOn("bad", "laptop", "/repo", "unknown"));
+        ArchiveRefusedException.class, () -> projects.rootOn("bad", "laptop", "/repo", "unknown"));
     assertNull(projects.id("bad"));
     assertThrows(
         ValidationException.class,
@@ -121,7 +282,12 @@ class ProjectMembersTest {
         new ProjectStore(jdbc, tmp.resolve("config"), tmp.resolve("sampling"), null, null, null);
     var channel =
         new io.aeyer.plowshare.server.ws.FileChannelHandler(
-            sessions, presences, projects::rootOn, members);
+            sessions,
+            presences,
+            projects::rootOn,
+            members,
+            new JdbcProjectCreatorGrants(jdbc)::holds,
+            projects);
     var socket = org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketSession.class);
     org.mockito.Mockito.when(socket.getUri())
         .thenReturn(
