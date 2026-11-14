@@ -85,17 +85,19 @@ public final class JdbcSelectedDocumentRepository implements SelectedDocumentRep
       InformationReadSelection selection, UUID document, String conversation, int limit) {
     if (limit < 1 || limit > CitationStore.MOST_LISTED)
       throw new IllegalArgumentException("Invalid citation limit");
-    // Conversation ownership is a separate authority axis from project/source READ, matching
-    // scoped CitationStore. An accessible source never exposes another account's transcript.
+    // Ownership, current conversation-home READ and source READ are independent gates. A
+    // source in an accessible project cannot restore access to a conversation in a revoked home.
+    // Confined work also admits every retained context input (including its revision dependencies)
+    // across the exact ancestry that the audit below inherits. Resolve scope authority once for
+    // all conversations and boundary checks; evaluate each distinct context revision only once.
     var candidates = InformationSelectedSql.candidates(selection, List.of(NO_TARGET));
     var args = new ArrayList<Object>();
-    args.add(selection.reader().actor());
-    args.add(selection.reader().actor());
-    args.add(selection.reader().boundaryHome());
-    args.add(selection.reader().boundaryHome());
     args.add(selection.reader().boundaryHome());
     args.add(conversation);
     args.add(document);
+    args.add(selection.reader().actor());
+    args.add(selection.reader().actor());
+    args.add(selection.reader().actor());
     args.add(conversation);
     args.add(document);
     args.add(document);
@@ -103,12 +105,45 @@ public final class JdbcSelectedDocumentRepository implements SelectedDocumentRep
     args.add(limit);
     String sql =
         """
-        WITH blocked AS MATERIALIZED (SELECT log FROM information_unreadable_logs(?)),
-        readable_logs AS MATERIALIZED (SELECT log.id FROM conversations log LEFT JOIN projects project ON project.id=log.project_id WHERE log.owner_handle=?
-         AND log.id NOT IN (SELECT log FROM blocked)
-         AND (?::text IS NULL OR project.name=? OR EXISTS(SELECT 1 FROM authority_scopes scope
-          WHERE scope.project_id=log.project_id AND scope.kind='CONTAINED' AND contained_scope_in_home(scope.id,?)))),
+        WITH RECURSIVE boundary AS MATERIALIZED (SELECT ?::text AS home),
         requested AS MATERIALIZED (SELECT ?::text AS conversation,?::uuid AS document),
+        readable_scopes AS MATERIALIZED (
+         SELECT scope.id,scope.project_id,scope.kind,project.name AS project
+         FROM knowledge_read_authority(?) authority JOIN authority_scopes scope ON scope.id=authority.scope_id
+         LEFT JOIN projects project ON project.id=scope.project_id),
+        bounded_scopes AS MATERIALIZED (
+         SELECT scope.id FROM readable_scopes scope CROSS JOIN boundary
+         WHERE scope.project=boundary.home
+          OR (scope.kind='CONTAINED' AND contained_scope_in_home(scope.id,boundary.home))),
+        blocked AS MATERIALIZED (SELECT log FROM information_unreadable_logs(?)),
+        candidate_logs AS MATERIALIZED (
+         SELECT log.id FROM conversations log CROSS JOIN requested WHERE log.owner_handle=?
+          AND (requested.conversation IS NULL OR log.id=requested.conversation)
+          AND (requested.document IS NULL OR EXISTS(SELECT 1 FROM citations citation
+           WHERE citation.conversation_id=log.id AND citation.document_id=requested.document))
+          AND log.id NOT IN (SELECT log FROM blocked)
+          AND EXISTS(SELECT 1 FROM readable_scopes scope CROSS JOIN boundary
+           WHERE scope.project_id=log.project_id AND (boundary.home IS NULL OR scope.id IN (SELECT id FROM bounded_scopes)))),
+        context_edges(child,parent) AS (
+         SELECT id,parent_id FROM conversations WHERE parent_id IS NOT NULL
+         UNION SELECT conductor_conversation,caller_conversation FROM orchestrations WHERE caller_conversation IS NOT NULL
+         UNION SELECT child.conductor_conversation,parent.conductor_conversation FROM orchestrations child
+          JOIN orchestrations parent ON parent.id=child.parent
+         UNION SELECT conductor_conversation,id FROM orchestrations),
+        context_ancestry(log,ancestor) AS (
+         SELECT log.id,log.id FROM candidate_logs log CROSS JOIN boundary WHERE boundary.home IS NOT NULL
+         UNION SELECT ancestry.log,edge.parent FROM context_ancestry ancestry JOIN context_edges edge ON edge.child=ancestry.ancestor),
+        context_inputs AS MATERIALIZED (
+         SELECT DISTINCT ancestry.log,input.revision_id FROM context_ancestry ancestry
+         JOIN information_job_inputs input ON input.job_id=ancestry.ancestor),
+        context_admission AS MATERIALIZED (
+         SELECT root.revision_id,knowledge_document_admitted(root.revision_id,false,
+          ARRAY(SELECT id FROM bounded_scopes)) AS allowed
+         FROM (SELECT DISTINCT revision_id FROM context_inputs) root),
+        readable_logs AS MATERIALIZED (
+         SELECT log.id FROM candidate_logs log WHERE NOT EXISTS(
+          SELECT 1 FROM context_inputs input JOIN context_admission admission ON admission.revision_id=input.revision_id
+          WHERE input.log=log.id AND NOT coalesce(admission.allowed,false))),
         candidate_citations AS MATERIALIZED (
          SELECT c.* FROM citations c JOIN readable_logs log ON log.id=c.conversation_id
          WHERE (?::text IS NULL OR c.conversation_id=(SELECT conversation FROM requested))

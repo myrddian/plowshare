@@ -373,8 +373,11 @@ Live source RBAC, credential restrictions, privacy, dependency policy and server
 confinement apply before ranking or limits. Semantic query admission and accounting
 stay in the durable run home. Only matching retained/projection hashes expose
 passages or outlines. Citations also require conversation ownership and readable
-inputs; unavailable documents are omitted, while a missing paragraph preserves
-its `paragraph_gone` standing. Cited source revisions and conversation dependencies
+inputs and live READ on the conversation home under credential/owner limits.
+Confined reads check retained context inputs and their dependencies across the
+conversation's ancestry before limits and retention; ownership cannot bypass
+project revocation or confinement. Unavailable documents are omitted, while a
+missing paragraph preserves its `paragraph_gone` standing. Cited source revisions and conversation dependencies
 are retained in the receiving log. Legacy WS/HTTP/MCP selection contracts are
 unchanged; these are scoped model-tool bindings.
 

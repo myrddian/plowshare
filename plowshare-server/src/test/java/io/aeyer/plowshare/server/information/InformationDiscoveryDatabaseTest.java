@@ -32,6 +32,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -574,5 +576,159 @@ class InformationDiscoveryDatabaseTest {
             .citations(selected(reader, "one"), null, "stale-citations", 20)
             .citations()
             .isEmpty());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"direct", "ancestor", "dependency"})
+  void confined_citations_reject_foreign_context_before_limit_and_retention(String path) {
+    UUID cited = retained("one", "Cited in home " + path, "source");
+    UUID paragraph = projection(cited);
+    UUID foreign = retained("two", "Foreign context", "source");
+    UUID context = foreign;
+    conversation("boundary-good", "reader", "one");
+    if (!path.equals("ancestor")) conversation("boundary-bad", "reader", "one");
+    conversation("boundary-output", "reader", "one");
+    jdbc.update(
+        "INSERT INTO information_job_inputs(job_id,owner_handle,revision_id,scope,project_name,include_shared) VALUES('boundary-good','reader',?,'project','one',false)",
+        cited);
+    String inputLog = "boundary-bad";
+    if (path.equals("ancestor")) {
+      conversation("boundary-parent", "reader", "one");
+      jdbc.update(
+          "INSERT INTO conversations(id,created_at,origin,parent_id,lifecycle,agent,owner_handle,project_id) VALUES('boundary-bad',now(),'delegation','boundary-parent',NULL,'librarian','reader',(SELECT id FROM projects WHERE name='one'))");
+      inputLog = "boundary-parent";
+    } else if (path.equals("dependency")) {
+      context = retained("one", "Context with foreign dependency", "report");
+      jdbc.update(
+          "INSERT INTO information_inputs(derived_revision,input_revision) VALUES(?,?)",
+          context,
+          foreign);
+    }
+    jdbc.update(
+        "INSERT INTO information_job_inputs(job_id,owner_handle,revision_id,scope,project_name,include_shared) VALUES(?,'reader',?,'project',?,false)",
+        inputLog,
+        context,
+        path.equals("dependency") ? "one" : "two");
+    var citations = new CitationStore(jdbc);
+    assertTrue(citations.record(paragraph, "boundary-good", 1, "agent", Instant.now()));
+    assertTrue(
+        citations.record(paragraph, "boundary-bad", 1, "agent", Instant.now().plusSeconds(1)));
+    var confined =
+        selected(new Reader("reader", "one", new Audit("boundary-output", "reader")), "one");
+    assertEquals(
+        "boundary-good",
+        documentReads()
+            .citations(confined, cited, null, 1)
+            .citations()
+            .getFirst()
+            .conversationId());
+    assertEquals(
+        "boundary-good",
+        documentReads().citations(confined, null, null, 1).citations().getFirst().conversationId());
+    assertThrows(
+        NotFoundFault.class, () -> documentReads().citations(confined, null, "boundary-bad", 20));
+    assertEquals(
+        List.of(cited),
+        jdbc.queryForList(
+            "SELECT revision_id FROM information_job_inputs WHERE job_id='boundary-output'",
+            UUID.class),
+        "Blocked context must neither disclose nor contaminate the output's retained inputs");
+    // Effective RBAC still permits an ordinary read. Confinement narrows only the confined run.
+    conversation("unconfined-output", "reader", "one");
+    var ordinary =
+        selected(new Reader("reader", null, new Audit("unconfined-output", "reader")), "one");
+    assertEquals(
+        "boundary-bad",
+        documentReads()
+            .citations(ordinary, null, "boundary-bad", 20)
+            .citations()
+            .getFirst()
+            .conversationId());
+    assertTrue(
+        jdbc.queryForList(
+                "SELECT revision_id FROM information_job_inputs WHERE job_id='unconfined-output'",
+                UUID.class)
+            .contains(context));
+  }
+
+  @Test
+  void citation_ownership_does_not_survive_revocation_of_conversation_home_read() {
+    UUID cited = retained("two", "Still readable source", "source");
+    UUID paragraph = projection(cited);
+    conversation("revocation-good", "reader", "two");
+    conversation("revocation-bad", "reader", "one");
+    conversation("revocation-output", "reader", "two");
+    var citations = new CitationStore(jdbc);
+    assertTrue(citations.record(paragraph, "revocation-good", 1, "agent", Instant.now()));
+    assertTrue(
+        citations.record(paragraph, "revocation-bad", 1, "agent", Instant.now().plusSeconds(1)));
+    var selection =
+        selected(new Reader("reader", null, new Audit("revocation-output", "reader")), "two");
+    assertEquals(
+        "revocation-bad",
+        documentReads()
+            .citations(selection, null, "revocation-bad", 20)
+            .citations()
+            .getFirst()
+            .conversationId());
+    jdbc.update(
+        "DELETE FROM project_members WHERE handle='reader' AND project_id=(SELECT id FROM projects WHERE name='one')");
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT information_project_readable((SELECT id FROM projects WHERE name='one'),'reader')",
+            Boolean.class));
+    assertThrows(
+        NotFoundFault.class,
+        () -> documentReads().citations(selection, null, "revocation-bad", 20));
+    assertEquals(
+        "revocation-good",
+        documentReads()
+            .citations(selection, cited, null, 1)
+            .citations()
+            .getFirst()
+            .conversationId());
+    assertEquals(
+        "revocation-good",
+        documentReads()
+            .citations(selection, null, null, 1)
+            .citations()
+            .getFirst()
+            .conversationId());
+  }
+
+  @Test
+  void citation_conversation_home_is_limited_by_live_credential_and_owner_scopes() {
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,account_kind,must_change_password) VALUES('citation-owner','fixture','SERVICE',false),('@service/citations','fixture','SERVICE_TOKEN',false)");
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'citation-owner','MANAGER' FROM projects WHERE name IN ('one','two')");
+    UUID token = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO service_tokens(id,owner_handle,name,principal_handle,digest,expires_at) VALUES(?,'citation-owner','citations','@service/citations',?,now()+interval '1 hour')",
+        token,
+        token.toString());
+    jdbc.update(
+        "INSERT INTO service_token_scopes(token_id,project_id,role) SELECT ?,id,'VIEWER' FROM projects WHERE name='one'",
+        token);
+    UUID cited = retained("one", "Credential-readable source", "source");
+    UUID paragraph = projection(cited);
+    conversation("credential-log", "@service/citations", "two");
+    assertTrue(
+        new CitationStore(jdbc).record(paragraph, "credential-log", 1, "agent", Instant.now()));
+    var selection = selected(new Reader("@service/citations", null, null), "one");
+    assertThrows(
+        NotFoundFault.class,
+        () -> documentReads().citations(selection, null, "credential-log", 20));
+    jdbc.update(
+        "INSERT INTO service_token_scopes(token_id,project_id,role) SELECT ?,id,'VIEWER' FROM projects WHERE name='two'",
+        token);
+    assertEquals(
+        1, documentReads().citations(selection, null, "credential-log", 20).citations().size());
+    jdbc.update(
+        "DELETE FROM project_members WHERE handle='citation-owner' AND project_id=(SELECT id FROM projects WHERE name='two')");
+    assertThrows(
+        NotFoundFault.class,
+        () -> documentReads().citations(selection, null, "credential-log", 20));
+    assertTrue(documentReads().citations(selection, cited, null, 20).citations().isEmpty());
   }
 }

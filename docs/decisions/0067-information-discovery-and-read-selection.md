@@ -61,9 +61,15 @@ allowances and invocation identity stay with the durable execution home. Source
 authorization is independently checked before inference and again at disclosure.
 
 Citation reads require both readable selected sources and owned readable
-conversations. Server confinement also limits citation conversation homes. Missing
-documents cannot establish source authority and are omitted; missing paragraphs
-retain their `paragraph_gone` standing without text. Results retain the cited
+conversations, including current READ on the conversation home under the acting
+credential and its owner's limits. Ownership alone overrides neither role
+revocation nor credential narrowing. Server confinement limits both citation
+conversation homes and every retained input across the same ancestry that citation reads inherit;
+revision dependencies and references must remain within that boundary too.
+These gates precede pagination and audit retention. An explicit inaccessible
+conversation is refused, while collection reads omit it before applying limits.
+Missing documents cannot establish source authority and are omitted; missing
+paragraphs retain their `paragraph_gone` standing without text. Results retain the cited
 sources and inherit the source conversations' input dependencies, so a citation
 cannot shed a restriction belonging to its conversational context. These bounded
 content reads do not establish inventory completeness. Legacy public transport
