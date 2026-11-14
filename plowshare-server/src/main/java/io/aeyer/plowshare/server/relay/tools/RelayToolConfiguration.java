@@ -3,7 +3,9 @@ package io.aeyer.plowshare.server.relay.tools;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.ProjectionNotificationProperties;
 import io.aeyer.plowshare.server.relay.Relay;
+import java.time.Duration;
 import java.time.Instant;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
@@ -29,7 +31,10 @@ public class RelayToolConfiguration {
           definitions,
       org.springframework.beans.factory.ObjectProvider<io.aeyer.plowshare.server.agents.JobRuntime>
           runtime,
-      ToolScopeConnections connections) {
+      ToolScopeConnections connections,
+      ProjectionNotificationProperties notified) {
+    // A listed tool reuses its listing context for the same bound the other authority snapshots
+    // tolerate; with notifications untrusted there is no bound and every call rebuilds.
     return new ApplicationToolRegistry(
         resources,
         projects,
@@ -43,7 +48,8 @@ public class RelayToolConfiguration {
             io.aeyer.plowshare.server.agents.ScopedTools.reservedNames(
                 runtime.getObject().knownTools()),
         Instant::now,
-        connections);
+        connections,
+        notified.enabled() ? notified.staleness() : Duration.ZERO);
   }
 
   private static io.aeyer.plowshare.server.agents.ToolGrants toolGrants(
