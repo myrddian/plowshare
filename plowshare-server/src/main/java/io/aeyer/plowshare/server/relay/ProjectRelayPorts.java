@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Configured project ports derive publisher identity from authentication. System ingress is absent.
@@ -187,7 +188,10 @@ public final class ProjectRelayPorts implements RelayPorts {
     var key = new Relay.TopicKey(id, topic);
     if (direction == RelayPortProperties.Direction.EGRESS
         && topic.startsWith("tool.")
-        && tools.permits(account, project, topic, direction, group)) register(key);
+        && tools.permits(account, project, topic, direction, group))
+      // Deliberately not memoized: unlike publish, the egress callers (subscribe, consume,
+      // observe) have no repair path if the topic is deleted after being memoized.
+      relay.registerTopic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     return key;
   }
 
@@ -267,8 +271,11 @@ public final class ProjectRelayPorts implements RelayPorts {
     } catch (RelayTopicMissingException missing) {
       // The topic was deleted elsewhere after it was memoized. The failed append found no topic
       // row under its lock and rolled back before appending, so one register-and-retry cannot
-      // duplicate a publication. A second miss propagates.
+      // duplicate a publication. A second miss propagates. Inside an enclosing transaction the
+      // append joins it, so the throw may have marked it rollback-only and a retry could never
+      // commit: forget the key and rethrow instead.
       registered.forget(topic);
+      if (TransactionSynchronizationManager.isActualTransactionActive()) throw missing;
       register(topic);
       publication = relay.publish(topic, draft);
     }
