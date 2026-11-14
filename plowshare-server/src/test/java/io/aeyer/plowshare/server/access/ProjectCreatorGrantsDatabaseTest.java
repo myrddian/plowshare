@@ -175,6 +175,32 @@ class ProjectCreatorGrantsDatabaseTest {
     assertEquals(control("admin"), rows.getLast().get("issuing_grant"));
   }
 
+  /** A durable grant from another administrator replaces, not hides behind, a bound self-grant. */
+  @Test
+  void other_admin_grant_replaces_bound_self_grant() {
+    assertTrue(grants.grant("admin", "admin"));
+    UUID bound = (UUID) creatorRows("admin").getFirst().get("id");
+    // The holder granting again, bound or not, changes nothing.
+    assertFalse(grants.grant("admin", "admin"));
+    assertTrue(grants.grant("other", "admin"));
+    var rows = creatorRows("admin");
+    assertEquals(2, rows.size());
+    var replaced = rows.stream().filter(row -> row.get("id").equals(bound)).findFirst().get();
+    assertEquals(account("other"), replaced.get("revoked_by"));
+    assertEquals(control("other"), replaced.get("revoking_grant"));
+    var durable = rows.stream().filter(row -> !row.get("id").equals(bound)).findFirst().get();
+    assertEquals(null, durable.get("revoked_at"));
+    assertEquals(root(), durable.get("issuing_grant"));
+    assertEquals(control("other"), durable.get("exercised_grant"));
+    // A durable grant is kept, whoever grants again, including the holder themselves.
+    assertFalse(grants.grant("other", "admin"));
+    assertFalse(grants.grant("admin", "admin"));
+    assertEquals(2, creatorRows("admin").size());
+
+    jdbc.update("UPDATE admins SET server_admin=FALSE WHERE handle='admin'");
+    assertTrue(mayCreate("admin"));
+  }
+
   @Test
   void any_admin_may_revoke() {
     grants.grant("admin", "sam");
@@ -201,9 +227,9 @@ class ProjectCreatorGrantsDatabaseTest {
 
   @Test
   void grant_is_idempotent() {
-    grants.grant("admin", "sam");
-    grants.grant("admin", "sam");
-    grants.grant("other", "sam");
+    assertTrue(grants.grant("admin", "sam"));
+    assertFalse(grants.grant("admin", "sam"));
+    assertFalse(grants.grant("other", "sam"));
     assertEquals(1, creatorRows("sam").size());
     assertTrue(grants.holds("sam"));
   }
@@ -211,11 +237,11 @@ class ProjectCreatorGrantsDatabaseTest {
   @Test
   void revoke_is_idempotent() {
     long before = revokedGrants();
-    grants.revoke("admin", "sam");
+    assertFalse(grants.revoke("admin", "sam"));
     assertEquals(before, revokedGrants());
-    grants.grant("admin", "sam");
-    grants.revoke("admin", "sam");
-    grants.revoke("other", "sam");
+    assertTrue(grants.grant("admin", "sam"));
+    assertTrue(grants.revoke("admin", "sam"));
+    assertFalse(grants.revoke("other", "sam"));
     assertEquals(before + 1, revokedGrants());
     assertFalse(grants.holds("sam"));
     // A revoked holder may be granted again.

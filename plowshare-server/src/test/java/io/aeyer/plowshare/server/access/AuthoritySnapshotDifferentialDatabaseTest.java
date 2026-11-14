@@ -333,7 +333,8 @@ class AuthoritySnapshotDifferentialDatabaseTest {
             + " AND control.subject_account=admin.id AND control.scope_id=?",
         BuiltInIdentities.PROJECT_CREATION.value(),
         BuiltInIdentities.PROJECT_CREATOR.value(),
-        Timestamp.from(Instant.now().plusMillis(300)),
+        // Long enough for a full parity pass before expiry; parity alone is the race otherwise.
+        Timestamp.from(Instant.now().plusSeconds(3)),
         BuiltInIdentities.ADMINISTRATION.value());
     parity("bob expiring creator");
     assertTrue(snapshot().projectCreator("bob"));

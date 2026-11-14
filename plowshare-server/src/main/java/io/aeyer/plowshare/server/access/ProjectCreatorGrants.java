@@ -15,8 +15,9 @@ import java.util.Set;
  * ADMIN_CONTROL grant instead and ends when they stop being an administrator, as self-assignment of
  * memberships does. Any current administrator may revoke either.
  *
- * <p>Both mutations are idempotent and run in one transaction, joining the caller's when one is
- * active. Creator mutations are serialized on the PROJECT_CREATION scope row.
+ * <p>Both mutations are idempotent, report whether they changed anything, and run in one
+ * transaction, joining the caller's when one is active. Creator mutations are serialized on the
+ * PROJECT_CREATION scope row.
  */
 public interface ProjectCreatorGrants {
   /** {@code authority_may_create_projects(handle)}; a null or blank handle is false. */
@@ -30,16 +31,23 @@ public interface ProjectCreatorGrants {
 
   /**
    * Grants the role to {@code handle}, which must be an existing, active, non-bootstrap USER
-   * account; it may be {@code actor}. A live holder is left unchanged. A dead (expired, or a
-   * self-grant whose ADMIN_CONTROL lineage fell) but unrevoked grant still occupies the
-   * one-creator-grant slot, so it is revoked (attributed to {@code actor}) in the same transaction
-   * before the new grant is written.
+   * account; it may be {@code actor}. A live holder is left unchanged, except that a live bound
+   * self-grant is replaced (revoked, attributed to {@code actor}) by the durable grant when another
+   * administrator grants the role. A dead (expired, or a self-grant whose ADMIN_CONTROL lineage
+   * fell) but unrevoked grant still occupies the one-creator-grant slot, so it is revoked
+   * (attributed to {@code actor}) in the same transaction before the new grant is written.
+   *
+   * @return whether a grant was written: the account became a holder, or its bound self-grant was
+   *     replaced by a durable one; false for a no-op
    */
-  void grant(String actor, String handle);
+  boolean grant(String actor, String handle);
 
   /**
-   * Revokes the subject's unrevoked creator grant, live or expired, attributed to {@code actor} and
-   * their {@code ADMIN_CONTROL} grant. A non-holder is left unchanged. No other grant is touched.
+   * Revokes the subject's unrevoked creator grant, live or dead, attributed to {@code actor} and
+   * their {@code ADMIN_CONTROL} grant. A non-holder is left unchanged (a dead row is still cleaned
+   * up). No other grant is touched.
+   *
+   * @return whether the account was a holder and no longer is; false for a no-op
    */
-  void revoke(String actor, String handle);
+  boolean revoke(String actor, String handle);
 }

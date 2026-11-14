@@ -136,8 +136,9 @@ public class ServerAdministration {
   /**
    * Changes the supplied flags in one transaction under the administrator lock. Account flags apply
    * first, audited as {@code account.update} with the session revocation they imply; then a
-   * supplied {@code projectCreator} grants or revokes the role (both idempotent) and is audited as
-   * {@code account.project-creator.grant} or {@code .revoke}. Any refusal rolls back every change.
+   * supplied {@code projectCreator} grants or revokes the role (both idempotent) and, only when
+   * that changed something, is audited as {@code account.project-creator.grant} or {@code .revoke}.
+   * Any refusal rolls back every change.
    */
   public Account update(
       String actor, String handle, Boolean enabled, Boolean serverAdmin, Boolean projectCreator) {
@@ -150,9 +151,12 @@ public class ServerAdministration {
           if (enabled != null || serverAdmin != null)
             current = updateFlags(actor, current, enabled, serverAdmin);
           if (projectCreator == null) return current;
-          if (projectCreator) creators.grant(actor, handle);
-          else creators.revoke(actor, handle);
-          Account updated = current.withProjectCreator(creators.holds(handle));
+          boolean changed =
+              projectCreator ? creators.grant(actor, handle) : creators.revoke(actor, handle);
+          // A no-op (already a holder, or not one) is neither audited nor re-read: the account
+          // read above already carries the holder state. A change leaves the requested state.
+          if (!changed) return current;
+          Account updated = current.withProjectCreator(projectCreator);
           audit(
               actor,
               projectCreator ? "account.project-creator.grant" : "account.project-creator.revoke",

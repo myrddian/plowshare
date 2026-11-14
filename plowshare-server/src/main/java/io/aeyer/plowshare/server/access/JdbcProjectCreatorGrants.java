@@ -91,48 +91,65 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
   }
 
   @Override
-  public void grant(String actor, String handle) {
-    transactions.executeWithoutResult(
-        status -> {
-          Authority authority = authorize(actor);
-          UUID subject = recipient(handle);
-          Optional<UUID> existing = unrevoked(subject);
-          if (existing.isPresent() && holds(handle)) return;
-          // An unrevoked grant that does not hold is dead although the recipient is active, USER
-          // and non-bootstrap: it expired, or (a self-grant) its ADMIN_CONTROL lineage was revoked.
-          // It still occupies the unique slot.
-          existing.ifPresent(stale -> revokeRow(stale, authority));
-          // A self-grant is bound: it hangs off the actor's ADMIN_CONTROL grant and ends with it,
-          // because the database refuses exercised self-issuance. Any other recipient's grant is
-          // SYSTEM-rooted and records the exercised ADMIN_CONTROL grant, so it outlives the actor.
-          boolean self = subject.equals(authority.account());
-          jdbc.update(
-              "INSERT INTO authority_grants(subject_account,scope_id,role_id,requested_role,"
-                  + "issuer_account,issuing_grant,exercised_grant,provenance)"
-                  + " VALUES (?,?,?,'PROJECT_CREATOR',?,?,?,'ROLE')",
-              subject,
-              CREATION,
-              BuiltInIdentities.PROJECT_CREATOR.value(),
-              authority.account(),
-              self ? authority.grant() : root(),
-              self ? null : authority.grant());
-        });
+  public boolean grant(String actor, String handle) {
+    return Boolean.TRUE.equals(
+        transactions.execute(
+            status -> {
+              Authority authority = authorize(actor);
+              UUID subject = recipient(handle);
+              boolean self = subject.equals(authority.account());
+              Optional<Existing> existing = unrevoked(subject);
+              if (existing.isPresent() && holds(handle)) {
+                // A live grant is kept unless it is a bound self-grant and another administrator
+                // now grants the role: their grant is durable, so it replaces the bound one rather
+                // than being shadowed by a grant that ends with the holder's own admin control.
+                if (self || !existing.get().bound()) return false;
+              }
+              // Otherwise an unrevoked grant is dead although the recipient is active, USER and
+              // non-bootstrap: it expired, or (a self-grant) its ADMIN_CONTROL lineage was revoked.
+              // Either way it occupies the unique slot and is revoked first.
+              existing.ifPresent(replaced -> revokeRow(replaced.id(), authority));
+              // A self-grant is bound: it hangs off the actor's ADMIN_CONTROL grant and ends with
+              // it, because the database refuses exercised self-issuance. Any other recipient's
+              // grant is SYSTEM-rooted and records the exercised ADMIN_CONTROL grant, so it
+              // outlives the actor.
+              jdbc.update(
+                  "INSERT INTO authority_grants(subject_account,scope_id,role_id,requested_role,"
+                      + "issuer_account,issuing_grant,exercised_grant,provenance)"
+                      + " VALUES (?,?,?,'PROJECT_CREATOR',?,?,?,'ROLE')",
+                  subject,
+                  CREATION,
+                  BuiltInIdentities.PROJECT_CREATOR.value(),
+                  authority.account(),
+                  self ? authority.grant() : root(),
+                  self ? null : authority.grant());
+              return true;
+            }));
   }
 
   @Override
-  public void revoke(String actor, String handle) {
-    transactions.executeWithoutResult(
-        status -> {
-          Authority authority = authorize(actor);
-          if (handle == null || handle.isBlank()) return;
-          jdbc
-              .queryForList(
-                  "SELECT id FROM authority_accounts WHERE legacy_handle=?", UUID.class, handle)
-              .stream()
-              .findFirst()
-              .flatMap(this::unrevoked)
-              .ifPresent(grant -> revokeRow(grant, authority));
-        });
+  public boolean revoke(String actor, String handle) {
+    return Boolean.TRUE.equals(
+        transactions.execute(
+            status -> {
+              Authority authority = authorize(actor);
+              if (handle == null || handle.isBlank()) return false;
+              var existing =
+                  jdbc
+                      .queryForList(
+                          "SELECT id FROM authority_accounts WHERE legacy_handle=?",
+                          UUID.class,
+                          handle)
+                      .stream()
+                      .findFirst()
+                      .flatMap(this::unrevoked);
+              if (existing.isEmpty()) return false;
+              // A dead (expired or lineage-dead) row is cleaned up, but the account was not a
+              // holder, so nothing changed for it.
+              boolean held = holds(handle);
+              revokeRow(existing.get().id(), authority);
+              return held;
+            }));
   }
 
   /**
@@ -173,12 +190,16 @@ public final class JdbcProjectCreatorGrants implements ProjectCreatorGrants {
     throw new CallerFault("The project creator role can only be granted to an active user account");
   }
 
-  /** The subject's unrevoked creator grant, live or expired; the unique index allows one. */
-  private Optional<UUID> unrevoked(UUID subject) {
+  /** An unrevoked creator row; {@code bound} for a self-grant (no exercised grant). */
+  private record Existing(UUID id, boolean bound) {}
+
+  /** The subject's unrevoked creator grant, live or dead; the unique index allows one. */
+  private Optional<Existing> unrevoked(UUID subject) {
     return jdbc
-        .queryForList(
-            "SELECT id FROM authority_grants WHERE scope_id=? AND subject_account=? AND revoked_at IS NULL FOR UPDATE",
-            UUID.class,
+        .query(
+            "SELECT id,exercised_grant IS NULL FROM authority_grants"
+                + " WHERE scope_id=? AND subject_account=? AND revoked_at IS NULL FOR UPDATE",
+            (row, n) -> new Existing(row.getObject(1, UUID.class), row.getBoolean(2)),
             CREATION,
             subject)
         .stream()

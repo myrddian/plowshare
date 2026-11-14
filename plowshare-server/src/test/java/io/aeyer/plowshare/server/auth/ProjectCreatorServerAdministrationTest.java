@@ -66,7 +66,8 @@ class ProjectCreatorServerAdministrationTest {
 
   @Test
   void update_grants_and_revokes_project_creator() {
-    when(creators.holds("sam")).thenReturn(true);
+    when(creators.grant("admin", "sam")).thenReturn(true);
+    when(creators.revoke("admin", "sam")).thenReturn(true);
     Account granted = service.update("admin", "sam", null, null, true);
     var order = inOrder(repository, accounts, creators);
     order.verify(repository).lockAdministrators();
@@ -84,7 +85,6 @@ class ProjectCreatorServerAdministrationTest {
     verify(repository, never()).revokeSessions(anyString());
     verify(repository, never()).audit(anyString(), eq("account.update"), any());
 
-    when(creators.holds("sam")).thenReturn(false);
     Account revoked = service.update("admin", "sam", null, null, false);
     verify(creators).revoke("admin", "sam");
     verify(repository)
@@ -99,6 +99,18 @@ class ProjectCreatorServerAdministrationTest {
     verify(creators).revoke(anyString(), anyString());
     verify(repository).update("sam", false, false);
     verify(repository).audit(eq("admin"), eq("account.update"), any());
+  }
+
+  @Test
+  void no_op_creator_change_is_not_audited() {
+    // grant on a holder and revoke on a non-holder report no change.
+    when(creators.holds("sam")).thenReturn(true);
+    assertTrue(service.update("admin", "sam", null, null, true).projectCreator());
+    when(creators.holds("sam")).thenReturn(false);
+    assertFalse(service.update("admin", "sam", null, null, false).projectCreator());
+    verify(creators).grant("admin", "sam");
+    verify(creators).revoke("admin", "sam");
+    verify(repository, never()).audit(anyString(), anyString(), any());
   }
 
   @Test
