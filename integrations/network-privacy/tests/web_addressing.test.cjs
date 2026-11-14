@@ -73,11 +73,15 @@ test('the device pane carries an Assignment fact only when addressing is known',
   const {context, node} = dashboard();
   const base = {name:'TV', address:'192.0.2.10', identity:null, last_known_identity:null, presence:null, detection:null,
     dns_activity:null, dns:[], traffic:null, services:[], history:[], last_response_at:null};
-  const lines = value => {context.value = value; vm.runInContext('renderDeviceView(value)', context); return [...texts(node('device-identity')), ...texts(node('device-facts'))];};
-  const withAddressing = lines({...base, addressing:{mode:'dhcp_reserved', basis:'dhcp_reservation', services:['pihole'], expires_at:null, previous_mode:null, changed_at:null}});
-  assert.ok(withAddressing.includes('Assignment'));
-  assert.ok(withAddressing.includes('Address assignment'));
-  const without = lines({...base, addressing:null});
+  const render = value => {context.value = value; vm.runInContext('renderDeviceView(value)', context);};
+  render({...base, addressing:{mode:'dhcp_reserved', basis:'dhcp_reservation', services:['pihole'], expires_at:null, previous_mode:null, changed_at:null}});
+  // The section belongs to the identity block, not the traffic readout.
+  const identity = texts(node('device-identity'));
+  assert.ok(identity.includes('Assignment'));
+  assert.ok(identity.includes('Address assignment'));
+  assert.ok(!texts(node('device-facts')).includes('Address assignment'));
+  render({...base, addressing:null});
+  const without = [...texts(node('device-identity')), ...texts(node('device-facts'))];
   assert.ok(!without.includes('Assignment'));
   assert.ok(!without.includes('Address assignment'));
 });
@@ -115,4 +119,70 @@ test('the Evidence view lists assignments', async () => {
   assert.ok(lines.includes('192.0.2.10 · Reserved (DHCP reservation)'));
   assert.ok(lines.includes('192.0.2.11 · Unknown'));
   assert.ok(!(await show([])).includes('Address assignment'));
+});
+
+const modeDevice = (name, address, addressing) => ({name, address, identity:{mac:'02:00:00:00:00:' + address.slice(-2), device_id:'mac:' + address}, addressing});
+const state = (mode, basis, extra = {}) => ({mode, basis, services:[], expires_at:null, observed_at:null, previous_mode:null, changed_at:null, changed_in_latest:false, ...extra});
+const fullOverview = (devices, extra = {}) => ({devices, candidates:[], assessments:{summaries:[], usage:null},
+  health:{connected:true, detail:'', recovery:[], pihole:'Configured', unifi:'Configured'}, quick_presence:{enabled:true}, system:null, ...extra});
+const attention = (context, node, value) => {
+  context.value = value;
+  vm.runInContext('assessmentIndex = new Map(); renderAttention(value); renderAddressingSummary(value.devices)', context);
+  return node('attention-items').children.map(item => texts(item));
+};
+
+test('the overview summarises assignment across devices', () => {
+  const {context, node} = dashboard();
+  context.value = [modeDevice('A', '192.0.2.10', state('dhcp_dynamic', 'dhcp_lease')), modeDevice('B', '192.0.2.11', state('dhcp_reserved', 'dhcp_reservation')),
+    modeDevice('C', '192.0.2.12', state('static', 'outside_dhcp_range')), modeDevice('D', '192.0.2.13', null)];
+  vm.runInContext('renderAddressingSummary(value)', context);
+  assert.equal(node('addressing-summary').textContent, 'Address assignment (latest collection): 1 dynamic · 1 reserved · 1 static · 0 unknown · 1 not reported');
+  assert.equal(node('addressing-summary').hidden, false);
+  context.value = [modeDevice('A', '192.0.2.10', state('novel', null)), modeDevice('B', '192.0.2.11', state('unknown', null))];
+  vm.runInContext('renderAddressingSummary(value)', context);
+  assert.match(node('addressing-summary').textContent, /0 dynamic · 0 reserved · 0 static · 2 unknown · 0 not reported$/);
+});
+
+test('the summary is hidden when no device reports assignment', () => {
+  const {context, node} = dashboard();
+  context.value = [modeDevice('A', '192.0.2.10', null), modeDevice('B', '192.0.2.11', null)];
+  vm.runInContext('renderAddressingSummary(value)', context);
+  assert.equal(node('addressing-summary').hidden, true);
+});
+
+test('a static address inside the DHCP range is an attention item', () => {
+  const {context, node} = dashboard();
+  const rows = attention(context, node, fullOverview([modeDevice('TV', '192.0.2.10', state('static', 'no_lease_or_reservation')),
+    modeDevice('Cam', '192.0.2.11', state('static', 'no_lease_or_reservation')), modeDevice('Hub', '192.0.2.12', state('static', 'outside_dhcp_range'))]));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0][1], 'Static address inside the DHCP range');
+  assert.equal(rows[0][2], 'TV and Cam use an address the DHCP server can hand out, with no lease or reservation; that can clash with another device.');
+  assert.equal(rows[0][0], '2');
+});
+
+test('a mode change in the latest collection is an attention item', () => {
+  const {context, node} = dashboard();
+  const changed = state('dhcp_dynamic', 'dhcp_lease', {previous_mode:'dhcp_reserved', changed_at:'2026-11-14T03:10:11Z', changed_in_latest:true});
+  const older = state('dhcp_dynamic', 'dhcp_lease', {previous_mode:'dhcp_reserved', changed_at:'2026-11-13T03:10:11Z', changed_in_latest:false});
+  const rows = attention(context, node, fullOverview([modeDevice('TV', '192.0.2.10', changed), modeDevice('Cam', '192.0.2.11', older)]));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0][1], 'Address assignment changed');
+  assert.equal(rows[0][2], 'TV changed how their address is assigned in the latest collection.');
+  assert.equal(attention(context, node, fullOverview([modeDevice('Cam', '192.0.2.11', older)])).length, 0);
+});
+
+test('addressing items follow breach and review items', () => {
+  const {context, node} = dashboard();
+  const tv = modeDevice('TV', '192.0.2.10', state('static', 'no_lease_or_reservation', {previous_mode:'dhcp_dynamic', changed_at:'2026-11-14T03:10:11Z', changed_in_latest:true}));
+  context.value = fullOverview([tv], {assessments:{summaries:[{device_id:'mac:192.0.2.10', state:'review', pending:null, processing:false, potential_breaches:1, worth_checking:0, requested_at:null}], usage:null}});
+  vm.runInContext('assessmentIndex = new Map(value.assessments.summaries.map(item => [item.device_id, item])); renderAttention(value)', context);
+  const titles = node('attention-items').children.map(item => texts(item)[1]);
+  assert.deepEqual(titles, ['Potential breach', 'Assessment awaiting your review', 'Static address inside the DHCP range', 'Address assignment changed']);
+});
+
+test('unmonitored devices never raise addressing items', () => {
+  const {context, node} = dashboard();
+  const stray = modeDevice('Stray', '192.0.2.99', state('static', 'no_lease_or_reservation', {previous_mode:'dhcp_dynamic', changed_in_latest:true}));
+  const rows = attention(context, node, fullOverview([modeDevice('TV', '192.0.2.10', null)], {candidates:[stray]}));
+  assert.equal(rows.length, 0);
 });

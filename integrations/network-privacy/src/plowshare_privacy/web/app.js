@@ -1187,6 +1187,8 @@ function renderDeviceView(device) {
   }
   if (device.addressing) fact(facts, 'Assignment', addressingLabel(device.addressing));
   identity.append(facts);
+  const assignment = renderAddressing(device.addressing);
+  if (assignment) identity.append(assignment);
   if (device.detection) identity.append(renderDeviceDetection(device.detection));
 
   const talks = paneSection('What it talks to', 'Talks to');
@@ -1218,8 +1220,6 @@ function renderDeviceView(device) {
   ports.append(sweep);
   if (device.detection) ports.append(...renderExposures(device.detection));
   byId('device-identity').replaceChildren(identity);
-  const assignment = renderAddressing(device.addressing);
-  if (assignment) sends.append(assignment);
   byId('device-facts').replaceChildren(talks, sends, ports);
 
   const history = paneSection('Evidence history', 'Evidence');
@@ -2539,9 +2539,31 @@ function renderAttention(value) {
   const missing = missingCredentials(value.system);
   if (missing.length) items.push(attentionItem(formatCount(missing.length), missing.length === 1 ? 'Credential missing' : 'Credentials missing',
     missing.map(item => item.purpose).join(', ') + '. The collector cannot use a connection without it.', 'Open System health', openSystemHealth));
+  // Address assignment is configuration context, not evidence of compromise, so
+  // these rows follow the others. Only monitored devices (value.devices) count.
+  const clashing = value.devices.filter(device => device.addressing?.basis === 'no_lease_or_reservation');
+  if (clashing.length) items.push(attentionItem(formatCount(clashing.length), 'Static address inside the DHCP range',
+    `${deviceNames(clashing)} use an address the DHCP server can hand out, with no lease or reservation; that can clash with another device.`, ...reviewAction(clashing)));
+  const reassigned = value.devices.filter(device => device.addressing?.changed_in_latest === true);
+  if (reassigned.length) items.push(attentionItem(formatCount(reassigned.length), 'Address assignment changed',
+    `${deviceNames(reassigned)} changed how their address is assigned in the latest collection.`, ...reviewAction(reassigned)));
   byId('attention-items').replaceChildren(...items);
   byId('attention').hidden = items.length === 0;
   byId('attention-clear').hidden = items.length > 0;
+}
+// One line counting the monitored devices by assignment mode in the latest
+// collection. A device with no addressing was not reported on; an unrecognised
+// mode is counted as unknown rather than guessed. Hidden when nothing reports.
+function renderAddressingSummary(devices) {
+  const section = byId('addressing-summary');
+  const counts = {dhcp_dynamic:0, dhcp_reserved:0, static:0, unknown:0, missing:0};
+  for (const device of devices) {
+    if (!device.addressing) counts.missing += 1;
+    else if (Object.hasOwn(addressingShortNames, device.addressing.mode)) counts[device.addressing.mode] += 1;
+    else counts.unknown += 1;
+  }
+  section.hidden = counts.missing === devices.length;
+  section.textContent = section.hidden ? '' : `Address assignment (latest collection): ${counts.dhcp_dynamic} dynamic · ${counts.dhcp_reserved} reserved · ${counts.static} static · ${counts.unknown} unknown · ${counts.missing} not reported`;
 }
 const trustNames = {ca_file:'Private certificate authority file', pinned:'Pinned certificate fingerprint', system:'System trust store'};
 function credentialText(item) {
@@ -2641,6 +2663,7 @@ function renderOverview(value) {
     : 'Quick presence checks are off.';
   renderAskBadge(value.ask);
   renderAttention(value);
+  renderAddressingSummary(value.devices);
   renderBackgroundUsage(value);
   renderDeepScanGroup(value);
   followReferences(value);
