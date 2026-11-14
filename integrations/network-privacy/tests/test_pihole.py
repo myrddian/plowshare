@@ -16,7 +16,14 @@ from uuid import uuid4
 
 from aiohttp import web
 from aiohttp.test_utils import TestServer
-from support import EXAMPLES, FixturePort, MemoryReceipts, configuration
+from support import (
+    EXAMPLES,
+    FixturePort,
+    MemoryReceipts,
+    configuration,
+    legacy_sources,
+    with_sources,
+)
 
 from plowshare_privacy.collection import NetworkCollector, changes, scope_fingerprint
 from plowshare_privacy.collector_factory import configured_collector
@@ -52,17 +59,49 @@ SECRET = "fixture-pihole-app-password"
 SID = "fixture-session-identifier"
 
 
-class PiHoleTest(unittest.IsolatedAsyncioTestCase):
+class PiHoleServerCase(unittest.IsolatedAsyncioTestCase):
+    """A local fake Pi-hole v6 API; it holds no tests so other modules reuse it."""
+
     async def asyncSetUp(self) -> None:
         self.now = datetime.now(timezone.utc).timestamp()
         self.mode = "normal"
         self.calls: list[tuple[str, str]] = []
         self.query_clients: list[str] = []
         self.stolen = False
+        # ``GET config/dhcp``; another status answers with an error carrying the secret.
+        self.dhcp_status = 200
+        self.dhcp_settings: object = {
+            "config": {
+                "dhcp": {
+                    "active": True,
+                    "start": "192.0.2.100",
+                    "end": "192.0.2.200",
+                    "router": "192.0.2.1",
+                    "netmask": "255.255.255.0",
+                    "leaseTime": "24h",
+                    "ipv6": False,
+                    "rapidCommit": False,
+                    "multiDNS": False,
+                    "logging": False,
+                    "ignoreUnknownClients": False,
+                    "hosts": [],
+                }
+            },
+            "took": 0.01,
+        }
+        # ``GET dhcp/leases``; another status answers with an error carrying the secret.
+        self.leases_status = 200
+        self.leases: object = {"leases": [], "took": 0.01}
+        # ``GET config/dns/hosts``; another status answers with an error carrying the secret.
+        self.hosts_status = 200
+        self.dns_hosts: object = {"config": {"dns": {"hosts": []}}, "took": 0.01}
         app = web.Application()
         app.router.add_route("*", "/api/auth", self.auth)
         app.router.add_get("/api/network/devices", self.devices)
         app.router.add_get("/api/queries", self.queries)
+        app.router.add_get("/api/config/dhcp", self.dhcp)
+        app.router.add_get("/api/dhcp/leases", self.dhcp_leases)
+        app.router.add_get("/api/config/dns/hosts", self.local_dns)
         app.router.add_route("*", "/stolen", self.stolen_request)
         self.server = TestServer(app)
         await self.server.start_server()
@@ -74,71 +113,6 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         self.environment = patch.dict(os.environ, {"PIHOLE_TEST_PASSWORD": SECRET})
         self.environment.start()
         self.addCleanup(self.environment.stop)
-
-    async def test_identity_check_reads_no_dns_and_uses_ephemeral_password(
-        self,
-    ) -> None:
-        with patch.dict(os.environ, {"PIHOLE_TEST_PASSWORD": "unused"}):
-            result = await PiHoleV6(self.plan, application_password=SECRET).identify(
-                (ADDRESS,), utc_now()
-            )
-        self.assertEqual(result.devices[0].mac, MAC)
-        self.assertEqual(result.dns, ())
-        self.assertIsNone(result.window)
-        self.assertEqual(self.query_clients, [])
-        self.assertEqual(self.calls[-1], ("DELETE", "/api/auth"))
-
-    async def test_presence_reads_one_table_and_keeps_valid_rows_in_partial_response(
-        self,
-    ) -> None:
-        self.mode = "partial_identity"
-        targets = (ADDRESS, *(f"192.0.2.{n}" for n in range(30, 90)))
-        result = await PiHoleV6(self.plan).presence(targets, utc_now())
-        self.assertEqual(
-            [(device.address, device.mac) for device in result.devices],
-            [(ADDRESS, MAC)],
-        )
-        self.assertTrue(
-            any(issue.startswith("identity_partial:") for issue in result.issues)
-        )
-        self.assertEqual(
-            self.calls,
-            [
-                ("POST", "/api/auth"),
-                ("GET", "/api/network/devices"),
-                ("DELETE", "/api/auth"),
-            ],
-        )
-        self.assertEqual(self.query_clients, [])
-
-    async def test_presence_exposes_conflicting_addresses_without_guessing_mac(
-        self,
-    ) -> None:
-        self.mode = "ambiguous"
-        result = await PiHoleV6(self.plan).presence((ADDRESS,), utc_now())
-        self.assertEqual(result.devices, ())
-        self.assertEqual(result.ambiguous_addresses, frozenset({ADDRESS}))
-        self.assertEqual(self.query_clients, [])
-
-    async def test_activity_uses_half_open_query_window_and_records_blocked_status(
-        self,
-    ) -> None:
-        self.mode = "activity"
-        since = datetime.fromtimestamp(self.now - 120, timezone.utc).isoformat()
-        samples, issues = await PiHoleV6(self.plan).activity(
-            (ADDRESS,), since, utc_now()
-        )
-        self.assertEqual(issues, ())
-        self.assertEqual(len(samples), 1)
-        self.assertEqual(
-            [(item.domain, item.queries) for item in samples[0].dns],
-            [("ad.doubleclick.net", 1), ("www.youtube.com", 1)],
-        )
-        self.assertEqual(samples[0].blocked, {"ad.doubleclick.net": 1})
-        self.assertEqual(
-            self.calls,
-            [("POST", "/api/auth"), ("GET", "/api/queries"), ("DELETE", "/api/auth")],
-        )
 
     async def stolen_request(self, request: web.Request) -> web.Response:
         self.stolen = True
@@ -172,6 +146,36 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
                 "took": 0.01,
             }
         )
+
+    async def dhcp(self, request: web.Request) -> web.Response:
+        self.calls.append((request.method, request.path))
+        self.assertEqual(request.headers.get("X-FTL-SID"), SID)
+        self.assertEqual(dict(request.query), {})
+        if self.dhcp_status != 200:
+            return web.json_response(
+                {"error": {"message": SECRET}}, status=self.dhcp_status
+            )
+        return web.json_response(self.dhcp_settings)
+
+    async def dhcp_leases(self, request: web.Request) -> web.Response:
+        self.calls.append((request.method, request.path))
+        self.assertEqual(request.headers.get("X-FTL-SID"), SID)
+        self.assertEqual(dict(request.query), {})
+        if self.leases_status != 200:
+            return web.json_response(
+                {"error": {"message": SECRET}}, status=self.leases_status
+            )
+        return web.json_response(self.leases)
+
+    async def local_dns(self, request: web.Request) -> web.Response:
+        self.calls.append((request.method, request.path))
+        self.assertEqual(request.headers.get("X-FTL-SID"), SID)
+        self.assertEqual(dict(request.query), {})
+        if self.hosts_status != 200:
+            return web.json_response(
+                {"error": {"message": SECRET}}, status=self.hosts_status
+            )
+        return web.json_response(self.dns_hosts)
 
     def device(self, address: str, mac: str = MAC) -> dict[str, object]:
         return {
@@ -272,6 +276,73 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
                 "earliest_timestamp_disk": self.now - 7200,
                 "took": 0.01,
             }
+        )
+
+
+class PiHoleTest(PiHoleServerCase):
+    async def test_identity_check_reads_no_dns_and_uses_ephemeral_password(
+        self,
+    ) -> None:
+        with patch.dict(os.environ, {"PIHOLE_TEST_PASSWORD": "unused"}):
+            result = await PiHoleV6(self.plan, application_password=SECRET).identify(
+                (ADDRESS,), utc_now()
+            )
+        self.assertEqual(result.devices[0].mac, MAC)
+        self.assertEqual(result.dns, ())
+        self.assertIsNone(result.window)
+        self.assertEqual(self.query_clients, [])
+        self.assertEqual(self.calls[-1], ("DELETE", "/api/auth"))
+
+    async def test_presence_reads_one_table_and_keeps_valid_rows_in_partial_response(
+        self,
+    ) -> None:
+        self.mode = "partial_identity"
+        targets = (ADDRESS, *(f"192.0.2.{n}" for n in range(30, 90)))
+        result = await PiHoleV6(self.plan).presence(targets, utc_now())
+        self.assertEqual(
+            [(device.address, device.mac) for device in result.devices],
+            [(ADDRESS, MAC)],
+        )
+        self.assertTrue(
+            any(issue.startswith("identity_partial:") for issue in result.issues)
+        )
+        self.assertEqual(
+            self.calls,
+            [
+                ("POST", "/api/auth"),
+                ("GET", "/api/network/devices"),
+                ("DELETE", "/api/auth"),
+            ],
+        )
+        self.assertEqual(self.query_clients, [])
+
+    async def test_presence_exposes_conflicting_addresses_without_guessing_mac(
+        self,
+    ) -> None:
+        self.mode = "ambiguous"
+        result = await PiHoleV6(self.plan).presence((ADDRESS,), utc_now())
+        self.assertEqual(result.devices, ())
+        self.assertEqual(result.ambiguous_addresses, frozenset({ADDRESS}))
+        self.assertEqual(self.query_clients, [])
+
+    async def test_activity_uses_half_open_query_window_and_records_blocked_status(
+        self,
+    ) -> None:
+        self.mode = "activity"
+        since = datetime.fromtimestamp(self.now - 120, timezone.utc).isoformat()
+        samples, issues = await PiHoleV6(self.plan).activity(
+            (ADDRESS,), since, utc_now()
+        )
+        self.assertEqual(issues, ())
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(
+            [(item.domain, item.queries) for item in samples[0].dns],
+            [("ad.doubleclick.net", 1), ("www.youtube.com", 1)],
+        )
+        self.assertEqual(samples[0].blocked, {"ad.doubleclick.net": 1})
+        self.assertEqual(
+            self.calls,
+            [("POST", "/api/auth"), ("GET", "/api/queries"), ("DELETE", "/api/auth")],
         )
 
     async def test_selected_device_and_query_sample_use_one_private_session(
@@ -390,7 +461,9 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
                 return data
 
         plan = CollectionPlan("tcp", (ADDRESS,), (443,), 1, 1, None, 0)
-        collector = NetworkCollector("fixture-collector", plan, Source())
+        collector = NetworkCollector(
+            "fixture-collector", plan, legacy_sources(Source())
+        )
         with patch(
             "plowshare_privacy.collection.asyncio.open_connection",
             side_effect=ConnectionRefusedError(61, "fixture refused"),
@@ -446,15 +519,17 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         listener = await asyncio.start_server(accept, "127.0.0.1", 0)
         self.addAsyncCleanup(listener.wait_closed)
         self.addCleanup(listener.close)
-        plan = CollectionPlan(
-            "tcp",
-            (ADDRESS,),
-            (listener.sockets[0].getsockname()[1],),
-            1,
-            1,
-            None,
-            0,
-            labels=(DeviceLabel(ADDRESS, "Living room TV"),),
+        plan = with_sources(
+            CollectionPlan(
+                "tcp",
+                (ADDRESS,),
+                (listener.sockets[0].getsockname()[1],),
+                1,
+                1,
+                None,
+                0,
+                labels=(DeviceLabel(ADDRESS, "Living room TV"),),
+            ),
             pihole=self.plan,
         )
         original = asyncio.open_connection
@@ -570,8 +645,7 @@ class PiHoleConfigurationTest(unittest.TestCase):
             old.pop("device_descriptions")
             old.pop("enabled")
             old.pop("labels")
-            old.pop("pihole")
-            old.pop("unifi")
+            old.pop("sources")
             old["observations_file"] = str(plan.observations_file)
             self.assertEqual(
                 scope_fingerprint(plan),

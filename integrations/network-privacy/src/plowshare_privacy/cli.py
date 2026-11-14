@@ -499,10 +499,8 @@ async def execute(args: argparse.Namespace) -> None:
             def managed_products() -> ManagedProductLookup | None:
                 # Settings can replace the active collector and its configured controller.
                 collector = worker.collector
-                if isinstance(collector, NetworkCollector) and isinstance(
-                    collector.identity_source, ManagedProductLookup
-                ):
-                    return collector.identity_source
+                if isinstance(collector, NetworkCollector):
+                    return collector.product_lookup
                 return None
 
             def research_presence() -> PresenceView:

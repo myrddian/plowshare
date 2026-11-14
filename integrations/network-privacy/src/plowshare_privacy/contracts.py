@@ -9,7 +9,8 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import AbstractSet, Literal
+from types import MappingProxyType
+from typing import AbstractSet, Literal, Mapping, get_args
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -176,6 +177,26 @@ def mac_address(value: object) -> str:
     return mac
 
 
+EvidenceKind = Literal[
+    "configured",
+    "neighbour_table",
+    "dhcp_lease",
+    "controller_client",
+    "managed_device",
+    "local_dns",
+]
+_EVIDENCE_KINDS: dict[str, EvidenceKind] = {
+    kind: kind for kind in get_args(EvidenceKind)
+}
+IDENTITY_SOURCES: frozenset[str] = frozenset({"configured", "pihole-v6", "unifi"})
+# Evidence kind implied by a source when a record states none.
+_LEGACY_KIND: dict[str, EvidenceKind] = {
+    "configured": "configured",
+    "pihole-v6": "neighbour_table",
+    "unifi": "controller_client",
+}
+
+
 @dataclass(frozen=True)
 class DeviceIdentity:
     """A time-specific address association, not proof of a physical device's identity."""
@@ -189,6 +210,10 @@ class DeviceIdentity:
     source: Literal["configured", "pihole-v6", "unifi"]
     observed_at: str
     last_seen: str | None
+    # Optional provenance appended last: older receipts and positional callers
+    # omit it, and encode() drops absent values so retained text is unchanged.
+    evidence: EvidenceKind | None = None
+    service: str | None = None
 
     @classmethod
     def decode(cls, value: object) -> DeviceIdentity:
@@ -205,17 +230,30 @@ class DeviceIdentity:
                 "observed_at",
                 "last_seen",
             },
+            {"evidence", "service"},
         )
         address = str(ipaddress.ip_address(text(row["address"])))
         mac = mac_address(row["mac"]) if row["mac"] is not None else None
         expected = "mac:" + mac if mac else "ip:" + address
         source = row["source"]
-        if row["device_id"] != expected or source not in (
-            "configured",
-            "pihole-v6",
-            "unifi",
+        if (
+            row["device_id"] != expected
+            or not isinstance(source, str)
+            or source not in IDENTITY_SOURCES
         ):
             raise ValueError("Invalid device identity provenance")
+        kind = row.get("evidence")
+        if kind is not None and (
+            not isinstance(kind, str)
+            or kind not in _EVIDENCE_KINDS
+            or (kind == "configured") != (source == "configured")
+        ):
+            raise ValueError("Invalid device evidence kind")
+        service = row.get("service")
+        if service is not None:
+            service = identifier(service)
+            if len(service) > 64:
+                raise ValueError("Invalid device service name")
         if source == "unifi" and mac is None:
             raise ValueError("UniFi association requires a client MAC address")
         if row["source"] == "configured" and (
@@ -239,7 +277,14 @@ class DeviceIdentity:
             else "configured",
             timestamp(row["observed_at"]),
             timestamp(row["last_seen"]) if row["last_seen"] is not None else None,
+            _EVIDENCE_KINDS[kind] if isinstance(kind, str) else None,
+            service,
         )
+
+
+def evidence_kind(identity: DeviceIdentity) -> EvidenceKind:
+    """The kind of evidence behind an identity, inferred from its source when unstated."""
+    return identity.evidence or _LEGACY_KIND[identity.source]
 
 
 @dataclass(frozen=True)
@@ -281,6 +326,92 @@ class DnsWindow:
         return cls("pihole-v6", start, end, read, available, row["complete"])
 
 
+AssignmentMode = Literal["dhcp_dynamic", "dhcp_reserved", "static", "unknown"]
+AssignmentBasis = Literal[
+    "dhcp_lease",
+    "dhcp_reservation",
+    "controller_fixed_ip",
+    "inside_dhcp_range",
+    "outside_dhcp_range",
+    "no_lease_or_reservation",
+]
+_ASSIGNMENT_MODES: dict[str, AssignmentMode] = {
+    mode: mode for mode in get_args(AssignmentMode)
+}
+_ASSIGNMENT_BASES: dict[str, AssignmentBasis] = {
+    basis: basis for basis in get_args(AssignmentBasis)
+}
+# The bases each mode may rest on; ``unknown`` rests on none.
+MODE_BASES: Mapping[AssignmentMode, frozenset[AssignmentBasis]] = MappingProxyType(
+    {
+        "dhcp_reserved": frozenset({"dhcp_reservation", "controller_fixed_ip"}),
+        "dhcp_dynamic": frozenset({"dhcp_lease", "inside_dhcp_range"}),
+        "static": frozenset({"outside_dhcp_range", "no_lease_or_reservation"}),
+        "unknown": frozenset(),
+    }
+)
+
+
+@dataclass(frozen=True)
+class AddressAssignment:
+    """How one selected address was assigned to the MAC holding it.
+
+    Decided by ``addressing.assign_addresses``. A known mode names the MAC, the
+    basis it rests on and the services whose facts decided it; ``unknown`` has
+    no basis. ``expires_at`` is a lease's expiry and appears only with the
+    ``dhcp_lease`` basis (``None`` there means the lease does not expire).
+    """
+
+    address: str
+    mac: str | None
+    mode: AssignmentMode
+    basis: AssignmentBasis | None
+    services: tuple[str, ...]
+    expires_at: str | None
+
+    @classmethod
+    def decode(cls, value: object) -> AddressAssignment:
+        row = object_fields(
+            value, {"address", "mac", "mode", "basis", "services", "expires_at"}
+        )
+        address = str(ipaddress.ip_address(text(row["address"])))
+        mac = mac_address(row["mac"]) if row["mac"] is not None else None
+        mode = (
+            _ASSIGNMENT_MODES.get(row["mode"]) if isinstance(row["mode"], str) else None
+        )
+        basis = (
+            _ASSIGNMENT_BASES.get(row["basis"])
+            if isinstance(row["basis"], str)
+            else None
+        )
+        if mode is None or (row["basis"] is not None and basis is None):
+            raise ValueError("Unsupported address assignment mode or basis")
+        if (basis is None) != (mode == "unknown") or (
+            basis is not None and basis not in MODE_BASES[mode]
+        ):
+            raise ValueError("Address assignment basis does not fit its mode")
+        services = tuple(
+            _service_name(item) for item in items(row["services"], MAX_SERVICES)
+        )
+        if len(set(services)) != len(services):
+            raise ValueError("Duplicate address assignment service")
+        if mode != "unknown" and (mac is None or not services):
+            raise ValueError("A known address assignment needs a MAC and a service")
+        expires_at = (
+            timestamp(row["expires_at"]) if row["expires_at"] is not None else None
+        )
+        if expires_at is not None and basis != "dhcp_lease":
+            raise ValueError("Only a DHCP lease assignment has an expiry")
+        return cls(address, mac, mode, basis, services, expires_at)
+
+
+def _service_name(value: object) -> str:
+    service = identifier(value)
+    if len(service) > 64:
+        raise ValueError("Invalid service name")
+    return service
+
+
 @dataclass(frozen=True)
 class Snapshot:
     """A bounded export/fixture. DNS queries are observations, not proof of payload exfiltration."""
@@ -290,11 +421,16 @@ class Snapshot:
     dns: tuple[DnsObservation, ...]
     devices: tuple[DeviceIdentity, ...] = ()
     dns_window: DnsWindow | None = None
+    # One per selected address with an identity record, in target order;
+    # empty (and omitted from encoded evidence) unless addressing is enabled.
+    addressing: tuple[AddressAssignment, ...] = ()
 
     @classmethod
     def decode(cls, value: object) -> Snapshot:
         row = object_fields(
-            value, {"version", "observed_at", "tcp", "dns"}, {"devices", "dns_window"}
+            value,
+            {"version", "observed_at", "tcp", "dns"},
+            {"devices", "dns_window", "addressing"},
         )
         integer(row["version"], 1, 1)
         tcp = tuple(
@@ -318,7 +454,13 @@ class Snapshot:
             if row.get("dns_window") is not None
             else None
         )
-        return cls(timestamp(row["observed_at"]), tcp, dns, devices, window)
+        addressing = tuple(
+            AddressAssignment.decode(item)
+            for item in items(row.get("addressing", []), MAX_TARGETS)
+        )
+        if len({item.address for item in addressing}) != len(addressing):
+            raise ValueError("Duplicate address assignment")
+        return cls(timestamp(row["observed_at"]), tcp, dns, devices, window, addressing)
 
 
 _PRIVATE_IPV4 = tuple(
@@ -549,6 +691,144 @@ class UniFiPlan:
         )
 
 
+Capability = Literal[
+    "network_table",
+    "dns_queries",
+    "dhcp_leases",
+    "dhcp_reservations",
+    "dhcp_scope",
+    "local_dns_names",
+    "controller_clients",
+    "managed_inventory",
+    "traffic_counters",
+]
+_CAPABILITIES: dict[str, Capability] = {name: name for name in get_args(Capability)}
+# These add new evidence, so they stay off until the operator names them: on an
+# upgraded configuration and whenever a service omits ``capabilities``.
+OPT_IN_CAPABILITIES: frozenset[Capability] = frozenset(
+    {"dhcp_leases", "dhcp_reservations", "dhcp_scope", "local_dns_names"}
+)
+ConnectorKind = Literal["pihole", "unifi"]
+_KINDS: dict[str, ConnectorKind] = {name: name for name in get_args(ConnectorKind)}
+# What each kind of service can offer. Enabling anything else is a decode error.
+KIND_CAPABILITIES: Mapping[ConnectorKind, frozenset[Capability]] = MappingProxyType(
+    {
+        "pihole": frozenset(
+            {
+                "network_table",
+                "dns_queries",
+                "dhcp_leases",
+                "dhcp_reservations",
+                "dhcp_scope",
+                "local_dns_names",
+            }
+        ),
+        "unifi": frozenset(
+            {
+                "controller_clients",
+                "managed_inventory",
+                "traffic_counters",
+                "dhcp_reservations",
+                "dhcp_scope",
+            }
+        ),
+    }
+)
+# UniFi DHCP reads address the legacy site by name, so they require trafficSite.
+_UNIFI_SITE_CAPABILITIES: frozenset[Capability] = frozenset(
+    {"dhcp_reservations", "dhcp_scope"}
+)
+MAX_SERVICES = 16
+
+
+def legacy_capabilities(
+    kind: ConnectorKind, settings: PiHolePlan | UniFiPlan
+) -> frozenset[Capability]:
+    """What a ``collection.pihole`` / ``collection.unifi`` key has always read."""
+    if kind == "pihole":
+        return frozenset({"network_table", "dns_queries"})
+    base: frozenset[Capability] = frozenset({"controller_clients", "managed_inventory"})
+    if isinstance(settings, UniFiPlan) and settings.traffic_site is not None:
+        return base | {"traffic_counters"}
+    return base
+
+
+@dataclass(frozen=True)
+class ServicePlan:
+    """One configured external service and the capabilities enabled on it.
+
+    ``legacy`` records that a service was decoded from the old
+    ``pihole``/``unifi`` keys. It is informational only: it does not drive the
+    scope fingerprint. ``scope_fingerprint`` keeps the historical encoding
+    whenever every service reads exactly its kind's legacy capabilities
+    (ignoring ``traffic_counters``), whether or not this flag is set.
+    """
+
+    kind: ConnectorKind
+    id: str
+    capabilities: frozenset[Capability]
+    settings: PiHolePlan | UniFiPlan
+    legacy: bool = False
+
+    def __post_init__(self) -> None:
+        expected = PiHolePlan if self.kind == "pihole" else UniFiPlan
+        if not isinstance(self.settings, expected):
+            raise ValueError("Service settings do not match the service kind")
+        if not self.capabilities <= KIND_CAPABILITIES[self.kind]:
+            raise ValueError("Service enables a capability its kind does not offer")
+        if isinstance(self.settings, UniFiPlan) and self.settings.traffic_site is None:
+            # DHCP and byte-counter reads use the legacy endpoints, addressed
+            # by the short site name; without it there is nothing to read.
+            if self.capabilities & _UNIFI_SITE_CAPABILITIES:
+                raise ValueError("UniFi DHCP capabilities require trafficSite")
+            if "traffic_counters" in self.capabilities:
+                raise ValueError("UniFi traffic counters require a legacy site name")
+
+    @classmethod
+    def legacy_service(
+        cls, kind: ConnectorKind, settings: PiHolePlan | UniFiPlan
+    ) -> ServicePlan:
+        return cls(kind, kind, legacy_capabilities(kind, settings), settings, True)
+
+    @classmethod
+    def decode(cls, value: object) -> ServicePlan:
+        row = object_fields(value, {"kind", "id", "settings"}, {"capabilities"})
+        kind = _KINDS.get(row["kind"]) if isinstance(row["kind"], str) else None
+        if kind is None:
+            raise ValueError("Unsupported service kind")
+        settings: PiHolePlan | UniFiPlan = (
+            PiHolePlan.decode(row["settings"])
+            if kind == "pihole"
+            else UniFiPlan.decode(row["settings"])
+        )
+        if "capabilities" not in row:
+            capabilities = KIND_CAPABILITIES[kind] - OPT_IN_CAPABILITIES
+            if isinstance(settings, UniFiPlan) and settings.traffic_site is None:
+                # As the legacy key: traffic counters only with a site name.
+                capabilities -= {"traffic_counters"}
+        else:
+            names = items(row["capabilities"], len(_CAPABILITIES))
+            enabled = [
+                _CAPABILITIES.get(name) if isinstance(name, str) else None
+                for name in names
+            ]
+            if None in enabled or len(set(enabled)) != len(enabled):
+                raise ValueError("Service capabilities must be unique known names")
+            capabilities = frozenset(name for name in enabled if name is not None)
+        return cls(kind, identifier(row["id"]), capabilities, settings)
+
+
+def _validate_sources(sources: tuple[ServicePlan, ...]) -> None:
+    """Rules across services that hold until multi-service support (stage 3)."""
+    if len({source.id for source in sources}) != len(sources):
+        raise ValueError("Service ids must be unique")
+    for capability in ("dns_queries", "traffic_counters"):
+        if sum(capability in source.capabilities for source in sources) > 1:
+            raise ValueError("Enable " + capability + " on at most one service")
+    if len({source.kind for source in sources}) != len(sources):
+        raise ValueError("Configure one service per kind until multi-service support")
+
+
 @dataclass(frozen=True)
 class CollectionPlan:
     mode: Literal["tcp", "fixture"]
@@ -560,13 +840,61 @@ class CollectionPlan:
     max_observation_age: int
     enabled: bool = True
     labels: tuple[DeviceLabel, ...] = ()
-    pihole: PiHolePlan | None = None
-    unifi: UniFiPlan | None = None
+    # The configured external services, in configuration order. Decode allows
+    # at most one service per kind in this stage.
+    sources: tuple[ServicePlan, ...] = ()
     quick_scan: bool = False
     dns_profiles: bool = False
     # Ask confirmed devices to describe themselves after quick checks
     # (unicast SSDP/mDNS); see device_facts. Local presence work only.
     device_descriptions: bool = False
+
+    @property
+    def pihole(self) -> PiHolePlan | None:
+        """Settings of the single Pi-hole service, if configured.
+
+        Stage-1 accessor kept for existing callers; the stage-3 plan removes it
+        once the collector reads ``sources`` through the connector registry.
+        """
+        for source in self.sources:
+            if isinstance(source.settings, PiHolePlan):
+                return source.settings
+        return None
+
+    @property
+    def unifi(self) -> UniFiPlan | None:
+        """Settings of the single UniFi service, if configured.
+
+        Stage-1 accessor kept for existing callers; the stage-3 plan removes it
+        once the collector reads ``sources`` through the connector registry.
+        """
+        for source in self.sources:
+            if isinstance(source.settings, UniFiPlan):
+                return source.settings
+        return None
+
+
+def _collection_sources(plan: Mapping[str, object]) -> tuple[ServicePlan, ...]:
+    """Decode ``sources``, or the legacy ``pihole``/``unifi`` keys, never both."""
+    if "sources" in plan:
+        if "pihole" in plan or "unifi" in plan:
+            raise ValueError("Configure services in sources or pihole/unifi, not both")
+        sources = tuple(
+            ServicePlan.decode(entry) for entry in items(plan["sources"], MAX_SERVICES)
+        )
+    else:
+        legacy: list[ServicePlan] = []
+        if "pihole" in plan:
+            legacy.append(
+                ServicePlan.legacy_service("pihole", PiHolePlan.decode(plan["pihole"]))
+            )
+        if "unifi" in plan:
+            legacy.append(
+                ServicePlan.legacy_service("unifi", UniFiPlan.decode(plan["unifi"]))
+            )
+        sources = tuple(legacy)
+    _validate_sources(sources)
+    return sources
 
 
 def household_day(stamp: str, zone: str) -> date:
@@ -685,6 +1013,7 @@ class Configuration:
                 "deviceLabels",
                 "pihole",
                 "unifi",
+                "sources",
                 "quickScan",
                 "dnsProfiles",
                 "deviceDescriptions",
@@ -748,20 +1077,25 @@ class Configuration:
                 if observations
                 else 0
             )
-            pihole = PiHolePlan.decode(plan["pihole"]) if "pihole" in plan else None
+            sources = _collection_sources(plan)
+            dns = any("dns_queries" in source.capabilities for source in sources)
             dns_profiles = plan.get("dnsProfiles", False)
             if type(dns_profiles) is not bool:
                 raise ValueError("DNS activity profiles must be a boolean")
-            if dns_profiles and (not quick_scan or pihole is None):
+            if dns_profiles and (
+                not quick_scan or not any(source.kind == "pihole" for source in sources)
+            ):
                 raise ValueError(
                     "DNS activity profiles require quick presence checks and Pi-hole"
                 )
+            if dns_profiles and not dns:
+                raise ValueError("DNS activity profiles require dns_queries on Pi-hole")
             device_descriptions = plan.get("deviceDescriptions", False)
             if type(device_descriptions) is not bool:
                 raise ValueError("Device descriptions must be a boolean")
             if device_descriptions and not quick_scan:
                 raise ValueError("Device descriptions require quick presence checks")
-            if pihole is not None and observations is not None:
+            if dns and observations is not None:
                 raise ValueError("Choose either Pi-hole or a DNS observation file")
             collection = CollectionPlan(
                 "tcp",
@@ -773,8 +1107,7 @@ class Configuration:
                 age,
                 enabled,
                 device_labels(plan.get("deviceLabels", {}), targets),
-                pihole,
-                UniFiPlan.decode(plan["unifi"]) if "unifi" in plan else None,
+                sources,
                 quick_scan,
                 dns_profiles,
                 device_descriptions,
@@ -862,11 +1195,21 @@ class Evidence:
         row = asdict(self)
         if self.baseline is None:
             row.pop("baseline")
-        enriched = bool(self.snapshot.devices) or self.snapshot.dns_window is not None
+        enriched = (
+            bool(self.snapshot.devices)
+            or self.snapshot.dns_window is not None
+            or bool(self.snapshot.addressing)
+        )
         if not self.snapshot.devices:
             row["snapshot"].pop("devices")
+        for device in row["snapshot"].get("devices", ()):
+            for key in ("evidence", "service"):
+                if device[key] is None:
+                    del device[key]
         if self.snapshot.dns_window is None:
             row["snapshot"].pop("dns_window")
+        if not self.snapshot.addressing:
+            row["snapshot"].pop("addressing")
         return json.dumps(
             row,
             indent=None if enriched else 2,
@@ -899,7 +1242,9 @@ class Evidence:
         if mode not in ("tcp", "fixture"):
             raise ValueError("Invalid evidence mode")
         snapshot = object_fields(
-            row["snapshot"], {"observed_at", "tcp", "dns"}, {"devices", "dns_window"}
+            row["snapshot"],
+            {"observed_at", "tcp", "dns"},
+            {"devices", "dns_window", "addressing"},
         )
         snapshot["version"] = 1
         return cls(

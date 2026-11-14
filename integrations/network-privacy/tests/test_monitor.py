@@ -387,6 +387,60 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         self.receipts.complete_scope_change(configured.collection)
         self.worker.config = configured
 
+    async def test_settings_saves_keep_the_services_form(self) -> None:
+        """Monitoring and Pi-hole saves edit sources in place, or legacy keys."""
+        secret = self.root / "fixture-pihole-password"
+        secret.write_text("fixture-secret")
+        secret.chmod(0o600)
+        settings = {
+            "origin": "https://pihole.example",
+            "passwordEnvironment": "FIXTURE_PIHOLE_PASSWORD",
+            "queryLimit": 128,
+        }
+        sources = [
+            {
+                "kind": "pihole",
+                "id": "home-dns",
+                "capabilities": ["network_table", "dns_queries", "dhcp_leases"],
+                "settings": settings,
+            }
+        ]
+        for form in ("legacy", "sources"):
+            with self.subTest(form=form):
+                self.settings.pending_path.unlink(missing_ok=True)
+                row = json.loads(self.path.read_text())
+                row["collection"].pop("pihole", None)
+                row["collection"].pop("sources", None)
+                if form == "legacy":
+                    row["collection"]["pihole"] = settings
+                else:
+                    row["collection"]["sources"] = sources
+                configured = Configuration.decode(row, self.path)
+                self.receipts.prepare_scope_change(configured.collection)
+                self.path.write_text(json.dumps(row))
+                self.receipts.complete_scope_change(configured.collection)
+                self.worker.config = configured
+                await self.settings.save(CHOICE)
+                await self.settings.save_pihole("https://other.example", secret)
+                pending = json.loads(self.settings.pending_path.read_text())
+                collection = pending["collection"]
+                self.assertEqual(collection["targets"], list(CHOICE.targets))
+                if form == "legacy":
+                    self.assertNotIn("sources", collection)
+                    saved = collection["pihole"]
+                else:
+                    self.assertNotIn("pihole", collection)
+                    (entry,) = collection["sources"]
+                    self.assertEqual(entry["id"], "home-dns")
+                    self.assertEqual(entry["capabilities"], sources[0]["capabilities"])
+                    saved = entry["settings"]
+                self.assertEqual(saved["origin"], "https://other.example")
+                self.assertEqual(saved["passwordFile"], str(secret))
+                self.assertEqual(saved["queryLimit"], 128)
+                plan = Configuration.read(self.settings.pending_path).collection
+                assert plan.pihole is not None
+                self.assertEqual(plan.pihole.origin, "https://other.example")
+
     async def test_resaving_pihole_connection_keeps_saved_tuning(self) -> None:
         self.configure_pihole(
             {

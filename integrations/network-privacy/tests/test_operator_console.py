@@ -14,7 +14,14 @@ from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
 from plowshare import Delivery, Refusal, TransportError
-from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
+from support import (
+    CountingCollector,
+    FixturePort,
+    MemoryReceipts,
+    configuration,
+    event,
+    with_sources,
+)
 from test_device_assessments import Dossiers, Runs
 
 from plowshare_privacy.advisories import AdvisoryLookup, AdvisoryPage
@@ -36,6 +43,7 @@ from plowshare_privacy.contracts import (
     DeviceIdentity,
     DeviceLabel,
     PiHolePlan,
+    ServicePlan,
     TcpObservation,
 )
 from plowshare_privacy.device_assessments import AssessmentJournal, DeviceAssessments
@@ -54,7 +62,7 @@ from plowshare_privacy.operator_state import (
     Preferences,
     findings,
 )
-from plowshare_privacy.pihole import DeviceData
+from plowshare_privacy.pihole import DeviceData, PiHoleDhcp
 from plowshare_privacy.presence import PresenceView, Sighting
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
@@ -748,8 +756,9 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.worker.config = replace(
             self.config,
-            collection=replace(
-                self.config.collection, targets=(old,), ports=(443,), pihole=plan
+            collection=with_sources(
+                replace(self.config.collection, targets=(old,), ports=(443,)),
+                pihole=plan,
             ),
         )
         settings = AsyncMock(spec=Settings)
@@ -779,6 +788,39 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
             await self.console.accept_move(old, new, identity.device_id)
             self.assertEqual(settings.save.await_args.args[0].targets, (new,))
             self.assertEqual(identify.await_count, 4)
+            # The configured service's capabilities and id, not the defaults.
+            [service] = self.worker.config.collection.sources
+            source.assert_called_with(
+                plan, capabilities=service.capabilities, service=service.id
+            )
+
+    async def test_move_detection_needs_the_pihole_network_table(self) -> None:
+        plan = PiHolePlan.decode(
+            {
+                "origin": "http://pihole.invalid",
+                "passwordEnvironment": "PRIVACY_FIXTURE_PASSWORD",
+            }
+        )
+        self.worker.config = replace(
+            self.config,
+            collection=replace(
+                self.config.collection,
+                sources=(
+                    ServicePlan(
+                        "pihole", "dns", frozenset({"dns_queries", "dhcp_leases"}), plan
+                    ),
+                ),
+            ),
+        )
+        discovery = AsyncMock(spec=LocalDeviceDiscovery)
+        discovery.latest = lambda: DiscoveryReport(
+            "10.1.2.0/24", (443,), 254, (DiscoveredDevice("10.1.2.22", (443,), ()),), 0
+        )
+        self.console.discovery = discovery
+        with patch("plowshare_privacy.console.PiHoleV6") as source:
+            with self.assertRaisesRegex(ValueError, "Pi-hole network table"):
+                await self.console.moved_devices()
+            source.assert_not_called()
 
     async def test_pihole_save_never_tests_connection_and_can_wait_for_activation(
         self,
@@ -821,10 +863,14 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
                     (), (), None, ("Pi-hole authentication or connection failed",)
                 )
             )
+            source.return_value.offered = AsyncMock(
+                return_value=PiHoleDhcp(None, None, (), ("fixture gap",))
+            )
             tested = await self.console.connect_pihole(
                 "http://pihole.invalid", "bad-secret", False
             )
         self.assertFalse(tested.connected)
+        self.assertIsNone(tested.dhcp)
         self.assertFalse(tested.saved)
         self.assertEqual(credential.read_bytes(), before)
         self.assertEqual(tuple(self.root.glob("pihole-*.password")), (credential,))
@@ -865,12 +911,38 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
                     (), (), None, ("No fresh identity association",)
                 )
             )
+            source.return_value.offered = AsyncMock(
+                return_value=PiHoleDhcp(False, None, (), ())
+            )
             tested = await self.console.connect_pihole(
                 "http://pihole.invalid", "fixture-secret", False
             )
         self.assertTrue(tested.connected)
         self.assertFalse(tested.saved)
+        self.assertIs(tested.dhcp, False)
         self.assertEqual(tuple(self.root.glob("pihole-*.password")), ())
+
+    async def test_pihole_test_reports_whether_dhcp_is_offered(self) -> None:
+        for active in (True, False, None):
+            with self.subTest(active=active):
+                with patch("plowshare_privacy.console.PiHoleV6") as source:
+                    source.return_value.identify = AsyncMock(
+                        return_value=DeviceData((), (), None, ())
+                    )
+                    source.return_value.offered = AsyncMock(
+                        return_value=PiHoleDhcp(active, None, (), ())
+                    )
+                    tested = await self.console.connect_pihole(
+                        "http://pihole.invalid", "fixture-secret", False
+                    )
+                self.assertIs(tested.dhcp, active)
+                source.return_value.offered.assert_awaited_once_with()
+
+    async def test_pihole_save_does_not_report_dhcp(self) -> None:
+        saved = await self.console.connect_pihole(
+            "http://pihole.invalid", "fixture-secret", True
+        )
+        self.assertIsNone(saved.dhcp)
 
     async def test_device_assessment_routes_check_access_inventory_and_state(
         self,

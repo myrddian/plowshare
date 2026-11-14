@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Awaitable, Callable, Protocol
 from uuid import uuid4
 
 from plowshare.contracts import (
@@ -19,9 +20,32 @@ from plowshare.contracts import (
 )
 
 from plowshare_privacy.collection import NetworkCollector
-from plowshare_privacy.contracts import CollectionPlan, Configuration, Evidence
+from plowshare_privacy.contracts import (
+    CollectionPlan,
+    Configuration,
+    Evidence,
+    PiHolePlan,
+    ServicePlan,
+    UniFiPlan,
+)
+from plowshare_privacy.dns_activity import QuerySample
+from plowshare_privacy.identity_source import (
+    DeviceIdentitySource,
+    IdentitySample,
+    ManagedInventory,
+)
 from plowshare_privacy.journal import Publication, Receipt
+from plowshare_privacy.pihole import DeviceDataSource
 from plowshare_privacy.ports import evidence_name
+from plowshare_privacy.source_set import (
+    Bound,
+    DnsActivityReader,
+    PresenceReader,
+    SourceSet,
+    TrafficReader,
+)
+from plowshare_privacy.traffic import TrafficCounter
+from plowshare_privacy.unifi import ControllerInventory, UniFiNetwork, adopted_identity
 
 STAMP = "2026-01-01T00:00:00Z"
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -42,6 +66,138 @@ def configuration(directory: Path) -> Configuration:
         "privacy-home-network",
         "scheduled-example",
         CollectionPlan("fixture", (), (), 1, 1, snapshot, 0),
+    )
+
+
+def with_sources(
+    plan: CollectionPlan,
+    *,
+    pihole: PiHolePlan | None = None,
+    unifi: UniFiPlan | None = None,
+) -> CollectionPlan:
+    """Configure ``plan`` with legacy services, as the old pihole/unifi keys decode."""
+    sources: list[ServicePlan] = []
+    if pihole is not None:
+        sources.append(ServicePlan.legacy_service("pihole", pihole))
+    if unifi is not None:
+        sources.append(ServicePlan.legacy_service("unifi", unifi))
+    return replace(plan, sources=tuple(sources))
+
+
+PresenceCall = Callable[[tuple[str, ...], str], Awaitable[IdentitySample]]
+ActivityCall = Callable[
+    [tuple[str, ...], str, str],
+    Awaitable[tuple[tuple[QuerySample, ...], tuple[str, ...]]],
+]
+TrafficCall = Callable[
+    [tuple[str, ...]], Awaitable[tuple[tuple[TrafficCounter, ...], tuple[str, ...]]]
+]
+
+
+class _Readers:
+    """Adapts fixture callables to the bound reader protocols.
+
+    A reader left unset is bound but fails if read, so a test that binds a
+    device read for collection never silently samples presence or DNS.
+    """
+
+    def __init__(
+        self,
+        presence: PresenceCall | None = None,
+        activity: ActivityCall | None = None,
+        traffic: TrafficCall | None = None,
+    ) -> None:
+        self._presence = presence
+        self._activity = activity
+        self._traffic = traffic
+
+    async def presence(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        assert self._presence is not None, "presence is not read in this test"
+        return await self._presence(targets, observed_at)
+
+    async def activity(
+        self, targets: tuple[str, ...], since: str, observed_at: str
+    ) -> tuple[tuple[QuerySample, ...], tuple[str, ...]]:
+        assert self._activity is not None, "DNS activity is not read in this test"
+        return await self._activity(targets, since, observed_at)
+
+    async def traffic(
+        self, targets: tuple[str, ...]
+    ) -> tuple[tuple[TrafficCounter, ...], tuple[str, ...]]:
+        assert self._traffic is not None
+        return await self._traffic(targets)
+
+
+class _Adopted:
+    """A controller fixture read through the adopted-inventory merge, as bound."""
+
+    def __init__(self, controller: ControllerInventory) -> None:
+        self._controller = controller
+
+    async def identify(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        return await adopted_identity(self._controller, targets, observed_at)
+
+
+class _Controller:
+    def __init__(self, network: UniFiNetwork) -> None:
+        self._network = network
+
+    async def identify(
+        self, targets: tuple[str, ...], observed_at: str
+    ) -> IdentitySample:
+        return await self._network.controller_identity(targets, observed_at)
+
+
+class AdoptedFixture(ControllerInventory, ManagedInventory, Protocol):
+    """A controller fixture with connected clients and adopted inventory."""
+
+
+def legacy_sources(
+    device_source: DeviceDataSource | None = None,
+    identity_source: DeviceIdentitySource | None = None,
+    pihole_presence: PresenceCall | None = None,
+    pihole_activity: ActivityCall | None = None,
+    traffic_source: TrafficCall | None = None,
+    *,
+    adopted: AdoptedFixture | None = None,
+    controller: UniFiNetwork | None = None,
+) -> SourceSet:
+    """Fixtures bound as the legacy ``pihole``/``unifi`` services bind.
+
+    A device source binds a network table and DNS (``network_table`` and
+    ``dns_queries``); ``adopted`` and ``controller`` bind connected clients
+    merged with adopted inventory, which also marks infrastructure.
+    """
+    readers = _Readers(pihole_presence, pihole_activity, traffic_source)
+    identity: DeviceIdentitySource | None = identity_source
+    managed: tuple[ManagedInventory, ...] = ()
+    if adopted is not None:
+        identity, managed = _Adopted(adopted), (adopted,)
+    if controller is not None:
+        identity, managed = _Controller(controller), (controller,)
+    table = device_source is not None
+    return SourceSet(
+        device_reads=(Bound[DeviceDataSource]("pihole", "pihole", device_source),)
+        if device_source is not None
+        else (),
+        identity=(Bound[DeviceIdentitySource]("unifi", "unifi", identity),)
+        if identity is not None
+        else (),
+        presence=(Bound[PresenceReader]("pihole", "pihole", readers),)
+        if table or pihole_presence is not None
+        else (),
+        dns_activity=Bound[DnsActivityReader]("pihole", "pihole", readers)
+        if table or pihole_activity is not None
+        else None,
+        traffic=Bound[TrafficReader]("unifi", "unifi", readers)
+        if traffic_source is not None
+        else None,
+        product=controller,
+        managed=managed,
     )
 
 

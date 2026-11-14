@@ -9,25 +9,37 @@ import json
 from collections import Counter
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Mapping, Protocol
+from typing import Protocol
 
+from .addressing import AddressingSample, assign_addresses
+from .connectors import REGISTRY
 from .contracts import (
+    AddressAssignment,
+    Capability,
     CollectionPlan,
+    ConnectorKind,
     DeviceIdentity,
     DnsObservation,
     DnsWindow,
     Evidence,
     Snapshot,
     TcpObservation,
+    legacy_capabilities,
     load_json,
     private_ipv4,
     utc_now,
 )
-from .dns_activity import DnsActivityWindow, QuerySample
-from .identity_source import DeviceIdentitySource, IdentitySample, ManagedInventory
+from .dns_activity import DnsActivityWindow
+from .identity_merge import merge_identities, rank
+from .identity_source import IdentitySample, ManagedProductLookup
 from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
-from .pihole import DeviceDataSource
 from .presence import MAX_ATTRIBUTION_GAP, PresenceSample, Sighting, epoch
+from .source_set import (
+    CollectionDeviceSource,
+    DeviceData,
+    DeviceDataSource,
+    SourceSet,
+)
 from .traffic import TrafficCounter
 
 
@@ -54,25 +66,32 @@ def scope_fingerprint(plan: CollectionPlan) -> str:
         values.pop("enabled")
     if not plan.labels:
         values.pop("labels")
-    if plan.pihole is None:
-        values.pop("pihole")
+    values.pop("sources")
+    # ``traffic_counters`` reads local presence data, like quick checks, so it
+    # never changes full collection evidence or the receipt journal identity.
+    scoped = [(s, s.capabilities - {"traffic_counters"}) for s in plan.sources]
+    if all(
+        caps == legacy_capabilities(s.kind, s.settings) - {"traffic_counters"}
+        for s, caps in scoped
+    ):
+        # Services that read exactly what the former ``pihole``/``unifi`` keys
+        # read keep those keys, so an untouched configuration keeps its
+        # fingerprint and journal identity.
+        for s, _ in scoped:
+            values[s.kind] = REGISTRY[s.kind].scope_settings(s.settings)
     else:
-        values["pihole"]["password_file"] = (
-            str(plan.pihole.password_file) if plan.pihole.password_file else None
+        # Ids are labels; only what is read, and from where, defines scope.
+        values["sources"] = sorted(
+            (
+                {
+                    "kind": s.kind,
+                    "capabilities": sorted(caps),
+                    "settings": REGISTRY[s.kind].scope_settings(s.settings),
+                }
+                for s, caps in scoped
+            ),
+            key=lambda row: json.dumps(row, sort_keys=True),
         )
-    if plan.unifi is None:
-        values.pop("unifi")
-    else:
-        values["unifi"]["ca_file"] = (
-            str(plan.unifi.ca_file) if plan.unifi.ca_file else None
-        )
-        if plan.unifi.certificate_sha256 is None:
-            values["unifi"].pop("certificate_sha256")
-        # A controller alias enriches identity evidence without changing probe scope.
-        values["unifi"].pop("gateway")
-        # Byte counters are local presence data, like quick checks; they never
-        # change full collection evidence or the receipt journal identity.
-        values["unifi"].pop("traffic_site")
     values["observations_file"] = (
         str(plan.observations_file) if plan.observations_file else None
     )
@@ -108,6 +127,24 @@ def changes(
             difference.append(
                 f"Device association at {device.address} changed: {old.mac} -> {device.mac}; compare address observations, not a presumed physical device."
             )
+    # Only two known modes for the same MAC are comparable, and any addressing
+    # gap or conflict in either collection makes the modes incomparable.
+    if not any(
+        issue.startswith("addressing_") for issue in (*previous.issues, *issues)
+    ):
+        old_modes = {item.address: item for item in previous.snapshot.addressing}
+        for item in current.addressing:
+            prior = old_modes.get(item.address)
+            if (
+                prior is not None
+                and item.mac is not None
+                and prior.mac == item.mac
+                and "unknown" not in (prior.mode, item.mode)
+                and prior.mode != item.mode
+            ):
+                difference.append(
+                    f"Address assignment at {item.address} changed: {prior.mode} -> {item.mode}"
+                )
     # Query counts and absence are not compared: exports may cover different windows.
     if not any(issue.startswith("dns_") for issue in (*previous.issues, *issues)):
         known = {(item.device, item.domain) for item in previous.snapshot.dns}
@@ -120,153 +157,230 @@ def changes(
     return tuple(difference)
 
 
-def mac_conflicts(
-    known: Mapping[str, DeviceIdentity], sample: IdentitySample
-) -> frozenset[str]:
-    """Addresses where ``sample`` names another MAC than a known identity that has one.
+# Capabilities whose binding yields a reader tagged with its service id. A
+# configured service enabling one of them must be bound; adopted inventory
+# alone binds only an untagged lookup, so ``managed_inventory`` is not here.
+_TAGGED_CAPABILITIES: frozenset[Capability] = frozenset(
+    {
+        "network_table",
+        "dns_queries",
+        "controller_clients",
+        "traffic_counters",
+        "local_dns_names",
+    }
+)
+# Any of these enabled on a service turns on the Addressing bucket.
+_ADDRESSING_CAPABILITIES: frozenset[Capability] = frozenset(
+    {"dhcp_leases", "dhcp_reservations", "dhcp_scope"}
+)
 
-    A known identity without a MAC (an address-only record) never conflicts;
-    a sample identity without a MAC conflicts with a known MAC.
+
+def _conflict_issue(kinds: tuple[ConnectorKind, ...]) -> str:
+    """The issue for a MAC disagreement between ``kinds``, highest precedence first.
+
+    Built from the registry's display names so the historical text ("UniFi and
+    Pi-hole ...") is unchanged without naming a vendor here.
     """
-    return frozenset(
-        item.address
-        for item in sample.devices
-        if (prior := known.get(item.address)) is not None
-        and prior.mac
-        and item.mac != prior.mac
+    names = list(dict.fromkeys(REGISTRY[kind].display_name for kind in kinds))
+    joined = (
+        names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
     )
+    return "identity_conflict: " + joined + " disagreed on a selected IP's MAC address"
+
+
+def _disagreeing_kinds(
+    address: str, samples: list[tuple[ConnectorKind, IdentitySample]]
+) -> tuple[ConnectorKind, ...]:
+    """Kinds whose MAC-bearing records at ``address`` disagree, by precedence.
+
+    Each kind ranks by its best record there, as ``merge_identities`` ranks
+    records; ties keep sample order.
+    """
+    best: dict[ConnectorKind, int] = {}
+    for kind, sample in samples:
+        for device in sample.devices:
+            if device.address == address and device.mac:
+                kind_rank = rank(device)
+                best[kind] = min(best.get(kind, kind_rank), kind_rank)
+    return tuple(sorted(best, key=best.__getitem__))
+
+
+async def _read_batches(
+    reader: DeviceDataSource, batches: tuple[tuple[str, ...], ...], observed: str
+) -> tuple[tuple[DeviceData, ...], AddressingSample | None]:
+    """One device source's reads of every batch, with its addressing facts.
+
+    A ``CollectionDeviceSource`` reads its collection-wide facts once and
+    returns one addressing sample. Any other source is read batch by batch; it
+    may return addressing facts from at most one batch, because a scope read
+    per batch could decide addresses of another batch whose own read failed.
+    """
+    if isinstance(reader, CollectionDeviceSource):
+        read = await reader.read_collection(batches, observed)
+        if len(read.batches) != len(batches) or any(
+            part.addressing is not None for part in read.batches
+        ):
+            raise ValueError("Device source returned an invalid collection read")
+        return read.batches, read.addressing
+    parts = tuple([await reader.read(batch, observed) for batch in batches])
+    facts = [part.addressing for part in parts if part.addressing is not None]
+    if len(facts) > 1:
+        raise ValueError("Device source returned addressing facts for several batches")
+    return parts, facts[0] if facts else None
+
+
+def _device_sample(
+    devices: tuple[DeviceIdentity, ...],
+    issues: tuple[str, ...],
+    targets: tuple[str, ...],
+) -> IdentitySample:
+    """A device read's associations, validated against the targets it was asked."""
+    addresses = [device.address for device in devices]
+    if len(set(addresses)) != len(addresses) or not set(addresses) <= set(targets):
+        raise ValueError("Device source returned invalid or out-of-scope addresses")
+    return IdentitySample(devices, frozenset(), issues)
 
 
 class NetworkCollector:
+    """Collect a configured scope through the readers bound from its services.
+
+    The collector knows no vendor: every external read goes through
+    ``sources``, and identity evidence from several services is combined by
+    ``merge_identities``. A full collection reverts an address the services
+    disagree on to its configured record and reports the conflict; a fresh
+    identity confirmation instead leaves it ambiguous.
+    """
+
     def __init__(
-        self,
-        collector: str,
-        plan: CollectionPlan,
-        device_source: DeviceDataSource | None = None,
-        identity_source: DeviceIdentitySource | None = None,
-        pihole_presence: Callable[[tuple[str, ...], str], Awaitable[IdentitySample]]
-        | None = None,
-        pihole_activity: Callable[
-            [tuple[str, ...], str, str],
-            Awaitable[tuple[tuple[QuerySample, ...], tuple[str, ...]]],
-        ]
-        | None = None,
-        traffic_source: Callable[
-            [tuple[str, ...]],
-            Awaitable[tuple[tuple[TrafficCounter, ...], tuple[str, ...]]],
-        ]
-        | None = None,
+        self, collector: str, plan: CollectionPlan, sources: SourceSet = SourceSet()
     ):
-        if plan.pihole is not None and device_source is None:
-            raise ValueError("Configured Pi-hole requires a device-data source")
-        if plan.unifi is not None and identity_source is None:
-            raise ValueError("Configured UniFi requires a device identity source")
+        tagged = {
+            bound.service
+            for bound in (
+                *sources.device_reads,
+                *sources.identity,
+                *sources.presence,
+                *sources.addressing,
+                *(b for b in (sources.dns_activity, sources.traffic) if b is not None),
+            )
+        }
+        # A service enabling a readable or addressing capability must have a
+        # bound reader (addressing rides on a device read or its own binding).
+        required = _TAGGED_CAPABILITIES | _ADDRESSING_CAPABILITIES
+        for service in plan.sources:
+            if service.capabilities & required and service.id not in tagged:
+                raise ValueError(
+                    "Configured service " + service.id + " has no bound reader"
+                )
         self.collector = collector
         self.plan = plan
-        self.device_source = device_source
-        self.identity_source = identity_source
-        self.pihole_presence = pihole_presence
-        self.pihole_activity = pihole_activity
-        self.traffic_source = traffic_source
+        self.sources = sources
 
     @property
     def confirms_identity(self) -> bool:
-        """Whether any source can tie an address to a MAC (UniFi or Pi-hole)."""
-        return self.identity_source is not None or self.device_source is not None
+        """Whether any bound capability can tie an address to a MAC."""
+        return self.sources.confirms_identity
+
+    @property
+    def product_lookup(self) -> ManagedProductLookup | None:
+        """The bound controller product lookup, if a service offers one."""
+        return self.sources.product
 
     async def confirm_identity(
         self, targets: tuple[str, ...], observed_at: str
     ) -> IdentitySample:
         """A fresh read of who holds ``targets``, from every source collection uses.
 
-        UniFi's connected clients and adopted devices are merged as collection
-        merges them, then Pi-hole's network-table association is read through
-        the device source; its DNS rows are not used. An address on which the
+        Network-table reads (the device reads of services that also bind
+        presence; their DNS rows are not used) come first, then each identity
+        binding, merged by ``merge_identities``. An address on which the
         sources name different MACs is ambiguous and has no identity, so a
         caller can never trust one source over another that disagrees. Nothing
         is probed and no worker lock is needed. Raises ValueError when no source
-        is configured or a source answers outside ``targets``.
+        is bound or a source answers outside ``targets``.
         """
         if not self.confirms_identity:
-            raise ValueError("No UniFi or Pi-hole source can confirm identities")
-        sample = await self._identity_sample(observed_at, targets)
-        if self.device_source is None:
-            return sample
-        data = await self.device_source.read(targets, observed_at)
-        addresses = [device.address for device in data.devices]
-        if len(set(addresses)) != len(addresses) or not set(addresses) <= set(targets):
-            raise ValueError("Device source returned invalid or out-of-scope addresses")
-        pihole = {device.address: device for device in data.devices}
-        ambiguous = sample.ambiguous_addresses | mac_conflicts(pihole, sample)
-        # UniFi's identity wins where both agree, as in collection.
-        merged = pihole | {device.address: device for device in sample.devices}
+            raise ValueError("No configured source can confirm identities")
+        identities = await self._identity_samples(observed_at, targets)
+        tables = {bound.service for bound in self.sources.presence}
+        samples: list[IdentitySample] = []
+        for bound in self.sources.device_reads:
+            if bound.service in tables:
+                data = await bound.reader.read(targets, observed_at)
+                samples.append(_device_sample(data.devices, data.issues, targets))
+        # Table associations first, so devices keep their first-seen order.
+        samples.extend(sample for _, sample in identities)
+        merge = merge_identities(samples, frozenset(targets))
         return IdentitySample(
+            merge.devices,
+            merge.ambiguous | merge.conflicts,
             tuple(
-                identity
-                for address, identity in merged.items()
-                if address not in ambiguous
+                dict.fromkeys(issue for sample in samples for issue in sample.issues)
             ),
-            frozenset(ambiguous),
-            tuple(dict.fromkeys((*data.issues, *sample.issues))),
         )
+
+    async def _identity_samples(
+        self, observed: str, targets: tuple[str, ...] | None = None
+    ) -> list[tuple[ConnectorKind, IdentitySample]]:
+        """Each identity binding's sample for ``targets`` (default: the plan's)."""
+        scope_targets = self.plan.targets if targets is None else targets
+        return [
+            (bound.kind, await bound.reader.identify(scope_targets, observed))
+            for bound in self.sources.identity
+        ]
 
     async def _identity_sample(
         self, observed: str, targets: tuple[str, ...] | None = None
     ) -> IdentitySample:
-        """UniFi's connected and adopted identities for ``targets`` (default: the plan's)."""
-        if self.identity_source is None:
-            return IdentitySample()
+        """Every identity binding's evidence for ``targets``, merged.
+
+        Disagreeing services leave the address ambiguous. Raises ValueError
+        when a binding answers outside ``targets``.
+        """
         scope_targets = self.plan.targets if targets is None else targets
-        samples = [await self.identity_source.identify(scope_targets, observed)]
-        if isinstance(self.identity_source, ManagedInventory):
-            samples.append(
-                await self.identity_source.managed_sightings(
-                    scope_targets, observed, samples[0].devices
-                )
-            )
-        devices: dict[str, DeviceIdentity] = {}
-        ambiguous: set[str] = set()
-        issues: list[str] = []
-        scope = frozenset(scope_targets)
-        for sample in samples:
-            addresses = {identity.address for identity in sample.devices}
-            if (
-                len(addresses) != len(sample.devices)
-                or addresses & sample.ambiguous_addresses
-                or not (addresses | sample.ambiguous_addresses) <= scope
-            ):
-                raise ValueError(
-                    "Identity source returned invalid or out-of-scope addresses"
-                )
-            issues.extend(sample.issues)
-            ambiguous.update(sample.ambiguous_addresses)
-            for identity in sample.devices:
-                prior = devices.get(identity.address)
-                if prior is not None and prior.mac != identity.mac:
-                    ambiguous.add(identity.address)
-                    issues.append(
-                        "unifi_ambiguous: connected and adopted inventory disagree on a watched address"
-                    )
-                devices[identity.address] = identity
+        samples = [s for _, s in await self._identity_samples(observed, scope_targets)]
+        merge = merge_identities(samples, frozenset(scope_targets))
         return IdentitySample(
+            merge.devices,
+            merge.ambiguous | merge.conflicts,
             tuple(
-                identity
-                for address, identity in devices.items()
-                if address not in ambiguous
+                dict.fromkeys(issue for sample in samples for issue in sample.issues)
             ),
-            frozenset(ambiguous),
-            tuple(dict.fromkeys(issues)),
+        )
+
+    def _reads_dns(self) -> bool:
+        """Whether a bound device read returns DNS rows (``dns_queries`` is enabled).
+
+        Binding sets ``dns_activity`` only for a service with ``dns_queries``,
+        and that same service's device read carries its query rows.
+        """
+        dns = self.sources.dns_activity
+        return dns is not None and any(
+            bound.service == dns.service for bound in self.sources.device_reads
+        )
+
+    def _reads_addressing(self) -> bool:
+        """Whether any configured service enables an addressing capability.
+
+        Without one the collector reads no addressing facts and the snapshot's
+        ``addressing`` stays empty, so evidence text is unchanged.
+        """
+        return any(
+            service.capabilities & _ADDRESSING_CAPABILITIES
+            for service in self.plan.sources
         )
 
     def _infrastructure(self, identity: DeviceIdentity) -> bool:
-        """Adopted UniFi gateways, switches and access points.
+        """Adopted gateways, switches and access points.
 
-        They are network infrastructure, not DNS clients of Pi-hole; profiling
-        them would only produce a misleading "no DNS" result.
+        They are network infrastructure, not DNS clients; profiling them would
+        only produce a misleading "no DNS" result. A service whose adopted
+        inventory is bound without connected clients marks nothing, because
+        its inventory is never read.
         """
-        return isinstance(
-            self.identity_source, ManagedInventory
-        ) and self.identity_source.recently_managed(identity)
+        return any(
+            inventory.recently_managed(identity) for inventory in self.sources.managed
+        )
 
     async def collect_presence(self, since: str) -> PresenceSample:
         """Sample positive evidence only, without building or publishing a full scan."""
@@ -294,8 +408,16 @@ class NetworkCollector:
             for address in plan.targets
             if address not in sightings and address not in ambiguous
         )
-        if self.pihole_presence is not None and remaining:
-            cached = await self.pihole_presence(remaining, observed)
+        for bound in self.sources.presence:
+            # Each table is asked only about addresses nothing has explained yet.
+            remaining = tuple(
+                address
+                for address in remaining
+                if address not in sightings and address not in ambiguous
+            )
+            if not remaining:
+                break
+            cached = await bound.reader.presence(remaining, observed)
             # Ordinary absence/staleness is expected when watching every address on a subnet.
             issues.extend(
                 issue
@@ -342,8 +464,10 @@ class NetworkCollector:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
         traffic: tuple[TrafficCounter, ...] = ()
-        if self.traffic_source is not None:
-            counters, traffic_issues = await self.traffic_source(plan.targets)
+        if self.sources.traffic is not None:
+            counters, traffic_issues = await self.sources.traffic.reader.traffic(
+                plan.targets
+            )
             issues.extend(traffic_issues)
             # Attribute bytes only where this check confirmed the same MAC at the
             # same address; IP-only or conflicting sightings get no traffic.
@@ -373,10 +497,10 @@ class NetworkCollector:
         self, previous: PresenceSample, current: PresenceSample
     ) -> tuple[tuple[DnsActivityWindow, ...], tuple[str, ...]]:
         gap = epoch(current.checked_at) - epoch(previous.checked_at)
-        read = self.pihole_activity
+        bound = self.sources.dns_activity
         if (
             not self.plan.dns_profiles
-            or read is None
+            or bound is None
             or not 0 < gap <= MAX_ATTRIBUTION_GAP
         ):
             return (), ()
@@ -409,7 +533,7 @@ class NetworkCollector:
         }
         if not confirmed:
             return (), ()
-        samples, issues = await read(
+        samples, issues = await bound.reader.activity(
             tuple(confirmed), previous.checked_at, current.checked_at
         )
         return (
@@ -517,32 +641,38 @@ class NetworkCollector:
                 )
                 for address in self.plan.targets
             }
-            devices = configured.copy()
             dns = imported.dns if imported else ()
             window = None
-            if self.device_source is not None:
+            # Per kind, so a conflict can name the services that disagreed.
+            samples: list[tuple[ConnectorKind, IdentitySample]] = []
+            # Each device read carries at most one addressing sample per collection.
+            addressing: list[AddressingSample] = []
+            if self.sources.device_reads:
                 dns_rows: list[DnsObservation] = []
                 windows: list[DnsWindow] = []
-                for batch in batches:
-                    enriched = await self.device_source.read(batch, observed)
-                    if (
-                        len({device.address for device in enriched.devices})
-                        != len(enriched.devices)
-                        or not {device.address for device in enriched.devices}
-                        <= set(batch)
-                        or not {query.device for query in enriched.dns} <= set(batch)
-                    ):
-                        raise ValueError(
-                            "Device source returned observations outside the configured scope for this batch"
-                        )
-                    for device in enriched.devices:
-                        devices[device.address] = replace(
-                            device, label=labels.get(device.address)
-                        )
-                    dns_rows.extend(enriched.dns)
-                    if enriched.window is not None:
-                        windows.append(enriched.window)
-                    issues.extend(enriched.issues)
+                for bound in self.sources.device_reads:
+                    table: list[DeviceIdentity] = []
+                    parts, facts = await _read_batches(bound.reader, batches, observed)
+                    if facts is not None:
+                        addressing.append(facts)
+                    for batch, enriched in zip(batches, parts, strict=True):
+                        if (
+                            len({device.address for device in enriched.devices})
+                            != len(enriched.devices)
+                            or not {device.address for device in enriched.devices}
+                            <= set(batch)
+                            or not {query.device for query in enriched.dns}
+                            <= set(batch)
+                        ):
+                            raise ValueError(
+                                "Device source returned observations outside the configured scope for this batch"
+                            )
+                        table.extend(enriched.devices)
+                        dns_rows.extend(enriched.dns)
+                        if enriched.window is not None:
+                            windows.append(enriched.window)
+                        issues.extend(enriched.issues)
+                    samples.append((bound.kind, IdentitySample(tuple(table))))
                 if len(dns_rows) > MAX_DNS_ROWS:
                     issues.append("dns_truncated: combined destination limit reached")
                 dns = tuple(dns_rows[:MAX_DNS_ROWS])
@@ -555,6 +685,8 @@ class NetworkCollector:
                         raise ValueError(
                             "Device source returned inconsistent batch windows"
                         )
+                    # At most one bound service reads DNS, so a complete window
+                    # has one part per batch.
                     window = DnsWindow(
                         first.source,
                         first.from_at,
@@ -566,35 +698,60 @@ class NetworkCollector:
                         and not any(issue.startswith("dns_") for issue in issues),
                     )
                 issues = list(dict.fromkeys(issues))
-            if self.identity_source is not None:
-                sample = await self._identity_sample(observed)
-                issues.extend(sample.issues)
-                for address in sample.ambiguous_addresses:
-                    devices[address] = configured[address]
-                conflicts = mac_conflicts(devices, sample)
-                for item in sample.devices:
-                    devices[item.address] = (
-                        configured[item.address]
-                        if item.address in conflicts
-                        else replace(item, label=labels.get(item.address))
+            if self.sources.identity:
+                identities = await self._identity_samples(observed)
+                samples.extend(identities)
+                issues.extend(
+                    dict.fromkeys(
+                        issue for _, sample in identities for issue in sample.issues
                     )
-                if conflicts:
-                    issues.append(
-                        "identity_conflict: UniFi and Pi-hole disagreed on a selected IP's MAC address"
+                )
+            merge = merge_identities(
+                [sample for _, sample in samples], frozenset(self.plan.targets)
+            )
+            winners = {device.address: device for device in merge.devices}
+            # Ambiguous and conflicting addresses keep their configured record;
+            # the snapshot keeps the configured target order.
+            devices = {
+                address: replace(winners[address], label=labels.get(address))
+                if address in winners
+                else record
+                for address, record in configured.items()
+            }
+            for kinds in dict.fromkeys(
+                _disagreeing_kinds(address, samples)
+                for address in self.plan.targets
+                if address in merge.conflicts
+            ):
+                issues.append(_conflict_issue(kinds))
+            assignments: tuple[AddressAssignment, ...] = ()
+            addressing_issues: tuple[str, ...] = ()
+            if self._reads_addressing():
+                for reader in self.sources.addressing:
+                    addressing.append(
+                        await reader.reader.addressing(self.plan.targets, observed)
                     )
+                # Decided against the final identities, after conflicts reverted
+                # disputed addresses to their configured (MAC-less) records.
+                assignments, addressing_issues = assign_addresses(
+                    addressing, devices, self.plan.targets, observed
+                )
             snapshot = Snapshot(
                 imported.observed_at if imported else observed,
                 tuple(observations),
                 dns,
                 tuple(devices.values()),
                 window,
+                assignments,
             )
-            if self.plan.observations_file is None and self.device_source is None:
+            if self.plan.observations_file is None and not self._reads_dns():
                 issues.append("dns_unavailable: no DNS observation source configured")
             if any(item.status in {"timeout", "unreachable"} for item in snapshot.tcp):
                 issues.append(
                     "tcp_incomplete: some probes timed out or were unreachable"
                 )
+            # Addressing issues come last, so other issue text keeps its order.
+            issues.extend(item for item in addressing_issues if item not in issues)
         scope = scope_fingerprint(self.plan)
         evidence = Evidence(
             scan_id,

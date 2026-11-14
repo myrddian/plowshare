@@ -131,6 +131,51 @@ projection and can page relevant evidence; omitted rows never prove absence.
 The local receipt file is bounded to 128 MiB and 1,000 scans; a full journal
 refuses new work rather than dropping history or uncertain receipts.
 
+### Services, capabilities and address assignment
+
+`collection.sources` lists each external service with a `kind` (`pihole` or
+`unifi`), an operator-chosen `id`, the `capabilities` turned on and the
+service's `settings`. The older `collection.pihole` and `collection.unifi` keys
+still work and read what they always have; a configuration uses one form or the
+other. `enable-capability --service <id> --capability <name> [--off]` turns a
+capability on or off on a stopped collector and rewrites the older keys to
+`sources` under the same scope-change fence as `connect-pihole`. See
+[turning capabilities on](SETUP.md#turn-capabilities-on).
+
+The opt-in capabilities are `dhcp_leases`, `dhcp_reservations`, `dhcp_scope`
+and `local_dns_names` on Pi-hole, and `dhcp_reservations` and `dhcp_scope` on
+UniFi. They are off on an upgraded configuration until the operator turns them
+on. With them, each selected address with a confirmed MAC gets one of four
+assignment modes:
+
+- `dhcp_reserved`: a Pi-hole reservation (`dhcp_reservation`) or UniFi fixed IP
+  (`controller_fixed_ip`) names this address and MAC.
+- `dhcp_dynamic`: an active Pi-hole lease names this address and MAC
+  (`dhcp_lease`), or the address is inside a complete UniFi DHCP range, which
+  has no lease table to check (`inside_dhcp_range`).
+- `static`: a complete DHCP scope covers the subnet and the address is outside
+  the range (`outside_dhcp_range`), or inside it with no lease or reservation in
+  that service's completely read lease table (`no_lease_or_reservation`).
+- `unknown`: anything else. `static` is only claimed from a complete DHCP scope
+  and is never a default.
+
+A scope is complete only when `dhcp_reservations` is on for that service as
+well as `dhcp_scope`, on Pi-hole and UniFi alike: without the reservation or
+fixed-IP read, an unseen reservation could hold any address, so `dhcp_scope`
+alone never gives a `static` result. When several services' complete scopes
+cover an address and decide differently, it is `unknown` with an
+`addressing_conflict`.
+
+Leases are identity and addressing evidence, not presence: they never mark a
+device online. Reservations and fixed IPs are intent only and never assert an
+identity. Pi-hole reads `config/dhcp`, `dhcp/leases` while its DHCP server is
+active, and `config/dns/hosts` for local names. UniFi reads fixed IPs from its
+known-client list (`rest/user`) and DHCP settings from `rest/networkconf`; both
+are legacy endpoints that need `trafficSite`. `enable-unifi-traffic` is the way
+to set `trafficSite`, and it also turns UniFi traffic counters on. Confirm the
+UniFi API key can read those endpoints before enabling them; a refused read is
+an addressing gap.
+
 ## Guided setup
 
 Use the [guided start walkthrough](SETUP.md#start-and-use-the-dashboard). The

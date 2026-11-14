@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from support import FixturePort, MemoryReceipts, configuration
+from support import FixturePort, MemoryReceipts, configuration, legacy_sources
 
 from plowshare_privacy.collection import NetworkCollector, scope_fingerprint
 from plowshare_privacy.contracts import CollectionPlan, DeviceIdentity, DnsObservation
@@ -109,7 +109,9 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         collector = NetworkCollector(
-            "fixture", PLAN, identity_source=Controller(), pihole_presence=pihole
+            "fixture",
+            PLAN,
+            legacy_sources(identity_source=Controller(), pihole_presence=pihole),
         )
         with (
             patch("plowshare_privacy.collection.utc_now", return_value=at(300)),
@@ -225,7 +227,9 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
                     ),
                 ]
             )
-            collector = NetworkCollector("fixture", plan, pihole_activity=read)
+            collector = NetworkCollector(
+                "fixture", plan, legacy_sources(pihole_activity=read)
+            )
             clock = 0
             history = PresenceHistory(root)
             watch = PresenceWatch(
@@ -324,7 +328,7 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
         read = AsyncMock(return_value=((QuerySample((), 0, 0, ()),), ()))
         inventory = ManagedFixture(managed={"mac:" + OTHER_MAC})
         collector = NetworkCollector(
-            "fixture", plan, identity_source=inventory, pihole_activity=read
+            "fixture", plan, legacy_sources(adopted=inventory, pihole_activity=read)
         )
         previous = PresenceSample(
             at(120),
@@ -353,7 +357,7 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
                 identity(B, "unifi", 300, OTHER_MAC),
             ),
         )
-        collector = NetworkCollector("fixture", PLAN, identity_source=inventory)
+        collector = NetworkCollector("fixture", PLAN, legacy_sources(adopted=inventory))
         with (
             patch("plowshare_privacy.collection.utc_now", return_value=at(300)),
             patch(
@@ -461,7 +465,9 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         collector = NetworkCollector(
-            "fixture", plan, identity_source=identities, traffic_source=traffic
+            "fixture",
+            plan,
+            legacy_sources(identity_source=identities, traffic_source=traffic),
         )
         with patch(
             "plowshare_privacy.collection._quick_connect",
@@ -474,7 +480,9 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
     async def test_dns_activity_refuses_conflicts_and_reused_addresses(self) -> None:
         plan = replace(PLAN, dns_profiles=True)
         read = AsyncMock()
-        collector = NetworkCollector("fixture", plan, pihole_activity=read)
+        collector = NetworkCollector(
+            "fixture", plan, legacy_sources(pihole_activity=read)
+        )
         previous = PresenceSample(
             at(120),
             (

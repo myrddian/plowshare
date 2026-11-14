@@ -215,8 +215,7 @@ class DeferredCollectionTest(unittest.IsolatedAsyncioTestCase):
             legacy.pop("device_descriptions")
             legacy.pop("enabled")
             legacy.pop("labels")
-            legacy.pop("pihole")
-            legacy.pop("unifi")
+            legacy.pop("sources")
             legacy["observations_file"] = str(plan.observations_file)
             expected = hashlib.sha256(
                 json.dumps(legacy, sort_keys=True).encode()
