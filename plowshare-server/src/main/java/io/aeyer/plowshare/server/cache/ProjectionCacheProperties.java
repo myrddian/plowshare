@@ -4,7 +4,11 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
-/** Explicit per-projection budgets; version connections use a separate bounded pool. */
+/**
+ * Explicit per-projection budgets; version connections use a separate bounded pool. {@code timeout}
+ * is the single deadline of one cached read: its FETCH slot wait and its wait on a shared reload
+ * both draw on it (see {@link io.aeyer.plowshare.server.reads.ReadDeadline}).
+ */
 @ConfigurationProperties("plowshare.projection-cache")
 public record ProjectionCacheProperties(
     @DefaultValue("256") int entries,
@@ -15,12 +19,19 @@ public record ProjectionCacheProperties(
     @DefaultValue("64") int waitersPerLoad,
     @DefaultValue("8192") int dependencyLinks,
     @DefaultValue("8388608") long maxValueBytes,
-    @DefaultValue("5s") Duration timeout,
+    @DefaultValue("2s") Duration timeout,
     @DefaultValue("1s") Duration notificationPoll,
     @DefaultValue("1s") Duration reconnectDelay,
     @DefaultValue("128") int maxPendingTransactions,
     @DefaultValue("24") int maxProjections,
     @DefaultValue("4") int versionConnections) {
+  /**
+   * A domain-scoped entry depends on at most every domain; an item-scoped one on at most {@link
+   * ProjectionItemVersions#MAX_ITEMS} items. {@code dependencyLinks} still bounds the total.
+   */
+  private static final int DEPENDENCIES_PER_KEY =
+      Math.max(ProjectionVersions.Domain.values().length, ProjectionItemVersions.MAX_ITEMS);
+
   public ProjectionCacheProperties {
     new SnapshotCache.Limits(
         entries,
@@ -29,7 +40,7 @@ public record ProjectionCacheProperties(
         loadingBytes,
         waiters,
         waitersPerLoad,
-        ProjectionVersions.Domain.values().length,
+        DEPENDENCIES_PER_KEY,
         dependencyLinks,
         timeout);
     if (maxValueBytes < 1
@@ -59,7 +70,7 @@ public record ProjectionCacheProperties(
         loadingBytes,
         waiters,
         waitersPerLoad,
-        ProjectionVersions.Domain.values().length,
+        DEPENDENCIES_PER_KEY,
         dependencyLinks,
         timeout);
   }

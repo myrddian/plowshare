@@ -69,6 +69,7 @@ import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
+import io.aeyer.plowshare.server.reads.BusyReadRetry;
 import io.aeyer.plowshare.server.relay.RelayPublishing;
 import io.aeyer.plowshare.server.todos.TodoLists;
 import java.nio.charset.StandardCharsets;
@@ -185,9 +186,25 @@ import org.slf4j.LoggerFactory;
 public final class JobRuntime {
   private InformationAccess informationAccess;
   private InformationJobs informationInputs;
+  private BusyReadRetry logChecks = BusyReadRetry.defaults();
 
   public void useInformationInputs(InformationJobs inputs) {
     this.informationInputs = inputs;
+  }
+
+  /** Replaces the retry policy of the per-step log checks; for tests. */
+  void useLogCheckRetry(BusyReadRetry retry) {
+    logChecks = Objects.requireNonNull(retry, "retry");
+  }
+
+  /**
+   * The run's log-readability check, taken before the run and at each step. It changes nothing, so
+   * a busy refusal from its cached read (the cache's single deadline passed, usually while another
+   * request's reload of the same deny set was still running) is retried a bounded number of times
+   * instead of ending the job. A real denial ({@code NotFoundFault}) is never retried.
+   */
+  void requireLogReadable(String log, String owner) {
+    if (informationInputs != null) logChecks.run(() -> informationInputs.requireLog(log, owner));
   }
 
   public void useInformationAccess(InformationAccess access) {
@@ -2118,7 +2135,7 @@ public final class JobRuntime {
         transcript.usage().status() != UsageAttribution.Status.ATTRIBUTED
             ? ownerOf(callerHandle, session, conversation)
             : transcript.usage().accountHandle();
-    if (informationInputs != null) informationInputs.requireLog(conversation, owner);
+    requireLogReadable(conversation, owner);
     Hooks skillChecks = fileChecksFor(definition, session, owner);
     HookContext declared =
         new HookContext(
@@ -2207,7 +2224,7 @@ public final class JobRuntime {
             taken,
             budget.spent() - callsBefore,
             "");
-      if (informationInputs != null) informationInputs.requireLog(conversation, owner);
+      requireLogReadable(conversation, owner);
       if (previous != null
           && !previous.hash().equals(hash)
           && (repair == null || !repair.crosses(previous, hash)))
@@ -2572,7 +2589,7 @@ public final class JobRuntime {
         transcript.usage().status() != UsageAttribution.Status.ATTRIBUTED
             ? ownerOf(callerHandle, sessionId, transcript.conversationId())
             : transcript.usage().accountHandle();
-    if (informationInputs != null) informationInputs.requireLog(transcript.conversationId(), owner);
+    requireLogReadable(transcript.conversationId(), owner);
     Hooks skillChecks = fileChecksFor(definition, sessionId, owner);
     // THE RUN'S IN-TURN LOG STAGES (spec 2026-09-28-hooks-reach-the-log, slices 2 and 3):
     // stage.* and approval.pre, asked of the same chain as every run stage — this run's
@@ -3040,8 +3057,7 @@ public final class JobRuntime {
       admittedAuthority.run();
       if (operation != null) operations.require(operation);
       Set<AgentRules.Rule> fileRulesForThisStep = Set.copyOf(deliveredFileRules);
-      if (informationInputs != null)
-        informationInputs.requireLog(transcript.conversationId(), owner);
+      requireLogReadable(transcript.conversationId(), owner);
       // The three boundary checks, in the order a caller would want them
       // answered. Cancellation before the budget so that a cancelled run
       // is reported as cancelled rather than as having run out of

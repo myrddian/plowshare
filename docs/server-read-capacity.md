@@ -34,7 +34,15 @@ bounds all caches together, and the oldest waiter whose cache has a free slot go
 load before admission, so a slot bounds distinct concurrent loads, not requesters. A requester on a
 miss waits in arrival order for a slot, including inside a transaction: the load runs on that
 requester's thread and its own connection, so waiting cannot starve a slot holder.
-`plowshare.read-scheduling.fetch-wait-millis` (5,000 ms) only turns a stuck load into a refusal.
+A fill's slot wait and its requesters' wait on that shared reload draw on one deadline per read,
+`plowshare.projection-cache.timeout` (2 s), which starts when the request reaches the cache: the
+slot wait uses whatever remains of it. A requester still waiting at the deadline is refused as busy
+(`ReadUnavailableException`) without starting another load; an elected loader whose load outlived
+it still stores its value, which serves the next request, and only its own caller is refused.
+`plowshare.read-scheduling.fetch-wait-millis` (2,000 ms) bounds a FETCH wait outside any cached
+read. The agent job runtime retries its side-effect-free per-step log check up to three more times
+(100, 200 and 400 ms apart) after a busy refusal; checks that may hold a transaction, such as a
+log-visibility callback, still refuse at once.
 Log deny sets and the authority snapshot use no per-account seat: a deny set has one key per
 account, so an account's misses always share one fill, and the snapshot is one key. PROC queue and
 usage report keys include the query, so one account could start many distinct fills; those fills

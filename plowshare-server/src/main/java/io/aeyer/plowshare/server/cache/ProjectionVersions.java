@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -34,7 +35,60 @@ public interface ProjectionVersions {
     READABILITY,
     KNOWLEDGE_ACCESS,
     KNOWLEDGE_REVOCATIONS,
-    AUTHORITY
+    AUTHORITY;
+
+    /**
+     * Whether this domain's triggers also version and notify individual {@link Item items}
+     * (migration V257). Only such domains may back an item-scoped projection.
+     */
+    public boolean itemTracked() {
+      return this == READABILITY;
+    }
+  }
+
+  /**
+   * One row group of an item-tracked domain, as named by its triggers (migration V257). The address
+   * is opaque and bounded, never content or an allow decision:
+   *
+   * <ul>
+   *   <li>{@code conversation:<root log>}: a log tree, addressed by each root of the changed log's
+   *       ancestry under {@code information_log_readable}'s edges (conversation parent, caller to
+   *       conductor, parent orchestration's conductor, orchestration id to conductor). Changes to
+   *       conversations, orchestrations, retained job inputs and quarantined payloads;
+   *   <li>{@code revision:<id>}, {@code resource:<id>}, {@code scope:<id>}: information rows;
+   *   <li>{@code *}: every item of the domain. A change the triggers cannot address, or one naming
+   *       more than the fan-out bound, moves this item instead. Every captured item set includes
+   *       it.
+   * </ul>
+   */
+  record Item(Domain domain, String address) {
+    /** The address of a domain's fan-out fallback. */
+    public static final String ALL = "*";
+
+    private static final Pattern ADDRESS =
+        Pattern.compile("(\\*|(conversation|revision|resource|scope):[!-{}~]{1,200})");
+
+    public Item {
+      Objects.requireNonNull(domain);
+      if (!domain.itemTracked())
+        throw new IllegalArgumentException("Projection domain is not item-tracked");
+      if (address == null || !ADDRESS.matcher(address).matches())
+        throw new IllegalArgumentException("Invalid projection item address");
+    }
+
+    /** The fan-out fallback of {@code domain}. */
+    public static Item all(Domain domain) {
+      return new Item(domain, ALL);
+    }
+
+    public boolean isAll() {
+      return ALL.equals(address);
+    }
+
+    /** The cache dependency through which a keyed notification invalidates this item. */
+    public SnapshotCache.Dependency dependency() {
+      return new SnapshotCache.Dependency("item:" + domain.name() + ":" + address);
+    }
   }
 
   /**

@@ -316,7 +316,11 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T> {
     }
     Flight selected = flight;
     try {
-      schedule(waiter);
+      // An elected inline loader runs on this thread and has finished before readInline returns,
+      // so its own waiter needs no deadline. Arming one would let the timer abandon the flight
+      // when a slow load outlives it, discarding a value that would serve the next request; the
+      // caller's deadline is decided by its owner after the load instead.
+      if (!(dispatch && inline)) schedule(waiter);
       if (dispatch) {
         if (inline) load(selected, loader);
         else executor.execute(() -> load(selected, loader));

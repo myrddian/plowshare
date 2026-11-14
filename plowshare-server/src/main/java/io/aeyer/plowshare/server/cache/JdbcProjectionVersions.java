@@ -1,16 +1,22 @@
 package io.aeyer.plowshare.server.cache;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,8 +32,12 @@ import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy;
  * <p>Spring synchronization may retain the independent autocommit lease until the caller
  * transaction completes. Freshness and the captured snapshot are per statement, not necessarily per
  * new physical lease. The version pool is separately bounded and must account for this occupancy.
+ *
+ * <p>Item versions ({@link ProjectionItemVersions}) read {@code snapshot_cache_item_versions}
+ * through the same independent leases: one primary-key probe per item, with the caller's own
+ * transaction refused by the same eligibility guard as domain capture.
  */
-public final class JdbcProjectionVersions implements ProjectionVersions {
+public final class JdbcProjectionVersions implements ProjectionVersions, ProjectionItemVersions {
   private record Counters(UUID database, Map<Domain, Long> values) {}
 
   private record Captured(
@@ -196,6 +206,92 @@ public final class JdbcProjectionVersions implements ProjectionVersions {
   @Override
   public boolean canShare() {
     return eligibility().safe();
+  }
+
+  // The item list is bound as parallel arrays; (domain,item) is the primary key of the table, so
+  // each requested item is one index probe. Absent rows read as 0 (never written).
+  private static final String ITEM_COUNTERS =
+      """
+      SELECT requested.domain,requested.item,coalesce(version.counter,0) AS counter,
+        identity.database_id
+      FROM unnest(?::text[],?::text[]) AS requested(domain,item)
+      CROSS JOIN snapshot_cache_identity identity
+      LEFT JOIN snapshot_cache_item_versions version
+        ON version.domain=requested.domain AND version.item=requested.item
+      WHERE identity.singleton
+      """;
+
+  private static final String ITEMS_CURRENT =
+      """
+      SELECT identity.database_id=?::uuid AND NOT EXISTS(
+        SELECT 1 FROM unnest(?::text[],?::text[],?::bigint[]) AS expected(domain,item,counter)
+        LEFT JOIN snapshot_cache_item_versions version
+          ON version.domain=expected.domain AND version.item=expected.item
+        WHERE coalesce(version.counter,0)<>expected.counter)
+      FROM snapshot_cache_identity identity WHERE identity.singleton
+      """;
+
+  @Override
+  public Optional<ItemToken> captureItems(Set<Item> items) {
+    if (items == null || items.isEmpty())
+      throw new IllegalArgumentException("Explicit projection items required");
+    var selected = new TreeSet<Item>(ITEM_ORDER);
+    for (Item item : items) {
+      selected.add(Objects.requireNonNull(item));
+      selected.add(Item.all(item.domain()));
+    }
+    if (selected.size() > MAX_ITEMS)
+      throw new IllegalArgumentException("Too many projection items for one entry");
+    Eligibility eligibility = eligibility();
+    if (!eligibility.safe()) return Optional.empty();
+    var domains = selected.stream().map(item -> domainName(item.domain())).toArray(String[]::new);
+    var addresses = selected.stream().map(Item::address).toArray(String[]::new);
+    var counters = new HashMap<Item, Long>();
+    var databases = new HashSet<UUID>();
+    authoritative.query(
+        ITEM_COUNTERS,
+        statement -> {
+          statement.setArray(1, statement.getConnection().createArrayOf("text", domains));
+          statement.setArray(2, statement.getConnection().createArrayOf("text", addresses));
+        },
+        row -> {
+          var domain = Domain.valueOf(row.getString("domain").toUpperCase(Locale.ROOT));
+          counters.put(new Item(domain, row.getString("item")), row.getLong("counter"));
+          databases.add(row.getObject("database_id", UUID.class));
+        });
+    // A row per requested item is the statement's contract; anything else is not evidence.
+    if (!counters.keySet().equals(selected) || databases.size() != 1)
+      throw new IllegalStateException("Projection item versions unavailable");
+    UUID database = databases.iterator().next();
+    if (!database.equals(eligibility.database())) return Optional.empty();
+    return Optional.of(new ItemToken(database, counters));
+  }
+
+  @Override
+  public boolean currentItems(ItemToken token) {
+    Objects.requireNonNull(token);
+    var entries = new ArrayList<>(token.counters().entrySet());
+    var domains = entries.stream().map(entry -> domainName(entry.getKey().domain())).toArray();
+    var addresses = entries.stream().map(entry -> entry.getKey().address()).toArray();
+    var counters = entries.stream().map(Map.Entry::getValue).toArray();
+    return Boolean.TRUE.equals(
+        authoritative.query(
+            ITEMS_CURRENT,
+            statement -> {
+              statement.setObject(1, token.database());
+              statement.setArray(2, statement.getConnection().createArrayOf("text", domains));
+              statement.setArray(3, statement.getConnection().createArrayOf("text", addresses));
+              statement.setArray(4, statement.getConnection().createArrayOf("bigint", counters));
+            },
+            (ResultSet row) -> row.next() ? row.getBoolean(1) : null));
+  }
+
+  private static final Comparator<Item> ITEM_ORDER =
+      Comparator.comparing(Item::domain).thenComparing(Item::address);
+
+  private static String domainName(Domain domain) {
+    // Item domains come exclusively from the closed enum and are bound as values, never SQL text.
+    return domain.name().toLowerCase(Locale.ROOT);
   }
 
   private Eligibility eligibility() {

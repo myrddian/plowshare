@@ -1,7 +1,7 @@
 # Item-level cache invalidation and shared read data
 
-Status: proposed design, not implemented. It extends the
-[query and cache strategy](query-efficiency-and-cache-design.md) and the
+Status: slice 0 implemented (see [Slice 0 status](#slice-0-status)); later slices proposed. It
+extends the [query and cache strategy](query-efficiency-and-cache-design.md) and the
 [deployment follow-ups](query-efficiency-deployment-followups.md). The current projection caches,
 FETCH lane and notification freshness stay in place until each slice below replaces them. An
 independent review of the first draft is reflected throughout; its corrections are summarised in
@@ -97,6 +97,33 @@ items changed.
   write committed on another by up to that bound; projections that must not lag stay versioned.
 - **Trusted-hit bookkeeping** is keyed by item, so one change no longer clears the trusted map. The
   map's 256-entry limit is sized per projection.
+
+### Slice 0 status
+
+Implemented: migration `V257__item_projection_versions.sql`, `ProjectionItemVersions`,
+`ItemProjectionCache` (`ProjectionCaches.createItemScoped`), keyed delivery on
+`plowshare_item_changes`, the `contained_principals` AUTHORITY trigger, the single read deadline
+(`plowshare.projection-cache.timeout`, now 2 s) and the job runtime's bounded retry of its per-step
+log check (`BusyReadRetry`). No existing projection was moved to item scope.
+
+- **Domain.** Only READABILITY is item-tracked. Its domain counter, writer record and domain hint
+  are unchanged, so domain-scoped projections behave as before.
+- **Addresses.** `conversation:<root>` (each root of the changed log's ancestry under
+  `information_log_readable`'s edges, old and new endpoints), `revision:<id>`, `resource:<id>`,
+  `scope:<id>`, and `*` for the fallback. Platform and project navigation policies and
+  `information_document_policies` have no address and take the fallback.
+- **Bounds.** More than 1,024 rows in a statement, more than 256 logs in an ancestry walk, more than
+  64 items in a transaction, or `TRUNCATE` bump `*`.
+- **Counters move at commit.** Triggers accumulate items in a transaction-local setting; a deferred
+  constraint trigger bumps them in one sorted statement just before commit, so item rows are never
+  held for a transaction's lifetime and flushes cannot deadlock on them. Values come from one
+  sequence and are never reused. Because the rows are transactional, a versioned check needs no
+  pending-transaction evidence.
+- **Items are declared before the load**, as `SnapshotCache.Request` requires. Slice 1's views,
+  whose items are only known after reading (a dependency closure), need a way to record discovered
+  items; that is not built.
+- **Not done.** Counter rows are never pruned (open question above); nothing yet sizes the
+  trusted map per projection.
 
 ## Slice 1: targeted readability from shared data
 

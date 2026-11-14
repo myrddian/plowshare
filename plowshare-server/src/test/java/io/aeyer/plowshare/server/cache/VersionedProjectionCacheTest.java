@@ -499,7 +499,7 @@ class VersionedProjectionCacheTest {
     }
   }
 
-  static final class Signals implements ProjectionChangeSignals {
+  static class Signals implements ProjectionChangeSignals {
     final CopyOnWriteArrayList<Observer> observers = new CopyOnWriteArrayList<>();
     final AtomicInteger disposed = new AtomicInteger();
 

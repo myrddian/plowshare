@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** Composition-owned typed cache factory; no repository or SQL is exposed to domain services. */
 public final class ProjectionCaches implements AutoCloseable {
   private final ProjectionVersions versions;
+  private final ProjectionItemVersions itemVersions;
   private final ProjectionChangeSignals signals;
   private final ProjectionCacheProperties properties;
   private final UUID database;
@@ -47,7 +48,21 @@ public final class ProjectionCaches implements AutoCloseable {
       ProjectionCacheProperties properties,
       Duration notifiedStaleness,
       ProjectionTelemetry telemetry) {
+    this(versions, null, signals, properties, notifiedStaleness, telemetry);
+  }
+
+  /**
+   * {@code itemVersions} enables {@link #createItemScoped}; null leaves only domain-scoped caches.
+   */
+  public ProjectionCaches(
+      ProjectionVersions versions,
+      ProjectionItemVersions itemVersions,
+      ProjectionChangeSignals signals,
+      ProjectionCacheProperties properties,
+      Duration notifiedStaleness,
+      ProjectionTelemetry telemetry) {
     this.versions = Objects.requireNonNull(versions);
+    this.itemVersions = itemVersions;
     this.signals = Objects.requireNonNull(signals);
     this.properties = Objects.requireNonNull(properties);
     this.notifiedStaleness = notifiedStaleness;
@@ -74,6 +89,50 @@ public final class ProjectionCaches implements AutoCloseable {
 
   public <T> ProjectionCache<T> create(
       String projection, Set<ProjectionVersions.Domain> domains, Freshness freshness) {
+    return register(
+        projection,
+        freshness,
+        (SnapshotCache<VersionedProjectionCache.Versioned<T>> backing, Duration staleness) ->
+            new VersionedProjectionCache<>(
+                backing,
+                versions,
+                signals,
+                domains,
+                properties.maxValueBytes(),
+                staleness,
+                properties.timeout()));
+  }
+
+  /**
+   * An item-scoped projection: entries name the items they read and a write invalidates only the
+   * entries of the items it changed. {@code domains} must all be item-tracked.
+   */
+  public <T> ItemProjectionCache<T> createItemScoped(
+      String projection, Set<ProjectionVersions.Domain> domains, Freshness freshness) {
+    if (itemVersions == null) throw new IllegalStateException("Item versions are not configured");
+    return register(
+        projection,
+        freshness,
+        (SnapshotCache<VersionedProjectionCache.Versioned<T>> backing, Duration staleness) ->
+            VersionedProjectionCache.itemScoped(
+                backing,
+                itemVersions,
+                signals,
+                domains,
+                properties.maxValueBytes(),
+                staleness,
+                properties.timeout()));
+  }
+
+  /** Builds one projection over its backing cache and staleness bound (null when versioned). */
+  @FunctionalInterface
+  private interface Factory<T> {
+    VersionedProjectionCache<T> create(
+        SnapshotCache<VersionedProjectionCache.Versioned<T>> backing, Duration staleness);
+  }
+
+  private <T> VersionedProjectionCache<T> register(
+      String projection, Freshness freshness, Factory<T> factory) {
     Objects.requireNonNull(freshness);
     var namespace = new SnapshotCache.Namespace(database.toString(), projection);
     if (closed.get()) throw new IllegalStateException("Projection caches closed");
@@ -86,14 +145,7 @@ public final class ProjectionCaches implements AutoCloseable {
             namespace, properties.limits());
     VersionedProjectionCache<T> cache;
     try {
-      cache =
-          new VersionedProjectionCache<>(
-              backing,
-              versions,
-              signals,
-              domains,
-              properties.maxValueBytes(),
-              freshness == Freshness.NOTIFIED ? notifiedStaleness : null);
+      cache = factory.create(backing, freshness == Freshness.NOTIFIED ? notifiedStaleness : null);
     } catch (RuntimeException | Error failure) {
       backing.close();
       reservations.decrementAndGet();

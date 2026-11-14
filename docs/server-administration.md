@@ -215,7 +215,7 @@ inconsistent values fail startup.
 | `waiters-per-load` | `64` | Callers waiting on one load. |
 | `dependency-links` | `8192` | Dependency links between entries. |
 | `max-value-bytes` | `8388608` | Largest single value; must fit within `loading-bytes` with headroom. |
-| `timeout` | `5s` | How long a caller waits for a load. |
+| `timeout` | `2s` | The single deadline of one cached read, from when it reaches the cache. The FETCH slot wait of its loader and its wait on another request's reload both draw on it; past it the read is refused as busy (retry) and no uncached load is started. An elected loader whose load outlives it still stores the value for the next read. |
 | `notification-poll` | `1s` | Version-notification poll cadence, at most 30s. |
 | `reconnect-delay` | `1s` | Delay before reconnecting a lost notification session, at most 1m. |
 | `max-pending-transactions` | `128` | Pending transactions tracked (1..4096). |
@@ -249,6 +249,7 @@ rates or interval deltas across deployments.
 | `bypass_cache_refused` | Recoverable backing-cache refusal led to an ordinary-loader attempt. |
 | `bypass_stale` | Retrieved candidate failed the final readiness/version check and led to an ordinary-loader attempt. |
 | `capacity_rejected` | Capacity exhaustion refused the read without an ordinary-loader fallback. |
+| `deadline_rejected` | The read's `timeout` passed before a value was available (waiting for another request's reload, or the caller's own load outlived it); refused as busy without an ordinary-loader fallback. |
 
 The first three events count successful cache returns and are mutually exclusive per
 read. `load` and bypasses count attempts; adding them to returns double-counts work.

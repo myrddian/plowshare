@@ -20,7 +20,9 @@ public final class ProjectionCacheStatistics {
     BYPASS_LOAD_REFUSED,
     BYPASS_CACHE_REFUSED,
     BYPASS_STALE,
-    CAPACITY_REJECTED
+    CAPACITY_REJECTED,
+    /** The read's single deadline passed before a value was available; no SQL load was added. */
+    DEADLINE_REJECTED
   }
 
   private final EnumMap<Event, LongAdder> counts = new EnumMap<>(Event.class);

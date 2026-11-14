@@ -206,7 +206,7 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
             throw new IllegalStateException("Projection recovery baseline unavailable");
           transition(true);
           if (heartbeat == null) {
-            while (!isClosed()) changed(opened.poll(pollInterval));
+            while (!isClosed()) changed(opened.pollChanges(pollInterval));
           } else {
             probe(opened);
           }
@@ -257,14 +257,14 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
         // Record the time before sending: the echo proves delivery of commits before this instant.
         if (!opened.heartbeat(sequence)) {
           // This session cannot probe; fall back to plain polling with no freshness claim.
-          while (!isClosed()) changed(opened.poll(pollInterval));
+          while (!isClosed()) changed(opened.pollChanges(pollInterval));
           return;
         }
         sent.addLast(new long[] {sequence, now});
         nextSend = now + interval;
       }
       long wait = Math.min(pollInterval.toNanos(), Math.max(1_000_000L, nextSend - now));
-      changed(opened.poll(Duration.ofNanos(wait)));
+      changed(opened.pollChanges(Duration.ofNanos(wait)));
       // Observers have now applied every change returned so far, including those before the echo.
       long answered = opened.heartbeatsReceived();
       long through = -1;
@@ -305,17 +305,23 @@ public final class ListeningProjectionChangeSignals implements ProjectionChangeS
     }
   }
 
-  private void changed(Set<ProjectionVersions.Domain> changed) {
+  private void changed(ProjectionNotificationSource.Changes changed) {
     if (changed.isEmpty()) return;
     for (var registration : List.copyOf(observers.values())) {
       if (!registration.active()) continue;
       var relevant =
-          changed.stream()
+          changed.domains().stream()
               .filter(registration.domains::contains)
               .collect(Collectors.toUnmodifiableSet());
-      if (relevant.isEmpty()) continue;
+      var items =
+          changed.items().stream()
+              .filter(item -> registration.domains.contains(item.domain()))
+              .collect(Collectors.toUnmodifiableSet());
       try {
-        registration.observer.changed(relevant);
+        // Both hint sets describe commits already returned by this poll; both are applied before
+        // a later probe echo can publish delivery past them, so their relative order is free.
+        if (!items.isEmpty()) registration.observer.itemsChanged(items);
+        if (!relevant.isEmpty()) registration.observer.changed(relevant);
       } catch (RuntimeException failure) {
         registration.close();
         LOG.warn("Projection observer removed ({})", failure.getClass().getSimpleName());

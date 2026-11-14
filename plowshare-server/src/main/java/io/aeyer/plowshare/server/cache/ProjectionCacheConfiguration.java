@@ -77,8 +77,9 @@ public class ProjectionCacheConfiguration {
     return new VersionConnections(source);
   }
 
+  /** One repository supplies both domain and item version evidence from the same pool. */
   @Bean
-  public ProjectionVersions projectionVersions(
+  public JdbcProjectionVersions projectionVersions(
       JdbcTemplate jdbc, VersionConnections authoritative, ProjectionCacheProperties properties) {
     return new JdbcProjectionVersions(
         jdbc,
@@ -132,11 +133,17 @@ public class ProjectionCacheConfiguration {
   @Bean(destroyMethod = "close")
   public ProjectionCaches projectionCaches(
       ProjectionVersions versions,
+      ProjectionItemVersions itemVersions,
       ProjectionChangeSignals signals,
       ProjectionCacheProperties properties,
       ProjectionNotificationProperties notified,
       ProjectionTelemetry telemetry) {
     return new ProjectionCaches(
-        versions, signals, properties, notified.enabled() ? notified.staleness() : null, telemetry);
+        versions,
+        itemVersions,
+        signals,
+        properties,
+        notified.enabled() ? notified.staleness() : null,
+        telemetry);
   }
 }

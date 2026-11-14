@@ -20,6 +20,14 @@ public interface ProjectionChangeSignals extends AutoCloseable {
 
     /** Immutable bounded domain set; changes may be coalesced or duplicated. */
     void changed(Set<ProjectionVersions.Domain> domains);
+
+    /**
+     * Immutable bounded set of changed items of the observer's item-tracked domains, delivered on
+     * the same worker and in the same commit order as {@link #changed}. An item {@link
+     * ProjectionVersions.Item#isAll} means every item of its domain changed. A domain change is
+     * also delivered through {@link #changed}; observers that only track domains ignore this.
+     */
+    default void itemsChanged(Set<ProjectionVersions.Item> items) {}
   }
 
   interface Subscription extends AutoCloseable {

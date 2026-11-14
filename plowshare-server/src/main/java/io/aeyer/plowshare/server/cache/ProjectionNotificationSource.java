@@ -7,12 +7,38 @@ import java.util.Set;
 public interface ProjectionNotificationSource {
   Session open();
 
+  /**
+   * The hints of one poll: changed domains, and changed items of item-tracked domains. An item
+   * {@link ProjectionVersions.Item#isAll} stands for every item of its domain. Both sets are
+   * bounded; hints may be coalesced or duplicated, and never carry source content.
+   */
+  record Changes(Set<ProjectionVersions.Domain> domains, Set<ProjectionVersions.Item> items) {
+    public static final Changes NONE = new Changes(Set.of(), Set.of());
+
+    public Changes {
+      domains = Set.copyOf(domains);
+      items = Set.copyOf(items);
+    }
+
+    public boolean isEmpty() {
+      return domains.isEmpty() && items.isEmpty();
+    }
+  }
+
   interface Session extends AutoCloseable {
     /** Commits LISTEN registration before returning; recovery baseline must happen afterwards. */
     void listen();
 
     /** Bounded blocking poll; results contain fixed domain hints, never source content. */
     Set<ProjectionVersions.Domain> poll(Duration timeout);
+
+    /**
+     * Bounded blocking poll returning item hints as well. Sessions without keyed notifications
+     * report domains only, which item-scoped observers never mistake for item changes.
+     */
+    default Changes pollChanges(Duration timeout) {
+      return new Changes(poll(timeout), Set.of());
+    }
 
     /**
      * Commits a delivery probe addressed to this session only. PostgreSQL delivers notifications to

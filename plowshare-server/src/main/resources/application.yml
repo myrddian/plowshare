@@ -188,7 +188,10 @@ plowshare:
     dependency-links: ${PLOWSHARE_PROJECTION_CACHE_DEPENDENCY_LINKS:8192}
     # Largest single cached value; must fit within loading-bytes with headroom.
     max-value-bytes: ${PLOWSHARE_PROJECTION_CACHE_MAX_VALUE_BYTES:8388608}
-    timeout: ${PLOWSHARE_PROJECTION_CACHE_TIMEOUT:5s}
+    # One deadline per cached read, from when it reaches the cache: the FETCH slot
+    # wait and the wait on another request's reload both draw on it. A read past it
+    # is refused as busy (retry); an elected loader still finishes and stores its value.
+    timeout: ${PLOWSHARE_PROJECTION_CACHE_TIMEOUT:2s}
     # Cadence of the version-notification poll (at most 30s) and the delay
     # before reconnecting a lost LISTEN session (at most 1m).
     notification-poll: ${PLOWSHARE_PROJECTION_CACHE_NOTIFICATION_POLL:1s}
