@@ -146,6 +146,19 @@ function fixture(
             local.push(project);
             return { code: 'OK', payload: project };
           }
+          if (type === 'conversation.list' || type === 'agent.list') {
+            // The server refuses project-scoped reads before membership exists; an
+            // accepted file claim is what registers a newly chosen folder's project.
+            const project = decodePayload(type, payload).project;
+            if (
+              project &&
+              ![...serverProjects, ...local].some((row) => row.name === project)
+            )
+              return {
+                code: 'BAD_REQUEST',
+                said: 'This account does not have the required project access',
+              };
+          }
           if (type === 'conversation.list') {
             const project = decodePayload('conversation.list', payload).project;
             return {
