@@ -4996,6 +4996,22 @@ public final class JobRuntime {
                     throw new IllegalStateException(
                         "Document inputs cannot be published as memory");
                 });
+      if (tool instanceof ScopedDocumentTool reading) {
+        tool =
+            reading.forRun(
+                runInformation,
+                informationActor,
+                informationInputs,
+                transcript.conversationId(),
+                confined || informationActor != null && !informationActor.uncontained()
+                    ? toolHome.project()
+                    : null,
+                () -> {
+                  if (operation == null || cancelled.getAsBoolean())
+                    throw new IllegalStateException("Document read run is unavailable");
+                  operations.require(operation);
+                });
+      }
       if (tool instanceof InformationDiscoveryTool discovery) {
         tool =
             discovery.forRun(

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -330,6 +331,65 @@ class AgentFramesTest {
             isNull(),
             eq(Speaker.person("enzo")),
             any());
+  }
+
+  /** ADR 0069: both surfaces hand the conversation's new total to the turn that applies it. */
+  @Test
+  void both_surfaces_carry_a_new_conversation_total_to_the_turn() throws Exception {
+    when(turns.speak(
+            anyString(), any(), anyString(), any(), any(), anyInt(), any(Speaker.class), any()))
+        .thenReturn("job_4");
+
+    MockHttpServletResponse http =
+        mvc.perform(
+                post("/v1/agents/scribe/runs")
+                    .requestAttr(AuthFilter.HANDLE_ATTRIBUTE, "enzo")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        "{\"task\": \"go\", \"conversation\": \"cnv_1\", \"maxModelCalls\": 60}"))
+            .andReturn()
+            .getResponse();
+    Outcome outcome =
+        router.route(
+            FrameParity.frame(
+                FrameTypes.AGENT_RUN,
+                "{\"agent\": \"scribe\", \"task\": \"go\", \"conversation\": \"cnv_1\","
+                    + " \"maxModelCalls\": 60}"),
+            new Asking("session-1", "enzo"));
+
+    assertEquals(Code.ACCEPTED, outcome.code());
+    FrameParity.assertSameAnswer(http, outcome);
+    verify(turns, times(2))
+        .speak(
+            eq("cnv_1"),
+            eq(registry.get("scribe")),
+            eq("go"),
+            isNull(),
+            isNull(),
+            eq(60),
+            eq(Speaker.person("enzo")),
+            any());
+  }
+
+  /** ADR 0069: a total with no existing conversation is the same 400 on both surfaces. */
+  @Test
+  void a_total_without_a_conversation_is_the_same_refusal_on_both_surfaces() throws Exception {
+    MockHttpServletResponse http =
+        posted(
+            "/v1/agents/scribe/runs",
+            """
+                {"task": "go", "newConversation": true, "maxModelCalls": 60}""");
+    Outcome outcome =
+        route(
+            FrameTypes.AGENT_RUN,
+            """
+                {"agent": "scribe", "task": "go", "newConversation": true, "maxModelCalls": 60}""");
+
+    assertEquals(Code.BAD_REQUEST, outcome.code());
+    FrameParity.assertSameRefusal(http, outcome);
+    assertTrue(outcome.said().contains("maxModelCalls"), outcome.said());
+    verify(jobs, never())
+        .submit(any(AgentDefinition.class), any(), any(), any(), any(), any(), anyBoolean(), any());
   }
 
   /**

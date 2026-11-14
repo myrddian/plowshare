@@ -6,6 +6,8 @@ import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationContext;
+import io.aeyer.plowshare.server.information.InformationReadSelection;
+import io.aeyer.plowshare.server.information.InformationSelectedSql;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -87,6 +89,8 @@ public final class DocumentStore implements DocumentSummaries {
   private final UnitOfWork transactions;
   private final InformationAccess access;
   private final InformationContext context;
+  private InformationReadSelection selected;
+  private UUID selectedTarget;
   private Runnable mutationFence;
   private java.util.function.Consumer<UUID> readAudit;
   private ProjectionCache<SearchSnapshot> searchCache = ProjectionCache.direct();
@@ -133,6 +137,16 @@ public final class DocumentStore implements DocumentSummaries {
     reader.embeddingProfile = embeddingProfile;
     reader.readAudit = readAudit;
     reader.searchCache = searchCache;
+    return reader;
+  }
+
+  /**
+   * Explicit read-only view. Every statement rechecks selection and dependency policy before LIMIT.
+   */
+  public DocumentStore selected(InformationReadSelection selection, UUID target) {
+    DocumentStore reader = audited(null);
+    reader.selected = Objects.requireNonNull(selection);
+    reader.selectedTarget = target;
     return reader;
   }
 
@@ -270,7 +284,8 @@ public final class DocumentStore implements DocumentSummaries {
 
   /** A processing lease is rechecked under a short transaction before every checkpoint. */
   public DocumentStore fenced(Runnable fence) {
-    if (access != null) throw new IllegalStateException("a reader cannot become a writer");
+    if (access != null || selected != null)
+      throw new IllegalStateException("a reader cannot become a writer");
     DocumentStore writer = new DocumentStore(jdbc, transactions);
     writer.mutationFence = Objects.requireNonNull(fence, "fence");
     writer.dualEmbeddings = dualEmbeddings;
@@ -286,11 +301,13 @@ public final class DocumentStore implements DocumentSummaries {
     reader.embeddingProfile = embeddingProfile;
     reader.searchCache = searchCache;
     reader.cacheHitChars = cacheHitChars;
+    reader.selected = selected;
+    reader.selectedTarget = selectedTarget;
     return reader;
   }
 
   private int writeUpdate(String sql, Object... args) {
-    if (access != null)
+    if (access != null || selected != null)
       throw new IllegalStateException("a scoped reader cannot mutate projections");
     return transactions.inTransaction(
         () -> {
@@ -324,6 +341,30 @@ public final class DocumentStore implements DocumentSummaries {
     int at = sql.indexOf(marker);
     if (at < 0 || sql.indexOf(marker, at + marker.length()) >= 0) {
       throw new IllegalStateException("corpus read must have exactly one policy seam");
+    }
+    if (selected != null) {
+      var candidates =
+          InformationSelectedSql.candidates(
+              selected, selectedTarget == null ? null : List.of(selectedTarget));
+      // Projection hashes prevent summaries and passages from an obsolete extraction being
+      // presented as the selected revision. Exact targets may be historical; corpus reads use
+      // heads.
+      String predicate =
+          documentExpression
+              + " IN (SELECT revision FROM selected_information WHERE allowed)"
+              + " AND EXISTS(SELECT 1 FROM documents projection JOIN information_revisions retained ON retained.id=projection.id"
+              + " WHERE projection.id="
+              + documentExpression
+              + " AND projection.text_hash=retained.text_hash)"
+              + (vectorStage == null ? "" : " AND " + compatible(documentExpression, vectorStage));
+      var args = new ArrayList<Object>(candidates.arguments());
+      args.addAll(java.util.Arrays.asList(arguments));
+      return new ReadQuery(
+          "WITH selected_information AS MATERIALIZED ("
+              + candidates.sql()
+              + ") "
+              + sql.replace(marker, (hasWhere ? " AND " : " WHERE ") + predicate),
+          args.toArray());
     }
     if (access == null) {
       if (discovery || vectorStage != null) {
@@ -576,7 +617,8 @@ public final class DocumentStore implements DocumentSummaries {
       String ingestedBy,
       Instant at,
       DerivedDocument derived) {
-    if (access != null) throw new IllegalStateException("a scoped reader cannot write projections");
+    if (access != null || selected != null)
+      throw new IllegalStateException("a scoped reader cannot write projections");
     Objects.requireNonNull(sourceName, "sourceName");
     Objects.requireNonNull(extracted, "extracted");
     Objects.requireNonNull(derived, "derived");
@@ -876,7 +918,8 @@ public final class DocumentStore implements DocumentSummaries {
   public void locateCodePassages(UUID document, String source) {
     if (source.isBlank())
       return; // No passages; the immutable extraction still preserves every character.
-    if (access != null) throw new IllegalStateException("a reader cannot locate code projections");
+    if (access != null || selected != null)
+      throw new IllegalStateException("a reader cannot locate code projections");
     transactions.inTransaction(
         () -> {
           if (mutationFence != null) mutationFence.run();
@@ -906,7 +949,8 @@ public final class DocumentStore implements DocumentSummaries {
 
   /** Persist a complete checkpoint under the same write fence as code chunks. */
   public void writeCodeOutline(UUID document, CodeOutline outline) {
-    if (access != null) throw new IllegalStateException("a reader cannot write code outlines");
+    if (access != null || selected != null)
+      throw new IllegalStateException("a reader cannot write code outlines");
     transactions.inTransaction(
         () -> {
           if (mutationFence != null) mutationFence.run();

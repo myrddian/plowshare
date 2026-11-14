@@ -211,7 +211,9 @@ public class AgentController {
                 request.images(),
                 Speaker.person(handle),
                 handle,
-                request.newConversation()),
+                request.newConversation(),
+                null,
+                request.maxModelCalls()),
             pictures);
     return ResponseEntity.accepted()
         .body(new StartedJob(started.id(), started.agent(), null, started.conversation()));

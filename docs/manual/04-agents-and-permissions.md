@@ -105,6 +105,10 @@ conversation's project and owner. WebSocket inspections can use an eligible root
 session; resume uses the requested session. REST inspections are sessionless.
 Read-only inspection can describe unexported agents; resume keeps exported admission
 and current work/session checks. A missing project refuses instead of becoming global.
+Resume continues only a run that stopped mid-turn. When a conversation whose last
+turn answered has spent its model-call allowance, send `maxModelCalls` (the new
+total, not an increment) with the next `agent.run` into it. That raise needs the same
+work access as speaking into the conversation.
 Historical projections retain the recorded system block when available.
 
 Operator files in `global/agents/`, `global/bots/` and `global/orchestrations/` refresh

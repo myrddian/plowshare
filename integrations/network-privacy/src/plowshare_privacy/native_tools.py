@@ -23,6 +23,7 @@ from .tools import (
     DEFINITIONS,
     LINK_NOTE_LIMIT,
     NOTE_LIMIT,
+    QUERY_LIMIT,
     QUESTION_LIMIT,
     PrivacyTools,
     ScanCall,
@@ -71,6 +72,15 @@ def parameters(name: str, parameter: str | None) -> tuple[Parameter, ...]:
                     else "Maximum page records: 1-32 (scan list: 1-50).",
                     required=False,
                 ),
+            )
+        )
+    if name == "network.devices":
+        values.append(
+            Parameter(
+                "query",
+                "STRING",
+                f"Optional search, 1-{QUERY_LIMIT} characters: words matched case-insensitively against each device's name, hostname, vendor, likely type, address and MAC. Use it to find a device the user names.",
+                required=False,
             )
         )
     if name == "network.note_profile":
@@ -161,6 +171,20 @@ ASSISTANT_TOOLS = frozenset(
 )
 
 
+def _usage(tool: str) -> str:
+    """A refusal for invalid arguments that restates the tool's parameters."""
+    declaration = next((d for d in DECLARATIONS if d.name == tool), None)
+    accepted = (
+        "; ".join(
+            f"{p.name}{'' if p.required else ' (optional)'}: {p.description}"
+            for p in declaration.parameters
+        )
+        if declaration is not None and declaration.parameters
+        else "no arguments"
+    )
+    return f"Invalid arguments; nothing ran. Accepted: {accepted}"
+
+
 def registered(tools: PrivacyTools) -> tuple[RegisteredTool, ...]:
     async def handle(call: ToolCall) -> ToolResult:
         # A scan gets its retained request identity from the harness invocation;
@@ -190,6 +214,12 @@ def registered(tools: PrivacyTools) -> tuple[RegisteredTool, ...]:
                 )
             except ToolRefusal as error:
                 return ToolResult("REJECTED", str(error))
+            except ValueError:
+                # Malformed arguments: refuse, never let it escape. An escaped
+                # exception is reported as an uncertain effect ("external
+                # effects may have occurred") although nothing ran. The reply
+                # restates the declared parameters and echoes no input.
+                return ToolResult("REJECTED", _usage(call.tool))
         try:
             result = await tools.execute(decoded)
         except ToolRefusal as error:

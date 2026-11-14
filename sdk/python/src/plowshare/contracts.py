@@ -3986,6 +3986,7 @@ class AgentRunPayloadDto:
     agent: str
     conversation: TierDtoProject | Unset = UNSET
     images: tuple[str, ...] | Unset = UNSET
+    max_model_calls: float | Unset = UNSET
     max_turns: float | Unset = UNSET
     new_conversation: bool | Unset = UNSET
     no_turn_cap: bool | Unset = UNSET
@@ -6292,6 +6293,7 @@ class AgentRunRequest(Request[ObservedStartedJobDto]):
     agent: str
     conversation: TierDtoProject | Unset = UNSET
     images: tuple[str, ...] | Unset = UNSET
+    max_model_calls: float | Unset = UNSET
     max_turns: float | Unset = UNSET
     new_conversation: bool | Unset = UNSET
     no_turn_cap: bool | Unset = UNSET
@@ -10099,7 +10101,7 @@ _FIELDS = {
     AdminSessionsPayloadDto: {"handle": "handle"},
     AgentCuratePayloadDto: {"maxModelCalls": "max_model_calls", "project": "project"},
     AgentDefinePayloadDto: {"name": "name", "overwrite": "overwrite", "project": "project", "text": "text"},
-    AgentRunPayloadDto: {"agent": "agent", "conversation": "conversation", "images": "images", "maxTurns": "max_turns", "newConversation": "new_conversation", "noTurnCap": "no_turn_cap", "project": "project", "session": "session", "task": "task"},
+    AgentRunPayloadDto: {"agent": "agent", "conversation": "conversation", "images": "images", "maxModelCalls": "max_model_calls", "maxTurns": "max_turns", "newConversation": "new_conversation", "noTurnCap": "no_turn_cap", "project": "project", "session": "session", "task": "task"},
     ApplicationActivatePayloadDto: {"expectedRevision": "expected_revision", "project": "project", "requestId": "request_id", "revision": "revision"},
     ApplicationChildCancelPayloadDto: {"child": "child", "conversation": "conversation"},
     ApplicationChildCeilingPayloadDto: {"calls": "calls", "child": "child", "conversation": "conversation"},
@@ -10387,7 +10389,7 @@ _FIELDS = {
     AgentCurateRequest: {"maxModelCalls": "max_model_calls", "project": "project"},
     AgentDefineRequest: {"name": "name", "overwrite": "overwrite", "project": "project", "text": "text"},
     AgentListRequest: {"project": "project"},
-    AgentRunRequest: {"agent": "agent", "conversation": "conversation", "images": "images", "maxTurns": "max_turns", "newConversation": "new_conversation", "noTurnCap": "no_turn_cap", "project": "project", "session": "session", "task": "task"},
+    AgentRunRequest: {"agent": "agent", "conversation": "conversation", "images": "images", "maxModelCalls": "max_model_calls", "maxTurns": "max_turns", "newConversation": "new_conversation", "noTurnCap": "no_turn_cap", "project": "project", "session": "session", "task": "task"},
     ApplicationActivateRequest: {"expectedRevision": "expected_revision", "project": "project", "requestId": "request_id", "revision": "revision"},
     ApplicationChildCancelRequest: {"child": "child", "conversation": "conversation"},
     ApplicationChildCeilingRequest: {"calls": "calls", "child": "child", "conversation": "conversation"},

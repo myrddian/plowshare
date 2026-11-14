@@ -6,12 +6,14 @@ import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.agents.ApplicationResources;
 import io.aeyer.plowshare.server.data.DataLayout;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -33,6 +35,14 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
   public void useApplicationResources(ApplicationResources resources) {
     this.resources = resources;
   }
+
+  /**
+   * Test seam, package-private: called with {@code "stage"} immediately before the real-path check
+   * that precedes staging and with {@code "move"} immediately before the one that precedes the
+   * final rename in {@link #writeApplication}, so a test can swap the folder in between. Production
+   * code never sets it.
+   */
+  java.util.function.Consumer<String> checkpoint = point -> {};
 
   private final DataLayout data;
   private final SessionChannel channel;
@@ -88,9 +98,9 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
 
   public void write(
       ScheduleDefinitionStore.Source source, String name, String text, boolean overwrite) {
-    if (!source.source().equals("workspace") && resources.root(source.projectId()).isPresent())
+    if (applicationOwned(source))
       throw new IllegalArgumentException(
-          "Update Application schedules through a new deployment revision");
+          "Application schedules are written only through the Application save path");
     ScheduledWork.identity(name, "file name");
     if (text.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES)
       throw new IllegalArgumentException("Schedule file exceeds 64 KiB");
@@ -125,10 +135,80 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     }
   }
 
+  /**
+   * Writes one schedule file in place in an Application root (ADR 0068).
+   *
+   * <p>Every check runs before the target changes: the name rule and 64 KiB limit, then the path
+   * containment and symlink checks, then the folder's 256-file and 1 MiB limits as they would stand
+   * after this write. The limits are checked here because a folder over them is unreadable, so a
+   * write that crossed them would suspend every schedule in it at the next scan.
+   *
+   * <p>The text is staged in a temporary file in the same folder and renamed into place, so a scan
+   * sees the old file or the new one, never a partial one. A replacement is an atomic rename. A
+   * create ({@code overwrite=false}) checks for an existing file and then renames without
+   * replacement; the JDK refuses an existing target, so only a racing create in the instant between
+   * its check and the rename can still be replaced.
+   *
+   * <p>A folder already over its limits is unavailable ({@link WorkspaceUnavailableException}); a
+   * write that would take the folder over them is refused as a {@link CallerFault}.
+   *
+   * <p>The segment checks see links that exist when they run. A folder swapped for a link
+   * afterwards is caught by real-path checks immediately before the temporary file is created and
+   * immediately before the rename: each requires the folder's real path to be exactly the root's
+   * real {@code schedules/} folder, so a link to another folder inside the root (such as {@code
+   * agents/}) is refused as well as one leading outside it. A refusal deletes the temporary file.
+   * The rename itself still resolves the folder by name, so only a swap in the instant between the
+   * last check and the rename remains possible.
+   */
+  public void writeApplication(
+      ScheduleDefinitionStore.Source source, String name, String text, boolean overwrite) {
+    if (!applicationOwned(source))
+      throw new IllegalArgumentException("This schedule source is not an Application root");
+    ScheduledWork.identity(name, "file name");
+    if (text.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES)
+      throw new IllegalArgumentException("Schedule file exceeds 64 KiB");
+    Path folder = folder(source), file = folder.resolve(name + ".json");
+    try {
+      safe(file, source);
+      Files.createDirectories(folder);
+      safe(file, source);
+      boolean exists = Files.exists(file, LinkOption.NOFOLLOW_LINKS);
+      if (exists && !overwrite)
+        throw new CallerFault("A schedule named " + name + " already exists");
+      // read() applies the same per-file, regular-file and name checks a scan will; the projected
+      // folder then replaces this name's entry with the new text before the limits are checked.
+      List<Entry> projected = new ArrayList<>();
+      for (Entry entry : read(source)) if (!entry.name().equals(name)) projected.add(entry);
+      projected.add(new Entry(name, text));
+      // The existing folder was within its limits (read() refuses one that is not), so crossing
+      // them now is caused by what this caller sent: a caller fault, not an unavailable folder.
+      if (!withinLimits(projected)) throw new CallerFault(LIMITS);
+      Path real = root(source).toRealPath();
+      checkpoint.accept("stage");
+      inside(folder, real);
+      Path staged = Files.createTempFile(folder, "schedule-", ".tmp");
+      try {
+        Files.writeString(staged, text, StandardCharsets.UTF_8);
+        checkpoint.accept("move");
+        inside(folder, real);
+        if (overwrite)
+          Files.move(
+              staged, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        else Files.move(staged, file);
+      } finally {
+        Files.deleteIfExists(staged);
+      }
+    } catch (FileAlreadyExistsException exists) {
+      throw new CallerFault("A schedule named " + name + " already exists");
+    } catch (IOException failed) {
+      throw new WorkspaceUnavailableException("Schedule file could not be written", failed);
+    }
+  }
+
   public void delete(ScheduleDefinitionStore.Source source, String name) {
-    if (!source.source().equals("workspace") && resources.root(source.projectId()).isPresent())
+    if (applicationOwned(source))
       throw new IllegalArgumentException(
-          "Update Application schedules through a new deployment revision");
+          "Application schedules cannot be deleted; save a replacement definition instead");
     ScheduledWork.identity(name, "file name");
     if (source.source().equals("workspace")) {
       ask(session(source), FileRequest.delete(id(), remotePath(name)).forSchedules());
@@ -212,15 +292,26 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     return data.schedulesFor(source.projectId());
   }
 
+  /**
+   * Refuses a folder whose real path is not the root's own real {@code schedules/} folder. Being
+   * merely under the root is not enough: a link to a sibling such as {@code agents/} stays inside
+   * it.
+   */
+  private static void inside(Path folder, Path realRoot) throws IOException {
+    if (!folder.toRealPath().equals(realRoot.resolve("schedules")))
+      throw new WorkspaceUnavailableException("Schedule folder moved outside its root");
+  }
+
+  private Path root(ScheduleDefinitionStore.Source source) {
+    return resources
+        .root(source.projectId())
+        .orElseGet(() -> data.root())
+        .toAbsolutePath()
+        .normalize();
+  }
+
   private void safe(Path path, ScheduleDefinitionStore.Source source) {
-    Path
-        root =
-            resources
-                .root(source.projectId())
-                .orElseGet(() -> data.root())
-                .toAbsolutePath()
-                .normalize(),
-        at = root;
+    Path root = root(source), at = root;
     if (!path.toAbsolutePath().normalize().startsWith(root))
       throw new WorkspaceUnavailableException("Schedule path escaped the definitions tier");
     for (Path segment : root.relativize(path.toAbsolutePath().normalize())) {
@@ -245,12 +336,18 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     return UUID.randomUUID().toString();
   }
 
+  private static final String LIMITS = "Schedule folder exceeds its file or byte limit";
+
+  /** Refuses a folder read that is over the limits: the folder, not the caller, is at fault. */
   private static void bounded(List<Entry> entries) {
-    if (entries.size() > MAX_FILES
-        || entries.stream().mapToInt(e -> e.text().getBytes(StandardCharsets.UTF_8).length).sum()
-            > TOTAL_BYTES
-        || entries.stream()
-            .anyMatch(e -> e.text().getBytes(StandardCharsets.UTF_8).length > MAX_BYTES))
-      throw new WorkspaceUnavailableException("Schedule folder exceeds its file or byte limit");
+    if (!withinLimits(entries)) throw new WorkspaceUnavailableException(LIMITS);
+  }
+
+  private static boolean withinLimits(List<Entry> entries) {
+    return entries.size() <= MAX_FILES
+        && entries.stream().mapToInt(e -> e.text().getBytes(StandardCharsets.UTF_8).length).sum()
+            <= TOTAL_BYTES
+        && entries.stream()
+            .noneMatch(e -> e.text().getBytes(StandardCharsets.UTF_8).length > MAX_BYTES);
   }
 }

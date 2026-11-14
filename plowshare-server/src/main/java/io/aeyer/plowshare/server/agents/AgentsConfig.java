@@ -39,6 +39,7 @@ import io.aeyer.plowshare.server.documents.Deliberation;
 import io.aeyer.plowshare.server.documents.DocumentStore;
 import io.aeyer.plowshare.server.documents.DocumentsProperties;
 import io.aeyer.plowshare.server.documents.RetrievalService;
+import io.aeyer.plowshare.server.documents.ScopedDocumentReading;
 import io.aeyer.plowshare.server.fetch.FetchService;
 import io.aeyer.plowshare.server.files.AbsentPresence;
 import io.aeyer.plowshare.server.files.CommandIsolationProperties;
@@ -776,6 +777,7 @@ public class AgentsConfig {
       ObjectProvider<InformationContentTypes> informationTypes,
       ObjectProvider<InformationNavigationService> informationNavigation,
       ObjectProvider<InformationDiscoveryService> informationDiscovery,
+      ObjectProvider<ScopedDocumentReading> scopedDocuments,
       DocumentStore documents,
       CitationStore citations,
       TurnStore turns,
@@ -847,10 +849,10 @@ public class AgentsConfig {
                               contextTokenizer.getObject(),
                               contextCompaction.getObject().contextLengthOf(definition));
                         }),
-                    new RetrievalTools.Retrieve(corpus),
+                    new ScopedDocumentTool("document_retrieve", scopedDocuments::getObject),
                     new RetrievalTools.Rank(corpus),
-                    new RetrievalTools.Outline(documents),
-                    new RetrievalTools.Citations(citations, conversations),
+                    new ScopedDocumentTool("document_outline", scopedDocuments::getObject),
+                    new ScopedDocumentTool("document_citations", scopedDocuments::getObject),
                     new DocumentTools.Search(corpus),
                     new InformationDiscoveryTool("scopes", informationDiscovery::getObject),
                     new InformationDiscoveryTool("list", informationDiscovery::getObject),

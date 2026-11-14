@@ -105,6 +105,12 @@ public interface ScheduleDefinitionStore {
 
   Source register(String account, Long projectId, String source);
 
+  /**
+   * The source already registered for this project folder, whoever registered it. Read-only: it
+   * never creates or reassigns a registration. Callers authorize before using it.
+   */
+  Optional<Source> registered(long projectId, String source);
+
   List<Source> sources();
 
   /** Lightweight source identities only: owner selection, or every registrar in one project. */

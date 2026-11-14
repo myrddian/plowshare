@@ -1848,6 +1848,12 @@ function renderReferences(value) {
     const line = element('div', undefined, 'entry-line');
     line.append(element('span', item.label, 'badge'), element('strong', item.title));
     row.append(line, element('p', item.product + (item.retired ? ' · Retired from the shipped list' : ''), 'hint'));
+    if (Number.isInteger(item.waiting_minutes)) {
+      row.append(element('p', 'Fetching for ' + (item.waiting_minutes < 1 ? 'less than a minute' : plural(item.waiting_minutes, 'minute', 'minutes')) + '.', 'hint'));
+    }
+    // No Retry: the server is still working on this fetch, and a second one
+    // would only wait behind it.
+    if (item.slow) row.append(element('p', 'This is taking longer than it should. A page normally arrives within a minute or two. The Plowshare server may be busy with other fetches or unable to reach the site. Nothing needs doing yet; it finishes or fails on its own, and a failure can be retried here.', 'notice'));
     if (item.error) row.append(element('p', item.error, 'notice error'));
     if (item.untag_failed) row.append(element('p', 'Removing it from search failed.', 'notice error'));
     // A ``submitted`` row with an error is an uncertain acquire whose ticket was
@@ -2542,6 +2548,9 @@ function renderAttention(value) {
   const stuck = (value.references?.failed || 0) + (value.references?.blocked || 0) + (value.references?.unresolved || 0);
   if (stuck) items.push(attentionItem(formatCount(stuck), 'Reference docs need a check',
     'Some vendor documentation could not be fetched or is held. Retry it from the Reference library.', 'Open Settings', () => showView('settings', true)));
+  const slow = value.references?.slow || 0;
+  if (slow) items.push(attentionItem(formatCount(slow), 'Reference docs are slow to fetch',
+    'The Plowshare server has been fetching some vendor documentation for more than 10 minutes. See how long in the Reference library.', 'Open Settings', () => showView('settings', true)));
   const drafts = latestStatus?.profile_drafts_waiting || 0;
   if (drafts) items.push(attentionItem(formatCount(drafts), drafts === 1 ? 'Profile draft awaiting review' : 'Profile drafts awaiting review',
     'Background research drafted device profiles. Review each before it is saved.', 'Open drafts', () => {

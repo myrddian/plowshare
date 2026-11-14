@@ -5,6 +5,7 @@ import io.aeyer.plowshare.server.api.ConversationsProperties;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
+import io.aeyer.plowshare.server.requests.RequestedAllowanceRaise;
 import io.aeyer.plowshare.server.requests.RequestedHome;
 import io.aeyer.plowshare.server.requests.RequestedSession;
 import io.aeyer.plowshare.server.requests.RequestedTask;
@@ -173,6 +174,10 @@ public final class Runs {
    *     for every other run — which is every run that is not {@code application.child.run}. See
    *     {@link Contained}; the three facts travel together because they come from one proved
    *     admission and are meaningless apart.
+   * @param maxModelCalls the existing conversation's new model-call total, or {@code null} to leave
+   *     it alone (ADR 0069). Only an utterance into an existing conversation may carry it; {@link
+   *     RequestedAllowanceRaise} refuses it anywhere else, and {@link Turn#speak} applies it with
+   *     {@link Turn#resume}'s rules before the exhausted-budget refusal is read
    */
   public record Ask(
       String agent,
@@ -186,7 +191,8 @@ public final class Runs {
       Speaker speaker,
       String callerHandle,
       Boolean newConversation,
-      Contained contained) {
+      Contained contained,
+      Integer maxModelCalls) {
 
     /**
      * The authority a contained run carries, proved before it was built (ADR 0042).
@@ -241,6 +247,36 @@ public final class Runs {
       if (contained != null && (conversation != null || !Boolean.TRUE.equals(newConversation)))
         throw new IllegalArgumentException(
             "A contained run opens its own conversation: it names none and asks for a fresh one");
+    }
+
+    /** Every ask that raises no conversation allowance: each caller but agent.run's two doors. */
+    public Ask(
+        String agent,
+        String task,
+        String project,
+        String session,
+        String conversation,
+        Integer maxTurns,
+        Boolean noTurnCap,
+        List<String> images,
+        Speaker speaker,
+        String callerHandle,
+        Boolean newConversation,
+        Contained contained) {
+      this(
+          agent,
+          task,
+          project,
+          session,
+          conversation,
+          maxTurns,
+          noTurnCap,
+          images,
+          speaker,
+          callerHandle,
+          newConversation,
+          contained,
+          null);
     }
 
     public Ask(
@@ -376,7 +412,8 @@ public final class Runs {
    * @return the id and the agent's own name
    * @throws CallerFault for a body this server can name as wrong: an unknown agent, no task, a
    *     session that is present and empty, a turn cap said twice, an utterance carrying images, or
-   *     a run naming a conversation and a project both
+   *     a run naming a conversation and a project both, or a {@code maxModelCalls} that names no
+   *     existing conversation or is not positive
    */
   public Started start(Ask ask, Shown shown) {
     // Named first, ahead of every other reading of the body: the resolved
@@ -390,6 +427,10 @@ public final class Runs {
     if (Boolean.TRUE.equals(ask.newConversation()) && ask.conversation() != null) {
       throw new CallerFault("newConversation cannot be combined with a conversation id");
     }
+    // Read off the body alone, beside the refusal above and for the same reason: a raise that
+    // names no existing conversation is wrong whatever the rest of the body says (ADR 0069).
+    Integer maxModelCalls =
+        RequestedAllowanceRaise.in(ask.maxModelCalls(), ask.conversation(), ask.newConversation());
     String runProject =
         personal != null && ask.conversation() == null
             ? personal.home(ask.project(), ask.callerHandle()).project()
@@ -503,16 +544,25 @@ public final class Runs {
               + " decide where it runs. A conversation is opened in a home and its"
               + " turns run in that home, so leave 'project' out of an utterance");
     }
+    // Work authority over this conversation before anything is spoken or raised: the raise rides
+    // on the utterance and is admitted by exactly the check that admits speaking (ADR 0069).
     callers.requireConversationWork(ask.conversation(), ask.callerHandle());
+    Speaker speaker = ask.speaker() == null ? Speaker.person(null) : ask.speaker();
+    // An utterance naming no total takes exactly the door it always took; only a raise reaches the
+    // overload that applies one.
     String id =
-        turns.speak(
-            ask.conversation(),
-            definition,
-            task,
-            session,
-            turnCap,
-            ask.speaker() == null ? Speaker.person(null) : ask.speaker(),
-            outcome -> {});
+        maxModelCalls == null
+            ? turns.speak(
+                ask.conversation(), definition, task, session, turnCap, speaker, outcome -> {})
+            : turns.speak(
+                ask.conversation(),
+                definition,
+                task,
+                session,
+                turnCap,
+                maxModelCalls,
+                speaker,
+                outcome -> {});
     return new Started(id, definition.name(), ask.conversation());
   }
 

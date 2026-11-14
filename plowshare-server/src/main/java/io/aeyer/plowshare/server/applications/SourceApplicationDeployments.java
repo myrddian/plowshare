@@ -17,8 +17,12 @@ import java.util.*;
 /**
  * Staging is outside the database transaction. Only a committed placement is runnable. Staged
  * orphans are retained after uncertain commit; they are never inferred to be active or replayed.
+ *
+ * <p>Also creates project Managers' schedule-only revisions ({@link ApplicationScheduleRevisions},
+ * ADR 0068), which share staging, validation and the store's head fence with deployments.
  */
-public final class SourceApplicationDeployments implements ApplicationDeployments {
+public final class SourceApplicationDeployments
+    implements ApplicationDeployments, ApplicationScheduleRevisions {
   public static final int MAX_FILES = 128, MAX_FILE_BYTES = 65536, MAX_TOTAL_BYTES = 131072;
   private final ApplicationDeploymentStore store;
   private final ProjectMembers members;
@@ -27,6 +31,9 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
   private final ApplicationPackageValidator validator;
 
   private final ApplicationIdentities identities;
+
+  /** Resolves a schedule source's project id; only schedule-only revisions need it. */
+  private final ProjectNames names;
 
   public SourceApplicationDeployments(
       ApplicationDeploymentStore store,
@@ -44,6 +51,18 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
       FileStores fileStores,
       ApplicationPackageValidator validator,
       ApplicationIdentities identities) {
+    this(store, members, projects, fileStores, validator, identities, null);
+  }
+
+  public SourceApplicationDeployments(
+      ApplicationDeploymentStore store,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      FileStores fileStores,
+      ApplicationPackageValidator validator,
+      ApplicationIdentities identities,
+      ProjectNames names) {
+    this.names = names;
     this.identities = identities;
     this.store = store;
     this.members = members;
@@ -55,6 +74,10 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
   private void require(String account, String project) {
     if (!members.isServerAdmin(account))
       throw new CallerFault("Application deployment requires a server administrator");
+    ordinary(project);
+  }
+
+  private static void ordinary(String project) {
     if (project == null
         || project.isBlank()
         || !project.equals(project.strip())
@@ -109,24 +132,7 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
       Files.createDirectories(resolved.root().getParent());
       resolve(account, request.project(), destination, placement);
       Files.createDirectory(resolved.root());
-      for (var file : files) {
-        Path target = resolved.root().resolve(file.path());
-        var fence = sourceFence(request.project(), resolved.root());
-        if (!fence.permits(target)) throw new CallerFault("Application source escaped staging");
-        Path at = resolved.root();
-        for (Path segment : resolved.root().relativize(target.getParent())) {
-          at = at.resolve(segment);
-          if (Files.notExists(at, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(at);
-          if (Files.isSymbolicLink(at) || !Files.isDirectory(at, LinkOption.NOFOLLOW_LINKS))
-            throw new CallerFault("Application staging source changed to a link");
-        }
-        Files.writeString(
-            target,
-            file.text(),
-            StandardCharsets.UTF_8,
-            StandardOpenOption.CREATE_NEW,
-            LinkOption.NOFOLLOW_LINKS);
-      }
+      stage(request.project(), resolved.root(), files);
       WorkspaceApplicationPolicy.parse(
           files.stream()
               .filter(f -> f.path().equals("plowshare.json"))
@@ -179,6 +185,183 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
             resolved.root(),
             true,
             ApplicationIdentitySource.read(resolved.root())));
+  }
+
+  /**
+   * Writes every file into a freshly created revision directory. Each parent segment is created or
+   * re-checked without following links, and each file is created new without following links, so no
+   * write can land outside the staged revision or replace an existing file.
+   */
+  private void stage(String project, Path root, List<File> files) throws IOException {
+    for (var file : files) {
+      Path target = root.resolve(file.path());
+      var fence = sourceFence(project, root);
+      if (!fence.permits(target)) throw new CallerFault("Application source escaped staging");
+      Path at = root;
+      for (Path segment : root.relativize(target.getParent())) {
+        at = at.resolve(segment);
+        if (Files.notExists(at, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(at);
+        if (Files.isSymbolicLink(at) || !Files.isDirectory(at, LinkOption.NOFOLLOW_LINKS))
+          throw new CallerFault("Application staging source changed to a link");
+      }
+      Files.writeString(
+          target,
+          file.text(),
+          StandardCharsets.UTF_8,
+          StandardOpenOption.CREATE_NEW,
+          LinkOption.NOFOLLOW_LINKS);
+    }
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Order: the name and size rules; the caller's current project management; the active head and
+   * its retained release, whose files are read back and checked against the retained digest; the
+   * existing-file rule; then staging into {@code <destination>/revisions/<new uuid>}, the manifest
+   * parse and the package validator; then one commit under the head fence, with {@code
+   * expectedRevision} the head read at the start. A deploy or rollback that lands in between makes
+   * the commit refuse with the store's {@code Application revision changed} message; nothing is
+   * retried.
+   *
+   * <p>The revisions directory's real path is taken before staging. The new directory is created
+   * there without following links and re-checked against it before staging and before commit, so a
+   * link swapped into the destination cannot redirect the revision outside it.
+   *
+   * <p>Idempotency: each call uses a fresh request id and receipt, so two saves are two revisions.
+   * A definite refusal ({@link CallerFault} or {@link ArchiveRefusedException}, which roll the
+   * transaction back) removes the staged directory. Any other commit failure has an unknown outcome
+   * and keeps it, because it may already be the active head.
+   */
+  @Override
+  public String revise(
+      String caller, long projectId, String scheduleName, String text, boolean overwrite) {
+    String name;
+    try {
+      name = io.aeyer.plowshare.protocol.ScheduledWork.identity(scheduleName, "file name");
+    } catch (IllegalArgumentException invalid) {
+      throw new CallerFault(invalid.getMessage());
+    }
+    if (text == null || text.getBytes(StandardCharsets.UTF_8).length > MAX_FILE_BYTES)
+      throw new CallerFault("Schedule file exceeds 64 KiB");
+    if (names == null) throw new CallerFault("Application schedule revisions are unavailable");
+    String project =
+        names
+            .nameForId(projectId)
+            .orElseThrow(() -> new CallerFault("Choose a registered project for schedule files"));
+    ordinary(project);
+    if (io.aeyer.plowshare.server.auth.ServiceCredentials.principal(caller)
+        || !members.mayManage(project, caller))
+      throw new CallerFault("Saving an Application schedule requires a project Manager");
+    UUID active = store.status(project).activeRevision();
+    if (active == null) throw new CallerFault("Deploy the Application before saving its schedules");
+    var previous = store.release(project, active);
+    var current = place(project, previous.placement());
+    List<File> retained = read(current.root());
+    if (!digest(retained).equals(previous.release().digest())
+        || retained.size() != previous.release().fileCount())
+      throw new CallerFault("Retained Application source changed; deploy a new revision");
+    String path = "schedules/" + name + ".json";
+    boolean exists = retained.stream().anyMatch(file -> file.path().equals(path));
+    if (exists && !overwrite) throw new CallerFault("A schedule named " + name + " already exists");
+    List<File> files = new ArrayList<>();
+    for (var file : retained) if (!file.path().equals(path)) files.add(file);
+    files.add(new File(path, text));
+    validateFiles(files);
+    UUID revision = UUID.randomUUID();
+    var destination = previous.destination();
+    var placement =
+        new ApplicationPlacement(
+            new FileStoreReference(
+                destination.store(), destination.path() + "/revisions/" + revision),
+            previous.placement().writableAreas());
+    var resolved = place(project, placement);
+    Path root = resolved.root();
+    Path revisions = current.root().getParent();
+    if (revisions == null || !revisions.equals(root.getParent()))
+      throw new CallerFault(
+          "A schedule revision must stay inside the Application's existing destination");
+    Path real;
+    try {
+      real = revisions.toRealPath();
+    } catch (IOException unavailable) {
+      throw new CallerFault("Retained Application source is unavailable");
+    }
+    ApplicationIdentitySource identity;
+    boolean created = false;
+    try {
+      requireStaged(root, real, false);
+      Files.createDirectory(root);
+      created = true;
+      requireStaged(root, real, true);
+      stage(project, root, files);
+      WorkspaceApplicationPolicy.parse(
+          files.stream()
+              .filter(file -> file.path().equals("plowshare.json"))
+              .findFirst()
+              .orElseThrow()
+              .text(),
+          project);
+      validator.validate(project, root);
+      if (!place(project, placement).equals(resolved))
+        throw new CallerFault("FileStore placement changed while staging the Application");
+      identity = ApplicationIdentitySource.read(root);
+      requireStaged(root, real, true);
+    } catch (IOException | IllegalArgumentException invalid) {
+      var refused =
+          new CallerFault("Application source could not be staged or its manifest is invalid");
+      if (created) discard(root, refused);
+      throw refused;
+    } catch (RuntimeException refused) {
+      if (created) discard(root, refused);
+      throw refused;
+    }
+    String digest = digest(files);
+    var mutation =
+        new ApplicationDeploymentStore.Mutation(
+            project,
+            UUID.randomUUID(),
+            active,
+            hash("schedule-revision\0" + project + "\0" + active + "\0" + revision + "\0" + digest),
+            new ApplicationDeploymentStore.Retained(
+                new Release(revision, digest, files.size()), destination, placement),
+            root,
+            true,
+            identity,
+            true);
+    try {
+      store.commit(caller, mutation);
+    } catch (CallerFault | ArchiveRefusedException refused) {
+      discard(root, refused);
+      throw refused;
+    }
+    return revision.toString();
+  }
+
+  /**
+   * Refuses when the revisions directory no longer resolves to {@code revisions} (its real path
+   * taken before staging), or when the staged directory is a link or resolves elsewhere.
+   */
+  private static void requireStaged(Path root, Path revisions, boolean exists) throws IOException {
+    if (!root.getParent().toRealPath().equals(revisions))
+      throw new CallerFault("Application destination changed while staging the revision");
+    if (exists
+        && (Files.isSymbolicLink(root)
+            || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)
+            || !root.toRealPath().equals(revisions.resolve(root.getFileName()))))
+      throw new CallerFault("Application staging source changed to a link");
+  }
+
+  /**
+   * Removes a refused revision's staging, deepest first and without following links. A failure to
+   * remove it is attached to the refusal rather than replacing it; the orphan is never activated.
+   */
+  private static void discard(Path root, RuntimeException refusal) {
+    try (var paths = Files.walk(root)) {
+      for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
+    } catch (IOException | java.io.UncheckedIOException failed) {
+      refusal.addSuppressed(failed);
+    }
   }
 
   private static io.aeyer.plowshare.protocol.ApplicationIdentity.Declaration serviceDeclaration(
@@ -276,6 +459,15 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
       ApplicationPlacement placement) {
     if (!fileStores.permits(destination, account, ProjectRole.MANAGER))
       throw new CallerFault("Deployment needs MANAGER access to the destination FileStore");
+    return place(project, placement);
+  }
+
+  /**
+   * Resolves a placement and applies the private-area and writable-area fences, without the
+   * caller's FileStore authority. Schedule-only revisions use it directly: they stay inside the
+   * destination the server already staged for this project.
+   */
+  private FileStores.Placement place(String project, ApplicationPlacement placement) {
     var resolved = fileStores.resolve(placement);
     var fence = sourceFence(project, resolved.root());
     if (!fence.permits(resolved.root()))

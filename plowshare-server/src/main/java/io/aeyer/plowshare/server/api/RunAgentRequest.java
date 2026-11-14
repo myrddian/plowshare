@@ -58,6 +58,13 @@ package io.aeyer.plowshare.server.api;
  *     definition, and a run granting itself one would be spending something no row knows about
  * @param newConversation open a fresh conversation before submitting its first turn; cannot be
  *     combined with a conversation id or images
+ * @param maxModelCalls the named conversation's new model-call total, or {@code null} to leave it
+ *     alone (ADR 0069). <b>The conversation's and not this run's</b>, with exactly {@code
+ *     conversation.resume}'s meaning: an absolute total, never an increment, so a replayed request
+ *     writes the same ceiling again. It is how a person raises a conversation whose allowance is
+ *     spent and whose last turn answered, which {@code conversation.resume} does not continue.
+ *     Refused without {@code conversation}, beside {@code newConversation}, when not positive, when
+ *     below what the conversation has already spent and for a conversation with no ceiling
  */
 public record RunAgentRequest(
     String task,
@@ -67,7 +74,20 @@ public record RunAgentRequest(
     Integer maxTurns,
     Boolean noTurnCap,
     java.util.List<String> images,
-    Boolean newConversation) {
+    Boolean newConversation,
+    Integer maxModelCalls) {
+
+  public RunAgentRequest(
+      String task,
+      String project,
+      String session,
+      String conversation,
+      Integer maxTurns,
+      Boolean noTurnCap,
+      java.util.List<String> images,
+      Boolean newConversation) {
+    this(task, project, session, conversation, maxTurns, noTurnCap, images, newConversation, null);
+  }
 
   public RunAgentRequest(
       String task,
@@ -77,7 +97,7 @@ public record RunAgentRequest(
       Integer maxTurns,
       Boolean noTurnCap,
       java.util.List<String> images) {
-    this(task, project, session, conversation, maxTurns, noTurnCap, images, null);
+    this(task, project, session, conversation, maxTurns, noTurnCap, images, null, null);
   }
 
   /** Never null, so the one caller does not branch before it iterates. */

@@ -242,7 +242,7 @@ fallback:
 #               that. search and fetch are the only two names this slice adds
 #               to any agent's surface.
 # run executes commands and skill helpers where the project's environment.yml and hooks allow it.
-tools: [code_map, file_roots, file_glob, file_grep, file_read, file_stat, file_edit, file_delete, file_move, run, todo_read, todo_write, memory_recall, memory_read, memory_write, memory_navigate, result_read, result_list, agent_run, search, fetch, memory_index, conversation_list, conversation_search, conversation_chat, conversation_context, conversation_trajectory, information_read, information_write, information_scopes, information_list, information_search, information_facets]
+tools: [code_map, file_roots, file_glob, file_grep, file_read, file_stat, file_edit, file_delete, file_move, run, todo_read, todo_write, memory_recall, memory_read, memory_write, memory_navigate, result_read, result_list, agent_run, search, fetch, memory_index, conversation_list, conversation_search, conversation_chat, conversation_context, conversation_trajectory, information_read, document_retrieve, document_outline, document_citations, information_write, information_scopes, information_list, information_search, information_facets]
 # Three callees, and it is a discipline rather than a feature. This is the agent
 # most at risk of becoming the kitchen sink, because it has the widest surface
 # and the most tempting scope — and the guardrails in this project are in the

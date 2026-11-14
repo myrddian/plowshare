@@ -31,8 +31,13 @@ class ScheduleDefinitionsTest {
           "active",
           null);
   private final ScheduleControlAuthority controls = mock(ScheduleControlAuthority.class);
+  private final ApplicationProjects applications = mock(ApplicationProjects.class);
+  private final ApplicationScheduleAudit audit = mock(ApplicationScheduleAudit.class);
+  private final io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions revisions =
+      mock(io.aeyer.plowshare.server.applications.ApplicationScheduleRevisions.class);
   private final ScheduleDefinitions service =
-      new FileScheduleDefinitions(store, files, projects, members, authority, controls);
+      new FileScheduleDefinitions(
+          store, files, projects, members, authority, controls, applications, audit, revisions);
 
   @BeforeEach
   void configure() {
@@ -392,15 +397,249 @@ class ScheduleDefinitionsTest {
   void operationalAuthorityDoesNotAuthorizeDefinitionAuthoringOrRemoval() {
     when(store.sourceOf(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(source));
     assertThrows(RuntimeException.class, () -> service.forget(prior.internalName(), "owner"));
-    when(projects.id("project")).thenReturn(7L);
-    assertThrows(
-        RuntimeException.class,
-        () ->
-            service.save(
-                "owner", new ScheduledWork.Save("daily", "project", "server", definition, true)));
-    verifyNoInteractions(controls);
+    // The Application save admits a current project Manager only. Operational (pause) authority
+    // and Contributor work access do not reach it.
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "owner")).thenReturn(false);
+    when(members.mayManage("project", "operator")).thenReturn(false);
+    when(members.mayWork("project", "operator")).thenReturn(true);
+    for (String actor : List.of("owner", "operator"))
+      assertThrows(
+          io.aeyer.plowshare.server.faults.CallerFault.class,
+          () ->
+              service.save(
+                  actor, new ScheduledWork.Save("daily", "project", "server", definition, true)));
+    verifyNoInteractions(controls, audit, revisions);
     verify(files, never()).delete(any(), anyString());
     verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
     verify(store, never()).register(anyString(), any(), anyString());
+  }
+
+  /** A hand-registered Application whose server source "owner" registered. */
+  private void application(ApplicationProjects.ProjectType type) {
+    when(projects.id("project")).thenReturn(7L);
+    when(files.applicationOwned(
+            argThat(
+                s ->
+                    s != null
+                        && Long.valueOf(7L).equals(s.projectId())
+                        && s.source().equals("server"))))
+        .thenReturn(true);
+    when(applications.find(7L))
+        .thenReturn(
+            java.util.Optional.of(new ApplicationProjects.ApplicationProject("project", type)));
+    when(store.registered(7L, "server")).thenReturn(java.util.Optional.of(source));
+    when(files.read(source))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+  }
+
+  private ScheduledWork.File saveApplication(String actor, ScheduledWork work) {
+    return service.save(actor, new ScheduledWork.Save("daily", "project", "server", work, true));
+  }
+
+  @Test
+  void managerSavesDisjointApplicationScheduleInPlace() {
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "owner")).thenReturn(true);
+    assertEquals(prior, saveApplication("owner", definition));
+    var order = inOrder(authority, files, store, audit);
+    order.verify(authority).validate(source, definition);
+    order
+        .verify(files)
+        .writeApplication(source, "daily", ScheduleDefinitionCodec.write(definition), true);
+    order.verify(files).read(source);
+    order.verify(store).apply(eq(source), eq("daily"), eq(definition), any());
+    order.verify(audit).saved("owner", "project/daily");
+    verify(store, never()).register(anyString(), any(), anyString());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+  }
+
+  @Test
+  void managerWhoIsNotTheRegistrarCanSave() {
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "manager")).thenReturn(true);
+    assertEquals(prior, saveApplication("manager", definition));
+    // Actions are validated under the registered owner, whose registration is never changed:
+    // once before the write and again when reconciliation projects the file.
+    verify(authority, times(2)).validate(source, definition);
+    verify(authority, never())
+        .validate(argThat(s -> s != null && s.account().equals("manager")), any());
+    verify(files)
+        .writeApplication(source, "daily", ScheduleDefinitionCodec.write(definition), true);
+    verify(audit).saved("manager", "project/daily");
+    verify(store, never()).register(anyString(), any(), anyString());
+  }
+
+  @Test
+  void contributorCannotSaveApplicationSchedule() {
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayWork("project", "contributor")).thenReturn(true);
+    var refusal =
+        assertThrows(
+            io.aeyer.plowshare.server.faults.CallerFault.class,
+            () -> saveApplication("contributor", definition));
+    assertEquals(
+        "Managing schedule definitions requires project MANAGER access", refusal.getMessage());
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+    verifyNoInteractions(authority, audit);
+  }
+
+  @Test
+  void servicePrincipalCannotSaveAnInPlaceApplicationSchedule() {
+    // A service token that somehow holds Manager membership is still refused before any write,
+    // matching the MANAGED revision path.
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "@service/bot")).thenReturn(true);
+    var refusal =
+        assertThrows(
+            io.aeyer.plowshare.server.faults.CallerFault.class,
+            () -> saveApplication("@service/bot", definition));
+    assertEquals("Saving an Application schedule requires a project Manager", refusal.getMessage());
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+    verify(store, never()).register(anyString(), any(), anyString());
+    verifyNoInteractions(authority, audit, revisions);
+  }
+
+  @Test
+  void missingRegisteredSourceIsRefused() {
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "owner")).thenReturn(true);
+    when(store.registered(7L, "server")).thenReturn(java.util.Optional.empty());
+    var refusal =
+        assertThrows(
+            io.aeyer.plowshare.server.faults.CallerFault.class,
+            () -> saveApplication("owner", definition));
+    assertEquals("No registered schedule source for this Application", refusal.getMessage());
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verify(store, never()).register(anyString(), any(), anyString());
+    verifyNoInteractions(authority, audit);
+  }
+
+  @Test
+  void actionsTheOwnerLacksAreRefusedBeforeWriting() {
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "manager")).thenReturn(true);
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("The owner cannot run that agent"))
+        .when(authority)
+        .validate(source, definition);
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> saveApplication("manager", definition));
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verifyNoInteractions(audit);
+  }
+
+  @Test
+  void aRegisteredOwnerWithoutExecutionAccessIsRefusedBeforeWriting() {
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "manager")).thenReturn(true);
+    when(members.mayWork("project", "owner")).thenReturn(false);
+    var refusal =
+        assertThrows(
+            io.aeyer.plowshare.server.faults.CallerFault.class,
+            () -> saveApplication("manager", definition));
+    assertEquals(
+        "The registered schedule owner no longer has execution access", refusal.getMessage());
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verifyNoInteractions(authority, audit);
+  }
+
+  @Test
+  void invalidCronIsRefusedBeforeWriting() {
+    application(ApplicationProjects.ProjectType.DISJOINT);
+    when(members.mayManage("project", "owner")).thenReturn(true);
+    var invalid =
+        new ScheduledWork(
+            definition.version(),
+            "not a cron",
+            definition.zone(),
+            definition.paused(),
+            definition.action(),
+            definition.target(),
+            definition.limits());
+    assertThrows(RuntimeException.class, () -> saveApplication("owner", invalid));
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verifyNoInteractions(audit);
+  }
+
+  @Test
+  void managerSavesManagedApplicationScheduleAsRevision() {
+    application(ApplicationProjects.ProjectType.MANAGED);
+    when(members.mayManage("project", "manager")).thenReturn(true);
+    String text = ScheduleDefinitionCodec.write(definition);
+    when(revisions.revise("manager", 7L, "daily", text, true)).thenReturn("rev");
+    assertEquals(prior, saveApplication("manager", definition));
+    var order = inOrder(authority, revisions, files, store, audit);
+    order.verify(authority).validate(source, definition);
+    order.verify(revisions).revise("manager", 7L, "daily", text, true);
+    order.verify(files).read(source);
+    order.verify(store).apply(eq(source), eq("daily"), eq(definition), any());
+    order.verify(audit).saved("manager", "project/daily@rev");
+    // The revision is the only write: no in-place file and no new registration.
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+    verify(store, never()).register(anyString(), any(), anyString());
+  }
+
+  @Test
+  void managedApplicationSaveValidatesBeforeRevising() {
+    application(ApplicationProjects.ProjectType.MANAGED);
+    when(members.mayManage("project", "manager")).thenReturn(true);
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("bad action"))
+        .when(authority)
+        .validate(source, definition);
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> saveApplication("manager", definition));
+    verifyNoInteractions(revisions, audit);
+  }
+
+  @Test
+  void workspaceAndGlobalSavesUnchanged() {
+    // An ordinary project server source still registers and writes through the ordinary path.
+    when(projects.id("project")).thenReturn(7L);
+    when(members.mayManage("project", "owner")).thenReturn(true);
+    when(store.register("owner", 7L, "server")).thenReturn(source);
+    when(files.read(source))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    assertEquals(prior, saveApplication("owner", definition));
+    verify(files).write(source, "daily", ScheduleDefinitionCodec.write(definition), true);
+
+    // A workspace source and a global source are never Application sources.
+    var workspace = new ScheduleDefinitionStore.Source(2, "owner", 7L, "project", "workspace");
+    when(store.register("owner", 7L, "workspace")).thenReturn(workspace);
+    when(store.snapshot(workspace, "daily"))
+        .thenReturn(
+            java.util.Optional.of(
+                new ScheduleDefinitionStore.FileSnapshot(
+                    workspace, "daily", "scheduled-2-daily", definition, null, "active", null)));
+    when(files.read(workspace))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    service.save(
+        "owner", new ScheduledWork.Save("daily", "project", "workspace", definition, false));
+    verify(files).write(workspace, "daily", ScheduleDefinitionCodec.write(definition), false);
+
+    var global = new ScheduleDefinitionStore.Source(3, "admin", null, null, "server");
+    when(members.isServerAdmin("admin")).thenReturn(true);
+    when(store.register("admin", null, "server")).thenReturn(global);
+    when(store.snapshot(global, "daily"))
+        .thenReturn(
+            java.util.Optional.of(
+                new ScheduleDefinitionStore.FileSnapshot(
+                    global, "daily", "scheduled-3-daily", definition, null, "active", null)));
+    when(files.read(global))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    service.save("admin", new ScheduledWork.Save("daily", null, "server", definition, true));
+    verify(files).write(global, "daily", ScheduleDefinitionCodec.write(definition), true);
+
+    verify(files, never()).writeApplication(any(), anyString(), anyString(), anyBoolean());
+    verifyNoInteractions(applications, audit);
   }
 }

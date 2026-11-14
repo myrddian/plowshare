@@ -96,6 +96,31 @@ class ServiceScheduleAuthorizationTest {
   }
 
   @Test
+  void serviceTokensStillCannotSaveSchedules() {
+    // ADR 0068 admits a project Manager to Application schedule saves; service tokens stay out.
+    when(resources.projects(schedule)).thenReturn(List.of("application"));
+    for (boolean overwrite : List.of(true, false)) {
+      assertFalse(
+          access.allowed(
+              "schedule.save",
+              AccessRequestDecoder.decode(
+                  "schedule.save",
+                  Map.of(
+                      "project",
+                      "application",
+                      "source",
+                      "server",
+                      "name",
+                      "daily",
+                      "overwrite",
+                      overwrite)),
+              SERVICE));
+    }
+    verifyNoInteractions(members, accounts);
+    assertEquals(ProjectRole.MANAGER, ProjectAuthorization.required("schedule.save"));
+  }
+
+  @Test
   void globalHumanResumeStillRequiresServerAdministrationDespiteInjectedScope() {
     doThrow(new CallerFault("Administrator required")).when(accounts).requireServerAdmin("human");
     assertFalse(

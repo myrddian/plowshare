@@ -44,7 +44,8 @@ public final class InformationDiscoveryInputs {
     if (value == null) throw new CallerFault("Discovery fields cannot be explicitly null");
     if (value instanceof Map<?, ?> fields) {
       for (var entry : fields.entrySet()) {
-        if (Set.of("revision", "contentType", "contentTypeVersion").contains(entry.getKey())
+        if (Set.of("revision", "document", "contentType", "contentTypeVersion")
+                .contains(entry.getKey())
             && (!(entry.getValue() instanceof String id)
                 || !id.matches("[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")))
           throw new CallerFault("Exact discovery UUID required");

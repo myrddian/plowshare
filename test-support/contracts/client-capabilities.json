@@ -1409,8 +1409,17 @@
       "internalAgent": {
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
-        "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RetrievalTools.java",
-        "shippedGrants": []
+        "selection": "required explicit RBAC-readable scopes; document is an exact revision UUID; execution and write home stay unchanged",
+        "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ScopedDocumentTool.java",
+        "shippedGrants": [
+          "plowshare-server/src/main/resources/agents/close_reader.md",
+          "plowshare-server/src/main/resources/agents/critic.md",
+          "plowshare-server/src/main/resources/agents/interlocutor.md",
+          "plowshare-server/src/main/resources/agents/librarian.md",
+          "plowshare-server/src/main/resources/agents/researcher.md",
+          "plowshare-server/src/main/resources/bots/aristoxenus.md",
+          "plowshare-server/src/main/resources/bots/farnsworth.md"
+        ]
       },
       "work": [
         "live-mcp-deployment-validation",
@@ -1629,8 +1638,17 @@
       "internalAgent": {
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
-        "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RetrievalTools.java",
-        "shippedGrants": []
+        "selection": "required explicit RBAC-readable scopes; document is an exact revision UUID; execution and write home stay unchanged",
+        "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ScopedDocumentTool.java",
+        "shippedGrants": [
+          "plowshare-server/src/main/resources/agents/close_reader.md",
+          "plowshare-server/src/main/resources/agents/critic.md",
+          "plowshare-server/src/main/resources/agents/interlocutor.md",
+          "plowshare-server/src/main/resources/agents/librarian.md",
+          "plowshare-server/src/main/resources/agents/researcher.md",
+          "plowshare-server/src/main/resources/bots/aristoxenus.md",
+          "plowshare-server/src/main/resources/bots/farnsworth.md"
+        ]
       },
       "work": [
         "live-mcp-deployment-validation",
@@ -1773,8 +1791,17 @@
       "internalAgent": {
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
-        "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/RetrievalTools.java",
-        "shippedGrants": []
+        "selection": "required explicit RBAC-readable scopes; document is an exact revision UUID; execution and write home stay unchanged",
+        "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ScopedDocumentTool.java",
+        "shippedGrants": [
+          "plowshare-server/src/main/resources/agents/close_reader.md",
+          "plowshare-server/src/main/resources/agents/critic.md",
+          "plowshare-server/src/main/resources/agents/interlocutor.md",
+          "plowshare-server/src/main/resources/agents/librarian.md",
+          "plowshare-server/src/main/resources/agents/researcher.md",
+          "plowshare-server/src/main/resources/bots/aristoxenus.md",
+          "plowshare-server/src/main/resources/bots/farnsworth.md"
+        ]
       },
       "work": [
         "live-mcp-deployment-validation",

@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.documents;
 import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationContext;
+import io.aeyer.plowshare.server.information.InformationJson;
+import io.aeyer.plowshare.server.information.InformationReadSelection;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.*;
@@ -92,7 +94,7 @@ import java.util.UUID;
  * way to tell a lexical half that has broken from one that is correctly quiet, since both look like
  * a vector-only answer.
  */
-public final class RetrievalService implements UsageAware {
+public final class RetrievalService implements UsageAware, SelectedPassages {
   private DualEmbeddings dualEmbeddings;
 
   public void useDualEmbeddings(DualEmbeddings embeddings) {
@@ -100,6 +102,8 @@ public final class RetrievalService implements UsageAware {
     store.useDualEmbeddings(embeddings);
   }
 
+  private InformationReadSelection selected;
+  private UUID selectedTarget;
   private QueryEmbeddings queries;
   private QueryEmbeddings.Origin queryOrigin;
   private QueryEmbeddings.Read queryRead;
@@ -128,6 +132,8 @@ public final class RetrievalService implements UsageAware {
     copy.queries = queries;
     copy.queryOrigin = queryOrigin;
     copy.queryRead = queryRead;
+    copy.selected = selected;
+    copy.selectedTarget = selectedTarget;
     return copy;
   }
 
@@ -135,11 +141,26 @@ public final class RetrievalService implements UsageAware {
       QueryEmbeddings.Query query, java.util.function.Function<RetrievalService, T> call) {
     if (queryOrigin == null || usageContext == null)
       throw new IllegalStateException("Query needs an admitted request or retained run");
-    try (var read = queries.open(usageContext, query, queryOrigin)) {
+    // Source selection is independently fenced by the scoped repository before inference and
+    // disclosure. Query accounting remains in the retained run home, rather than pretending a
+    // cross-project source belongs to that home. Bind exact selection into the inference identity.
+    var admitted =
+        selected == null
+            ? query
+            : new QueryEmbeddings.Query(
+                query.kind(),
+                query.text(),
+                null,
+                query.limit(),
+                InformationJson.json(
+                    List.of(selected.scopes(), selectedTarget == null ? "" : selectedTarget)));
+    try (var read = queries.open(usageContext, admitted, queryOrigin)) {
       var reader = new RetrievalService(store, embeddings.forOperation(read), model, expectedDim);
       reader.dualEmbeddings = dualEmbeddings == null ? null : dualEmbeddings.forQuery(read);
       reader.queries = queries;
       reader.queryRead = read;
+      reader.selected = selected;
+      reader.selectedTarget = selectedTarget;
       reader.usageContext = usageContext;
       reader.usageOwners = usageOwners;
       return call.apply(reader);
@@ -320,6 +341,22 @@ public final class RetrievalService implements UsageAware {
     var copy = scopedCopy(store.scoped(access, context));
     copy.usageContext = context;
     return copy;
+  }
+
+  @Override
+  public List<DocumentStore.Retrieved> retrieve(
+      InformationReadSelection selection,
+      InformationContext queryHome,
+      QueryEmbeddings.Origin origin,
+      String question,
+      UUID document,
+      int limit) {
+    var copy = scopedCopy(store.selected(selection, document));
+    copy.selected = selection;
+    copy.selectedTarget = document;
+    copy.usageContext = Objects.requireNonNull(queryHome);
+    copy.queryOrigin = Objects.requireNonNull(origin);
+    return copy.retrieve(question, document, limit);
   }
 
   public RetrievalService checkingConfiguration() {

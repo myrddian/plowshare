@@ -76,7 +76,9 @@ public final class AgentRunHandler implements FrameHandler {
                 asked.images(),
                 Speaker.person(asking.handle()),
                 asking.handle(),
-                asked.newConversation()),
+                asked.newConversation(),
+                null,
+                asked.maxModelCalls()),
             pictures);
     return new Outcome(
         Code.ACCEPTED,

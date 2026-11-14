@@ -15,7 +15,7 @@ fallback:
   when: [refusal]
   model: low_refusal_osint
   max-attempts: 1
-tools: [conversation_trajectory, get_date, code_map, file_roots, file_glob, file_grep, file_read, file_stat, file_edit, file_delete, file_move, todo_read, todo_write, memory_recall, memory_read, memory_write, memory_navigate, result_read, result_list, information_read, agent_run, search, fetch, run, memory_index, conversation_list, conversation_search, conversation_chat, conversation_context, information_write, information_scopes, information_list, information_search, information_facets]
+tools: [conversation_trajectory, get_date, code_map, file_roots, file_glob, file_grep, file_read, file_stat, file_edit, file_delete, file_move, todo_read, todo_write, memory_recall, memory_read, memory_write, memory_navigate, result_read, result_list, information_read, document_retrieve, document_outline, document_citations, agent_run, search, fetch, run, memory_index, conversation_list, conversation_search, conversation_chat, conversation_context, information_write, information_scopes, information_list, information_search, information_facets]
 scopes: [workspace:write]
 exported: true
 delegable: false
