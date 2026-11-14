@@ -27,7 +27,7 @@ import org.junit.jupiter.api.*;
 class ContainmentHopTest {
   IdentityRepository identities = mock(IdentityRepository.class);
   ScopedGrantRepository grants = mock(ScopedGrantRepository.class);
-  ScopedAuthority authority = mock(ScopedAuthority.class);
+  ScopedAuthority authority = ScopedAuthorityMocks.mockAuthority();
   ProjectMembers members = mock(ProjectMembers.class);
   OperationRecords records = mock(OperationRecords.class);
   ResourceScopeRepository resources = mock(ResourceScopeRepository.class);
@@ -192,8 +192,8 @@ class ContainmentHopTest {
             .collect(java.util.stream.Collectors.toSet()));
     // The immutable parent edge, as derive records it. No new grant was resolved for the child:
     // the only live-grant reads in this test are the parent's admission (one in admit, one in the
-    // walk admit ends with) and the single walk of the contained admission: GATE ONE reads the
-    // source's grants once per walk and shares that list between its support items.
+    // walk admit ends with) and the one walk contain makes by calling require(parent). Gate one
+    // reads the source's grants once per walk and shares that list between its support items.
     verify(records).retainChild(contained, parent.id());
     verify(grants, times(3)).live(recipient);
   }

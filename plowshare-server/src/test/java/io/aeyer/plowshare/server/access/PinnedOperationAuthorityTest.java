@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.access;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
@@ -17,7 +18,7 @@ import org.junit.jupiter.api.*;
 class PinnedOperationAuthorityTest {
   IdentityRepository identities = mock(IdentityRepository.class);
   ScopedGrantRepository grants = mock(ScopedGrantRepository.class);
-  ScopedAuthority authority = mock(ScopedAuthority.class);
+  ScopedAuthority authority = ScopedAuthorityMocks.mockAuthority();
   ProjectMembers members = mock(ProjectMembers.class);
   OperationRecords records = mock(OperationRecords.class);
   ResourceScopeRepository resources = mock(ResourceScopeRepository.class);
@@ -74,10 +75,13 @@ class PinnedOperationAuthorityTest {
           .thenReturn(true);
     var admitted = policy.admit("alice", target, actions);
     assertEquals(3, admitted.support().size());
+    var live = grants.live(recipient);
     clearInvocations(grants, authority);
     policy.require(admitted);
     verify(grants, times(1)).live(recipient);
-    verify(authority, times(3)).allowsUsing(eq(recipient), eq(target), any(), eq(grant), any());
+    // Every item is checked against the very list that one read returned.
+    verify(authority, times(3))
+        .allowsUsing(eq(recipient), eq(target), any(), eq(grant), same(live));
   }
 
   @Test
@@ -256,10 +260,12 @@ class PinnedOperationAuthorityTest {
             eq(grant),
             anyList()))
         .thenReturn(false);
+    clearInvocations(grants);
     assertThrows(CallerFault.class, () -> policy.require(child));
-    // Never fewer than the admission's own read; every walk since reads the list once per
-    // admission checked, not once per support item.
-    verify(grants, atLeastOnce()).live(recipient);
+    // The child walk checks the child and then its retained parent: one read of the source's live
+    // grants per admission checked, however many support items each carries. A per-item read
+    // would show as more than two here.
+    verify(grants, times(2)).live(recipient);
   }
 
   @Test

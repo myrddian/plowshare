@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.access;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -14,8 +15,10 @@ import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
 import io.aeyer.plowshare.server.access.ScopedGrantRepository.Binding;
 import io.aeyer.plowshare.server.access.ScopedGrantRepository.Coverage;
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
+import io.aeyer.plowshare.server.archive.ProjectRole;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -45,12 +48,21 @@ class LiveScopedAuthorityTest {
   }
 
   private Binding binding(GrantRecipient recipient, ScopeId target, Set<AuthorityAction> actions) {
+    return binding(recipient, target, actions, StandardRole.ADMIN, Optional.empty());
+  }
+
+  private Binding binding(
+      GrantRecipient recipient,
+      ScopeId target,
+      Set<AuthorityAction> actions,
+      StandardRole role,
+      Optional<String> project) {
     return new Binding(
         UUID.randomUUID(),
         recipient,
         target,
-        StandardRole.ADMIN,
-        StandardRole.ADMIN,
+        role,
+        role,
         Coverage.SELF,
         human,
         Optional.of(UUID.randomUUID()),
@@ -64,7 +76,7 @@ class LiveScopedAuthorityTest {
         Optional.empty(),
         actions,
         "human",
-        Optional.empty());
+        project);
   }
 
   /** Asks both overloads, the list overload with the very list the id overload will read. */
@@ -105,6 +117,86 @@ class LiveScopedAuthorityTest {
     // Unresolvable target.
     var unknown = new AuthorityScope.Project(new ScopeId(UUID.randomUUID()), 1);
     assertFalse(both(human, unknown, AuthorityAction.READ, held.id(), List.of(held), false));
+    // Invalid lineage refuses an otherwise matching grant.
+    var broken = binding(human, scope, Set.of(AuthorityAction.READ));
+    when(lineage.valid(broken.id())).thenReturn(false);
+    assertFalse(both(human, project, AuthorityAction.READ, broken.id(), List.of(broken), false));
+  }
+
+  /** A project grant is further limited by the Application manifest, in both overloads alike. */
+  @Test
+  void bindingOverloadMatchesIdOverloadWhenTheManifestNarrowsTheRole() {
+    when(applications.read("fixture"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION, Map.of("human", ProjectRole.VIEWER)));
+    for (var role : List.of(StandardRole.CONTRIBUTOR, StandardRole.MANAGER)) {
+      var held =
+          binding(
+              human,
+              scope,
+              Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.MANAGE_ACCESS),
+              role,
+              Optional.of("fixture"));
+      // The manifest caps the stored role at viewer: reading survives, writing and managing do not.
+      assertTrue(both(human, project, AuthorityAction.READ, held.id(), List.of(held), true));
+      assertFalse(both(human, project, AuthorityAction.WRITE, held.id(), List.of(held), false));
+      assertFalse(
+          both(human, project, AuthorityAction.MANAGE_ACCESS, held.id(), List.of(held), false));
+    }
+  }
+
+  @Test
+  void walkReadsLineageOncePerDistinctGrant() {
+    var first = binding(human, scope, Set.of(AuthorityAction.READ, AuthorityAction.WRITE));
+    var second = binding(human, scope, Set.of(AuthorityAction.READ));
+    var walk = authority.walk(human, List.of(first, second));
+    for (var action : List.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.READ))
+      assertTrue(walk.allows(project, action, first.id()));
+    verify(lineage, times(1)).valid(first.id());
+    assertTrue(walk.allows(project, AuthorityAction.READ, second.id()));
+    verify(lineage, times(1)).valid(second.id());
+    verify(lineage, times(2)).valid(any());
+    // A new walk memoises nothing from the last one.
+    authority.walk(human, List.of(first)).allows(project, AuthorityAction.READ, first.id());
+    verify(lineage, times(2)).valid(first.id());
+  }
+
+  @Test
+  void walkReadsEachApplicationManifestOncePerProject() {
+    when(applications.read("fixture"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION, Map.of("human", ProjectRole.MANAGER)));
+    var first =
+        binding(
+            human,
+            scope,
+            Set.of(AuthorityAction.READ),
+            StandardRole.CONTRIBUTOR,
+            Optional.of("fixture"));
+    var second =
+        binding(
+            human,
+            scope,
+            Set.of(AuthorityAction.READ),
+            StandardRole.MANAGER,
+            Optional.of("fixture"));
+    var walk = authority.walk(human, List.of(first, second));
+    assertTrue(walk.allows(project, AuthorityAction.READ, first.id()));
+    assertTrue(walk.allows(project, AuthorityAction.READ, first.id()));
+    assertTrue(walk.allows(project, AuthorityAction.READ, second.id()));
+    verify(applications, times(1)).read("fixture");
+  }
+
+  @Test
+  void aFailedLineageReadIsNotMemoised() {
+    var held = binding(human, scope, Set.of(AuthorityAction.READ));
+    when(lineage.valid(held.id())).thenThrow(new IllegalStateException("boom")).thenReturn(true);
+    var walk = authority.walk(human, List.of(held));
+    assertThrows(
+        IllegalStateException.class, () -> walk.allows(project, AuthorityAction.READ, held.id()));
+    assertTrue(walk.allows(project, AuthorityAction.READ, held.id()));
   }
 
   @Test

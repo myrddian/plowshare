@@ -50,7 +50,7 @@ class VerifiedAdmissionsTest {
 
   private final IdentityRepository identities = mock(IdentityRepository.class);
   private final ScopedGrantRepository grants = mock(ScopedGrantRepository.class);
-  private final ScopedAuthority authority = mock(ScopedAuthority.class);
+  private final ScopedAuthority authority = ScopedAuthorityMocks.mockAuthority();
   private final ProjectMembers members = mock(ProjectMembers.class);
   private final OperationRecords records = mock(OperationRecords.class);
   private final ResourceScopeRepository resources = mock(ResourceScopeRepository.class);

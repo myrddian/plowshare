@@ -8,6 +8,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.access.*;
 import io.aeyer.plowshare.server.access.AuthorityIds.*;
+import io.aeyer.plowshare.server.access.ScopedAuthorityMocks;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.allowances.*;
 import io.aeyer.plowshare.server.archive.*;
@@ -466,7 +467,7 @@ class ContainedCancellationTest {
   @Test
   void aRevokedContainerStopsItsDescendantsWork() {
     var grants = mock(ScopedGrantRepository.class);
-    var scoped = mock(ScopedAuthority.class);
+    var scoped = ScopedAuthorityMocks.mockAuthority();
     var members = mock(ProjectMembers.class);
     var operations = mock(OperationRecords.class);
     var resources = mock(ResourceScopeRepository.class);

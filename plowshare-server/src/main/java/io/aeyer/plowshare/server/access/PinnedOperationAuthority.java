@@ -183,11 +183,14 @@ public final class PinnedOperationAuthority implements OperationAuthority {
         members.authorityAccount(executor).orElseThrow(PinnedOperationAuthority::denied);
     var recipient = GrantRecipient.account(identities.account(source).id());
     var live = grants.live(recipient);
+    // One walk for the admission: grants already refused or accepted for one action share their
+    // lineage and manifest reads with the next action.
+    var walk = authority.walk(recipient, live);
     var support = new ArrayList<Support>();
     for (var action : actions) {
       var binding =
           live.stream()
-              .filter(grant -> authority.allowsUsing(recipient, target, action, grant.id(), live))
+              .filter(grant -> walk.allows(target, action, grant.id()))
               .findFirst()
               .orElseThrow(PinnedOperationAuthority::denied);
       support.add(new Support(action, binding.id()));
@@ -493,14 +496,14 @@ public final class PinnedOperationAuthority implements OperationAuthority {
     var role =
         members.role(project, admission.executor()).orElseThrow(PinnedOperationAuthority::denied);
     // One read of the source's live grants serves every support item: they all name grants of the
-    // same recipient, and the grants are selected by id from this list. Read lazily so an
+    // same recipient, and the grants are selected by id from this list; the walk also shares
+    // lineage and manifest reads between items that name one grant. Read lazily so an
     // admission with no support, or one refused by its role ceiling first, reads nothing.
-    List<ScopedGrantRepository.Binding> live = null;
+    ScopedAuthority.Walk walk = null;
     for (var item : admission.support()) {
       if (!ceiling(role, item.action())) throw denied();
-      if (live == null) live = grants.live(admission.source());
-      if (!authority.allowsUsing(admission.source(), scope, item.action(), item.grant(), live))
-        throw denied();
+      if (walk == null) walk = authority.walk(admission.source(), grants.live(admission.source()));
+      if (!walk.allows(scope, item.action(), item.grant())) throw denied();
     }
     return containment;
   }

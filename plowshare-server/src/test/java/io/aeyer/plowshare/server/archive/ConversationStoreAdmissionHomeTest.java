@@ -15,6 +15,7 @@ import io.aeyer.plowshare.server.access.OperationRecords;
 import io.aeyer.plowshare.server.access.PinnedOperationAuthority;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.access.ScopedAuthority;
+import io.aeyer.plowshare.server.access.ScopedAuthorityMocks;
 import io.aeyer.plowshare.server.access.ScopedGrantRepository;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
@@ -60,7 +61,7 @@ class ConversationStoreAdmissionHomeTest {
   private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
   private final IdentityRepository identities = mock(IdentityRepository.class);
   private final ScopedGrantRepository grants = mock(ScopedGrantRepository.class);
-  private final ScopedAuthority authority = mock(ScopedAuthority.class);
+  private final ScopedAuthority authority = ScopedAuthorityMocks.mockAuthority();
   private final ProjectMembers members = mock(ProjectMembers.class);
   private final OperationRecords records = mock(OperationRecords.class);
   private final ResourceScopeRepository resources = mock(ResourceScopeRepository.class);

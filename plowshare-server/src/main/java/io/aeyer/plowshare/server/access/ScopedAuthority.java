@@ -26,4 +26,17 @@ public interface ScopedAuthority {
       AuthorityAction action,
       UUID grant,
       List<ScopedGrantRepository.Binding> live);
+
+  /**
+   * Opens a checking session over a live-grant list the caller already read for {@code recipient}.
+   * The session may remember, for its own lifetime only, facts that are expensive to re-derive and
+   * cannot differ within one decision: it must hold no state that outlives the object, and a caller
+   * must discard it when the walk or admission it serves ends.
+   */
+  Walk walk(GrantRecipient recipient, List<ScopedGrantRepository.Binding> live);
+
+  /** One walk's checks; same contract per call as the five-argument {@code allowsUsing}. */
+  interface Walk {
+    boolean allows(AuthorityScope target, AuthorityAction action, UUID grant);
+  }
 }
