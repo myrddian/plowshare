@@ -20,9 +20,10 @@ import java.util.Objects;
  * cost"; it is not an operation context and carries no authority or identity.
  *
  * <p>The meter is tagged only by {@link Kind}, a fixed set, and uses a percentile histogram so the
- * tail of statements per operation is visible. Until a registry is bound (the first {@link
- * MicrometerJdbcExecutionTrace} does so) scopes are no-ops. Scopes are for try-with-resources on
- * the thread that opened them and must be closed in reverse order of opening.
+ * tail of statements per operation is visible. Until a registry is bound scopes are no-ops; every
+ * {@link MicrometerJdbcExecutionTrace} constructed binds its registry, so the latest-constructed
+ * trace's registry wins. Scopes are for try-with-resources on the thread that opened them and must
+ * be closed in reverse order of opening.
  */
 public final class OperationStatements {
   public static final String METER = "plowshare.operation.statements";
