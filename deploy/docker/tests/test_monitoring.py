@@ -56,6 +56,11 @@ class ComposeTelemetryTests(unittest.TestCase):
         ):
             self.assertIn(meter, text)
 
+    def test_read_rejected_is_a_gauge_not_a_counter(self):
+        text = (MONITORING / "grafana-plowshare.json").read_text()
+        self.assertNotIn("plowshare_read_rejected_total", text)
+        self.assertRegex(text, r"plowshare_read_rejected\b")
+
     def test_jfr_settings_enable_the_jdbc_event(self):
         settings = (MONITORING / "plowshare.jfc").read_text()
         match = re.search(r'<event name="plowshare.JdbcExecute">(.*?)</event>', settings, re.S)

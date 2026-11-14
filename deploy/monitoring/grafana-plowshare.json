@@ -385,7 +385,7 @@
         },
         {
           "refId": "B",
-          "expr": "sum(rate(plowshare_read_rejected_total[5m]))",
+          "expr": "sum(deriv(plowshare_read_rejected[5m]))",
           "legendFormat": "rejected reads/s"
         }
       ]

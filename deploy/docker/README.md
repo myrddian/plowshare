@@ -161,6 +161,8 @@ The shipped telemetry is opt-in and has no default addresses.
 - **Flight recording**: set `PLOWSHARE_JFR_DIR` to a writable mounted directory to
   record continuously (6 hours or 512 MB, dumped on exit) with the settings in
   `deploy/monitoring/plowshare.jfc`, which add `plowshare.JdbcExecute` stack traces.
+  `plowshare.jfc` was derived from the JDK 17 `profile.jfc` and can be regenerated
+  from a Java 21 JDK.
 - **Files**: [scrape example](../monitoring/prometheus-scrape.example.yaml),
   [Grafana dashboard](../monitoring/grafana-plowshare.json) (import into Grafana and
   select the Prometheus data source) and `deploy/monitoring/pg-stat-snapshot.sh`
