@@ -6,6 +6,7 @@ import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
 import io.aeyer.plowshare.server.cache.ProjectionVersions.Domain;
 import java.time.Duration;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 class ProjectionRelayToolWakeupsTest {
   private final AtomicReference<ProjectionChangeSignals.Observer> observer =
       new AtomicReference<>();
+  private final AtomicBoolean healthy = new AtomicBoolean(true);
   private final AtomicReference<Set<Domain>> subscribed = new AtomicReference<>();
 
   private final ProjectionChangeSignals signals =
@@ -26,7 +28,7 @@ class ProjectionRelayToolWakeupsTest {
         public void start() {}
 
         public boolean healthy() {
-          return true;
+          return healthy.get();
         }
 
         public void close() {}
@@ -66,6 +68,16 @@ class ProjectionRelayToolWakeupsTest {
       observer.get().changed(Set.of(Domain.AUTHORITY));
       assertTrue(first.await(Duration.ofSeconds(30)));
       assertFalse(second.await(Duration.ofMillis(1)));
+    }
+  }
+
+  @Test
+  void hints_are_trusted_only_while_the_listener_is_healthy() {
+    var wakeups = new ProjectionRelayToolWakeups(signals, 4);
+    try (var wake = wakeups.open()) {
+      assertTrue(wake.trusted());
+      healthy.set(false);
+      assertFalse(wake.trusted());
     }
   }
 }

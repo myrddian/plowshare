@@ -20,12 +20,14 @@ import java.util.concurrent.TimeUnit;
 public final class ProjectionRelayToolWakeups implements RelayToolWakeups, AutoCloseable {
   private final Set<Waiter> waiters = ConcurrentHashMap.newKeySet();
   private final int maximum;
+  private final ProjectionChangeSignals signals;
   private final ProjectionChangeSignals.Subscription subscription;
 
   public ProjectionRelayToolWakeups(ProjectionChangeSignals signals, int maximum) {
     if (maximum < 1 || maximum > 65536)
       throw new IllegalArgumentException("Invalid tool waiter bound");
     this.maximum = maximum;
+    this.signals = Objects.requireNonNull(signals);
     this.subscription =
         Objects.requireNonNull(signals)
             .subscribe(
@@ -83,6 +85,11 @@ public final class ProjectionRelayToolWakeups implements RelayToolWakeups, AutoC
       signalled = false;
       authority = false;
       return result;
+    }
+
+    @Override
+    public boolean trusted() {
+      return signals.healthy();
     }
 
     @Override

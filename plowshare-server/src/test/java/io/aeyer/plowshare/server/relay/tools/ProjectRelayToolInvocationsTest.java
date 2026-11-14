@@ -341,6 +341,7 @@ class ProjectRelayToolInvocationsTest {
     final AtomicInteger closed = new AtomicInteger();
     final AtomicReference<Instant> clock;
     final Duration advance;
+    volatile boolean trusted = true;
 
     ScriptedWakeups(AtomicReference<Instant> clock, Duration advance, Boolean... wakes) {
       this.clock = clock;
@@ -359,6 +360,11 @@ class ProjectRelayToolInvocationsTest {
           awaits.incrementAndGet();
           clock.updateAndGet(value -> value.plus(advance));
           return script.isEmpty() ? false : script.poll();
+        }
+
+        @Override
+        public boolean trusted() {
+          return trusted;
         }
 
         @Override
@@ -433,7 +439,7 @@ class ProjectRelayToolInvocationsTest {
     var authority = mock(HostedInvocationAuthority.class);
     when(authority.permits(any(), eq("caller"))).thenReturn(true);
     var clock = new AtomicReference<>(NOW);
-    var wakeups = new ScriptedWakeups(clock, Duration.ZERO, false, false, false);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(100), false, false, false);
     // Zero staleness means every wake authorizes: initial admission plus four loop passes.
     var outcome = waitFor(waiting(clock, wakeups, Duration.ZERO, authority), hosted, wakeups, 3);
     assertEquals(RelayToolCodec.State.UNKNOWN, outcome.state());
@@ -446,7 +452,7 @@ class ProjectRelayToolInvocationsTest {
   @Test
   void waitReauthorizesOnAuthoritySignal() {
     var clock = new AtomicReference<>(NOW);
-    var wakeups = new ScriptedWakeups(clock, Duration.ZERO, false, false, true, false);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(100), false, false, true, false);
     var outcome =
         waitFor(
             waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE),
@@ -477,7 +483,7 @@ class ProjectRelayToolInvocationsTest {
   @Test
   void refusalDuringTheWaitIsFatalAndReleasesTheRegistration() {
     var clock = new AtomicReference<>(NOW);
-    var wakeups = new ScriptedWakeups(clock, Duration.ZERO, true);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(100), true);
     var service = waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE);
     when(members.mayWork("fixture", "caller")).thenAnswer(answer -> wakeups.awaits.get() == 0);
     assertThrows(CallerFault.class, () -> waitFor(service, longBinding("provider"), wakeups, 9));
@@ -488,7 +494,7 @@ class ProjectRelayToolInvocationsTest {
   @Test
   void cancellationIsSeenOnTheNextWakeAndReleasesTheRegistration() {
     var clock = new AtomicReference<>(NOW);
-    var wakeups = new ScriptedWakeups(clock, Duration.ZERO, false);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(100), false);
     var outcome =
         waitFor(
             waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE),
@@ -497,6 +503,34 @@ class ProjectRelayToolInvocationsTest {
             1);
     assertEquals(RelayToolCodec.State.UNKNOWN, outcome.state());
     assertEquals(1, wakeups.awaits.get());
+    assertEquals(1, wakeups.closed.get());
+  }
+
+  @Test
+  void unhealthyListenerReauthorizesOnEveryWake() {
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(100), false, false, false);
+    wakeups.trusted = false;
+    waitFor(
+        waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE),
+        longBinding("provider"),
+        wakeups,
+        3);
+    // Admission plus four passes, although the bound is a minute and nothing was signalled.
+    verify(projects, times(5)).id("fixture");
+  }
+
+  @Test
+  void manyRelayWakesInsideTheReadGapCauseOneRead() {
+    var clock = new AtomicReference<>(NOW);
+    var wakeups = new ScriptedWakeups(clock, Duration.ofMillis(10));
+    waitFor(
+        waiting(clock, wakeups, Duration.ofMinutes(1), HostedInvocationAuthority.NONE),
+        longBinding("provider"),
+        wakeups,
+        10);
+    // Ten wakes spaced 10 ms apart: the read at t=0 and the next one once 100 ms have passed.
+    verify(relay, times(2)).retained(any(), any());
     assertEquals(1, wakeups.closed.get());
   }
 }

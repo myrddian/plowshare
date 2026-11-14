@@ -25,6 +25,12 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
    */
   static final Duration CEILING = Duration.ofSeconds(1);
 
+  /**
+   * Minimum gap between one waiter's retained-result reads. Wake-ups may be coarse (any relay
+   * publication anywhere), so this keeps a waiter at the old 100 ms poll rate at most.
+   */
+  static final Duration READ_GAP = Duration.ofMillis(100);
+
   private final RelayToolRepository repository;
   private final Relay relay;
   private final ProjectMembers members;
@@ -190,10 +196,13 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
     // refusal, failure). Hints only end a wait early; every pass re-reads the retained result.
     try (var wake = wakeups.open()) {
       boolean authority = false;
+      Instant readAt = null;
       while (true) {
         // The admission decision is reused inside the staleness bound until an authority change
-        // is signalled. A refusal is never reused: it ends the call.
-        if (authority || !clock.get().isBefore(authorizedAt.plus(staleness))) {
+        // is signalled, and only while the hints are trustworthy: with the listener down a change
+        // may go unannounced, so every wake re-authorizes. A refusal is never reused.
+        Duration reuse = wake.trusted() ? staleness : Duration.ZERO;
+        if (authority || !clock.get().isBefore(authorizedAt.plus(reuse))) {
           if (original.hosted() != null) {
             if (!hosting.permits(binding, owner.accountHandle()))
               return unknown(id, "Hosted authority or availability ended after submission.");
@@ -206,6 +215,7 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
           authorizedAt = clock.get();
           authority = false;
         }
+        readAt = clock.get();
         var publication =
             relay.retained(
                 new Relay.TopicKey(project, binding.results()),
@@ -239,8 +249,21 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
           return unknown(id, "Waiting ended after submission; external effects may have occurred.");
         try {
           long remaining = waitUntil - System.nanoTime();
-          authority =
+          authority |=
               wake.await(Duration.ofNanos(Math.max(1, Math.min(remaining, CEILING.toNanos()))));
+          // A wake inside the read gap waits out the remainder (still bounded by the deadline and
+          // cancellation) instead of reading again; authority hints keep accumulating meanwhile.
+          while (true) {
+            Duration left = Duration.between(clock.get(), readAt.plus(READ_GAP));
+            long budget = waitUntil - System.nanoTime();
+            if (left.isNegative()
+                || left.isZero()
+                || budget <= 0
+                || cancelled.getAsBoolean()
+                || !clock.get().isBefore(deadline)) break;
+            authority |=
+                wake.await(Duration.ofNanos(Math.max(1, Math.min(budget, left.toNanos()))));
+          }
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
           return unknown(

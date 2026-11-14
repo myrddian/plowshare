@@ -26,6 +26,13 @@ public interface RelayToolWakeups {
      */
     boolean await(Duration maximum) throws InterruptedException;
 
+    /**
+     * Whether hints are currently reliable. When false (no signal source, or the listener is down
+     * or recovering) a change may go unannounced, so the caller must not reuse an authorization
+     * across wakes.
+     */
+    boolean trusted();
+
     @Override
     void close();
   }
@@ -40,6 +47,11 @@ public interface RelayToolWakeups {
             @Override
             public boolean await(Duration maximum) throws InterruptedException {
               Thread.sleep(maximum);
+              return false;
+            }
+
+            @Override
+            public boolean trusted() {
               return false;
             }
 
