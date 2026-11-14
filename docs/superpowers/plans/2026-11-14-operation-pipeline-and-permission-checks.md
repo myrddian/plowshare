@@ -146,8 +146,9 @@ Javadoc says so. This is telemetry, not the operation context of Task 11, which 
 Decisions:
 - PostgreSQL command gains `-c shared_preload_libraries=pg_stat_statements,auto_explain`,
   `-c pg_stat_statements.track=top`, `-c pg_stat_statements.max=10000`, `-c track_io_timing=on`,
-  `-c auto_explain.log_min_duration=${PLOWSHARE_PG_AUTO_EXPLAIN_MS:-1000}`,
-  `-c auto_explain.log_format=json`, `-c log_min_duration_statement=${PLOWSHARE_PG_SLOW_MS:-1000}`.
+  `-c auto_explain.log_min_duration=${PLOWSHARE_PG_AUTO_EXPLAIN_MS:--1}`,
+  `-c auto_explain.log_format=json`, `-c log_min_duration_statement=${PLOWSHARE_PG_SLOW_MS:--1}`.
+  (R7 made statement logging opt-in: the defaults are `-1`, and bind parameters are suppressed.)
 - `V259`: `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;` (PROD already has it; idempotent).
 - `postgres-exporter` service under compose profile `monitoring`, image pinned by exact version,
   bound to `${PLOWSHARE_MONITORING_BIND:?}` only when the profile is enabled; its custom queries expose

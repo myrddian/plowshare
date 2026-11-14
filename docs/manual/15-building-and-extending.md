@@ -64,8 +64,10 @@ platform/toolchain and signing requirements in [Distributions](../distributions.
 
 Prepare a PostgreSQL database with pgvector available. The shipped deployment uses
 PostgreSQL 16; its application role needs migration authority, including permission
-to install `vector` unless the extension is already installed. Flyway applies the
-shipped migrations at server startup. Do not point a disposable development
+to install `vector` unless the extension is already installed. The optional
+`pg_stat_statements` telemetry extension is not trusted: migration V259 creates it only
+when the module is available and the role is a superuser, and otherwise logs a notice
+and continues. Flyway applies the shipped migrations at server startup. Do not point a disposable development
 experiment at your only production database.
 
 Configure actual chat and embedding providers. Logical bindings such as `fast`

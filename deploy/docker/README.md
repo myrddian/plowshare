@@ -143,11 +143,15 @@ pipeline steps; these files target Docker Compose.
 The shipped telemetry is opt-in and has no default addresses.
 
 - **PostgreSQL** always preloads `pg_stat_statements` and `auto_explain` (a restart is
-  needed to change this; migration V259 creates the extension's views). Logging of
+  needed to change this). `pg_stat_statements` is optional: migration V259 creates its
+  views only when the migration role is a superuser (the extension is not trusted) and
+  otherwise logs a notice and continues. Only the exporter and
+  `deploy/monitoring/pg-stat-snapshot.sh` read it; the server does not need it. Logging of
   statements slower than `PLOWSHARE_PG_SLOW_MS` and plans slower than
   `PLOWSHARE_PG_AUTO_EXPLAIN_MS` is **off by default** (-1). Enabling either writes
   SQL statement text to the PostgreSQL container log; bind parameters are never
-  logged.
+  logged. PostgreSQL's default `log_min_error_statement=error` still logs the SQL text
+  of failing statements, never their parameters (`log_parameter_max_length_on_error=0`).
 - **Server metrics**: set `PLOWSHARE_MANAGEMENT_PORT` and `PLOWSHARE_MANAGEMENT_BIND`
   together in the server environment (an overlay adds them to the `server` service)
   to serve `/actuator/prometheus` on a separate listener; the entrypoint refuses one

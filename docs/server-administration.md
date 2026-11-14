@@ -475,10 +475,28 @@ entrypoint passes the settings above (one without the other stops startup), and
 `auto_explain`, both slow-statement logging thresholds are off by default (enabling them
 writes SQL statement text, not parameters, to the PostgreSQL container log), and an optional
 exporter profile, using its own `pg_monitor` role, exposes top statements by `queryid`.
+`pg_stat_statements` is optional: V259 installs it only for a superuser migration role and
+otherwise continues with a notice; only the exporter and snapshot script use it.
+PostgreSQL's default `log_min_error_statement=error` still logs the SQL text of failing
+statements (never parameters, since `log_parameter_max_length_on_error=0`).
 The statement-count meters `plowshare.jdbc.statements`,
 `plowshare.authority.admission.checks`, `plowshare.authority.session.checks` and
 `plowshare.operation.statements` are charted in `deploy/monitoring/grafana-plowshare.json`.
 See the [Docker README](../deploy/docker/README.md#monitoring).
+
+### Upgrade notes for the telemetry changes
+
+- **Metric tag.** The main Hikari pool is now named `plowshare-main`, so the
+  `hikaricp_*{pool=...}` series changes from `HikariPool-1` to `plowshare-main`. Update
+  dashboards and alert rules that select the old tag; history under the old tag is not
+  renamed.
+- **PostgreSQL restart.** The compose database command adds preload libraries
+  (`pg_stat_statements`, `auto_explain`) and `track_io_timing=on`. A running instance picks
+  them up only after a PostgreSQL restart.
+- **Relay tool results.** A waiting tool call re-reads its retained result when a relay
+  publication or authority change wakes it. While notifications are off, the listener is
+  down or the waiter capacity is exceeded, it reads at most every 100 ms, as before; each
+  such read also re-checks authorization.
 
 ## Information feature switches
 
