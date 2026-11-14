@@ -9,12 +9,12 @@ function refusingSocket(closing: { code?: number; reason?: string }): Socket {
   return {
     send: () => undefined,
     close: () => undefined,
-    addEventListener: ((type: string, listener: (event: never) => void) => {
+    addEventListener: (type: string, listener: (event: never) => void) => {
       if (type === 'close') {
         onClose = listener as (event: unknown) => void;
         queueMicrotask(() => onClose?.(closing));
       }
-    }) as Socket['addEventListener'],
+    },
   };
 }
 

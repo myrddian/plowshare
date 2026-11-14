@@ -17,7 +17,7 @@ const account = (projectCreator: boolean): ServerAccount => ({
   projectCreator,
 });
 
-test('account detail states whether the account may create projects', () => {
+await test('account detail states whether the account may create projects', () => {
   assert.match(accountStatus(account(true)), /May create projects/);
   assert.match(accountStatus(account(false)), /Cannot create projects/);
   assert.equal(
@@ -27,7 +27,7 @@ test('account detail states whether the account may create projects', () => {
   assert.equal(creatorActionLabel(account(false)), 'Allow creating projects');
 });
 
-test('the creator toggle sends only the flipped projectCreator field', () => {
+await test('the creator toggle sends only the flipped projectCreator field', () => {
   for (const held of [true, false]) {
     const update = toggledUpdate(account(held), 'projectCreator');
     assert.deepEqual(update, { handle: 'sam', projectCreator: !held });
