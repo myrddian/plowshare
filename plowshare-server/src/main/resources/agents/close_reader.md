@@ -88,7 +88,7 @@ model: reasoning
 #               either half without the other.
 # Supporting corpus reads can locate a document or verify a returned grounding
 # block. The answer still comes from document_ask's deliberation, as below.
-tools: [document_ask, document_retrieve, document_rank, document_outline, document_citations]
+tools: [document_ask, information_read]
 calls: []
 # EXPORTED, and it is the SECOND door in the Documents set after librarian.
 #

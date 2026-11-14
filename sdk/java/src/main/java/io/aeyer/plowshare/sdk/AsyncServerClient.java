@@ -9,6 +9,11 @@ import java.util.concurrent.CompletionStage;
 
 /** Typed asynchronous server capabilities. Completion never implies durable job completion. */
 public interface AsyncServerClient extends AutoCloseable {
+  /** Read-only discovery shares this client's socket, credentials and request cancellation. */
+  default InformationDiscoveryClient informationDiscovery() {
+    throw new UnsupportedOperationException("Information discovery is unavailable");
+  }
+
   default CompletionStage<io.aeyer.plowshare.protocol.RelayBlob.Published> publishRelayBlobAsync(
       io.aeyer.plowshare.protocol.RelayBlob.Publish request, byte[] bytes) {
     return java.util.concurrent.CompletableFuture.failedFuture(

@@ -294,6 +294,14 @@ export function constrain(graph) {
       if(op==='information.interchange.import') rules(s,not(eq('scope.kind','global_read')));
     }
     if (op.startsWith('information.')) {
+      if (op.startsWith('information.discovery.')) {
+        field(s,'scopes',{minItems:1,maxItems:32,uniqueItems:true,element:{pattern:'^(global_read|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$'}});
+        field(s,'limit',integer(1,op.endsWith('.read')?32768:50));
+        field(s,'offset',integer(0,2147483647));
+        field(s,'cursor',{pattern:'^[A-Za-z0-9_-]{1,2048}\\.[A-Za-z0-9_-]{43}$',maxLength:2092});
+        field(s,'query',{...text(512,1),nonblank:true});
+        field(s,'revision',canonicalUuid);
+      }
       const accountOperations = ['upload','list','status','await','read','tags','tags.groups','exclude','unexclude','withdraw','restore','delete','retry','rebuild','allowance','share','unshare'];
       if (!accountOperations.includes(op.slice('information.'.length))) rules(s,not(eq('scope.kind','account')));
       else rules(s,implies(eq('scope.kind','account'),and(absent('typing','expectedRevision'),or(absent('corpus'),eq('corpus','documents')))));
@@ -308,7 +316,10 @@ export function constrain(graph) {
       field(s, 'label', {minLength:1,maxLength:120,nonblank:true});
       // Empty descriptions are valid; override the generic nonblank text constraint.
       field(s, 'description', {...text(4096), nonblank:false});
-      if (s.properties.filter) rules(s, implies(or(present('filter.contentType'),present('filter.contentTypeVersion'),present('filter.untyped')),eq('view','content-types-v1')),implies(eq('filter.untyped',true),absent('filter.contentType','filter.contentTypeVersion')));
+      if (s.properties.filter) {
+        if (!op.startsWith('information.discovery.')) rules(s, implies(or(present('filter.contentType'),present('filter.contentTypeVersion'),present('filter.untyped')),eq('view','content-types-v1')));
+        rules(s,implies(eq('filter.untyped',true),absent('filter.contentType','filter.contentTypeVersion')));
+      }
       if (s.properties.typing) rules(s, implies(present('typing'),eq('view','content-types-v1')),implies(present('expectedRevision'),present('typing')));
       if (op==='information.types.version.create') rules(s,
         {eq:[present('type'),present('expectedControlRevision')]},
@@ -456,6 +467,25 @@ export function constrain(graph) {
     if (title === 'SchemaObject') add(shape,{maxProperties:1024,keyPattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$'});
     if (shape.properties?.source && shape.properties?.subject && shape.properties?.state)
       field(shape, 'source', { ...portName, maxLength: 1024 });
+    if (['DiscoveryScopes','DiscoveryPage','DiscoveryFacets'].includes(title)) {
+      field(shape,'items',{maxItems:50});
+      field(shape,'scopes',{minItems:1,maxItems:32,uniqueItems:true,element:{pattern:'^(global_read|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$'}});
+      field(shape,'nextCursor',{pattern:'^[A-Za-z0-9_-]{1,2048}\\.[A-Za-z0-9_-]{43}$',maxLength:2092});
+      rules(shape,{eq:[g('hasMore'),not(eq('nextCursor',null))]});
+      if(title==='DiscoveryFacets') {
+        const values=resolve(graph,resolve(graph,shape.properties.items).items);
+        field(values,'count',integer(1,9007199254740991));
+      }
+    }
+    if(title==='DiscoveryScope') {
+      field(shape,'id',{pattern:'^(global_read|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$'});
+      field(shape,'kind',{pattern:'^(PROJECT|PERSONAL|ACCOUNT_KNOWLEDGE|CONTAINED|GLOBAL_READ)$'});
+    }
+    if(title==='DiscoveryItem') {
+      field(shape,'revision',canonicalUuid);field(shape,'resource',canonicalUuid);field(shape,'scope',canonicalUuid);
+      field(shape,'createdAt',instant);
+      for(const key of ['tags','autoTag']) field(shape,key,{maxItems:32,element:{minLength:1,maxLength:64}});
+    }
     if (title.startsWith('Relay')) {
       field(shape, 'topic', { ...portName, maxLength: 1024 });
       field(shape, 'parentTopic', { ...portName, maxLength: 1024 });

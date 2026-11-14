@@ -13,6 +13,24 @@ const input = (operation, value, valid) =>
 const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
+const discoveryScope='11111111-1111-1111-1111-111111111111';
+input('information.discovery.scopes',{limit:10},true);
+for(const limit of [0,51,1.5,'10']) input('information.discovery.scopes',{limit},false);
+for(const scopes of [[],['bad'],[discoveryScope,discoveryScope],Array(33).fill(discoveryScope)]) input('information.discovery.list',{scopes},false);
+input('information.discovery.list',{scopes:[discoveryScope]},true);
+input('information.discovery.list',{scopes:[discoveryScope],actor:'admin'},false);
+input('information.discovery.list',{scopes:[discoveryScope],filter:{search:'x'}},false);
+input('information.discovery.search',{scopes:[discoveryScope,'global_read'],query:'privacy',filter:{kind:'report'}},true);
+input('information.discovery.search',{scopes:[discoveryScope],query:''},false);
+input('information.discovery.facets',{scopes:[discoveryScope],facet:'tags'},true);
+input('information.discovery.facets',{scopes:[discoveryScope],facet:'imaginary'},false);
+input('information.discovery.read',{scopes:[discoveryScope],revision:discoveryScope,offset:0,limit:8192},true);
+input('information.discovery.read',{scopes:[discoveryScope],revision:'1-1-1-1-1'},false);
+input('information.discovery.read',{scopes:[discoveryScope],revision:discoveryScope,limit:32769},false);
+result('information.discovery.list',{scopes:[discoveryScope],items:[],nextCursor:null,hasMore:false},true);
+result('information.discovery.list',{scopes:[discoveryScope],items:[],nextCursor:null,hasMore:true},false);
+result('information.discovery.facets',{scopes:[discoveryScope],facet:'tags',items:[{value:'network',count:-1}],nextCursor:null,hasMore:false},false);
+result('information.discovery.list',{scopes:[discoveryScope],items:[{revision:discoveryScope}],nextCursor:null,hasMore:false},false);
 const imageInvocation='11111111-1111-1111-1111-111111111111';
 const imageHash=createHash('sha256').update('invocation-image/1\n'+imageInvocation+'\n0').digest('hex').slice(0,32);
 const imageRequest = {invocation:imageInvocation,ordinal:0,requestId:`${imageHash.slice(0,8)}-${imageHash.slice(8,12)}-${imageHash.slice(12,16)}-${imageHash.slice(16,20)}-${imageHash.slice(20)}`};

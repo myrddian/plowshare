@@ -258,8 +258,24 @@ class SkillsTest {
             session -> true,
             (project, session) -> false);
     var catalog = resolver.forCaller(new DefinitionResolver.Caller(7L, "other"));
-    assertEquals(Set.of("diagnose-conversation"), catalog.skills().keySet());
+    assertEquals(
+        Set.of("diagnose-conversation", "information-discovery"), catalog.skills().keySet());
     assertEquals(Tier.SHIPPED, catalog.skills().get("diagnose-conversation").definition().tier());
+    var discovery = catalog.skills().get("information-discovery").definition();
+    assertEquals(Tier.SHIPPED, discovery.tier());
+    assertEquals(SkillDefinition.Mode.NEW, discovery.mode());
+    assertEquals("librarian", discovery.agent());
+    assertTrue(discovery.agentVisible());
+    assertEquals(
+        List.of(
+            "information_scopes",
+            "information_list",
+            "information_search",
+            "information_facets",
+            "information_read",
+            "result_read",
+            "result_list"),
+        discovery.allowedTools());
     assertTrue(requests.isEmpty());
   }
 

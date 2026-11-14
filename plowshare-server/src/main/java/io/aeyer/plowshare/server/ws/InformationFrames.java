@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.InformationDiscovery;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.Budget;
@@ -22,6 +23,13 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class InformationFrames implements FrameArea {
+  private InformationDiscoveryService discovery;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void useDiscovery(InformationDiscoveryService discovery) {
+    this.discovery = discovery;
+  }
+
   private final InformationNavigationService navigation;
   private final InformationInterchangeService interchange;
 
@@ -97,6 +105,32 @@ public final class InformationFrames implements FrameArea {
   }
 
   private Outcome handle(String verb, Map<String, Object> payload, Asking asking) {
+    if (verb.startsWith("discovery.")) {
+      if (discovery == null) throw new CallerFault("Information discovery unavailable");
+      var reader =
+          new InformationDiscoveryRepository.Reader(
+              asking.requireHandle("information." + verb), null, null);
+      String operation = verb.substring("discovery.".length());
+      return Outcome.ok(
+          switch (operation) {
+            case "scopes" ->
+                discovery.scopes(
+                    reader,
+                    InformationDiscoveryInputs.decode(
+                        payload, InformationDiscovery.ScopesRequest.class));
+            case "list" ->
+                discovery.list(reader, InformationDiscoveryInputs.query(operation, payload));
+            case "search" ->
+                discovery.search(reader, InformationDiscoveryInputs.query(operation, payload));
+            case "facets" ->
+                discovery.facets(reader, InformationDiscoveryInputs.query(operation, payload));
+            case "read" ->
+                discovery.read(
+                    reader,
+                    InformationDiscoveryInputs.decode(payload, InformationDiscovery.Read.class));
+            default -> throw new CallerFault("Unknown information discovery operation");
+          });
+    }
     // Validate the original selector before typed DTO construction can normalize an identity.
     // Navigation/interchange still require their own explicit scope and command contracts.
     var selection = verb.startsWith("migration.") ? null : InformationScopes.from(payload);

@@ -9,6 +9,11 @@ public final class InformationOperations {
 
   public static final List<String> ALL =
       List.of(
+          "discovery.scopes",
+          "discovery.list",
+          "discovery.search",
+          "discovery.facets",
+          "discovery.read",
           "interchange.capabilities",
           "interchange.export",
           "interchange.readable",
@@ -79,6 +84,11 @@ public final class InformationOperations {
           "acquisitions");
   public static final Set<String> MODEL =
       Set.of(
+          "discovery.scopes",
+          "discovery.list",
+          "discovery.search",
+          "discovery.facets",
+          "discovery.read",
           "documents.list",
           "documents.get",
           "relationships.list",

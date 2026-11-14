@@ -115,8 +115,6 @@ class InterlocutorDefinitionTest {
             ResultTools.READ_NAME,
             ResultTools.LIST_NAME,
             AgentRegistry.AGENT_RUN,
-            DocumentTools.SEARCH_NAME,
-            DocumentTools.LIST_NAME,
             SearchTool.NAME,
             FetchTool.NAME,
             ArchiveReadTools.INDEX,
@@ -124,13 +122,13 @@ class InterlocutorDefinitionTest {
             ConversationSearchTool.NAME,
             ArchiveReadTools.CHAT,
             ConversationContextTool.NAME,
-            RetrievalTools.RETRIEVE,
-            RetrievalTools.RANK,
-            RetrievalTools.OUTLINE,
-            RetrievalTools.CITATIONS,
             ConversationTrajectoryTool.NAME,
             InformationTool.READ,
-            InformationTool.WRITE),
+            InformationTool.WRITE,
+            "information_scopes",
+            "information_list",
+            "information_search",
+            "information_facets"),
         shipped().tools());
   }
 
@@ -156,13 +154,13 @@ class InterlocutorDefinitionTest {
   @Test
   void the_corpus_is_granted_to_chat_corpus_and_board_research_agents() {
     assertTrue(
-        shipped().tools().contains(DocumentTools.SEARCH_NAME),
+        shipped().tools().contains("information_search"),
         "the agent a person talks to cannot ask the corpus, so an uploaded document is"
             + " reachable from a person only by naming a different agent");
 
     java.util.Set<String> holders =
         shippedSet().entrySet().stream()
-            .filter(agent -> agent.getValue().tools().contains(DocumentTools.SEARCH_NAME))
+            .filter(agent -> agent.getValue().tools().contains("information_search"))
             .map(Map.Entry::getKey)
             .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
 
@@ -196,7 +194,7 @@ class InterlocutorDefinitionTest {
   void the_corpus_listing_goes_to_the_same_agents_that_hold_the_search() {
     java.util.Set<String> holders =
         shippedSet().entrySet().stream()
-            .filter(agent -> agent.getValue().tools().contains(DocumentTools.LIST_NAME))
+            .filter(agent -> agent.getValue().tools().contains("information_list"))
             .map(Map.Entry::getKey)
             .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
 

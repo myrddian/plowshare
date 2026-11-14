@@ -56,6 +56,11 @@ public class ProjectAuthorization {
   // Reads are named explicitly. New operations require work until their policy is reviewed.
   private static final Set<String> READ =
       Set.of(
+          "information.discovery.scopes",
+          "information.discovery.list",
+          "information.discovery.search",
+          "information.discovery.facets",
+          "information.discovery.read",
           "proc.list",
           "proc.inspect",
           "proc.calls",

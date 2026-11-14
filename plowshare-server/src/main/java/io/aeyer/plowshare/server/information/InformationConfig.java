@@ -20,6 +20,17 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @Import(InformationFeatureConfig.class)
 public class InformationConfig {
   @Bean
+  public InformationDiscoveryRepository informationDiscoveryRepository(JdbcTemplate jdbc) {
+    return new JdbcInformationDiscoveryRepository(jdbc);
+  }
+
+  @Bean
+  public InformationDiscoveryService informationDiscoveryService(
+      InformationDiscoveryRepository repository) {
+    return new CursorInformationDiscovery(repository, Clock.systemUTC());
+  }
+
+  @Bean
   public InformationInterchangeRepository informationInterchangeRepository(JdbcTemplate jdbc) {
     return new JdbcInformationInterchangeRepository(jdbc);
   }

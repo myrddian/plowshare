@@ -1,6 +1,297 @@
 [
   {
     "boundary": "input",
+    "operation": "information.discovery.scopes",
+    "value": {
+      "limit": 10
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.scopes",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.scopes",
+    "value": {
+      "limit": 51
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.scopes",
+    "value": {
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.scopes",
+    "value": {
+      "limit": "10"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "bad"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "actor": "admin"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "filter": {
+        "search": "x"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.search",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111",
+        "global_read"
+      ],
+      "query": "privacy",
+      "filter": {
+        "kind": "report"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.search",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "query": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.facets",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "facet": "tags"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.facets",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "facet": "imaginary"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.read",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "offset": 0,
+      "limit": 8192
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.read",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "revision": "1-1-1-1-1"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.discovery.read",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "limit": 32769
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "items": [],
+      "nextCursor": null,
+      "hasMore": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "items": [],
+      "nextCursor": null,
+      "hasMore": true
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.discovery.facets",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "facet": "tags",
+      "items": [
+        {
+          "value": "network",
+          "count": -1
+        }
+      ],
+      "nextCursor": null,
+      "hasMore": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.discovery.list",
+    "value": {
+      "scopes": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "items": [
+        {
+          "revision": "11111111-1111-1111-1111-111111111111"
+        }
+      ],
+      "nextCursor": null,
+      "hasMore": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "artifact.admission.status",
     "value": {
       "invocation": "11111111-1111-1111-1111-111111111111",

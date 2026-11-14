@@ -3,12 +3,10 @@ package io.aeyer.plowshare.server.images;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.aeyer.plowshare.protocol.EnvironmentFile;
-import io.aeyer.plowshare.server.agents.AgentDefinition;
-import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.BoundTools;
-import io.aeyer.plowshare.server.agents.ClasspathDefinitions;
 import io.aeyer.plowshare.server.agents.Environments;
 import io.aeyer.plowshare.server.agents.RelayPublishTool;
+import io.aeyer.plowshare.server.agents.ShippedDefinitions;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
@@ -74,9 +72,8 @@ class NothingEnumeratesImagesTest {
    * <p><b>Asserted from both sides, because "agent-facing" has two of them.</b> A tool is reachable
    * by an agent when this boot binds the name <em>and</em> a definition declares it: the bound set
    * is what an operator's own agent file may name, and the declared set is what the agents this
-   * repository ships are actually offered. They are the same eighteen names today, and that is a
-   * fact about this directory rather than a rule — a tool bound and declared by nobody would be
-   * legal and would still belong in this list, because the next definition written could name it.
+   * repository ships are actually offered. Compatibility tools may be registered without release
+   * grants; both sets remain explicit because a custom definition could name a registered tool.
    *
    * <p><b>{@code BoundTools} is a hand-assembled set and this is not a loophole.</b> {@code
    * AgentsConfigTest.the_known_tool_set_the_tests_assemble_is_the_set_the_boot_binds} asserts it
@@ -162,7 +159,11 @@ class NothingEnumeratesImagesTest {
             "file_roots",
             "file_stat",
             "get_date",
+            "information_facets",
+            "information_list",
             "information_read",
+            "information_scopes",
+            "information_search",
             "information_write",
             "memory_index",
             "memory_navigate",
@@ -187,12 +188,8 @@ class NothingEnumeratesImagesTest {
     assertEquals(allowed, List.copyOf(BoundTools.boundByThisServer()), why);
 
     Set<String> declared = new TreeSet<>();
-    for (AgentDefinition shipped :
-        AgentRegistry.read(new ClasspathDefinitions(), BoundTools.boundByThisServer(), Set.of())
-            .enabled()
-            .values()) {
-      declared.addAll(shipped.tools());
-    }
+    var released = ShippedDefinitions.registry(BoundTools.boundByThisServer());
+    for (String name : released.names()) declared.addAll(released.get(name).tools());
     // run is behind a permission flag rather than a declaration, so whether a shipped agent
     // names it yet does not move this rule. Relay publishing tools need explicit
     // grants;
@@ -203,6 +200,7 @@ class NothingEnumeratesImagesTest {
                 tool ->
                     !tool.equals("run")
                         && !tool.equals("information_write")
+                        && !(tool.startsWith("document_") && !tool.equals("document_ask"))
                         && !tool.equals(RelayPublishTool.NAME)
                         && !tool.equals("send_message"))
             .toList(),

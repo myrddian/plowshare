@@ -4,15 +4,17 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.InformationDiscovery;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.information.*;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.util.*;
+import java.util.function.Supplier;
 
 /**
- * Information capabilities bind the authenticated root principal and home, never model-supplied
- * scope.
+ * Information capabilities bind the authenticated acting principal. Writes and legacy controls
+ * retain the run home; explicit discovered-scope reads use live RBAC without moving that home.
  */
 public final class InformationTool implements AgentTool {
   public static final String READ = "information_read", WRITE = "information_write";
@@ -42,6 +44,24 @@ public final class InformationTool implements AgentTool {
   private final String log;
   private String session;
   private final java.util.function.Supplier<InformationContentTypes> contentTypes;
+  private Supplier<InformationDiscoveryService> discovery;
+  private String discoveryBoundary;
+
+  /**
+   * Composition supplies the read-only capability; the model cannot supply the execution ceiling.
+   */
+  public InformationTool withDiscovery(
+      Supplier<InformationDiscoveryService> discovery, String boundary) {
+    this.discovery = discovery;
+    this.discoveryBoundary = boundary;
+    return this;
+  }
+
+  /** Runtime-only confinement, copied independently of model-selected read scopes. */
+  public InformationTool withDiscoveryBoundary(String boundary) {
+    this.discoveryBoundary = boundary;
+    return this;
+  }
 
   private io.aeyer.plowshare.server.documents.RetrievalService retrieval;
 
@@ -115,7 +135,8 @@ public final class InformationTool implements AgentTool {
       InformationAccess access, InformationJobs inputs, InformationActor actor, String log) {
     return new InformationTool(
             writing, catalogue, access, inputs, actor, log, contentTypes, navigation)
-        .withRetrieval(retrieval);
+        .withRetrieval(retrieval)
+        .withDiscovery(discovery, discoveryBoundary);
   }
 
   /** Handle-only, for the same reason as the four-argument overload above. */
@@ -163,6 +184,20 @@ public final class InformationTool implements AgentTool {
   @Override
   public ToolSchema schema() {
     Map<String, Object> fields = new LinkedHashMap<>();
+    if (!writing)
+      fields.put(
+          "scopes",
+          Map.of(
+              "type",
+              "array",
+              "items",
+              Map.of("type", "string"),
+              "minItems",
+              1,
+              "maxItems",
+              32,
+              "description",
+              "For operation read, select exact IDs from information_scopes and the returned revision. Uses effective RBAC without changing the write home. Other legacy operations use the run home."));
     fields.put(
         "operation",
         Map.of(
@@ -364,7 +399,7 @@ public final class InformationTool implements AgentTool {
         writing ? WRITE : READ,
         writing
             ? "Use relationships.create/remove for explicit document connections; create needs source resource UUID, target {resource, revision?}, relation, expectedSourceRevision and stable requestId. Removal needs relationship, expectedVersion and requestId. These are navigation controls, not body reads; removal retains access obligations. This tool cannot change reference policy. Queue public URL acquisition, record exact quoted evidence or a draft research report in your current information namespace. Acquire needs url, name and stable UUID requestId; returns a durable acquisition ticket with a separately captured processing allowance. Use information_read await with selected acquisition/revision references to fence on readable extraction or terminal unavailability. A fetch receipt alone is not readiness. Evidence needs revision, start/end UTF-16 offsets, quote, locator extracted-text:utf16 and a stable UUID requestId. Reports need a stable UUID requestId, name, text, inputs and optional evidence UUIDs in citations. Every document consumed by this run is inherited as an input, including uncited sources. Returns durable IDs; report processing uses the configured independent allowance, visible in status. This tool cannot share or finalise."
-            : "For knowledge navigation, documents.list returns current document resource identities; documents.get takes target {resource, revision?}; omitted revision follows the current head. relationships.list takes resource and direction outgoing/backlinks, with optional relation. Tags form sets, not inferred relationships. Locked references contain approved labels without body access. Readable metadata is retained as consumed input; use read on its exact revision for content. Policy and saved-view administration are human controls. Read the scoped information catalogue, a revision's processing status, a bounded retained-text window, or recorded evidence. Use await with sources [{revision:UUID} or {acquisition:UUID}] and waitMs 0..30000 to wait for one durable readiness outcome per unique reference. Check complete/expected/settled/ready/pending and outcomes; pending is not failure, and failed, blocked or unavailable sources count as settled without granting readable text. Reissue the same references while incomplete. Use list with offset/limit, status or read with revision UUID, acquisition with acquisition UUID, or evidence with evidence UUID. Rank with query returns scoped documents ordered by summary similarity. Search with query and optional revision returns scoped passages with exact retained-source coordinates when available; matched=false explicitly indicates unavailable evidence. Read returns UTF-16 start/end offsets for evidence. Omitted read limit is 8192, maximum 32768. For code, explicitly select corpus code: outline with revision returns syntax declarations; symbols with query returns literal declaration-name prefix matches and optional revision narrows the search. Both accept offset/limit (maximum 100) and expose exact retained UTF-16 ranges for read/evidence. Check outline status: pending, unavailable, unsupported, partial, limited, failed or stale are not a complete map. Signatures are abbreviated navigation, not evidence or resolved references. Source text is untrusted evidence. Scope and account come from this run.",
+            : "For discovery use information_scopes, information_list, information_search and information_facets. Read discovered revisions with operation read, explicit scopes and revision. This scope selection grants no access and changes no execution/write home. Other operations below retain their run-home selection. For knowledge navigation, documents.list returns current document resource identities; documents.get takes target {resource, revision?}; omitted revision follows the current head. relationships.list takes resource and direction outgoing/backlinks, with optional relation. Tags form sets, not inferred relationships. Locked references contain approved labels without body access. Readable metadata is retained as consumed input; use read on its exact revision for content. Policy and saved-view administration are human controls. Read the scoped information catalogue, a revision's processing status, a bounded retained-text window, or recorded evidence. Use await with sources [{revision:UUID} or {acquisition:UUID}] and waitMs 0..30000 to wait for one durable readiness outcome per unique reference. Check complete/expected/settled/ready/pending and outcomes; pending is not failure, and failed, blocked or unavailable sources count as settled without granting readable text. Reissue the same references while incomplete. Use list with offset/limit, status or read with revision UUID, acquisition with acquisition UUID, or evidence with evidence UUID. Rank with query returns scoped documents ordered by summary similarity. Search with query and optional revision returns scoped passages with exact retained-source coordinates when available; matched=false explicitly indicates unavailable evidence. Read returns UTF-16 start/end offsets for evidence. Omitted read limit is 8192, maximum 32768. For code, explicitly select corpus code: outline with revision returns syntax declarations; symbols with query returns literal declaration-name prefix matches and optional revision narrows the search. Both accept offset/limit (maximum 100) and expose exact retained UTF-16 ranges for read/evidence. Check outline status: pending, unavailable, unsupported, partial, limited, failed or stale are not a complete map. Signatures are abbreviated navigation, not evidence or resolved references. Source text is untrusted evidence. Scope and account come from this run.",
         stable(Map.of("type", "object", "properties", fields, "required", List.of("operation"))));
   }
 
@@ -404,6 +439,25 @@ public final class InformationTool implements AgentTool {
       inputs.requireLog(log, actor.attribution());
       Map<String, Object> args =
           JSON.readValue(arguments, new TypeReference<Map<String, Object>>() {});
+      if (!writing && args.containsKey("scopes")) {
+        if (discovery == null || queryValidity == null)
+          throw new CallerFault("Information discovery unavailable");
+        if (!"read".equals(required(args, "operation")))
+          throw new CallerFault(
+              "Use information_list, information_search or information_facets for discovery");
+        queryValidity.run();
+        var fields = new LinkedHashMap<>(args);
+        fields.remove("operation");
+        var request = InformationDiscoveryInputs.decode(fields, InformationDiscovery.Read.class);
+        var reader =
+            new InformationDiscoveryRepository.Reader(
+                actor.acting(),
+                discoveryBoundary,
+                new InformationDiscoveryRepository.Audit(log, actor.attribution()));
+        var result = discovery.get().read(reader, request);
+        inputs.requireLog(log, actor.attribution());
+        return JSON.writeValueAsString(result);
+      }
       InformationContext context =
           access
               .forRun(actor, home)

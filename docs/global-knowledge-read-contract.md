@@ -63,6 +63,14 @@ never body READ. Retained ceilings also bound those references.
 
 ## API cutover and migration
 
+The later [cursor discovery contract](information-system.md#cursor-discovery)
+adds explicit multi-scope read selection for ordinary agents and clients. It uses
+the acting identity's current scoped RBAC rather than the execution home as its
+information selection. Confined/contained work keeps its server-owned boundary;
+execution, write destinations and the existing controls above are unchanged.
+[ADR 0067](decisions/0067-information-discovery-and-read-selection.md) records
+this deliberate extension to the earlier retained-home selection contract.
+
 This is a deliberate breaking selector change on existing operations:
 
 - `scope.kind:"shared"` becomes `scope.kind:"global_read"`.

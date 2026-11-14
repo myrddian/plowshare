@@ -135,6 +135,23 @@ guessing a name and calling `skill_run`. Automatic selection also needs a
 configured context mode. A skill without one needs an explicit command with
 `--mode` until its author configures the mode.
 
+## Information discovery
+
+The bundled `information-discovery` skill is model-visible and uses `mode: NEW`
+with `agent: librarian`. Its worker receives the explicit task and pinned skill
+instructions in a fresh conversation, sharing the parent's allowance, cancellation
+and approval lifecycle. Retrieved source bodies stay out of the parent's context;
+the worker returns a concise answer with exact references and coverage. Invocation
+is `/skill:information-discovery <question or inventory request>`.
+
+The same exported Librarian remains independently selectable/delegable. Both paths
+use `information_scopes`, `information_list`, `information_search`,
+`information_facets` and `information_read`. The worker has no filesystem,
+acquisition, mutation, further delegation or skill grants. Metadata and text reads
+retain their inputs before disclosure; current RBAC and credential limits apply
+on every cursor page. Confined and contained execution keeps its server-owned
+boundary. See [information discovery](information-system.md#cursor-discovery).
+
 ## Conversation diagnostics
 
 The bundled `diagnose-conversation` skill is model-visible and selects the private

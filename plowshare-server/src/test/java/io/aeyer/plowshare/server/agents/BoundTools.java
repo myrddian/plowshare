@@ -60,6 +60,7 @@ public final class BoundTools {
     names.add(DocumentTools.SEARCH_NAME);
     names.add(InformationTool.READ);
     names.add(InformationTool.WRITE);
+    names.addAll(InformationDiscoveryTool.NAMES);
     // The corpus as a listing, gated by nothing for the same reason as the
     // search one line up. It reads DocumentStore rather than
     // RetrievalService, which is not a second gate: DocumentsConfig binds

@@ -82,7 +82,7 @@ fallback:
   when: [refusal]
   model: low_refusal_osint
   max-attempts: 1
-tools: [get_date, code_map, file_roots, file_glob, file_grep, file_read, file_stat, file_edit, file_delete, file_move, todo_read, todo_write, memory_recall, memory_read, memory_write, memory_navigate, result_read, result_list, agent_run, document_search, document_list, search, fetch, run, information_read, information_write]
+tools: [get_date, code_map, file_roots, file_glob, file_grep, file_read, file_stat, file_edit, file_delete, file_move, todo_read, todo_write, memory_recall, memory_read, memory_write, memory_navigate, result_read, result_list, agent_run, search, fetch, run, information_read, information_write, information_scopes, information_list, information_search, information_facets]
 # EXPORTED, and there is no version of this that is not: a bot IS the front
 # door. Spec section 2 -- "a person opening the terminal is talking to a bot;
 # reaching an agent directly is the specialised act". GET /v1/agents and the

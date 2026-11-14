@@ -4905,6 +4905,21 @@ public final class JobRuntime {
                     throw new IllegalStateException(
                         "Document inputs cannot be published as memory");
                 });
+      if (tool instanceof InformationDiscoveryTool discovery) {
+        tool =
+            discovery.forRun(
+                informationActor,
+                informationInputs,
+                transcript.conversationId(),
+                confined || informationActor != null && !informationActor.uncontained()
+                    ? toolHome.project()
+                    : null,
+                () -> {
+                  if (operation == null || cancelled.getAsBoolean())
+                    throw new IllegalStateException("Information discovery run is unavailable");
+                  operations.require(operation);
+                });
+      }
       if (tool instanceof InformationTool information) {
         tool =
             information
@@ -4914,6 +4929,10 @@ public final class JobRuntime {
                     informationActor,
                     transcript.conversationId(),
                     sessionId)
+                .withDiscoveryBoundary(
+                    confined || informationActor != null && !informationActor.uncontained()
+                        ? toolHome.project()
+                        : null)
                 .withQueryValidity(
                     () -> {
                       if (operation == null || cancelled.getAsBoolean())

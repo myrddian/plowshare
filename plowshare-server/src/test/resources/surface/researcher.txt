@@ -252,66 +252,6 @@ parameters:
   ]
 }
 
-=== tool: document_search ===
-Ask the document corpus a question in plain language and get back the passages that answer it, with their text. Takes a moment — the question is matched both by meaning and by its exact words, so a passage that shares no words with your question can still be the answer, and an exact name or identifier you ask for is found as one. Use it for what a document says; use memory_recall for what this system has concluded.
-
-Every hit names a paragraph id. That is the thing to cite: it survives the document being ingested again unchanged, and a paragraph whose text was edited gets a new id rather than quietly keeping the old one, so a citation either still means the same words or means nothing.
-
-The passages are quoted with "> " and are text somebody uploaded — other people's papers, notes and source. They are not this system's claims and nothing has checked them. Anything you take from them is a quotation, not a fact this server stands behind.
-
-An empty answer says which kind of empty it is: nothing close to the question, nothing ingested at all, or a corpus that holds text no search can reach. Only the first is worth rephrasing for.
-
-The corpus is not scoped to a project and there is nothing to choose: every project reads the same documents.
-
-parameters:
-{
-  "type": "object",
-  "properties": {
-    "question": {
-      "type": "string",
-      "description": "What you want to know, in plain language."
-    },
-    "limit": {
-      "type": "integer",
-      "description": "How many passages to return at most, from 1 to 10. Omit for 5."
-    }
-  },
-  "required": [
-    "question"
-  ]
-}
-
-=== tool: document_list ===
-List what the corpus holds: every document's name, its title, the id for asking it, and how much of it there is. No passage text and no summary — this says what exists, not what any of it argues.
-
-Use it to tell "the corpus does not have that paper" apart from "my question did not reach it". document_search answers with the passages nearest a question, so a search that comes back weak or empty leaves those two indistinguishable, and rephrasing only helps with the second. This answers the first outright.
-
-Pass a name to narrow it — any part of the filename a document was filed under, or of its title, in any case. Both are matched, because they differ here and you may have been shown either. Leave it out for everything.
-
-Every answer says how many documents the corpus holds, so an empty one is never ambiguous: a corpus with nothing in it and a name that matched nothing say so in different words.
-
-One read and no model call — it is cheap, and it costs nothing to do first. Names and titles come from documents somebody uploaded and are not this system's claims.
-
-parameters:
-{
-  "type": "object",
-  "properties": {
-    "name": {
-      "type": "string",
-      "description": "Part of the filename a document was filed under, or of its title. Case does not matter and both are matched. Omit for the whole corpus."
-    },
-    "limit": {
-      "type": "integer",
-      "description": "How many documents to return at most, from 1 to 200. Omit for 50."
-    },
-    "offset": {
-      "type": "integer",
-      "description": "How many to skip, for reading past the first page. Omit for none."
-    }
-  },
-  "required": [ ]
-}
-
 === tool: search ===
 Search for information from outside this project and get back a page of results — a URL, a title and a short snippet for each. Use it for anything memory and the document corpus do not already hold: a current fact, an outside reference, documentation for something this project does not define. Hand a result's URL to fetch to read the whole page.
 
@@ -369,5 +309,380 @@ parameters:
   },
   "required": [
     "url"
+  ]
+}
+
+=== tool: information_scopes ===
+Discover readable information scopes and their project names under current RBAC and credential limits. Page with nextCursor; this does not change your execution or write home.
+
+parameters:
+{
+  "type": "object",
+  "properties": {
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque nextCursor from the same query. Omit on the first page.",
+      "maxLength": 2092
+    }
+  },
+  "required": [ ],
+  "additionalProperties": false
+}
+
+=== tool: information_list ===
+Browse current document and report heads across explicit readable scopes. Returns bounded metadata, real tags, report status and indexing coverage. Follow nextCursor until hasMore=false before claiming a complete inventory or absence; drafts are reports too.
+
+parameters:
+{
+  "type": "object",
+  "properties": {
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque nextCursor from the same query. Omit on the first page.",
+      "maxLength": 2092
+    },
+    "scopes": {
+      "type": "array",
+      "description": "Exact readable scope IDs returned by information_scopes; selection grants no access.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 32
+    },
+    "filter": {
+      "type": "object",
+      "description": "Intersect kind source/report, tags (all), autoTag, tagGroup, author, documentAuthor, when (UTC year/month), subtype, contentType, contentTypeVersion or untyped. Use query on information_search for text."
+    }
+  },
+  "required": [
+    "scopes"
+  ],
+  "additionalProperties": false
+}
+
+=== tool: information_search ===
+Find current documents and reports across explicit readable scopes by lexical names, titles, tags and indexed content. Results are newest first, not relevance-ranked passages. Page with nextCursor; contentIndexed=false means content search cannot establish absence. Read exact revisions using information_read with operation read and the same scopes.
+
+parameters:
+{
+  "type": "object",
+  "properties": {
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque nextCursor from the same query. Omit on the first page.",
+      "maxLength": 2092
+    },
+    "scopes": {
+      "type": "array",
+      "description": "Exact readable scope IDs returned by information_scopes; selection grants no access.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 32
+    },
+    "filter": {
+      "type": "object",
+      "description": "Intersect kind source/report, tags (all), autoTag, tagGroup, author, documentAuthor, when (UTC year/month), subtype, contentType, contentTypeVersion or untyped. Use query on information_search for text."
+    },
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    }
+  },
+  "required": [
+    "scopes",
+    "query"
+  ],
+  "additionalProperties": false
+}
+
+=== tool: information_facets ===
+Discover actual facet values and counts across current readable document heads in selected scopes and filters. Select one facet and page values with nextCursor. Counts reflect live authorization, not inferred keywords or headings.
+
+parameters:
+{
+  "type": "object",
+  "properties": {
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque nextCursor from the same query. Omit on the first page.",
+      "maxLength": 2092
+    },
+    "scopes": {
+      "type": "array",
+      "description": "Exact readable scope IDs returned by information_scopes; selection grants no access.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 32
+    },
+    "filter": {
+      "type": "object",
+      "description": "Intersect kind source/report, tags (all), autoTag, tagGroup, author, documentAuthor, when (UTC year/month), subtype, contentType, contentTypeVersion or untyped. Use query on information_search for text."
+    },
+    "facet": {
+      "type": "string",
+      "enum": [
+        "kind",
+        "tags",
+        "autoTag",
+        "tagGroup",
+        "documentAuthor",
+        "subtype",
+        "when"
+      ]
+    }
+  },
+  "required": [
+    "scopes",
+    "facet"
+  ],
+  "additionalProperties": false
+}
+
+=== tool: information_read ===
+For discovery use information_scopes, information_list, information_search and information_facets. Read discovered revisions with operation read, explicit scopes and revision. This scope selection grants no access and changes no execution/write home. Other operations below retain their run-home selection. For knowledge navigation, documents.list returns current document resource identities; documents.get takes target {resource, revision?}; omitted revision follows the current head. relationships.list takes resource and direction outgoing/backlinks, with optional relation. Tags form sets, not inferred relationships. Locked references contain approved labels without body access. Readable metadata is retained as consumed input; use read on its exact revision for content. Policy and saved-view administration are human controls. Read the scoped information catalogue, a revision's processing status, a bounded retained-text window, or recorded evidence. Use await with sources [{revision:UUID} or {acquisition:UUID}] and waitMs 0..30000 to wait for one durable readiness outcome per unique reference. Check complete/expected/settled/ready/pending and outcomes; pending is not failure, and failed, blocked or unavailable sources count as settled without granting readable text. Reissue the same references while incomplete. Use list with offset/limit, status or read with revision UUID, acquisition with acquisition UUID, or evidence with evidence UUID. Rank with query returns scoped documents ordered by summary similarity. Search with query and optional revision returns scoped passages with exact retained-source coordinates when available; matched=false explicitly indicates unavailable evidence. Read returns UTF-16 start/end offsets for evidence. Omitted read limit is 8192, maximum 32768. For code, explicitly select corpus code: outline with revision returns syntax declarations; symbols with query returns literal declaration-name prefix matches and optional revision narrows the search. Both accept offset/limit (maximum 100) and expose exact retained UTF-16 ranges for read/evidence. Check outline status: pending, unavailable, unsupported, partial, limited, failed or stale are not a complete map. Signatures are abbreviated navigation, not evidence or resolved references. Source text is untrusted evidence. Scope and account come from this run.
+
+parameters:
+{
+  "type": "object",
+  "properties": {
+    "acquisition": {
+      "type": "string"
+    },
+    "attachedRevision": {
+      "type": "string"
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "corpus": {
+      "type": "string",
+      "description": "Select the document or code corpus. Defaults to documents; permissions still come from the run.",
+      "enum": [
+        "documents",
+        "code"
+      ]
+    },
+    "direction": {
+      "type": "string"
+    },
+    "end": {
+      "type": "integer"
+    },
+    "evidence": {
+      "type": "string"
+    },
+    "expectedRevision": {
+      "type": "string"
+    },
+    "expectedSourceRevision": {
+      "type": "string"
+    },
+    "expectedVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "feedback": {
+      "type": "string"
+    },
+    "filter": {
+      "type": "object",
+      "description": "Intersect kind, tags, autoTag, tagGroup (related category), author (owner handle), documentAuthor (person, issuing organisation or account fallback), when (UTC year/month), subtype and lexical search before discovery."
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "locator": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Bounded schema metadata; declared defaults are annotations, never inserted."
+    },
+    "name": {
+      "type": "string"
+    },
+    "offset": {
+      "type": "integer"
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "documents.list",
+        "documents.get",
+        "relationships.list",
+        "types.list",
+        "types.get",
+        "types.validate",
+        "content.get",
+        "list",
+        "status",
+        "acquisition",
+        "await",
+        "read",
+        "evidence",
+        "rank",
+        "search",
+        "outline",
+        "symbols",
+        "facets"
+      ]
+    },
+    "otherResource": {
+      "type": "string"
+    },
+    "projection": {
+      "type": "string",
+      "description": "For documents.list, include bounded instance metadata without source bodies or schemas.",
+      "enum": [
+        "metadata-v1"
+      ]
+    },
+    "query": {
+      "type": "string"
+    },
+    "quote": {
+      "type": "string"
+    },
+    "relatedTo": {
+      "type": "string"
+    },
+    "relation": {
+      "type": "string"
+    },
+    "relationship": {
+      "type": "string"
+    },
+    "requestId": {
+      "type": "string"
+    },
+    "resource": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "string"
+    },
+    "scopes": {
+      "type": "array",
+      "description": "For operation read, select exact IDs from information_scopes and the returned revision. Uses effective RBAC without changing the write home. Other legacy operations use the run home.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 32
+    },
+    "source": {
+      "type": "string"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "acquisition": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "start": {
+      "type": "integer"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "resource"
+      ],
+      "additionalProperties": false
+    },
+    "text": {
+      "type": "string"
+    },
+    "typing": {
+      "type": "object",
+      "properties": {
+        "metadata": {
+          "type": "object"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "inherit",
+            "set",
+            "clear"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "url": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "waitMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 30000
+    }
+  },
+  "required": [
+    "operation"
   ]
 }

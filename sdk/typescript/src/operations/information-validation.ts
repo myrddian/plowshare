@@ -11,6 +11,95 @@ export function informationPayloadProblem(
   body: Record<string, unknown>,
   required: readonly string[],
 ): string | undefined {
+  if (type.startsWith('information.discovery.')) {
+    for (const key of required)
+      if (!(key in body)) return `${type} needs ${key}`;
+    const scopeId =
+      /^(?:global_read|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/;
+    const scopes = body['scopes'];
+    if (
+      'scopes' in body &&
+      (!isList(scopes) ||
+        scopes.length < 1 ||
+        scopes.length > 32 ||
+        new Set(scopes).size !== scopes.length ||
+        scopes.some(
+          (value) => typeof value !== 'string' || !scopeId.test(value),
+        ))
+    )
+      return 'Select 1–32 distinct discovered scope IDs';
+    const read = type.endsWith('.read');
+    const limit = body['limit'];
+    if (
+      'limit' in body &&
+      (typeof limit !== 'number' ||
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > (read ? 32768 : 50))
+    )
+      return 'Invalid information discovery page limit';
+    const cursor = body['cursor'];
+    if (
+      'cursor' in body &&
+      (typeof cursor !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,2048}\.[A-Za-z0-9_-]{43}$/.test(cursor))
+    )
+      return 'Invalid information discovery cursor';
+    const offset = body['offset'];
+    if (
+      'offset' in body &&
+      (typeof offset !== 'number' ||
+        !Number.isSafeInteger(offset) ||
+        offset < 0)
+    )
+      return 'Invalid read offset';
+    const revision = body['revision'];
+    if (
+      'revision' in body &&
+      (typeof revision !== 'string' ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(revision))
+    )
+      return 'Exact revision UUID required';
+    const query = body['query'];
+    if (
+      'query' in body &&
+      (typeof query !== 'string' ||
+        !query.trim() ||
+        query.length > 512 ||
+        query.includes('\0'))
+    )
+      return 'Bounded discovery query required';
+    if (
+      'facet' in body &&
+      (typeof body['facet'] !== 'string' ||
+        ![
+          'kind',
+          'tags',
+          'autoTag',
+          'tagGroup',
+          'documentAuthor',
+          'subtype',
+          'when',
+        ].includes(body['facet']))
+    )
+      return 'Unsupported discovery facet';
+    const filter = body['filter'];
+    if (filter !== undefined) {
+      if (
+        !filter ||
+        typeof filter !== 'object' ||
+        isList(filter) ||
+        'search' in filter
+      )
+        return 'Use query rather than filter.search';
+      return informationPayloadProblem(
+        'information.list',
+        { view: 'content-types-v1', filter },
+        [],
+      );
+    }
+    return undefined;
+  }
   if (type === 'information.outline' || type === 'information.symbols') {
     if (body['corpus'] !== 'code')
       return 'syntax navigation requires corpus code';
