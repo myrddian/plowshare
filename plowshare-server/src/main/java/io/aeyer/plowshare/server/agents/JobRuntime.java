@@ -5119,7 +5119,7 @@ public final class JobRuntime {
     return "the result of '"
         + tool
         + "' was withheld because this run's authority changed while it"
-        + " ran. Any change the tool made has already happened.";
+        + " ran. Any change the tool made may already have happened.";
   }
 
   /**

@@ -11,7 +11,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import org.springframework.stereotype.Component;
 
-/** Reads live lineage on every decision; failures never turn into permission or a cached allow. */
+/** Reads live lineage on every walk; failures never turn into permission or a cached allow. */
 @Component
 public final class LiveScopedAuthority implements ScopedAuthority {
   private final ScopedGrantRepository grants;

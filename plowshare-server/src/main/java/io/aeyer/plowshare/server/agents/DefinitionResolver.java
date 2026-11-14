@@ -1007,15 +1007,15 @@ public final class DefinitionResolver implements SessionCloseListener {
     return registry;
   }
 
-  private java.nio.file.Path agentsDirectory(Long id, ApplicationResources resources) {
+  private Path agentsDirectory(Long id, ApplicationResources resources) {
     return resources.directory(id, "agents").orElseGet(() -> data.agentsFor(id));
   }
 
-  private java.nio.file.Path botsDirectory(Long id) {
+  private Path botsDirectory(Long id) {
     return botsDirectory(id, applicationResources);
   }
 
-  private java.nio.file.Path botsDirectory(Long id, ApplicationResources resources) {
+  private Path botsDirectory(Long id, ApplicationResources resources) {
     return resources.directory(id, "bots").orElseGet(() -> data.botsFor(id));
   }
 }

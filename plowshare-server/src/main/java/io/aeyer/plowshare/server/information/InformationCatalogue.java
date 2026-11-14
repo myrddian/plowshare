@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * Durable catalogue. All mutations are short transactions; extraction, models and hooks run outside
@@ -41,9 +42,9 @@ public final class InformationCatalogue implements InformationReadAccess {
   }
 
   private java.util.function.IntSupplier allowance = () -> 1000;
-  private java.util.function.Supplier<Map<String, String>> configuration = Map::of;
+  private Supplier<Map<String, String>> configuration = Map::of;
 
-  public void useConfiguration(java.util.function.Supplier<Map<String, String>> configuration) {
+  public void useConfiguration(Supplier<Map<String, String>> configuration) {
     this.configuration = configuration;
   }
 
@@ -123,7 +124,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       List<UUID> sources,
       String session,
       Class<T> type,
-      java.util.function.Supplier<T> transition) {
+      Supplier<T> transition) {
     return prepared(
         context,
         request,
@@ -144,7 +145,7 @@ public final class InformationCatalogue implements InformationReadAccess {
       List<UUID> sources,
       String session,
       Class<T> type,
-      java.util.function.Supplier<T> transition,
+      Supplier<T> transition,
       OperationFence fence) {
     if (writeGates == null) {
       // No gate transaction to place it in; the transition's own transaction runs the fence.

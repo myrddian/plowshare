@@ -272,7 +272,7 @@ class DefinitionResolverTest {
     Path project = root.resolve("project"), personal = root.resolve("personal");
     write(project.resolve("bots"), "worker", "project prompt");
     write(personal.resolve("bots"), "helper", "personal prompt");
-    var roots = new java.util.concurrent.atomic.AtomicInteger();
+    var roots = new AtomicInteger();
     ApplicationResources counting =
         id -> {
           roots.incrementAndGet();

@@ -15,6 +15,7 @@ import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.cache.ProjectionNotificationProperties;
 import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.events.SpeakerHandles;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.pool.OperationStatements;
@@ -29,6 +30,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
@@ -37,6 +39,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -613,7 +616,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
   private AuthoritySnapshots authoritySnapshots = AuthoritySnapshots.none();
   private LongSupplier sessionClock = System::nanoTime;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useSocketAuthorization(SocketAuthorization authorization) {
     this.socketAuthorization = authorization;
   }
@@ -623,7 +626,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * authority snapshot; with notifications disabled the operator chose exact checks, so nothing is
    * reused.
    */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  @Autowired(required = false)
   public void useSessionCheckReuse(
       ProjectionNotificationProperties notified, AuthoritySnapshots snapshots) {
     this.sessionCheckBound = notified.enabled() ? notified.staleness() : Duration.ZERO;
@@ -646,8 +649,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
   private static Runnable fence(
       WebSocketSession socket, Delivery delivery, RequestSessionValidity session) {
     return () -> {
-      if (!delivery.running || !socket.isOpen())
-        throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+      if (!delivery.running || !socket.isOpen()) throw new CallerFault("Query connection ended");
       if (session != null) session.run();
     };
   }
@@ -940,7 +942,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
   }
 
   @SuppressWarnings("try")
-  private java.util.concurrent.CompletionStage<Void> routeConcurrent(
+  private CompletionStage<Void> routeConcurrent(
       WebSocketSession socket,
       Delivery delivery,
       String frame,
@@ -952,7 +954,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
         || !delivery.running
         || requestSession != null && !requestSession.verify()) {
       delivered.run();
-      return java.util.concurrent.CompletableFuture.completedFuture(null);
+      return CompletableFuture.completedFuture(null);
     }
     try {
       var correlation = correlationOf(frame);
@@ -974,7 +976,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
       try (var ignored = OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
         answer =
             ConcurrentDispatch.TYPE.equals(type)
-                ? java.util.concurrent.CompletableFuture.completedFuture(
+                ? CompletableFuture.completedFuture(
                     Outcome.ok(
                         new ConcurrentDispatch.Selected(
                             ConcurrentDispatch.MODE,
@@ -1003,7 +1005,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
               usageSubscriptions.ready(socket.getId(), initial.subscription());
           });
     } catch (RuntimeException invalid) {
-      return java.util.concurrent.CompletableFuture.failedFuture(invalid);
+      return CompletableFuture.failedFuture(invalid);
     }
   }
 
@@ -1023,8 +1025,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
                 ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
                 : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
             () -> {
-              if (!socket.isOpen())
-                throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+              if (!socket.isOpen()) throw new CallerFault("Query connection ended");
             });
     Outcome outcome;
     // One socket request, counted on this thread, which runs it to completion here.
@@ -1060,7 +1061,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
               if (!delivery.running
                   || !socket.isOpen()
                   || socketAuthorization != null && !socketAuthorization.current(socket))
-                throw new io.aeyer.plowshare.server.faults.CallerFault("Query connection ended");
+                throw new CallerFault("Query connection ended");
               router().requireDisclosure(frame, asking, answer);
             }
             : delivery.validity);
@@ -1194,7 +1195,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
   private io.aeyer.plowshare.server.access.ProjectAuthorization projectAuthorization;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useProjectAuthorization(
       io.aeyer.plowshare.server.access.ProjectAuthorization authorization) {
     projectAuthorization = authorization;

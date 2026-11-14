@@ -30,7 +30,7 @@ several units, each fenced:
 6. The approval.
 7. The final transition.
 
-A revoked run therefore fires no hook and opens no new log. A refusal at the claim leaves no
+A revoked run, once the fence observes the revocation, fires no further hook and opens no new log (a revocation landing between a check and the action it guards is a race window the next check closes). A refusal at the claim leaves no
 receipt row. A later refusal records the receipt as `blocked`, as any other transition failure
 does. The final transition also runs the fence a second time inside the catalogue's own unit, after
 that unit's locks. Both runs are in one transaction, so this repeats a walk; it does not widen any
@@ -51,7 +51,7 @@ the run has one). Like the after-tool block, a run with no admission and no oper
 that does nothing. A refusal is rethrown as `OperationFence.Withdrawn`, which is deliberately not a
 `CallerFault`, so a tool's own "refused" handling cannot catch it. `JobRuntime`'s tool loop maps it
 to the same words as the after-tool check: "the result of '…' was withheld because this run's
-authority changed while it ran. Any change the tool made has already happened." `tool.post` is
+authority changed while it ran. Any change the tool made may already have happened." `tool.post` is
 skipped. A script command that hits the fence fails like a script command whose after-tool check
 refused: no journal receipt, and no automatic replay.
 

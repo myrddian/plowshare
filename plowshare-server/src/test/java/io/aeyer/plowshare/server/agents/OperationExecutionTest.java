@@ -170,7 +170,7 @@ class OperationExecutionTest {
         false);
     String second = histories.get(1);
     assertTrue(second.contains("withheld because this run's authority changed"), second);
-    assertTrue(second.contains("Any change the tool made has already happened."), second);
+    assertTrue(second.contains("Any change the tool made may already have happened."), second);
     assertFalse(second.contains("fault in the tool"), second);
     assertFalse(second.contains("private tool result"), second);
     assertEquals(0, postCalls.get(), "tool.post must not see a withheld result");
@@ -240,7 +240,7 @@ class OperationExecutionTest {
         false);
     String second = histories.get(1);
     assertTrue(second.contains("withheld because this run's authority changed"), second);
-    assertTrue(second.contains("Any change the tool made has already happened."), second);
+    assertTrue(second.contains("Any change the tool made may already have happened."), second);
     assertFalse(second.contains("refused"), second);
     assertFalse(second.contains("fault in the tool"), second);
     assertEquals(0, postCalls.get(), "tool.post must not see a fence refusal");

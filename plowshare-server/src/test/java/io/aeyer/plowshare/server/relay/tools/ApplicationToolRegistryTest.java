@@ -292,7 +292,7 @@ class ApplicationToolRegistryTest {
 
   @Test
   void revision_resolves_the_root_through_the_resources_it_is_given() {
-    var asked = new java.util.concurrent.atomic.AtomicInteger();
+    var asked = new AtomicInteger();
     ApplicationResources perCall =
         id -> {
           asked.incrementAndGet();
