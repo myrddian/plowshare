@@ -655,7 +655,8 @@ async def execute(args: argparse.Namespace) -> None:
                     handoff.unlink(missing_ok=True)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The collector's command line; ``main`` adds the cross-field checks."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument(
@@ -700,8 +701,25 @@ def main() -> None:
         action="store_true",
         help="Enable private operator settings, health and recovery controls",
     )
+    # On by default so the dashboard's Pause/Resume work for every install, not
+    # only those started by the bootstrap installer. Pause/resume uses the
+    # collector's own service session on its own project schedule; changing the
+    # schedule definition still asks for the deployment administrator's password
+    # each time and never stores it.
+    serve.add_argument(
+        "--deployment-controls",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Offer schedule Pause/Resume and the reviewed schedule editor "
+        "in the dashboard (default: on; --no-deployment-controls hides them)",
+    )
     serve.add_argument("--bind", required=True)
     serve.add_argument("--port", required=True, type=int)
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
     if not 1 <= args.tool_catalog_renew_seconds <= 100:
         parser.error("Catalogue renewal must be between 1 and 100 seconds")

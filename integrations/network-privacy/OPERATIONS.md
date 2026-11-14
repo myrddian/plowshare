@@ -56,8 +56,10 @@ Use the arrow keys, Home and End to move between the dashboard tabs.
 
 Application schedules are immutable source definitions. This dashboard editor
 changes the source timing and initial pause setting through a reviewed Application
-deployment, with the reviewed revision as a concurrency fence. For operational
-pause/resume without changing source, use Plowshare CLI `schedule pause <internalName>`
+deployment, with the reviewed revision as a concurrency fence. Overview's
+**Pause monitoring** and **Resume monitoring** change only the runtime state and
+are available unless the collector was started with `--no-deployment-controls`.
+Outside the dashboard, for operational pause/resume without changing source, use Plowshare CLI `schedule pause <internalName>`
 or `schedule resume <internalName>`, TUI `/schedule pause` / `/schedule resume`, desktop
 Activity controls, or the web console **Schedules** view. Obtain the registered
 `internalName` from `schedule files`; use its owning account with project management

@@ -965,6 +965,11 @@ The app uses its existing Application service connection and the public SDK
 password or human login is needed. The server checks the manifest execution-account
 binding and effective Contributor access on each call. The worker stays a Contributor.
 
+These controls are on by default for `plowshare-privacy serve`, including services
+started by an operator's own launcher rather than the bootstrap installer. Start the
+collector with `--no-deployment-controls` to hide Pause/Resume and the reviewed
+schedule editor; the dashboard then says schedule control is unavailable.
+
 Pause prevents future scheduled scans while existing work can finish. Resume
 selects the next future occurrence; missed ticks are not replayed. These controls
 create no Application revision and do not enable local collection, start a manual
