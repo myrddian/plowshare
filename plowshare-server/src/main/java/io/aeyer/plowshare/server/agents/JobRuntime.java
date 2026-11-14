@@ -6,7 +6,6 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.access.AccessRequest;
 import io.aeyer.plowshare.server.access.AuthorityAction;
-import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
 import io.aeyer.plowshare.server.access.InferenceCalls;
 import io.aeyer.plowshare.server.access.KnowledgeReadScope;
 import io.aeyer.plowshare.server.access.OperationAuthority;
@@ -4069,9 +4068,11 @@ public final class JobRuntime {
                   String providerText = result;
                   // The after-tool check is a disclosure gate: it decides whether the
                   // model may see what the tool returned, and cannot undo what the tool
-                  // did (writes are fenced in their own transactions). Only a refusal
-                  // that says authority was withdrawn gets the model-facing explanation
-                  // below; any other failure keeps the generic tool-fault wording.
+                  // did (writes are fenced in their own transactions). Every check in
+                  // this block is an authority or retention check, so any CallerFault
+                  // refusal from it means authority changed while the tool ran and gets
+                  // the model-facing explanation below. Infrastructure failures are not
+                  // CallerFaults and keep the generic tool-fault path.
                   boolean authorityWithdrawn = false;
                   try {
                     admittedAuthority.run();
@@ -4079,7 +4080,7 @@ public final class JobRuntime {
                     if (confined)
                       retainedResources.require(
                           home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
-                  } catch (AuthorityWithdrawnException withdrawn) {
+                  } catch (CallerFault withdrawn) {
                     authorityWithdrawn = true;
                   }
                   if (authorityWithdrawn) {

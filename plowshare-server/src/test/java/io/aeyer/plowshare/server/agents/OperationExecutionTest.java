@@ -6,12 +6,18 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.AuthorityAction;
 import io.aeyer.plowshare.server.access.AuthorityWithdrawnException;
 import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.hooks.HookContext;
+import io.aeyer.plowshare.server.hooks.Hooks;
+import io.aeyer.plowshare.server.hooks.ToolPost;
 import io.aeyer.plowshare.server.llm.dispatch.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -74,22 +80,36 @@ class OperationExecutionTest {
 
   @Test
   void revokedDuringToolWithholdsResultAndSaysWhy() {
+    withheldAfterTool(() -> new AuthorityWithdrawnException("withdrawn"));
+  }
+
+  @Test
+  void aPlainCallerFaultFromTheOperationCheckAfterTheToolIsWithheldToo() {
+    withheldAfterTool(() -> new CallerFault("revoked"));
+  }
+
+  /**
+   * Runs one tool call whose tool withdraws authority; the next after-tool check then refuses with
+   * {@code refusal}. A confined (RunAdmission) runtime rejects custom tools, so the shared catch is
+   * exercised through the operation check.
+   */
+  private void withheldAfterTool(Supplier<CallerFault> refusal) {
     var dispatcher = mock(LlmDispatcher.class);
     var authority = mock(OperationAuthority.class);
     var admission = mock(OperationAuthority.Admission.class);
     when(admission.executor()).thenReturn("alice");
     when(admission.home()).thenReturn(Home.of("one"));
     when(admission.actions())
-        .thenReturn(
-            Set.of(
-                io.aeyer.plowshare.server.access.AuthorityAction.READ,
-                io.aeyer.plowshare.server.access.AuthorityAction.WRITE,
-                io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL));
+        .thenReturn(Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.RUN_MODEL));
     AtomicBoolean revoked = new AtomicBoolean();
+    // Withdrawn once, by the tool; later checks pass so the next history can be inspected.
+    Runnable check =
+        () -> {
+          if (revoked.getAndSet(false)) throw refusal.get();
+        };
     doAnswer(
             call -> {
-              // Withdrawn once, by the tool; later checks pass so the history can be inspected.
-              if (revoked.getAndSet(false)) throw new AuthorityWithdrawnException("withdrawn");
+              check.run();
               return null;
             })
         .when(authority)
@@ -107,7 +127,7 @@ class OperationExecutionTest {
           }
         };
     var histories = new ArrayList<String>();
-    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    var calls = new AtomicInteger();
     when(dispatcher.stream(any(), any(), any()))
         .thenAnswer(
             call -> {
@@ -121,6 +141,16 @@ class OperationExecutionTest {
                   : new Completion("done", "stop", TokenUsage.UNKNOWN, List.of());
             });
     var runtime = new JobRuntime(authority, dispatcher, List.of(probe));
+    var postCalls = new AtomicInteger();
+    runtime.useHooks(
+        new Hooks() {
+          @Override
+          public ToolPost toolPost(
+              HookContext context, String tool, String argumentsJson, String result) {
+            postCalls.incrementAndGet();
+            return new ToolPost(result, List.of());
+          }
+        });
     var definition =
         new AgentDefinition(
             "chat", "chat", "fast", List.of("probe"), List.of(), List.of(), 4, 4, "Answer");
@@ -142,6 +172,7 @@ class OperationExecutionTest {
     assertTrue(second.contains("Any change the tool made has already happened."), second);
     assertFalse(second.contains("fault in the tool"), second);
     assertFalse(second.contains("private tool result"), second);
+    assertEquals(0, postCalls.get(), "tool.post must not see a withheld result");
   }
 
   @Test
