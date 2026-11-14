@@ -58,13 +58,19 @@ Use the arrow keys, Home and End to move between the dashboard tabs.
 A project Manager can also change the schedule frequency on any install with
 Plowshare CLI `schedule save` (`plowshare-cli --project <project> --payload -
 schedule save < request.json`, with `source: "server"` and `overwrite: true`); it
-needs no deployment administrator and no bootstrap layout. The dashboard editor
-below still needs the bootstrap `deployment/` layout.
+needs no deployment administrator and no bootstrap layout. The saved `paused`
+value replaces the current Pause/Resume state: the packaged `network_scan` ships
+`"paused": true`, so set `"paused": false` in the request to keep monitoring
+running. A later deployment from an unchanged source tree replaces the saved
+schedule; carry the change into the source tree. The dashboard editor below still
+needs the bootstrap `deployment/` layout.
 
-Application schedules are immutable source definitions. This dashboard editor
-changes the source timing and initial pause setting through a reviewed Application
+An Application schedule definition changes only through a project Manager's
+`schedule save` or an Application deployment. This dashboard editor changes the
+source timing and initial pause setting through a reviewed Application
 deployment, with the reviewed revision as a concurrency fence. Overview's
-**Pause monitoring** and **Resume monitoring** change only the runtime state.
+**Pause monitoring** and **Resume monitoring** are an operational override that
+changes only the runtime state, never the definition.
 They are on by default and work on any install, bootstrap-made or not. The
 reviewed schedule editor needs the bootstrap `deployment/` layout; otherwise it
 refuses with "The schedule editor needs the bootstrap deployment layout; Pause and

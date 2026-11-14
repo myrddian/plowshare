@@ -36,9 +36,11 @@ configured events tick interval. It also reconciles before boot recovery drains
 queued firings. An unchanged file preserves its next-fire time. Timing changes
 calculate the next future fire. Deleting a file removes its schedule and trigger
 and refuses waiting firings; historical firings remain. Pause/resume updates JSON
-and both runtime rows together for mutable file definitions. Deployed Application
-files remain immutable: an operational pause override updates both runtime rows
-without a new release. Legacy schedule/trigger definitions still work.
+and both runtime rows together for mutable file definitions. For an Application,
+Pause/Resume is an operational override that changes runtime state only: it
+updates both runtime rows and never the definition file. An Application's
+definition changes only through `schedule.save` by a project Manager (below) or
+through a deployment. Legacy schedule/trigger definitions still work.
 
 A current project Manager can change an Application's schedule definition (timing,
 actions, initial pause state) with `schedule.save` and `source: "server"`, with no
@@ -52,15 +54,32 @@ execution access. It writes only `schedules/<name>.json`:
   differ from the head and that `plowshare.json` and the service identity are
   byte-identical. Deployment limits apply (128 files, 64 KiB per file, 128 KiB
   total). The history records the change, and a later admin deploy or rollback
-  still works.
+  still works. Like any revision change, the save is refused while the project
+  holds a live contained Application ("This Application holds a live contained
+  Application; destroy it before changing the revision that authorized it", ADR
+  0042); destroy the contained Application first.
 - **DISJOINT or hand-registered root:** the file is replaced in place in
   `schedules/` with an atomic temporary file and rename. Symlinks are refused; the
   limits are 64 KiB per file, 256 files and 1 MiB.
 
 Each save is audited as `schedule.save.application` with target
-`<project>/<name>` (MANAGED adds `@<revision>`). A save with an uncertain commit
-outcome is not audited and is never retried. Deleting an Application schedule is
-still refused: save a replacement definition instead.
+`<project>/<name>` (MANAGED adds `@<revision>`). The audit row is written after
+the commit (or in-place write) and reconciliation, in its own transaction. A
+crash in that window leaves the change without an audit row; for MANAGED the
+deployment receipt, which records the account, remains the record. A save with
+an uncertain commit outcome is not audited and is never retried. Deleting an
+Application schedule is still refused: save a replacement definition instead.
+
+**The saved `paused` value replaces the current Pause/Resume state.** A save
+clears the operational pause override, and the saved `definition.paused` then
+applies. A definition copied from a package that ships paused (Network Privacy
+Watch's `network_scan`, for example) carries `"paused": true` and would stop a
+running schedule. Set `"paused": false` to keep a running schedule running.
+
+**A save is not carried into your source.** A later `application.deploy` of a
+source tree that still holds the old `schedules/<name>.json`, or the next sync by
+the pipeline that owns a DISJOINT directory, replaces the Manager-saved file.
+Carry the change into the source tree as well.
 
 Application overrides survive unchanged source reconciliation and restart. A
 changed schedule definition (including a Manager `schedule.save`) or removal
@@ -206,7 +225,8 @@ plowshare-cli schedule forget '{"schedule":"scheduled-1-weekday"}'
 
 To change an Application's schedule as a project Manager, save the whole definition
 with `overwrite` true. `request.json` (copy `definition` from the Application's
-`schedules/<name>.json`):
+`schedules/<name>.json`, then set `paused` to the state you want after the save;
+`false` keeps the schedule running, whatever the copied file says):
 
 ```json
 {
@@ -218,7 +238,7 @@ with `overwrite` true. `request.json` (copy `definition` from the Application's
     "version": 1,
     "cron": "0 */30 * * * *",
     "zone": "UTC",
-    "paused": true,
+    "paused": false,
     "action": {"kind": "orchestration", "agent": "privacy_coordinator", "name": "privacy_tick", "input": "A collection occurrence is available through Relay.", "mode": null},
     "target": {"kind": "mailbox", "project": null, "conversation": null, "to": null, "route": null},
     "limits": {"maxModelCalls": 1, "maxTurns": 8, "queueCap": 1}

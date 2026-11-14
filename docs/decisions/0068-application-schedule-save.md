@@ -46,6 +46,10 @@ How the change lands depends on the project type:
     `plowshare.json` are unchanged. The manifest is copied, never re-resolved.
     Acting grants are re-bound to the new head from the unchanged manifest.
   - The deployment history therefore records every timing change.
+  - Like every revision change, the save is refused while a contained Application
+    beneath the project is live (`SourceContainmentFence`, ADR 0042). A
+    schedule-only revision is not exempt: the fence protects the revision that
+    authorized the child, and the Manager destroys the child first.
   - The deployment store itself enforces the invariant under the project lock:
     only `schedules/*.json` differ from the head, `plowshare.json` and the service
     identity are byte-identical to the head, and the caller is a current project
@@ -74,8 +78,18 @@ In both cases:
   saved `definition.paused` value then applies.
 - Every Application schedule save writes an `admin_audit` row: actor,
   `schedule.save.application`, and target `<project>/<name>`, plus `@<revision>`
-  for MANAGED projects. A save whose commit outcome is uncertain is not audited
-  and is never retried; the caller inspects state before deciding.
+  for MANAGED projects. The row is written after the commit (or in-place write)
+  and reconciliation, in its own transaction, not in the deployment commit. A
+  crash in that window leaves no audit row: for MANAGED the deployment receipt,
+  which records the account, is then the record; an in-place write has no other
+  record. A save whose commit outcome is uncertain is not audited and is never
+  retried; the caller inspects state before deciding.
+- The saved `paused` replaces the current Pause/Resume state, so a definition
+  copied from a package that ships paused stops a running schedule unless the
+  caller sets `"paused": false`.
+- A later `application.deploy` from a source tree that still holds the old file,
+  or a DISJOINT pipeline's next sync, replaces the saved schedule. Operators
+  carry the change into their source tree.
 
 Unchanged:
 

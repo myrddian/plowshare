@@ -167,7 +167,9 @@ pause rules. A current project Manager updates a packaged schedule definition wi
 project gets a schedule-only deployment revision, and a DISJOINT or hand-registered
 root is written in place in `schedules/`. See [Scheduling](scheduling.md). For
 example, `plowshare-cli --project P --payload - schedule save < request.json`.
-Deleting an Application schedule remains refused.
+A later `application.deploy` from a source tree that still holds the old
+`schedules/<name>.json` replaces the saved schedule, so carry the change into the
+source tree too. Deleting an Application schedule remains refused.
 Application agent and bot definitions also belong to their source package.
 Update `agents/` or `bots/` through `application.deploy` for managed source, or the
 owning external deployment workflow for DISJOINT source. `agent.define` is for
@@ -323,7 +325,9 @@ bin/plowshare-cli project create '{"name":"home-assistant","type":"DISJOINT","wo
 ```
 
 A project Manager can still change the registered Application's schedule timing
-through `schedule save`, which rewrites only `schedules/<name>.json` in place.
+through `schedule save`, which rewrites only `schedules/<name>.json` in place. The
+pipeline's next sync of that file replaces the saved schedule, so carry the change
+into the pipeline's source as well.
 The pipeline can update the directory while Plowshare retains the project's
 framework state. Neither server project type participates in client union sync.
 `DISJOINT` makes independent lifecycle ownership explicit. It can register an
