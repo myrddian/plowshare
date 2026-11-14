@@ -569,8 +569,12 @@ async def execute(args: argparse.Namespace) -> None:
                     ask=ask,
                     ask_detail=ask_detail,
                     advisory_origin=advisory_origin,
+                    # The editor reads the configuration this process was started
+                    # with, not a sibling collector.json; its state stays beside it.
                     schedule_editor=ScheduleEditor(
-                        Path(args.config).parent, schedule_runtime
+                        Path(args.config).parent,
+                        schedule_runtime,
+                        config=Path(args.config),
                     )
                     if getattr(args, "deployment_controls", False)
                     else None,

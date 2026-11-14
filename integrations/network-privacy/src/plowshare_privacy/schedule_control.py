@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -49,16 +51,42 @@ class SdkScheduleRuntime:
         ).require_payload()
 
 
+def private_directory(path: Path) -> None:
+    """Ensure ``path`` is a real directory, creating it owner-only (0o700) if absent.
+
+    An existing directory (a bootstrap install) is left exactly as it is. A link or
+    any other kind of file at ``path`` is refused rather than followed or replaced.
+    """
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    else:
+        # mkdir's mode is filtered by the umask; set the intended mode explicitly.
+        os.chmod(path, 0o700)
+    if not stat.S_ISDIR(os.lstat(path).st_mode):
+        raise ValueError("Schedule control directory must be an unlinked directory")
+
+
 class ScheduleController:
+    """Pause/Resume the configured schedule; state lives under ``root/deployment``.
+
+    ``config`` is the collector configuration the process was started with
+    (``--config``). It defaults to ``root/collector.json``, the bootstrap layout.
+    ``deployment/`` need not exist until the first control is retained.
+    """
+
     def __init__(
         self,
         root: Path,
         lock: asyncio.Lock,
         runtime: Callable[[Configuration], ScheduleRuntime] | None,
+        config: Path | None = None,
     ):
-        self.config = root / "collector.json"
+        self.config = config if config is not None else root / "collector.json"
         self.lock, self.runtime = lock, runtime
-        self.path = root / "deployment/schedule-control.json"
+        self.directory = root / "deployment"
+        self.path = self.directory / "schedule-control.json"
         self.deployment = root / "deployment/schedule-update-intent.json"
 
     def status(self) -> ScheduleControlStatus:
@@ -82,6 +110,8 @@ class ScheduleController:
         )
 
     def retain(self, config: Configuration, paused: bool, state: str) -> None:
+        # Installs not made by the bootstrap installer have no deployment/ yet.
+        private_directory(self.directory)
         replace_private(
             self.path,
             json.dumps(

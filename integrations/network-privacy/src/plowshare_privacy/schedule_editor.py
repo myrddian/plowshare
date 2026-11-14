@@ -111,30 +111,56 @@ class ScheduleManagement(Protocol):
     async def deploy(self, review_id: str, store: str, password: str) -> str: ...
 
 
+BOOTSTRAP_REQUIRED = (
+    "The schedule editor needs the bootstrap deployment layout; "
+    "Pause and Resume remain available."
+)
+
+
 class ScheduleEditor:
+    """Runtime Pause/Resume plus the reviewed schedule editor for one collector.
+
+    ``config`` is the collector configuration the process was started with
+    (``--config``); it defaults to ``root/collector.json``. Pause/Resume work on
+    any install. Review, deploy and reconcile need the bootstrap layout
+    (``root/deployment/setup.json`` describing this collector); it is read only
+    when one of them runs, and its absence is refused before any contact.
+    """
+
     def __init__(
         self,
         root: Path,
         runtime: Callable[[Configuration], ScheduleRuntime] | None = None,
+        config: Path | None = None,
     ):
         self.root = root
-        self.setup = Setup.read(root / "deployment/setup.json")
-        if (
-            self.setup.output != root / "deployment"
-            or self.setup.collector != root / "collector.json"
-        ):
-            raise ValueError("Deployment setup does not belong to this collector")
+        self.config = config if config is not None else root / "collector.json"
         self.lock = asyncio.Lock()
-        self.controller = ScheduleController(root, self.lock, runtime)
+        self.controller = ScheduleController(root, self.lock, runtime, self.config)
         self.draft: Draft | None = None
         self.pending = root / "deployment/schedule-update-intent.json"
         self.receipt = root / "deployment/schedule-update-receipt.json"
+
+    def bootstrap(self) -> Setup:
+        """Read the bootstrap setup for this collector, once per editor action.
+
+        Raises ``SettingsBusy`` (shown by the dashboard as a 409) when the install
+        has no bootstrap layout, before any administrator login or server contact.
+        """
+        path = self.root / "deployment/setup.json"
+        if not path.is_file():
+            raise SettingsBusy(BOOTSTRAP_REQUIRED)
+        setup = Setup.read(path)
+        if setup.output != self.root / "deployment" or setup.collector != self.config:
+            raise ValueError("Deployment setup does not belong to this collector")
+        return setup
 
     async def review(
         self, preset: str, zone: str, paused: bool, password: str
     ) -> ScheduleReview:
         from .bootstrap import application_files
 
+        setup = self.bootstrap()
         if (preset not in PRESETS and preset != CURRENT) or type(paused) is not bool:
             raise ValueError("Choose a listed schedule frequency")
         try:
@@ -146,9 +172,9 @@ class ScheduleEditor:
                 raise SettingsBusy(
                     "A schedule change is retained. Check its deployment receipt or runtime state before preparing another revision."
                 )
-            config = Configuration.read(self.setup.collector)
+            config = Configuration.read(setup.collector)
             async with administrator_login(
-                config.origin, self.setup.deployer, password
+                config.origin, setup.deployer, password
             ) as bearer:
                 async with await Client.connect(
                     config.origin, bearer, timeout=15
@@ -158,7 +184,7 @@ class ScheduleEditor:
                     ).require_payload()
                     if (
                         not administrator.server_admin
-                        or administrator.handle != self.setup.deployer
+                        or administrator.handle != setup.deployer
                     ):
                         raise ValueError("Use the configured deployment administrator")
                     status = (
@@ -184,7 +210,7 @@ class ScheduleEditor:
                 raise SettingsBusy(
                     "Application changed outside this setup. Review and synchronize its prepared source before deploying."
                 )
-            files = application_files(self.setup.output / "application")
+            files = application_files(setup.output / "application")
             selected = next(
                 (item for item in files if item.path == "schedules/network_scan.json"),
                 None,
@@ -230,6 +256,7 @@ class ScheduleEditor:
     async def deploy(self, review_id: str, store: str, password: str) -> str:
         from .bootstrap import application_files
 
+        setup = self.bootstrap()
         async with self.lock:
             draft = self.draft
             if (
@@ -244,7 +271,7 @@ class ScheduleEditor:
                 )
             # Refuse externally edited prepared source; the reviewed schedule is the
             # only permitted difference. A new process requires a fresh review.
-            existing = application_files(self.setup.output / "application")
+            existing = application_files(setup.output / "application")
             baseline = tuple(
                 item
                 for item in draft.files
@@ -259,7 +286,7 @@ class ScheduleEditor:
                 != baseline
             ):
                 raise ValueError("Prepared Application source changed since review")
-            config = Configuration.read(self.setup.collector)
+            config = Configuration.read(setup.collector)
             destination = object_fields(
                 load_json(self.root / "destination.json"), {"path"}
             )
@@ -274,7 +301,7 @@ class ScheduleEditor:
                 files=draft.files,
             )
             async with administrator_login(
-                config.origin, self.setup.deployer, password
+                config.origin, setup.deployer, password
             ) as bearer:
                 async with await Client.connect(
                     config.origin, bearer, timeout=15
@@ -310,7 +337,7 @@ class ScheduleEditor:
                         if item.path == "schedules/network_scan.json"
                     )
                     replace_private(
-                        self.setup.output / "application/schedules/network_scan.json",
+                        setup.output / "application/schedules/network_scan.json",
                         selected.text,
                     )
                     # Archive the intent only after the server receipt and local
@@ -353,11 +380,12 @@ class ScheduleEditor:
         from .bootstrap import application_files
         from .contracts import items
 
+        setup = self.bootstrap()
         async with self.lock:
             identity = self.pending_request()
             if identity is None:
                 return None
-            config = Configuration.read(self.setup.collector)
+            config = Configuration.read(setup.collector)
             row = object_fields(load_json(self.pending), {"request", "sourceDigest"})
             request = object_fields(
                 row["request"],
@@ -394,7 +422,7 @@ class ScheduleEditor:
             )
             if selected is None or len({item.path for item in files}) != len(files):
                 raise ValueError("Incomplete deployment intent")
-            existing = application_files(self.setup.output / "application")
+            existing = application_files(setup.output / "application")
             if tuple(item for item in existing if item.path != selected.path) != tuple(
                 item for item in files if item.path != selected.path
             ):
@@ -402,7 +430,7 @@ class ScheduleEditor:
                     "Prepared source changed while deployment was unsettled; inspect retained files first"
                 )
             async with administrator_login(
-                config.origin, self.setup.deployer, password
+                config.origin, setup.deployer, password
             ) as bearer:
                 async with await Client.connect(
                     config.origin, bearer, timeout=15
@@ -435,7 +463,7 @@ class ScheduleEditor:
                 json.dumps(asdict(result)) + "\n",
             )
             replace_private(
-                self.setup.output / "application/schedules/network_scan.json",
+                setup.output / "application/schedules/network_scan.json",
                 selected.text,
             )
             self.pending.rename(
