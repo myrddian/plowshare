@@ -177,28 +177,34 @@ public class InformationConfig {
   }
 
   /**
-   * The targeted readability check from item-cached shared facts (design slice 1). One item-scoped,
-   * versioned projection holds every revision and resource fact; an evaluation may read at most the
-   * projection's entry limit of facts, so its facts can stay resident together.
+   * The shared revision and resource facts of design slice 1. One item-scoped, versioned projection
+   * holds every fact for both the targeted readability check and log visibility's retained inputs;
+   * an evaluation may read at most the projection's entry limit of facts, so its facts can stay
+   * resident together.
    */
   @Bean
-  public KnowledgeReadabilityCheck knowledgeReadabilityCheck(
+  KnowledgeFactSource knowledgeFactSource(
       JdbcTemplate jdbc,
       ProjectionCaches caches,
-      ProjectionItemVersions itemVersions,
       ProjectionCacheProperties properties,
-      AuthoritySnapshots authority,
       ReadAdmission admission) {
-    return new CachedKnowledgeReadability(
+    return new KnowledgeFactSource(
         caches.createItemScoped(
             "knowledge-facts-v1",
             java.util.Set.of(Domain.READABILITY),
             ProjectionCaches.Freshness.VERSIONED),
         new JdbcKnowledgeFactRepository(jdbc),
-        itemVersions,
-        authority,
         admission,
         properties.entries());
+  }
+
+  /** The targeted readability check from item-cached shared facts (design slice 1). */
+  @Bean
+  public KnowledgeReadabilityCheck knowledgeReadabilityCheck(
+      KnowledgeFactSource facts,
+      ProjectionItemVersions itemVersions,
+      AuthoritySnapshots authority) {
+    return new CachedKnowledgeReadability(facts, itemVersions, authority);
   }
 
   @Bean

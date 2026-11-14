@@ -106,11 +106,16 @@ class ItemProjectionVersionsDatabaseTest {
 
     String child = unique("child");
     log(child, a);
+    long childCounter = counter("conversation:" + child);
     log(unique("grandchild"), child);
 
     assertNotEquals(treeA, counter("conversation:" + a), "The tree's root is addressed");
     assertEquals(treeB, counter("conversation:" + b), "Another tree is untouched");
-    assertEquals(0, counter("conversation:" + child), "Descendants are addressed by their root");
+    // V258: a new edge also names its child, the old root if the child was one. Later writes
+    // below the child are addressed by the tree's root alone.
+    assertTrue(childCounter > 0, "A new edge names its child endpoint");
+    assertEquals(
+        childCounter, counter("conversation:" + child), "Descendants are addressed by their root");
     assertEquals(all, counter("*"), "No fallback for an addressable change");
     assertTrue(domainCounter() > domain, "Domain-scoped projections still see the change");
 

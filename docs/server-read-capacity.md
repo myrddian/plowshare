@@ -20,7 +20,7 @@ against the total database capacity when running multiple server processes.
 | `interactive` / `interactive-per-principal` | 16 / 4 | Executing audited socket reads and legacy HTTP GET requests |
 | `reports` / `reports-per-principal` | 2 / 1 | Physical PROC and usage repository loads |
 | `authority` / `authority-per-principal` | 2 / 1 | Statement-authoritative visibility reads and retained foreground code reads, including non-shareable reads |
-| `fetches` / `fetches-total` | 2 / 8 | Each cache's own slots into PostgreSQL for its fills, and the total across caches: log deny sets, the authority snapshot, PROC queues and foreground usage reports |
+| `fetches` / `fetches-total` | 2 / 8 | Each cache's own slots into PostgreSQL for its fills, and the total across caches: log deny sets, log-tree facts, the authority snapshot, PROC queues and foreground usage reports |
 | `maintenance` / `maintenance-per-principal` | 1 / 1 | Embedding discovery and background code metadata batches |
 | `observers` / `observers-per-principal` | 64 / 4 | Parked information readiness requests |
 | `sockets` / `sockets-per-principal` | 1024 / 32 | Attached event and file sockets combined |
@@ -43,8 +43,9 @@ it still stores its value, which serves the next request, and only its own calle
 read. The agent job runtime retries its side-effect-free per-step log check up to three more times
 (100, 200 and 400 ms apart) after a busy refusal; checks that may hold a transaction, such as a
 log-visibility callback, still refuse at once.
-Log deny sets and the authority snapshot use no per-account seat: a deny set has one key per
-account, so an account's misses always share one fill, and the snapshot is one key. PROC queue and
+Log deny sets, log-tree facts and the authority snapshot use no per-account seat: a deny set has
+one key per account, so an account's misses always share one fill; a tree has one key per root log
+and no account, so every account's misses on it share one fill; and the snapshot is one key. PROC queue and
 usage report keys include the query, so one account could start many distinct fills; those fills
 first hold the account's `reports` seat, which queues rather than refuses, and only then a cache
 slot, so no tenant can take every slot. Uncached PROC and usage-audit reads and background usage

@@ -76,6 +76,11 @@ public interface ProjectionVersions {
         throw new IllegalArgumentException("Invalid projection item address");
     }
 
+    /** Whether {@code address} is in the item grammar shared with the V257 triggers. */
+    public static boolean addressable(String address) {
+      return address != null && ADDRESS.matcher(address).matches();
+    }
+
     /** The fan-out fallback of {@code domain}. */
     public static Item all(Domain domain) {
       return new Item(domain, ALL);

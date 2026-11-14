@@ -3,19 +3,11 @@ package io.aeyer.plowshare.server.information;
 import io.aeyer.plowshare.server.access.AuthoritySnapshots;
 import io.aeyer.plowshare.server.cache.ItemProjectionCache;
 import io.aeyer.plowshare.server.cache.ProjectionItemVersions;
-import io.aeyer.plowshare.server.cache.ProjectionVersions;
-import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.cache.VersionedProjectionCache;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * The targeted readability check from shared, item-cached facts and the in-memory authority
@@ -59,14 +51,11 @@ import java.util.function.Supplier;
  */
 public final class CachedKnowledgeReadability implements KnowledgeReadabilityCheck {
   /** FETCH admission principal: the fact cache's own slots, never a per-account budget. */
-  static final String FETCH = "knowledge-facts";
+  static final String FETCH = KnowledgeFactSource.FETCH;
 
-  private final ItemProjectionCache<KnowledgeFact> cache;
-  private final KnowledgeFactRepository repository;
+  private final KnowledgeFactSource facts;
   private final ProjectionItemVersions versions;
   private final AuthoritySnapshots authority;
-  private final ReadAdmission admission;
-  private final int maxFacts;
 
   /**
    * @param maxFacts most distinct facts one evaluation may read; at most the projection's entry
@@ -79,14 +68,15 @@ public final class CachedKnowledgeReadability implements KnowledgeReadabilityChe
       AuthoritySnapshots authority,
       ReadAdmission admission,
       int maxFacts) {
-    this.cache = Objects.requireNonNull(cache);
-    this.repository = Objects.requireNonNull(repository);
+    this(new KnowledgeFactSource(cache, repository, admission, maxFacts), versions, authority);
+  }
+
+  /** Reads facts from {@code facts}, which log visibility may share. */
+  CachedKnowledgeReadability(
+      KnowledgeFactSource facts, ProjectionItemVersions versions, AuthoritySnapshots authority) {
+    this.facts = Objects.requireNonNull(facts);
     this.versions = Objects.requireNonNull(versions);
     this.authority = Objects.requireNonNull(authority);
-    this.admission = Objects.requireNonNull(admission);
-    if (maxFacts < 1 || maxFacts >= ProjectionItemVersions.MAX_CONFIRMED_ITEMS)
-      throw new IllegalArgumentException("Readability fact budget out of range");
-    this.maxFacts = maxFacts;
   }
 
   @Override
@@ -96,50 +86,15 @@ public final class CachedKnowledgeReadability implements KnowledgeReadabilityChe
     if (!VersionedProjectionCache.callerHasNoOwnWrites()) return Optional.empty();
     var snapshot = authority.current();
     if (snapshot.isEmpty()) return Optional.empty();
-    var facts = new Evaluation();
+    var reads = facts.reads();
     var verdict =
         KnowledgeReadability.readable(
-            KnowledgeReadability.Request.of(context, revision), snapshot.get(), facts);
+            KnowledgeReadability.Request.of(context, revision), snapshot.get(), reads);
     if (verdict.isEmpty()) return verdict;
-    var stale = versions.staleItems(facts.tokens);
+    var stale = versions.staleItems(reads.tokens());
     if (stale.isEmpty()) return verdict;
     // Drop exactly the outdated facts; the next check reloads them and keeps the rest.
-    stale.forEach(cache::invalidate);
+    stale.forEach(facts::invalidate);
     return Optional.empty();
-  }
-
-  /** The facts and item counters one evaluation read; confined to the calling thread. */
-  private final class Evaluation implements KnowledgeReadability.Facts {
-    private final Map<SnapshotCache.Key, KnowledgeFact> read = new HashMap<>();
-    private final List<ProjectionItemVersions.ItemToken> tokens = new ArrayList<>();
-
-    @Override
-    public Optional<KnowledgeFact> revision(UUID id) {
-      return fact("knowledge-revision", "revision:", id, () -> repository.revision(id));
-    }
-
-    @Override
-    public Optional<KnowledgeFact> resource(UUID id) {
-      return fact("knowledge-resource", "resource:", id, () -> repository.resource(id));
-    }
-
-    private Optional<KnowledgeFact> fact(
-        String kind, String prefix, UUID id, Supplier<KnowledgeFact> loader) {
-      var key = new SnapshotCache.Key(kind, id.toString());
-      var known = read.get(key);
-      if (known != null) return Optional.of(known);
-      if (read.size() >= maxFacts) return Optional.empty();
-      var item = new ProjectionVersions.Item(ProjectionVersions.Domain.READABILITY, prefix + id);
-      var result =
-          cache.readUnconfirmed(
-              key,
-              Set.of(item),
-              () -> admission.read(FETCH, ReadAdmission.Work.FETCH, loader),
-              KnowledgeFact::weight);
-      if (result.isEmpty()) return Optional.empty();
-      read.put(key, result.get().value());
-      tokens.add(result.get().items());
-      return Optional.of(result.get().value());
-    }
   }
 }

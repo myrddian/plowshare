@@ -20,6 +20,11 @@ import java.util.UUID;
  * the row in {@code information_revision_allowances} is active and passes the typed-content filter
  * of {@link InformationSql#content}.
  *
+ * <p>{@link #retainedInputs} evaluates, over the same facts, the {@code readable} column of {@code
+ * information_readable_input_selections} (V235), which log visibility applies to every retained job
+ * input ({@link LogReadability}). It shares the closure, node and public-dependency walks but keeps
+ * V235's own {@code facts.readable}, {@code general_readable} and selection arms.
+ *
  * <p>Facts come from {@link Facts}, authority from an {@link AuthoritySnapshot}. Each private
  * method names the SQL clause it mirrors. {@code KnowledgeReadabilityDifferentialDatabaseTest}
  * compares this class with the SQL routine on generated fixtures; a migration that changes one of
@@ -92,6 +97,43 @@ public final class KnowledgeReadability {
     }
   }
 
+  /**
+   * The {@code readable} column of {@code information_readable_input_selections(actor, ...)} (V235)
+   * for retained selections, one evaluator per actor and evaluation: the nodes, closures and
+   * public-dependency walks it computes are independent of the selection, so they are shared across
+   * the inputs it is asked about. Not thread-safe.
+   *
+   * @param actor the reading account; never null (a NULL account reads no retained input, which
+   *     {@link LogReadability} decides without authority)
+   */
+  public static RetainedInputs retainedInputs(
+      String actor, AuthoritySnapshot authority, Facts facts) {
+    return new RetainedInputs(new Evaluation(Objects.requireNonNull(actor), authority, facts));
+  }
+
+  /** See {@link #retainedInputs}. */
+  public static final class RetainedInputs {
+    private final Evaluation evaluation;
+
+    private RetainedInputs(Evaluation evaluation) {
+      this.evaluation = evaluation;
+    }
+
+    /**
+     * Whether the actor's current READ authority admits this retained selection, or empty when a
+     * fact could not be served or a row is {@link KnowledgeFact.Oversized}; the caller must then
+     * ask SQL.
+     */
+    public Optional<Boolean> readable(LogTreeFact.JobInput input) {
+      Objects.requireNonNull(input);
+      try {
+        return Optional.of(evaluation.retainedAdmitted(input));
+      } catch (Unservable abandoned) {
+        return Optional.empty();
+      }
+    }
+  }
+
   /** Control signal only: abandons the evaluation without deciding anything. */
   private static final class Unservable extends RuntimeException {
     Unservable() {
@@ -111,10 +153,14 @@ public final class KnowledgeReadability {
       Optional<String> projectName) {}
 
   private static final class Evaluation {
+    /** The targeted check's arguments; null for a retained-input evaluation. */
     private final Request request;
+
+    private final String actor;
     private final AuthoritySnapshot authority;
     private final Facts facts;
     private AuthoritySnapshot.KnowledgeReader reader;
+    private final Map<UUID, Boolean> retainedGenerallyReadable = new HashMap<>();
     private final Map<UUID, Optional<KnowledgeFact.Revision>> revisions = new HashMap<>();
     private final Map<UUID, Optional<KnowledgeFact.Resource>> resources = new HashMap<>();
     private final Map<UUID, Optional<Node>> nodes = new HashMap<>();
@@ -124,12 +170,20 @@ public final class KnowledgeReadability {
 
     Evaluation(Request request, AuthoritySnapshot authority, Facts facts) {
       this.request = request;
+      this.actor = request.actor();
+      this.authority = authority;
+      this.facts = facts;
+    }
+
+    Evaluation(String actor, AuthoritySnapshot authority, Facts facts) {
+      this.request = null;
+      this.actor = actor;
       this.authority = authority;
       this.facts = facts;
     }
 
     boolean admitted() {
-      reader = authority.knowledgeReader(request.actor());
+      reader = authority.knowledgeReader(actor);
       UUID target = request.target();
       // candidates: information_revisions r JOIN information_resources q, r.id=ANY(targets).
       var root = revision(target);
@@ -187,7 +241,8 @@ public final class KnowledgeReadability {
           && scope.isPresent()
           && scope.get().builtin().equals(Optional.of("GLOBAL_KNOWLEDGE"))) return true;
       if (!selected.equals("personal") && !selected.equals("project")) return false;
-      if (scope.isPresent() && personalArms(root, scope.get(), homeName(scope.get()))) return true;
+      if (scope.isPresent()
+          && personalArms(root, scope.get(), homeName(scope.get()), selected, project)) return true;
       // (a.general_member AND $4 AND root_policy.audience='GLOBAL_READ')
       return member && includeGlobal && globalAudience;
     }
@@ -199,9 +254,11 @@ public final class KnowledgeReadability {
      * account knowledge when the selected project is the actor's personal project.
      */
     private boolean personalArms(
-        KnowledgeFact.Revision revision, AuthoritySnapshot.Scope scope, Optional<String> home) {
-      String selected = request.scope();
-      String project = request.project();
+        KnowledgeFact.Revision revision,
+        AuthoritySnapshot.Scope scope,
+        Optional<String> home,
+        String selected,
+        String project) {
       boolean ownAccountKnowledge =
           scope.kind().equals("ACCOUNT_KNOWLEDGE") && same(scope.account(), reader.actorId());
       if (selected.equals("personal")
@@ -212,10 +269,10 @@ public final class KnowledgeReadability {
       if (home.isPresent()
           && home.get().equals(project)
           && reader.readableScopes().contains(scope.id())) return true;
-      if (ownAccountKnowledge && linkedToSelectedProject(revision)) return true;
+      if (ownAccountKnowledge && linkedToSelectedProject(revision, project)) return true;
       return ownAccountKnowledge
           && scope.builtin().isEmpty()
-          && authority.personalProject(project, request.actor());
+          && authority.personalProject(project, actor);
     }
 
     /**
@@ -223,10 +280,10 @@ public final class KnowledgeReadability {
      * linked.id=link.project_id JOIN authority_scopes ON project_id=linked.id JOIN readable_scopes
      * WHERE link.revision_id=r.id AND linked.name=$3)} (V229).
      */
-    private boolean linkedToSelectedProject(KnowledgeFact.Revision revision) {
+    private boolean linkedToSelectedProject(KnowledgeFact.Revision revision, String project) {
       for (long link : revision.links()) {
         var linked = authority.project(link);
-        if (linked.isEmpty() || !linked.get().name().equals(request.project())) continue;
+        if (linked.isEmpty() || !linked.get().name().equals(project)) continue;
         for (var scope : authority.projectScopes(link))
           if (reader.readableScopes().contains(scope.id())) return true;
       }
@@ -272,8 +329,102 @@ public final class KnowledgeReadability {
           && !includeGlobal
           && node.scope().builtin().equals(Optional.of("GLOBAL_KNOWLEDGE"))) return true;
       if (!selected.equals("personal") && !selected.equals("project")) return false;
-      if (personalArms(node.revision(), node.scope(), node.projectName())) return true;
+      if (personalArms(node.revision(), node.scope(), node.projectName(), selected, project))
+        return true;
       return !contained && includeGlobal && generalReadable(node);
+    }
+
+    /**
+     * One row of {@code information_readable_input_selections} (V235): the selection survives the
+     * {@code selections} join and prune, every node of its closure is {@code facts.readable}, the
+     * closure has at most 1,024 nodes ({@code accepted}), and the root's facts row satisfies one of
+     * the retained selection arms.
+     */
+    boolean retainedAdmitted(LogTreeFact.JobInput input) {
+      if (reader == null) reader = authority.knowledgeReader(actor);
+      UUID target = input.revision();
+      // selections: JOIN information_revisions r JOIN information_resources resource JOIN
+      // information_resource_policies policy, pruned to a readable home or a GLOBAL_READ audience.
+      // The prune is implied by the root's own facts.readable below; it is mirrored, not relied on.
+      var root = revision(target);
+      if (root.isEmpty()) return false;
+      var resource = resource(root.get().resource());
+      if (resource.isEmpty() || resource.get().policy().isEmpty()) return false;
+      boolean readableHome =
+          resource.get().homeScope().map(reader.readableScopes()::contains).orElse(false);
+      if (!readableHome && resource.get().policy().get().audience() != Audience.GLOBAL_READ)
+        return false;
+      // accepted: count(*)<=1024 AND bool_and(coalesce(f.readable,false)) over the closure.
+      var closure = closure(target);
+      if (closure == null) return false;
+      for (UUID id : closure) {
+        var node = node(id);
+        if (node.isEmpty() || !retainedReadable(node.get())) return false;
+      }
+      // LEFT JOIN facts f ON f.id=selected.revision_id: a NULL row satisfies no arm.
+      var rootFact = node(target);
+      return rootFact.isPresent() && retainedSelected(rootFact.get(), input);
+    }
+
+    /**
+     * {@code facts.readable} of V235: unlike V229 it requires general membership (false for a
+     * contained actor, V229's knowledge_read_authority) and has no contained-actor guard on the
+     * general arm.
+     */
+    private boolean retainedReadable(Node node) {
+      var policy = node.policy();
+      boolean privacy =
+          (!policy.privateOnly() && !node.resource().navigation().ownerOnly())
+              || same(policy.privacyPrincipal(), reader.actorId());
+      return reader.generalMember()
+          && node.revision().active()
+          && (policy.audience() == Audience.HOME || policy.audience() == Audience.GLOBAL_READ)
+          && !node.scope().kind().equals("RESTRICTED")
+          && privacy
+          && (reader.readableScopes().contains(node.scope().id()) || retainedGeneralReadable(node));
+    }
+
+    /**
+     * The retained selection arms of V235's final SELECT over the root's facts row. The selection
+     * is stored text compared literally, so an unknown scope satisfies no arm.
+     */
+    private boolean retainedSelected(Node node, LogTreeFact.JobInput input) {
+      String selected = input.scope();
+      String project = input.project().orElse(null);
+      boolean shared = input.includeShared();
+      if (selected.equals("global_read")
+          && project == null
+          && !shared
+          && retainedGeneralReadable(node)) return true;
+      if (selected.equals("account")
+          && project == null
+          && !shared
+          && node.scope().builtin().equals(Optional.of("GLOBAL_KNOWLEDGE"))) return true;
+      if (!selected.equals("personal") && !selected.equals("project")) return false;
+      if (personalArms(node.revision(), node.scope(), node.projectName(), selected, project))
+        return true;
+      return shared && retainedGeneralReadable(node);
+    }
+
+    /**
+     * {@code public_facts.general_readable} of V235: V229's column without its {@code
+     * scope_kind<>'CONTAINED'} conjunct. {@code information_public_dependencies} is unchanged and
+     * keeps its own contained exclusion through {@code information_public_policy}.
+     */
+    private boolean retainedGeneralReadable(Node node) {
+      UUID id = node.revision().id();
+      var known = retainedGenerallyReadable.get(id);
+      if (known != null) return known;
+      var policy = node.policy();
+      boolean value =
+          policy.audience() == Audience.GLOBAL_READ
+              && !node.scope().kind().equals("RESTRICTED")
+              && !policy.privateOnly()
+              && !node.resource().navigation().ownerOnly()
+              && node.revision().active()
+              && publicDependencies(id);
+      retainedGenerallyReadable.put(id, value);
+      return value;
     }
 
     /**
@@ -294,7 +445,7 @@ public final class KnowledgeReadability {
       if (scope.kind().equals("ACCOUNT_KNOWLEDGE")
           && scope.builtin().isEmpty()
           && same(scope.account(), reader.actorId())
-          && authority.personalProject(home, request.actor())) return true;
+          && authority.personalProject(home, actor)) return true;
       return global && reader.generalMember() && generalReadable(node);
     }
 

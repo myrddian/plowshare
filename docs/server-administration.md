@@ -265,6 +265,11 @@ the check has read every fact it needs: there `versioned_hit` and `loaded_return
 count facts returned before that confirmation. A failed confirmation invalidates the
 stale facts and the check falls back to its SQL statement.
 
+`log-tree-facts-v1` holds one log tree per root for the targeted log check, read and
+confirmed the same way together with the knowledge facts of its retained inputs. A
+write in one tree reloads only that tree. `information-log-visibility-v1` now serves
+only collection reads (transcript lists, orchestration lists and inbox feeds).
+
 `plowshare.projection.cache.backing` exports existing backing-cache counters with
 `projection` and `event` tags: `hits`, `misses`, `coalesced`, `evictions`, `bypassed`,
 `invalidations` and `load_failures`. These describe activity before final freshness
