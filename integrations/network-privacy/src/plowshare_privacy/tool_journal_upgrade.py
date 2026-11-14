@@ -113,11 +113,22 @@ DEVICES_BEFORE_LOOKUP = ToolDeclaration(
     ),
     timeout_seconds=30,
 )
-# The exact thirteen-tool reference binding: the current declarations with the
+# Descriptions participate in the SDK binding hash too. Keep the lookup-era
+# wording intact so a guidance edit cannot orphan any historical journal or
+# change the source identity recorded by an earlier transition.
+_BEFORE_READ_GUIDANCE = {
+    "network_scan_list": "List paged local collection receipts (offset/limit), with bounded previews and full counts.",
+    "network_evidence": "Read retained evidence. Large scans return counts; use section tcp/dns/devices/changes/issues with offset/limit and follow next_offset.",
+}
+LOOKUP_DECLARATIONS = tuple(
+    replace(tool, description=_BEFORE_READ_GUIDANCE.get(tool.name, tool.description))
+    for tool in DECLARATIONS
+)
+# The exact thirteen-tool reference binding: the frozen lookup declarations with the
 # pre-lookup ``network_devices``. A test pins its digest.
 REFERENCE_DECLARATIONS = tuple(
     DEVICES_BEFORE_LOOKUP if tool.name == "network_devices" else tool
-    for tool in DECLARATIONS
+    for tool in LOOKUP_DECLARATIONS
 )
 # The exact six-tool paged binding that deployments already hold. It is the
 # reference binding without the later tools; a test pins its digest so an
@@ -213,7 +224,10 @@ def compatible_descriptors() -> None:
         REFERENCE_TOOLS,
         REFERENCE_TOOLS,
     )
-    _compatible(REFERENCE_DECLARATIONS, DECLARATIONS, _LOOKUP_ADDITIONS, frozenset())
+    _compatible(
+        REFERENCE_DECLARATIONS, LOOKUP_DECLARATIONS, _LOOKUP_ADDITIONS, frozenset()
+    )
+    _compatible(LOOKUP_DECLARATIONS, DECLARATIONS, {}, frozenset())
 
 
 def receipt_stages(receipt: ToolReceipt) -> tuple[ToolReceipt, ...]:
@@ -321,7 +335,8 @@ def open_tool_journal(
     pagination) -> ``<directory>-devices`` (adds the device read tools) ->
     ``<directory>-assistant`` (adds the assistant's request and record tools) ->
     ``<directory>-references`` (adds the assistant's reference request) ->
-    ``<directory>-lookup`` (adds the optional device search). Each
+    ``<directory>-lookup`` (adds the optional device search) ->
+    ``<directory>-read-guidance`` (clarifies scan/report descriptions). Each
     step copies public typed receipts before admitting the new provider. Partial
     copies are checked and resumed locally; neither handlers nor Relay mutations
     run. A durable marker fences each step once its complete copy is confirmed.
@@ -335,6 +350,7 @@ def open_tool_journal(
     assistant = directory.parent / (directory.name + "-assistant")
     references = directory.parent / (directory.name + "-references")
     lookup = directory.parent / (directory.name + "-lookup")
+    guidance = directory.parent / (directory.name + "-read-guidance")
     with ExitStack() as stores:
         legacy = None
         if (directory / "relay-tools.sqlite").exists():
@@ -381,9 +397,17 @@ def open_tool_journal(
                 references,
                 deployment_config(project, provider, account, REFERENCE_DECLARATIONS),
             )
+        lookup_journal = None
+        if reference_journal is not None or (lookup / "relay-tools.sqlite").exists():
+            lookup_journal = _transition(
+                stores,
+                reference_journal,
+                lookup,
+                deployment_config(project, provider, account, LOOKUP_DECLARATIONS),
+            )
         yield _transition(
             stores,
-            reference_journal,
-            lookup,
+            lookup_journal,
+            guidance,
             deployment_config(project, provider, account, DECLARATIONS),
         )

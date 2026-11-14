@@ -21,6 +21,7 @@ from plowshare_privacy.tool_journal_upgrade import (
     ASSISTANT_DECLARATIONS,
     DEVICE_DECLARATIONS,
     LEGACY_DECLARATIONS,
+    LOOKUP_DECLARATIONS,
     PAGED_DECLARATIONS,
     REFERENCE_DECLARATIONS,
     open_tool_journal,
@@ -37,6 +38,8 @@ DEVICE_BINDING = "4f96e9bae4283288546bf98b39386e13f2043d54054cc70a5444272794f753
 ASSISTANT_BINDING = "28bf816e886374905526e1658ac0a8b64373da1745eb496282f8cc07c8d651ea"
 # The thirteen-tool reference binding (before the device search), frozen the same way.
 REFERENCE_BINDING = "4e1e8e4c9eebc37e9026b6ab5296f003be2949555d2edc84c245d5b73d8a9e99"
+# The lookup binding before the scan/report description clarification.
+LOOKUP_BINDING = "d871cc0081a3b04a2f2fa97fbce4143d5b2c56eae56b91db834565a72c703cce"
 
 
 def binding(declarations: tuple[ToolDeclaration, ...]) -> str:
@@ -269,7 +272,8 @@ class DeviceToolTransitionTest(unittest.TestCase):
             self.assertFalse((directory.parent / "relay-tools-devices").exists())
             self.assertFalse((directory.parent / "relay-tools-assistant").exists())
             self.assertFalse((directory.parent / "relay-tools-references").exists())
-            self.assertTrue((directory.parent / "relay-tools-lookup").is_dir())
+            self.assertFalse((directory.parent / "relay-tools-lookup").exists())
+            self.assertTrue((directory.parent / "relay-tools-read-guidance").is_dir())
 
 
 class AssistantToolTransitionTest(unittest.TestCase):
@@ -420,7 +424,7 @@ class ReferenceToolTransitionTest(unittest.TestCase):
                 (directory.parent / "relay-tools-lookup/transition.json").read_text()
             )
             self.assertEqual(marker["receipts"], len(retained))
-            self.assertEqual(marker["target"], binding(DECLARATIONS))
+            self.assertEqual(marker["target"], binding(LOOKUP_DECLARATIONS))
             # The newest journal holds the full binding, so the SDK fence
             # refuses to open it with the older one.
             with self.assertRaisesRegex(ValueError, "another deployment"):
@@ -441,9 +445,9 @@ class ReferenceToolTransitionTest(unittest.TestCase):
 class LookupTransitionTest(unittest.TestCase):
     def test_reference_binding_is_frozen_and_only_query_is_added(self) -> None:
         self.assertEqual(binding(REFERENCE_DECLARATIONS), REFERENCE_BINDING)
-        self.assertNotEqual(binding(DECLARATIONS), REFERENCE_BINDING)
+        self.assertNotEqual(binding(LOOKUP_DECLARATIONS), REFERENCE_BINDING)
         before = {tool.name: tool for tool in REFERENCE_DECLARATIONS}
-        after = {tool.name: tool for tool in DECLARATIONS}
+        after = {tool.name: tool for tool in LOOKUP_DECLARATIONS}
         self.assertEqual(set(before), set(after))
         changed = {name for name in after if after[name] != before[name]}
         self.assertEqual(changed, {"network_devices"})
@@ -488,7 +492,7 @@ class LookupTransitionTest(unittest.TestCase):
             lookup = directory.parent / "relay-tools-lookup"
             marker = json.loads((lookup / "transition.json").read_text())
             self.assertEqual(marker["receipts"], len(retained))
-            self.assertEqual(marker["target"], binding(DECLARATIONS))
+            self.assertEqual(marker["target"], binding(LOOKUP_DECLARATIONS))
             # Reopening is stable; new work after the copy means an older
             # binary ran against the reference journal, and it is refused.
             with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
@@ -498,3 +502,96 @@ class LookupTransitionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Foreign tool transition"):
                 with open_tool_journal(directory, "fixture", "scanner", "owner"):
                     self.fail("changed reference history admitted")
+
+
+class ReadGuidanceTransitionTest(unittest.TestCase):
+    def test_lookup_identity_is_frozen_and_only_two_descriptions_change(self) -> None:
+        self.assertEqual(binding(LOOKUP_DECLARATIONS), LOOKUP_BINDING)
+        before = {tool.name: tool for tool in LOOKUP_DECLARATIONS}
+        after = {tool.name: tool for tool in DECLARATIONS}
+        self.assertEqual(set(before), set(after))
+        self.assertEqual(
+            {name for name in after if after[name] != before[name]},
+            {"network_scan_list", "network_evidence"},
+        )
+        for name, previous in before.items():
+            self.assertEqual(
+                replace(after[name], description=previous.description), previous
+            )
+
+    def prepare_lookup(self, directory: Path) -> tuple[ToolReceipt, ...]:
+        lookup = directory.parent / "relay-tools-lookup"
+        with SqliteToolJournal(
+            lookup,
+            configuration=deployment_config(
+                "fixture", "scanner", "owner", LOOKUP_DECLARATIONS
+            ),
+        ) as store:
+            for phase in range(4):
+                for stage in receipt_stages(receipt())[: phase + 1]:
+                    store.save(stage)
+            retained = store.all()
+        # A fresh lookup-era install had no predecessor. Its marker fenced
+        # that empty source before any of these real tool receipts arrived.
+        (lookup / "transition.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "source": None,
+                    "target": LOOKUP_BINDING,
+                    "receipts": 0,
+                    "digest": hashlib.sha256(b"[]").hexdigest(),
+                }
+            )
+        )
+        return retained
+
+    def test_every_phase_survives_description_upgrade_and_source_changes_are_refused(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "relay-tools"
+            retained = self.prepare_lookup(directory)
+            for _ in range(2):
+                with open_tool_journal(
+                    directory, "fixture", "scanner", "owner"
+                ) as current:
+                    self.assertEqual(current.identity, binding(DECLARATIONS))
+                    self.assertEqual(current.all(), retained)
+            guidance = directory.parent / "relay-tools-read-guidance"
+            marker = json.loads((guidance / "transition.json").read_text())
+            self.assertEqual(marker["source"], LOOKUP_BINDING)
+            self.assertEqual(marker["target"], binding(DECLARATIONS))
+            self.assertEqual(marker["receipts"], 4)
+            with SqliteToolJournal(
+                directory.parent / "relay-tools-lookup",
+                configuration=deployment_config(
+                    "fixture", "scanner", "owner", LOOKUP_DECLARATIONS
+                ),
+            ) as previous:
+                self.assertEqual(previous.all(), retained)
+                previous.save(receipt_stages(receipt())[0])
+            with self.assertRaisesRegex(ValueError, "Foreign tool transition"):
+                with open_tool_journal(directory, "fixture", "scanner", "owner"):
+                    self.fail("work added by an older collector was admitted")
+
+    def test_interrupted_guidance_copy_resumes_with_exact_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "relay-tools"
+            retained = self.prepare_lookup(directory)
+            original = SqliteToolJournal.save
+
+            def interrupt(store: SqliteToolJournal, item: ToolReceipt) -> None:
+                if (
+                    store.identity == binding(DECLARATIONS)
+                    and item.phase == "publishing"
+                ):
+                    raise RuntimeError("interrupted guidance copy")
+                original(store, item)
+
+            with patch.object(SqliteToolJournal, "save", interrupt):
+                with self.assertRaisesRegex(RuntimeError, "interrupted guidance copy"):
+                    with open_tool_journal(directory, "fixture", "scanner", "owner"):
+                        self.fail("copy did not stop")
+            with open_tool_journal(directory, "fixture", "scanner", "owner") as current:
+                self.assertEqual(current.all(), retained)
