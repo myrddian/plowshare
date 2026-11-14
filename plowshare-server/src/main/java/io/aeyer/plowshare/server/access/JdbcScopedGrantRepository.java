@@ -116,17 +116,18 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
             status -> {
               lock(request.scope());
               Binding parent = issuing(request.issuer(), request.authority());
+              AccountKind issuerKind = kind(request.issuer().account());
               StandardRole effective =
                   RoleGrantPolicy.effective(
                       request.requested(),
                       request.recipient().agent().isPresent(),
                       request.forceManager(),
-                      kind(request.issuer().account()),
+                      issuerKind,
                       request.issuer().agent().isPresent(),
                       parent.role());
               if (!active(request.recipient().account()))
                 throw new CallerFault("Grant recipient is not active");
-              return insert(request, effective, "ROLE");
+              return insert(request, effective, "ROLE", issuerKind);
             }));
   }
 
@@ -150,13 +151,27 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
             account.value()));
   }
 
-  private Binding insert(Issue request, StandardRole effective, String provenance) {
+  /**
+   * Inserts the grant row. A person (USER account, no agent) granting to a different account
+   * exercises the authorizing grant: the row is rooted at the ROOT_POLICY grant and records the
+   * exercised grant, so it outlives later revocation of the issuer's own grant. Agent, service and
+   * self-directed (a person's own agent) issuance stays delegated to the authorizing grant, because
+   * the database refuses exercised self-issuance.
+   */
+  private Binding insert(
+      Issue request, StandardRole effective, String provenance, AccountKind issuerKind) {
     UUID id = request.id();
+    boolean exercised =
+        request.issuer().agent().isEmpty()
+            && issuerKind == AccountKind.USER
+            && !request.recipient().account().equals(request.issuer().account());
+    UUID lineage = exercised ? rootPolicy() : request.authority();
+    UUID exercisedGrant = exercised ? request.authority() : null;
     int changed =
         jdbc.update(
             "INSERT INTO authority_grants(id,subject_account,subject_agent,scope_id,role_id,requested_role,"
-                + "issuer_account,issuer_agent,issuing_grant,expires_at,manager_forced,provenance) "
-                + "SELECT ?,?,?,?,r.id,?,?,?,?,?,?,? FROM authority_roles r WHERE r.name=? AND r.assignable",
+                + "issuer_account,issuer_agent,issuing_grant,exercised_grant,expires_at,manager_forced,provenance) "
+                + "SELECT ?,?,?,?,r.id,?,?,?,?,?,?,?,? FROM authority_roles r WHERE r.name=? AND r.assignable",
             id,
             request.recipient().account().value(),
             request.recipient().agent().orElse(null),
@@ -164,13 +179,19 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
             request.requested().name(),
             request.issuer().account().value(),
             request.issuer().agent().orElse(null),
-            request.authority(),
+            lineage,
+            exercisedGrant,
             request.expiresAt().orElse(null),
             request.forceManager(),
             provenance,
             effective.name());
     if (changed != 1) throw new CallerFault("Requested role is unavailable");
     return find(id).orElseThrow(() -> new IllegalStateException("Issued grant disappeared"));
+  }
+
+  private UUID rootPolicy() {
+    return jdbc.queryForObject(
+        "SELECT id FROM authority_grants WHERE provenance='ROOT_POLICY'", UUID.class);
   }
 
   private Binding issuing(GrantRecipient issuer, UUID authority) {
