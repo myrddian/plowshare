@@ -41,7 +41,7 @@ public final class BoundedReadAdmission implements ReadAdmission {
     synchronized (this) {
       if (!available(key, work)
           || report(work) && !waiting.isEmpty()
-          || work == Work.FETCH && !fetching.isEmpty()) throw rejectedRead();
+          || work == Work.FETCH && fetching.contains(key)) throw rejectedRead();
       return reserve(key, work);
     }
   }
@@ -104,13 +104,14 @@ public final class BoundedReadAdmission implements ReadAdmission {
   }
 
   /**
-   * Waits in arrival order for one of the cache's FETCH slots for at most {@code fetchWaitMillis}.
-   * A fetch holds one slot for one load, so the wait is bounded by the loads ahead of it; the
+   * Waits in arrival order for one of its cache's FETCH slots for at most {@code fetchWaitMillis}.
+   * The principal is the cache, never the requester; {@code fetches-total} bounds all caches. A
+   * fetch holds one slot for one load, so the wait is bounded by the loads ahead of it; the
    * deadline only turns a stuck load into a refusal rather than an indefinite park.
    */
   private synchronized Lease awaitFetch(String principal) {
     var key = key(principal, Work.FETCH);
-    if (fetching.isEmpty() && available(key, Work.FETCH)) return reserve(key, Work.FETCH);
+    if (!fetching.contains(key) && available(key, Work.FETCH)) return reserve(key, Work.FETCH);
     var ticket = new Key(principal, Work.FETCH);
     fetching.add(ticket);
     long deadline =
@@ -118,8 +119,11 @@ public final class BoundedReadAdmission implements ReadAdmission {
             + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(scheduling.fetchWaitMillis());
     try {
       while (true) {
-        if (fetching.getFirst() == ticket && available(key, Work.FETCH))
-          return reserve(key, Work.FETCH);
+        // The oldest waiter whose cache has a free slot goes next, so one busy cache never
+        // holds up another cache's fetch.
+        Key eligible =
+            fetching.stream().filter(next -> available(next, Work.FETCH)).findFirst().orElse(null);
+        if (eligible == ticket) return reserve(key, Work.FETCH);
         long remaining = deadline - System.nanoTime();
         if (remaining <= 0) throw rejectedRead();
         try {

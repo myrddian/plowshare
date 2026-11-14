@@ -17,6 +17,10 @@ import java.util.Objects;
 public final class CachedUsageReportRepository implements UsageReportRepository {
   private final UsageReportRepository source;
   private final ProjectionCache<Report> reports;
+
+  /** The report cache's FETCH principal. Uncached audit reads keep the account's REPORT seat. */
+  static final String FETCHER = "usage-report";
+
   private final ReadAdmission admission;
   private final ObjectMapper json;
 
@@ -49,7 +53,13 @@ public final class CachedUsageReportRepository implements UsageReportRepository 
     return reports.read(
         key,
         true,
-        () -> admission.read(account, work, () -> source.report(account, query)),
+        // A foreground fill uses the cache's own FETCH slots and waits; a background refresh
+        // keeps REPORT_REFRESH, which yields to foreground reports and may simply be skipped.
+        () ->
+            admission.read(
+                work == ReadAdmission.Work.REPORT_REFRESH ? account : FETCHER,
+                work == ReadAdmission.Work.REPORT_REFRESH ? work : ReadAdmission.Work.FETCH,
+                () -> source.report(account, query)),
         value -> 4096L + 4L * canonical(value).length());
   }
 

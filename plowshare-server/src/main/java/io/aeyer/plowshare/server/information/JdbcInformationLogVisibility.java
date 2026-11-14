@@ -9,6 +9,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** One bounded graph fill per account/version, with fresh fences around the consuming SQL. */
 public final class JdbcInformationLogVisibility implements InformationLogVisibility {
+  /** The cache's FETCH principal: deny-set loads use this cache's slots, not the account's. */
+  static final String FETCHER = "information-log-visibility";
+
   private static final Set<ProjectionVersions.Domain> DOMAINS =
       Set.of(ProjectionVersions.Domain.READABILITY, ProjectionVersions.Domain.AUTHORITY);
   private static final int MAX_LOGS = 32768;
@@ -45,7 +48,7 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
         cache.read(
             new SnapshotCache.Key("blocked-logs", ProjectionCache.fingerprint(account)),
             true,
-            () -> admission.read(account, ReadAdmission.Work.FETCH, () -> load(account)),
+            () -> admission.read(FETCHER, ReadAdmission.Work.FETCH, () -> load(account)),
             value -> value.blocked().map(JdbcInformationLogVisibility::weight).orElse(1024L));
     // Oversized snapshots retain a versioned fallback marker, never a partial deny list. The
     // original statement-authoritative path remains available under the same physical budget.
@@ -77,7 +80,7 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
         cache.read(
             new SnapshotCache.Key("blocked-logs", ProjectionCache.fingerprint(account)),
             true,
-            () -> admission.read(account, ReadAdmission.Work.FETCH, () -> load(account)),
+            () -> admission.read(FETCHER, ReadAdmission.Work.FETCH, () -> load(account)),
             Facts::authoritative,
             value -> value.blocked().map(JdbcInformationLogVisibility::weight).orElse(1024L));
     var blocked = facts.blocked();

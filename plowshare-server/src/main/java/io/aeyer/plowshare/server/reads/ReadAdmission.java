@@ -16,8 +16,9 @@ public interface ReadAdmission {
      * The cache's own slots into PostgreSQL, used to fetch a shared value such as an account's log
      * deny set or the authority snapshot. These seats belong to the cache, not to the requester:
      * the cache merges concurrent misses for one key before admission, and a requester on a miss
-     * waits for a slot instead of being refused. Capacity is the number of concurrent distinct
-     * fetches against the database, never a per-account budget.
+     * waits for a slot instead of being refused. The admission principal is the cache's name, so
+     * each cache owns {@code fetches} slots and {@code fetches-total} bounds all of them; it is
+     * never a per-account budget.
      */
     FETCH,
     MAINTENANCE,

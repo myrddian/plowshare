@@ -235,32 +235,58 @@ class BoundedReadAdmissionTest {
   }
 
   @Test
-  void aCacheFetchWaitsInOrderForItsSeatInsteadOfBeingRefused() throws Exception {
+  void aCacheFetchWaitsInOrderForItsCachesSlotAndAnotherCacheIsNotHeldUp() throws Exception {
     var admission = new BoundedReadAdmission(new ReadCapacityProperties(4, 2, 2, 1, 8, 2));
-    var held = admission.admit("snapshot", ReadAdmission.Work.FETCH);
-    var other = admission.admit("deny-set", ReadAdmission.Work.FETCH);
+    var held = admission.admit("deny-sets", ReadAdmission.Work.FETCH);
+    var other = admission.admit("deny-sets", ReadAdmission.Work.FETCH);
     var order = new java.util.concurrent.CopyOnWriteArrayList<String>();
     try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
       var first =
           callers.submit(
-              () -> admission.read("alice", ReadAdmission.Work.FETCH, () -> order.add("alice")));
+              () ->
+                  admission.read("deny-sets", ReadAdmission.Work.FETCH, () -> order.add("first")));
       awaitFetching(admission, 1);
       var second =
           callers.submit(
-              () -> admission.read("bob", ReadAdmission.Work.FETCH, () -> order.add("bob")));
+              () ->
+                  admission.read("deny-sets", ReadAdmission.Work.FETCH, () -> order.add("second")));
       awaitFetching(admission, 2);
       assertThrows(
           ReadUnavailableException.class,
-          () -> admission.admit("carol", ReadAdmission.Work.FETCH),
-          "An immediate admission may not jump the queue");
+          () -> admission.admit("deny-sets", ReadAdmission.Work.FETCH),
+          "An immediate admission may not jump its cache's queue");
+      assertEquals(
+          "snapshot",
+          admission.read("authority-snapshot", ReadAdmission.Work.FETCH, () -> "snapshot"),
+          "A busy cache must not hold up another cache's fetch");
       held.close();
       other.close();
       assertTrue(first.get(5, TimeUnit.SECONDS));
       assertTrue(second.get(5, TimeUnit.SECONDS));
     }
-    assertEquals(java.util.List.of("alice", "bob"), order);
+    assertEquals(java.util.List.of("first", "second"), order);
     assertEquals(0, admission.active(ReadAdmission.Work.FETCH));
     assertEquals(0, admission.waitingFetches());
+  }
+
+  @Test
+  void theTotalAcrossCachesIsBoundedAndAFreedSlotServesTheOldestEligibleWaiter() throws Exception {
+    var admission = new BoundedReadAdmission(new ReadCapacityProperties(4, 2, 2, 1, 8, 2));
+    var leases = new ArrayList<ReadAdmission.Lease>();
+    for (int cache = 0; cache < 4; cache++)
+      for (int slot = 0; slot < 2; slot++)
+        leases.add(admission.admit("cache-" + cache, ReadAdmission.Work.FETCH));
+    try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var waiting =
+          callers.submit(() -> admission.read("fifth-cache", ReadAdmission.Work.FETCH, () -> "ok"));
+      awaitFetching(admission, 1);
+      assertEquals(8, admission.active(ReadAdmission.Work.FETCH));
+      leases.removeFirst().close();
+      assertEquals("ok", waiting.get(5, TimeUnit.SECONDS));
+    } finally {
+      leases.forEach(ReadAdmission.Lease::close);
+    }
+    assertEquals(0, admission.active(ReadAdmission.Work.FETCH));
   }
 
   @Test
@@ -275,16 +301,16 @@ class BoundedReadAdmissionTest {
           () -> admission.admit("admin", ReadAdmission.Work.AUTHORITY));
       assertEquals(
           "loaded",
-          admission.read("admin", ReadAdmission.Work.FETCH, () -> "loaded"),
+          admission.read("deny-sets", ReadAdmission.Work.FETCH, () -> "loaded"),
           "A deny-set fetch must not fail because the account's AUTHORITY seats are busy");
     }
   }
 
   @Test
-  void theCacheHasTwoSlotsByDefaultAndARequesterInATransactionStillWaits() throws Exception {
+  void aCacheHasTwoSlotsByDefaultAndARequesterInATransactionStillWaits() throws Exception {
     var admission = new BoundedReadAdmission(new ReadCapacityProperties(4, 2, 2, 1, 8, 2));
-    var first = admission.admit("snapshot", ReadAdmission.Work.FETCH);
-    var second = admission.admit("deny-set", ReadAdmission.Work.FETCH);
+    var first = admission.admit("deny-sets", ReadAdmission.Work.FETCH);
+    var second = admission.admit("deny-sets", ReadAdmission.Work.FETCH);
     try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
       var waiting =
           callers.submit(
@@ -294,7 +320,7 @@ class BoundedReadAdmissionTest {
                 org.springframework.transaction.support.TransactionSynchronizationManager
                     .setActualTransactionActive(true);
                 try {
-                  return admission.read("job", ReadAdmission.Work.FETCH, () -> "loaded");
+                  return admission.read("deny-sets", ReadAdmission.Work.FETCH, () -> "loaded");
                 } finally {
                   org.springframework.transaction.support.TransactionSynchronizationManager.clear();
                 }
@@ -316,14 +342,14 @@ class BoundedReadAdmissionTest {
             new ReadCapacityProperties(4, 2, 2, 1, 8, 2),
             new ReadSchedulingProperties(2, 1, 2000, 1));
     var first = admission.admit("stuck", ReadAdmission.Work.FETCH);
-    var second = admission.admit("stuck-too", ReadAdmission.Work.FETCH);
+    var second = admission.admit("stuck", ReadAdmission.Work.FETCH);
     try (first;
         second) {
       assertThrows(
           ReadUnavailableException.class,
           () ->
               admission.read(
-                  "waiting",
+                  "stuck",
                   ReadAdmission.Work.FETCH,
                   () -> {
                     fail("Expired fetch must not enter SQL");
