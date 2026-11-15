@@ -167,6 +167,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
                     None,
                     (
                         ServerAccountDto(
+                            project_creator=False,
                             created_at=STAMP,
                             enabled=True,
                             handle="manager",
@@ -374,6 +375,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
                 None,
                 (
                     ServerAccountDto(
+                        project_creator=False,
                         created_at=STAMP,
                         enabled=True,
                         handle="manager",

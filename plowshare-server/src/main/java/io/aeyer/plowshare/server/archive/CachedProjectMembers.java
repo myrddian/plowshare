@@ -164,6 +164,12 @@ public final class CachedProjectMembers implements ProjectMembers {
   }
 
   @Override
+  public List<String> managers(String project) {
+    // Alert recipients are current authority, never the cached membership projection.
+    return stored.managers(project);
+  }
+
+  @Override
   public List<String> members(String project) {
     return stored.members(project);
   }

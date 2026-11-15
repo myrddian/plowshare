@@ -478,6 +478,35 @@ Python independently consumes that exact schedule from the project's
 `schedule.due` stream. Other schedules are ignored. Legacy global schedules are
 not used: SDK ports do not expose system scope.
 
+The packaged `inbox` manifest setting keeps successful background bookkeeping,
+including both `privacy_tick` receipts, in the application's project inbox.
+Successful `investigate_network` and `assess_network_device` results need review
+and notify the application's **current human RBAC Managers**. Failures, approval
+requests and human questions also notify Managers. Installing the application or
+being a server administrator does not itself make someone an alert recipient.
+
+Inspect the application inbox in the console's Inbox screen by entering the
+application project and choosing **Inspect application inbox**, or use the CLI:
+
+```sh
+bin/plowshare-cli --server "$PLOWSHARE_ORIGIN" inbox list '{"project":"network-privacy-watch","limit":50}'
+```
+
+Project Viewers can inspect published application output; Managers can mark its
+shared items read. Personal and application acknowledgements are independent.
+Source-log links retain their separate access checks. The Python SDK exposes the
+same selection through `InboxListRequest(project="network-privacy-watch")`.
+
+Collector stops publish one failure alert per stopped episode. A disconnected
+server can leave the private alert pending; its status remains visible in the
+dashboard. **Check retained work** reads exact publication receipts without
+resending unknown mutations. After restoring connectivity, an operator can stop
+the collector and explicitly send pending alerts with
+`plowshare-privacy --config "$PRIVACY_CONFIG" send-pending-alerts`; this retains the
+original alert identities and never repeats a scan. Deploy compatible server,
+Application source and collector versions together. Existing personal inbox
+history is preserved.
+
 The result route starts `investigate_network` under `privacy_coordinator` for the
 baseline or a changed observation/coverage gap. Unchanged collections are retained
 without launching another model investigation. The

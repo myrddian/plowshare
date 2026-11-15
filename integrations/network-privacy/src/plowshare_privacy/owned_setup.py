@@ -191,7 +191,7 @@ async def recover_installation(
     manifest = object_fields(
         load_json(setup.output / "application/plowshare.json"),
         {"version", "name", "access", "caps", "commands"},
-        {"executionAccount", "toolScopes", "toolGrants", "service"},
+        {"executionAccount", "toolScopes", "toolGrants", "service", "inbox"},
     )
     if manifest.get("service") != {"handle": setup.service, "role": "CONTRIBUTOR"}:
         raise SetupProblem(

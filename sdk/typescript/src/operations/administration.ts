@@ -56,8 +56,18 @@ export interface AdministrativePayloads {
   'retention.sweep': Record<string, never>;
   'provider.list': Record<string, never>;
   'provider.deregister': { readonly provider: string };
-  'inbox.list': Page & { readonly unread?: boolean };
-  'inbox.read': { readonly items: readonly string[] };
+  'inbox.list': Page & { readonly unread?: boolean; readonly project?: string };
+  'inbox.read': {
+    readonly items: readonly string[];
+    readonly project?: string;
+  };
+  'inbox.publish': {
+    readonly project: string;
+    readonly requestId: string;
+    readonly kind: 'finding' | 'failure' | 'attention';
+    readonly text: string;
+  };
+  'inbox.receipt': { readonly project: string; readonly requestId: string };
   'todos.read': { readonly conversation: string };
   'orchestration.start': Tier & {
     readonly agent: string;

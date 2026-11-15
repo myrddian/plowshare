@@ -92,7 +92,7 @@ describe('typed requests cover the actual server contracts', () => {
       (frame) => !cli.has(frame),
     );
     expect([...cli, ...remaining].sort()).toEqual(typed);
-    expect(cli.size).toBe(284);
+    expect(cli.size).toBe(286);
     expect(remaining.sort()).toEqual([
       'acting.context.close',
       'acting.context.open',
@@ -111,6 +111,8 @@ describe('typed requests cover the actual server contracts', () => {
     ['approval.revoke', 'ws/ApprovalFrames', 'RevokeBody', []],
     ['inbox.list', 'ws/InboxListHandler', 'Body', []],
     ['inbox.read', 'ws/InboxReadHandler', 'Body', []],
+    ['inbox.publish', 'ws/InboxPublishHandler', 'Body', []],
+    ['inbox.receipt', 'ws/InboxReceiptHandler', 'Body', []],
     ['schedule.define', 'ws/ScheduleDefineHandler', 'Body', []],
     ['schedule.read', 'ws/ScheduleReadHandler', 'Body', []],
     ['schedule.pause', 'ws/SchedulePauseHandler', 'Body', []],

@@ -3,6 +3,17 @@
 These are platform follow-ups, not requirements for deploying the external
 Network Privacy Watch integration. This Application uses only public SDK contracts.
 
+## Application-owned background output
+
+Resolved in source by [ADR 0072](../../docs/decisions/0072-application-inbox-ownership-and-attention.md).
+The packaged manifest opts into an inspectable project inbox. Schedule receipts
+and successful housekeeping stay there; failed work, human questions and the
+configured investigation/assessment results reach current human RBAC Managers.
+Collector stop alerts use the public `inbox.publish` contract with exact receipt
+recovery. No direct SQL, second scheduler or automatic acknowledgement of the
+person's inbox is used. Deploy compatible server, Application and collector
+versions before relying on this behavior; existing inbox history is unchanged.
+
 ## Scoped document chapter-outline reads
 
 Plowshare stores a derived hierarchy of document, chapters, sections, paragraphs

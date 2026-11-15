@@ -25,6 +25,7 @@ import io.aeyer.plowshare.server.archive.LocalHookSetStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.archive.TurnStore;
+import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.events.Dispatcher;
 import io.aeyer.plowshare.server.events.SpeakerHandles;
 import io.aeyer.plowshare.server.hooks.HookRecord;
@@ -76,6 +77,7 @@ class LogStagesConfigTest {
 
     archive
         .withBean("projectHooks", Hooks.class, () -> project)
+        .withBean(ApplicationInbox.class, () -> mock(ApplicationInbox.class))
         .withBean(Compaction.class, () -> compaction)
         .withBean(Orchestrations.class, () -> orchestrations)
         .withBean(Delivery.class, () -> delivery)
@@ -136,6 +138,7 @@ class LogStagesConfigTest {
 
     archive
         .withBean("projectHooks", Hooks.class, () -> project)
+        .withBean(ApplicationInbox.class, () -> mock(ApplicationInbox.class))
         .withBean("localHooks", Hooks.class, () -> local)
         .run(
             context -> {

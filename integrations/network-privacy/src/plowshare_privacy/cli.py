@@ -31,6 +31,7 @@ from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 from .advisories import NvdAdvisories
 from .ask import compose_ask
 from .assessment_port import SdkAssessmentPort
+from .attention import AttentionOutbox, SdkAttentionPort
 from .collection import NetworkCollector
 from .collector_factory import configured_collector
 from .console import FileManualInvestigations, OperatorConsole
@@ -207,6 +208,12 @@ async def execute(args: argparse.Namespace) -> None:
                 operator_store,
                 PresenceWatch(PresenceHistory(config.state_directory)),
             )
+            worker.attention = AttentionOutbox(
+                config.state_directory, SdkAttentionPort(lambda: client, config.project)
+            )
+            if args.command == "send-pending-alerts":
+                print(json.dumps({"confirmed": await worker.attention.send_pending()}))
+                return
             # The record and request services are composed before the native tool
             # provider, whose assistant tools use them (see assistant_tools).
             issues = (
@@ -691,6 +698,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands.add_parser(
         "reconcile", help="Read retained records to settle unknown receipts"
+    )
+    commands.add_parser(
+        "send-pending-alerts",
+        help="Explicitly submit unconfirmed inbox alerts using their retained identities; stop the collector first",
     )
     schedule = commands.add_parser(
         "install-schedule", help="Create a paused project schedule through the SDK"

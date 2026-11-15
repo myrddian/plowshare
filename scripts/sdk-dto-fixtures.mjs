@@ -666,6 +666,26 @@ for (const operation of ['schedule.list', 'schedule.files']) {
     {limit:1.5}, {limit:'50'}, {offset:50}]) input(operation,value,false);
 }
 
+// Application publications choose a category, never their Manager recipients.
+const inboxPublication = {
+  project: 'network-privacy-watch',
+  requestId: '11111111-1111-4111-8111-111111111111',
+  kind: 'failure',
+  text: 'Collection stopped',
+};
+input('inbox.publish', inboxPublication, true);
+for (const change of [
+  {recipients: ['arbitrary']},
+  {kind: 'routine'},
+  {text: '  '},
+  {requestId: 'invalid'},
+]) input('inbox.publish', {...inboxPublication, ...change}, false);
+input('inbox.receipt', {
+  project: inboxPublication.project,
+  requestId: inboxPublication.requestId,
+}, true);
+input('inbox.list', {project: inboxPublication.project, limit: 50}, true);
+
 for (const test of cases) {
   let accepted = true;
   try {

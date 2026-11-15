@@ -3,15 +3,25 @@ package io.aeyer.plowshare.server.events;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.archive.ArchiveConfig;
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRole;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -52,6 +62,119 @@ class InboxStoreTest {
   }
 
   @Test
+  void application_ownership_is_isolated_and_attention_fanout_is_atomic_and_idempotent() {
+    long project =
+        jdbc.queryForObject(
+            "INSERT INTO projects(name,workspace) VALUES('inbox-app','/fixture/inbox-app') RETURNING id",
+            Long.class);
+    var app =
+        new JdbcApplicationInboxStore(
+            jdbc,
+            new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(jdbc.getDataSource())));
+    var routine =
+        new ApplicationInboxStore.Notice(
+            "enzo", "run", "cnv_fixture", "ANSWERED", "Available", null, false);
+    assertEquals(List.of(), app.append(project, "tick:1", routine, List.of(), T0));
+    assertEquals(1, app.page(project, false, 0, 50).items().size());
+    assertEquals(0, store.unread("enzo"));
+    assertEquals(List.of(), store.list("enzo", false, 0, 50));
+    var appItem = app.page(project, false, 0, 50).items().getFirst();
+    assertEquals(0, store.markRead("enzo", List.of(appItem.id()), T0));
+    assertEquals(0, app.read(project + 1, List.of(appItem.id()), T0));
+    var failure =
+        new ApplicationInboxStore.Notice(
+            "enzo", "failure", null, "FAILED", "Collector stopped", null, true);
+    assertEquals(List.of("sam"), app.append(project, "failure:1", failure, List.of("sam"), T0));
+    assertEquals(List.of(), app.append(project, "failure:1", failure, List.of("sam"), T0));
+    assertEquals(1, store.unread("sam"));
+    assertEquals(2, app.unread(project));
+    assertEquals(1, app.read(project, List.of(appItem.id()), T0));
+    assertEquals(1, app.unread(project));
+    Assertions.assertThrows(
+        IllegalStateException.class,
+        () -> app.append(project, "failure:1", routine, List.of(), T0));
+    assertEquals(2, app.page(project, false, 0, 50).items().size());
+    UUID request = UUID.randomUUID();
+    app.append(project, "publication:enzo:" + request, failure, List.of("sam"), T0);
+    assertEquals(true, app.published(project, "enzo", request));
+    assertEquals(false, app.published(project, "sam", request));
+    assertEquals(false, app.published(project + 1, "enzo", request));
+  }
+
+  @Test
+  void
+      application_background_provenance_follows_nested_roots_without_retargeting_foreground_work() {
+    long project =
+        jdbc.queryForObject(
+            "INSERT INTO projects(name,workspace) VALUES('origin-app','/fixture/origin-app') RETURNING id",
+            Long.class);
+    var app =
+        new JdbcApplicationInboxStore(
+            jdbc,
+            new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(jdbc.getDataSource())));
+    jdbc.update(
+        "INSERT INTO conversations(id,project_id,origin,agent,created_at,budget_total,budget_spent) "
+            + "VALUES('cnv_event',?,'event','worker',now(),10,0),('cnv_turn',?,'turn',NULL,now(),10,0),"
+            + "('cnv_parent',?,'orchestration','worker',now(),10,0),('cnv_child',?,'orchestration','worker',now(),10,0)",
+        project,
+        project,
+        project,
+        project);
+    assertEquals(Optional.of("origin-app"), app.backgroundProject("cnv_event"));
+    assertEquals(Optional.empty(), app.backgroundProject("cnv_turn"));
+    assertEquals(Optional.empty(), app.backgroundProject("missing"));
+    jdbc.update(
+        "INSERT INTO orchestrations(id,definition_name,tier,definition_hash,stages,max_returns,"
+            + "conductor_conversation,caller_conversation,caller_agent,caller_handle,state,created_at,"
+            + "definition_source,definition_origin,parent,depth) VALUES "
+            + "('orc_parent','fixture','GLOBAL','fixture','[]',0,'cnv_parent','cnv_turn','worker','enzo','running',now(),'fixture','fixture',NULL,0),"
+            + "('orc_child','fixture','GLOBAL','fixture','[]',0,'cnv_child','cnv_parent','worker','enzo','running',now(),'fixture','fixture','orc_parent',1)");
+    assertEquals(Optional.empty(), app.backgroundProject("cnv_child"));
+    jdbc.update("UPDATE orchestrations SET caller_conversation='cnv_event' WHERE id='orc_parent'");
+    assertEquals(Optional.of("origin-app"), app.backgroundProject("cnv_parent"));
+    assertEquals(Optional.of("origin-app"), app.backgroundProject("cnv_child"));
+  }
+
+  @Test
+  void application_manager_recipients_follow_live_rbac_and_enabled_accounts() {
+    jdbc.update(
+        "UPDATE admins SET server_admin=true,must_change_password=false WHERE handle='enzo'");
+    jdbc.update("INSERT INTO projects(name) VALUES('manager-app')");
+    var members = new JdbcProjectMembers(jdbc);
+    members.assign("manager-app", "enzo", ProjectRole.MANAGER, "enzo", true);
+    members.assign("manager-app", "sam", ProjectRole.CONTRIBUTOR, "enzo", true);
+    assertEquals(List.of("enzo"), members.managers("manager-app"));
+    members.assign("manager-app", "sam", ProjectRole.MANAGER, "enzo", false);
+    assertEquals(List.of("enzo", "sam"), members.managers("manager-app"));
+    jdbc.update("UPDATE admins SET enabled=false WHERE handle='sam'");
+    assertEquals(List.of("enzo"), members.managers("manager-app"));
+  }
+
+  @Test
+  void application_duplicate_attention_delivery_is_fenced_by_the_database() throws Exception {
+    long project =
+        jdbc.queryForObject(
+            "INSERT INTO projects(name) VALUES('concurrent-app') RETURNING id", Long.class);
+    var app =
+        new JdbcApplicationInboxStore(
+            jdbc,
+            new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(jdbc.getDataSource())));
+    var failure =
+        new ApplicationInboxStore.Notice("enzo", "failure", null, "FAILED", "Stopped", null, true);
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      var calls = new ArrayList<Future<List<String>>>();
+      for (int i = 0; i < 8; i++)
+        calls.add(
+            pool.submit(() -> app.append(project, "same-event", failure, List.of("sam"), T0)));
+      int alerts = 0;
+      for (var call : calls) alerts += call.get().size();
+      assertEquals(1, alerts);
+    }
+    assertEquals(1, app.unread(project));
+    assertEquals(1, store.unread("sam"));
+  }
+
+  @Test
   void an_account_sees_only_its_own_items() {
     store.deliver("enzo", null, "cnv_1", "ANSWERED", "three PRs", T0);
     store.deliver("sam", null, "cnv_2", "ANSWERED", "nothing", T0);
@@ -81,8 +204,8 @@ class InboxStoreTest {
         store.noticeOnceFromLog(
             "enzo", "approval", "Review command", "cnv_fixture", "approval:alert", T0);
     assertEquals(false, store.claimQuestionAlert("sam", item.id(), T0, retry));
-    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-      var calls = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      var calls = new ArrayList<Future<Boolean>>();
       for (int i = 0; i < 8; i++)
         calls.add(pool.submit(() -> store.claimQuestionAlert("enzo", item.id(), T0, retry)));
       int claimed = 0;
@@ -104,8 +227,8 @@ class InboxStoreTest {
   @Test
   void concurrent_question_delivery_is_idempotent_and_does_not_revive_read_or_settled_items()
       throws Exception {
-    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-      var calls = new java.util.ArrayList<java.util.concurrent.Future<InboxItem>>();
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      var calls = new ArrayList<Future<InboxItem>>();
       for (int i = 0; i < 8; i++)
         calls.add(
             pool.submit(
@@ -150,8 +273,7 @@ class InboxStoreTest {
   void marking_read_touches_only_the_callers_rows() {
     InboxItem mine = store.deliver("enzo", null, "cnv_1", "ANSWERED", "a", T0);
     InboxItem theirs = store.deliver("sam", null, "cnv_2", "ANSWERED", "b", T0);
-    assertEquals(
-        1, store.markRead("enzo", java.util.List.of(mine.id(), theirs.id()), T0.plusSeconds(5)));
+    assertEquals(1, store.markRead("enzo", List.of(mine.id(), theirs.id()), T0.plusSeconds(5)));
     assertEquals(0, store.unread("enzo"));
     assertEquals(1, store.unread("sam"));
   }

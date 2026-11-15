@@ -865,5 +865,15 @@
         "postedAt": "2026-10-02T00:00:00Z"
       }
     }
+  },
+  "inbox.publish": {
+    "code": "NO_CONTENT",
+    "payload": null
+  },
+  "inbox.receipt": {
+    "code": "OK",
+    "payload": {
+      "found": false
+    }
   }
 }

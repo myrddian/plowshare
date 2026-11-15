@@ -1,8 +1,13 @@
 import { background } from '../background.ts';
 import type { EventStream, EventStreamOptions } from '../events';
-import { button, el, trouble } from './dom';
+import { button, el, input, trouble } from './dom';
 import type { Screen } from './screen';
-import { asInboxChanged, type InboxItemView, type InboxPage } from './wire';
+import { asInboxChanged } from './wire';
+import { decodeReply } from '../../../sdk/typescript/src/operations/schema.ts';
+import type {
+  InboxItem as InboxItemView,
+  InboxPage,
+} from '../../../sdk/typescript/src/operations/administrative-replies.ts';
 
 export interface InboxOptions {
   readonly root: HTMLElement;
@@ -15,19 +20,56 @@ export interface InboxOptions {
  * first screen spoken entirely over frames: inbox.list, inbox.read, and the inbox.changed push.
  */
 export function createInbox(options: InboxOptions): Screen {
-  const element = el('section', 'inbox');
-  options.root.append(element);
+  const view = el('section', 'inbox');
+  const element = el('div', 'inbox-content');
+  const selector = el('form', 'inbox-selector');
+  const application = input('Application project', 'Application project');
+  application.className = 'inbox-project';
+  application.placeholder = 'Application project';
+  application.setAttribute('aria-label', 'Application project');
+  const inspect = button('application-inbox', 'Inspect application inbox');
+  const own = button('personal-inbox', 'My inbox');
+  let project: string | undefined;
+  selector.append(application, inspect, own);
+  view.append(selector, element);
+  options.root.append(view);
+  function inspectApplication(): void {
+    const requested = application.value.trim();
+    if (!requested) {
+      element.replaceChildren(trouble('Enter an application project.'));
+      return;
+    }
+    project = requested;
+    background(refresh());
+  }
+  selector.addEventListener('submit', (event) => {
+    event.preventDefault();
+    inspectApplication();
+  });
+  inspect.addEventListener('click', inspectApplication);
+  own.addEventListener('click', () => {
+    project = undefined;
+    background(refresh());
+  });
   let stream: EventStream | null = null;
   let stopped = false;
+  let refreshVersion = 0;
 
   async function refresh(): Promise<void> {
     if (stream === null || stopped) {
       return;
     }
+    const selectedProject = project;
+    const version = ++refreshVersion;
     let outcome;
     try {
-      outcome = await stream.ask('inbox.list', { limit: 50 });
+      outcome = await stream.ask('inbox.list', {
+        limit: 50,
+        ...(selectedProject ? { project: selectedProject } : {}),
+      });
     } catch (problem) {
+      if (stopped || version !== refreshVersion || selectedProject !== project)
+        return;
       element.replaceChildren(
         trouble(
           problem instanceof Error
@@ -37,13 +79,25 @@ export function createInbox(options: InboxOptions): Screen {
       );
       return;
     }
+    if (stopped || version !== refreshVersion || selectedProject !== project)
+      return;
     if (outcome.code !== 'OK') {
       element.replaceChildren(
         trouble(outcome.said ?? 'The inbox could not be read.'),
       );
       return;
     }
-    draw(outcome.payload as InboxPage);
+    try {
+      draw(decodeReply('inbox.list', outcome.payload), selectedProject);
+    } catch (problem) {
+      element.replaceChildren(
+        trouble(
+          problem instanceof Error
+            ? problem.message
+            : 'Invalid inbox response.',
+        ),
+      );
+    }
   }
 
   /** "Waiting on the socket," rather than the trouble a premature `ask` would show. */
@@ -62,10 +116,9 @@ export function createInbox(options: InboxOptions): Screen {
     article.append(trouble(text));
   }
 
-  function draw(page: InboxPage): void {
+  function draw(page: InboxPage, selectedProject: string | undefined): void {
     const heading = el('h2', 'inbox-heading');
-    heading.textContent =
-      page.unread === 0 ? 'inbox' : `inbox · ${page.unread} unread`;
+    heading.textContent = `${selectedProject ? selectedProject + ' · application inbox' : 'inbox'}${page.unread ? ' · ' + page.unread + ' unread' : ''}`;
     if (page.items.length === 0) {
       const empty = el('p', 'inbox-empty');
       empty.textContent =
@@ -73,17 +126,29 @@ export function createInbox(options: InboxOptions): Screen {
       element.replaceChildren(heading, empty);
       return;
     }
-    element.replaceChildren(heading, ...page.items.map(row));
+    element.replaceChildren(
+      heading,
+      ...page.items.map((item) => row(item, selectedProject)),
+    );
   }
 
-  function row(item: InboxItemView): HTMLElement {
+  function row(
+    item: InboxItemView,
+    selectedProject: string | undefined,
+  ): HTMLElement {
     const article = el('article', 'inbox-item');
     article.dataset['item'] = item.id;
     article.dataset['unread'] = String(item.readAt === null);
     const meta = el('div', 'inbox-meta');
-    meta.textContent = `${item.arrivedAt} · ${item.ending} · ${item.conversation}`;
+    meta.textContent = [
+      item.arrivedAt,
+      item.ending ?? item.kind,
+      item.conversation,
+    ]
+      .filter(Boolean)
+      .join(' · ');
     const answer = el('pre', 'inbox-answer');
-    answer.textContent = item.answer;
+    answer.textContent = item.answer ?? '';
     const open = button('mark-read', 'mark read');
     open.addEventListener('click', () => {
       open.disabled = true;
@@ -96,7 +161,10 @@ export function createInbox(options: InboxOptions): Screen {
                 'the event socket is not open; "inbox.read" was not sent',
               );
             }
-            outcome = await stream.ask('inbox.read', { items: [item.id] });
+            outcome = await stream.ask('inbox.read', {
+              items: [item.id],
+              ...(selectedProject ? { project: selectedProject } : {}),
+            });
           } catch (problem) {
             open.disabled = false;
             showItemTrouble(
@@ -115,6 +183,18 @@ export function createInbox(options: InboxOptions): Screen {
             );
             return;
           }
+          try {
+            decodeReply('inbox.read', outcome.payload);
+          } catch (problem) {
+            open.disabled = false;
+            showItemTrouble(
+              article,
+              problem instanceof Error
+                ? problem.message
+                : 'Invalid inbox acknowledgement.',
+            );
+            return;
+          }
           await refresh();
         })(),
       );
@@ -125,7 +205,7 @@ export function createInbox(options: InboxOptions): Screen {
   }
 
   return {
-    element: () => element,
+    element: () => view,
     async load(): Promise<void> {
       if (stream === null && !stopped) {
         stream = options.openStream({
@@ -153,6 +233,7 @@ export function createInbox(options: InboxOptions): Screen {
       stopped = true;
       stream?.close();
       stream = null;
+      view.remove();
     },
   };
 }
