@@ -80,6 +80,12 @@ describe('shared retrieval response boundary', () => {
     hits[0]['sources'] = [source];
     hits[0]['sourceCount'] = 1;
     expect(retrievalReply('conversation.search', payload)).toBe(payload);
+    source.inputProvenance.end = 21;
+    expect(retrievalReply('conversation.search', payload)).toBeUndefined();
+    source.inputProvenance.end = 20;
+    source.inputProvenance.sourceCount = 0;
+    expect(retrievalReply('conversation.search', payload)).toBeUndefined();
+    source.inputProvenance.sourceCount = 100;
     source.inputProvenance.end = 5;
     expect(retrievalReply('conversation.search', payload)).toBeUndefined();
     source.inputProvenance.end = 20;

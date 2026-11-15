@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
@@ -58,6 +59,28 @@ class ConversationSearchClientTest {
         assertEquals("snapshot", result.retrieval().snapshot());
         assertEquals(1, result.retrieval().queryEmbeddingCalls());
       }
+    }
+  }
+
+  @Test
+  void suppliedContextCannotExceedItsSourceOrUnderstateItsRetainedReferences() throws Exception {
+    var json = SdkJson.mapper();
+    String valid =
+        """
+        {"conversationId":"cnv_a","ordinal":1,"turnOrdinal":1,"kind":"utterance",
+        "handle":null,"recordedAt":null,"sourceRevision":"hash","length":20,"supersededBy":null,
+        "inputProvenance":{"start":5,"end":20,"sourceCount":100,
+        "sources":[{"id":"evidence-1","revision":"revision-1"}]}}
+        """;
+    var source = SdkJson.decode(json, json.readTree(valid), ServerClient.LogSource.class);
+    assertEquals(20, source.inputProvenance().end());
+    for (String invalid :
+        List.of(
+            valid.replace("\"end\":20", "\"end\":21"),
+            valid.replace("\"sourceCount\":100", "\"sourceCount\":0"))) {
+      assertThrows(
+          IOException.class,
+          () -> SdkJson.decode(json, json.readTree(invalid), ServerClient.LogSource.class));
     }
   }
 

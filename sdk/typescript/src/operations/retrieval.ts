@@ -566,18 +566,31 @@ const inputProvenance = record(
     row['sourceCount'] >= row['sources'].length &&
     row['sourceCount'] <= 1024,
 );
-const searchSource = record({
-  inputProvenance: optional(nullable(inputProvenance)),
-  conversationId: named,
-  ordinal: positive,
-  turnOrdinal: positive,
-  kind: named,
-  handle: nullable(named),
-  recordedAt: nullable(named),
-  sourceRevision: nullable(named),
-  length: count,
-  supersededBy: nullable(positive),
-});
+const searchSource = record(
+  {
+    inputProvenance: optional(nullable(inputProvenance)),
+    conversationId: named,
+    ordinal: positive,
+    turnOrdinal: positive,
+    kind: named,
+    handle: nullable(named),
+    recordedAt: nullable(named),
+    sourceRevision: nullable(named),
+    length: count,
+    supersededBy: nullable(positive),
+  },
+  (row) => {
+    const provenance = row['inputProvenance'];
+    return (
+      provenance === undefined ||
+      provenance === null ||
+      (object(provenance) &&
+        typeof provenance['end'] === 'number' &&
+        typeof row['length'] === 'number' &&
+        provenance['end'] <= row['length'])
+    );
+  },
+);
 const logHit = record(
   {
     sources: optional(list(searchSource)),
