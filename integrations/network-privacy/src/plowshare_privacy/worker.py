@@ -30,6 +30,7 @@ from .limits import MAX_EVIDENCE_BYTES
 from .operator_state import OperatorStore
 from .ports import PrivacyPort, evidence_name
 from .presence import PresenceCollector, PresenceStatus, PresenceView, PresenceWatch
+from .recovery import wait_for_recovery
 
 
 class ReconciliationRequired(RuntimeError):
@@ -77,6 +78,7 @@ class Worker:
         self.recovery_requested = asyncio.Event()
         self.last_contact: str | None = None
         self.failure_kind: str | None = None
+        self.reconnecting = False
         self.config = config
         self.port = port
         self.receipts = receipts
@@ -503,9 +505,17 @@ class Worker:
         stop: asyncio.Event,
         external: ExternalRequests | None = None,
         apply_settings: Callable[[], Awaitable[None]] | None = None,
+        recover: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
+        """Run intake; reconnect transport failures through receipt-only recovery.
+
+        ``recover`` must establish a fresh session and settle retained effects
+        without replaying operations. Returning permits intake to resume;
+        unresolved receipts and non-transport failures require a manual check.
+        Without a callback, this worker preserves explicit-only recovery.
+        """
         try:
-            await self._run(stop, external, apply_settings)
+            await self._run(stop, external, apply_settings, recover)
         finally:
             await self.stop_facts()
 
@@ -514,7 +524,9 @@ class Worker:
         stop: asyncio.Event,
         external: ExternalRequests | None,
         apply_settings: Callable[[], Awaitable[None]] | None,
+        recover: Callable[[], Awaitable[None]] | None,
     ) -> None:
+        idle_check_due = 0.0
         while not stop.is_set():
             try:
                 # Apply desired configuration before new intake, retaining the old
@@ -525,6 +537,15 @@ class Worker:
                 if external is not None:
                     self.operation = "external tool provider"
                     await external.poll()
+                elif not self.config.collection.enabled:
+                    # Disabled collection still needs a live dashboard session.
+                    # Probe only while no provider/intake reads check it, and at
+                    # most twice per minute rather than on every local tick.
+                    now = asyncio.get_running_loop().time()
+                    if now >= idle_check_due:
+                        self.operation = "relay.topics"
+                        await self.port.available_topics()
+                        idle_check_due = now + 30.0
                 await self.poll()
                 if self.attention is not None:
                     self.attention.recovered()
@@ -540,24 +561,16 @@ class Worker:
                 ValueError,
                 OSError,
             ) as error:
-                # Keep the dashboard available; reconnection and mutation replay are explicit.
-                if self.presence is not None:
-                    self.presence.reset()
-                self.failure_kind = type(error).__name__
-                self.state = "attention_required"
-                self.detail = (
-                    refusal_detail(error, self.operation)
-                    if isinstance(error, Refusal)
-                    else (
-                        "Collection stopped. Inspect receipts and restart after resolving the cause ("
-                        + type(error).__name__
-                        + ")."
-                    )
+                self._attention(error)
+                self.reconnecting = (
+                    recover is not None
+                    and isinstance(error, TransportError)
+                    and error.delivery != Delivery.INVALID_RESPONSE
                 )
                 if self.attention is not None:
                     try:
                         alert = await self.attention.stopped(
-                            self.failure_kind, self.operation
+                            type(error).__name__, self.operation
                         )
                     except (OSError, ValueError) as journal_error:
                         # The collector's original stop remains primary and the dashboard
@@ -569,16 +582,29 @@ class Worker:
                         )
                     if alert:
                         self.detail += " " + alert
-                stopped = asyncio.create_task(stop.wait())
-                resumed = asyncio.create_task(self.recovery_requested.wait())
                 try:
-                    await asyncio.wait(
-                        (stopped, resumed), return_when=asyncio.FIRST_COMPLETED
-                    )
+                    try:
+                        await wait_for_recovery(
+                            stop,
+                            self.recovery_requested,
+                            recover if self.reconnecting else None,
+                        )
+                    except (
+                        ReconciliationRequired,
+                        ToolAttention,
+                        TransportError,
+                        Refusal,
+                        ValueError,
+                        OSError,
+                    ) as recovery_error:
+                        # Connectivity is independent of effect settlement. An
+                        # absent/conflicting receipt or revoked authority keeps
+                        # intake fenced until explicit operator recovery.
+                        self._attention(recovery_error)
+                        self.reconnecting = False
+                        await wait_for_recovery(stop, self.recovery_requested, None)
                 finally:
-                    for pending in (stopped, resumed):
-                        pending.cancel()
-                    await asyncio.gather(stopped, resumed, return_exceptions=True)
+                    self.reconnecting = False
                 self.recovery_requested.clear()
                 if stop.is_set():
                     return
@@ -597,3 +623,19 @@ class Worker:
                 await asyncio.wait_for(stop.wait(), wait)
             except TimeoutError:
                 continue
+
+    def _attention(self, error: Exception) -> None:
+        """Keep local evidence/UI available while intake is fenced."""
+        if self.presence is not None:
+            self.presence.reset()
+        self.failure_kind = type(error).__name__
+        self.state = "attention_required"
+        self.detail = (
+            refusal_detail(error, self.operation)
+            if isinstance(error, Refusal)
+            else (
+                "Collection stopped. Inspect retained receipts before resuming ("
+                + type(error).__name__
+                + ")."
+            )
+        )
