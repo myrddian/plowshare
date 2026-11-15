@@ -116,25 +116,10 @@ scopes: [workspace:read]
 # is stopped without reaching it. JobRuntime.Repeats ends a run that keeps
 # asking for one identical call, with its own ending.
 max-turns: 100
-# The cost bound, and no longer equal to the cap. The old sentence said this
-# could not honestly be less than max-turns, because the loop checks
-# turns >= max-turns BEFORE it spends and a capped run had therefore made
-# exactly that many calls; what has changed is that the budget is now meant to
-# bind first, so a review submitted on its own behalf ends at CALL_BUDGET rather
-# than at a cap it never reaches. A review is roots, then a handful of globs and
-# reads, then the report — forty is room for that over a tree big enough to need
-# paging, and it is the same fallback shape interlocutor.md argues.
-#
-# INERT for a delegated review, which is the shape this agent usually runs in: a
-# child spends the budget its parent was given, shared by reference, and
-# JobRuntime never re-reads this number for a run started with one.
-#
-# Excalibur's timeout_seconds still has no key here and there is still nowhere
-# for one to attach: the loop's boundary checks are the turn cap, cancellation
-# and the budget, and the only clock anywhere near a run is the transport's read
-# timeout on a single model call (see JobStore.close, which calls that the only
-# deadline this system has for one).
-max-model-calls: 40
+# Standalone and Relay message runs receive enough calls to use every declared step.
+# Delegated runs share their caller's allowance; conversation turns use the conversation's.
+# Those shared allowances can still bind earlier, including after delegated work or retries.
+max-model-calls: 100
 ---
 You are reviewing code you have not seen before.
 

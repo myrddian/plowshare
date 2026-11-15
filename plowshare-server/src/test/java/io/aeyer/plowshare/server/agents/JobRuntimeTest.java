@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -538,6 +539,17 @@ class JobRuntimeTest {
    * distance between two reads — so any instant would do; a named one keeps the fixtures readable.
    */
   private static final Instant WHEN = Instant.parse("2026-09-03T14:00:00Z");
+
+  /** Allowance advice is checked separately; these projections isolate other prompt contracts. */
+  private static List<ChatMessage> withoutAllowanceAdvice(List<ChatMessage> messages) {
+    return messages.stream().filter(message -> !isAllowanceAdvice(message.content())).toList();
+  }
+
+  private static boolean isAllowanceAdvice(String text) {
+    return text.startsWith("[Runtime allowance:")
+        || text.startsWith("[Allowance warning:")
+        || text.startsWith("[Final allowance warning:");
+  }
 
   private static Budget generous() {
     return Budget.of(100);
@@ -1424,11 +1436,11 @@ class JobRuntimeTest {
             EntryKind.TOOL_RESULT,
             EntryKind.THINKING,
             EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList(),
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList(),
         "each call's thinking sits just before what that call said");
     assertEquals(
         List.of(thought, thought),
-        log.entries().stream()
+        log.entriesWithoutAllowanceAdvice().stream()
             .filter(entry -> entry.kind() == EntryKind.THINKING)
             .map(LoggedEntry::content)
             .toList());
@@ -1476,7 +1488,15 @@ class JobRuntimeTest {
     assertFalse(outcome.text().contains("could not be reached"));
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.ANSWER, EntryKind.TOOL_RESULT, EntryKind.DIAGNOSTIC),
-        recorded.entries().stream().map(LoggedEntry::kind).toList());
+        recorded.entries().stream()
+            .filter(
+                entry ->
+                    entry.kind() != EntryKind.NOTICE
+                        || !(entry.content().startsWith("[Runtime allowance:")
+                            || entry.content().startsWith("[Allowance warning:")
+                            || entry.content().startsWith("[Final allowance warning:")))
+            .map(LoggedEntry::kind)
+            .toList());
     LoggedEntry diagnostic = recorded.entries().getLast();
     assertTrue(diagnostic.content().contains("ERROR: incomplete model call"));
     assertTrue(diagnostic.content().contains("repeat this forever"));
@@ -1636,6 +1656,9 @@ class JobRuntimeTest {
                       1,
                       "original review",
                       Optional.of("retained completed review"))));
+      doReturn(new Recorded(List.of(), "child-log"))
+          .when(retained)
+          .resumeDelegation(any(Transcript.DelegationRetry.class), any(AgentDefinition.class));
       doAnswer(
               invocation -> {
                 recorded.record(invocation.getArgument(0));
@@ -1837,7 +1860,7 @@ class JobRuntimeTest {
 
     assertEquals(
         List.of("which programme?", "the answer is Sundial"),
-        log.entries().stream().map(LoggedEntry::content).toList(),
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::content).toList(),
         "the loop records the utterance and then the answer, exactly once each");
     assertEquals(List.of(2500L), log.durationsOf(EntryKind.ANSWER));
   }
@@ -1897,7 +1920,7 @@ class JobRuntimeTest {
         List.of(red));
 
     ChatMessage utterance =
-        transport.calls().get(0).messages().get(transport.calls().get(0).messages().size() - 1);
+        withoutAllowanceAdvice(transport.calls().getFirst().messages()).getLast();
     assertEquals(2, utterance.parts().size(), utterance.parts().toString());
     assertTrue(
         utterance.parts().get(0) instanceof Content.Text,
@@ -1940,7 +1963,7 @@ class JobRuntimeTest {
         TurnCap.none(),
         List.of(new Content.Image(uid, "data:image/png;base64,iVBORw0K")));
 
-    List<ChatMessage> sent = transport.calls().get(0).messages();
+    List<ChatMessage> sent = withoutAllowanceAdvice(transport.calls().get(0).messages());
     ChatMessage utterance = sent.get(sent.size() - 1);
     assertTrue(
         utterance.content().contains(uid),
@@ -1978,7 +2001,7 @@ class JobRuntimeTest {
             new Content.Image(first, "data:image/png;base64,iVBORw0K"),
             new Content.Image(second, "data:image/png;base64,iVBORw0L")));
 
-    List<ChatMessage> sent = transport.calls().get(0).messages();
+    List<ChatMessage> sent = withoutAllowanceAdvice(transport.calls().get(0).messages());
     String said = sent.get(sent.size() - 1).content();
     assertTrue(said.indexOf(first) >= 0 && said.indexOf(first) < said.indexOf(second), said);
   }
@@ -2008,7 +2031,7 @@ class JobRuntimeTest {
 
     assertEquals(
         List.of("what shape is this", "a red square"),
-        log.entries().stream().map(LoggedEntry::content).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::content).toList());
   }
 
   /**
@@ -2016,7 +2039,7 @@ class JobRuntimeTest {
    * for every caller that has no picture.
    */
   @Test
-  void a_run_shown_nothing_sends_the_message_it_always_sent() throws Exception {
+  void a_run_shown_nothing_keeps_the_plain_task_message() throws Exception {
     Scripted transport = new Scripted().then(() -> answer("done"));
     JobRuntime runtime = runtimeOver(transport);
 
@@ -2030,7 +2053,7 @@ class JobRuntimeTest {
         JobWatch.UNWATCHED,
         Transcript.NONE);
 
-    List<ChatMessage> sent = transport.calls().get(0).messages();
+    List<ChatMessage> sent = withoutAllowanceAdvice(transport.calls().get(0).messages());
     assertEquals(List.of(new Content.Text("which programme?")), sent.get(sent.size() - 1).parts());
   }
 
@@ -2062,7 +2085,7 @@ class JobRuntimeTest {
 
     assertEquals(
         List.of("what shape is this", "a red square"),
-        log.entries().stream().map(LoggedEntry::content).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::content).toList());
     for (LoggedEntry entry : log.entries()) {
       assertFalse(entry.content().contains("data:"), entry.content());
       assertFalse(entry.content().contains("iVBORw0K"), entry.content());
@@ -2081,8 +2104,9 @@ class JobRuntimeTest {
    * actually handed.
    *
    * <p>Every message before it is <em>equal</em>, not merely similar: {@code ChatMessage} is a
-   * record, so this is field-by-field over role, content, tool calls and tool-call id. The reminder
-   * is the last element and nothing else moved.
+   * record, so this is field-by-field over role, content, tool calls and tool-call id. Allowance
+   * advice is projected out here; it is independently verified as an appended notice by the
+   * librarian's 64-call test. The reminder follows the task without moving the earlier prefix.
    *
    * <p><b>Last and not merely late, and the difference is measurable.</b> A turn opens {@code
    * [system] [history] [utterance]} and the next one opens {@code [system] [history] [utterance]
@@ -2092,8 +2116,7 @@ class JobRuntimeTest {
    * assertion below is what pins the position — moving the append one line earlier turns it red.
    */
   @Test
-  void a_reminder_is_the_last_message_and_leaves_every_message_before_it_untouched()
-      throws Exception {
+  void a_reminder_follows_the_task_without_rewriting_the_existing_prefix() throws Exception {
     ChatMessage recalled = ChatMessage.user("[what the archive holds]");
     Scripted plain = new Scripted().thenAlways(() -> answer("done"));
     Scripted reminded = new Scripted().thenAlways(() -> answer("done"));
@@ -2108,8 +2131,8 @@ class JobRuntimeTest {
             (definition, home, utterance) -> Optional.of(recalled))
         .run(agent("echo"), "which programme?", Home.global(), generous(), null);
 
-    List<ChatMessage> before = plain.calls.get(0).messages();
-    List<ChatMessage> after = reminded.calls.get(0).messages();
+    List<ChatMessage> before = withoutAllowanceAdvice(plain.calls.get(0).messages());
+    List<ChatMessage> after = withoutAllowanceAdvice(reminded.calls.get(0).messages());
 
     assertEquals(
         before.size() + 1,
@@ -2183,10 +2206,10 @@ class JobRuntimeTest {
     // audit, which never projects and so never comes back inside before().
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.HOOK, EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
     assertEquals(
         List.of("which programme?", "the answer is Sundial"),
-        log.entries().stream()
+        log.entriesWithoutAllowanceAdvice().stream()
             .filter(entry -> entry.kind() != EntryKind.HOOK)
             .map(LoggedEntry::content)
             .toList(),
@@ -2251,15 +2274,18 @@ class JobRuntimeTest {
         JobWatch.UNWATCHED,
         log);
 
-    List<ChatMessage> before = plain.calls.get(0).messages();
-    List<ChatMessage> after = noticed.calls.get(0).messages();
+    List<ChatMessage> before = withoutAllowanceAdvice(plain.calls.get(0).messages());
+    List<ChatMessage> after = withoutAllowanceAdvice(noticed.calls.get(0).messages());
     assertEquals(before.size() + 1, after.size());
     assertEquals(
         before.subList(0, before.size() - 1),
         after.subList(0, before.size() - 1),
         "the notice moved bytes that came before the utterance");
     assertEquals(ChatMessage.user("at 09:02, 1 item arrived"), after.get(after.size() - 2));
-    assertEquals(recalled, after.get(after.size() - 1), "the reminder is still last");
+    assertEquals(
+        recalled,
+        after.get(after.size() - 1),
+        "the reminder is last before runtime allowance advice");
     assertEquals(
         List.of("s-enzo"),
         sessionsAsked,
@@ -2307,7 +2333,7 @@ class JobRuntimeTest {
         "s-enzo",
         JobWatch.UNWATCHED,
         turnOne);
-    List<ChatMessage> firstSent = transport.calls().get(0).messages();
+    List<ChatMessage> firstSent = withoutAllowanceAdvice(transport.calls().get(0).messages());
 
     // What the log now holds, projected exactly as `Projection` would build
     // it for the next turn: the utterance, the notice -- both USER, in
@@ -2327,7 +2353,7 @@ class JobRuntimeTest {
         "s-enzo",
         JobWatch.UNWATCHED,
         turnTwo);
-    List<ChatMessage> secondSent = transport.calls().get(1).messages();
+    List<ChatMessage> secondSent = withoutAllowanceAdvice(transport.calls().get(1).messages());
 
     assertEquals(
         firstSent,
@@ -2378,7 +2404,7 @@ class JobRuntimeTest {
 
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.NOTICE, EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
   }
 
   /**
@@ -2412,12 +2438,12 @@ class JobRuntimeTest {
         log);
 
     assertEquals(List.of("story cnv_talk"), asked);
-    List<ChatMessage> sent = transport.calls().get(0).messages();
+    List<ChatMessage> sent = withoutAllowanceAdvice(transport.calls().get(0).messages());
     assertEquals(ChatMessage.user("look at the code"), sent.get(sent.size() - 2));
     assertEquals(ChatMessage.user("the files are on bench.local"), sent.get(sent.size() - 1));
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.NOTICE, EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
   }
 
   /**
@@ -2454,12 +2480,12 @@ class JobRuntimeTest {
         null,
         true);
     assertEquals(List.of("implement the parser | story | s-enzo | cnv_talk"), asked);
-    List<ChatMessage> sent = transport.calls().get(0).messages();
+    List<ChatMessage> sent = withoutAllowanceAdvice(transport.calls().get(0).messages());
     assertEquals(ChatMessage.user("implement the parser"), sent.get(sent.size() - 2));
     assertEquals(ChatMessage.user("an orchestration may suit this"), sent.get(sent.size() - 1));
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.NOTICE, EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
   }
 
   /**
@@ -2515,10 +2541,10 @@ class JobRuntimeTest {
     assertEquals(List.of(), asked);
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.ANSWER),
-        explicit.entries().stream().map(LoggedEntry::kind).toList());
+        explicit.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.ANSWER),
-        viaOldOverload.entries().stream().map(LoggedEntry::kind).toList());
+        viaOldOverload.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
   }
 
   /**
@@ -2588,7 +2614,7 @@ class JobRuntimeTest {
     assertEquals("done", outcome.text());
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
   }
 
   /** The fixture agent, holding the two todo tools. Built by hand, as {@link #announcing} is. */
@@ -2687,10 +2713,10 @@ class JobRuntimeTest {
     assertEquals(List.of("cnv_talk"), todos.noticedFor);
     assertEquals(List.of("cnv_talk"), todos.noticedIn);
     assertEquals(List.of("cnv_talk s-enzo"), todos.appliedIn);
-    List<ChatMessage> first = transport.calls().get(0).messages();
+    List<ChatMessage> first = withoutAllowanceAdvice(transport.calls().get(0).messages());
     assertEquals(ChatMessage.user("plan it"), first.get(first.size() - 2));
     assertEquals(ChatMessage.user("Harness notice: the list"), first.get(first.size() - 1));
-    assertEquals(EntryKind.NOTICE, log.entries().get(1).kind());
+    assertEquals(EntryKind.NOTICE, log.entriesWithoutAllowanceAdvice().get(1).kind());
     assertTrue(runtime.knownTools().containsAll(TodoTools.NAMES));
   }
 
@@ -2720,7 +2746,7 @@ class JobRuntimeTest {
     assertEquals(List.of(), todos.noticedFor);
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
   }
 
   /** A place that cannot be worked out is not a reason to lose the turn. */
@@ -2750,7 +2776,7 @@ class JobRuntimeTest {
     assertEquals(Ending.ANSWERED, outcome.ending());
     assertEquals(
         List.of(EntryKind.UTTERANCE, EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
   }
 
   // --- harness tools a run is handed -------------------------------------------
@@ -2938,14 +2964,18 @@ class JobRuntimeTest {
     assertEquals(Outcome.Ending.AWAITING, outcome.ending());
     assertEquals("Which database?", outcome.text());
     assertEquals(1, transport.calls().size());
-    assertEquals(2, log.entries().stream().filter(e -> e.kind() == EntryKind.TOOL_RESULT).count());
+    assertEquals(
+        2,
+        log.entriesWithoutAllowanceAdvice().stream()
+            .filter(e -> e.kind() == EntryKind.TOOL_RESULT)
+            .count());
     // The log ends at the step's results: the only ANSWER is the assistant turn that asked for
     // the tools, and the question is Turn's to record when it closes the log, not the loop's.
     assertEquals(
         List.of(
             EntryKind.UTTERANCE, EntryKind.ANSWER, EntryKind.TOOL_RESULT, EntryKind.TOOL_RESULT),
-        log.entries().stream().map(LoggedEntry::kind).toList());
-    assertFalse(log.entries().get(1).toolCalls().isEmpty());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
+    assertFalse(log.entriesWithoutAllowanceAdvice().get(1).toolCalls().isEmpty());
     assertFalse(runtime.knownTools().contains("ask_now"));
   }
 
@@ -3082,7 +3112,7 @@ class JobRuntimeTest {
     assertEquals("the result", outcome.text());
     assertEquals(1, transport.calls().size());
     List<LoggedEntry> answers =
-        log.entries().stream()
+        log.entriesWithoutAllowanceAdvice().stream()
             .filter(e -> e.kind() == EntryKind.ANSWER && e.content().equals("the result"))
             .toList();
     assertEquals(1, answers.size());
@@ -3094,7 +3124,7 @@ class JobRuntimeTest {
             EntryKind.TOOL_RESULT,
             EntryKind.TOOL_RESULT,
             EntryKind.ANSWER),
-        log.entries().stream().map(LoggedEntry::kind).toList());
+        log.entriesWithoutAllowanceAdvice().stream().map(LoggedEntry::kind).toList());
   }
 
   /** An end requested in a batch a dependency failure then stops keeps the failure's ending. */
@@ -3320,12 +3350,16 @@ class JobRuntimeTest {
     runtime.run(agent("reader"), "find the codename", Home.global(), generous(), null);
 
     Scripted.Call first = transport.calls().get(0);
-    assertEquals(2, first.messages().size(), first.messages().toString());
-    assertEquals(ChatMessage.Role.SYSTEM, first.messages().get(0).role());
     assertEquals(
-        "You look things up before you answer.", first.messages().get(0).content().strip());
-    assertEquals(ChatMessage.Role.USER, first.messages().get(1).role());
-    assertEquals("find the codename", first.messages().get(1).content());
+        2,
+        withoutAllowanceAdvice(first.messages()).size(),
+        withoutAllowanceAdvice(first.messages()).toString());
+    assertEquals(ChatMessage.Role.SYSTEM, withoutAllowanceAdvice(first.messages()).get(0).role());
+    assertEquals(
+        "You look things up before you answer.",
+        withoutAllowanceAdvice(first.messages()).get(0).content().strip());
+    assertEquals(ChatMessage.Role.USER, withoutAllowanceAdvice(first.messages()).get(1).role());
+    assertEquals("find the codename", withoutAllowanceAdvice(first.messages()).get(1).content());
     assertEquals(List.of("probe_read"), first.tools().stream().map(ToolSchema::name).toList());
   }
 
@@ -3365,7 +3399,7 @@ class JobRuntimeTest {
 
     // The whole point of the message array: system, task, the assistant
     // turn that asked, and the result filed against the id it answers.
-    List<ChatMessage> second = transport.conversation(1);
+    List<ChatMessage> second = withoutAllowanceAdvice(transport.conversation(1));
     assertEquals(
         List.of(
             ChatMessage.Role.SYSTEM, ChatMessage.Role.USER,
@@ -3963,7 +3997,7 @@ class JobRuntimeTest {
 
     assertEquals("the codename is Gnomon", outcome.text());
     assertEquals(List.of("{\"id\":\"mem_1\"}"), read.seen());
-    List<ChatMessage> third = transport.conversation(2);
+    List<ChatMessage> third = withoutAllowanceAdvice(transport.conversation(2));
     ChatMessage asked = third.get(third.size() - 2);
     assertEquals(ChatMessage.Role.ASSISTANT, asked.role());
     assertEquals(List.of("probe_read"), asked.toolCalls().stream().map(ToolCall::name).toList());
@@ -4661,6 +4695,112 @@ class JobRuntimeTest {
   }
 
   // --- the endings that are not answers ---------------------------------------
+
+  @Test
+  void librarian_can_answer_on_its_64th_call_and_receives_retained_allowance_warnings() {
+    AgentDefinition librarian =
+        ShippedDefinitions.registry(BoundTools.boundByThisServer()).get("librarian");
+    AtomicInteger page = new AtomicInteger();
+    Scripted transport =
+        new Scripted()
+            .thenAlways(
+                () -> {
+                  int call = page.incrementAndGet();
+                  return call == 64
+                      ? answer("verified answer")
+                      : asking(
+                          "read next page",
+                          call("page-" + call, "information_search", "{\"page\":" + call + "}"));
+                });
+    LlmDispatcher dispatcher =
+        new LlmDispatcher(
+            List.of(
+                new LlmPool(
+                    "scripted",
+                    List.of(librarian.model()),
+                    Map.of(),
+                    4,
+                    1,
+                    Duration.ofSeconds(5),
+                    transport)),
+            new NoOpTokenLedger());
+    JobRuntime runtime =
+        new JobRuntime(
+            dispatcher, List.of(Probe.returning("information_search", "source evidence")));
+    Recorded log = new Recorded(List.of());
+    Outcome outcome =
+        runtime.run(
+            librarian,
+            "find the evidence",
+            Home.global(),
+            Budget.of(librarian.maxModelCalls()),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            log);
+
+    assertEquals(Ending.ANSWERED, outcome.ending(), outcome.toString());
+    assertEquals(64, outcome.steps());
+    assertEquals(64, outcome.modelCalls());
+    List<String> notices =
+        log.entries().stream()
+            .filter(entry -> entry.kind() == EntryKind.NOTICE)
+            .map(LoggedEntry::content)
+            .filter(JobRuntimeTest::isAllowanceAdvice)
+            .toList();
+    assertEquals(5, notices.size());
+    assertTrue(notices.getFirst().contains("64 of 64 remaining"));
+    assertTrue(notices.getLast().contains("Final allowance warning"));
+    assertTrue(notices.getLast().contains("3 of 64 remaining"));
+    for (int index = 1; index < transport.calls().size(); index++) {
+      List<ChatMessage> previous = transport.calls().get(index - 1).messages();
+      List<ChatMessage> current = transport.calls().get(index).messages();
+      assertEquals(previous, current.subList(0, previous.size()), "advice must extend the prefix");
+    }
+    List<String> delivered =
+        transport.calls().getLast().messages().stream()
+            .map(ChatMessage::content)
+            .filter(JobRuntimeTest::isAllowanceAdvice)
+            .toList();
+    assertEquals(notices, delivered, "every delivered notice is retained exactly once");
+  }
+
+  @Test
+  void last_call_warning_can_be_used_to_finish_instead_of_hitting_the_budget() throws Exception {
+    Scripted transport = new Scripted();
+    transport.thenAlways(
+        () -> {
+          List<ChatMessage> sent = transport.calls().getLast().messages();
+          return sent.getLast().content().contains("Final allowance warning")
+              ? answer("verified partial result; more evidence needs an extension")
+              : asking("look", call("c1", "probe_read", "{}"));
+        });
+    Budget budget = Budget.of(2);
+    Outcome outcome =
+        runtimeOver(transport, Probe.returning("probe_read", "evidence"))
+            .run(agent("spendthrift"), "find it", Home.global(), budget, null);
+    assertEquals(Ending.ANSWERED, outcome.ending());
+    assertEquals(2, budget.spent());
+    assertEquals(2, budget.limit(), "warnings never grant an extension");
+  }
+
+  @Test
+  void a_board_wake_reports_its_shared_remainder_and_local_window_separately() throws Exception {
+    Budget shared = Budget.resumed(400, 397);
+    Budget wake = Budget.boardLease(shared.identity(), 40, shared::tryClaim);
+    Scripted transport = new Scripted().then(() -> answer("done"));
+
+    Outcome outcome =
+        runtimeOver(transport).run(agent("echo"), "read the board", Home.global(), wake, null);
+
+    assertEquals(Ending.ANSWERED, outcome.ending());
+    String note = transport.calls().getFirst().messages().getLast().content();
+    assertTrue(note.contains("Final allowance warning"), note);
+    assertTrue(note.contains("shared allowance: 3 of 400 remaining"), note);
+    assertTrue(note.contains("model calls in this wake: 40 of 40 remaining"), note);
+    assertEquals(398, shared.spent());
+    assertEquals(1, wake.spent());
+  }
 
   @Test
   void a_run_that_never_answers_stops_at_the_turn_cap() throws Exception {
@@ -5428,7 +5568,7 @@ class JobRuntimeTest {
         outcome.ending(),
         "the run reached the model at all — " + outcome.detail());
 
-    List<ChatMessage> sent = transport.conversation(0);
+    List<ChatMessage> sent = withoutAllowanceAdvice(transport.conversation(0));
     List<ChatMessage> systems = withRole(sent, ChatMessage.Role.SYSTEM);
     assertEquals(
         1,
@@ -5483,18 +5623,7 @@ class JobRuntimeTest {
           + " what is already above, then try different arguments, a different tool,"
           + " or answer with what you have and say what is missing.]";
 
-  /**
-   * The second, and the number of turns in it is {@code spendthrift}'s own {@code max-turns} rather
-   * than anything this note invents.
-   */
-  /**
-   * <b>No number appears in it, and that is the assertion.</b> This note used to name the run's
-   * turn cap and say each repeat spent one of them. An agent does not get to read its own counters:
-   * a budget a model can see is one it optimises against, and the same question asked with forty
-   * turns left and four would become two different prompts whose difference the transcript does not
-   * show. What it is told is a consequence of its own behaviour — go on repeating one call and the
-   * run is stopped — which is about the task.
-   */
+  /** Repetition advice is separate from the runtime's recorded allowance checkpoints. */
   private static final String SECOND_NOTE =
       "[Runtime note, not part of any tool's answer: you have now called 'probe_read'"
           + " with exactly the same arguments 5 times in a row, and a run that goes"
@@ -5507,7 +5636,8 @@ class JobRuntimeTest {
    * any note this runtime added.
    */
   private static List<String> saidToTheModel(Scripted transport, int index) {
-    return withRole(transport.conversation(index), ChatMessage.Role.USER).stream()
+    return withRole(withoutAllowanceAdvice(transport.conversation(index)), ChatMessage.Role.USER)
+        .stream()
         .map(ChatMessage::content)
         .toList();
   }
@@ -5726,7 +5856,7 @@ class JobRuntimeTest {
             ChatMessage.Role.TOOL,
             ChatMessage.Role.TOOL,
             ChatMessage.Role.USER),
-        transport.conversation(1).stream().map(ChatMessage::role).toList(),
+        withoutAllowanceAdvice(transport.conversation(1)).stream().map(ChatMessage::role).toList(),
         "every result first, then the note");
     assertEquals(List.of("find the codename", FIRST_NOTE), saidToTheModel(transport, 1));
   }
@@ -6103,16 +6233,7 @@ class JobRuntimeTest {
     assertTrue(outcome.text().contains("budget of 1 model calls"), outcome.text());
   }
 
-  /**
-   * The note carries no counter, and a run with a generous cap is the case that proves it rather
-   * than a run with none.
-   *
-   * <p><b>This test used to assert something weaker.</b> It ran only against an uncapped run and
-   * checked that no ceiling was invented — which passed while the note happily named a cap whenever
-   * there was one to name. The rule is not "invent nothing"; it is that an agent does not read its
-   * own counters at all, so the interesting run is the one that <em>has</em> a cap and is still not
-   * told it.
-   */
+  /** Repetition advice remains independent from the separately recorded allowance checkpoints. */
   @Test
   void the_second_note_names_no_counter_even_when_the_run_has_one() throws Exception {
     Scripted transport = stuckOn("{\"path\":\"a.txt\"}");
@@ -7516,7 +7637,7 @@ class JobRuntimeTest {
 
     assertEquals(
         List.of(ChatMessage.Role.USER),
-        transport.conversation(0).stream().map(ChatMessage::role).toList());
+        withoutAllowanceAdvice(transport.conversation(0)).stream().map(ChatMessage::role).toList());
   }
 
   /**
@@ -7746,6 +7867,13 @@ class JobRuntimeTest {
 
     List<LoggedEntry> entries() {
       return entries;
+    }
+
+    /** Isolates existing logging contracts from the independently tested allowance notices. */
+    List<LoggedEntry> entriesWithoutAllowanceAdvice() {
+      return entries.stream()
+          .filter(entry -> entry.kind() != EntryKind.NOTICE || !isAllowanceAdvice(entry.content()))
+          .toList();
     }
 
     /**

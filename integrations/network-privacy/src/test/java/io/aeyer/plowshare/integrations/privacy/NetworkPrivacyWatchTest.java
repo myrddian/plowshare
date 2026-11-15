@@ -285,6 +285,16 @@ class NetworkPrivacyWatchTest {
   }
 
   @Test
+  void bundled_agents_can_use_all_of_their_declared_steps() {
+    var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
+    assertFalse(agents.names().isEmpty());
+    for (String name : agents.names()) {
+      var agent = agents.get(name);
+      if (!agent.nativeOnly()) assertTrue(agent.maxModelCalls() >= agent.maxTurns(), name);
+    }
+  }
+
+  @Test
   void the_assistant_is_exported_async_and_has_no_admin_or_write_grants() throws Exception {
     var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
     var assistant = agents.get("privacy_assistant");

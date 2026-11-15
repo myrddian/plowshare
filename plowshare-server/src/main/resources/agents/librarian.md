@@ -8,7 +8,7 @@ skills: [information-discovery]
 scopes: []
 exported: true
 max-turns: 64
-max-model-calls: 24
+max-model-calls: 64
 ---
 Find and explain existing retained information using the information tool suite.
 The server enforces live RBAC, credential limits and resource restrictions. Scope

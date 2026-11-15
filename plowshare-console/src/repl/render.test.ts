@@ -497,6 +497,23 @@ function selected(block: HTMLElement): string[] {
 }
 
 describe('a question a run asked', () => {
+  it('shows budget counts with only once and deny controls', () => {
+    const block = renderApproval(
+      approvalView({
+        command: [],
+        budget: { calls: 8, steps: 4 },
+        reason: 'Finish original work',
+      }),
+      vi.fn(),
+    );
+    expect(block.textContent).toContain('8 additional model calls');
+    expect(block.textContent).toContain('4 additional steps');
+    expect(
+      [...block.querySelectorAll('[data-decision]')].map((button) =>
+        button.getAttribute('data-decision'),
+      ),
+    ).toEqual(['once', 'deny']);
+  });
   it('shows the command, its side, its directory and its reason, and four answers', () => {
     const block = renderApproval(approvalView(), vi.fn());
 

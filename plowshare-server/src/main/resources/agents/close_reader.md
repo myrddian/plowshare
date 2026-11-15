@@ -157,19 +157,10 @@ scopes: []
 # a name that resolved to nothing is six. Eight is that with room and is two
 # deliberations short of anything an operator would notice.
 max-turns: 8
-# THE COST BOUND, and it is the one that binds first. Six.
-#
-# The arithmetic is over the run this number is not inert for, which is a run
-# started on this agent's own behalf -- POST /v1/agents/close_reader/runs and
-# the MCP agent_run over it. JobStore builds a Budget from this key only for
-# such a run; Turn.speak hands the conversation's own Budget instead, shared by
-# reference, and JobRuntime never re-reads this key for a run started with one.
-#
-# Six is the three-turn shape above with three spare, which is one more retry
-# than the workload has a use for. It is deliberately not librarian's twelve:
-# this agent's model calls are the cheap half of what it spends, and a number
-# generous in them would be generous in deliberations at four times the price.
-max-model-calls: 6
+# Standalone and Relay message runs receive enough calls to use every declared step.
+# Delegated runs share their caller's allowance; conversation turns use the conversation's.
+# Those shared allowances can still bind earlier, including after delegated work or retries.
+max-model-calls: 8
 # PRECISE, and the argument is about copying rather than about thinking.
 #
 # The load-bearing thing this agent does is reproduce, character for character,

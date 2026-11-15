@@ -282,7 +282,7 @@ def inventory():
         builders[frame] = [{"source": usage_source, "function": "UsageClient / UsageWatch socket-owned view lifecycle"}]
     response_families = {}
     for family, name, expected_types, expected_operations in [
-        ("administrative", "AdministrativeReplies", 35, 39),
+        ("administrative", "AdministrativeReplies", 36, 39),
         ("conversation", "ConversationReplies", 42, 86),
         ("inspection", "InspectionReplies", 14, 8),
         ("information", "InformationReplies", 76, 73),

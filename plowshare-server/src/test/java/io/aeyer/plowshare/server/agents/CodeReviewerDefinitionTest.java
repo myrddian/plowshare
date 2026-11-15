@@ -275,13 +275,8 @@ class CodeReviewerDefinitionTest {
    * <p>Its first turn buys a tool result and nothing else, so an agent capped at one turn is a run
    * that reads a file and is stopped before it can say anything about it.
    *
-   * <p><b>The other half of this test has moved.</b> {@code max-model-calls <= max-turns} was
-   * asserted here too, in two lines identical to two in {@code CuratorTest} down to the failure
-   * message — a fact about every shipped definition, written twice and covering two of the three.
-   * {@code AgentsConfigTest.no_shipped_agent_reaches_its_turn_cap_before_it_has_ spent_its_budget}
-   * walks the directory and owns it, and the argument for it lives there. (This sentence named a
-   * method no file defines, and wrote the inequality upside down, from the rename until
-   * 2026-09-04.)
+   * <p>{@code AgentsConfigTest} separately checks that shipped call allowances can cover their
+   * declared step caps.
    */
   @Test
   void the_reviewer_has_more_than_one_turn_to_read_and_then_report() {

@@ -512,6 +512,11 @@ public interface Transcript {
     return NONE;
   }
 
+  /** Reopens a retained child, never creates another delegation identity. */
+  default Transcript resumeDelegate(AgentDefinition callee, String child, int continuing) {
+    throw new UnsupportedOperationException("This transcript cannot restore a retained delegation");
+  }
+
   /**
    * A failed delegation's exact durable call and child. Only explicit continuation transcripts
    * expose these; ordinary turns never automatically retry a delegation.

@@ -542,10 +542,18 @@ export function renderApproval(
     el(
       'div',
       'approval-head',
-      `${textOf(view.agent) || 'the agent'} asks before running this command`,
+      view.budget === undefined
+        ? `${textOf(view.agent) || 'the agent'} asks before running this command`
+        : `${textOf(view.agent) || 'the agent'} asks to extend its budget and continue the same work`,
     ),
   );
-  const shown = el('pre', 'approval-command', command.join(' '));
+  const shown = el(
+    'pre',
+    'approval-command',
+    view.budget === undefined
+      ? command.join(' ')
+      : `${view.budget.calls} additional model calls; ${view.budget.steps} additional steps`,
+  );
   shown.dataset['approvalCommand'] = '';
   block.appendChild(shown);
   block.appendChild(detail('side', textOf(view.side)));
@@ -562,6 +570,8 @@ export function renderApproval(
   const actions = el('div', 'approval-actions');
   const buttons: HTMLButtonElement[] = [];
   for (const [decision, words] of DECISIONS) {
+    if (view.budget !== undefined && decision !== 'once' && decision !== 'deny')
+      continue;
     const control = document.createElement('button');
     control.type = 'button';
     control.textContent = words;

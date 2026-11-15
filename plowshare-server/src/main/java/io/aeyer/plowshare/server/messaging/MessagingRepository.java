@@ -172,6 +172,11 @@ public interface MessagingRepository {
 
   void awaiting(String message);
 
+  /** A retained budget question keeps this original request open across execution interruption. */
+  default boolean awaitingBudget(String message) {
+    return false;
+  }
+
   void endRequest(String message, Outcome.Ending ending);
 
   void deactivate(String id);

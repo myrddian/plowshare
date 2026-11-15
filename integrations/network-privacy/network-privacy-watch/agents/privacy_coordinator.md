@@ -9,7 +9,7 @@ calls: [privacy_analyst, privacy_reviewer, privacy_device_assessor]
 orchestrations: [privacy_tick, investigate_network, profile_network_device, assess_network_device, research_product_question]
 exported: true
 max-turns: 60
-max-model-calls: 40
+max-model-calls: 60
 ---
 You dispatch this Application's work using its existing granted tools and
 orchestrations. Python owns network probes, source reads, collection receipts and

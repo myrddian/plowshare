@@ -111,6 +111,19 @@ public final class ApprovalDelivery implements ApprovalNotifications {
    * of them in the reason — where it runs, and why.
    */
   public static String question(RunApproval approval) {
+    if (approval.budget() != null) {
+      return "Approve "
+          + approval.budget().calls()
+          + " additional model calls and "
+          + approval.budget().steps()
+          + " additional steps for '"
+          + approval.agent()
+          + "' to continue the same work? "
+          + Objects.requireNonNullElse(approval.reason(), "")
+          + " Answer once or deny. ["
+          + approval.id()
+          + "]";
+    }
     String what =
         approval.isSet()
             ? approval.commands().size() + " commands"

@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.ws;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.agents.BudgetRequests;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.LogStages;
@@ -9,6 +11,7 @@ import io.aeyer.plowshare.server.agents.Runs;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.approvals.BudgetExtension;
 import io.aeyer.plowshare.server.approvals.ConductorContinuation;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
@@ -33,6 +36,12 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class ApprovalFrames implements FrameArea {
+  private BudgetRequests budgetRequests = BudgetRequests.NONE;
+
+  @Autowired
+  public void useBudgetRequests(ObjectProvider<BudgetRequests> requests) {
+    budgetRequests = requests.getIfAvailable(() -> BudgetRequests.NONE);
+  }
 
   private static final Logger log = LoggerFactory.getLogger(ApprovalFrames.class);
 
@@ -151,7 +160,45 @@ public class ApprovalFrames implements FrameArea {
       Instant createdAt,
       Instant answeredAt,
       List<List<String>> commands,
-      String judged) {
+      String judged,
+      @JsonInclude(JsonInclude.Include.NON_NULL) BudgetExtension budget) {
+
+    public View(
+        String id,
+        String conversation,
+        String askedIn,
+        String agent,
+        String side,
+        List<String> command,
+        String cwd,
+        String reason,
+        String state,
+        String scope,
+        List<String> prefix,
+        List<String> defaultPrefix,
+        Instant createdAt,
+        Instant answeredAt,
+        List<List<String>> commands,
+        String judged) {
+      this(
+          id,
+          conversation,
+          askedIn,
+          agent,
+          side,
+          command,
+          cwd,
+          reason,
+          state,
+          scope,
+          prefix,
+          defaultPrefix,
+          createdAt,
+          answeredAt,
+          commands,
+          judged,
+          null);
+    }
 
     static View of(RunApproval a) {
       return new View(
@@ -170,7 +217,8 @@ public class ApprovalFrames implements FrameArea {
           a.createdAt(),
           a.answeredAt(),
           a.commands(),
-          a.judged());
+          a.judged(),
+          a.budget());
     }
   }
 
@@ -281,6 +329,24 @@ public class ApprovalFrames implements FrameArea {
           "An approval reason must be nonblank text of at most 4000 characters, and is only valid for deny.");
     }
     boolean answered;
+    if (approval.budget() != null) {
+      if (!deny && !RunApproval.ONCE.equals(body.decision()) || body.prefix() != null)
+        throw new CallerFault(
+            "A budget extension takes once or deny; it cannot create standing command permission.");
+      var decision =
+          budgetRequests
+              .answer(approval, !deny, by, body.reason())
+              .orElseThrow(
+                  () ->
+                      new CallerFault("Budget continuation is unavailable; nothing was granted."));
+      toldApprovalPost(
+          approval,
+          deny ? ApprovalAnswer.DENY : ApprovalAnswer.ALLOW,
+          deny ? null : RunApproval.ONCE);
+      delivery.settled(approval.id());
+      return Outcome.ok(
+          new Answered(approval.id(), decision.state(), null, decision.live(), decision.note()));
+    }
     if (deny) {
       answered =
           body.reason() == null
@@ -465,7 +531,8 @@ public class ApprovalFrames implements FrameArea {
         approval.deliveredAt(),
         approval.createdAt(),
         approval.commands(),
-        approval.judged());
+        approval.judged(),
+        approval.budget());
   }
 
   /**

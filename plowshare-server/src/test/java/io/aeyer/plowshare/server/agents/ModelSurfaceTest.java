@@ -124,9 +124,9 @@ class ModelSurfaceTest {
    * The task each rendering is run with.
    *
    * <p>Deliberately not a plausible one. Only its <em>position</em> is a claim this file makes —
-   * {@link JobRuntime} puts the utterance being answered last, where a model looks for what it is
-   * being asked — and a realistic sentence sitting in a pinned file invites a reader to take it for
-   * something an agent is really sent.
+   * {@link JobRuntime} puts the utterance after retained history and before runtime notices, and a
+   * realistic sentence sitting in a pinned file invites a reader to take it for something an agent
+   * is really sent.
    */
   private static final String TASK = "<the task this run was given>";
 
@@ -481,8 +481,8 @@ class ModelSurfaceTest {
                 # agent through JobRuntime; see ModelSurfaceTest for how, and for how to
                 # regenerate this file when the change is meant.
                 #
-                # The user message is the placeholder that rendering was run with. Only
-                # its position is a claim.
+                # The task is a placeholder. This fixture has a one-call allowance to
+                # capture only the opening request; its allowance notice reflects that fixture.
 
                 """
         .formatted(agent);

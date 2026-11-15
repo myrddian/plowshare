@@ -1,3 +1,5 @@
+import type { BudgetExtension } from '../../../sdk/typescript/src/operations/administrative-replies.ts';
+
 /**
  * The shapes this server sends, written down once.
  *
@@ -297,6 +299,7 @@ export function asJobEvent(frame: unknown): JobEventFrame | null {
  * first argument, the server's suggestion and not a rule.
  */
 export interface ApprovalView {
+  readonly budget?: BudgetExtension;
   readonly id: string;
   readonly conversation: string;
   readonly agent: string;

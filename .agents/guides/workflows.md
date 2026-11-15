@@ -50,6 +50,16 @@ Current human Managers are resolved for attention copies; the registrar/executor
 is not an implicit recipient. Project Viewers can inspect shared output, Managers
 acknowledge it, and neither publication grants access to private execution logs.
 
+## Agent budget approvals
+
+Budget requests are a typed optional variant of the existing approval record.
+`approval.list` displays exact additional calls/steps; `approval.answer` accepts
+`once` or `deny`. Approval atomically adds to the canonical allowance once;
+command prefixes and standing conversation/project grants cannot approve it.
+The original execution owner continues the retained stack after approval,
+including after exhaustion. Consent grants budget, never additional tool or
+resource authority. See [ADR 0073](../../docs/decisions/0073-agent-budget-consent-and-continuation.md).
+
 ## Bounded work
 
 Required contract: active start/control/stage/occurrence work needs configured

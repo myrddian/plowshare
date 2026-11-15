@@ -38,7 +38,52 @@ public record RunApproval(
     Instant deliveredAt,
     Instant createdAt,
     List<List<String>> commands,
-    String judged) {
+    String judged,
+    BudgetExtension budget) {
+
+  /** Command approvals retain their existing construction and wire shape. */
+  public RunApproval(
+      String id,
+      long projectId,
+      String conversation,
+      String askedIn,
+      String handle,
+      String agent,
+      String side,
+      List<String> argv,
+      String cwd,
+      String reason,
+      String state,
+      String scope,
+      List<String> prefix,
+      String answeredBy,
+      Instant answeredAt,
+      Instant deliveredAt,
+      Instant createdAt,
+      List<List<String>> commands,
+      String judged) {
+    this(
+        id,
+        projectId,
+        conversation,
+        askedIn,
+        handle,
+        agent,
+        side,
+        argv,
+        cwd,
+        reason,
+        state,
+        scope,
+        prefix,
+        answeredBy,
+        answeredAt,
+        deliveredAt,
+        createdAt,
+        commands,
+        judged,
+        null);
+  }
 
   /** An approval of one command, never judged: every approval before V67. */
   public RunApproval(
@@ -229,6 +274,17 @@ public record RunApproval(
   }
 
   public RunApproval {
+    if (budget != null
+        && (handle == null
+            || handle.isBlank()
+            || argv == null
+            || !argv.isEmpty()
+            || commands != null
+            || prefix != null
+            || scope != null && !ONCE.equals(scope)))
+      throw new IllegalArgumentException(
+          "Budget consent is an owned one-time extension, never command permission");
+
     Objects.requireNonNull(id, "id");
     Objects.requireNonNull(conversation, "conversation");
     Objects.requireNonNull(askedIn, "askedIn");
@@ -245,7 +301,7 @@ public record RunApproval(
 
   /** Every command it covers: the set's, or its one. */
   public List<List<String>> covered() {
-    return commands != null ? commands : List.of(argv);
+    return budget != null ? List.of() : commands != null ? commands : List.of(argv);
   }
 
   /**

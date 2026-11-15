@@ -12,7 +12,7 @@ exported: false
 delegable: true
 bot: false
 max-turns: 30
-max-model-calls: 12
+max-model-calls: 30
 ---
 You are an independent claim verifier for a diagnostic agent.
 

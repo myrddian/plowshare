@@ -220,6 +220,21 @@ public final class AgentRunTool implements AgentTool {
   }
 
   private final JobRuntime runtime;
+  private BudgetCheckpoint.Frame retainedChild;
+
+  /** Uses the original call and conversation after a budget decision, with current grant checks. */
+  String resumeExisting(BudgetCheckpoint.Frame frame, ToolCall opening, Home home) {
+    if (retainedChild != null || retrying != null)
+      throw new IllegalStateException("Delegation recovery is already active");
+    retainedChild = frame;
+    try {
+      calledAs(opening.id());
+      return run(opening.arguments(), home);
+    } finally {
+      retainedChild = null;
+    }
+  }
+
   private final AgentDefinition caller;
   private final Budget budget;
   private final BooleanSupplier cancelled;
@@ -293,6 +308,9 @@ public final class AgentRunTool implements AgentTool {
   record RetriedDelegation(ToolCall call, String result, int modelCalls) {}
 
   Optional<RetriedDelegation> retryInterruptedDelegation(Home home) {
+    if (retainedChild != null || retrying != null) {
+      throw new IllegalStateException("Delegation recovery is already active");
+    }
     Optional<Transcript.DelegationRetry> pending = transcript.pendingDelegationRetry();
     if (pending.isEmpty()) return Optional.empty();
     Transcript.DelegationRetry retry = pending.orElseThrow();
@@ -629,7 +647,12 @@ public final class AgentRunTool implements AgentTool {
           + callee.name()
           + "', whose workspace grants exceed the caller's; delegation is refused";
     }
-    if (conversation != null) {
+    if (retainedChild != null
+        && conversation != null
+        && !conversation.equals(retainedChild.conversation())) {
+      throw new IllegalStateException("The budget checkpoint cannot replace its retained child");
+    }
+    if (conversation != null && retainedChild == null) {
       try {
         retrying = transcript.retainedDelegationRetry(conversation, callee, home);
       } catch (IllegalStateException refused) {
@@ -745,9 +768,28 @@ public final class AgentRunTool implements AgentTool {
     // authority-bound runtime requires its own durable child link and refuses before
     // model execution if opening that log failed.
     runtime.requireChild(operation, callee, home);
+    if (retainedChild != null && retrying != null) {
+      throw new IllegalStateException("A delegation cannot restore two different checkpoints");
+    }
+    if (retainedChild != null && !retainedChild.agent().equals(callee.name())) {
+      throw new IllegalStateException("The retained callee cannot be replaced");
+    }
+    boolean restoringChild = retainedChild != null || retrying != null;
+    Transcript child =
+        retainedChild != null
+            ? transcript.resumeDelegate(callee, retainedChild.conversation(), retainedChild.turn())
+            : retrying != null
+                ? transcript.resumeDelegation(retrying, callee)
+                : transcript.delegate(callee, home, openedBy);
+    var childOperation =
+        !restoringChild
+            ? runtime.childOperation(
+                operation, transcript.conversationId(), child, callee, home, budget)
+            : runtime.restoredChildOperation(
+                operation, transcript.conversationId(), child, callee, home, budget);
+    // Retained children keep their original capability/skill snapshot. The restored operation
+    // above rechecks its immutable envelope before either inference or cached-result disclosure.
     if (retrying != null && retrying.completedAnswer().isPresent()) {
-      // The child settled but the parent's durable receipt failed. Reconcile that known answer;
-      // neither another model call nor another execution of the child's tools is authorized.
       runtime.requireLogReadable(retrying.conversation(), callerHandle);
       returned = Outcome.Ending.ANSWERED;
       return render(
@@ -755,26 +797,21 @@ public final class AgentRunTool implements AgentTool {
           pictures,
           new Outcome(Outcome.Ending.ANSWERED, retrying.completedAnswer().orElseThrow(), 0, 0, ""));
     }
-    Transcript child =
-        retrying == null
-            ? transcript.delegate(callee, home, openedBy)
-            : transcript.resumeDelegation(retrying, callee);
-    var childOperation =
-        runtime.childOperation(operation, transcript.conversationId(), child, callee, home, budget);
-    if (prepareChild != null) prepareChild.accept(child);
+    if (prepareChild != null && !restoringChild) prepareChild.accept(child);
     // The record's delegation lines (spec 2026-09-28 §2), on the caller's conversation: the
     // record follows the caller's run, and the child's own lines are its conversation's.
     // child.conversationId() names this specific delegation's own conversation (spec
     // 2026-09-29 §1a, fixed after review): two delegations to the same callee, live at once
     // in this run, each open a distinct one, and the facts footer reads that one back.
-    runtime
-        .activity()
-        .delegated(
-            transcript.conversationId(),
-            caller.name(),
-            callee.name(),
-            task,
-            child.conversationId());
+    if (!restoringChild)
+      runtime
+          .activity()
+          .delegated(
+              transcript.conversationId(),
+              caller.name(),
+              callee.name(),
+              task,
+              child.conversationId());
 
     // The full form, called directly and on this thread. Not
     // JobStore.submit: that builds a fresh Budget from the child's own

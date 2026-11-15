@@ -29,7 +29,7 @@ class MessageFailureStatusMigrationTest {
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     var jdbc = new JdbcTemplate(source);
     // Reproduce the two V93 CHECK clauses in their original declaration order. The V243 table
-    // rename preserves their generated names; V267 must replace the actual inherited constraint.
+    // rename preserves their generated names; V268 must replace the actual inherited constraint.
     jdbc.execute(
         """
         CREATE TABLE board_message_routes (
@@ -41,7 +41,7 @@ class MessageFailureStatusMigrationTest {
         ALTER TABLE board_message_routes RENAME TO message_routes;
         """);
     jdbc.execute(
-        new ClassPathResource("db/migration/V267__message_failure_status_notices.sql")
+        new ClassPathResource("db/migration/V268__message_failure_status_notices.sql")
             .getContentAsString(StandardCharsets.UTF_8));
     jdbc.update("INSERT INTO message_routes VALUES ('request',NULL,false,false,false,NULL)");
     jdbc.update("INSERT INTO message_routes VALUES ('explicit','request',false,true,false,NULL)");

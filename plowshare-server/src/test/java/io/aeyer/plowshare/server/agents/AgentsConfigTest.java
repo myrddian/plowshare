@@ -523,78 +523,30 @@ class AgentsConfigTest {
                 assertSame(CallValidator.NONE, context.getBean(JobRuntime.class).validator()));
   }
 
-  /**
-   * No shipped agent's turn cap is the thing that stops a run on its own allowance.
-   *
-   * <p><b>This assertion is the inverse of the one it replaces, and the inversion is the change
-   * rather than an accident of it.</b> It used to read {@code maxModelCalls >= maxTurns}, argued
-   * this way: {@code JobRuntime}'s loop checks {@code turns >= maxTurns} <em>before</em> it spends,
-   * so a run ending at its cap has made exactly {@code maxTurns} calls, and a smaller budget was a
-   * number the file asserted and the runtime disproved. Every word of that mechanism is still true.
-   * What changed is which of the two is <em>supposed</em> to bind.
-   *
-   * <p>Both looping agents shipped with the two numbers equal, so {@code TURN_CAP} and {@code
-   * CALL_BUDGET} fired at the same moment for the same run — while {@code Outcome} argued they were
-   * distinct because the fix differs, one being an agent that needs more room and the other a tree
-   * spending more than it was given. True in principle and indistinguishable in practice. The turn
-   * cap is now a runaway guard above the budget, so what this holds is that <b>a run started on an
-   * agent's own allowance is bounded by cost and never by count</b>: it cannot reach its cap
-   * without first spending everything it was given. A definition that broke this would have a
-   * backstop that is really its binding constraint, which is the fault the whole slice was written
-   * against.
-   *
-   * <p>Equality still satisfies it, and two shipped definitions still have it: {@code
-   * promotion_judge.md} and {@code scribe.md} are not looping agents — four turns and one — and
-   * their own comments argue those numbers. What equality means for them is that the two bounds
-   * coincide, which is honest for a run that ends in two turns; it is only misleading for an agent
-   * whose cap is meant to be a backstop.
-   *
-   * <p><b>The history is why it is worth a test at all.</b> {@code promotion_judge.md} shipped with
-   * {@code max-model-calls: 3} against a cap of 4, contradicted by {@code
-   * CuratorTest.a_judge_that_hits_its_turn_cap_leaves_one_candidate_undecided} — a passing test in
-   * the same commit. Its numbers are inert for a curator pass, where a shared {@code Budget}
-   * governs and this one is never read; this is what keeps the file honest anyway.
-   *
-   * <p><b>One owner, walking the directory.</b> The assertion once stood in two places — {@code
-   * CuratorTest} and {@code CodeReviewerDefinitionTest} — with the same message word for word, each
-   * reading one definition, which left {@code scribe.md} covered by neither. Walking every
-   * definition the boot loaded covers all of them and holds the next one for free.
-   *
-   * <p><b>Deliberately not a rule in the loader</b>, and that was checked rather than assumed:
-   * {@code src/test/resources/agents/frugal.md} declares {@code max-turns: 5} with {@code
-   * max-model-calls: 1} and {@code spendthrift.md} 10 against 2, both on purpose — and both are now
-   * the shape this test asks the shipped set for rather than the shape it used to forbid. It is a
-   * property of what <em>this repository ships</em>, which is a test's job and not a parser's.
-   */
+  /** Shipped defaults must allow every declared step; explicit runtime limits may be smaller. */
   @Test
-  void no_shipped_agent_reaches_its_turn_cap_before_it_has_spent_its_budget() {
+  void every_shipped_agent_has_enough_model_calls_for_its_declared_steps() {
     runner()
         .run(
             context -> {
               AgentRegistry shipped = context.getBean(AgentRegistry.class);
-              // Walked over shippedNames() and not shipped.names(): the
-              // registry now always layers the classpath seed, which in
-              // this module's own test JVM aggregates
-              // src/test/resources/agents too, and frugal.md /
-              // spendthrift.md in there declare this exact violation on
-              // purpose -- see this method's own javadoc. Asserted
-              // non-empty rather than assumed, for trap 5's reason: a
-              // walk over an empty set passes without looking at
-              // anything.
-              Set<String> names = shippedNames();
+              // Read only the release bundle, including bots; test fixtures deliberately include
+              // tighter standalone budgets and are not release defaults.
+              Set<String> names =
+                  ShippedDefinitions.registry(BoundTools.boundByThisServer()).names();
               assertTrue(shipped.names().containsAll(names), shipped.names().toString());
               assertFalse(names.isEmpty());
               for (String name : names) {
                 AgentDefinition definition = shipped.get(name);
+                if (definition.nativeOnly()) continue;
                 assertTrue(
-                    definition.maxModelCalls() <= definition.maxTurns(),
+                    definition.maxModelCalls() >= definition.maxTurns(),
                     name
                         + " has max-model-calls "
                         + definition.maxModelCalls()
-                        + " above max-turns "
+                        + " below max-turns "
                         + definition.maxTurns()
-                        + ", so its turn cap is what stops a run on its own"
-                        + " allowance rather than its budget");
+                        + ", so it cannot use all of its declared steps on its own allowance");
               }
             });
   }
@@ -645,7 +597,7 @@ class AgentsConfigTest {
             context -> {
               AgentRegistry shipped = context.getBean(AgentRegistry.class);
               // Walked over shippedNames() and not shipped.names(), for
-              // no_shipped_agent_reaches_its_turn_cap_before_it_has_spent_its_budget's
+              // every_shipped_agent_has_enough_model_calls_for_its_declared_steps's
               // reason: the registry now always layers the classpath
               // seed, which aggregates src/test/resources/agents too in
               // this module's own test JVM. Asserted non-empty rather
@@ -843,45 +795,6 @@ class AgentsConfigTest {
                   "an agent with no sampling: key takes the middle of the"
                       + " vocabulary, and the middle is still a row in a"
                       + " profile");
-            });
-  }
-
-  /**
-   * And for the agents that loop, the two numbers are not the same number.
-   *
-   * <p>Separate from the walk above because it is a different claim about a smaller set. Equality
-   * passes that one and is exactly the state this slice exists to leave: a run in which {@code
-   * TURN_CAP} and {@code CALL_BUDGET} are one event with two names, so an operator reading either
-   * learns nothing about which fix to reach for. It is only meaningful for an agent whose cap is
-   * meant to be a backstop, which is why it names those three rather than walking the directory.
-   *
-   * <p><b>{@code librarian} is the third, and its cap is doing more work than the other two's.</b>
-   * What makes a hundred safe on those is {@code JobRuntime.Repeats}, which ends a run that keeps
-   * asking for one <em>identical</em> call. The librarian's runaway is a rephrase loop — {@code
-   * document_search}'s own empty answer invites one — and every call in it carries different
-   * arguments, so {@code Repeats} never sees it and the cap is the only thing that ends it. That is
-   * the reason its two numbers are twenty and twelve rather than a hundred and forty, and it is why
-   * the separation asserted here matters more for it than for either of the others.
-   */
-  @Test
-  void the_shipped_agents_that_loop_do_not_have_one_number_doing_both_jobs() {
-    // No directory property: see the_learner_is_wired_and_is_what_a_fold_tells.
-    runner()
-        .run(
-            context -> {
-              AgentRegistry shipped = context.getBean(AgentRegistry.class);
-              for (String name : List.of("interlocutor", "code_reviewer", "librarian")) {
-                AgentDefinition definition = shipped.get(name);
-                assertTrue(
-                    definition.maxTurns() > definition.maxModelCalls(),
-                    name
-                        + " caps turns at "
-                        + definition.maxTurns()
-                        + " and calls at "
-                        + definition.maxModelCalls()
-                        + ", so both endings fire at the same moment for the"
-                        + " same run");
-              }
             });
   }
 

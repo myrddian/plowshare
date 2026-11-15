@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { noticeApproval } from './approvals.ts';
+import { noticeApproval, installApprovalControls } from './approvals.ts';
 import { approvalWire } from '../wire-fixtures.ts';
 import type { DesktopState } from '../shared.ts';
 import { approvalsOf } from 'plowshare-client-ts/operations/client-views';
@@ -12,6 +12,30 @@ const approvals = approvalsOf({
   },
 })!;
 const state = { approvals } as DesktopState;
+
+await test('budget prompts show the grant and reason with only exact once/deny buttons', () => {
+  const host = { addEventListener() {} } as unknown as Document;
+  const controls = installApprovalControls(
+    host,
+    () => state,
+    async () => {
+      throw new Error('No click expected');
+    },
+    () => {},
+  );
+  const html = controls.prompt({
+    ...approvals[0]!,
+    command: [],
+    budget: { calls: 8, steps: 4 },
+    reason: '<review the evidence>',
+  });
+  assert.match(html, /8 additional model calls/);
+  assert.match(html, /4 additional steps/);
+  assert.match(html, /&lt;review the evidence&gt;/);
+  assert.match(html, /data-decision="once"/);
+  assert.match(html, /data-decision="deny"/);
+  assert.doesNotMatch(html, /data-decision="(?:conversation|project)"/);
+});
 
 await test('Inbox controls answer the server request identity even if notice prose mentions another approval', () => {
   assert.equal(

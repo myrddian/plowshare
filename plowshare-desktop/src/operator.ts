@@ -399,6 +399,13 @@ export class OperatorClient {
         break;
       case 'approval-grant': {
         const decision = String(input.decision);
+        const selected = view.data.approvals?.find(
+          (row) => row.id === input.id,
+        );
+        if (selected?.budget && decision !== 'once' && decision !== 'deny')
+          throw new Error(
+            'A budget extension accepts once or deny; it does not create standing command permission.',
+          );
         if (!['once', 'conversation', 'project', 'deny'].includes(decision))
           throw new Error('Choose an approval scope.');
         const prefix: unknown =
@@ -422,8 +429,9 @@ export class OperatorClient {
             ? { prefix }
             : {}),
         });
-        summary =
-          'Record this command decision. Allowing may continue the waiting job; project grants cover the reviewed argument prefix.';
+        summary = selected?.budget
+          ? `Record this budget decision for ${selected.budget.calls} additional model calls and ${selected.budget.steps} additional steps. Approval continues the same work and retains prior spending.`
+          : 'Record this command decision. Allowing may continue the waiting job; project grants cover the reviewed argument prefix.';
         break;
       }
       case 'approval-revoke':

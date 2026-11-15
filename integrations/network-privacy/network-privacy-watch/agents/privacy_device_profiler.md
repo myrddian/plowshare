@@ -4,7 +4,7 @@ description: Drafts device profiles from retained identification evidence and pu
 model: reasoning
 tools: [information_read]
 max-turns: 6
-max-model-calls: 4
+max-model-calls: 6
 ---
 You draft the six profile fields returned by profile_network_device. The
 collector supplies DATA with retained observations, an optional confirmed public

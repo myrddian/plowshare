@@ -28,6 +28,8 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.TurnRecord;
 import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
@@ -439,6 +441,160 @@ class ConversationRetryTest {
 
   private static Completion answer(String text) {
     return new Completion(text, "stop", TokenUsage.UNKNOWN, List.of());
+  }
+
+  @Test
+  void budget_checkpoint_after_a_failed_retry_keeps_the_original_task_execution_turn() {
+    try (Fixture f = new Fixture()) {
+      when(f.entries.thatProjectFor("child"))
+          .thenReturn(
+              List.of(
+                  entry("child", 1, 1, EntryKind.UTTERANCE, "Review", null, List.of()),
+                  entry(
+                      "child",
+                      2,
+                      1,
+                      EntryKind.ANSWER,
+                      "",
+                      null,
+                      List.of(new ToolCall("already-read", "file_read", "{}"))),
+                  entry(
+                      "child",
+                      3,
+                      1,
+                      EntryKind.TOOL_RESULT,
+                      "paid-before-retry",
+                      "already-read",
+                      List.of())));
+      UsageAttribution original =
+          UsageAttribution.global("alice", UsageAttribution.Operation.AGENT_CHAT)
+              .withExecution(
+                  UsageLineage.root("child"),
+                  UsageLineage.root("original-run"),
+                  UsageLineage.NONE,
+                  CHILD.name(),
+                  1L,
+                  1L);
+      Transcript retried =
+          new AttributedTranscript(
+              f.compaction.resumedTranscriptFor("child", CHILD, 2), original, original);
+      retried.before();
+      BudgetExecutionStack stack = new BudgetExecutionStack();
+      try (var running = stack.enter(CHILD, retried, TurnCap.of(5))) {
+        running.progress(1, List.of());
+        assertEquals(
+            1,
+            stack.snapshot().getFirst().turn(),
+            "budget recovery must retain work from the original task, not only the last failed segment");
+      }
+    }
+  }
+
+  @Test
+  void
+      budget_checkpoint_of_an_explicit_failed_child_retry_uses_the_checkpoint_and_retained_history() {
+    try (Fixture f = new Fixture()) {
+      when(f.turns.forConversation("child"))
+          .thenReturn(
+              List.of(
+                  stopped("child", 1, "old failure sentence", Outcome.Ending.UNAVAILABLE),
+                  stopped("child", 2, "budget approval pending", Outcome.Ending.AWAITING)));
+      when(f.entries.thatProjectFor("child"))
+          .thenReturn(
+              List.of(
+                  entry("child", 1, 1, EntryKind.UTTERANCE, "Review", null, List.of()),
+                  entry(
+                      "child",
+                      2,
+                      1,
+                      EntryKind.ANSWER,
+                      "",
+                      null,
+                      List.of(new ToolCall("already-read", "file_read", "{}"))),
+                  entry(
+                      "child",
+                      3,
+                      1,
+                      EntryKind.TOOL_RESULT,
+                      "paid-before-budget",
+                      "already-read",
+                      List.of()),
+                  entry("child", 4, 1, EntryKind.ANSWER, "old failure sentence", null, List.of()),
+                  entry("child", 5, 2, EntryKind.NOTICE, "Budget approved", null, List.of())));
+      List<ChatRequest> requests = new ArrayList<>();
+      when(f.dispatcher.stream(any(), any(), any()))
+          .thenAnswer(
+              invocation -> {
+                requests.add(invocation.getArgument(0));
+                return answer("review finished after budget grant");
+              });
+      Transcript parent =
+          new AttributedTranscript(
+              f.compaction.transcriptFor("parent", PARENT, Speaker.harness()),
+              UsageAttribution.LEGACY,
+              UsageAttribution.LEGACY);
+      AgentRunTool tool =
+          new AgentRunTool(
+              new AgentRegistry(Map.of(PARENT.name(), PARENT, CHILD.name(), CHILD)),
+              f.runtime(),
+              PARENT,
+              Budget.of(20),
+              () -> false,
+              "session",
+              parent,
+              List.of(),
+              ImageStore.NONE);
+      ToolCall opening =
+          new ToolCall(
+              "explicit-retry",
+              "agent_run",
+              "{\"agent\":\"reviewer\",\"task\":\"Review\",\"conversation\":\"child\"}");
+      String result =
+          tool.resumeExisting(
+              new BudgetCheckpoint.Frame("child", "reviewer", 1, 2, 5, List.of()), opening, HOME);
+
+      assertTrue(result.contains("review finished after budget grant"), result);
+      assertEquals(1, requests.size());
+      assertTrue(
+          requests.getFirst().messages().stream()
+              .anyMatch(message -> message.content().equals("paid-before-budget")));
+      assertFalse(
+          requests.getFirst().messages().stream()
+              .anyMatch(message -> message.content().equals("old failure sentence")));
+      verify(f.entries, never()).delegationCall(any(), any());
+      verify(f.conversations, never()).log(any(), any(), any(), any(), any(), any(), any());
+    }
+  }
+
+  @Test
+  void a_budget_checkpoint_rejects_a_different_explicit_child_selector() {
+    try (Fixture f = new Fixture()) {
+      AgentRunTool tool =
+          new AgentRunTool(
+              new AgentRegistry(Map.of(PARENT.name(), PARENT, CHILD.name(), CHILD)),
+              f.runtime(),
+              PARENT,
+              Budget.of(20),
+              () -> false,
+              "session",
+              f.compaction.transcriptFor("parent", PARENT, Speaker.harness()),
+              List.of(),
+              ImageStore.NONE);
+      ToolCall changed =
+          new ToolCall(
+              "explicit-retry",
+              "agent_run",
+              "{\"agent\":\"reviewer\",\"task\":\"Review\",\"conversation\":\"foreign-child\"}");
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              tool.resumeExisting(
+                  new BudgetCheckpoint.Frame("child", "reviewer", 1, 2, 5, List.of()),
+                  changed,
+                  HOME));
+      verify(f.dispatcher, never()).stream(any(), any(), any());
+      verify(f.conversations, never()).log(any(), any(), any(), any(), any(), any(), any());
+    }
   }
 
   private static JobWatch watch(List<JobDelta> previews) {

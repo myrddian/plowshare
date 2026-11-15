@@ -863,10 +863,13 @@ class DelegationTest {
 
     List<ChatMessage> child = transport.calls().get(1);
     assertEquals(
-        List.of(ChatMessage.Role.SYSTEM, ChatMessage.Role.USER),
+        List.of(ChatMessage.Role.SYSTEM, ChatMessage.Role.USER, ChatMessage.Role.USER),
         child.stream().map(ChatMessage::role).toList());
     assertEquals("count the sundials", child.get(1).content());
     assertEquals(agent("helper").prompt(), child.get(0).content());
+    assertTrue(
+        child.getLast().content().contains("99 of 100 remaining"),
+        "a child sees the shared allowance after its parent's spending");
   }
 
   /**
@@ -2208,7 +2211,7 @@ class DelegationTest {
                   if (heardBack) {
                     return answer("looker says a red square");
                   }
-                  String id = firstIdIn(messages.get(messages.size() - 1).content());
+                  String id = firstIdIn(messages.get(1).content());
                   return id == null
                       ? answer("I was never told what the picture I am looking at is called")
                       : asking(
@@ -2278,7 +2281,7 @@ class DelegationTest {
         List.of(red));
 
     List<ChatMessage> child = transport.calls().get(1);
-    ChatMessage utterance = child.get(child.size() - 1);
+    ChatMessage utterance = child.get(1);
     assertTrue(
         utterance.parts().contains(red),
         "the child was handed an id and not the picture behind it: " + utterance.parts());
@@ -2553,7 +2556,7 @@ class DelegationTest {
         List.of());
 
     List<ChatMessage> child = transport.calls().get(1);
-    ChatMessage utterance = child.get(child.size() - 1);
+    ChatMessage utterance = child.get(1);
     assertTrue(
         utterance.parts().contains(new Content.Image(uid, store.dataUri(atlas, uid))),
         "the child was not shown the picture its tier holds: " + utterance.parts());
@@ -2616,7 +2619,7 @@ class DelegationTest {
         List.of());
 
     List<ChatMessage> child = transport.calls().get(1);
-    ChatMessage utterance = child.get(child.size() - 1);
+    ChatMessage utterance = child.get(1);
     assertTrue(
         utterance.parts().contains(new Content.Image(uid, store.dataUri(atlas, uid))),
         "the child was not shown the picture the workspace holds: " + utterance.parts());
@@ -2845,7 +2848,7 @@ class DelegationTest {
         List.of(shown));
 
     List<ChatMessage> child = transport.calls().get(1);
-    ChatMessage utterance = child.get(child.size() - 1);
+    ChatMessage utterance = child.get(1);
     assertTrue(
         utterance.parts().contains(shown),
         "the id was resolved out of the store rather than out of what the run holds: "
@@ -3044,7 +3047,7 @@ class DelegationTest {
         List.of(picture('a')));
 
     List<ChatMessage> child = transport.calls().get(1);
-    ChatMessage utterance = child.get(child.size() - 1);
+    ChatMessage utterance = child.get(1);
     assertEquals(
         List.of(new Content.Text("what do you know")),
         utterance.parts(),

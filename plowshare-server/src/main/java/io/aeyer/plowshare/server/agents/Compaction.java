@@ -1773,11 +1773,15 @@ public final class Compaction implements SkillSummaries {
      */
     @Override
     public List<ChatMessage> before() {
+      turn.retainedAuthority.run();
       turn.turnOrdinal();
       // Continuing without the retained history can repeat effects or silently discard paid
       // work. Unlike a fresh conversation, a retry must fail closed when this read fails.
       List<TurnRecord> spoken = turns.forConversation(turn.conversationId);
-      retained = withoutLegacyFailureAnswers(entries.thatProjectFor(turn.conversationId), spoken);
+      retained =
+          withoutLegacyFailureAnswers(
+              ApprovalProjection.settledResults(entries.thatProjectFor(turn.conversationId)),
+              spoken);
       int openingTurn = continuationOpeningTurn();
       expectsFailedDelegate =
           spoken.stream()
@@ -1874,7 +1878,7 @@ public final class Compaction implements SkillSummaries {
     public Transcript resumeDelegation(DelegationRetry retry, AgentDefinition callee) {
       if (retry.agent().equals(callee.name())
           && pendingDelegationRetry().filter(retry::equals).isPresent()) {
-        return resumedTranscriptFor(retry.conversation(), callee, retry.continuingTurn());
+        return turn.failedDelegateTranscript(retry, callee);
       }
       return turn.resumeDelegation(retry, callee);
     }
@@ -2002,6 +2006,11 @@ public final class Compaction implements SkillSummaries {
     @Override
     public Transcript delegate(AgentDefinition callee, Home home, String openedBy) {
       return turn.delegate(callee, home, openedBy);
+    }
+
+    @Override
+    public Transcript resumeDelegate(AgentDefinition callee, String child, int continuing) {
+      return turn.resumeDelegate(callee, child, continuing);
     }
 
     /**
@@ -2151,7 +2160,28 @@ public final class Compaction implements SkillSummaries {
         throw new IllegalStateException(
             "The retained delegation was not validated for this parent");
       }
-      return resumedTranscriptFor(retry.conversation(), callee, retry.continuingTurn());
+      return failedDelegateTranscript(retry, callee);
+    }
+
+    private ResumedTranscript failedDelegateTranscript(
+        DelegationRetry retry, AgentDefinition callee) {
+      ResumedTranscript resumed =
+          resumedTranscriptFor(retry.conversation(), callee, retry.continuingTurn());
+      if (confined) resumed.turn.confine(retainedAuthority, retainedSubject);
+      return resumed;
+    }
+
+    private Integer budgetContinuing;
+
+    /** Keeps the original inference execution and its complete working across budget segments. */
+    public void continueBudget(int originalTurn) {
+      if (originalTurn < 1) throw new IllegalArgumentException("Original turn required");
+      budgetContinuing = originalTurn;
+    }
+
+    @Override
+    public Integer continuingTurn() {
+      return budgetContinuing;
     }
 
     private Runnable retainedAuthority = () -> {};
@@ -2484,6 +2514,22 @@ public final class Compaction implements SkillSummaries {
     public List<ChatMessage> before() {
       retainedAuthority.run();
       turnOrdinal();
+      if (budgetContinuing != null) {
+        // Budget recovery must fail closed if history is unavailable. Returning an empty context
+        // here would turn a continuation into a second attempt at the original task.
+        List<EntryRecord> log =
+            withoutLegacyFailureAnswers(
+                ApprovalProjection.settledResults(entries.thatProjectFor(conversationId)),
+                turns.forConversation(conversationId));
+        List<EntryRecord> earlier =
+            log.stream().filter(entry -> entry.turnOrdinal() < budgetContinuing).toList();
+        List<EntryRecord> working =
+            log.stream().filter(entry -> entry.turnOrdinal() >= budgetContinuing).toList();
+        List<EntryRecord> retained =
+            new ArrayList<>(whatWasSaidAndWhatCameBack(earlier, definition.canRedeem()));
+        retained.addAll(working);
+        return Projection.of(retained, definition.canList());
+      }
       try {
         List<TurnRecord> spoken = turns.forConversation(conversationId);
         // The pre-execution reservation is independent of completed history; another
@@ -3501,6 +3547,26 @@ public final class Compaction implements SkillSummaries {
           openedBy,
           null,
           causation);
+    }
+
+    @Override
+    public Transcript resumeDelegate(AgentDefinition callee, String child, int continuing) {
+      retainedAuthority.run();
+      if (conversations == null)
+        throw new IllegalStateException("Retained delegation storage required");
+      var saved =
+          conversations
+              .find(child)
+              .orElseThrow(() -> new IllegalStateException("The retained delegate is unavailable"));
+      if (saved.origin() != Origin.DELEGATION
+          || !conversationId.equals(saved.parentId())
+          || !callee.name().equals(saved.agent()))
+        throw new IllegalStateException("The retained delegation does not belong to this caller");
+      TurnTranscript resumed =
+          new TurnTranscript(child, callee, null, Speaker.harness(), Origin.DELEGATION, causation);
+      resumed.continueBudget(continuing);
+      if (confined) resumed.confine(retainedAuthority, retainedSubject);
+      return resumed;
     }
 
     /**

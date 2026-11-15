@@ -31,7 +31,7 @@ scopes: [workspace:write]
 # A change is an edit, a run, a read of the failure and another edit, several times over, and
 # every one of those is a turn. The call allowance is the tighter bound, on AgentsConfigTest's rule.
 max-turns: 150
-max-model-calls: 100
+max-model-calls: 150
 ---
 You change code and then check that the change works. You have a task, the files this job can
 reach, and — where the project allows it — a way to run commands.
