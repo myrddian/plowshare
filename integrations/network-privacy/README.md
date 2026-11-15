@@ -17,7 +17,7 @@ where the operator has configured network access. No shared host or filesystem i
 assumed, and no Java code is required to run the collector.
 
 ```text
-Plowshare project schedule ── schedule.due ─┐
+Plowshare project schedule ── SCHEDULE_DUE ─┐
                                           ├─ SDK egress → Python collection
 Python web UI ── SDK ingress → scan request ┘                  │
                                                              ↓
@@ -451,8 +451,11 @@ intent and reconcile it first. The script never reconnects or replays mutations.
    and [`server/ports.json`](network-privacy-watch/server/ports.json) inherit it.
    Its owning service handle needs the manifest grant and project membership. These
    declarations deploy with the Application; no global server edit or restart
-   is needed. The collector receives EGRESS on `schedule.due` and the request
-   topic, and INGRESS on requests/completions. It initiates an authenticated
+   is needed. The collector receives EGRESS on the discovered project schedule
+   stream and the request topic, and INGRESS on requests/completions. Replace the
+   legacy `schedule.due` port-template entry with the actual project-scoped
+   `relay.topics` result whose kind is `SCHEDULE_DUE`. Keep its EGRESS direction
+   and the collector's exact group; do not grant schedule INGRESS. It initiates an authenticated
    outbound WebSocket to the explicit Plowshare origin. Explicit provider scope assignments
    validate the coordinator before Python starts; the provider publishes and
    renews its live catalogue while serving.
@@ -474,9 +477,14 @@ intent and reconcile it first. The script never reconnects or replays mutations.
 
 The native schedule action is `privacy_tick`, a deterministic JavaScript
 orchestration that records occurrence availability without calling a model.
-Python independently consumes that exact schedule from the project's
-`schedule.due` stream. Other schedules are ignored. Legacy global schedules are
-not used: SDK ports do not expose system scope.
+Python discovers project streams by their `SCHEDULE_DUE` kind through the public
+SDK; their names are opaque and are not derived by the adapter. Each occurrence
+must still name the exact configured schedule. Other schedules are ignored.
+New schedule consumer groups start at `LATEST`, admitting future occurrences
+without backfilling missed historical scans. Existing groups retain their cursor
+and gap checks. Manual requests continue from `OLDEST_RETAINED` with their
+original identities. Legacy global schedules are not used: SDK ports do not
+expose system scope.
 
 Application-owned background output does not require an `inbox` manifest upgrade.
 Older installations retain both successful `privacy_tick` receipts in the application's

@@ -143,7 +143,7 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
             receipts = MemoryReceipts()
             collector = NetworkCollector("fixture", PLAN)
             clock = 0
-            delays = iter([120.0, 300.0, 180.0])
+            delays = iter([300.0, 180.0, 120.0])
             watch = PresenceWatch(
                 PresenceHistory(root),
                 monotonic=lambda: float(clock),
@@ -155,18 +155,20 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
                 collector, "collect_presence", new_callable=AsyncMock
             ) as sample:
                 sample.side_effect = [
-                    PresenceSample(at(120), (Sighting(A),)),
+                    PresenceSample(at(0), (Sighting(A),)),
                     OSError(errno.ENETUNREACH, "fixture"),
+                    PresenceSample(at(610), (Sighting(A),)),
                 ]
                 await worker.poll_presence()
-                clock = 119
-                await worker.poll_presence()
                 sample.assert_not_awaited()
-                clock = 120
+                self.assertEqual(watch.wait_seconds(), 0)
                 await worker.poll_presence()
-                self.assertEqual(watch.due, 420)
+                self.assertEqual(watch.due, 300)
                 self.assertEqual(worker.presence_view().checks, 1)
-                clock = 420
+                clock = 299
+                await worker.poll_presence()
+                self.assertEqual(sample.await_count, 1)
+                clock = 300
                 await worker.poll_presence()
                 self.assertEqual(worker.presence_view().checks, 1)
                 self.assertIn("excluded", watch.issues[0])
@@ -177,6 +179,16 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
                 await worker.poll_presence()
                 self.assertIsNone(watch.due)
                 self.assertEqual(sample.await_count, 2)
+                # Recovery/re-enabling records a fresh baseline promptly, without
+                # a full jitter delay or replaying a publication.
+                worker.config = config
+                await worker.poll_presence()
+                self.assertEqual(watch.wait_seconds(), 0)
+                await worker.poll_presence()
+                self.assertEqual(
+                    worker.presence_view().checked_at, at(610).replace("+00:00", "Z")
+                )
+                self.assertEqual(watch.due, 730)
             self.assertEqual(port.published, [])
             self.assertEqual(port.uploads, 0)
             self.assertEqual(receipts.all(), ())

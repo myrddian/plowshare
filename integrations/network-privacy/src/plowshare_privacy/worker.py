@@ -104,8 +104,8 @@ class Worker:
             await self._drain()
             self.operation = "relay.topics"
             available = await self.port.available_topics()
-            for topic in ("schedule.due", self.config.request_topic):
-                if topic not in available:
+            for topic in (*sorted(available.schedules), self.config.request_topic):
+                if topic not in available.names:
                     # Topics appear on first publication. A paused schedule and an
                     # unused request channel must not prevent other registered intake.
                     # No missing topic is consumed, acknowledged or considered complete.
@@ -126,7 +126,7 @@ class Worker:
                 ):
                     raise ValueError("Foreign batch")
                 for event in batch.events:
-                    if topic == "schedule.due":
+                    if topic in available.schedules:
                         if (
                             event.payload.kind != "SCHEDULE_DUE"
                             or event.payload.schedule != self.config.schedule
@@ -171,7 +171,7 @@ class Worker:
             await self._drain()
             self.detail = (
                 "Ready for dashboard scans. Scheduled intake is waiting for its first event."
-                if "schedule.due" not in available
+                if not available.schedules
                 else "Waiting for scheduled or requested collection."
             )
 
