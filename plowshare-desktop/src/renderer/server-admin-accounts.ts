@@ -5,7 +5,12 @@ export type AccountToggle = 'enabled' | 'serverAdmin' | 'projectCreator';
 
 /** One-line status shown for the selected account. */
 export function accountStatus(account: ServerAccount): string {
-  return `${account.enabled ? 'Enabled' : 'Disabled'} · ${account.serverAdmin ? 'Server administrator' : 'Regular user'} · ${account.projectCreator ? 'May create projects' : 'Cannot create projects'}${account.mustChangePassword ? ' · Password change required' : ''}`;
+  const creation = account.projectCreator
+    ? account.enabled
+      ? 'May create projects'
+      : 'Project creator role held; creation blocked while disabled'
+    : 'Cannot create projects';
+  return `${account.enabled ? 'Enabled' : 'Disabled'} · ${account.serverAdmin ? 'Server administrator' : 'Regular user'} · ${creation}${account.mustChangePassword ? ' · Password change required' : ''}`;
 }
 
 /** Label of the button that flips the project creator role. */

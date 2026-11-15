@@ -13,10 +13,14 @@ import io.aeyer.plowshare.server.auth.AuthProperties;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.session.*;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.socket.*;
 
@@ -94,6 +98,41 @@ class ProjectMembershipTest {
     assertEquals("this account may not root 'ledger'", status.getValue().getReason());
     assertTrue(presences.serving("ledger").isEmpty());
     verifyNoInteractions(roots);
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        " ledger",
+        "ledger ",
+        "\tledger",
+        "ledger\t",
+        "\u2003ledger",
+        "ledger\u2003",
+        "\u0001ledger",
+        "ledger\u0001"
+      })
+  void edge_whitespace_is_refused_before_any_project_lookup_or_creation(String project)
+      throws Exception {
+    var socket = socket("desk", "carol");
+    when(socket.getUri())
+        .thenReturn(
+            URI.create(
+                "ws://localhost/v1/files?session=desk&project="
+                    + URLEncoder.encode(project, StandardCharsets.UTF_8)
+                    + "&machine=new-machine&root=/repo&ready=1"));
+
+    channel.afterConnectionEstablished(socket);
+
+    ArgumentCaptor<CloseStatus> status = ArgumentCaptor.forClass(CloseStatus.class);
+    verify(socket).close(status.capture());
+    assertEquals(1003, status.getValue().getCode());
+    assertEquals(
+        "Project names must not start or end with whitespace", status.getValue().getReason());
+    verifyNoInteractions(members, roots, creation, registry);
+    verify(socket, never()).sendMessage(any());
+    assertTrue(presences.serving("ledger").isEmpty());
+    assertFalse(channel.isConnected("desk"));
   }
 
   @Test

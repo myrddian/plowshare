@@ -189,6 +189,17 @@ val pnpmBuild by tasks.registering(Exec::class) {
 
     // Imported TUI logic resolves the shared client through the TUI dependency links.
     dependsOn(pnpmInstall, ":plowshare-client-ts:clientBuild", ":plowshare-tui:pnpmInstall")
+    // Console imports the Desktop native MCP renderer, whose package links and declarations
+    // must exist before tsc starts even on a clean checkout.
+    dependsOn(":plowshare-desktop:pnpmInstall", ":plowshare-mcp-integration:mcpIntegrationBuild")
+    inputs.file(rootProject.file("plowshare-desktop/src/renderer/native-mcp.ts"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(rootProject.file("plowshare-desktop/package.json"), rootProject.file("integrations/mcp/package.json"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("integrations/mcp/src"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("sdk/node/src"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("sdk/typescript/build/operations"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("plowshare-tui/src/logic"))
