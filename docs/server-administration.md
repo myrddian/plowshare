@@ -998,6 +998,23 @@ Regular users can query their permitted project/conversation statistics; foreign
 resources remain refused. Pricing is an operator estimate, not a provider invoice.
 Local reference comparisons are separate from server prices and booked costs.
 
+For self-hosted inference whose booked provider cost should be zero, select
+`ZERO_RATE` explicitly instead of leaving the price missing. Copy the served
+route, exact model and current version from `admin pricing list`:
+
+```sh
+plowshare-cli admin pricing set '{"billingRoute":"local","model":"local-model","expectedVersion":"boot:","mode":"ZERO_RATE","currency":"USD","source":"operator-local-zero"}' --json
+```
+
+This illustrative route/model must be replaced with the values from your server.
+Omit rates, tiers and request fees in this mode. New admissions book an explicit
+currency amount of `0`, independently of whether the provider reports a cache
+split. It does not mean hardware or electricity are free. Existing calls and
+retries keep their original immutable price snapshots; historical missing prices
+remain unknown. Token coverage, cache measurements and cost completeness are
+separate: a price change does not create missing token measurements or rewrite
+recorded history.
+
 
 ## Live configuration authorization
 

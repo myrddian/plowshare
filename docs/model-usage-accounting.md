@@ -8,7 +8,7 @@ Durable token accounting is enabled by default. Apply all Flyway migrations ship
 
 Every enabled inference request needs explicit server-resolved ownership. New legacy-unattributed requests fail before contacting the model. Runtime calls retain their account, stable project ID, conversation and run ancestry, actual agent, turn and step. Folds, validators, advisors, learning, digestion, navigation, scheduling, corpus summaries and embedding write/query/repair paths carry explicit operations. Background maintenance without a human requester uses a system bucket. Shared corpus work has global scope; a document query made by an agent keeps the requesting execution's project scope.
 
-Source deletion does not cascade into accounting. The original account can inspect retained conversation/run history after source deletion. Current source ownership and project membership continue to control access while those rows exist. Project members can read project totals, including other members' work in that project. Conversation/run/orchestration detail additionally checks account ownership. Server administrator status is explicit, rather than implied by login. The current `usage.pools` implementation still exposes its fleet report to authenticated accounts; it does not check that separate administrator role. Other report types filter to accessible work even if the payload asserts `admin` or a different `account`.
+Source deletion does not cascade into accounting. The original account can inspect retained conversation/run history after source deletion. Current source ownership and project membership continue to control access while those rows exist. Project members can read project totals, including other members' work in that project. Conversation/run/orchestration detail additionally checks account ownership. Server administrator status is explicit, rather than implied by login. The fleet `usage.pools` report requires an enabled human server administrator, and subscriptions recheck that authority. Other report types filter to accessible work even if the payload asserts `admin` or a different `account`.
 
 ## Accounting and prices
 
@@ -42,6 +42,15 @@ No account provisioning or schema migration is required.
 Calls and upstream attempts are different units. A retry adds an attempt to the same call; an earlier attempt with missing usage remains unknown after a successful retry. Project totals sum atomic attempts once. A conversation/run/orchestration subtree uses captured ancestor IDs rather than adding already inclusive reports.
 
 Input, output, provider total, cache read/write and reasoning observations remain independently nullable. Cache and reasoning are subsets, not extra tokens to add to the provider total. Reports return known subtotals, known-field counts and incomplete-attempt counts. All cumulative quantities and monetary amounts are decimal strings. Money is separated by currency, and estimates are not invoices.
+
+The text usage view and shared console/desktop panel expose provider total, cache
+read/write and reasoning tokens with the number of attempts that reported each
+field. Missing measurements show **Not reported**; an explicit provider zero shows
+**0**. The **Token cache hit rate** is cache-read tokens divided by input tokens,
+weighted by tokens rather than requests. It is available only when every attempt
+has valid, complete input and cache-read measurements and no work is active. A
+partial cache subtotal cannot be divided by the full input total. Empty input has
+no applicable rate, and unknown pricing does not hide valid token measurements.
 
 Configure prices under the top-level `plowshare.llm.pricing` map. `billing-route` defaults to the pool name; price lookup uses that route and the exact wire model, including Azure deployment aliases. `model-families` controls capabilities independently. Supported modes are `token`, `included`, `zero_rate` and `unpriced`; missing rates stay unknown. Token rates are per million. Cache read/write rates, input-size tiers and optional per-attempt request fees are supported. Prices are immutable admission snapshots. Editing boot configuration affects a rebuilt accounting catalog/new admissions, never booked history. Administrators can also view and change durable route/model overrides through `admin pricing list` and `admin pricing set` in the CLI/TUI or **Server administration → Pricing** in the desktop GUI. Overrides take precedence immediately for future admissions and persist across restarts; already admitted calls, retries and booked history retain their price snapshots. See [pricing administration](server-administration.md#model-pricing-and-usage-statistics).
 

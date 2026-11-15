@@ -236,19 +236,19 @@ this branch moved the checked-authority SQL, byte-for-byte, to V264. Ordinary
 canonical databases apply V261–V263 before V264; the historical BETA trial above
 still refers to the original source and its experimental V261 history.
 
-The existing BETA database is on that divergent history and must not be upgraded
-with the merged artifact directly. Its V261 description/checksum will conflict
+At merge time, the BETA database was on that divergent history and could not be
+upgraded with the merged artifact directly. Its V261 description/checksum conflicted
 with canonical V261. Renumbering the source does not reconcile an already-applied
 migration. No BETA schema, Flyway history or runtime setting was changed during
 this merge.
 
-Before a further BETA upgrade, take a new backup and rehearse reconciliation on a
-restored copy. Verify the exact existing function definitions and migration
-checksum, preserve a receipt of the original history, and choose an explicit
-operator-reviewed transition that applies canonical V261–V263 and accounts for
-the already-installed checked functions at V264. Validate Flyway history and
-exercise both checked and SQL-fallback paths on that restored copy before any
-live cutover. A generic Flyway repair, skipping migrations, disabling validation
+The subsequent BETA upgrade required a new backup and reconciliation rehearsal on
+a restored copy. That procedure verified the exact existing function definitions
+and migration checksum, preserved a receipt of the original history, and used an
+explicit operator-reviewed transition to apply canonical V261–V263 while
+accounting for the already-installed checked functions at V264. It validated
+Flyway history and exercised both checked and SQL-fallback paths on the restored
+copy before the live cutover. A generic Flyway repair, skipping migrations, disabling validation
 or rewriting history without that rehearsal is not a supported upgrade path.
 
 G passed review: the Java implementer reviewed the merged composition and grant
@@ -267,3 +267,10 @@ checked-authority, authority-snapshot differential, scoped grant persistence,
 role-exercised issuance, person-grant re-rooting and project-creator schema classes.
 That run also passed formatting checks. No BETA reconciliation or deployment was
 performed as part of G.
+
+The subsequent reviewed rollout reconciled BETA's experimental history to V264
+and applied the unchanged canonical V261–V263 migrations after a restored-copy
+rehearsal. Production applied canonical V260–V264 normally. Both deployments
+were validated on the same final source at schema V264 with confirmation enabled;
+configuration was preserved and the configured CLI passed functional and model
+usage checks. The divergent BETA history above is historical, not current state.
