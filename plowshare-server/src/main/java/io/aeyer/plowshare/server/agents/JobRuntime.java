@@ -2700,7 +2700,8 @@ public final class JobRuntime {
                 sessionId,
                 owner,
                 end,
-                offered);
+                offered,
+                operation);
     if (bound != null && bound.refusal() != null) {
       transcript.record(LoggedEntry.utterance(userPrompt, transcript.speaker()));
       transcript.record(LoggedEntry.notice(bound.refusal()));
@@ -5086,8 +5087,14 @@ public final class JobRuntime {
     if (skills != null) {
       for (AgentTool tool :
           skills.forRun(
-              definition, transcript, budget, cancelled, sessionId, callerHandle, extras.end()))
-        offered.putIfAbsent(tool.schema().name(), tool);
+              definition,
+              transcript,
+              budget,
+              cancelled,
+              sessionId,
+              callerHandle,
+              extras.end(),
+              operation)) offered.putIfAbsent(tool.schema().name(), tool);
     }
     if (extras.keepsTodos() && todos != null) {
       offered.putIfAbsent(TodoTools.READ_NAME, new TodoTools.Read(todos, transcript));

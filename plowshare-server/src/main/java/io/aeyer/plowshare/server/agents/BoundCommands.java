@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.agents;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -67,6 +68,7 @@ public final class BoundCommands {
     private final String account;
     private final TurnEnd end;
     private final Map<String, AgentTool> offered;
+    private final OperationAuthority.Admission operation;
     private final Map<UUID, String> directInstructions = new HashMap<>();
 
     Prepared(
@@ -79,7 +81,8 @@ public final class BoundCommands {
         String session,
         String account,
         TurnEnd end,
-        Map<String, AgentTool> offered) {
+        Map<String, AgentTool> offered,
+        OperationAuthority.Admission operation) {
       this.bindings = List.copyOf(bindings);
       this.refusal = refusal;
       this.caller = caller;
@@ -90,6 +93,7 @@ public final class BoundCommands {
       this.account = account;
       this.end = end;
       this.offered = offered;
+      this.operation = operation;
     }
 
     public String refusal() {
@@ -216,7 +220,16 @@ public final class BoundCommands {
         if (bound.kind().equals("skill")) {
           result =
               runtime.dispatch(
-                  bound, home, caller, transcript, budget, cancelled, session, account, end);
+                  bound,
+                  home,
+                  caller,
+                  transcript,
+                  budget,
+                  cancelled,
+                  session,
+                  account,
+                  end,
+                  operation);
         } else {
           AgentTool tool = offered.get("orchestrate_" + bound.name());
           if (!(tool instanceof BoundCommandTool operation))
@@ -266,7 +279,8 @@ public final class BoundCommands {
       String session,
       String account,
       TurnEnd end,
-      Map<String, AgentTool> offered) {
+      Map<String, AgentTool> offered,
+      OperationAuthority.Admission operation) {
     List<CommandInvocations.Bound> bindings = List.of();
     String refusal = null;
     try {
@@ -352,7 +366,8 @@ public final class BoundCommands {
             session,
             account,
             end,
-            offered);
+            offered,
+            operation);
     if (refusal == null) {
       try {
         // Only an explicit, authorized binding reaches this activation. It pins instructions and
@@ -369,7 +384,8 @@ public final class BoundCommands {
             session,
             account,
             end,
-            offered);
+            offered,
+            operation);
       }
     }
     return prepared;

@@ -189,6 +189,10 @@ through `AgentRunTool`. The child has its own durable log and shares the parent'
 model budget, cancellation flag and approval propagation. The shipped
 `interlocutor` is a delegable ordinary Agent and explicitly declares
 `skills: ["*"]` for this default route.
+Both model-selected invocation and explicit skill commands pass the invoking run's
+retained operation to delegation. The child derives its authority within that
+operation's existing execution home and action ceiling; skill invocation never
+re-admits work from ambient account grants.
 
 INHERITED captures the parent's complete entry log at a fixed boundary, excluding
 its role/system prefix. It stores an immutable copy as historical context data in

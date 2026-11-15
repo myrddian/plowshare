@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
@@ -848,7 +849,8 @@ class JobRuntimeTest {
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any()))
+                org.mockito.ArgumentMatchers.any(),
+                any()))
         .thenReturn(List.of(load));
     org.mockito.Mockito.when(
             skills.refusal(
@@ -947,7 +949,8 @@ class JobRuntimeTest {
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any()))
+                org.mockito.ArgumentMatchers.any(),
+                any()))
         .thenAnswer(
             invocation -> {
               active.set(true);
@@ -965,7 +968,8 @@ class JobRuntimeTest {
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any()))
+                org.mockito.ArgumentMatchers.any(),
+                any()))
         .thenReturn(List.of(Probe.returning("skill_run", "must not invoke")));
     org.mockito.Mockito.when(
             skills.refusal(
@@ -1069,7 +1073,8 @@ class JobRuntimeTest {
                     org.mockito.ArgumentMatchers.any(),
                     org.mockito.ArgumentMatchers.any(),
                     org.mockito.ArgumentMatchers.any(),
-                    org.mockito.ArgumentMatchers.any()))
+                    org.mockito.ArgumentMatchers.any(),
+                    any()))
             .thenAnswer(
                 invocation -> {
                   ending.set(invocation.getArgument(9));

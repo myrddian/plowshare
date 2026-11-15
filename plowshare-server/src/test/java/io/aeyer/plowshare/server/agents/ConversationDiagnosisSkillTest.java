@@ -69,7 +69,7 @@ class ConversationDiagnosisSkillTest {
 
   String invoke(String actor, String mode) {
     return skills
-        .forRun(main, parent, budget, () -> false, "session", actor, new TurnEnd())
+        .forRun(main, parent, budget, () -> false, "session", actor, new TurnEnd(), null)
         .getFirst()
         .run(
             "{\"name\":\"diagnose-conversation\",\"arguments\":\"Why did the latest tool fail?\","

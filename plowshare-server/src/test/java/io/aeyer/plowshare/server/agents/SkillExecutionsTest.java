@@ -238,7 +238,8 @@ class SkillExecutionsTest {
             "session",
             "alice",
             end,
-            Map.of());
+            Map.of(),
+            null);
     assertNull(prepared.refusal());
     assertTrue(prepared.dispatchCalls().isEmpty());
     assertTrue(prepared.notice().contains("Read the evidence and produce the requested review."));
@@ -267,7 +268,8 @@ class SkillExecutionsTest {
             "session",
             "alice",
             end,
-            Map.of());
+            Map.of(),
+            null);
     assertNull(inspected.refusal());
     assertTrue(inspected.notice().contains("It was not replayed"));
     assertEquals(accepted.invocation(), executions.active(parent).getFirst().invocation());
@@ -275,7 +277,7 @@ class SkillExecutionsTest {
         parent, new Outcome(Outcome.Ending.ANSWERED, "Which evidence matters?", 1, 1, ""));
     String refused =
         skillRuntime
-            .forRun(caller, transcript, budget, () -> false, "session", "alice", end)
+            .forRun(caller, transcript, budget, () -> false, "session", "alice", end, null)
             .getFirst()
             .run(
                 "{\"name\":\"review\",\"arguments\":\"Later clarification\",\"mode\":\"DIRECT\",\"invocation\":\""
