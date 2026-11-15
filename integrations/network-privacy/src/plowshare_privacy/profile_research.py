@@ -47,11 +47,25 @@ from .private_files import replace_private
 MAX_RECORDS = 256
 MAX_JOURNAL_BYTES = 6 * 1024 * 1024
 DAILY_LIMIT = 4
+MAX_DRAFT_BYTES = 64 * 1024
 MIN_SIGHTINGS = 3
 FRESH_SECONDS = 720
 _CVE = re.compile(r"\bCVE-[0-9]{4}-[0-9]{4,19}\b", re.I)
 _ACTIVE = {"pending", "running"}
 _PHASES = _ACTIVE | {"queued", "review", "reviewed", "dismissed", "failed"}
+
+
+def _draft_field(value: object, words: int, *, required: bool = False) -> str:
+    """Count whitespace-delimited words without truncating the retained response.
+
+    Include BOM as whitespace to match the orchestration's JavaScript counter.
+    The separate response byte budget bounds even one extremely long word.
+    """
+    result = field(value, MAX_DRAFT_BYTES, required=required)
+    count = len(re.findall(r"[^\s\ufeff]+", result))
+    if count > words or required and count == 0:
+        raise ValueError("Device profile draft exceeds its word limit")
+    return result
 
 
 @dataclass(frozen=True)
@@ -77,13 +91,18 @@ class ProfileDraft:
             },
         )
         values = cls(
-            field(row["name"], 128, required=True),
-            field(row["model_hypothesis"], 128),
-            field(row["purpose"], 512),
-            field(row["expected_services"], 1024),
-            field(row["notes"], 1024),
-            field(row["questions"], 512),
+            _draft_field(row["name"], 128, required=True),
+            _draft_field(row["model_hypothesis"], 128),
+            _draft_field(row["purpose"], 512),
+            _draft_field(row["expected_services"], 1024),
+            _draft_field(row["notes"], 1024),
+            _draft_field(row["questions"], 512),
         )
+        if (
+            len(json.dumps(asdict(values), ensure_ascii=False).encode())
+            > MAX_DRAFT_BYTES
+        ):
+            raise ValueError("Device profile draft exceeds the response byte budget")
         if any(
             marker in value
             for value in asdict(values).values()
@@ -610,7 +629,7 @@ class ProfileResearch:
                 if outcome.result is None:
                     raise ValueError("Missing device draft")
                 draft = ProfileDraft.decode(
-                    parse_json(outcome.result, maximum_bytes=8192)
+                    parse_json(outcome.result, maximum_bytes=MAX_DRAFT_BYTES)
                 )
                 used_ids = {
                     m.upper()

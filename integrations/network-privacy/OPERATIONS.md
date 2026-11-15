@@ -550,6 +550,12 @@ and do not grant schedule INGRESS. A new schedule group begins at `LATEST`, so
 the fix waits for the next automatic occurrence rather than running historical
 scans. Existing cursors and retention gaps are preserved.
 
+Device-profile research drafts use word budgets: name and model hypothesis allow
+128 words each, purpose 512, expected services and research notes 1,024 each, and
+questions 512. Words are separated by whitespace. The complete response also has
+an independent 64 KiB UTF-8 budget. Invalid drafts stay retained for inspection;
+changing these limits does not resume or rewrite an already-failed orchestration.
+
 Keep the dashboard open when collection stops. Its detail includes available
 refusal codes/reasons; local evidence stays readable. Fix credentials, connectivity
 or project/provider grants first, then choose **Check retained work**. For a stopped

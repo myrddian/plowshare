@@ -48,7 +48,9 @@ what firmware and configuration would need to be checked. An empty result
 or unavailable search does not establish safety. Summarize checks or actions
 for an operator to consider. Do not claim a mitigation is applied.
 
-Return only JSON with exactly these string fields: name (128 characters),
+Return only JSON with exactly these string fields: name (128 words),
 model_hypothesis (128), purpose (512), expected_services (1024), notes (1024),
-questions (512). Only name is required to be nonempty. Questions are for the
+questions (512). Every field limit counts whitespace-delimited words, not
+characters. Keep the entire response within 64 KiB of UTF-8 JSON. Only name is
+required to be nonempty. Questions are for the
 operator reviewing the draft in the dashboard. Never include raw tool-call markup.

@@ -55,6 +55,57 @@ DRAFT = ProfileDraft(
 
 
 class ProfileResearchTest(unittest.IsolatedAsyncioTestCase):
+    def test_draft_limits_count_words_and_preserve_long_valid_text(self) -> None:
+        draft = replace(
+            DRAFT,
+            model_hypothesis="unconfirmed hypothesis " * 20,
+            notes="Check the exact firmware version. " * 100,
+            questions="Can you confirm the public model? " * 20,
+        )
+        self.assertEqual(ProfileDraft.decode(asdict(draft)), draft)
+        bounds = {
+            "name": 128,
+            "model_hypothesis": 128,
+            "purpose": 512,
+            "expected_services": 1024,
+            "notes": 1024,
+            "questions": 512,
+        }
+        for key, limit in bounds.items():
+            with self.subTest(field=key):
+                row = asdict(DRAFT)
+                row[key] = "word " * limit
+                self.assertEqual(getattr(ProfileDraft.decode(row), key), row[key])
+                row[key] += "extra"
+                with self.assertRaisesRegex(ValueError, "word limit"):
+                    ProfileDraft.decode(row)
+
+    def test_unicode_whitespace_and_separate_byte_budget(self) -> None:
+        draft = replace(DRAFT, model_hypothesis="word\t\n\u00a0\u0085\ufeff" * 128)
+        self.assertEqual(ProfileDraft.decode(asdict(draft)), draft)
+        with self.assertRaises(ValueError):
+            ProfileDraft.decode(asdict(replace(DRAFT, name="\ufeff")))
+        with self.assertRaisesRegex(ValueError, "byte budget"):
+            ProfileDraft.decode(asdict(replace(DRAFT, notes="é" * 40000)))
+        for invalid in (None, "bad\x01text", "<tool_call>untrusted"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                row = asdict(DRAFT)
+                row["notes"] = invalid
+                ProfileDraft.decode(row)
+
+    async def test_finished_word_bounded_draft_can_exceed_old_response_cap(
+        self,
+    ) -> None:
+        draft = replace(DRAFT, notes="firmware " * 1024)
+        self.port.outcome.return_value = ResearchOutcome(
+            "finished", json.dumps(asdict(draft))
+        )
+        self.service.enable(True)
+        await self.service.poll()
+        await self.service.poll()
+        self.assertEqual(self.service.ledger.entries[0].phase, "review")
+        self.assertEqual(self.service.ledger.entries[0].draft, draft)
+
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

@@ -10,17 +10,34 @@ export const manifest = {
 
 const fields = {name: 128, model_hypothesis: 128, purpose: 512,
   expected_services: 1024, notes: 1024, questions: 512};
+const MAX_DRAFT_BYTES = 64 * 1024;
+
+// Field budgets count whitespace-delimited words. The independent UTF-8 byte
+// budget also bounds a response made of just one very long word.
+function utf8Size(value) {
+  let bytes = 0;
+  for (const point of value) {
+    const code = point.codePointAt(0);
+    if (code <= 0x7f) bytes += 1;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (code <= 0xffff) bytes += 3;
+    else bytes += 4;
+  }
+  return bytes;
+}
 
 function draftResult(raw) {
-  if (typeof raw !== 'string' || raw.length > 8192 || /^(?:<\||<tool_call|<function=)/.test(raw.trimStart())) throw new Error('Invalid profile draft response size');
+  if (typeof raw !== 'string' || utf8Size(raw) > MAX_DRAFT_BYTES || /^(?:<\||<tool_call|<function=)/.test(raw.trimStart())) throw new Error('Invalid profile draft response size');
   const parsed = llmJson.parse(raw);
   const value = parsed.value;
   if (!parsed.pass || !value || Array.isArray(value) || typeof value !== 'object'
       || Object.keys(value).length !== Object.keys(fields).length) throw new Error('Invalid profile draft JSON');
-  for (const [key, length] of Object.entries(fields)) {
-    if (typeof value[key] !== 'string' || value[key].length > length
+  for (const [key, maxWords] of Object.entries(fields)) {
+    // NEL is whitespace in Python; JavaScript's \s omits it.
+    if (typeof value[key] !== 'string' || (value[key].match(/[^\s\u0085]+/gu) || []).length > maxWords
+        || /[\u0000-\u0008\u000b-\u001f]/u.test(value[key])
         || /<\||<tool_call|<function=/.test(value[key])
-        || (key === 'name' && !value[key].trim())) throw new Error('Invalid profile draft field ' + key);
+        || (key === 'name' && !/[^\s\u0085]/u.test(value[key]))) throw new Error('Invalid profile draft field ' + key);
   }
   return value;
 }
