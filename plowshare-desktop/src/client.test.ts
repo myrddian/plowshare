@@ -2729,6 +2729,7 @@ await test('server account operations recheck the role and keep credentials out 
       enabled: true,
       serverAdmin: false,
       mustChangePassword: true,
+      projectCreator: false,
       createdAt: '2026-10-04T00:00:00Z',
     },
     temporaryPassword: 'one-time-test-password',

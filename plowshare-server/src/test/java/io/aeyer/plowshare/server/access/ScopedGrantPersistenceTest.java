@@ -256,7 +256,9 @@ class ScopedGrantPersistenceTest {
                           AuthorityAction.CONVERSATION_CREATE,
                           AuthorityAction.RUN_MODEL)
                       .contains(action);
-              case MANAGER -> action != AuthorityAction.ADMINISTER;
+              // Project creation is held only by PROJECT_CREATOR, never by a project role.
+              case MANAGER ->
+                  action != AuthorityAction.ADMINISTER && action != AuthorityAction.PROJECT_CREATE;
               case ADMIN ->
                   Set.of(
                           AuthorityAction.ADMINISTER,
@@ -428,7 +430,9 @@ class ScopedGrantPersistenceTest {
   @Test
   void lineage_scope_expiry_version_and_recipient_checks_fail_closed() {
     migrate();
-    var manager = issue("alice", StandardRole.MANAGER, "one");
+    // Agent issuance keeps delegated lineage; person issuance is rooted at SYSTEM instead.
+    var aliceAgent = GrantRecipient.agent(who("alice").account(), "worker");
+    var manager = forcedManager(aliceAgent, "one", Optional.empty());
     var child =
         grants.issue(
             new Issue(
@@ -436,7 +440,7 @@ class ScopedGrantPersistenceTest {
                 who("bob"),
                 scope("one"),
                 StandardRole.READER,
-                who("alice"),
+                aliceAgent,
                 manager.id(),
                 Optional.empty(),
                 false));
@@ -452,7 +456,7 @@ class ScopedGrantPersistenceTest {
                     who("carol"),
                     scope("two"),
                     StandardRole.READER,
-                    who("alice"),
+                    aliceAgent,
                     manager.id(),
                     Optional.empty(),
                     false)));
@@ -469,17 +473,8 @@ class ScopedGrantPersistenceTest {
                     manager.id(),
                     Optional.empty(),
                     false)));
-    var expiring =
-        grants.issue(
-            new Issue(
-                UUID.randomUUID(),
-                who("carol"),
-                scope("two"),
-                StandardRole.MANAGER,
-                who("admin"),
-                control(),
-                Optional.of(OffsetDateTime.now().plusHours(1)),
-                false));
+    var carolAgent = GrantRecipient.agent(who("carol").account(), "worker");
+    var expiring = forcedManager(carolAgent, "two", Optional.of(OffsetDateTime.now().plusHours(1)));
     assertThrows(
         DataAccessException.class,
         () ->
@@ -489,7 +484,7 @@ class ScopedGrantPersistenceTest {
                     who("bob"),
                     scope("two"),
                     StandardRole.READER,
-                    who("carol"),
+                    carolAgent,
                     expiring.id(),
                     Optional.empty(),
                     false)));
@@ -593,22 +588,127 @@ class ScopedGrantPersistenceTest {
     assertTrue(grants.find(binding.id()).isPresent());
   }
 
+  private Binding delegate(
+      GrantRecipient to, StandardRole role, GrantRecipient issuer, UUID authority) {
+    return grants.issue(
+        new Issue(
+            UUID.randomUUID(), to, scope("one"), role, issuer, authority, Optional.empty(), false));
+  }
+
+  private Binding forcedManager(
+      GrantRecipient agent, String project, Optional<OffsetDateTime> expiresAt) {
+    return grants.issue(
+        new Issue(
+            UUID.randomUUID(),
+            agent,
+            scope(project),
+            StandardRole.MANAGER,
+            who("admin"),
+            control(),
+            expiresAt,
+            true));
+  }
+
+  /** Inserts a delegated (non-exercised) row directly so the trigger's chain bounds are tested. */
+  private Binding delegatedRow(
+      GrantRecipient subject,
+      String project,
+      StandardRole role,
+      GrantRecipient issuer,
+      UUID parent) {
+    UUID id = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO authority_grants(id,subject_account,scope_id,role_id,requested_role,issuer_account,issuing_grant,provenance) "
+            + "SELECT ?,?,?,r.id,?,?,?,'ROLE' FROM authority_roles r WHERE r.name=?",
+        id,
+        subject.account().value(),
+        scope(project).value(),
+        role.name(),
+        issuer.account().value(),
+        parent,
+        role.name());
+    return grants.find(id).orElseThrow();
+  }
+
+  private UUID exercised(UUID grant) {
+    return jdbc.queryForObject(
+        "SELECT exercised_grant FROM authority_grants WHERE id=?", UUID.class, grant);
+  }
+
   @Test
-  void issuer_manifest_narrowing_reaches_children_in_every_effective_project_decision() {
+  void person_issued_role_grant_survives_issuer_revocation() {
+    migrate();
+    var mia = issue("alice", StandardRole.MANAGER, "one");
+    var child = delegate(who("bob"), StandardRole.CONTRIBUTOR, who("alice"), mia.id());
+    var root = grants.find(child.authority().orElseThrow()).orElseThrow();
+    assertEquals(StandardRole.SYSTEM, root.role());
+    assertEquals(mia.id(), exercised(child.id()));
+    grants.revoke(mia.id(), mia.version(), who("admin"), control());
+    assertTrue(grants.live(who("bob")).stream().anyMatch(g -> g.id().equals(child.id())));
+  }
+
+  @Test
+  void agent_issued_role_grant_still_follows_its_issuer() {
+    migrate();
+    var worker = GrantRecipient.agent(who("alice").account(), "worker");
+    var forced =
+        grants.issue(
+            new Issue(
+                UUID.randomUUID(),
+                worker,
+                scope("one"),
+                StandardRole.MANAGER,
+                who("admin"),
+                control(),
+                Optional.empty(),
+                true));
+    var child = delegate(who("bob"), StandardRole.CONTRIBUTOR, worker, forced.id());
+    assertEquals(forced.id(), child.authority().orElseThrow());
+    assertNull(exercised(child.id()));
+    grants.revoke(forced.id(), forced.version(), who("admin"), control());
+    assertTrue(grants.live(who("bob")).stream().noneMatch(g -> g.id().equals(child.id())));
+  }
+
+  @Test
+  void person_issuing_to_own_agent_stays_delegated() {
+    migrate();
+    var mia = issue("alice", StandardRole.MANAGER, "one");
+    var worker = GrantRecipient.agent(who("alice").account(), "worker");
+    var child = delegate(worker, StandardRole.CONTRIBUTOR, who("alice"), mia.id());
+    assertEquals(mia.id(), child.authority().orElseThrow());
+    assertNull(exercised(child.id()));
+  }
+
+  @Test
+  void service_issuer_stays_delegated() {
+    jdbc.update(
+        "INSERT INTO admins(handle,password_hash,must_change_password,server_admin,account_kind) VALUES ('service','fixture',FALSE,FALSE,'SERVICE')");
+    migrate();
+    var serviceManager = issue("service", StandardRole.MANAGER, "one");
+    var child = delegate(who("bob"), StandardRole.CONTRIBUTOR, who("service"), serviceManager.id());
+    assertEquals(serviceManager.id(), child.authority().orElseThrow());
+    assertNull(exercised(child.id()));
+  }
+
+  @Test
+  void manifest_demotion_of_issuer_does_not_narrow_person_issued_children() {
     migrate();
     members.assign("one", "alice", ProjectRole.MANAGER, "admin", true);
     members.assign("one", "bob", ProjectRole.CONTRIBUTOR, "alice", true);
     var effective =
         new ApplicationProjectMembers(
             members, applications, new ApplicationGrantLineage(grants, applications));
+    // A person-issued membership is rooted at SYSTEM: demoting the issuer leaves bob's own role,
+    // capped only by bob's own manifest entry.
     when(applications.read("one"))
         .thenReturn(
             new ApplicationPolicy.Boundary(
                 ApplicationPolicy.Kind.APPLICATION,
                 Map.of("alice", ProjectRole.VIEWER, "bob", ProjectRole.MANAGER)));
-    assertTrue(effective.role("one", "bob").isEmpty());
-    assertTrue(effective.roles(List.of("one"), "bob").isEmpty());
-    assertFalse(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
+    assertEquals(ProjectRole.CONTRIBUTOR, effective.role("one", "bob").orElseThrow());
+    assertEquals(Map.of("one", ProjectRole.CONTRIBUTOR), effective.roles(List.of("one"), "bob"));
+    assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
+    assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.WRITE));
     when(applications.read("one"))
         .thenReturn(
             new ApplicationPolicy.Boundary(
@@ -617,6 +717,48 @@ class ScopedGrantPersistenceTest {
     assertEquals(ProjectRole.CONTRIBUTOR, effective.role("one", "bob").orElseThrow());
     assertEquals(Map.of("one", ProjectRole.CONTRIBUTOR), effective.roles(List.of("one"), "bob"));
     assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.WRITE));
+  }
+
+  @Test
+  void manifest_demotion_of_issuer_still_narrows_agent_issued_children() {
+    migrate();
+    var worker = GrantRecipient.agent(who("alice").account(), "worker");
+    var forced =
+        grants.issue(
+            new Issue(
+                UUID.randomUUID(),
+                worker,
+                scope("one"),
+                StandardRole.MANAGER,
+                who("admin"),
+                control(),
+                Optional.empty(),
+                true));
+    var child =
+        grants.issue(
+            new Issue(
+                UUID.randomUUID(),
+                who("bob"),
+                scope("one"),
+                StandardRole.CONTRIBUTOR,
+                worker,
+                forced.id(),
+                Optional.empty(),
+                false));
+    assertEquals(forced.id(), child.authority().orElseThrow());
+    when(applications.read("one"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION,
+                Map.of("alice", ProjectRole.MANAGER, "bob", ProjectRole.MANAGER)));
+    assertTrue(authority.allows(who("bob"), identities.project("one"), AuthorityAction.WRITE));
+    // Delegated (agent) lineage still carries its issuer, so demoting alice narrows bob.
+    when(applications.read("one"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION,
+                Map.of("alice", ProjectRole.VIEWER, "bob", ProjectRole.MANAGER)));
+    assertFalse(authority.allows(who("bob"), identities.project("one"), AuthorityAction.READ));
   }
 
   @Test
@@ -674,6 +816,8 @@ class ScopedGrantPersistenceTest {
     assertTrue(grants.live(who("alice")).isEmpty());
     assertTrue(grants.find(expired).isPresent());
     var parent = issue("alice", StandardRole.MANAGER, "two");
+    var aliceAgent = GrantRecipient.agent(who("alice").account(), "worker");
+    var agentGrant = forcedManager(aliceAgent, "two", Optional.empty());
     var child =
         grants.issue(
             new Issue(
@@ -681,42 +825,25 @@ class ScopedGrantPersistenceTest {
                 who("bob"),
                 scope("two"),
                 StandardRole.READER,
-                who("alice"),
-                parent.id(),
+                aliceAgent,
+                agentGrant.id(),
                 Optional.empty(),
                 false));
     jdbc.update("UPDATE admins SET enabled=FALSE WHERE handle='alice'");
     assertTrue(grants.lineage(child.id()).isEmpty());
     jdbc.update("UPDATE admins SET enabled=TRUE WHERE handle='alice'");
     Binding current = parent;
-    for (int i = 0; i < 30; i++) {
+    for (int i = 0; i < 31; i++) {
       var recipient = current.recipient().equals(who("alice")) ? who("bob") : who("alice");
       current =
-          grants.issue(
-              new Issue(
-                  UUID.randomUUID(),
-                  recipient,
-                  scope("two"),
-                  StandardRole.MANAGER,
-                  current.recipient(),
-                  current.id(),
-                  Optional.empty(),
-                  false));
+          delegatedRow(recipient, "two", StandardRole.MANAGER, current.recipient(), current.id());
     }
     var deepest = current;
     assertThrows(
         DataAccessException.class,
         () ->
-            grants.issue(
-                new Issue(
-                    UUID.randomUUID(),
-                    who("carol"),
-                    scope("two"),
-                    StandardRole.READER,
-                    deepest.recipient(),
-                    deepest.id(),
-                    Optional.empty(),
-                    false)));
+            delegatedRow(
+                who("carol"), "two", StandardRole.READER, deepest.recipient(), deepest.id()));
     assertThrows(
         DataAccessException.class,
         () -> jdbc.update("UPDATE authority_grants SET issuing_grant=id WHERE id=?", parent.id()));
@@ -729,7 +856,8 @@ class ScopedGrantPersistenceTest {
   void revoking_an_issuing_role_cannot_remove_all_remaining_managers_through_descendants() {
     migrate();
     project("new");
-    var parent = issue("alice", StandardRole.MANAGER, "new");
+    var aliceAgent = GrantRecipient.agent(who("alice").account(), "worker");
+    var parent = forcedManager(aliceAgent, "new", Optional.empty());
     var child =
         grants.issue(
             new Issue(
@@ -737,7 +865,7 @@ class ScopedGrantPersistenceTest {
                 who("bob"),
                 scope("new"),
                 StandardRole.MANAGER,
-                who("alice"),
+                aliceAgent,
                 parent.id(),
                 Optional.empty(),
                 false));

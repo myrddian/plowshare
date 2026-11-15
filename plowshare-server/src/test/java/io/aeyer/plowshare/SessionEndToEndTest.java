@@ -17,6 +17,7 @@ import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.sdk.ServerClient;
+import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.AgentsConfig;
 import io.aeyer.plowshare.server.agents.AgentsProperties;
@@ -38,6 +39,7 @@ import io.aeyer.plowshare.server.agents.curator.Curator;
 import io.aeyer.plowshare.server.agents.curator.Passes;
 import io.aeyer.plowshare.server.api.AgentController;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
+import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.FileProvider;
@@ -69,6 +71,7 @@ import io.aeyer.plowshare.server.ws.EventChannelConfig;
 import io.aeyer.plowshare.server.ws.EventChannelHandler;
 import io.aeyer.plowshare.server.ws.FileChannelConfig;
 import io.aeyer.plowshare.server.ws.FileChannelHandler;
+import io.aeyer.plowshare.server.ws.TestProjectMembers;
 import io.aeyer.plowshare.testpeer.ControllerPeer;
 import io.aeyer.plowshare.testpeer.NodeFiles;
 import io.aeyer.plowshare.testpeer.SessionPeer;
@@ -981,6 +984,15 @@ class SessionEndToEndTest {
     @Bean
     ProjectRoots projectRoots(ProjectStore projects) {
       return projects::rootOn;
+    }
+
+    /**
+     * No account may create a project here. {@link ProjectRegistry} is the mocked store above, the
+     * production binding.
+     */
+    @Bean
+    ProjectCreation projectCreation() {
+      return TestProjectMembers.noCreation();
     }
 
     /** The production seam, over the production socket wiring. */

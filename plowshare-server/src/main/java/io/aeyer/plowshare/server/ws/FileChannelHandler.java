@@ -6,9 +6,12 @@ import io.aeyer.plowshare.protocol.FileChangeHint;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.archive.ArchiveRefusedException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
+import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionCloseListener;
 import io.aeyer.plowshare.server.files.SessionGoneException;
@@ -320,6 +323,20 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   private final ProjectMembers members;
 
   /**
+   * Whether an account may create a project: consulted only for a project that has no {@code
+   * projects} row at all, so that rooting a folder can create a project for a {@code
+   * PROJECT_CREATOR} holder. Membership is always asked first.
+   */
+  private final ProjectCreation creation;
+
+  /**
+   * Whether a project name already has a row. A registered project is attached to only by its
+   * members; an orphan row with no members stays administrator-only and is never offered to a
+   * creator.
+   */
+  private final ProjectRegistry registry;
+
+  /**
    * Session cleanup callbacks. The supplier breaks the construction cycle with DefinitionResolver,
    * which itself uses this SessionChannel. Production composition resolves an immutable snapshot
    * after singleton initialization; this supplier must never look up beans during socket cleanup,
@@ -341,13 +358,18 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
    *     provider no run could see
    * @param presences the one presence registry, injected for the same reason
    * @param roots where a declaration's durable half is written
+   * @param members who may root an existing project
+   * @param creation who may create a project by rooting an unregistered one
+   * @param registry which project names already have a row
    */
   public FileChannelHandler(
       SessionRegistry sessions,
       PresenceRegistry presences,
       ProjectRoots roots,
-      ProjectMembers members) {
-    this(sessions, presences, roots, members, DEADLINE);
+      ProjectMembers members,
+      ProjectCreation creation,
+      ProjectRegistry registry) {
+    this(sessions, presences, roots, members, creation, registry, DEADLINE);
   }
 
   /**
@@ -362,15 +384,18 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       PresenceRegistry presences,
       ProjectRoots roots,
       ProjectMembers members,
+      ProjectCreation creation,
+      ProjectRegistry registry,
       Duration deadline) {
-    this(sessions, presences, roots, members, deadline, List::of);
+    this(sessions, presences, roots, members, creation, registry, deadline, List::of);
   }
 
   /**
    * {@link #FileChannelHandler(SessionRegistry, PresenceRegistry, ProjectRoots, ProjectMembers,
-   * Duration)} with {@link #closeListeners} made explicit — the overload {@code FileChannelConfig}
-   * builds the production bean through, since neither existing constructor has anywhere to put one
-   * without breaking every caller that has no listener to offer.
+   * ProjectCreation, ProjectRegistry, Duration)} with {@link #closeListeners} made explicit — the
+   * overload {@code FileChannelConfig} builds the production bean through, since neither existing
+   * constructor has anywhere to put one without breaking every caller that has no listener to
+   * offer.
    *
    * @param closeListeners see this field's own javadoc for why it is a supplier and not the list
    */
@@ -379,12 +404,16 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       PresenceRegistry presences,
       ProjectRoots roots,
       ProjectMembers members,
+      ProjectCreation creation,
+      ProjectRegistry registry,
       Duration deadline,
       Supplier<List<SessionCloseListener>> closeListeners) {
     this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.presences = Objects.requireNonNull(presences, "presences");
     this.roots = Objects.requireNonNull(roots, "roots");
     this.members = Objects.requireNonNull(members, "members");
+    this.creation = Objects.requireNonNull(creation, "creation");
+    this.registry = Objects.requireNonNull(registry, "registry");
     this.deadline = Objects.requireNonNull(deadline, "deadline");
     this.closeListeners = Objects.requireNonNull(closeListeners, "closeListeners");
   }
@@ -1058,6 +1087,13 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
    * nothing is currently serving — and {@code AgentsConfig.serverCannotServe}, the one reader of
    * that fact, cannot reach a database either while this is true.
    *
+   * <p><b>Except when the claim creates the project.</b> A claim is permitted either by membership
+   * or, for a name with no {@code projects} row at all, by the {@code PROJECT_CREATOR} role; the
+   * archive then creates the row with this account as its sole manager. Until that write lands the
+   * project has no owner, so an unreachable archive withdraws the presence instead of letting it
+   * serve, and the socket keeps only its global files. An archive refusal (another creator won the
+   * race) is handled like any other refusal: the claim is given back and the socket closes 1003.
+   *
    * @return whether the connection should go on to be attached
    */
   private boolean declared(URI uri, String id, WebSocketSession socket) {
@@ -1066,6 +1102,12 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
     String root = parameter(uri, ROOT_PARAM);
     if (project == null || machine == null || root == null) {
       return true;
+    }
+    // Match ordinary names' Unicode whitespace rule as well as Presence's ASCII trimming. Reject
+    // before normalization can turn a refused client claim into creation of a different name.
+    if (!project.equals(project.strip()) || !project.equals(project.trim())) {
+      refuse(socket, id, "Project names must not start or end with whitespace");
+      return false;
     }
     Presence claim;
     try {
@@ -1081,10 +1123,19 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
           unreadable.getMessage());
       return true;
     }
+    // Whether this claim is permitted only because it creates the project. Set inside the
+    // permission check below; read when the archive is told.
+    boolean creating;
     try {
-      if (!io.aeyer.plowshare.server.archive.ClientProjects.visible(
-              claim.project(), sessionId(socket.getUri()), handleOn(socket))
-          || !members.mayUse(claim.project(), handleOn(socket))) {
+      String handle = handleOn(socket);
+      boolean visible = ClientProjects.visible(claim.project(), sessionId(socket.getUri()), handle);
+      // Membership first, so a member's reconnect asks nothing else. Only a name with no row at
+      // all may be created, and only by a PROJECT_CREATOR holder; a registered project without
+      // this account as a member is refused with the same sentence either way.
+      boolean member = visible && members.mayUse(claim.project(), handle);
+      creating =
+          visible && !member && !registry.registered(claim.project()) && creation.mayCreate(handle);
+      if (!member && !creating) {
         closeQuietly(
             socket,
             id,
@@ -1134,6 +1185,20 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       refuse(socket, id, held.getMessage());
       return false;
     } catch (ArchiveUnavailableException down) {
+      if (creating) {
+        // A project being created has no row and no member until the archive
+        // says so. A presence standing for it would serve a project nobody
+        // owns, so it is withdrawn and the socket lends its files only; the
+        // next reconnect creates it.
+        presences.withdraw(id);
+        log.warn(
+            "Session '{}' could not create '{}' because the archive is unavailable; it roots"
+                + " nothing. {}",
+            id,
+            claim.project(),
+            down.getMessage());
+        return true;
+      }
       // The presence stands. See this method's javadoc: the registry is
       // what routes a run and it does not need the database.
       log.warn(

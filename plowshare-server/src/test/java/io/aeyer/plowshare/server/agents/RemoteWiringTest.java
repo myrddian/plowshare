@@ -13,7 +13,9 @@ import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.protocol.Window;
+import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
+import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.files.AmbiguousPathException;
 import io.aeyer.plowshare.server.files.FileProvider;
@@ -46,6 +48,7 @@ import io.aeyer.plowshare.server.union.UnionRouting;
 import io.aeyer.plowshare.server.ws.EventChannelConfig;
 import io.aeyer.plowshare.server.ws.FileChannelConfig;
 import io.aeyer.plowshare.server.ws.FileChannelHandler;
+import io.aeyer.plowshare.server.ws.TestProjectMembers;
 import io.aeyer.plowshare.testpeer.NodeFiles;
 import io.aeyer.plowshare.testpeer.SocketPeer;
 import io.aeyer.plowshare.testpeer.TestRooting;
@@ -1151,6 +1154,17 @@ class RemoteWiringTest {
     @Bean
     ProjectRoots projectRoots() {
       return (project, machine, root, handle) -> {};
+    }
+
+    /** Transport fixtures: nothing is created by rooting, so membership alone decides. */
+    @Bean
+    ProjectCreation projectCreation() {
+      return TestProjectMembers.noCreation();
+    }
+
+    @Bean
+    ProjectRegistry projectRegistry() {
+      return TestProjectMembers.allRegistered();
     }
   }
 }

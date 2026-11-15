@@ -1481,6 +1481,7 @@ type ServerAccountDto struct {
 	Enabled            bool   `json:"enabled"`
 	Handle             string `json:"handle"`
 	MustChangePassword bool   `json:"mustChangePassword"`
+	ProjectCreator     bool   `json:"projectCreator"`
 	ServerAdmin        bool   `json:"serverAdmin"`
 }
 
@@ -6498,9 +6499,10 @@ type AdminAccountResetPayloadDto struct {
 
 // AdminAccountUpdatePayloadDto is the explicit AdminAccountUpdatePayloadDto protocol shape.
 type AdminAccountUpdatePayloadDto struct {
-	Enabled     *bool  `json:"enabled,omitempty"`
-	Handle      string `json:"handle"`
-	ServerAdmin *bool  `json:"serverAdmin,omitempty"`
+	Enabled        *bool  `json:"enabled,omitempty"`
+	Handle         string `json:"handle"`
+	ProjectCreator *bool  `json:"projectCreator,omitempty"`
+	ServerAdmin    *bool  `json:"serverAdmin,omitempty"`
 }
 
 // AdminAuditPayloadDto is the explicit AdminAuditPayloadDto protocol shape.
@@ -9499,9 +9501,10 @@ func (c *Client) AdminAccountReset(ctx context.Context, request AdminAccountRese
 
 // AdminAccountUpdateRequest is the explicit AdminAccountUpdateRequest protocol shape.
 type AdminAccountUpdateRequest struct {
-	Enabled     *bool  `json:"enabled,omitempty"`
-	Handle      string `json:"handle"`
-	ServerAdmin *bool  `json:"serverAdmin,omitempty"`
+	Enabled        *bool  `json:"enabled,omitempty"`
+	Handle         string `json:"handle"`
+	ProjectCreator *bool  `json:"projectCreator,omitempty"`
+	ServerAdmin    *bool  `json:"serverAdmin,omitempty"`
 }
 
 // AdminAccountUpdate validates before submission and returns the paired result DTO.

@@ -858,6 +858,51 @@ Administrators retain scoped membership-management control through the existing
 operations; `project access` can report `permissions:["manage"]` without data access.
 VIEWER remains the wire name of the internal READER helper.
 
+### Project creator role
+
+An ordinary account cannot create a project by rooting a folder. A server
+administrator can give it the **project creator** role, which lets it root a
+folder whose name has no project row yet (TUI `/here`, desktop **Add project
+folder**). The account becomes the new project's only Manager and nobody else
+gains access.
+
+```sh
+plowshare-cli admin account update '{"handle":"sam","projectCreator":true}'
+```
+
+In the desktop server administration dialog, **Allow creating projects** grants
+the role and **Revoke project creator role** removes it; an account that holds
+it shows "May create projects" while enabled. Disabled holders show "Project creator
+role held; creation blocked while disabled". `projectCreator:false` revokes the role. The
+account listing reports it, including for a disabled account, which keeps the
+role but cannot create projects until it is enabled again.
+
+The role grants one action and nothing else. It does not:
+
+- let the holder root, read or join an existing project; that still needs
+  membership;
+- provide any administrator authority, or any right to issue or delegate a role;
+- create server workspaces (`project.create`, `application.create`), which stay
+  administrator-only;
+- apply to agents or service accounts, or exist implicitly for administrators.
+
+It lives on its own isolated scope, not the administration scope; see
+[ADR 0071](decisions/0071-role-exercised-issuance-and-project-creator.md).
+
+### Who a grant depends on
+
+The role is permanent; the authority to exercise it is temporary. When a person
+(a user account with no agent or token) adds a member or grants the creator role to
+someone else, the grant belongs to the role and no longer depends on that person.
+Demoting or disabling the issuer leaves it live. A grant you give yourself stays
+bound to your own authority and ends with it, as do grants issued by agents,
+tokens or service accounts. A person-issued grant has no expiry cap taken from the
+issuer. One consequence is a known open risk: a person holding an expiring
+membership issued through a service token can issue permanent grants, so two
+such people can make each other permanent before the token expires; see
+ADR 0071 §3. Granting the role to yourself as an administrator works, but another
+administrator's grant replaces it with a durable one.
+
 Inspect the current account's effective access and explicit grants:
 
 ```sh

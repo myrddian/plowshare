@@ -39,7 +39,7 @@ sequence with PostgreSQL's current sequence. That is insufficient:
 
 ## Database contract
 
-V261 owns checked live-grant and lineage functions. Each STABLE function executes under
+V264 owns checked live-grant and lineage functions. Each STABLE function executes under
 the caller statement's MVCC snapshot and returns either a confirmation marker or the
 original ordered query rows, including an explicit empty-result marker. The repository
 maps a typed outcome; raw JDBC data never crosses its boundary. The old read queries
@@ -106,6 +106,7 @@ graph TD
     C --> D
     D --> E[BETA: guarded deployment and live functional proof]
     E --> F[Measurement: controlled OFF / ON / OFF comparison]
+    F --> G[Main integration: canonical V264 and upgrade regression]
 ```
 
 | Node | Implementer | Independent reviewer | Completion gate |
@@ -116,6 +117,7 @@ graph TD
 | D | Coordinator | Design reviewer plus both implementers | Integrated code review, formatting and repository checks; unresolved limits recorded |
 | E | Coordinator | Design reviewer | Backup, deployment identity/configuration checks and public SDK functional proof; both agree |
 | F | Coordinator, using Java implementer's native fixture | Design reviewer | Completed workflow receipts, measurement fences and explicitly bounded conclusions; both agree |
+| G | Coordinator and database implementer | Design reviewer and Java implementer | Canonical migration history, merged authority semantics, upgrade regressions and repository checks; both agree |
 
 Review findings are returned to the owning implementer, fixed, and reviewed again.
 A node does not close on an implementation report alone. Final acceptance records
@@ -225,7 +227,43 @@ blocked by retained authority; it was not used as a benchmark or fixed through
 unrelated core changes. The native fixture instead uses a dedicated external
 synthetic project and remains available for reproduction.
 
-V261 has now shipped on BETA and is immutable. Concurrent unshipped migrations
-using that number, including the migrations in PR #260, must be renumbered before
-combining branches. Do not replace the applied migration or skip lower versions
-to work around the collision.
+### Integration with main's migration history
+
+Main subsequently merged PR #260 with V261 (role-exercised issuance), V262
+(person-issued grant re-rooting) and V263 (project creation). Those canonical
+migrations remain unchanged. With explicit authorization to resolve the collision,
+this branch moved the checked-authority SQL, byte-for-byte, to V264. Ordinary
+canonical databases apply V261–V263 before V264; the historical BETA trial above
+still refers to the original source and its experimental V261 history.
+
+The existing BETA database is on that divergent history and must not be upgraded
+with the merged artifact directly. Its V261 description/checksum will conflict
+with canonical V261. Renumbering the source does not reconcile an already-applied
+migration. No BETA schema, Flyway history or runtime setting was changed during
+this merge.
+
+Before a further BETA upgrade, take a new backup and rehearse reconciliation on a
+restored copy. Verify the exact existing function definitions and migration
+checksum, preserve a receipt of the original history, and choose an explicit
+operator-reviewed transition that applies canonical V261–V263 and accounts for
+the already-installed checked functions at V264. Validate Flyway history and
+exercise both checked and SQL-fallback paths on that restored copy before any
+live cutover. A generic Flyway repair, skipping migrations, disabling validation
+or rewriting history without that rehearsal is not a supported upgrade path.
+
+G passed review: the Java implementer reviewed the merged composition and grant
+lineage semantics, and the independent design reviewer accepted the unchanged SQL,
+canonical numbering, upgrade tests and documented BETA boundary. The database
+implementer and reviewer both accepted the new regression deliverable after its
+two PostgreSQL cases passed: schema 260 to 264 and canonical schema 263 to 264.
+Those cases preserve every existing Flyway history field, verify existing human
+and agent authority, and exercise typed confirmation, forced SQL and own-write
+fallback. The schema-263 case also preserves all grant and registry rows.
+
+Post-merge `format`, `formatCheck` and repository `check --continue` passed. Main's
+updated audit artifact resolves the earlier historical CLI audit failure recorded
+above. A separate selected `-PfullDb` run passed all 80 tests across the upgrade,
+checked-authority, authority-snapshot differential, scoped grant persistence,
+role-exercised issuance, person-grant re-rooting and project-creator schema classes.
+That run also passed formatting checks. No BETA reconciliation or deployment was
+performed as part of G.

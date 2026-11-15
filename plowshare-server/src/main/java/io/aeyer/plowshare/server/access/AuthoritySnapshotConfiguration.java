@@ -18,7 +18,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** Composes the in-memory authority snapshot and the project membership reads that use it. */
+/**
+ * Composes the in-memory authority snapshot, the project membership and project-creation reads that
+ * use it, and the project creator grant store.
+ */
 @Configuration
 public class AuthoritySnapshotConfiguration {
   /**
@@ -119,5 +122,18 @@ public class AuthoritySnapshotConfiguration {
   public ProjectMembers cachedProjectMembers(
       @Qualifier("jdbcProjectMembers") ProjectMembers stored, AuthoritySnapshots snapshots) {
     return new CachedProjectMembers(stored, snapshots);
+  }
+
+  /** PROJECT_CREATOR issue and revocation on the ADMIN role's authority (V263). */
+  @Bean
+  public ProjectCreatorGrants projectCreatorGrants(JdbcTemplate jdbc) {
+    return new JdbcProjectCreatorGrants(jdbc);
+  }
+
+  /** The project-creation decision from the snapshot, or the SQL function without one. */
+  @Bean
+  public ProjectCreation projectCreation(
+      ProjectCreatorGrants grants, AuthoritySnapshots snapshots) {
+    return new CachedProjectCreation(grants, snapshots);
   }
 }

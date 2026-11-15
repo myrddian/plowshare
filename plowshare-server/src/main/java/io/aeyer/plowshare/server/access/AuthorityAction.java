@@ -9,5 +9,7 @@ public enum AuthorityAction {
   SET_AUDIENCE,
   ADMINISTER,
   CONVERSATION_CREATE,
-  RUN_MODEL
+  RUN_MODEL,
+  /** Create a new project. Granted only by PROJECT_CREATOR, at the PROJECT_CREATION scope. */
+  PROJECT_CREATE
 }

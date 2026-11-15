@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.ws;
 
+import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionCloseListener;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
@@ -90,6 +92,13 @@ public class FileChannelConfig implements WebSocketConfigurer {
   private final ProjectRoots roots;
 
   private final ProjectMembers members;
+
+  /** Who may create a project by rooting a folder whose name has no row. */
+  private final ProjectCreation creation;
+
+  /** Which names have a row; {@code ProjectStore} in production. */
+  private final ProjectRegistry registry;
+
   private final WebSocketKeepAlive keepAlive;
 
   /**
@@ -106,10 +115,14 @@ public class FileChannelConfig implements WebSocketConfigurer {
       ProjectRoots roots,
       ObjectProvider<SessionCloseListener> closeListeners,
       ProjectMembers members,
+      ProjectCreation creation,
+      ProjectRegistry registry,
       WebSocketKeepAlive keepAlive) {
     this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.roots = Objects.requireNonNull(roots, "roots");
     this.members = members;
+    this.creation = Objects.requireNonNull(creation, "creation");
+    this.registry = Objects.requireNonNull(registry, "registry");
     this.keepAlive = Objects.requireNonNull(keepAlive, "keepAlive");
     this.closeListeners = Objects.requireNonNull(closeListeners, "closeListeners");
   }
@@ -139,6 +152,8 @@ public class FileChannelConfig implements WebSocketConfigurer {
         presenceRegistry(),
         roots,
         members,
+        creation,
+        registry,
         FileChannelHandler.DEADLINE,
         () -> initializedCloseListeners);
   }

@@ -6,11 +6,23 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 /** Owns account row mappings, the shared administrator lock and session revocation writes. */
 @Repository
 public class JdbcAccountAdministrationRepository implements AccountAdministrationRepository {
+  /** Grants are not read here: {@code ServerAdministration} fills {@code projectCreator}. */
+  private static final RowMapper<Account> ACCOUNT =
+      (rs, n) ->
+          new Account(
+              rs.getString(1),
+              rs.getBoolean(2),
+              rs.getBoolean(3),
+              rs.getBoolean(4),
+              rs.getObject(5, OffsetDateTime.class),
+              false);
+
   private final JdbcTemplate jdbc;
 
   public JdbcAccountAdministrationRepository(JdbcTemplate jdbc) {
@@ -26,13 +38,7 @@ public class JdbcAccountAdministrationRepository implements AccountAdministratio
     return jdbc
         .query(
             "SELECT handle, enabled, server_admin, must_change_password, created_at FROM admins WHERE handle=? AND NOT bootstrap AND account_kind='USER'",
-            (rs, n) ->
-                new Account(
-                    rs.getString(1),
-                    rs.getBoolean(2),
-                    rs.getBoolean(3),
-                    rs.getBoolean(4),
-                    rs.getObject(5, OffsetDateTime.class)),
+            ACCOUNT,
             handle)
         .stream()
         .findFirst()
@@ -42,13 +48,7 @@ public class JdbcAccountAdministrationRepository implements AccountAdministratio
   public List<Account> list() {
     return jdbc.query(
         "SELECT handle, enabled, server_admin, must_change_password, created_at FROM admins WHERE NOT bootstrap AND account_kind='USER' ORDER BY handle",
-        (rs, n) ->
-            new Account(
-                rs.getString(1),
-                rs.getBoolean(2),
-                rs.getBoolean(3),
-                rs.getBoolean(4),
-                rs.getObject(5, OffsetDateTime.class)));
+        ACCOUNT);
   }
 
   public void audit(String actor, String action, Account target) {

@@ -57,6 +57,7 @@ Application: files, read, save [JSON]. Browses deployed files without --root or 
 project create provisions a MANAGED Application with plowshare.json, or registers DISJOINT files without
 client sync. writePaths names relative writable areas; DISJOINT defaults to [].
 admin accounts lists server accounts; admin account create/update/reset manages accounts.
+Grant or revoke the project creator role: admin account update '{"handle":"sam","projectCreator":true}'.
 admin sessions lists active logins; admin session revoke signs an account out everywhere.
 admin service accounts lists machine identities; admin service account create/update manages them.
 admin service tokens lists token metadata; admin service token create/rotate/revoke manages scoped credentials.

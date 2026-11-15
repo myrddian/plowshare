@@ -341,6 +341,28 @@ Creation refuses an existing project rather than overwriting it. After an
 uncertain response, inspect `project list`; a creation is never automatically
 replayed.
 
+## Creating a project by rooting a folder
+
+A folder whose name has no project yet can be rooted from the TUI (`/here`) or the
+desktop (**Add project folder**). The server permits it only for an account
+with the project creator role (see
+[server administration](server-administration.md#project-creator-role)). The
+account becomes the project's only Manager.
+
+- Creation is insert-only. If a project row appears meanwhile, the claim is
+  refused rather than adopted.
+- A name with a project row but no members stays administrator-only.
+- Any member can re-root an existing client-rooted project.
+- Reserved prefixes (`personal:`, `client:`) and Application names cannot be
+  created this way.
+
+When the server refuses a claim it gives one generic reason, so it does not
+reveal whether a name exists. The TUI and desktop add: "If this is a new project, a
+server administrator must grant you the project creator role." The CLI does not
+show the hint yet, because its session wrapper drops the close code. After an
+archive outage during creation, a later write can leave a project row with no
+members; only an administrator can recover it.
+
 ## Read access and writable areas
 
 `writePaths` is a project-level allowlist for server workspace mutations. Paths
