@@ -119,21 +119,14 @@ delegable: false
 bot: true
 skills: ["*"]
 # A RUNAWAY GUARD AND NOT A BUDGET, on interlocutor's distinction, and the same
-# hundred for the same reason: it is the operator's calibration for agentic
+# two hundred for the same reason: it is the operator's calibration for agentic
 # work rather than a measurement of this definition, and what makes it safe is
 # that a run going nowhere no longer has to reach it -- JobRuntime.Repeats ends
 # a run that keeps asking for one call, with its own ending.
 max-turns: 200
-# Twenty, and it is arithmetic rather than a round number. A full turn here is
-# a recall, a read or two of what it found, sometimes a write, then the answer:
-# four or five calls. Twenty is four of those with room, and it is the smaller
-# number because this holds five tools and none of them pages a file -- the
-# workload interlocutor measured its forty against does not exist here.
-#
-# INERT for every turn of an actual conversation, which is worth saying rather
-# than leaving to be discovered: Turn.speak hands JobStore the conversation's
-# own Budget, and only a job started on its own behalf is bounded by this.
-max-model-calls: 100
+# Match the standalone/message allowance to the declared step cap. Conversation turns still
+# spend their conversation's shared allowance, and delegated work also draws from that allowance.
+max-model-calls: 200
 calls: [code_reviewer, image_reader, close_reader, coder]
 # THE GRANT THAT MAKES A TRIGGER REACHABLE, on interlocutor's own comment and
 # for its own reason: this file sits in a different directory but is the same

@@ -136,4 +136,10 @@ public record AttributedTranscript(
     return new AttributedTranscript(
         delegate.delegate(callee, home, openedBy), UsageAttribution.LEGACY, usage);
   }
+
+  @Override
+  public Transcript resumeDelegate(AgentDefinition callee, String child, int continuing) {
+    return new AttributedTranscript(
+        delegate.resumeDelegate(callee, child, continuing), UsageAttribution.LEGACY, usage);
+  }
 }

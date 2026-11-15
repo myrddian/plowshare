@@ -208,7 +208,8 @@ class HookedRunTest {
   // --- prompt.pre ------------------------------------------------------------------
 
   @Test
-  void a_volatile_addition_is_sent_last_and_recorded_only_as_a_hook() throws Exception {
+  void a_volatile_addition_precedes_allowance_advice_and_is_recorded_only_as_a_hook()
+      throws Exception {
     Scripted model = new Scripted();
     JobRuntime runtime = runtime(model);
     runtime.useHooks(
@@ -225,8 +226,10 @@ class HookedRunTest {
     run(runtime, "echo", log);
 
     List<ChatMessage> first = model.sent.get(0);
-    assertEquals("[remember things]", first.get(first.size() - 1).content());
-    assertEquals(List.of(EntryKind.UTTERANCE, EntryKind.HOOK, EntryKind.ANSWER), log.kinds());
+    assertEquals("[remember things]", first.get(first.size() - 2).content());
+    assertEquals(
+        List.of(EntryKind.UTTERANCE, EntryKind.HOOK, EntryKind.NOTICE, EntryKind.ANSWER),
+        log.kinds());
   }
 
   @Test
@@ -272,7 +275,7 @@ class HookedRunTest {
     int n = tail.size();
     assertEquals(
         List.of("[house rule]", "[what the archive holds]", "[this turn only]"),
-        tail.subList(n - 3, n),
+        tail.subList(n - 4, n - 1),
         "durable before the unrecorded reminder, volatile after it: the only order in"
             + " which the next turn's prefix extends");
     assertEquals(
@@ -282,9 +285,10 @@ class HookedRunTest {
             EntryKind.HOOK,
             EntryKind.HOOK,
             EntryKind.HOOK,
+            EntryKind.NOTICE,
             EntryKind.ANSWER),
         log.kinds(),
-        "utterance, the durable notice, the recall audit, the two hook records, the answer");
+        "utterance, the durable notice, the recall audit, the two hook records, allowance advice, the answer");
     assertTrue(log.entries.get(2).content().contains("harness:recall"));
   }
 
@@ -1262,8 +1266,8 @@ class HookedRunTest {
             + " working on your task; this note needs no reply. The last tool call failed or was refused."
             + " A second model that looked at the recent steps suggests: probe_write refuses every q;"
             + " try it without one.]",
-        third.get(third.size() - 1).content());
-    assertEquals(ChatMessage.Role.USER, third.get(third.size() - 1).role());
+        third.get(third.size() - 2).content());
+    assertEquals(ChatMessage.Role.USER, third.get(third.size() - 2).role());
     assertEquals(1, log.entries.stream().filter(e -> e.kind() == EntryKind.RUNTIME_NOTE).count());
     assertTrue(
         log.entries.stream()
@@ -1290,8 +1294,8 @@ class HookedRunTest {
     List<ChatMessage> third = model.sent.get(2);
     assertEquals(
         ChatMessage.Role.TOOL,
-        third.get(third.size() - 1).role(),
-        "the tool result is the last thing the model is sent");
+        third.get(third.size() - 2).role(),
+        "the tool result precedes the allowance checkpoint");
     assertEquals(0, log.entries.stream().filter(e -> e.kind() == EntryKind.RUNTIME_NOTE).count());
     assertTrue(
         log.entries.stream()

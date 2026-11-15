@@ -352,32 +352,10 @@ scopes: [workspace:write]
 # JobRuntime.Repeats ends a run that keeps asking for one call, with its own
 # ending, and that landed in the change that raised this rather than after it.
 max-turns: 100
-# NOT equal to max-turns, and the sentence here used to say it could not
-# honestly be less. That was true of a loop where the turn cap was the only
-# other bound: JobRuntime checks turns >= max-turns BEFORE it spends, so a run
-# ending at the cap had made exactly that many calls, and a smaller number here
-# would have been a claim the runtime disproved.
-#
-# What changed is which one binds. With the cap at a hundred and this at forty,
-# a run started on this agent's own behalf ends at CALL_BUDGET after forty
-# calls and never reaches the cap at all — and that is the right way round: the
-# budget is the cost bound and the cap is the backstop above it. The two used to
-# be one number firing twice, which is why Outcome argued they were distinct and
-# no operator could tell them apart.
-#
-# Forty is arithmetic on the measurement above rather than a round number: a
-# full turn of this agent costs about twelve calls, and forty is three of those
-# with room. It is not measured itself, and it is the fallback rather than the
-# usual bound.
-#
-# INERT for every turn of an actual conversation, which is worth saying rather
-# than leaving to be discovered. Turn.speak hands JobStore the conversation's
-# own Budget, shared by reference; only JobStore's other submit builds one from
-# this number (Budget.of(definition.maxModelCalls())), for a job started on its
-# own behalf. What bounds an utterance is the conversation's remaining budget,
-# what bounds a whole conversation is what it was opened with, and either can be
-# raised on a run that is already going.
-max-model-calls: 40
+# Standalone and Relay message runs receive enough calls to use every declared step.
+# Delegated runs share their caller's allowance; conversation turns use the conversation's.
+# Those shared allowances can still bind earlier, including after delegated work or retries.
+max-model-calls: 100
 # THE GRANT THAT MAKES A TRIGGER REACHABLE. The three shipped conductors,
 # code_implementation, deep_research and implement_specification, each declare
 # triggers in their own frontmatter -- phrases and a /command -- and

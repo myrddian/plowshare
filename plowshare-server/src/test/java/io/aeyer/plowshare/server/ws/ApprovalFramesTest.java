@@ -12,12 +12,14 @@ import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.agents.BudgetRequests;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.Pictures;
 import io.aeyer.plowshare.server.agents.Runs;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.approvals.BudgetExtension;
 import io.aeyer.plowshare.server.approvals.ConductorContinuation;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
@@ -246,6 +248,62 @@ class ApprovalFramesTest {
 
   private Outcome route(String type, String json) {
     return router.route(FrameParity.frame(type, json), new Asking("tab-1", "enzo"));
+  }
+
+  @Test
+  void
+      budget_answers_use_the_atomic_owner_and_never_standing_command_or_generic_task_continuations() {
+    var question =
+        new RunApproval(
+            "apr_1",
+            7L,
+            "cnv_1",
+            "cnv_child",
+            "enzo",
+            "coder",
+            "server",
+            List.of(),
+            "",
+            "Finish original work",
+            RunApproval.ASKED,
+            null,
+            null,
+            null,
+            null,
+            null,
+            Instant.EPOCH,
+            null,
+            null,
+            new BudgetExtension(8, 4));
+    when(store.find("apr_1")).thenReturn(Optional.of(question));
+    var requests = mock(BudgetRequests.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<BudgetRequests> provider = mock(ObjectProvider.class);
+    when(provider.getIfAvailable(any())).thenReturn(requests);
+    frames.useBudgetRequests(provider);
+    when(requests.answer(question, true, "enzo", null))
+        .thenReturn(
+            Optional.of(
+                new BudgetRequests.Answer("allowed", true, "Original execution continues")));
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(
+                FrameTypes.APPROVAL_ANSWER,
+                "{\"id\":\"apr_1\",\"decision\":\"project\",\"prefix\":[\"run\"]}")
+            .code());
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(FrameTypes.APPROVAL_ANSWER, "{\"id\":\"apr_1\",\"decision\":\"conversation\"}")
+            .code());
+    var answered = route(FrameTypes.APPROVAL_ANSWER, "{\"id\":\"apr_1\",\"decision\":\"once\"}");
+    assertEquals(Code.OK, answered.code());
+    assertEquals(
+        new ApprovalFrames.Answered("apr_1", "allowed", null, true, "Original execution continues"),
+        answered.payload());
+    verify(requests).answer(question, true, "enzo", null);
+    verify(store, never()).allow(any(), any(), any(), any());
+    verify(runs, never()).start(any(), any());
+    verify(delivery).settled("apr_1");
   }
 
   private Outcome routeAs(String handle, String type, String json) {

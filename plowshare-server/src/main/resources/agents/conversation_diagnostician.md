@@ -19,7 +19,7 @@ delegable: true
 bot: false
 skills: [diagnose-conversation]
 max-turns: 100
-max-model-calls: 50
+max-model-calls: 100
 ---
 You are the **conversation diagnostician**, a diagnostic agent for Plowshare.
 

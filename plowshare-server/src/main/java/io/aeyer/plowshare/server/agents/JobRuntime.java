@@ -14,9 +14,11 @@ import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind;
 import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
+import io.aeyer.plowshare.server.allowances.AllowanceSnapshot;
 import io.aeyer.plowshare.server.applications.ContainedPrincipals;
 import io.aeyer.plowshare.server.approvals.ActiveRunApprovals;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.approvals.BudgetExtension;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.approvals.RunCallResumption;
@@ -187,6 +189,13 @@ import org.slf4j.LoggerFactory;
  * it does not cover.
  */
 public final class JobRuntime {
+  private volatile BudgetRequests budgetRequests = BudgetRequests.NONE;
+  private BudgetExecutionStack budgetStack = new BudgetExecutionStack();
+
+  public void useBudgetRequests(BudgetRequests requests) {
+    budgetRequests = Objects.requireNonNull(requests);
+  }
+
   private InformationAccess informationAccess;
   private InformationJobs informationInputs;
   private BusyReadRetry logChecks = BusyReadRetry.defaults();
@@ -300,6 +309,7 @@ public final class JobRuntime {
                 throw new CallerFault("SYSTEM model work cannot acquire resources");
             });
     copy.systemWork = work;
+    copy.budgetRequests = BudgetRequests.NONE;
     copy.harness = harness; // Preserve configured worker hooks inside the model-only envelope.
     copy.admittedAuthority = work::require;
     return copy;
@@ -376,6 +386,8 @@ public final class JobRuntime {
     retained.rulePrompts = rulePrompts;
     retained.todos = todos;
     retained.activity = activity;
+    retained.budgetRequests = budgetRequests;
+    retained.budgetStack = budgetStack;
     return retained;
   }
 
@@ -1923,6 +1935,37 @@ public final class JobRuntime {
     return operation;
   }
 
+  /** Recovery reuses the exact retained authority instead of deriving a broader current one. */
+  OperationAuthority.Admission restoredChildOperation(
+      OperationAuthority.Admission parent,
+      String parentConversation,
+      Transcript child,
+      AgentDefinition callee,
+      Home home,
+      Budget budget) {
+    if (operations == null) return parent;
+    requireChild(parent, callee, home);
+    var saved =
+        operations
+            .conversation(child.conversationId())
+            .orElseThrow(() -> new CallerFault("The retained delegation authority is unavailable"));
+    if (!parentConversation.equals(saved.parent())
+        || !saved.budget().value().equals(budget.identity())
+        || !saved.agent().equals(callee.name())
+        || !saved.capabilities().equals(OperationExecution.fingerprint(callee))
+        || !saved.admission().executor().equals(parent.executor())
+        || !saved.admission().account().equals(parent.account())
+        || !saved.admission().scope().equals(parent.scope())
+        || !saved.admission().source().equals(parent.source())
+        || !parent.support().containsAll(saved.admission().support())
+        || saved.admission().globalRead() && !parent.globalRead()
+        || !saved.admission().home().equals(parent.home())
+        || !parent.actions().containsAll(saved.admission().actions()))
+      throw new CallerFault("The retained delegation envelope cannot be replaced or widened");
+    operations.require(saved.admission());
+    return saved.admission();
+  }
+
   private void requireOperationTool(
       OperationAuthority.Admission operation, Home home, String name, String input) {
     if (operation == null) return;
@@ -1986,6 +2029,15 @@ public final class JobRuntime {
     Objects.requireNonNull(budget, "budget");
     Objects.requireNonNull(cancelled, "cancelled");
 
+    var restoredBudgetFrame = budgetRequests.restoring(transcript.conversationId());
+    if (restoredBudgetFrame.isPresent()) {
+      var frame = restoredBudgetFrame.get();
+      if (!frame.agent().equals(definition.name()))
+        throw new CallerFault("Budget continuation agent mismatch");
+      if (frame.stepLimit() == null) cap.lift();
+      else cap.changeTo(frame.stepLimit());
+    }
+
     if (userPrompt.isBlank()) {
       throw new IllegalArgumentException(
           "the agent '" + definition.name() + "' was started with no task to do");
@@ -2017,7 +2069,8 @@ public final class JobRuntime {
     // not let a failure of its own -- writing the harness's records -- replace
     // whatever this try block was already unwinding with.
     RuntimeException inFlight = null;
-    try {
+    try (var budgetFrame = budgetStack.enter(definition, ownedTranscript, cap)) {
+      budgetFrame.progress(0, List.of());
       outcome =
           ScriptProgram.isScript(definition.prompt())
               ? runScript(
@@ -2594,6 +2647,7 @@ public final class JobRuntime {
         transcript.usage().status() != UsageAttribution.Status.ATTRIBUTED
             ? ownerOf(callerHandle, sessionId, transcript.conversationId())
             : transcript.usage().accountHandle();
+    boolean retainsBudget = budgetRequests.available(transcript, owner) && !budget.windowed();
     requireLogReadable(transcript.conversationId(), owner);
     Hooks skillChecks = fileChecksFor(definition, sessionId, owner);
     // THE RUN'S IN-TURN LOG STAGES (spec 2026-09-28-hooks-reach-the-log, slices 2 and 3):
@@ -2727,6 +2781,25 @@ public final class JobRuntime {
     // -- a conductor's, an orchestration's -- is. The stuck trap judges a run by it: a
     // reviewer that can only read is never told it has only read (measured 2026-09-30).
     HookContext hookContext = declared.holding(offered.keySet());
+    var restoringBudget = budgetRequests.restoring(transcript.conversationId());
+    if (restoringBudget.isPresent()) {
+      budgetRequests.recoveryStarted(transcript.conversationId());
+      restoreBudgetTools(restoringBudget.get(), offered, transcript, home);
+      // A restored child may itself be waiting on command consent. Propagate that wait
+      // before another parent inference, exactly as the ordinary delegation path does.
+      var requested = extras.end().requested();
+      if (requested.isPresent()) {
+        budgetRequests.restored(transcript.conversationId());
+        return new Outcome(
+            requested.get().ending(),
+            requested.get().text(),
+            restoringBudget.get().steps(),
+            0,
+            "",
+            Pace.NONE,
+            true);
+      }
+    }
     List<ChatMessage> history =
         opening(
             systemText(definition.prompt(), transcript.opening()),
@@ -2741,6 +2814,7 @@ public final class JobRuntime {
         transcript.speaker() != null
             && transcript.speaker().kind() == Speaker.Kind.HARNESS
             && transcript.speaker().name().startsWith("approval ");
+    approvalContinuation |= restoringBudget.isPresent();
     approvalContinuation |=
         !incoming
             && suspendedRunCalls != null
@@ -2912,10 +2986,12 @@ public final class JobRuntime {
     // again. From here down, every message this loop appends is recorded as
     // it is appended, which is what makes what a model can be shown exactly
     // what was written down.
-    transcript.record(
+    LoggedEntry openingEntry =
         approvalContinuation
             ? LoggedEntry.diagnostic(userPrompt)
-            : LoggedEntry.utterance(userPrompt, transcript.speaker()));
+            : LoggedEntry.utterance(userPrompt, transcript.speaker());
+    if (retainsBudget) transcript.recordDurably(openingEntry);
+    else transcript.record(openingEntry);
     if (bound != null && bound.notice() != null)
       transcript.record(LoggedEntry.notice(bound.notice()));
     // Recorded AFTER the utterance, matching the log-order requirement:
@@ -3039,8 +3115,9 @@ public final class JobRuntime {
     // Counts across the whole run rather than within a batch, so two steps
     // that each lose an id cannot mint the same one twice.
     int synthesised = 0;
-    int steps = 0;
+    int steps = restoringBudget.map(BudgetCheckpoint.Frame::steps).orElse(0);
     int modelCalls = 0;
+    AllowanceNotices allowanceNotices = new AllowanceNotices();
     boolean answerReviewed = false;
     boolean regenerateResponse = false;
     boolean responseRetryUsed = false;
@@ -3058,9 +3135,11 @@ public final class JobRuntime {
     // turn may run at (spec 2026-09-30-fold-at-60-and-80 §1).
     boolean aStepEnded = false;
     Set<AgentRules.Rule> deliveredFileRules = new HashSet<>();
+    if (restoringBudget.isPresent()) budgetRequests.restored(transcript.conversationId());
 
     while (true) {
       try (var ignored = OperationStatements.open(OperationStatements.Kind.JOB_STEP)) {
+        budgetStack.current().progress(steps, List.of());
         admittedAuthority.run();
         if (operation != null) operations.require(operation);
         Set<AgentRules.Rule> fileRulesForThisStep = Set.copyOf(deliveredFileRules);
@@ -3079,7 +3158,16 @@ public final class JobRuntime {
               transcript.conversationId(), cap, steps, definition, sessionId, transcript, budget);
         }
         if (cap.stops(steps)) {
-          return capReached(cap, trail, steps, modelCalls);
+          if (awaitBudgetExtension(
+              definition,
+              transcript,
+              budget,
+              cap,
+              sessionId,
+              owner,
+              cancelled,
+              "The agent used all of its step allowance before completing the task.")) continue;
+          return pendingBudget(capReached(cap, trail, steps, modelCalls));
         }
         // A FOLD INSIDE THE TURN, at the tool-call boundary: after the step's results and
         // before the next model call, and only when there will be one -- after the cap and
@@ -3138,7 +3226,17 @@ public final class JobRuntime {
         }
         if (claimed.isEmpty()) {
           slot.release();
-          return budgetSpent(budget, trail, steps, modelCalls);
+          if (awaitBudgetExtension(
+              definition,
+              transcript,
+              budget,
+              cap,
+              sessionId,
+              owner,
+              cancelled,
+              "The agent used all of its model-call allowance before completing the task."))
+            continue;
+          return pendingBudget(budgetSpent(budget, trail, steps, modelCalls));
         }
         modelCalls++;
         // Published where the budget was claimed and not where the answer
@@ -3168,6 +3266,23 @@ public final class JobRuntime {
         boolean regenerating = regenerateResponse;
         regenerateResponse = false;
         try {
+          // Advice follows tool results and compaction without rewriting the system prefix or
+          // tool answers. The claim supplies shared spending; board wakes also have a local window.
+          Budget.Claim currentClaim = claimed.orElseThrow();
+          AllowanceSnapshot localAllowance = budget.snapshot();
+          allowanceNotices
+              .beforeCall(
+                  cap.ceiling(),
+                  steps,
+                  new AllowanceSnapshot(
+                      localAllowance.id(), currentClaim.limit(), currentClaim.ordinal()),
+                  budget.windowed() ? localAllowance : null,
+                  regenerating ? Set.of() : offered.keySet())
+              .ifPresent(
+                  text -> {
+                    history.add(ChatMessage.user(text));
+                    transcript.record(LoggedEntry.notice(text));
+                  });
           // Streamed, and the reason is a wall clock rather than a wish to
           // show tokens. Measured 2026-09-02 against qwen3.5-9b: a
           // 51-token prompt took 95.9 seconds, because the model thinks
@@ -3569,9 +3684,20 @@ public final class JobRuntime {
                   lastStep
                       ? RunActivity.Unwarned.LAST_STEP
                       : RunActivity.Unwarned.LAST_BUDGETED_CALL);
-              return lastStep
-                  ? capReached(cap, trail, steps, modelCalls)
-                  : budgetSpent(budget, trail, steps, modelCalls);
+              budgetStack.current().progress(steps, List.of());
+              if (awaitBudgetExtension(
+                  definition,
+                  transcript,
+                  budget,
+                  cap,
+                  sessionId,
+                  owner,
+                  cancelled,
+                  "The agent exhausted its allowance while correcting a tool call.")) continue;
+              return pendingBudget(
+                  lastStep
+                      ? capReached(cap, trail, steps, modelCalls)
+                      : budgetSpent(budget, trail, steps, modelCalls));
             }
             // From the second in a row, and for a safe tool only, the validator may make
             // the call the model meant. Never on the first: a single slip is the model's
@@ -3751,6 +3877,7 @@ public final class JobRuntime {
                           && typed.typedResults(home);
                     });
         if (typedResults
+            || retainsBudget
             || (suspendedRunCalls != null
                 && transcript.conversationId() != null
                 && asked.stream().anyMatch(wanted -> RunTool.NAME.equals(wanted.name())))) {
@@ -3786,7 +3913,9 @@ public final class JobRuntime {
         // a name no tool answers to is known here and not readable off the result's text.
         List<String> outcomes = new ArrayList<>(asked.size());
         List<Content.StoredImage> pictures = new ArrayList<>();
+        int pendingIndex = 0;
         for (ToolCall wanted : asked) {
+          budgetStack.current().progress(steps, asked.subList(pendingIndex++, asked.size()));
           try (var ignoredCall = OperationStatements.open(OperationStatements.Kind.TOOL_CALL)) {
             admittedAuthority.run();
             if (operation != null) operations.require(operation);
@@ -4237,7 +4366,15 @@ public final class JobRuntime {
                     .observing(observation)
                     .told(told)
                     .took(toolTook);
-            if (observation == null) transcript.record(toolEntry);
+            if (tool instanceof RequestBudgetTool requestTool) {
+              transcript.recordDurably(toolEntry);
+              if (requestTool.pending())
+                return new Outcome(
+                    Ending.AWAITING, result, steps, modelCalls, "budget approval pending");
+              if (requestTool.approval() != null)
+                budgetRequests.acknowledged(requestTool.approval());
+            } else if (retainsBudget && observation == null) transcript.recordDurably(toolEntry);
+            else if (observation == null) transcript.record(toolEntry);
             else {
               try {
                 pictures.addAll(transcript.recordToolResult(toolEntry));
@@ -4614,22 +4751,35 @@ public final class JobRuntime {
   public List<ToolSchema> schemasOfferedTo(
       AgentDefinition definition, Home home, String session, String account) {
     // No extras: this is a fact about the agent, and extras are a fact about a run.
-    return offeredTo(
-            definition,
-            Budget.of(1),
-            () -> false,
-            session,
-            Transcript.NONE,
-            List.of(),
-            RunExtras.Extras.NONE,
-            account,
-            RunHooks.NONE,
-            home,
-            null)
-        .values()
-        .stream()
-        .map(AgentTool::schema)
-        .toList();
+    List<ToolSchema> schemas =
+        offeredTo(
+                definition,
+                Budget.of(1),
+                () -> false,
+                session,
+                Transcript.NONE,
+                List.of(),
+                RunExtras.Extras.NONE,
+                account,
+                RunHooks.NONE,
+                home,
+                null)
+            .values()
+            .stream()
+            .map(AgentTool::schema)
+            .toList();
+    // Pricing has no transcript, but an authenticated foreground execution receives this
+    // intrinsic schema independently of the definition's declared resource tools.
+    if (budgetRequests != BudgetRequests.NONE
+        && systemWork == null
+        && account != null
+        && home != null
+        && !home.isGlobal()) {
+      var priced = new ArrayList<>(schemas);
+      priced.add(RequestBudgetTool.requestSchema());
+      return List.copyOf(priced);
+    }
+    return schemas;
   }
 
   /**
@@ -5134,8 +5284,106 @@ public final class JobRuntime {
     if (messaging != null)
       offered.replaceAll(
           (name, tool) -> messaging.protect(tool, definition, transcript.conversationId()));
+    if (budgetRequests.available(transcript, callerHandle)) {
+      offered.put(
+          RequestBudgetTool.NAME,
+          new RequestBudgetTool(
+              ask -> {
+                if (budgetStack.current().wasDenied())
+                  throw new ToolArguments.BadArguments(
+                      "A budget extension was already denied for this run; finish with the retained work.");
+                var decision =
+                    budgetRequests.await(
+                        new BudgetCheckpoint(sessionId, callerHandle, budgetStack.snapshot()),
+                        budget,
+                        budgetStack.current().cap(),
+                        new BudgetExtension(ask.calls(), ask.steps()),
+                        ask.reason(),
+                        cancelled);
+                decision
+                    .filter(answer -> !answer.allowed() && !answer.pending())
+                    .ifPresent(answer -> budgetStack.denied());
+                return decision;
+              }));
+    }
     reads.offered(offered.keySet());
     return offered;
+  }
+
+  /** Exhaustion can ask without another paid call; a live stack keeps every parent and sibling. */
+  private boolean awaitBudgetExtension(
+      AgentDefinition definition,
+      Transcript transcript,
+      Budget budget,
+      TurnCap cap,
+      String session,
+      String executor,
+      BooleanSupplier cancelled,
+      String reason) {
+    if (cancelled.getAsBoolean()
+        || budgetStack.current().wasDenied()
+        || !budgetRequests.available(transcript, executor)) return false;
+    var decision =
+        budgetRequests.await(
+            new BudgetCheckpoint(session, executor, budgetStack.snapshot()),
+            budget,
+            cap,
+            new BudgetExtension(
+                budget.exhausted() ? definition.maxModelCalls() : 0,
+                cap.stops(budgetStack.current().snapshot().steps()) ? definition.maxTurns() : 0),
+            reason,
+            cancelled);
+    if (decision.isEmpty()) return false;
+    var answer = decision.get();
+    transcript.recordDurably(LoggedEntry.notice(answer.text()));
+    if (answer.pending()) {
+      budgetStack.current().pending(answer.text());
+      return false;
+    }
+    budgetRequests.acknowledged(answer.approval());
+    if (!answer.allowed()) budgetStack.denied();
+    return answer.allowed();
+  }
+
+  private Outcome pendingBudget(Outcome exhausted) {
+    String pending = budgetStack.current().pending();
+    return pending == null
+        ? exhausted
+        : new Outcome(
+            Ending.AWAITING,
+            pending,
+            exhausted.steps(),
+            exhausted.modelCalls(),
+            "budget approval pending");
+  }
+
+  /** Restore the paused child and settle its original call slot before consulting the parent. */
+  private void restoreBudgetTools(
+      BudgetCheckpoint.Frame frame,
+      Map<String, AgentTool> offered,
+      Transcript transcript,
+      Home home) {
+    budgetStack.current().progress(frame.steps(), frame.pending());
+    Optional<BudgetCheckpoint.Frame> child = budgetRequests.restoringChild(frame.conversation());
+    String decision = budgetRequests.restorationDecision(frame.conversation()).orElseThrow();
+    for (int index = 0; index < frame.pending().size(); index++) {
+      ToolCall pending = frame.pending().get(index);
+      String result;
+      if (index == 0 && child.isPresent()) {
+        if (!AgentRunTool.NAME.equals(pending.name())
+            || !(offered.get(AgentRunTool.NAME) instanceof AgentRunTool runner))
+          throw new CallerFault("The original delegation is not available for budget continuation");
+        result = runner.resumeExisting(child.get(), pending, home);
+      } else if (index == 0 && RequestBudgetTool.NAME.equals(pending.name())) {
+        result = decision;
+      } else {
+        result =
+            "The harness did not execute this call: it was after the suspended call in the original batch. "
+                + "Continue the same task and invoke this operation explicitly if it is still required. No effect was replayed.";
+      }
+      transcript.recordDurably(LoggedEntry.toolResult(pending.id(), result));
+    }
+    transcript.recordDurably(LoggedEntry.notice(decision));
   }
 
   /** What the model is told when authority changed while a tool ran. */
@@ -5899,27 +6147,8 @@ public final class JobRuntime {
             + " what is missing.]";
       }
       if (running == SECOND) {
-        // NO NUMBER, AND NOT THE RUN'S OWN CAP EITHER. An earlier
-        // version named the cap here — "this run stops after 16 turns…
-        // each repeat spends one of them" — three lines under a comment
-        // saying an agent does not get to read its own limits. The rule
-        // and the code disagreed and the code was wrong.
-        //
-        // What a model is told is a consequence of what IT is doing: a
-        // run that goes on repeating one call is stopped without an
-        // answer. What it is not told is any counter — not the cap, not
-        // what remains of it, not ENOUGH. A budget a model can read is a
-        // budget it optimises against, padding or rushing or bargaining,
-        // and none of that is the task; and the same question asked with
-        // forty turns left and four becomes two different prompts, which
-        // makes a run's behaviour depend on infrastructure that its own
-        // transcript does not show.
-        //
-        // The line is DeepSeek Harness's and it holds it structurally
-        // rather than by discipline: its request/context event carries
-        // the context window and is not a surface event type, so the
-        // number cannot reach a model however carelessly somebody writes
-        // a sentence. See implementation rationale
+        // Repetition advice describes the behavior, independently of AllowanceNotices' retained
+        // limit checkpoints. Neither notice rewrites a tool's result or changes the allowance.
         return opening(wanted.name(), SECOND)
             + ", and a run that goes on repeating one call is stopped without an"
             + " answer. Try different arguments, a different tool, or answer with"

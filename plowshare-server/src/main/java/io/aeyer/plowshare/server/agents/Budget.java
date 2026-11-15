@@ -140,10 +140,31 @@ public final class Budget {
     return identity;
   }
 
+  /** Whether this loop also has a wake-local ceiling below its canonical shared allowance. */
+  boolean windowed() {
+    return windowed;
+  }
+
   public AllowanceSnapshot snapshot() {
     claiming.lock();
     try {
       return new AllowanceSnapshot(new AllowanceId(identity), limit, spent.get());
+    } finally {
+      claiming.unlock();
+    }
+  }
+
+  /**
+   * Refreshes this same live counter after an atomic, authorized grant in its owning repository.
+   */
+  public void refreshFrom(AllowanceSnapshot snapshot) {
+    claiming.lock();
+    try {
+      if (!identity.equals(snapshot.id().value()) || snapshot.spent() < spent.get())
+        throw new IllegalArgumentException(
+            "An allowance refresh cannot replace its identity or lose spending");
+      limit = snapshot.ceiling();
+      spent.set(snapshot.spent());
     } finally {
       claiming.unlock();
     }

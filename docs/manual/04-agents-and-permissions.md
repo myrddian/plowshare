@@ -227,6 +227,48 @@ successful output contains, when to stop, and how to represent missing evidence.
 Keep the declared tools consistent with the procedure. A model that cannot meet
 an instruction should return a visible gap rather than invent a successful action.
 
+`max-turns` limits one run's model steps; `max-model-calls` supplies its standalone
+or incoming-message call allowance. Shipped definitions provide at least one model
+call per declared step, so their default allowance can reach the step cap. Calls
+spent on retries, reviews or delegated work can still exhaust the shared allowance
+earlier. Conversation turns and delegated agents use the allowance supplied by
+their caller rather than receiving a fresh definition allowance. Explicit caller
+limits and project policy remain authoritative.
+
+Before its first model response, a run receives a retained runtime notice showing
+its actual remaining steps and model calls. Further notices arrive when either
+finite allowance has 50%, 20%, 10% and 5% remaining. Counts include the response
+about to be generated. Small allowances also receive a final warning on their last
+step or call; crossing several thresholds at once produces only the most urgent
+warning. Ceiling changes produce an updated notice and reset the checkpoints.
+Board workers see both the shared allowance and their separate per-wake window;
+either can trigger a warning.
+
+Eligible foreground, delegated and messaging agents receive `request_budget`.
+It accepts `additional_calls`, `additional_steps` (nonnegative integers, at least
+one positive) and a `reason`. Set the unused count to zero. The final warning
+directs the agent to request what it needs or finish with verified results and
+explicit gaps. If it reaches a limit first, the harness can create the request
+without another model call. Conductors retain their existing orchestration cap
+question and extension controls.
+
+Budget requests appear in `approval.list` and the existing approval controls.
+Answer with `approval.answer` using `once` or `deny`; conversation/project command
+grants cannot approve a budget request. Approval adds the displayed counts once
+to the existing allowance and requesting agent's step cap. It preserves all
+spending and does not change tool permissions.
+
+While approval is pending, the original job waits without holding a model slot.
+Its parents wait too, and the original message remains open. Approval continues
+that execution, including when it exhausted its allowance. After a server
+interruption, the retained checkpoint restores the same conversations,
+delegation stack, original task history and message route. It creates no new task
+instance or allowance. Completed effects are retained; unstarted calls after the
+suspended call are explicitly returned as unexecuted for the agent to reconsider.
+Cancellation withdraws the question, and expired messages or revoked authority
+cannot resume. SYSTEM tasks and board wake windows do not acquire this capability.
+A request alone never raises a limit.
+
 When adding an assistant, test it with its real effective definition and account
 scope. Include refused operations and unavailable providers as well as a happy
 path. Deterministic fixture tests validate the contracts; they do not prove the

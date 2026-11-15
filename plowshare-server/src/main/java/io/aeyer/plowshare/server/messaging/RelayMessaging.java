@@ -987,6 +987,10 @@ public final class RelayMessaging implements MessageService {
   }
 
   private void completeReadable(String message, Outcome outcome) {
+    completeReadable(message, outcome, false);
+  }
+
+  private void completeReadable(String message, Outcome outcome, boolean settledBudget) {
     work.inTransaction(
         () -> {
           Route pending = route(message).orElseThrow();
@@ -994,7 +998,8 @@ public final class RelayMessaging implements MessageService {
           lockRequest(message);
           Route original = route(message).orElseThrow();
           if (original.handled()) return null;
-          if (outcome.ending() == Outcome.Ending.AWAITING) {
+          if (outcome.ending() == Outcome.Ending.AWAITING
+              || !settledBudget && repository.awaitingBudget(message)) {
             repository.awaiting(message);
             return null;
           }
@@ -1074,7 +1079,9 @@ public final class RelayMessaging implements MessageService {
           if (handling.isEmpty()) return !recipient.lifetime().equals("caller");
           if (!recipient.active()) return true;
           String child =
-              approval.askedIn().equals(recipient.conversation()) ? null : approval.askedIn();
+              approval.budget() != null || approval.askedIn().equals(recipient.conversation())
+                  ? null
+                  : approval.askedIn();
           if (child != null) {
             var row =
                 conversations
@@ -1096,14 +1103,21 @@ public final class RelayMessaging implements MessageService {
                   MessageWake.Continuation.APPROVAL,
                   approval.id(),
                   utterance,
-                  child));
+                  child),
+              approval.budget() == null);
           return true;
         });
   }
 
   private void queueContinuation(Instance recipient, MessageWake data) {
-    int allowance = definitions.resolve(recipient.agent(), recipient.project()).maxModelCalls();
-    repository.addAllowance(data.message(), allowance);
+    queueContinuation(recipient, data, true);
+  }
+
+  private void queueContinuation(Instance recipient, MessageWake data, boolean addAllowance) {
+    if (addAllowance) {
+      int allowance = definitions.resolve(recipient.agent(), recipient.project()).maxModelCalls();
+      repository.addAllowance(data.message(), allowance);
+    }
     firings.oweMessage(
         recipient.id(),
         RelayMessageInboxes.target(recipient),
@@ -1157,6 +1171,35 @@ public final class RelayMessaging implements MessageService {
                       + MessageToolCodec.delegate(outcome),
                   null));
           return null;
+        });
+  }
+
+  @Override
+  public boolean budgetDenied(RunApproval approval, String text) {
+    return endBudget(approval, text, Outcome.Ending.CALL_BUDGET);
+  }
+
+  @Override
+  public boolean budgetInterrupted(RunApproval approval, String text) {
+    return endBudget(approval, text, Outcome.Ending.UNAVAILABLE);
+  }
+
+  private boolean endBudget(RunApproval approval, String text, Outcome.Ending ending) {
+    return work.inTransaction(
+        () -> {
+          List<Instance> bound = repository.byConversation(approval.conversation());
+          if (bound.isEmpty()) return false;
+          Instance recipient = bound.getFirst();
+          if (!recipient.account().equals(approval.handle()))
+            throw new MessageRefused("Budget approval belongs to another account");
+          lockMailbox(recipient);
+          for (String message : repository.lockHandling(recipient.id())) {
+            // This final denial owns settlement even while its checkpoint awaits acknowledgement.
+            // No model call is needed to close the original request.
+            completeReadable(
+                message, new Outcome(ending, text, 0, 0, "budget continuation ended"), true);
+          }
+          return true;
         });
   }
 

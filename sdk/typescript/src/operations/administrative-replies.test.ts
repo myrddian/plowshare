@@ -72,6 +72,42 @@ function missingFields(value: unknown): unknown[] {
 }
 
 describe('complete administrative WS replies', () => {
+  it('retains budget extension counts and rejects invalid allowance values', () => {
+    const original = fixtures['approval.list'];
+    if (!object(original.payload) || !isList(original.payload.approvals))
+      throw new Error('Missing approvals');
+    const approval = original.payload.approvals[0];
+    if (!object(approval)) throw new Error('Missing approval');
+    const withBudget = (budget: unknown) => ({
+      code: 'OK' as const,
+      payload: {
+        approvals: [
+          {
+            ...approval,
+            command: [],
+            commands: null,
+            prefix: null,
+            scope: null,
+            budget,
+          },
+        ],
+      },
+    });
+    const valid = withBudget({ calls: 8, steps: 4 });
+    expect(administrativeReply('approval.list', valid)).toEqual(valid);
+    for (const invalid of [
+      null,
+      {},
+      { calls: 0, steps: 0 },
+      { calls: -1, steps: 2 },
+      { calls: 1.5, steps: 2 },
+      { calls: 2147483648, steps: 0 },
+      { calls: '8', steps: 2 },
+    ])
+      expect(
+        administrativeReply('approval.list', withBudget(invalid)),
+      ).toBeUndefined();
+  });
   it('has a nonempty fixture for every supported operation', () => {
     expect(Object.keys(fixtures).sort()).toEqual(
       [...ADMINISTRATIVE_OPERATIONS].sort(),
@@ -359,6 +395,12 @@ describe('complete administrative WS replies', () => {
       Record<string, string>?,
     ][] = [
       [
+        'BudgetExtension',
+        'server/approvals/BudgetExtension',
+        'BudgetExtension',
+        [],
+      ],
+      [
         'ApprovalView',
         'server/ws/ApprovalFrames',
         'View',
@@ -566,7 +608,10 @@ describe('complete administrative WS replies', () => {
       expect(
         dto.members.map((member) => {
           const field = member as ts.PropertySignature;
-          if (type === 'InboxItem' && field.name.getText(source) === 'about')
+          if (
+            (type === 'InboxItem' && field.name.getText(source) === 'about') ||
+            (type === 'ApprovalView' && field.name.getText(source) === 'budget')
+          )
             expect(field.questionToken, type).toBeDefined();
           else expect(field.questionToken, type).toBeUndefined();
           return [field.name.getText(source), field.type!.getText(source)];

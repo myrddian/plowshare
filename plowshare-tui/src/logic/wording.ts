@@ -2233,6 +2233,15 @@ export function describeFired(
  * never used.
  */
 export function describeQuestion(approval: Approval): string[] {
+  if (approval.budget !== undefined) {
+    return [
+      `a run asks for ${approval.budget.calls} additional model calls and ${approval.budget.steps} additional steps:`,
+      '  continue the same work; retain its history and prior spending',
+      ...(approval.reason === undefined
+        ? []
+        : [`  because ${approval.reason}`]),
+    ];
+  }
   if (approval.commands !== undefined) {
     // AN ACCEPTANCE SET (V67): every command, one answer for all of them — and why the command
     // judge, when it was shown them, put them to the person.
@@ -2269,6 +2278,8 @@ export function describeQuestion(approval: Approval): string[] {
 export function describeKeys(state: Asking): string[] {
   switch (state.kind) {
     case 'choosing':
+      if (state.approval.budget !== undefined)
+        return ['o approve extension once · d deny · esc leave it for later'];
       // A set takes no project prefix (V67), so it is not offered one.
       return state.approval.commands !== undefined
         ? ['o once · c for this conversation · d deny · esc leave it for later']

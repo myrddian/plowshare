@@ -616,6 +616,11 @@ export function constrain(graph) {
     if (title === 'ApplicationRelease') { field(s, 'revision', {pattern:uuid,minLength:36,maxLength:36}); field(s, 'digest', {pattern:'^[a-f0-9]{64}$',minLength:64,maxLength:64}); field(s, 'fileCount', integer(1,128)); }
     if (title === 'ApplicationDeploymentReceipt') field(s, 'requestId', {pattern:uuid,minLength:36,maxLength:36});
     if (title === 'ApplicationDeploymentStatus') { field(s, 'activeRevision', {pattern:uuid,minLength:36,maxLength:36}); field(s, 'releases', {maxItems:100}); }
+    if (title === 'BudgetExtension') {
+      field(s, 'calls', integer());
+      field(s, 'steps', integer());
+      rules(s, or({gt:[g('calls'),0]}, {gt:[g('steps'),0]}));
+    }
     if (title === 'BoardOpened') rules(s, not(eq('topic.swarm', null)));
     if (title === 'BoardMessages') rules(s, {eq:[g('topic.swarm'),g('root.swarm')]});
     if (title === 'SwarmSelection') {

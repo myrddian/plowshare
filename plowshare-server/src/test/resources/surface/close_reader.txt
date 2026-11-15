@@ -5,8 +5,8 @@
 # agent through JobRuntime; see ModelSurfaceTest for how, and for how to
 # regenerate this file when the change is meant.
 #
-# The user message is the placeholder that rendering was run with. Only
-# its position is a claim.
+# The task is a placeholder. This fixture has a one-call allowance to
+# capture only the opening request; its allowance notice reflects that fixture.
 
 model specifier: reasoning
 
@@ -99,6 +99,9 @@ about rather than picking one in silence.
 
 === user message ===
 <the task this run was given>
+
+=== user message ===
+[Final allowance warning: steps (max-turns): 8 of 8 remaining; model calls in the shared allowance: 1 of 1 remaining. At most 5% remains for at least one limit, or this is its last step/call. Counts include this step and this model call; other work sharing the allowance can spend calls too. Finish now with verified results and explicit remaining gaps, or request more allowance from your caller before it runs out. No allowance-request tool is offered; finish with what you can verify and state any work that needs more allowance. A request does not grant an increase; only an authorized caller or configured policy can change the limits.]
 
 === tool: document_ask ===
 Ask ONE document a question and wait for the answer. Name the document by its id, or by words describing it — "the retry budget paper" — and this resolves the name to exactly one document before it asks. When the name matches more than one, nothing is asked and you get the candidates' ids back to choose from.

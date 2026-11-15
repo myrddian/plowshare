@@ -3,6 +3,7 @@ import {
   type FileStoreReference,
 } from '../binding/filestores.ts';
 import { isList } from '../binding/values.ts';
+import type { BudgetExtension } from './administrative-replies.ts';
 import { commandEntry, type CommandEntry } from './conversation-replies.ts';
 // Shared domain readers. Unknown fields are tolerated; frontend rendering stays outside this module.
 import {
@@ -537,6 +538,7 @@ export interface Approval {
   readonly prefix?: readonly string[];
   /** Where a project prefix starts: the program and its first argument, as the server chose. */
   readonly defaultPrefix: readonly string[];
+  readonly budget?: BudgetExtension;
 }
 
 /** A list of strings, or nothing for anything that is not exactly that. */
@@ -588,11 +590,31 @@ function approvalIn(fields: Record<string, unknown>): Approval | undefined {
   const id = textAt(fields, 'id');
   const command = wordsAt(fields, 'command');
   const commands = commandsAt(fields);
+  const rawBudget = fields['budget'];
+  let budget: BudgetExtension | undefined;
+  if (rawBudget !== undefined) {
+    const values = fieldsOf(rawBudget);
+    const calls = values['calls'],
+      steps = values['steps'];
+    if (
+      typeof calls !== 'number' ||
+      typeof steps !== 'number' ||
+      !Number.isSafeInteger(calls) ||
+      !Number.isSafeInteger(steps) ||
+      calls < 0 ||
+      steps < 0 ||
+      calls > 2147483647 ||
+      steps > 2147483647 ||
+      calls + steps === 0
+    )
+      return undefined;
+    budget = { calls, steps };
+  }
   // A set names its commands and runs no one command of its own; anything else names its one.
   if (
     id === undefined ||
     command === undefined ||
-    (command.length === 0 && commands === undefined)
+    (command.length === 0 && commands === undefined && budget === undefined)
   ) {
     return undefined;
   }
@@ -616,6 +638,7 @@ function approvalIn(fields: Record<string, unknown>): Approval | undefined {
     ...(scope === undefined ? {} : { scope }),
     ...(prefix === undefined ? {} : { prefix }),
     defaultPrefix: wordsAt(fields, 'defaultPrefix') ?? [],
+    ...(budget === undefined ? {} : { budget }),
   };
 }
 

@@ -4,7 +4,7 @@ description: Assesses one household device's privacy behaviour from its retained
 model: reasoning
 tools: [information_read]
 max-turns: 6
-max-model-calls: 4
+max-model-calls: 6
 ---
 You supply one structured device assessment to assess_network_device. The script
 reads the retained dossier, validates your JSON, obtains an independent review,

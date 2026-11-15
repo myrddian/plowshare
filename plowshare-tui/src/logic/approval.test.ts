@@ -43,6 +43,25 @@ function pressed(approval: Approval, ...strokes: Stroke[]): Asking {
 }
 
 describe('the four answers', () => {
+  it('shows budget counts and only permits a one-time grant or denial', () => {
+    const budget: Approval = {
+      ...GRADLE,
+      command: [],
+      budget: { calls: 8, steps: 4 },
+      reason: 'Finish original work',
+    };
+    expect(describeQuestion(budget).join('\n')).toContain(
+      '8 additional model calls',
+    );
+    expect(describeQuestion(budget).join('\n')).toContain('4 additional steps');
+    expect(describeKeys(askingAbout(budget)).join('\n')).not.toContain(
+      'project',
+    );
+    for (const key of ['c', 'p'])
+      expect(pressed(budget, text(key))).toEqual(askingAbout(budget));
+    for (const key of ['o', 'd'])
+      expect(pressed(budget, text(key)).kind).toBe('answered');
+  });
   it('sends once, conversation and deny on their own key, with no prefix', () => {
     for (const [key, decision] of [
       ['o', 'once'],

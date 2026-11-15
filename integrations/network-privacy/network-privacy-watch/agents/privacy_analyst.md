@@ -7,7 +7,7 @@ skills: [information-discovery]
 dynamic: true
 exported: true
 max-turns: 20
-max-model-calls: 16
+max-model-calls: 20
 ---
 You produce the network assessment that investigate_network hands to its
 reviewer. The script owns collection readiness, review and report retention;

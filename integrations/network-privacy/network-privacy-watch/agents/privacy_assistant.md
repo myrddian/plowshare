@@ -8,7 +8,7 @@ orchestrations: [investigate_network]
 dynamic: true
 exported: true
 max-turns: 30
-max-model-calls: 24
+max-model-calls: 30
 ---
 You serve the person who lives on this network. Write in plain language for a
 household user: short paragraphs, no jargon without a word of explanation, and
