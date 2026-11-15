@@ -10,6 +10,12 @@ import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.agents.digests.*;
 import io.aeyer.plowshare.server.documents.Chunking;
+import io.aeyer.plowshare.server.embedding.EmbeddingProfile;
+import io.aeyer.plowshare.server.embedding.EmbeddingQuery;
+import io.aeyer.plowshare.server.embedding.EmbeddingSearchPolicy;
+import io.aeyer.plowshare.server.embedding.EmbeddingSlot;
+import io.aeyer.plowshare.server.embedding.EmbeddingSpace;
+import io.aeyer.plowshare.server.embedding.JdbcEmbeddingSpaceRepository;
 import io.aeyer.plowshare.server.llm.*;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer;
@@ -286,7 +292,7 @@ class ConversationRetrievalTest {
         index.generation());
     jdbc.update(
         "INSERT INTO retrieval_passages(source_type,source_id,position,passage,embedding) "
-            + "SELECT s.source_type,s.source_id,g,'orchard fixture passage',CAST(? AS vector) "
+            + "SELECT s.source_type,s.source_id,g,'orchard fixture passage ' || s.source_id,CAST(? AS vector) "
             + "FROM retrieval_sources s CROSS JOIN generate_series(0,4) g WHERE s.source_type='entry'",
         Arrays.toString(vector("orchard")));
     assertEquals(
@@ -372,6 +378,88 @@ class ConversationRetrievalTest {
         0,
         jdbc.queryForObject(
             "SELECT count(*) FROM retrieval_sources WHERE source_type='entry'", Integer.class));
+  }
+
+  @Test
+  void semanticAndHybridSearchNarrowBeforeRankingAndGroupRepeatedPassages() {
+    List<String> repeated = new ArrayList<>();
+    for (int i = 0; i < 12; i++) repeated.add(add(project, "orchard copied passage"));
+    String distinct = add(project, "orchard unique evidence");
+    add(Home.of("elsewhere"), "orchard hidden");
+    fill();
+    for (String mode : List.of("semantic", "hybrid")) {
+      var page = search.search(project, "orchard", 0, 20, mode, null);
+      assertEquals(2, page.hits().size());
+      var grouped =
+          page.hits().stream().filter(hit -> hit.sources().size() > 1).findFirst().orElseThrow();
+      assertEquals(12, grouped.sources().size());
+      assertEquals(
+          12, grouped.sources().stream().map(LogSearch.Source::conversationId).distinct().count());
+      var selected = search.search(project, "fruit cultivation", 0, 10, mode, null, distinct);
+      assertEquals(1, selected.hits().size());
+      assertEquals(distinct, selected.hits().getFirst().conversationId());
+      assertThrows(
+          ValidationException.class,
+          () ->
+              search.search(
+                  project,
+                  "fruit cultivation",
+                  0,
+                  10,
+                  mode,
+                  selected.retrieval().snapshot(),
+                  repeated.getFirst()));
+      assertTrue(
+          search
+              .search(project, "fruit cultivation", 0, 10, mode, null, "missing")
+              .hits()
+              .isEmpty());
+    }
+  }
+
+  @Test
+  void typedSemanticSearchUsesTheSelectedConversationAndCurrentEmbeddingSpace() {
+    String selected = add(project, "orchard selected evidence");
+    add(project, "orchard copied evidence");
+    add(project, "orchard copied evidence");
+    fill();
+    var space =
+        new JdbcEmbeddingSpaceRepository(jdbc)
+            .register(
+                new EmbeddingSpace.Definition(
+                    "conversation-fixture",
+                    "v1",
+                    768,
+                    "query: ",
+                    "document: ",
+                    "mean",
+                    EmbeddingSpace.Normalization.NONE,
+                    "none"));
+    jdbc.update(
+        "UPDATE retrieval_passages SET prose_space_id=?,prose_embedding=embedding,prose_source_revision=embedding_source_revision",
+        space.id());
+    var repository = new JdbcPassageRepository(jdbc, transactions);
+    for (var mode :
+        List.of(EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Mode.HNSW_BINARY)) {
+      var profile =
+          new EmbeddingProfile(
+              EmbeddingSlot.PROSE,
+              space,
+              new EmbeddingSearchPolicy(mode, EmbeddingSearchPolicy.Distance.COSINE),
+              1);
+      var scope = new PassageRepository.ReadScope(false, null, false, selected);
+      var matches =
+          repository.rank(
+              project,
+              "entry",
+              new EmbeddingQuery(profile, vector("orchard")),
+              1,
+              index.generation(),
+              scope);
+      assertEquals(1, matches.size());
+      assertEquals(selected + ":1", matches.getFirst().id());
+      assertEquals(1, matches.getFirst().sources().size());
+    }
   }
 
   @Test

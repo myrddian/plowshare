@@ -8,7 +8,12 @@ import java.util.Optional;
 
 /** Committed retrieval sources and atomic derived-vector publication, without model dispatch. */
 public interface PassageRepository {
-  record ReadScope(boolean constrained, String account, boolean knowledgeOnly) {
+  record ReadScope(
+      boolean constrained, String account, boolean knowledgeOnly, String conversation) {
+    public ReadScope(boolean constrained, String account, boolean knowledgeOnly) {
+      this(constrained, account, knowledgeOnly, null);
+    }
+
     public ReadScope(boolean constrained, String account) {
       this(constrained, account, false);
     }

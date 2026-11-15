@@ -25,7 +25,7 @@ PAYLOADS = {
     'memory write': 'proposal:{summary,scope,body,formedBy,formedWhere}; project selects tier',
     'memory resolve': 'proposal,accept,by,reason; accept|reject becomes a boolean',
     'memory curate': 'project,maxModelCalls',
-    'conversation search': 'q,project,offset,limit; mode:lexical preserves legacy matching',
+    'conversation search': 'q,project,conversation,offset,limit; mode:lexical uses BM25 and groups repeated excerpts',
     'conversation chat': 'conversation,offset,limit',
     'conversation trajectory': 'conversation,offset,limit',
     'conversation context': 'conversation,agent',

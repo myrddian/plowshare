@@ -210,6 +210,28 @@ class CapabilityReadToolsTest {
   }
 
   @Test
+  void searchCurrentUsesTheRunOwnedConversationAndAuthenticatedReader() throws Exception {
+    var scoped = mock(EntryStore.class);
+    when(entries.forAccount("reader")).thenReturn(scoped);
+    var view = LogSearchView.of(LogSearch.NONE, 0, 10);
+    when(scoped.searchView(HOME, "claim", 0, 10, "semantic", null, null, "cnv_current"))
+        .thenReturn(view);
+    var tool = new ConversationSearchTool(entries).forRun("cnv_current", "reader");
+    assertEquals(
+        tree(view),
+        json.readTree(
+            tool.run(
+                "{\"question\":\"claim\",\"mode\":\"semantic\",\"conversation\":\"current\"}",
+                HOME)));
+    verify(scoped).searchView(HOME, "claim", 0, 10, "semantic", null, null, "cnv_current");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ConversationSearchTool(entries)
+                .run("{\"question\":\"claim\",\"conversation\":\"current\"}", HOME));
+  }
+
+  @Test
   void search_defaults_are_shared_and_service_failure_is_not_zero_hits() throws Exception {
     var view = LogSearchView.of(LogSearch.NONE, 0, 10);
     when(entries.searchView(Home.global(), "claim", 0, 10, "hybrid", null)).thenReturn(view);

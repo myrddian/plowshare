@@ -847,14 +847,23 @@ public class ConversationController {
       @RequestParam(required = false) Integer offset,
       @RequestParam(required = false) Integer limit,
       @RequestParam(required = false) String mode,
-      @RequestParam(required = false) String snapshot) {
-    if (mode == null && snapshot == null) return searchEntries(q, project, offset, limit);
+      @RequestParam(required = false) String snapshot,
+      @RequestParam(required = false) String conversation) {
+    if (mode == null && snapshot == null && conversation == null)
+      return searchEntries(q, project, offset, limit);
     String question = RequestedLogQuestion.in(q);
     RequestedWindow window = RequestedWindow.in(offset, limit);
     return ResponseEntity.ok(
         entryReads()
             .searchView(
-                RequestedHome.in(project), question, window.skip(), window.most(), mode, snapshot));
+                RequestedHome.in(project),
+                question,
+                window.skip(),
+                window.most(),
+                mode,
+                snapshot,
+                null,
+                conversation));
   }
 
   public ResponseEntity<LogSearchView> searchEntries(

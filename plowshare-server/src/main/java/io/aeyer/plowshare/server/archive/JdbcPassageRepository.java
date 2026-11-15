@@ -1,19 +1,45 @@
 package io.aeyer.plowshare.server.archive;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.archive.PassageIndex.*;
 import io.aeyer.plowshare.server.embedding.*;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.Duration;
 import java.util.*;
+import org.springframework.jdbc.core.ArgumentPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 /** Owns retrieval SQL and lock ordering. External embedding calls never run in this repository. */
 public final class JdbcPassageRepository implements PassageRepository {
+  private static final ObjectReader OCCURRENCES_IN =
+      new ObjectMapper().readerFor(new TypeReference<List<Occurrence>>() {});
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
+  private final Duration readBudget;
 
   public JdbcPassageRepository(JdbcTemplate jdbc, UnitOfWork transactions) {
+    this(jdbc, transactions, Duration.ofSeconds(2));
+  }
+
+  public JdbcPassageRepository(JdbcTemplate jdbc, UnitOfWork transactions, Duration readBudget) {
+    if (readBudget == null
+        || readBudget.isZero()
+        || readBudget.isNegative()
+        || readBudget.compareTo(Duration.ofMinutes(1)) > 0)
+      throw new IllegalArgumentException(
+          "Passage read budget must be positive and at most one minute");
     this.jdbc = jdbc;
     this.transactions = transactions;
+    this.readBudget = readBudget;
   }
 
   private static void sourceType(String type) {
@@ -159,25 +185,51 @@ public final class JdbcPassageRepository implements PassageRepository {
   }
 
   private <T> List<T> informationRows(
-      ReadScope scope,
-      String sql,
-      org.springframework.jdbc.core.RowMapper<T> mapper,
-      Object... args) {
+      ReadScope scope, String sql, RowMapper<T> mapper, Object... args) {
     String marker = "/*information*/";
     int at = sql.indexOf(marker);
     List<Object> bound = new ArrayList<>(Arrays.asList(args));
+    if (scope.conversation() != null && at >= 0) {
+      int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
+      bound.add(before, scope.conversation());
+      sql = sql.replace(marker, " AND s.conversation_id=? " + marker);
+      at = sql.indexOf(marker);
+    }
     if (scope.constrained() && at >= 0) {
       int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
       bound.add(before, scope.account());
     }
-    return jdbc.query(
+    String selected =
         sql.replace(
             marker,
             scope.constrained()
                 ? " AND s.conversation_id NOT IN (SELECT log FROM information_unreadable_logs(?))"
-                : ""),
-        mapper,
-        bound.toArray());
+                : "");
+    return ReadDeadline.within(
+        readBudget,
+        () -> {
+          long deadline = ReadDeadline.deadlineNanos(readBudget);
+          var setter = new ArgumentPreparedStatementSetter(bound.toArray());
+          try {
+            var rows =
+                jdbc.query(
+                    selected,
+                    statement -> {
+                      long remaining = deadline - System.nanoTime();
+                      if (remaining <= 0) throw new ReadUnavailableException();
+                      int timeout = (int) Math.max(1, (remaining + 999_999_999L) / 1_000_000_000L);
+                      int transactionTimeout = statement.getQueryTimeout();
+                      statement.setQueryTimeout(
+                          transactionTimeout > 0 ? Math.min(transactionTimeout, timeout) : timeout);
+                      setter.setValues(statement);
+                    },
+                    mapper);
+            if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
+            return rows;
+          } finally {
+            setter.cleanupParameters();
+          }
+        });
   }
 
   public boolean publish(
@@ -358,6 +410,8 @@ public final class JdbcPassageRepository implements PassageRepository {
   public List<Match> rank(
       Home home, String type, float[] query, int most, String generation, ReadScope scope) {
     sourceType(type);
+    if (most < 1 || most > 2000)
+      throw new IllegalArgumentException("passage result limit must be 1..2000");
 
     String join =
         type.equals("entry")
@@ -367,9 +421,8 @@ public final class JdbcPassageRepository implements PassageRepository {
         type.equals("entry")
             ? " AND e.content IS NOT NULL AND e.role IS NOT NULL AND e.ejected_at IS NULL "
             : " AND owner.stale_at IS NULL ";
-    return informationRows(
-        scope,
-        "SELECT source_id,position,passage,source_hash,similarity FROM (SELECT DISTINCT ON (s.source_id) s.source_id,p.position,p.passage,s.source_hash,1-(p.embedding <=> CAST(? AS vector)) AS similarity"
+    String best =
+        "SELECT DISTINCT ON (s.source_id) s.source_id,p.position,p.passage,s.source_hash,1-(p.embedding <=> CAST(? AS vector)) AS similarity"
             + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
             + join
             + " WHERE s.source_type=? AND s.status='ready' AND s.generation=?"
@@ -377,14 +430,11 @@ public final class JdbcPassageRepository implements PassageRepository {
             + eligible
             + digestFence(type, scope)
             + (type.equals("entry") ? " /*information*/" : "")
-            + " AND 1-(p.embedding <=> CAST(? AS vector))>=0.35 ORDER BY s.source_id,similarity DESC,p.position) best ORDER BY similarity DESC,source_id LIMIT ?",
-        (r, n) ->
-            new Match(
-                r.getString(1),
-                r.getInt(2),
-                r.getString(3),
-                r.getDouble("similarity"),
-                r.getString("source_hash")),
+            + " AND 1-(p.embedding <=> CAST(? AS vector))>=0.35 ORDER BY s.source_id,similarity DESC,p.position";
+    return informationRows(
+        scope,
+        groupMatches(best, type.equals("entry")),
+        JdbcPassageRepository::match,
         Arrays.toString(query),
         type,
         generation,
@@ -421,42 +471,72 @@ public final class JdbcPassageRepository implements PassageRepository {
             + (type.equals("entry") ? " /*information*/" : "")
             + " AND "
             + plan.present("p");
-    var args = new java.util.ArrayList<Object>();
+    var args = new ArrayList<Object>();
     args.add(query.vectorText());
     args.add(type);
     args.add(generation);
     args.add(ProjectIds.toRead(jdbc, home));
-    if (plan.exact()) inner += " ORDER BY distance";
+    boolean exact = plan.exact() || type.equals("entry");
+    if (exact) inner += " ORDER BY distance";
     else {
       inner += " ORDER BY " + plan.candidateDistance(column);
       args.add(query.vectorText());
     }
     // More passages than sources are considered before deduplication. This is an explicit
     // candidate bound; repeated passages never contribute additional fusion votes.
-    if (!plan.exact()) {
+    if (!exact) {
       inner += " LIMIT ?";
       args.add(plan.candidates(most));
     }
-    String sql =
-        "SELECT source_id,position,passage,source_hash,distance FROM (SELECT DISTINCT ON(source_id) * FROM ("
+    String best =
+        "SELECT source_id,position,passage,source_hash,1-distance AS similarity FROM (SELECT DISTINCT ON(source_id) * FROM ("
             + inner
             + ") candidates ORDER BY source_id,distance,position) best"
             + (query.profile().search().distance() == EmbeddingSearchPolicy.Distance.COSINE
                 ? " WHERE distance<=0.65"
-                : "")
-            + " ORDER BY distance,source_id LIMIT ?";
+                : "");
     args.add(most);
     return informationRows(
         scope,
-        sql,
-        (r, n) ->
-            new Match(
-                r.getString("source_id"),
-                r.getInt("position"),
-                r.getString("passage"),
-                1 - r.getDouble("distance"),
-                r.getString("source_hash")),
+        groupMatches(best, type.equals("entry")),
+        JdbcPassageRepository::match,
         args.toArray());
+  }
+
+  /** Duplicate passages collapse before the source limit, with bounded authorized references. */
+  private static String groupMatches(String best, boolean group) {
+    if (!group)
+      return "SELECT best.*,1 AS source_count,jsonb_build_array(jsonb_build_object('id',source_id,'revision',source_hash))::text AS sources FROM ("
+          + best
+          + ") best ORDER BY similarity DESC,source_id LIMIT ?";
+    return "WITH best AS ("
+        + best
+        + "), grouped AS (SELECT "
+        + "(array_agg(source_id ORDER BY similarity DESC,source_id,position))[1] AS source_id,"
+        + "(array_agg(position ORDER BY similarity DESC,source_id,position))[1] AS position,"
+        + "(array_agg(passage ORDER BY similarity DESC,source_id,position))[1] AS passage,"
+        + "(array_agg(source_hash ORDER BY similarity DESC,source_id,position))[1] AS source_hash,"
+        + "max(similarity) AS similarity,count(*)::integer AS source_count,"
+        + "to_jsonb((array_agg(jsonb_build_object('id',source_id,'revision',source_hash)"
+        + " ORDER BY similarity DESC,source_id,position))[1:20])::text AS sources"
+        + " FROM best GROUP BY regexp_replace(btrim(passage),'\\s+',' ','g'))"
+        + " SELECT * FROM grouped ORDER BY similarity DESC,source_id LIMIT ?";
+  }
+
+  private static Match match(ResultSet rs, int row) throws SQLException {
+    try {
+      List<Occurrence> sources = OCCURRENCES_IN.readValue(rs.getString("sources"));
+      return new Match(
+          rs.getString("source_id"),
+          rs.getInt("position"),
+          rs.getString("passage"),
+          rs.getDouble("similarity"),
+          rs.getString("source_hash"),
+          sources,
+          rs.getInt("source_count"));
+    } catch (JsonProcessingException invalid) {
+      throw new SQLException("Invalid persisted passage references", invalid);
+    }
   }
 
   @Override
@@ -571,7 +651,7 @@ public final class JdbcPassageRepository implements PassageRepository {
                     r.getString("conversation_id"),
                     r.getInt("ordinal"),
                     r.getInt("turn_ordinal"),
-                    io.aeyer.plowshare.server.agents.EntryKind.of(r.getString("kind")),
+                    EntryKind.of(r.getString("kind")),
                     rank,
                     snippet.length() > EntryStore.MOST_CHARACTERS_PER_SNIPPET
                         ? snippet.substring(0, EntryStore.MOST_CHARACTERS_PER_SNIPPET)

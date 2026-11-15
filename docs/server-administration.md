@@ -1043,3 +1043,14 @@ identities are refused, and disabling the authentication filter does not bypass
 the controller's role check. Request parameters and servlet-principal names are
 not substitutes for the filter's account context. Successful writes retain the
 existing raw-text, live-key and deployment-pin behavior.
+
+### Conversation search budget
+
+`plowshare.retrieval.search-budget` defaults to `2s` (positive, at most `1m`).
+Lexical ranking, grouped-reference refresh and passage repository reads inherit
+any earlier read deadline. JDBC query cancellation uses the remaining budget,
+rounded up to JDBC's whole-second timeout, and late results are rejected. This
+bounds these SQL executions; connection acquisition and cancellation cleanup
+still have the owning datasource/driver limits described above. Query embeddings
+retain their separate provider/admission budget and run outside SQL transactions.
+V268 adds the stored lexical length used by BM25; no embedding rebuild is needed.

@@ -451,6 +451,25 @@ public class WsServerClient implements ServerClient, AsyncServerClient, AutoClos
   }
 
   @Override
+  public LogHits searchEntries(LogQuery query) throws IOException {
+    return AsyncSupport.await(
+        RequestOptions.defaults(Duration.ofSeconds(2)),
+        options -> searchEntriesAsync(query, options));
+  }
+
+  @Override
+  public CompletionStage<LogHits> searchEntriesAsync(LogQuery query, RequestOptions options) {
+    Objects.requireNonNull(query, "query");
+    var selected = fields("project", query.project(), "q", query.q());
+    if (query.conversation() != null) selected.put("conversation", query.conversation());
+    if (query.mode() != null) selected.put("mode", query.mode());
+    if (query.snapshot() != null) selected.put("snapshot", query.snapshot());
+    if (query.offset() != null) selected.put("offset", query.offset());
+    if (query.limit() != null) selected.put("limit", query.limit());
+    return askAsync("conversation.search", selected, LogHits.class, options);
+  }
+
+  @Override
   public Context context(String conversationId, String agent) throws IOException {
     return AsyncSupport.await(
         RequestOptions.defaults(Duration.ofMinutes(30)),

@@ -150,6 +150,11 @@ public interface AsyncServerClient extends AutoCloseable {
 
   CompletionStage<Entries> trajectoryAsync(String conversationId, Integer offset, Integer limit);
 
+  /** Preserves selection and snapshot identity on the shared WebSocket operation. */
+  default CompletionStage<LogHits> searchEntriesAsync(LogQuery query, RequestOptions options) {
+    throw new UnsupportedOperationException("Selected conversation search is unavailable");
+  }
+
   CompletionStage<LogHits> searchEntriesAsync(
       String project, String query, Integer offset, Integer limit, RequestOptions options);
 

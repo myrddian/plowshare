@@ -8,6 +8,7 @@ import io.aeyer.plowshare.protocol.search.SearchPage;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public interface ServerClient {
@@ -368,6 +369,37 @@ public interface ServerClient {
   LogHits searchEntries(String project, String query, Integer offset, Integer limit)
       throws IOException;
 
+  /** BM25, semantic or hybrid search with an optional explicit conversation and snapshot. */
+  default LogHits searchEntries(LogQuery query) throws IOException {
+    throw new UnsupportedOperationException("Selected conversation search is unavailable");
+  }
+
+  record LogQuery(
+      String project,
+      String q,
+      String conversation,
+      String mode,
+      String snapshot,
+      Integer offset,
+      Integer limit) {
+    public LogQuery {
+      if (project != null && !project.equals(project.strip()))
+        throw new IllegalArgumentException("Invalid project");
+      project = ContractChecks.optionalIdentity(project, "project");
+      q = ContractChecks.text(q, "q");
+      if (conversation != null
+          && (!conversation.equals(conversation.strip()) || conversation.length() > 256))
+        throw new IllegalArgumentException("Invalid conversation identity");
+      conversation = ContractChecks.optionalIdentity(conversation, "conversation");
+      if (mode != null)
+        mode = ContractChecks.oneOf(mode, "mode", Set.of("lexical", "semantic", "hybrid"));
+      snapshot = ContractChecks.optionalIdentity(snapshot, "snapshot");
+      ContractChecks.nonnegative(offset, "offset");
+      if (limit != null && (limit < 1 || limit > 100))
+        throw new IllegalArgumentException("Invalid search limit");
+    }
+  }
+
   Context context(String conversationId, String agent) throws IOException;
 
   List<Seam> compactions(String conversationId) throws IOException;
@@ -494,7 +526,12 @@ public interface ServerClient {
     }
   }
 
-  record LogHits(List<LogHit> hits, int total, int offset, int limit, Reach reach) {
+  record LogHits(
+      List<LogHit> hits, int total, int offset, int limit, Reach reach, LogRetrieval retrieval) {
+    public LogHits(List<LogHit> hits, int total, int offset, int limit, Reach reach) {
+      this(hits, total, offset, limit, reach, null);
+    }
+
     public LogHits {
       ContractChecks.nonnegative(total, "total");
       ContractChecks.nonnegative(offset, "offset");
@@ -514,8 +551,45 @@ public interface ServerClient {
       int length,
       Integer supersededBy,
       String handle,
-      Instant recordedAt) {
+      Instant recordedAt,
+      List<LogSource> sources,
+      Integer sourceCount,
+      LogEvidence evidence) {
+    public LogHit(
+        String conversationId,
+        int ordinal,
+        int turnOrdinal,
+        String kind,
+        double rank,
+        String snippet,
+        int length,
+        Integer supersededBy,
+        String handle,
+        Instant recordedAt) {
+      this(
+          conversationId,
+          ordinal,
+          turnOrdinal,
+          kind,
+          rank,
+          snippet,
+          length,
+          supersededBy,
+          handle,
+          recordedAt,
+          null,
+          null,
+          null);
+    }
+
     public LogHit {
+      if (sources != null) {
+        ContractChecks.collection(sources, "sources", 20);
+        sources = List.copyOf(sources);
+        if (sources.isEmpty() || sourceCount == null || sourceCount < sources.size())
+          throw new IllegalArgumentException("Invalid grouped source references");
+      } else if (sourceCount != null)
+        throw new IllegalArgumentException("Source count needs references");
       conversationId = ContractChecks.identity(conversationId, "conversationId");
       ContractChecks.nonnegative(ordinal, "ordinal");
       ContractChecks.nonnegative(turnOrdinal, "turnOrdinal");
@@ -525,6 +599,69 @@ public interface ServerClient {
       ContractChecks.nonnegative(supersededBy, "supersededBy");
       handle = ContractChecks.optionalIdentity(handle, "handle");
       ContractChecks.finite(rank, "rank");
+    }
+  }
+
+  /** An authorized occurrence of the displayed passage, not an alternative execution identity. */
+  record LogSource(
+      String conversationId,
+      int ordinal,
+      int turnOrdinal,
+      String kind,
+      String handle,
+      Instant recordedAt,
+      String sourceRevision,
+      int length,
+      Integer supersededBy) {
+    public LogSource {
+      conversationId = ContractChecks.identity(conversationId, "conversationId");
+      kind = ContractChecks.identity(kind, "kind");
+      handle = ContractChecks.optionalIdentity(handle, "handle");
+      sourceRevision = ContractChecks.optionalIdentity(sourceRevision, "sourceRevision");
+      if (ordinal < 1 || turnOrdinal < 1)
+        throw new IllegalArgumentException("Invalid evidence coordinates");
+      ContractChecks.nonnegative(length, "length");
+      ContractChecks.nonnegative(supersededBy, "supersededBy");
+    }
+  }
+
+  record LogEvidence(String retrievedBy, Integer passagePosition, String sourceRevision) {
+    public LogEvidence {
+      retrievedBy =
+          ContractChecks.oneOf(
+              retrievedBy, "retrievedBy", Set.of("lexical", "semantic", "semantic+lexical"));
+      ContractChecks.nonnegative(passagePosition, "passagePosition");
+      sourceRevision = ContractChecks.optionalIdentity(sourceRevision, "sourceRevision");
+    }
+  }
+
+  record LogCoverage(int eligible, int indexed, int passages, int pending, int failed, int stale) {
+    public LogCoverage {
+      for (int count : new int[] {eligible, indexed, passages, pending, failed, stale})
+        ContractChecks.nonnegative(count, "coverage");
+    }
+  }
+
+  record LogRetrieval(
+      String requestedMode,
+      String effectiveMode,
+      String totalMeaning,
+      String snapshot,
+      boolean truncated,
+      boolean complete,
+      String fallback,
+      LogCoverage coverage,
+      String generation,
+      int queryEmbeddingCalls,
+      String provenance) {
+    public LogRetrieval {
+      requestedMode = ContractChecks.identity(requestedMode, "requestedMode");
+      effectiveMode = ContractChecks.identity(effectiveMode, "effectiveMode");
+      totalMeaning = ContractChecks.text(totalMeaning, "totalMeaning");
+      snapshot = ContractChecks.optionalIdentity(snapshot, "snapshot");
+      generation = ContractChecks.optionalIdentity(generation, "generation");
+      ContractChecks.nonnegative(queryEmbeddingCalls, "queryEmbeddingCalls");
+      provenance = ContractChecks.text(provenance, "provenance");
     }
   }
 

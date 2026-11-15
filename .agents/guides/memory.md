@@ -57,6 +57,19 @@ Recall, filing, navigation/digests and repair have separate operation bindings a
 budgets. A nearby conversation allowance does not automatically fund them. Count
 actual requests under the owning policy and preserve retained usage evidence.
 
+Conversation search uses [ConversationSearchRepository](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationSearchRepository.java)
+for authorized BM25 statistics, grouped lexical matches and batch refresh of retained
+source references. The home remains an authority ceiling; an optional conversation
+only narrows it. The agent tool resolves `conversation: "current"` from its run.
+`PassageIndex.inConversation` carries that selection into ranking and coverage SQL.
+Identical matching excerpts/passages (with whitespace normalized) group before
+pagination/source limits. Semantic entry ranking is exact to preserve that grouping;
+digest consumers retain their existing index policy. Each group exposes at most
+twenty authorized source references. Snapshot refresh rechecks all retained revisions
+in a batch and suppresses changed/moved/hidden references without filling later slots.
+Lexical totals count groups; semantic totals describe a bounded snapshot. Inspect
+coverage, fallback and capped references before claiming completeness.
+
 ## Bounded work
 
 Required contract: each active recall, filing, indexing or repair unit needs a
