@@ -7,7 +7,6 @@ import io.aeyer.plowshare.protocol.*;
 import io.aeyer.plowshare.server.agents.MemoryTools;
 import io.aeyer.plowshare.server.agents.scribe.Scribe;
 import io.aeyer.plowshare.server.api.*;
-import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.ws.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -62,7 +61,6 @@ class MemoryWriteEntryPointsTest {
     var tool =
         new MemoryTools.Write(archive, () -> scribe)
             .forRun(
-                null,
                 "log",
                 "writer",
                 () -> {
@@ -87,16 +85,20 @@ class MemoryWriteEntryPointsTest {
   }
 
   @Test
-  void documentDerivedToolMaterialStillCannotPublishAsMemory() {
+  void documentReadingDoesNotBlockOperationalMemoryAndOriginCannotDropItsInputLedger() {
     admitting();
-    var inputs = mock(InformationJobs.class);
-    when(inputs.hasInputs("log")).thenReturn(true);
     var tool =
-        new MemoryTools.Write(archive, () -> scribe)
-            .forRun(inputs, "log", "writer", () -> {}, () -> {});
+        new MemoryTools.Write(archive, () -> scribe).forRun("log", "writer", () -> {}, () -> {});
     tool.calledAs("call");
-    assertTrue(tool.run("{}", Home.of("project")).contains("information_write"));
-    verify(archive, never()).write(any());
+    String result =
+        tool.run(
+            "{\"summary\":\"Delegation failed\",\"scope\":\"tooling\",\"body\":\"Use the supported message route\"}",
+            Home.of("project"));
+    assertTrue(result.contains("mem_one"));
+    var request = ArgumentCaptor.forClass(MemoryWrites.Request.class);
+    verify(archive).write(request.capture());
+    assertEquals("log", request.getValue().origin().sourceLog());
+    verifyNoInteractions(scribe);
   }
 
   @Test

@@ -19,8 +19,30 @@ public interface MemoryWrites {
   }
 
   /** Alive remains applicable after commit; caller authority applies before content mutation. */
-  record Origin(String invocation, Runnable alive, Runnable authority, Learning learning) {
+  record Origin(
+      String invocation, Runnable alive, Runnable authority, Learning learning, String sourceLog) {
+    public Origin(String invocation, Runnable alive, Runnable authority, Learning learning) {
+      this(
+          invocation,
+          alive,
+          authority,
+          learning,
+          learning == null ? null : learning.conversation());
+    }
+
+    /** Server-selected conversation, never a model-selected list of supposedly relevant inputs. */
+    public Origin withSourceLog(String log) {
+      return new Origin(invocation, alive, authority, learning, Objects.requireNonNull(log));
+    }
+
     public Origin {
+      if (sourceLog != null
+          && (sourceLog.isBlank()
+              || sourceLog.length() > 1024
+              || sourceLog.codePoints().anyMatch(Character::isISOControl)))
+        throw new IllegalArgumentException("Valid memory source log required");
+      if (learning != null && !learning.conversation().equals(sourceLog))
+        throw new IllegalArgumentException("Learning source must match its retained window");
       Objects.requireNonNull(alive);
       Objects.requireNonNull(authority);
       if (invocation != null

@@ -180,8 +180,18 @@ public class MemoryStore implements MemoryRepository {
     // no provider IO occurs while these locks are held. Privacy evidence cannot change mid-read.
     jdbc.execute("LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE");
     jdbc.execute(
-        "LOCK TABLE memory_provenance,information_job_inputs,information_quarantined_payloads,information_resources,information_revisions,information_inputs IN SHARE MODE");
+        "LOCK TABLE memory_provenance,memory_input_snapshots,information_job_inputs,information_quarantined_payloads,information_resources,information_revisions,information_inputs IN SHARE MODE");
     require(request, expected);
+  }
+
+  @Override
+  public void lockDisclosure() {
+    jdbc.queryForObject(
+        "SELECT pg_advisory_xact_lock_shared(hashtextextended('information-navigation-control',0)) IS NULL",
+        Boolean.class);
+    jdbc.execute("LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE");
+    jdbc.execute(
+        "LOCK TABLE memory_provenance,memory_input_snapshots,information_job_inputs,information_quarantined_payloads,information_resources,information_revisions,information_inputs IN SHARE MODE");
   }
 
   @Override
@@ -267,6 +277,17 @@ public class MemoryStore implements MemoryRepository {
               request.acting(),
               request.home().project()))) throw writeDenied();
     }
+    if (!processing
+        && request.origin().sourceLog() != null
+        && request.origin().learning() == null) {
+      if (!Boolean.TRUE.equals(
+          jdbc.queryForObject(
+              "SELECT EXISTS(SELECT 1 FROM conversations c WHERE c.id=? AND memory_knowledge_scope(c.project_id)=? AND information_log_readable(c.id,?))",
+              Boolean.class,
+              request.origin().sourceLog(),
+              pin.scope(),
+              request.acting()))) throw writeDenied();
+    }
     var learning = request.origin().learning();
     if (learning != null) {
       if (!Boolean.TRUE.equals(
@@ -320,9 +341,10 @@ public class MemoryStore implements MemoryRepository {
     // mutation/publication and telemetry; provider IO always occurs after these locks release.
     jdbc.execute("LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE");
     jdbc.execute(
-        "LOCK TABLE memory_provenance,information_job_inputs,information_quarantined_payloads,information_resources,information_revisions,information_inputs IN SHARE MODE");
-    if (request.origin().learning() != null)
-      jdbc.execute("LOCK TABLE conversations,entries IN SHARE MODE");
+        "LOCK TABLE memory_provenance,memory_input_snapshots,information_job_inputs,information_quarantined_payloads,information_resources,information_revisions,information_inputs IN SHARE MODE");
+    if (request.origin().sourceLog() != null)
+      jdbc.execute("LOCK TABLE conversations,orchestrations IN SHARE MODE");
+    if (request.origin().learning() != null) jdbc.execute("LOCK TABLE entries IN SHARE MODE");
     require(request, pin, processing);
   }
 
@@ -349,6 +371,71 @@ public class MemoryStore implements MemoryRepository {
   }
 
   @Override
+  public Memory indexingOutput(String id) {
+    return jdbc
+        .query(
+            "SELECT "
+                + COLUMNS
+                + FROM_MEMORIES
+                + " WHERE m.id=? AND information_memory_indexable(m.id)",
+            ROW_MAPPER,
+            id)
+        .stream()
+        .findFirst()
+        .orElseThrow(MemoryStore::writeDenied);
+  }
+
+  @Override
+  public void retainInputs(String id, MemoryWrites.Request request) {
+    if (request.origin().sourceLog() != null)
+      jdbc.queryForObject(
+          "SELECT information_snapshot_memory_inputs(?,?) IS NULL",
+          Boolean.class,
+          id,
+          request.origin().sourceLog());
+  }
+
+  @Override
+  public void retainInputs(List<String> ids, Reader reader) {
+    if (reader.log() == null || ids.isEmpty()) return;
+    if (!Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM conversations c WHERE c.id=? AND information_log_readable(c.id,?))",
+            Boolean.class,
+            reader.log(),
+            reader.acting()))) throw writeDenied();
+    // Recheck after adding dependencies: a previously readable receiver must not accept
+    // a source selection that its current actor cannot read. Failure rolls back the ledger.
+    var arguments = new ArrayList<Object>();
+    arguments.add(reader.log());
+    arguments.addAll(ids);
+    jdbc.queryForObject(
+        "SELECT information_retain_memory_inputs(?,ARRAY["
+            + String.join(",", Collections.nCopies(ids.size(), "?::text"))
+            + "]) IS NULL",
+        Boolean.class,
+        arguments.toArray());
+    if (!Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT information_log_readable(?,?)", Boolean.class, reader.log(), reader.acting())))
+      throw writeDenied();
+  }
+
+  private String safe(boolean aliased, Reader reader) {
+    return reader == null
+        ? safe(aliased)
+        : (aliased ? "m.id" : "id")
+            + " NOT IN (SELECT memory FROM information_unreadable_memories(?)) AND ";
+  }
+
+  private static Object[] arguments(Reader reader, Object... rest) {
+    var values = new ArrayList<Object>();
+    if (reader != null) values.add(reader.acting());
+    Collections.addAll(values, rest);
+    return values.toArray();
+  }
+
+  @Override
   public void publishLegacy(
       MemoryWrites.Request request,
       QuerySources.Pin pin,
@@ -358,9 +445,9 @@ public class MemoryStore implements MemoryRepository {
     lock(request, pin, true);
     validity.run();
     if (expected.key().store() != EmbeddingWorkRepository.Store.MEMORIES
-        || !request.home().equals(current(expected.key().id()).home())) throw writeDenied();
+        || !request.home().equals(indexingOutput(expected.key().id()).home())) throw writeDenied();
     if (jdbc.update(
-            "UPDATE memories SET embedding=CAST(? AS vector) WHERE id=? AND home_scope_id=? AND embedding_source_revision=? AND summary || E'\\n' || scope=? AND state IN ('active','cold') AND information_memory_safe(id)",
+            "UPDATE memories SET embedding=CAST(? AS vector) WHERE id=? AND home_scope_id=? AND embedding_source_revision=? AND summary || E'\\n' || scope=? AND state IN ('active','cold') AND information_memory_indexable(id)",
             toVectorText(vector),
             expected.key().id(),
             pin.scope(),
@@ -522,15 +609,45 @@ public class MemoryStore implements MemoryRepository {
    * a stack trace.
    */
   public Optional<Memory> load(String id) {
+    return load(id, null);
+  }
+
+  @Override
+  public Optional<Memory> load(String id, Reader reader) {
     List<Memory> found =
         ArchiveUnavailableException.translating(
             "read a memory by id",
             () ->
                 jdbc.query(
-                    "SELECT " + COLUMNS + FROM_MEMORIES + " WHERE " + safe(true) + "m.id = ?",
+                    "SELECT "
+                        + COLUMNS
+                        + FROM_MEMORIES
+                        + " WHERE "
+                        + safe(true, reader)
+                        + "m.id = ?",
                     ROW_MAPPER,
-                    id));
+                    arguments(reader, id)));
     return found.isEmpty() ? Optional.empty() : Optional.of(found.get(0));
+  }
+
+  @Override
+  public List<Memory> load(List<String> ids, Reader reader) {
+    ids = List.copyOf(ids);
+    if (ids.isEmpty()) return List.of();
+    var args = new ArrayList<Object>();
+    args.add(reader.acting());
+    args.addAll(ids);
+    return jdbc.query(
+        "SELECT "
+            + COLUMNS
+            + FROM_MEMORIES
+            + " WHERE "
+            + safe(true, reader)
+            + "m.id IN ("
+            + String.join(",", Collections.nCopies(ids.size(), "?"))
+            + ")",
+        ROW_MAPPER,
+        args.toArray());
   }
 
   /**
@@ -622,6 +739,11 @@ public class MemoryStore implements MemoryRepository {
    * @param limit how many to return at most
    */
   public List<Memory> searchByVector(float[] embedding, Home home, int limit) {
+    return searchByVector(embedding, home, limit, null);
+  }
+
+  @Override
+  public List<Memory> searchByVector(float[] embedding, Home home, int limit, Reader reader) {
     if (limit <= 0) {
       return List.of();
     }
@@ -633,7 +755,7 @@ public class MemoryStore implements MemoryRepository {
                     + COLUMNS
                     + FROM_MEMORIES
                     + " WHERE "
-                    + safe(true)
+                    + safe(true, reader)
                     + HOME_MATCHES
                     + " AND state IN "
                     + LIVE_STATES
@@ -646,13 +768,16 @@ public class MemoryStore implements MemoryRepository {
                     + " ORDER BY embedding <=> CAST(? AS vector), m.id"
                     + " LIMIT ?",
                 ROW_MAPPER,
-                ProjectIds.toRead(jdbc, home),
-                toVectorText(embedding),
-                limit));
+                arguments(reader, ProjectIds.toRead(jdbc, home), toVectorText(embedding), limit)));
   }
 
   /** Same tier/state/information fences as legacy recall, with explicit slot identity. */
   public List<Memory> searchByVector(EmbeddingQuery query, Home home, int limit) {
+    return searchByVector(query, home, limit, null);
+  }
+
+  @Override
+  public List<Memory> searchByVector(EmbeddingQuery query, Home home, int limit, Reader reader) {
     if (limit <= 0) return List.of();
     var plan = new EmbeddingIndexPlan(query.profile());
     String sql =
@@ -663,7 +788,7 @@ public class MemoryStore implements MemoryRepository {
             + " AS distance"
             + FROM_MEMORIES
             + " WHERE "
-            + safe(true)
+            + safe(true, reader)
             + HOME_MATCHES
             + " AND state IN "
             + LIVE_STATES
@@ -671,6 +796,7 @@ public class MemoryStore implements MemoryRepository {
             + plan.present("m");
     List<Object> args = new java.util.ArrayList<>();
     args.add(query.vectorText());
+    if (reader != null) args.add(reader.acting());
     args.add(ProjectIds.toRead(jdbc, home));
     if (plan.exact()) {
       sql += " ORDER BY distance,m.id LIMIT ?";
@@ -693,10 +819,15 @@ public class MemoryStore implements MemoryRepository {
   }
 
   public int countUnsearchable(EmbeddingProfile profile, Home home) {
+    return countUnsearchable(profile, home, null);
+  }
+
+  @Override
+  public int countUnsearchable(EmbeddingProfile profile, Home home, Reader reader) {
     Integer count =
         jdbc.queryForObject(
             "SELECT count(*) FROM memories m WHERE "
-                + safe(true)
+                + safe(true, reader)
                 + HOME_MATCHES
                 + " AND state IN "
                 + LIVE_STATES
@@ -704,7 +835,7 @@ public class MemoryStore implements MemoryRepository {
                 + new EmbeddingIndexPlan(profile).present("m")
                 + ")",
             Integer.class,
-            ProjectIds.toRead(jdbc, home));
+            arguments(reader, ProjectIds.toRead(jdbc, home)));
     return count == null ? 0 : count;
   }
 
@@ -783,6 +914,11 @@ public class MemoryStore implements MemoryRepository {
    * is close to the question, and the only trace is a {@code log.warn} on the server.
    */
   public List<TocEntry> index(Home home) {
+    return index(home, null);
+  }
+
+  @Override
+  public List<TocEntry> index(Home home, Reader reader) {
     return ArchiveUnavailableException.translating(
         "index a tier",
         () ->
@@ -791,7 +927,7 @@ public class MemoryStore implements MemoryRepository {
                     + searchable(false)
                     + ")) AS unsearchable FROM memories"
                     + " WHERE "
-                    + safe(false)
+                    + safe(false, reader)
                     + HOME_MATCHES
                     + " AND state = 'active'"
                     + " ORDER BY id",
@@ -801,7 +937,7 @@ public class MemoryStore implements MemoryRepository {
                         rs.getString("summary"),
                         rs.getString("scope"),
                         rs.getBoolean("unsearchable")),
-                ProjectIds.toRead(jdbc, home)));
+                arguments(reader, ProjectIds.toRead(jdbc, home))));
   }
 
   /**
@@ -819,6 +955,11 @@ public class MemoryStore implements MemoryRepository {
    * here would report a problem that is not one.
    */
   public int countUnsearchable(Home home) {
+    return countUnsearchable(home, null);
+  }
+
+  @Override
+  public int countUnsearchable(Home home, Reader reader) {
     Integer count =
         ArchiveUnavailableException.translating(
             "count the unsearchable memories in a tier",
@@ -826,7 +967,7 @@ public class MemoryStore implements MemoryRepository {
                 jdbc.queryForObject(
                     "SELECT count(*) FROM memories"
                         + " WHERE "
-                        + safe(false)
+                        + safe(false, reader)
                         + HOME_MATCHES
                         + " AND state IN "
                         + LIVE_STATES
@@ -834,7 +975,7 @@ public class MemoryStore implements MemoryRepository {
                         + searchable(false)
                         + ")",
                     Integer.class,
-                    ProjectIds.toRead(jdbc, home)));
+                    arguments(reader, ProjectIds.toRead(jdbc, home))));
     return count == null ? 0 : count;
   }
 

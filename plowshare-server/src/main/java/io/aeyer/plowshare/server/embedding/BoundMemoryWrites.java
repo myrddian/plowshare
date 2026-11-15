@@ -215,7 +215,8 @@ public final class BoundMemoryWrites implements MemoryWrites {
                   "memory-write",
                   pin.account().toString(),
                   pin.scope().toString(),
-                  request.proposal().toString()));
+                  request.proposal().toString(),
+                  Objects.toString(request.origin().sourceLog(), "")));
     }
 
     void open() {
@@ -282,7 +283,7 @@ public final class BoundMemoryWrites implements MemoryWrites {
           outputs
               .source(output.key())
               .orElseThrow(() -> new IllegalStateException("Memory output withdrawn"));
-      var memory = memories.current(output.key().id());
+      var memory = memories.indexingOutput(output.key().id());
       if (!current.equals(output)
           || !memory.home().equals(request.home())
           || !(memory.state() == MemoryState.ACTIVE || memory.state() == MemoryState.COLD))
@@ -453,6 +454,7 @@ public final class BoundMemoryWrites implements MemoryWrites {
 
     public void provenance(String id) {
       if (request.origin().learning() != null) memories.provenance(id, request.origin().learning());
+      memories.retainInputs(id, request);
     }
 
     public void embed(Memory memory) {

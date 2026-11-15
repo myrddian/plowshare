@@ -546,7 +546,7 @@ class TransactionBoundaryTest {
       }
       assertTrue(arrived.await(30, SECONDS), "both writes should have reached the embedding call");
 
-      Future<List<TocEntry>> reader = threads.submit(() -> controller.index(null).getBody());
+      Future<List<TocEntry>> reader = threads.submit(() -> controller.index(null, null).getBody());
       List<TocEntry> globalIndex;
       try {
         globalIndex = reader.get(5, SECONDS);

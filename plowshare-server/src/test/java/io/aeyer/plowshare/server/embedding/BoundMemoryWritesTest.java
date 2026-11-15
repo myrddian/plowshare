@@ -69,6 +69,7 @@ class BoundMemoryWritesTest {
         .thenReturn(new AuthorityScope.Project(new AuthorityIds.ScopeId(pin.scope()), 1));
     when(permissions.allows(any(), any(), any())).thenAnswer(i -> allowed.get());
     when(memories.current(memory.id())).thenReturn(memory);
+    when(memories.indexingOutput(memory.id())).thenReturn(memory);
     when(outputs.source(output.key())).thenReturn(Optional.of(output));
     when(sources.openWrite(eq(pin), anyString(), any(), any()))
         .thenAnswer(
@@ -415,5 +416,17 @@ class BoundMemoryWritesTest {
     assertThrows(CallerFault.class, () -> writes.write(request()));
     assertEquals(0, chatted.get());
     verify(archive, never()).applyAdmitted(any(), any(), any(), any());
+  }
+
+  @Test
+  void sourceInputsAreRetainedInTheContentStepEvenWithNoInferenceBudget() {
+    policy.set(0);
+    var base = request();
+    var request =
+        new MemoryWrites.Request(base.acting(), home, proposal, base.origin().withSourceLog("log"));
+    writes.write(request);
+    verify(memories).retainInputs(memory.id(), request);
+    assertEquals(0, embedded.get());
+    assertEquals(0, chatted.get());
   }
 }

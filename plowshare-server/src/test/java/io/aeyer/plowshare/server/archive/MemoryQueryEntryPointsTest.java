@@ -4,14 +4,19 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Memory;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.MemoryTools;
 import io.aeyer.plowshare.server.agents.learner.Reminder;
 import io.aeyer.plowshare.server.agents.scribe.Scribe;
+import io.aeyer.plowshare.server.api.InvalidateRequest;
 import io.aeyer.plowshare.server.api.MemoryController;
 import io.aeyer.plowshare.server.api.RecallRequest;
 import io.aeyer.plowshare.server.embedding.QueryEmbeddings;
 import io.aeyer.plowshare.server.ws.Asking;
+import io.aeyer.plowshare.server.ws.MemoryIndexHandler;
+import io.aeyer.plowshare.server.ws.MemoryInvalidateHandler;
+import io.aeyer.plowshare.server.ws.MemoryReadHandler;
 import io.aeyer.plowshare.server.ws.MemoryRecallHandler;
 import java.util.List;
 import java.util.Map;
@@ -87,5 +92,34 @@ class MemoryQueryEntryPointsTest {
             "reader", "read", "model", List.of(), List.of(), List.of(), 1, 1, "read");
     assertTrue(bound.whatTheArchiveHolds(ineligible, home, "query").isEmpty());
     verify(archive, times(1)).survey(any(MemoryQueries.Request.class));
+  }
+
+  @Test
+  void identityAndIndexDisclosureAndInvalidationUseTheAuthenticatedReaderOnBothTransports() {
+    var memory = mock(Memory.class);
+    var frameReader = new MemoryReadRepository.Reader("reader", null);
+    var httpReader = new MemoryReadRepository.Reader("service", null);
+    when(archive.read(anyList(), any(MemoryReadRepository.Reader.class), any()))
+        .thenReturn(List.of(memory));
+    when(archive.index(any(), any(MemoryReadRepository.Reader.class), any())).thenReturn(List.of());
+    when(archive.invalidate(
+            anyString(), anyString(), anyString(), any(MemoryReadRepository.Reader.class), any()))
+        .thenReturn(memory);
+    var asking = new Asking(null, "reader");
+    new MemoryReadHandler(archive).handle(Map.of("memory", "mem_one"), asking);
+    new MemoryIndexHandler(archive).handle(Map.of("project", "project"), asking);
+    new MemoryInvalidateHandler(archive)
+        .handle(Map.of("memory", "mem_one", "reason", "obsolete", "by", "label"), asking);
+    var controller = new MemoryController(archive, mock(Scribe.class));
+    controller.get("mem_one", "service");
+    controller.index("project", "service");
+    controller.invalidate("mem_one", new InvalidateRequest("obsolete", "label"), "service");
+    for (var reader : List.of(frameReader, httpReader)) {
+      verify(archive).read(eq(List.of("mem_one")), eq(reader), any());
+      verify(archive).index(eq(Home.of("project")), eq(reader), any());
+      verify(archive).invalidate(eq("mem_one"), eq("obsolete"), eq("label"), eq(reader), any());
+    }
+    verify(archive, never()).read(anyList());
+    verify(archive, never()).index(any(Home.class));
   }
 }

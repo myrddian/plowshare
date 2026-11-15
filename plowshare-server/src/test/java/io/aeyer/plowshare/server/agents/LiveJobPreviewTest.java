@@ -14,6 +14,9 @@ import static org.mockito.Mockito.when;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.JobDelta;
 import io.aeyer.plowshare.protocol.JobEvent;
+import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.protocol.VerdictKind;
+import io.aeyer.plowshare.protocol.WriteResult;
 import io.aeyer.plowshare.server.access.AuthorityAction;
 import io.aeyer.plowshare.server.access.AuthorityIds.AccountId;
 import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
@@ -21,6 +24,9 @@ import io.aeyer.plowshare.server.access.GrantRecipient;
 import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.access.OperationInference;
 import io.aeyer.plowshare.server.access.RetainedInferenceBoundary;
+import io.aeyer.plowshare.server.agents.scribe.Scribe;
+import io.aeyer.plowshare.server.archive.Archive;
+import io.aeyer.plowshare.server.archive.MemoryWrites;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.information.InformationJobs;
@@ -103,9 +109,13 @@ class LiveJobPreviewTest {
   }
 
   private JobRuntime runtime(LlmDispatcher dispatcher) {
+    return runtime(dispatcher, List.of());
+  }
+
+  private JobRuntime runtime(LlmDispatcher dispatcher, List<AgentTool> tools) {
     return new JobRuntime(
         dispatcher,
-        List.of(),
+        tools,
         null,
         null,
         Instant::now,
@@ -307,6 +317,70 @@ class LiveJobPreviewTest {
   }
 
   @Test
+  void a_document_read_does_not_make_the_harness_reject_an_operational_memory() {
+    var archive = mock(Archive.class);
+    when(archive.maxBodyChars()).thenReturn(1000);
+    when(archive.writing()).thenReturn(true);
+    when(archive.write(any()))
+        .thenAnswer(
+            call -> {
+              MemoryWrites.Request request = call.getArgument(0);
+              request.origin().authority().run();
+              assertEquals("cnv_fixture", request.origin().sourceLog());
+              assertEquals("alice", request.acting());
+              return new WriteResult(VerdictKind.NEW, "mem_lesson", "filed", null, List.of());
+            });
+    var inputs = mock(InformationJobs.class);
+    when(inputs.hasInputs("cnv_fixture")).thenReturn(true);
+    when(inputs.logAllowed("cnv_fixture", "alice")).thenReturn(true);
+    Transport transport = new Transport();
+    transport.first =
+        new Completion(
+            "",
+            "tool_calls",
+            TokenUsage.UNKNOWN,
+            List.of(
+                new ToolCall(
+                    "memory-call",
+                    MemoryTools.WRITE_NAME,
+                    "{\"summary\":\"Retry transient reads\",\"scope\":\"tooling\",\"body\":\"A plain retry succeeds\"}")));
+    try (LlmDispatcher dispatcher =
+        dispatcher(transport, ChatFiltering.NONE, ModelResponseGuards.NONE)) {
+      JobRuntime runtime =
+          runtime(dispatcher, List.of(new MemoryTools.Write(archive, () -> mock(Scribe.class))));
+      runtime.useInformationInputs(inputs);
+      var definition =
+          new AgentDefinition(
+              "fixture",
+              "Fixture",
+              "model",
+              List.of(MemoryTools.WRITE_NAME),
+              List.of(),
+              List.of(),
+              2,
+              2,
+              "Save the operational lesson");
+      var outcome =
+          runtime.runOperation(
+              definition,
+              "Remember the retry",
+              HOME,
+              Budget.of(2),
+              () -> false,
+              "session",
+              new JobWatch("job_fixture", "session", new Watch()),
+              new Recording(),
+              TurnCap.of(2),
+              List.of(),
+              "alice",
+              false,
+              admission());
+      assertEquals(Outcome.Ending.ANSWERED, outcome.ending());
+      verify(archive).write(any());
+    }
+  }
+
+  @Test
   void final_authority_failure_still_blocks_an_ordinary_runs_final_answer() {
     Transport transport = new Transport();
     AtomicBoolean live = new AtomicBoolean(true);
@@ -443,6 +517,7 @@ class LiveJobPreviewTest {
 
   private static final class Transport implements LlmTransport {
     Runnable beforeCompletion = () -> {};
+    Completion first;
 
     public String poolName() {
       return "one";
@@ -460,6 +535,11 @@ class LiveJobPreviewTest {
         List<ToolSchema> tools,
         Deltas sink,
         BooleanSupplier cancelled) {
+      if (first != null) {
+        var result = first;
+        first = null;
+        return result;
+      }
       sink.thought("thinking");
       sink.answered("answer");
       beforeCompletion.run();
