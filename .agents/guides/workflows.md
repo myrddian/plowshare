@@ -40,9 +40,12 @@ Native scripts emit bounded typed commands through their owning runtime. They do
 not acquire arbitrary host IO or model-selected authority. Keep stage checkpoints,
 child completion delivery and effect replay rules intact across interruption.
 
-Application inbox routing and human attention ownership are distinct. Opted-in
-root applications retain routine background output in the project inbox; selected
-successes, failures, caps, approvals and questions follow explicit attention rules.
+Application inbox routing and human attention ownership are distinct. Root
+applications retain background output in the project inbox without manifest opt-in.
+Successful schedule receipts and pinned native-only completions are routine by
+default; other successful workflows notify Managers unless the explicit policy
+selects a different success-attention set. Failures, caps, approvals and questions
+still require attention.
 Current human Managers are resolved for attention copies; the registrar/executor
 is not an implicit recipient. Project Viewers can inspect shared output, Managers
 acknowledge it, and neither publication grants access to private execution logs.
@@ -65,9 +68,9 @@ this is not an end-to-end deadline across scheduling, child work and delivery.
 
 ## Legacy traps
 
-Omitting application `inbox` preserves previous routing; explicit foreground
-conversations keep their path. Do not migrate Personal/legacy delivery by assuming
-every project is an opted-in application. Application and personal read states
+Omitting application `inbox` uses default attention selection, not account-owned
+routine delivery. Explicit foreground conversations keep their path. Do not treat
+an External project as a root Application. Application and personal read states
 are separate. Scheduler wakeups, Relay availability and job progress do not prove
 successful handling or replace durable state transitions.
 

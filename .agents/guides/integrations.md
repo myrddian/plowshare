@@ -44,7 +44,8 @@ capabilities rather than internal services or database access.
 - Bound queues, journals and retention. Preserve cancellation, external provenance
   and lifecycle ownership rather than turning an external request into ambient
   SYSTEM or administrator authority.
-- Keep routine Application output in its configured owning inbox. Use supported
+- Keep routine root-Application output in its project inbox, including older
+  manifests with no inbox setting. Use supported
   attention publication for actionable output; adapters do not choose recipients
   by copying an installer account or inventing an external RBAC implementation.
 
