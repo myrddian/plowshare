@@ -7,6 +7,34 @@ also follows the [TypeScript standard](docs/typescript-standards.md). Native SDK
 follow the [native SDK standard](docs/native-sdk-standards.md). User instructions
 take precedence; more specific repository instructions apply within their scope.
 
+## Read only the guide for the work
+
+The code is the implementation reference. Subsystem guides explain its current
+mental model, non-obvious rules and legacy traps. Read only the relevant guide;
+this table also routes tests and documentation outside a subsystem's directory.
+The optional [wiki index](.agents/README.md) is not a required reading list.
+
+| If changing | Read |
+| --- | --- |
+| Authentication, authorization, roles/grants/ACLs, scope, admission, ownership or disclosure in any subsystem | [AUTH](.agents/guides/auth.md) |
+| SQL, repositories, Flyway, caches or database/read capacity | [Persistence and cache](.agents/guides/persistence-cache.md) |
+| Backpressure, queues, capacity limits, saturation or capacity retries | [Backpressure](.agents/guides/backpressure.md) |
+| Agent runtime, conversation log/Trajectory/model projection, reasoning streams or usage/pricing | [Runtime and inference](.agents/guides/runtime-and-inference.md) |
+| Documents, information lifecycle, knowledge policy or retrieval | [Information](.agents/guides/information.md) |
+| Memory, recall, embeddings or learning | [Memory](.agents/guides/memory.md) |
+| Orchestration, schedules, events, swarm or attention routing | [Workflows](.agents/guides/workflows.md) |
+| Messaging, Relay or delivery/subscription recovery | [Messaging and Relay](.agents/guides/messaging-relay.md) |
+| Application lifecycle, workspaces, files, union or Personal | [Applications and files](.agents/guides/applications-files.md) |
+| WebSocket dispatch, shared operation contracts or SDKs | [Transport and SDKs](.agents/guides/transport-sdks.md) |
+| CLI, TUI, console, Desktop or MCP client surfaces | [Clients](.agents/guides/clients.md) |
+| External adapters or extension services | [Integrations](.agents/guides/integrations.md) |
+| Packaging, releases or live operator actions | [Deployment and operations](.agents/guides/deployment-operations.md) |
+| Coordinating multiple dependent deliverables | [Delivery and review](.agents/delivery-and-review.md) |
+
+Older code paths and ADRs can describe a previous authority model. Do not infer
+current policy from their presence. Follow the relevant guide's source pointers,
+identify contradictions and update the guide when changing its contract.
+
 ## Understand the system first
 
 Plowshare is a persistent, server-first agent platform. Clients and adapters expose
@@ -122,6 +150,28 @@ explicit freshness, version, scope or concurrency reason. Follow the
 and the [query and cache strategy](docs/query-efficiency-and-cache-design.md).
 Shared caches must remain bounded and preserve current authorization and
 documented consistency; adding a cache is not a substitute for fixing wasteful SQL.
+
+**All active work must be bounded.** Short interactive reads, controls and async
+acceptance replies use a configurable **2-second default ceiling**, aiming much
+lower normally. Model/provider calls, transfers and background stages need their
+own explicit finite budgets. Bound queueing, execution, cancellation and cleanup;
+do not reset the budget on retries, confuse a caller timeout with remote abort,
+or replay uncertain effects. Long-lived workflows/subscriptions retain their
+durable lifecycle with bounded active steps, not a two-second lifetime. See
+[bounded work](docs/coding-standards.md#bound-active-work-in-every-subsystem) and
+the relevant subsystem guide for requirements and current enforcement limits.
+
+**SQL must have a completion deadline.** Every request-serving database work unit
+must finish within one configurable budget, with a **2-second default ceiling**;
+normal operation should be substantially faster. Admission, connection/lock waits,
+all statements and result materialization share the remaining budget, not a fresh
+timeout per query or retry. On expiry cancel database work, roll back its active
+transaction and surface failure without publishing late results or replaying a
+possibly committed mutation. Maintenance/migrations also need explicit bounded
+budgets; a different limit must be configured and justified for that work. See
+[bounded SQL work](docs/coding-standards.md#bound-sql-work-by-a-completion-deadline)
+for the rule and the current enforcement gap; existing cache wait limits alone
+do not establish universal SQL cancellation.
 
 ### Database test policy
 

@@ -161,8 +161,11 @@ public class EventChannelConfig implements WebSocketConfigurer {
   // read EventChannelHandler's requestPerConnection = 2, fed from event-read-concurrency (2) above,
   // and the properties were split keeping 2 purely to preserve behaviour. It is now more
   // load-bearing than before: with request-global at 0 (unlimited), this is the only transport
-  // execution bound. Raising it is what would pressure the connection pool, so do that only once
-  // Hikari starvation is expressed as CAPACITY_EXHAUSTED capacity, which this code does not do yet.
+  // execution bound at this layer. Raising it can increase downstream read/connection pressure.
+  // Never report a mid-handler database failure as CAPACITY_EXHAUSTED: that promises the entire
+  // request never started and permits capacity resubmission after earlier effects may have
+  // committed.
+  // See docs/backpressure.md for the separate transport, logical-read and wait-only pool contracts.
   @org.springframework.beans.factory.annotation.Value(
       "${plowshare.transport.request-per-connection:2}")
   private int requestPerConnection = 2;
@@ -179,16 +182,16 @@ public class EventChannelConfig implements WebSocketConfigurer {
 
   // Advertised to clients in the dispatch handshake; must be within 1..64 (the protocol ceiling).
   //
-  // Depth is the admission window: how many requests may be queued on one connection. It does not
-  // bound execution (request-per-connection does), so it has no bearing on database pool pressure.
-  // At 8 with two executing, six wait. The default is shallow for honest backpressure: a full queue
+  // Depth is the admission window: how many requests may be queued on one connection. Execution
+  // concurrency and downstream read admission, the throttle and Hikari separately determine DB
+  // pressure. At 8 with two executing, six wait. A shallow default gives honest backpressure: a
+  // queue
   // refuses sooner and visibly instead of letting 64 requests pile up behind two executing ones.
   //
-  // Consequence: the Java, Go, Python and .NET SDKs hard-fail with NOT_SUBMITTED at the depth bound
-  // instead of waiting, and all adopt the advertised depth, so an external consumer of those SDKs
-  // is refused at its 9th concurrent request. Only the TypeScript SDK blocks, and every first-party
-  // client uses it. A deployment serving the other four SDKs can raise this; teaching them to block
-  // is separate work.
+  // Public SDKs default to waiting for capacity and expose an explicit fail-fast option. A local
+  // fail-fast refusal before transmission is NOT_SUBMITTED; a safe server capacity refusal can be
+  // absorbed under the original request identity/deadline in waiting mode. Depth bounds admitted
+  // requests, not every parked caller or payload, and is not a reason to enlarge database capacity.
   @org.springframework.beans.factory.annotation.Value("${plowshare.transport.request-depth:8}")
   private int requestDepth = 8;
 

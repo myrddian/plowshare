@@ -1,5 +1,13 @@
 # Authority and roles: what is done, what is not
 
+> Historical snapshot: the dated defects, task counts and deployment observations
+> below are not a current to-do list. Start with the
+> [AUTH owner guide](../.agents/guides/auth.md) and
+> [ADR 0071](decisions/0071-role-exercised-issuance-and-project-creator.md).
+> Role-exercised human grants normally survive issuer demotion/disablement;
+> delegated/self/token lineage and retained V262 exceptions still need their live
+> support. Preserve the snapshot as evidence, not an instruction to restore old behavior.
+
 Status snapshot, 22 October 2026, re-verified 23 October against merged `main`
 at `0785a3f0`. Every claim below was checked against the code, not recalled.
 Verify again before acting — this file ages.

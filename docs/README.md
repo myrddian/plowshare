@@ -1,5 +1,6 @@
 # User manual
 
+- [Subsystem engineering guides](../.agents/README.md) — conditional code navigation, current rules and legacy traps; read only the guide for the work.
 - [Complete Plowshare manual](manual/README.md)
 - [Install the manual in the Library](manual/installation.md)
 - [Installation and distributions](distributions.md)
@@ -46,6 +47,7 @@
 - [Document navigation and reference policy](decisions/0028-document-navigation-and-reference-policy.md) — implemented locally; release is separate.
 - [Authored navigation implementation plan](authored-navigation-implementation.md)
 - [Model usage and pricing configuration](model-usage-accounting.md)
+- [Backpressure behavior](backpressure.md) — admission, waiting/refusal, safe retries, physical capacity ownership and saturation diagnostics.
 - [Processes, queues and conversation audit](proc-audit.md)
 - [MCP identities and accounting policy](mcp-accounting-policy.md) (proposed decision)
 - [MCP tool grants, hooks and invocation evidence](mcp-tool-authority.md)

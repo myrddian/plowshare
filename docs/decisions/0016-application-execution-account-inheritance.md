@@ -1,5 +1,11 @@
 # ADR 0016: Application declarations inherit the execution account
 
+> Current authority note: this accepted declaration-default contract remains in
+> force. Resolving an omitted execution account supplies an identity, not a role,
+> permission or an acting grant. Read the [AUTH owner guide](../../.agents/guides/auth.md)
+> and [ADR 0071](0071-role-exercised-issuance-and-project-creator.md) before changing
+> role issuance or interpreting an issuer's later demotion/disablement.
+
 Status: accepted.
 
 ## Platform need and authorization

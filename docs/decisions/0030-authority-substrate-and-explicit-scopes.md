@@ -1,5 +1,13 @@
 # ADR 0030: Authority substrate and explicit scopes
 
+> Current authority note: this ADR retains its staged architecture/history; its
+> original implementation status and general delegation diagrams are not a current
+> permission map. Use the [AUTH owner guide](../../.agents/guides/auth.md) and
+> [ADR 0071](0071-role-exercised-issuance-and-project-creator.md) for role-exercised
+> human issuance, delegated lineage exceptions and PROJECT_CREATOR. The current
+> issuer is checked at issue time; an exercised audit reference is not a continuing
+> liveness parent.
+
 Status: proposed architecture, 17 October 2026. Slices 01–03 are implemented in
 this branch under separate authorization; the remaining architecture is proposed.
 See the [roadmap](../authority-substrate-implementation-plan.md) for activation boundaries.
@@ -330,10 +338,14 @@ exception's live grant provenance alongside the retained admission ceiling.
 
 A grant records its subject, issuer, issuing authority reference, target scope or
 resource, actions or versioned role binding, permitted delegation, expiry and
-revocation state. A child grant can narrow targets, actions, time and delegation
-rights; it cannot enlarge them. Grant chains must be bounded, acyclic and rooted
-in valid authority. Removing an issuing grant makes dependent authority ineffective
-while preserving the records and their audit.
+revocation state. Delegated child grants can only narrow targets, actions, time
+and delegation rights; their actual `issuing_grant` chain remains bounded,
+acyclic and live. Removing that supporting grant makes dependent delegated
+authority ineffective while preserving records and audit. Under ADR 0071,
+qualifying human role exercise instead records `exercised_grant` as issuance-time
+proof and roots the new grant at SYSTEM. Later loss of the exercised grant or
+issuer authority/enablement does not cascade through that audit reference; the recipient's grant and
+current policies still decide access.
 
 Role grants supply the ordinary access path. ACLs supply resource-specific grants,
 such as granting one reader access to a document without making that reader a
@@ -342,6 +354,9 @@ never overrides mandatory resource restrictions. Cross-tenant sharing needs an
 explicitly permitted publication/sharing boundary; an arbitrary ACL row cannot
 cross it on its own. General deny-entry precedence and arbitrary group nesting
 are deferred rather than assumed.
+
+The sketch shows authorization relationships, not a promise that each human
+issuance stores the preceding person's grant as its liveness parent (ADR 0071).
 
 ```mermaid
 flowchart TD
