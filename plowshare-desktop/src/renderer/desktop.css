@@ -338,10 +338,10 @@
 .run-indicator { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex-shrink:0; color:#c6b380; }
 .run-orbit { width:12px; height:12px; box-sizing:border-box; border:1.5px solid #c6b38035; border-top-color:currentColor; border-radius:50%; animation:run-pulse 1.8s ease-in-out infinite; }
 .run-indicator[data-phase=thinking] .run-orbit { animation:run-turn 1.2s linear infinite; }
-.published-reasoning { margin:0 0 18px; padding:14px 18px; border:1px solid #8884; border-radius:12px; }
-.published-reasoning summary { cursor:pointer; font-weight:600; }
-.published-reasoning summary span { margin-left:8px; font-size:12px; font-weight:400; opacity:.7; }
-.published-reasoning pre { max-height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:13px; line-height:1.6; }
+.published-reasoning { margin:0 0 14px 25px; color:var(--muted); font-style:italic; }
+.published-reasoning pre { margin:0; max-height:110px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:13px; line-height:1.65; }
+.published-reasoning .history-note { margin:6px 0 0; }
+.live-tool-status { margin:10px 0 0 25px; color:var(--muted); font-size:13px; font-style:italic; }
 .run-bars,.run-tool { display:none; }
 .run-indicator[data-phase=answer] .run-orbit,.run-indicator[data-phase=tool] .run-orbit { display:none; }
 .run-indicator[data-phase=answer] .run-bars { display:flex; align-items:center; gap:2px; height:12px; }

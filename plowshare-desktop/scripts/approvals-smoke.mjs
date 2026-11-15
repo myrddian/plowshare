@@ -26,6 +26,7 @@ try {
   assert.ok(fixture.frames.some(frame => frame.type === 'approval.list' && frame.payload.conversation === 'fixture-first'));
   await prompt(page.locator('#approval-bar'), 'fixture-approval').getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(prompt(page.locator('#approval-bar'), 'fixture-approval')).toHaveCount(0);
+  await expect(page.locator('#approval-bar')).toBeHidden();
   assert.equal(decisions()[0].payload.decision, 'once');
 
   await expect(page.locator('#composer-status-text')).toHaveText('Ready');
@@ -35,6 +36,7 @@ try {
   await page.screenshot({ path: 'build/smoke/awaiting-approval.png' });
   await prompt(page.locator('#approval-bar'), 'awaiting-without-reason').getByRole('button', { name: 'Deny', exact: true }).click();
   await expect(prompt(page.locator('#approval-bar'), 'awaiting-without-reason')).toHaveCount(0);
+  await expect(page.locator('#approval-bar')).toBeHidden();
   assert.deepEqual(decisions().at(-1).payload, { id: 'awaiting-without-reason', decision: 'deny' });
 
   // New requests discovered from an Inbox push appear in their chat prompt and remain actionable.
@@ -58,6 +60,7 @@ try {
   assert.equal(decisions().length, beforeYes);
   await prompt(page.locator('#approval-bar'), 'log-only-request').getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(prompt(page.locator('#approval-bar'), 'log-only-request')).toHaveCount(0);
+  await expect(page.locator('#approval-bar')).toBeHidden();
   assert.deepEqual(decisions().at(-1).payload, { id: 'log-only-request', decision: 'once' });
 
   const newWindow = app.waitForEvent('window'); await page.locator('#inbox-open').click();
@@ -87,6 +90,7 @@ try {
   await expect(prompt(trajectory, 'trajectory-request')).toBeVisible();
   await prompt(trajectory, 'trajectory-request').getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(prompt(trajectory, 'trajectory-request')).toHaveCount(0);
+  await expect(page.locator('#approval-bar')).toBeHidden();
   assert.deepEqual(decisions().at(-1).payload, { id: 'trajectory-request', decision: 'once' });
   assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 1, 'Decisions continue their original request, never submit another agent turn');
   assert.equal(decisions().length, 7, 'Each explicit click answers exactly one approval');

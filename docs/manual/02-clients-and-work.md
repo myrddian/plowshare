@@ -46,14 +46,19 @@ inference. Each tool has its own execution time. Missing usage is shown as not r
 and a recorded zero remains zero. These counts describe past inference calls; the
 Context panel constructs the next request and its separate token count.
 
-During an ordinary live run, desktop chat shows the model's **Published reasoning**
-above its answer. The preview opens automatically and can be collapsed; new text
-does not reopen it or move your reading position when you scroll back. It retains
+During an ordinary live run, desktop chat streams the model's published reasoning
+as subtle italic text above its answer, including while the answer is streaming.
+New text follows the live tail unless you scroll back to read. It retains
 the latest 16,384 characters and marks omitted earlier text. Reasoning stays
 separate from the answer, and completion replaces previews with the server's
 recorded result. Trajectory shows recorded reasoning when available. Providers
 that publish no reasoning text produce no preview; confined work and output
 inspection policies can also withhold streaming text.
+While tools are running, the main answer area shows “Waiting for tool replies…”
+until the next model response, even when the agent has already streamed answer text.
+
+The command approvals bar appears only when there are pending approvals and hides
+after the last decision. Approval refresh failures use the normal error banner.
 
 Trajectory entries also explain their model-context policy. Approval diagnostics say
 “Not sent to model”; runtime notes say “Active run only” because they were delivered
