@@ -419,6 +419,16 @@ export function constrain(graph) {
   field(actingOpened,'subject',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'});
   field(actingOpened,'expiresAt',instant);
   for (const shape of Object.values(graph.$defs)) {
+    if (shape.title === 'SearchSource') {
+      field(shape,'conversationId',{...identity,maxLength:256});
+      field(shape,'ordinal',integer(1));field(shape,'turnOrdinal',integer(1));
+      field(shape,'length',integer());field(shape,'supersededBy',integer(1));
+    }
+    if (shape.title === 'LogSearchHit') {
+      field(shape,'sources',{minItems:1,maxItems:20});field(shape,'sourceCount',integer(1));
+      rules(shape,implies(present('sources'),present('sourceCount')),
+          implies(present('sourceCount'),present('sources')));
+    }
     if (shape.title === 'ToolInvocationResult') {
       shape.toolResult = true; field(shape,'id',canonicalUuid); field(shape,'text',text(16384));
     }
@@ -797,6 +807,7 @@ export function constrain(graph) {
     }
 
   }
+  field(resolve(graph,graph.inputs['conversation.search']),'conversation',{...identity,maxLength:256});
   const toolRead=resolve(graph,graph.inputs['tool.invocation.read']);
   field(toolRead,'project',{...identity,maxLength:256}); field(toolRead,'invocation',canonicalUuid);
   annotatePush(push);

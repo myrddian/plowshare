@@ -58,6 +58,11 @@ const cases: readonly [string, Operation, unknown][] = [
   ],
   ['memory reembed', 'memory.reembed', {}],
   ['search build errors', 'conversation.search', { q: 'build errors' }],
+  [
+    'search {"q":"failure","conversation":"cnv_selected","mode":"semantic"}',
+    'conversation.search',
+    { q: 'failure', conversation: 'cnv_selected', mode: 'semantic' },
+  ],
   ['job status job_1', 'job.status', { job: 'job_1' }],
   ['job cancel job_1', 'job.cancel', { job: 'job_1' }],
 ];

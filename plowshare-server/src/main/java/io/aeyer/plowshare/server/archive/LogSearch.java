@@ -29,8 +29,9 @@ import java.util.UUID;
  *
  * @param hits what matched, best first. Never null; empty for a question nothing matched and for a
  *     page past the end, which {@link #total} tells apart
- * @param total how many entries matched in all, which is a number about the tier and not about this
- *     page. Asked in the same statement as {@link #reach}, so the four numbers describe one instant
+ * @param total how many distinct matching passage groups were found, which is a number about the
+ *     tier and not about this page. Asked in the same statement as {@link #reach}, so the four
+ *     numbers describe one instant
  * @param reach what the search could and could not look at
  */
 public record LogSearch(List<Hit> hits, int total, Reach reach) {
@@ -66,11 +67,8 @@ public record LogSearch(List<Hit> hits, int total, Reach reach) {
    * @param kind what this is. Always one of the four that carry a role, which is what {@code
    *     EntryStore.SEARCH_SQL} searches and why {@link Reach#recordedOnly} exists to account for
    *     the rest
-   * @param rank what {@code ts_rank_cd} scored this entry against the question. <b>Always above
-   *     zero</b> — a rank of zero is what a row the question does not really match scores, and the
-   *     read refuses those rather than ranking them. <b>Not comparable across questions</b>:
-   *     Postgres keeps no corpus-wide term statistics, so this is a cover density and not a
-   *     calibrated relevance, and what it is good for is the order it puts one question's hits in
+   * @param rank BM25 for lexical retrieval, semantic similarity or reciprocal rank fusion for
+   *     semantic/hybrid retrieval. An ordering aid within this query, never a probability.
    * @param snippet the words around the match, with the matched words marked, bounded at {@code
    *     EntryStore.MOST_CHARACTERS_PER_SNIPPET}. <b>Not a prefix of the entry</b>: it is taken from
    *     wherever the match is, so a match at character ninety thousand is what a reader sees. Never
@@ -97,7 +95,47 @@ public record LogSearch(List<Hit> hits, int total, Reach reach) {
       Integer supersededBy,
       UUID handle,
       Instant recordedAt,
-      String sourceRevision) {
+      String sourceRevision,
+      List<Source> sources,
+      int sourceCount) {
+    public Hit(
+        String conversationId,
+        int ordinal,
+        int turnOrdinal,
+        EntryKind kind,
+        double rank,
+        String snippet,
+        int length,
+        Integer supersededBy,
+        UUID handle,
+        Instant recordedAt,
+        String sourceRevision) {
+      this(
+          conversationId,
+          ordinal,
+          turnOrdinal,
+          kind,
+          rank,
+          snippet,
+          length,
+          supersededBy,
+          handle,
+          recordedAt,
+          sourceRevision,
+          List.of(
+              new Source(
+                  conversationId,
+                  ordinal,
+                  turnOrdinal,
+                  kind.wireName(),
+                  handle == null ? null : handle.toString(),
+                  recordedAt,
+                  sourceRevision,
+                  length,
+                  supersededBy)),
+          1);
+    }
+
     public Hit(
         String conversationId,
         int ordinal,
@@ -127,6 +165,36 @@ public record LogSearch(List<Hit> hits, int total, Reach reach) {
       Objects.requireNonNull(conversationId, "conversationId");
       Objects.requireNonNull(kind, "kind");
       Objects.requireNonNull(snippet, "snippet");
+      sources = List.copyOf(sources);
+      if (sources.isEmpty() || sourceCount < sources.size())
+        throw new IllegalArgumentException("Invalid search source references");
+    }
+  }
+
+  /** Authorized occurrences of a matching passage; groups retain at most twenty references. */
+  public record Source(
+      String conversationId,
+      int ordinal,
+      int turnOrdinal,
+      String kind,
+      String handle,
+      Instant recordedAt,
+      String sourceRevision,
+      int length,
+      Integer supersededBy) {
+    public String id() {
+      return conversationId + ":" + ordinal;
+    }
+
+    public Reference reference() {
+      return new Reference(conversationId, ordinal, sourceRevision);
+    }
+  }
+
+  /** Immutable source identity retained by a search snapshot; contains no fabricated metadata. */
+  public record Reference(String conversationId, int ordinal, String sourceRevision) {
+    public String id() {
+      return conversationId + ":" + ordinal;
     }
   }
 

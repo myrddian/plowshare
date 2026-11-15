@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.api;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.aeyer.plowshare.server.archive.LogSearch;
+import io.aeyer.plowshare.server.archive.PassageIndex;
 import java.time.Instant;
 import java.util.List;
 
@@ -28,7 +30,8 @@ import java.util.List;
  *
  * @param hits what matched, best first. Never null; empty for a question nothing matched and for a
  *     page past the end, which {@code total} tells apart
- * @param total how many entries matched in all — about the tier and not about this page
+ * @param total how many distinct matching passage groups were found — about the tier and not about
+ *     this page
  * @param offset how many hits this page skipped, as asked for
  * @param limit how many hits this page could hold — <b>the number this server used and not the one
  *     the caller sent</b>, which differ exactly when the caller asked for more than {@code
@@ -41,9 +44,7 @@ public record LogSearchView(
     int offset,
     int limit,
     Reach reach,
-    @com.fasterxml.jackson.annotation.JsonInclude(
-            com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-        Retrieval retrieval) {
+    @JsonInclude(JsonInclude.Include.NON_NULL) Retrieval retrieval) {
 
   public LogSearchView(List<Hit> hits, int total, int offset, int limit, Reach reach) {
     this(hits, total, offset, limit, reach, null);
@@ -57,7 +58,7 @@ public record LogSearchView(
       boolean truncated,
       boolean complete,
       String fallback,
-      io.aeyer.plowshare.server.archive.PassageIndex.Coverage coverage,
+      PassageIndex.Coverage coverage,
       String generation,
       int queryEmbeddingCalls,
       String provenance) {}
@@ -81,10 +82,8 @@ public record LogSearchView(
    * @param turnOrdinal which turn produced it, or for a {@code summary} the last turn it stands for
    * @param kind what this is, as the column spells it. Always one of the four that reach a model;
    *     {@link Reach#recordedOnly} accounts for the rest
-   * @param rank what {@code ts_rank_cd} scored this against the question, always above zero. <b>Not
-   *     comparable across questions</b> — Postgres keeps no corpus-wide term statistics, so this is
-   *     a cover density and not a calibrated relevance, and what it is good for is the order it
-   *     puts one question's hits in
+   * @param rank BM25 for lexical retrieval, semantic similarity or reciprocal rank fusion for
+   *     semantic/hybrid retrieval. An ordering aid within this query, never a probability.
    * @param snippet the words around the match, with the matched words in square brackets. <b>Not a
    *     prefix of the entry</b>
    * @param length how many characters the entry really is, which is what says how much of it the
@@ -107,9 +106,47 @@ public record LogSearchView(
       Integer supersededBy,
       String handle,
       Instant recordedAt,
-      @com.fasterxml.jackson.annotation.JsonInclude(
-              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-          Evidence evidence) {
+      @JsonInclude(JsonInclude.Include.NON_NULL) Evidence evidence,
+      List<LogSearch.Source> sources,
+      int sourceCount) {
+    public Hit(
+        String conversationId,
+        int ordinal,
+        int turnOrdinal,
+        String kind,
+        double rank,
+        String snippet,
+        int length,
+        Integer supersededBy,
+        String handle,
+        Instant recordedAt,
+        Evidence evidence) {
+      this(
+          conversationId,
+          ordinal,
+          turnOrdinal,
+          kind,
+          rank,
+          snippet,
+          length,
+          supersededBy,
+          handle,
+          recordedAt,
+          evidence,
+          List.of(
+              new LogSearch.Source(
+                  conversationId,
+                  ordinal,
+                  turnOrdinal,
+                  kind,
+                  handle,
+                  recordedAt,
+                  evidence == null ? null : evidence.sourceRevision(),
+                  length,
+                  supersededBy)),
+          1);
+    }
+
     public Hit(
         String conversationId,
         int ordinal,
@@ -147,10 +184,12 @@ public record LogSearchView(
           supersededBy,
           handle,
           recordedAt,
-          evidence);
+          evidence,
+          sources,
+          sourceCount);
     }
 
-    static Hit of(LogSearch.Hit hit) {
+    public static Hit of(LogSearch.Hit hit) {
       return new Hit(
           hit.conversationId(),
           hit.ordinal(),
@@ -163,7 +202,10 @@ public record LogSearchView(
           // A string and not a UUID, as EntryView sends it: the id
           // travels as text everywhere else on this surface.
           hit.handle() == null ? null : hit.handle().toString(),
-          hit.recordedAt());
+          hit.recordedAt(),
+          null,
+          hit.sources(),
+          hit.sourceCount());
     }
   }
 

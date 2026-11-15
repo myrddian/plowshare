@@ -5370,6 +5370,8 @@ public final class JobRuntime {
                     .forRun(cancelled, runInformation, callerHandle, budget, sessionId)
                     .withInputs(informationInputs, transcript.conversationId());
       }
+      if (tool instanceof ConversationSearchTool search)
+        tool = search.forRun(transcript.conversationId(), memoryActingAxis(informationActor));
       if (tool instanceof MemoryTools.Write write)
         tool =
             write.forRun(

@@ -11,11 +11,15 @@ import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import java.nio.charset.StandardCharsets;
 import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -187,10 +191,6 @@ class LogSearchTest {
         EntryStore.SEARCH_SQL.contains(
             "websearch_to_tsquery('" + EntryStore.TEXT_SEARCH_CONFIGURATION + "'"),
         EntryStore.SEARCH_SQL);
-    assertTrue(
-        EntryStore.REACH_SQL.contains(
-            "websearch_to_tsquery('" + EntryStore.TEXT_SEARCH_CONFIGURATION + "'"),
-        EntryStore.REACH_SQL);
   }
 
   // --- which rows a search can reach ---------------------------------------------
@@ -280,7 +280,11 @@ class LogSearchTest {
   void a_search_says_how_many_matched_and_not_only_how_many_it_returns() {
     for (int i = 1; i <= 5; i++) {
       entries.append(
-          conversation, i, LoggedEntry.utterance("budget number " + i, Speaker.person(null)));
+          conversation,
+          i,
+          LoggedEntry.utterance(
+              "budget evidenceentry" + (char) (65 + i / 26) + (char) (65 + i % 26),
+              Speaker.person(null)));
     }
 
     LogSearch found = entries.search(Home.global(), "budget", 0, 2);
@@ -356,9 +360,9 @@ class LogSearchTest {
       turns.add(hit.turnOrdinal());
     }
     assertEquals(
-        List.of(1, 2),
+        List.of(2),
         turns,
-        "equally ranked hits did not come back in the order the conversation held them");
+        "identical excerpts should form one group with stable source references");
   }
 
   // --- the tier ------------------------------------------------------------------
@@ -451,11 +455,92 @@ class LogSearchTest {
   void the_bound_is_the_most_that_comes_back() {
     for (int i = 1; i <= 30; i++) {
       entries.append(
-          conversation, i, LoggedEntry.utterance("budget number " + i, Speaker.person(null)));
+          conversation,
+          i,
+          LoggedEntry.utterance(
+              "budget evidenceentry" + (char) (65 + i / 26) + (char) (65 + i % 26),
+              Speaker.person(null)));
     }
 
     assertEquals(20, entries.search(Home.global(), "budget", 0, 20).hits().size());
     assertEquals(10, entries.search(Home.global(), "budget", 20, 20).hits().size());
+  }
+
+  @Test
+  void bm25DemotesUbiquitousTermsAndGroupsCopiesBeforePaging() {
+    for (int i = 0; i < 30; i++) {
+      String id = conversations.open(Home.global(), Budget.of(2)).id();
+      entries.append(
+          id,
+          1,
+          LoggedEntry.utterance("workflow launch capacity boilerplate", Speaker.person(null)));
+    }
+    String useful = conversations.open(Home.global(), Budget.of(2)).id();
+    entries.append(
+        useful, 1, LoggedEntry.utterance("rareincident explanation", Speaker.person(null)));
+    var found = entries.search(Home.global(), "capacity OR rareincident", 0, 1);
+    assertEquals(2, found.total());
+    assertEquals(useful, found.hits().getFirst().conversationId());
+    var copies = entries.search(Home.global(), "capacity", 0, 1).hits().getFirst();
+    assertEquals(30, copies.sourceCount());
+    assertEquals(20, copies.sources().size());
+    assertEquals(
+        20, copies.sources().stream().map(LogSearch.Source::conversationId).distinct().count());
+    assertTrue(entries.search(Home.global(), "capacity", 1, 1).hits().isEmpty());
+    assertEquals(2, entries.search(Home.global(), "capacity OR rareincident", 5, 1).total());
+  }
+
+  @Test
+  void repeatedExcerptGroupsEvenWhenLongConversationsHaveDifferentRemainingText() {
+    String boilerplate =
+        "workflow launch returns a run handle and retains the report revision. ".repeat(1000);
+    for (String suffix : List.of("alpha", "bravo", "charlie")) {
+      String id = conversations.open(Home.global(), Budget.of(2)).id();
+      entries.append(
+          id,
+          1,
+          LoggedEntry.utterance(boilerplate + "Distinct footer " + suffix, Speaker.person(null)));
+    }
+    var found = entries.search(Home.global(), "workflow launch", 0, 10);
+    assertEquals(1, found.total());
+    assertEquals(3, found.hits().getFirst().sourceCount());
+    assertEquals(3, found.hits().getFirst().sources().size());
+  }
+
+  @Test
+  void conversationSelectionNarrowsCorpusAndDoesNotCrossHomes() {
+    entries.append(
+        conversation, 1, LoggedEntry.utterance("orchard evidence", Speaker.person(null)));
+    String other = conversations.open(PAYMENTS, Budget.of(2)).id();
+    entries.append(other, 1, LoggedEntry.utterance("orchard private", Speaker.person(null)));
+    assertEquals(1, entries.search(Home.global(), "orchard", 0, 10, conversation).total());
+    assertEquals(0, entries.search(Home.global(), "orchard", 0, 10, other).total());
+    assertEquals(0, entries.search(Home.global(), "orchard", 0, 10, "missing").reach().total());
+  }
+
+  @Test
+  void hiddenConversationsContributeNeitherBm25StatisticsNorGroupedReferences() {
+    entries.append(
+        conversation, 1, LoggedEntry.utterance("needle public evidence", Speaker.person(null)));
+    String hidden = conversations.open(Home.global(), Budget.of(2)).id();
+    entries.append(
+        hidden, 1, LoggedEntry.utterance("needle hidden evidence", Speaker.person(null)));
+    var visibility =
+        new InformationLogVisibility() {
+          public <T> T read(String account, Function<Facts, T> reader) {
+            return reader.apply(new Facts(Optional.of(List.of(hidden))));
+          }
+
+          public boolean readable(String account, String log, BooleanSupplier authoritative) {
+            return !log.equals(hidden);
+          }
+        };
+    var scoped = entries.useVisibility(visibility).forAccount("reader");
+    var found = scoped.search(Home.global(), "needle", 0, 10);
+    assertEquals(1, found.total());
+    assertEquals(1, found.reach().searched());
+    assertEquals(conversation, found.hits().getFirst().sources().getFirst().conversationId());
+    assertEquals(0, scoped.search(Home.global(), "needle", 0, 10, hidden).total());
   }
 
   // --- the plan ------------------------------------------------------------------
@@ -498,10 +583,7 @@ class LogSearchTest {
 
     String plan = explain(EntryStore.SEARCH_SQL);
     String withoutTheTieBreak =
-        explain(
-            EntryStore.SEARCH_SQL.replace(
-                " ORDER BY rank DESC, e.conversation_id, e.turn_ordinal, e.ordinal",
-                " ORDER BY rank DESC"));
+        explain(EntryStore.SEARCH_SQL.replace("ORDER BY score DESC,id", "ORDER BY score DESC"));
 
     assertTrue(plan.contains("Bitmap Index Scan on entries_by_text"), plan);
     assertTrue(plan.contains("Sort"), plan);
@@ -520,7 +602,7 @@ class LogSearchTest {
     entries.append(
         conversation, 1, LoggedEntry.utterance("the retry budget refilled", Speaker.person(null)));
 
-    String plan = explain(EntryStore.SEARCH_SQL.replace("AND e.text_search @@ q\n", ""));
+    String plan = explain(EntryStore.SEARCH_SQL.replace("e.text_search @@ p.query AND ", ""));
 
     assertFalse(
         plan.contains("entries_by_text"),
@@ -537,6 +619,15 @@ class LogSearchTest {
    * order: the snippet's character bound, the question, the tier, then the window.
    */
   private String explain(String sql) {
+    // With an authorized-owner CTE, a one-row corpus legitimately prefers its conversation index.
+    // Give the planner a selective lexical query so this verifies GIN eligibility meaningfully.
+    jdbc.update(
+        "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content) "
+            + "SELECT ?, n+1,1,'utterance','user','unrelated filler vocabulary' FROM generate_series(1,1000) n "
+            + "ON CONFLICT DO NOTHING",
+        conversation);
+    jdbc.execute("ANALYZE entries");
+    jdbc.execute("ANALYZE conversations");
     return String.join(
         "\n",
         jdbc.execute(
@@ -546,11 +637,12 @@ class LogSearchTest {
                     off.execute("SET enable_seqscan = off");
                   }
                   try (var explain = connection.prepareStatement("EXPLAIN " + sql)) {
-                    explain.setInt(1, EntryStore.MOST_CHARACTERS_PER_SNIPPET);
+                    explain.setString(1, "budget");
                     explain.setString(2, "budget");
                     explain.setObject(3, null, Types.BIGINT);
-                    explain.setInt(4, 0);
-                    explain.setInt(5, 20);
+                    explain.setObject(4, null, Types.VARCHAR);
+                    explain.setInt(5, 0);
+                    explain.setInt(6, 20);
                     List<String> lines = new ArrayList<>();
                     try (var rows = explain.executeQuery()) {
                       while (rows.next()) {

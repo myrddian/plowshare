@@ -192,6 +192,25 @@ export function problem(
   }
   const relayFailure = relayPayloadProblem(type, payload);
   if (relayFailure !== undefined) return relayFailure;
+  if (type === 'conversation.search' && payload['conversation'] !== undefined) {
+    const conversation = payload['conversation'];
+    if (
+      typeof conversation !== 'string' ||
+      !conversation.trim() ||
+      conversation !== conversation.trim() ||
+      conversation.length > 256 ||
+      Array.from(conversation).some((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return (
+          code < 32 ||
+          (code >= 127 && code <= 159) ||
+          code === 0x2028 ||
+          code === 0x2029
+        );
+      })
+    )
+      return 'Invalid conversation identity';
+  }
   const required: Partial<Record<Operation, readonly string[]>> = {
     'memory.read': ['memory'],
     'memory.recall': ['question'],

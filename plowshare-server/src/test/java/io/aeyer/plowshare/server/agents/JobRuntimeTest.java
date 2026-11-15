@@ -676,6 +676,7 @@ class JobRuntimeTest {
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.ConversationStore.class);
     var turns = org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.TurnStore.class);
     var entries = org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.EntryStore.class);
+    when(entries.forAccount(any())).thenReturn(entries);
     var archive = org.mockito.Mockito.mock(io.aeyer.plowshare.server.archive.Archive.class);
     var retrieval =
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.documents.RetrievalService.class);

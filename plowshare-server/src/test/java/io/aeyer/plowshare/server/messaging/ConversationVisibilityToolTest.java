@@ -62,6 +62,26 @@ class ConversationVisibilityToolTest {
   }
 
   @Test
+  void groupedSearchReferencesCannotExposeAnotherParticipantsConversation() {
+    var underlying = mock(AgentTool.class);
+    when(underlying.schema())
+        .thenReturn(ToolSchema.from("conversation_search", "search", Map.of()));
+    when(underlying.run(any(), any(), any()))
+        .thenReturn(
+            """
+        {"hits":[{"conversationId":"public","sources":[{"conversationId":"public"},
+          {"conversationId":"private"}],"sourceCount":2}],"retrieval":{"complete":true}}
+        """);
+    var boundary =
+        new ConversationVisibilityTool(
+            underlying, "public", (target, current) -> target.equals("public"));
+    String result = boundary.run("{\"conversation\":\"current\"}", Home.global());
+    assertFalse(result.contains("private"));
+    assertTrue(result.contains("\"sourceCount\":1"));
+    assertTrue(result.contains("\"complete\":false"));
+  }
+
+  @Test
   void an_absent_current_conversation_retains_the_policys_global_read_semantics() {
     var underlying = mock(AgentTool.class);
     when(underlying.schema()).thenReturn(ToolSchema.from("conversation_list", "list", Map.of()));

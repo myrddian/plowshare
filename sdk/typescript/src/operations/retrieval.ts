@@ -227,7 +227,21 @@ export interface CitationsResponse {
   readonly limit: number;
   readonly citations: readonly Citation[];
 }
+/** Bounded, authorized occurrences of one repeated matching passage. */
+export interface SearchSource {
+  readonly conversationId: string;
+  readonly ordinal: number;
+  readonly turnOrdinal: number;
+  readonly kind: string;
+  readonly handle: string | null;
+  readonly recordedAt: string | null;
+  readonly sourceRevision: string | null;
+  readonly length: number;
+  readonly supersededBy: number | null;
+}
 export interface LogSearchHit {
+  readonly sources?: readonly SearchSource[];
+  readonly sourceCount?: number;
   readonly conversationId: string;
   readonly ordinal: number;
   readonly turnOrdinal: number;
@@ -523,19 +537,45 @@ const evidence = record({
   passagePosition: nullable(count),
   sourceRevision: nullable(named),
 });
-const logHit = record({
-  evidence: optional(evidence),
+const searchSource = record({
   conversationId: named,
   ordinal: positive,
   turnOrdinal: positive,
   kind: named,
-  rank: finite,
-  snippet: text,
-  length: count,
-  supersededBy: nullable(positive),
   handle: nullable(named),
   recordedAt: nullable(named),
+  sourceRevision: nullable(named),
+  length: count,
+  supersededBy: nullable(positive),
 });
+const logHit = record(
+  {
+    sources: optional(list(searchSource)),
+    sourceCount: optional(positive),
+    evidence: optional(evidence),
+    conversationId: named,
+    ordinal: positive,
+    turnOrdinal: positive,
+    kind: named,
+    rank: finite,
+    snippet: text,
+    length: count,
+    supersededBy: nullable(positive),
+    handle: nullable(named),
+    recordedAt: nullable(named),
+  },
+  (row) => {
+    const sources = row['sources'],
+      count = row['sourceCount'];
+    return sources === undefined
+      ? count === undefined
+      : isList(sources) &&
+          sources.length >= 1 &&
+          sources.length <= 20 &&
+          typeof count === 'number' &&
+          count >= sources.length;
+  },
+);
 
 /** This explicit menu is also the response-validation inventory. No fallback
  * manufactures an empty array, coverage count or successful mutation result. */

@@ -1,4 +1,4 @@
-import { isList } from '../binding/values.ts';
+import { isList, isObject } from '../binding/values.ts';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -31,6 +31,30 @@ const read = (type: RetrievalOperation, payload: unknown) =>
   );
 
 describe('shared retrieval response boundary', () => {
+  it('validates every grouped source reference instead of trusting the representative', () => {
+    const payload = clone('conversation.search');
+    const hits = payload['hits'];
+    if (!isList(hits) || !isObject(hits[0]))
+      throw new Error('Missing search fixture');
+    const hit = hits[0];
+    const source = {
+      conversationId: 'cnv_selected',
+      ordinal: 1,
+      turnOrdinal: 1,
+      kind: 'utterance',
+      handle: null,
+      recordedAt: null,
+      sourceRevision: 'hash',
+      length: 20,
+      supersededBy: null,
+    };
+    hit['sources'] = [source];
+    hit['sourceCount'] = 1;
+    expect(retrievalReply('conversation.search', payload)).toBe(payload);
+    source.ordinal = 0;
+    expect(retrievalReply('conversation.search', payload)).toBeUndefined();
+  });
+
   it('covers every reviewed response fixture and retains raw arrays, metadata and future fields', async () => {
     expect([...RETRIEVAL_OPERATIONS].sort()).toEqual(
       Object.keys(fixtures.replies).sort(),
@@ -341,7 +365,13 @@ describe('shared retrieval response boundary', () => {
         'server/api/LogSearchView',
         'Hit',
         ['supersededBy', 'handle', 'recordedAt'],
-        { Evidence: 'SearchEvidence' },
+        { Evidence: 'SearchEvidence', 'LogSearch.Source': 'SearchSource' },
+      ],
+      [
+        'SearchSource',
+        'server/archive/LogSearch',
+        'Source',
+        ['handle', 'recordedAt', 'sourceRevision', 'supersededBy'],
       ],
       [
         'SearchEvidence',
@@ -355,8 +385,7 @@ describe('shared retrieval response boundary', () => {
         'Retrieval',
         ['snapshot', 'fallback', 'coverage', 'generation'],
         {
-          'io.aeyer.plowshare.server.archive.PassageIndex.Coverage':
-            'PassageCoverage',
+          'PassageIndex.Coverage': 'PassageCoverage',
         },
       ],
       ['LogSearchReach', 'server/api/LogSearchView', 'Reach', []],
@@ -439,7 +468,9 @@ describe('shared retrieval response boundary', () => {
               ((type === 'MemoryNavigation' || type === 'LogSearchResponse') &&
                 field.name.getText(source) === 'retrieval') ||
               (type === 'LogSearchHit' &&
-                field.name.getText(source) === 'evidence');
+                ['evidence', 'sources', 'sourceCount'].includes(
+                  field.name.getText(source),
+                ));
             expect(!!field.questionToken, type).toBe(optional);
             return [field.name.getText(source), field.type!.getText(source)];
           })
