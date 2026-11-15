@@ -37,6 +37,24 @@ public final class CachedAuthoritySnapshots implements AuthoritySnapshots {
   }
 
   @Override
+  public Optional<Candidate> candidate() {
+    if (!cache.enabled()) return Optional.empty();
+    return cache
+        .candidate(KEY)
+        .flatMap(
+            candidate ->
+                candidate.value().map(snapshot -> new Candidate(snapshot, candidate.token())));
+  }
+
+  @Override
+  public void refresh() {
+    // A rolled-back writer advances the nontransactional sequence without a NOTIFY. Retiring the
+    // trusted hit is essential: ordinary current() could otherwise reuse that old token forever.
+    cache.invalidate(KEY);
+    current();
+  }
+
+  @Override
   public Optional<AuthoritySnapshot> current() {
     if (!cache.enabled()) return UNAVAILABLE;
     return cache.read(

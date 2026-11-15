@@ -1,20 +1,37 @@
 package io.aeyer.plowshare.server.access;
 
-import io.aeyer.plowshare.server.access.AuthorityIds.*;
+import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.AuthorityIds.AccountId;
+import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
 import io.aeyer.plowshare.server.access.IdentityRepository.AccountKind;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import java.sql.Array;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.*;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Specialist store for atomic role issuance, retained lineage and optimistic revocation. */
 @Repository
-public class JdbcScopedGrantRepository implements ScopedGrantRepository {
+public class JdbcScopedGrantRepository implements ScopedGrantRepository, CheckedScopedGrants {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
 
@@ -38,19 +55,12 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
   @Override
   public List<Binding> live(GrantRecipient recipient) {
     Objects.requireNonNull(recipient);
-    return List.copyOf(
-        jdbc.query(
-            "SELECT g.* FROM authority_grant_records g "
-                + "JOIN authority_live_grants() l ON l.id=g.id WHERE g.subject_account=? "
-                + "AND g.subject_agent IS NOT DISTINCT FROM ? ORDER BY g.created_at,g.id",
-            (row, n) -> read(row),
-            recipient.account().value(),
-            recipient.agent().orElse(null)));
+    return liveChecked(recipient, Optional.empty()).rows();
   }
 
   @Override
   public List<Binding> projectBindings(String project, String account) {
-    io.aeyer.plowshare.protocol.Home.of(project);
+    Home.of(project);
     if (account == null || account.isBlank())
       throw new IllegalArgumentException("Account required");
     return List.copyOf(
@@ -64,7 +74,7 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
 
   @Override
   public List<List<Binding>> projectLineages(String project, String account) {
-    io.aeyer.plowshare.protocol.Home.of(project);
+    Home.of(project);
     if (account == null || account.isBlank())
       throw new IllegalArgumentException("Account required");
     var chains = new LinkedHashMap<UUID, List<Binding>>();
@@ -75,7 +85,7 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
             + "WHERE g.project_name=? AND g.subject_handle=? AND g.subject_agent IS NULL AND g.coverage='SELF' "
             + "UNION ALL SELECT c.root,p.id,p.issuing_grant,c.depth+1 FROM chain c JOIN authority_grants p ON p.id=c.issuing_grant WHERE c.depth<32) "
             + "SELECT c.root,g.* FROM chain c JOIN authority_grant_records g ON g.id=c.id ORDER BY c.root,c.depth",
-        (org.springframework.jdbc.core.RowCallbackHandler)
+        (RowCallbackHandler)
             row ->
                 chains
                     .computeIfAbsent(
@@ -89,14 +99,86 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
   @Override
   public List<Binding> lineage(UUID id) {
     Objects.requireNonNull(id);
-    return List.copyOf(
+    return lineageChecked(id, Optional.empty()).rows();
+  }
+
+  @Override
+  public Checked liveChecked(GrantRecipient recipient, Optional<ProjectionVersions.Token> token) {
+    Objects.requireNonNull(recipient);
+    Objects.requireNonNull(token);
+    return checked(
+        "SELECT checked.exact,checked.reason,checked.checked_version,(checked.grant_row).* "
+            + "FROM authority_live_grants_checked(?,?,?::uuid,?::bigint,?::text[],?::text,?::timestamptz,?::timestamptz) checked",
+        statement -> {
+          statement.setObject(1, recipient.account().value());
+          statement.setString(2, recipient.agent().orElse(null));
+          bindToken(statement, 3, token);
+        });
+  }
+
+  @Override
+  public Checked lineageChecked(UUID grant, Optional<ProjectionVersions.Token> token) {
+    Objects.requireNonNull(grant);
+    Objects.requireNonNull(token);
+    return checked(
+        "SELECT checked.exact,checked.reason,checked.checked_version,(checked.grant_row).* "
+            + "FROM authority_lineage_checked(?,?::uuid,?::bigint,?::text[],?::text,?::timestamptz,?::timestamptz) checked",
+        statement -> {
+          statement.setObject(1, grant);
+          bindToken(statement, 2, token);
+        });
+  }
+
+  /** Bind only validated immutable evidence; no raw token representation leaves this repository. */
+  private static void bindToken(
+      PreparedStatement statement, int at, Optional<ProjectionVersions.Token> candidate)
+      throws SQLException {
+    if (candidate.isEmpty()) {
+      for (int index = at; index < at + 6; index++) statement.setObject(index, null);
+      return;
+    }
+    var token = candidate.orElseThrow();
+    if (!token.counters().keySet().equals(Set.of(ProjectionVersions.Domain.AUTHORITY)))
+      throw new IllegalArgumentException("An authority-only projection token is required");
+    statement.setObject(at, token.database());
+    statement.setLong(at + 1, token.counters().get(ProjectionVersions.Domain.AUTHORITY));
+    // PostgreSQL text-array syntax is safe here: Token validates every member as unsigned digits.
+    statement.setString(at + 2, "{" + String.join(",", token.pendingTransactions()) + "}");
+    statement.setString(at + 3, token.futureTransactionsFrom());
+    statement.setObject(at + 4, offset(token.windowStart()));
+    statement.setObject(at + 5, offset(token.validUntil()));
+  }
+
+  private static OffsetDateTime offset(Instant at) {
+    return at == null ? null : at.atOffset(ZoneOffset.UTC);
+  }
+
+  private Checked checked(String sql, PreparedStatementSetter binder) {
+    return Objects.requireNonNull(
         jdbc.query(
-            "WITH RECURSIVE chain(id,issuing_grant,depth) AS ("
-                + "SELECT g.id,g.issuing_grant,0 FROM authority_grants g JOIN authority_live_grants() l ON l.id=g.id WHERE g.id=? "
-                + "UNION ALL SELECT p.id,p.issuing_grant,c.depth+1 FROM authority_grants p JOIN chain c ON c.issuing_grant=p.id WHERE c.depth<32) "
-                + "SELECT g.* FROM chain c JOIN authority_grant_records g ON g.id=c.id ORDER BY c.depth",
-            (row, n) -> read(row),
-            id));
+            sql,
+            binder,
+            row -> {
+              if (!row.next()) throw new IllegalStateException("Checked grant answer is missing");
+              var reason = Reason.valueOf(row.getString("reason").toUpperCase(Locale.ROOT));
+              long version = row.getLong("checked_version");
+              boolean exact = row.getBoolean("exact");
+              if (exact != (reason == Reason.EXACT))
+                throw new IllegalStateException("Inconsistent checked grant answer");
+              var rows = new ArrayList<Binding>();
+              boolean marker = row.getObject("id") == null;
+              do {
+                if (!row.getString("reason").equalsIgnoreCase(reason.name())
+                    || row.getLong("checked_version") != version
+                    || row.getBoolean("exact") != exact
+                    || marker != (row.getObject("id") == null))
+                  throw new IllegalStateException("Inconsistent checked grant rows");
+                if (!marker) rows.add(read(row));
+                else if (!rows.isEmpty())
+                  throw new IllegalStateException("Unexpected grant marker");
+              } while (row.next());
+              return new Checked(reason, version, rows);
+            }));
   }
 
   @Override
@@ -278,7 +360,7 @@ public class JdbcScopedGrantRepository implements ScopedGrantRepository {
 
   /** Maps one {@code authority_grant_records} row; shared with the authority snapshot loader. */
   static Binding read(ResultSet row) throws SQLException {
-    java.sql.Array array = row.getArray("actions");
+    Array array = row.getArray("actions");
     Set<AuthorityAction> actions = new HashSet<>();
     try {
       for (Object action : (Object[]) array.getArray())

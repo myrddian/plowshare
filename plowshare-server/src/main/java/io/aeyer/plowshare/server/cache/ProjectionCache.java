@@ -4,6 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 
@@ -27,6 +29,28 @@ public interface ProjectionCache<T> {
   default T read(
       SnapshotCache.Key key, boolean cacheable, Supplier<T> loader, ToLongFunction<T> weight) {
     return read(key, cacheable, loader, loader, weight);
+  }
+
+  /**
+   * A resident value with its original loader evidence. This is not permission to use the value:
+   * its consumer must confirm this token in the same database statement as its SQL fallback.
+   */
+  record Candidate<T>(T value, ProjectionVersions.Token token) {
+    public Candidate {
+      Objects.requireNonNull(value);
+      Objects.requireNonNull(token);
+    }
+  }
+
+  /** Finds a resident domain projection without SQL or loading; never establishes freshness. */
+  default Optional<Candidate<T>> candidate(SnapshotCache.Key key) {
+    Objects.requireNonNull(key);
+    return Optional.empty();
+  }
+
+  /** Retires this key, including notification-trusted evidence, before an authoritative refresh. */
+  default void invalidate(SnapshotCache.Key key) {
+    Objects.requireNonNull(key);
   }
 
   /** A bounded SQL projection refused before hydrating content; retry only the ordinary read. */

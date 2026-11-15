@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -255,6 +256,19 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T>, Resident
   @Override
   public Read<T> readInline(Request request, Loader<T> loader) {
     return read(request, loader, true);
+  }
+
+  @Override
+  public Optional<Tracked<T>> peek(Request request) {
+    Objects.requireNonNull(request);
+    synchronized (lock) {
+      if (closed || recovering) return Optional.empty();
+      var entry = entries.get(new Identity(request.key(), request.version()));
+      if (entry == null) return Optional.empty();
+      if (!entry.request.equals(request)) throw new CacheException(Failure.INCONSISTENT_REQUEST);
+      recent(entry);
+      return Optional.of(entry.snapshot);
+    }
   }
 
   private Read<T> read(Request request, Loader<T> loader, boolean inline) {
