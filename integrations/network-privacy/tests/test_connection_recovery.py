@@ -50,10 +50,13 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
             for candidate in clients:
                 candidate.__aenter__.return_value = candidate
 
+            old_operations: list[str] = []
+
             async def disconnected(command: object) -> Reply[object]:
                 # Main's stop-alert path may try one new alert on the failed
                 # session. Recovery must inspect that identity on the fresh one.
-                self.assertEqual(getattr(command, "operation"), "inbox.publish")
+                # Background readers may also observe the same closed session.
+                old_operations.append(getattr(command, "operation"))
                 raise TransportError(Delivery.NOT_SUBMITTED, "fixture closed socket")
 
             old.request.side_effect = disconnected
@@ -153,7 +156,14 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                     assert worker.attention is not None
                     self.assertEqual(worker.attention.pending, 1)
                     self.assertEqual(len(worker.attention.rows), 1)
-                    old.request.assert_awaited_once()
+                    self.assertEqual(old_operations.count("inbox.publish"), 1)
+                    self.assertFalse(
+                        {
+                            "relay.publish",
+                            "information.upload",
+                            "orchestration.start",
+                        }.intersection(old_operations)
+                    )
                 elif pending:
                     with self.assertRaises(Refusal):
                         await captured.check_and_resume()
@@ -173,11 +183,29 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 old.__aexit__.assert_awaited_once()
                 stop.set()
 
+            failures: list[Exception] = []
+
+            async def checked_run(
+                worker: Worker,
+                stop: asyncio.Event,
+                external: ExternalRequests | None,
+                apply_settings: Callable[[], Awaitable[None]] | None,
+                recover: Callable[[], Awaitable[None]],
+            ) -> None:
+                # Production shutdown logs background errors. Assertions in this
+                # fixture must fail the test after cleanup has finished.
+                try:
+                    await run(worker, stop, external, apply_settings, recover)
+                except Exception as error:
+                    failures.append(error)
+                finally:
+                    stop.set()
+
             connect = AsyncMock(side_effect=clients)
             with (
                 patch("plowshare_privacy.cli.Client.connect", connect),
                 patch("plowshare_privacy.cli.application", application),
-                patch.object(Worker, "run", run),
+                patch.object(Worker, "run", checked_run),
                 patch.dict(
                     "os.environ",
                     {
@@ -197,6 +225,8 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                         port=0,
                     )
                 )
+            if failures:
+                raise failures[0]
             for candidate in clients:
                 candidate.__aexit__.assert_awaited_once()
             return connect.await_count, operations
