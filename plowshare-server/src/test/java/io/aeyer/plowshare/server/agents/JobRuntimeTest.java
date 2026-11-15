@@ -42,7 +42,9 @@ import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.llm.tokens.RatioTokenizer;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.security.ChatFiltering;
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -380,8 +382,35 @@ class JobRuntimeTest {
         new NoOpTokenLedger());
   }
 
+  @Test
+  void handledReadCapacityFailureIsReportedWithoutChangingToolRecovery() throws Exception {
+    var observations = new ArrayList<Throwable>();
+    var busy = new ReadUnavailableException();
+    var transport =
+        new Scripted()
+            .then(() -> asking("looking", call("busy", "probe_read", "{}")))
+            .thenAlways(() -> answer("done"));
+    var runtime =
+        runtimeOver(
+            (source, failure) -> observations.add(failure),
+            transport,
+            new Probe(
+                "probe_read",
+                args -> {
+                  throw busy;
+                }));
+    var outcome = runtime.run(agent("reader"), "go", Home.global(), generous(), null);
+    assertEquals(Ending.ANSWERED, outcome.ending());
+    assertEquals(List.of(busy), observations);
+  }
+
   private static JobRuntime runtimeOver(LlmTransport transport, AgentTool... tools) {
-    return new JobRuntime(dispatcherOver(transport, 4), List.of(tools));
+    return runtimeOver(FailureReporter.NONE, transport, tools);
+  }
+
+  private static JobRuntime runtimeOver(
+      FailureReporter failures, LlmTransport transport, AgentTool... tools) {
+    return new JobRuntime(failures, dispatcherOver(transport, 4), List.of(tools));
   }
 
   /**
@@ -6563,8 +6592,13 @@ class JobRuntimeTest {
         new Scripted()
             .then(() -> asking("looking", call("c1", "probe_read", "{}")))
             .thenAlways(() -> answer("this must never be reached"));
+    var observations = new ArrayList<Throwable>();
     JobRuntime runtime =
         runtimeOver(
+            (source, failure) -> {
+              assertEquals(FailureReporter.Source.RUNTIME, source);
+              observations.add(failure);
+            },
             transport,
             new Probe(
                 "probe_read",
@@ -6576,6 +6610,8 @@ class JobRuntimeTest {
 
     Outcome outcome = runtime.run(agent("reader"), "go", Home.global(), generous(), null);
 
+    assertEquals(1, observations.size());
+    assertTrue(observations.getFirst() instanceof SessionGoneException);
     // The message rides on the assertEquals rather than on an assertNotEquals
     // beneath it: with SESSION_GONE already asserted, "and it is not
     // UNAVAILABLE" is a tautology no mutant can kill on its own, and a line

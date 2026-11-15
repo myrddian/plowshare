@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
@@ -18,7 +20,8 @@ import org.junit.jupiter.api.Test;
 
 class JobTelemetryTest {
   private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
-  private final MicrometerJobTelemetry telemetry = new MicrometerJobTelemetry(registry);
+  private final FailureReporter failures = mock(FailureReporter.class);
+  private final MicrometerJobTelemetry telemetry = new MicrometerJobTelemetry(registry, failures);
 
   @AfterEach
   void closeRegistry() {
@@ -92,13 +95,15 @@ class JobTelemetryTest {
       }
       until(() -> active() == 0);
       assertEquals(1, completed("cancelled"));
+      var failure = new IllegalStateException("private-failure");
       jobs.submit(
           "failing",
           cancelled -> {
-            throw new IllegalStateException("private-failure");
+            throw failure;
           });
       until(() -> completed("unavailable") == 1 && active() == 0);
       assertEquals(2, counter("started"));
+      verify(failures).report(FailureReporter.Source.RUNTIME, failure);
     }
   }
 

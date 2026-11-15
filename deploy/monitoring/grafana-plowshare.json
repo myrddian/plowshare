@@ -609,6 +609,134 @@
           "legendFormat": "index"
         }
       ]
+    },
+    {
+      "id": 25,
+      "type": "row",
+      "title": "Server failures",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 72
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Handled server failures per second",
+      "description": "Failures observed at WebSocket, HTTP and runtime handling boundaries. One incident may affect several boundaries; these are not unique incident counts. Session loss and read capacity are separate kinds.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 73
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance, source, kind) (rate(plowshare_failures_total[5m]))",
+          "legendFormat": "{{instance}} {{source}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "ERROR log entries per second",
+      "description": "Counts emitted ERROR-level log entries. Handled availability failures use sampled WARN diagnostics and are visible in the separate failure counter.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 73
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance) (rate(logback_events_total{level=\"error\"}[5m]))",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Failed inference attempts per second",
+      "description": "Includes failed upstream attempts even when a later retry succeeds. Retained independently from runtime failure diagnostics.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 81
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance, lane, operation) (rate(plowshare_inference_attempts_total{outcome=\"failed\"}[5m]))",
+          "legendFormat": "{{instance}} {{lane}} {{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "Unavailable jobs and lost sessions per second",
+      "description": "JobStore task exits. Session loss retains its distinct ending; these counters overlap runtime failure observations.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 81
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance, ending) (rate(plowshare_jobs_completed_total{ending=~\"unavailable|session_gone\"}[5m]))",
+          "legendFormat": "{{instance}} {{ending}}"
+        }
+      ]
     }
   ]
 }

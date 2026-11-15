@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.server.files.SessionChannel;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,15 +75,27 @@ public class FrameRoutingConfig {
   public FrameRouter frameRouter(
       List<FrameArea> areas,
       ActingRequests acting,
-      io.aeyer.plowshare.server.reads.ReadAdmission admission,
-      ObjectProvider<SessionChannel> channels) {
-    return assemble(areas, acting, admission, channels.getIfAvailable());
+      ReadAdmission admission,
+      ObjectProvider<SessionChannel> channels,
+      ObjectProvider<FailureReporter> failures) {
+    return assemble(
+        areas,
+        acting,
+        admission,
+        channels.getIfAvailable(),
+        failures.getIfAvailable(() -> FailureReporter.NONE));
   }
 
   public FrameRouter frameRouter(
       List<FrameArea> areas,
       ActingRequests acting,
-      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+      ReadAdmission admission,
+      ObjectProvider<SessionChannel> channels) {
+    return assemble(areas, acting, admission, channels.getIfAvailable());
+  }
+
+  public FrameRouter frameRouter(
+      List<FrameArea> areas, ActingRequests acting, ReadAdmission admission) {
     return assemble(areas, acting, admission, null);
   }
 
@@ -94,14 +108,20 @@ public class FrameRoutingConfig {
   }
 
   private FrameRouter assemble(List<FrameArea> areas, ActingRequests acting) {
-    return assemble(areas, acting, io.aeyer.plowshare.server.reads.ReadAdmission.direct(), null);
+    return assemble(areas, acting, ReadAdmission.direct(), null);
+  }
+
+  private FrameRouter assemble(
+      List<FrameArea> areas, ActingRequests acting, ReadAdmission admission, SessionChannel files) {
+    return assemble(areas, acting, admission, files, FailureReporter.NONE);
   }
 
   private FrameRouter assemble(
       List<FrameArea> areas,
       ActingRequests acting,
-      io.aeyer.plowshare.server.reads.ReadAdmission admission,
-      SessionChannel files) {
+      ReadAdmission admission,
+      SessionChannel files,
+      FailureReporter failures) {
     Map<String, FrameHandler> table = new HashMap<>();
     for (FrameArea area : areas) {
       for (Map.Entry<String, FrameHandler> entry : area.frames().entrySet()) {
@@ -132,6 +152,6 @@ public class FrameRoutingConfig {
         table.computeIfPresent(type, (ignored, handler) -> new ContextInputHandler(handler, files));
       }
     }
-    return new FrameRouter(table, acting, admission);
+    return new FrameRouter(table, acting, admission, failures);
   }
 }
