@@ -588,6 +588,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
                 "investigate_network",
                 "profile_network_device",
                 "assess_network_device",
+                "research_product_question",
             },
         )
         for path in scripts:

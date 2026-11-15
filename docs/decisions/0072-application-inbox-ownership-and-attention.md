@@ -7,7 +7,15 @@ rejected in favor of retaining the existing schedule execution path.
 
 ## Ownership and configuration
 
-A root Application opts into project-owned background output through its manifest:
+Background output belongs to its root Application, even when an older installed
+manifest has no inbox policy. Successful schedule receipts and successful native-only
+orchestration completions are routine. Other successful orchestration results notify
+current Managers by default. Native-only classification reads the pinned declaration
+through the bounded pure script sandbox without executing a workflow step; it never
+classifies result prose or depends on a workflow's name. An invalid declaration fails
+delivery rather than silently suppressing attention.
+
+A root Application can override which successful orchestration results need attention:
 
 ```json
 "inbox": {
@@ -23,8 +31,11 @@ attention. The server does not classify model prose or infer importance from wor
 in a message. Producers can explicitly publish `finding`, `failure` or `attention`
 through the public `inbox.publish` operation.
 
-Omitting `inbox` preserves existing behavior. The setting changes output ownership;
-it does not impersonate the application executor, transfer historical source
+Omitting `inbox` uses the defaults above. Requiring opt-in left existing operator-managed
+installations delivering routine ticks to their installer even after the compatible
+server was deployed. The optional setting now changes attention selection, not output
+ownership. External projects retain account-owned delivery. Application ownership
+does not impersonate the application executor, transfer historical source
 registration, expand tool grants or change accounting. Explicit foreground
 conversations retain their existing delivery path. Existing mailbox schedules,
 occurrence identities, Relay intake, pause/resume and execution lifecycle remain
@@ -61,7 +72,7 @@ normal command approvals and continuation fences remain in force.
 
 ## Public producers and recovery
 
-`inbox.publish` requires project Contributor authority and an opted-in Application.
+`inbox.publish` requires project Contributor authority and an Application.
 The request supplies project, UUID, category and bounded text; it cannot choose
 recipients. `inbox.receipt` reads admission under the exact project, authenticated
 producer and original UUID. Another account cannot claim that receipt. The same
@@ -86,6 +97,9 @@ personal ownership. It does not rewrite shipped migrations or move inbox history
 Shared TypeScript contracts and generated Java/Python/Go/.NET catalogs include
 project selection, publication and exact receipt inspection.
 
+Regression tests cover an existing Application without an inbox setting, both tick
+receipts, pinned native-only classification, model workflow results, failures,
+questions, explicit findings and inspection without a manifest upgrade.
 Mock tests cover routing, current Manager selection, foreground behavior, failure
 and question escalation, strict configuration and access denial. A focused
 PostgreSQL test covers ownership isolation, personal unread/read exclusion,

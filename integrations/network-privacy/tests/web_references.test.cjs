@@ -120,7 +120,7 @@ test('attention shows docs requested', () => {
   assert.deepEqual(band({...overview(null), reference_requests:null}), []);
   const lines = band({...overview(null), reference_requests:{pending:2, products:['caddy', 'synology']}});
   assert.equal(lines.length, 1);
-  assert.equal(lines[0], '2 | Docs requested | Privacy Watch could not answer about caddy, synology. Add a documentation link or dismiss. | Review');
+  assert.equal(lines[0], '2 | Product questions | Privacy Watch could not answer about caddy, synology. Research the question, add a source link or dismiss. | Review');
 });
 
 test('request review never renders agent text as markup', () => {
@@ -257,4 +257,37 @@ test('attention lists slow fetches apart from failures', () => {
   assert.equal(lines.length, 2);
   assert.match(lines[0], /^1 \| Reference docs need a check/);
   assert.match(lines[1], /^2 \| Reference docs are slow to fetch/);
+});
+
+test('product research is an explicit action with an optional device check', async () => {
+  const calls = [];
+  const {node, run} = dashboard(async (path, options = {}) => {
+    calls.push([path, options.method, options.body]);
+    return {ok:true, status:200, json:async () => ({requests:[{...ASKED, research:{phase:'queued', detail:null}}], research_available:true})};
+  });
+  run('renderRequests(' + JSON.stringify({requests:[{...ASKED, probe_available:true}], research_available:true}) + ')');
+  const card = node('reference-request-list').children[0];
+  const [research] = buttons(card);
+  assert.equal(research.textContent, 'Research this question');
+  research.listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls.filter(call => call[0].endsWith('/research')), [[`/api/reference-requests/${ASKED.id}/research`, 'POST', '{"probe":false}']]);
+  const pending = buttons(node('reference-request-list').children[0]);
+  assert.deepEqual(pending.map(button => button.textContent), ['Stop research', 'Approve', 'Dismiss']);
+  assert.equal(pending[1].disabled, true);
+  assert.equal(pending[2].disabled, true);
+});
+
+test('research completion refreshes the answer while keeping typed source links', async () => {
+  const {node, run} = dashboard();
+  const value = {requests:[{...ASKED, probe_available:true}], research_available:true};
+  run('renderRequests(' + JSON.stringify(value) + ')');
+  const [area] = textareas(node('reference-request-list').children[0]);
+  area.value = 'https://privacy.example.org/report';
+  area.listeners.input();
+  value.requests[0].research = {phase:'finished', detail:null, result:{answer:'# A reviewed answer'}};
+  run('renderRequests(' + JSON.stringify(value) + ')');
+  assert.equal(textareas(node('reference-request-list').children[0])[0].value, area.value);
+  assert.ok(texts(node('reference-request-list').children[0]).includes('Reviewed answer ready'));
+  assert.ok(texts(node('reference-request-list').children[0]).includes('Read the reviewed answer'));
 });

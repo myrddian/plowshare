@@ -2700,7 +2700,8 @@ public final class JobRuntime {
                 sessionId,
                 owner,
                 end,
-                offered);
+                offered,
+                operation);
     if (bound != null && bound.refusal() != null) {
       transcript.record(LoggedEntry.utterance(userPrompt, transcript.speaker()));
       transcript.record(LoggedEntry.notice(bound.refusal()));
@@ -3850,32 +3851,42 @@ public final class JobRuntime {
             }
             if (fenced == null && tool != null && bound != null)
               fenced = bound.fence(wanted.name());
+            boolean rulesDenied = false;
             if (fenced == null && tool != null) {
-              List<AgentRules.Rule> applicable =
-                  fileRules.forTool(
-                      definition, home, sessionId, owner, wanted.name(), wanted.arguments());
-              List<AgentRules.Rule> unread =
-                  applicable.stream()
-                      .filter(
-                          rule ->
-                              !fileRulesForThisStep.contains(rule)
-                                  && !definition.prompt().contains(rule.text()))
-                      .toList();
-              if (!unread.isEmpty()) {
-                deliveredFileRules.addAll(unread);
+              try {
+                List<AgentRules.Rule> applicable =
+                    fileRules.forTool(
+                        definition, home, sessionId, owner, wanted.name(), wanted.arguments());
+                List<AgentRules.Rule> unread =
+                    applicable.stream()
+                        .filter(
+                            rule ->
+                                !fileRulesForThisStep.contains(rule)
+                                    && !definition.prompt().contains(rule.text()))
+                        .toList();
+                if (!unread.isEmpty()) {
+                  deliveredFileRules.addAll(unread);
+                  fenced =
+                      "Applicable file instructions must be read before this operation. Nothing ran; "
+                          + "review these instructions and invoke the operation on the next model step.\n\n"
+                          + unread.stream()
+                              .map(
+                                  rule ->
+                                      "Instructions from "
+                                          + rule.origin()
+                                          + " (scope: "
+                                          + rule.scope()
+                                          + "):\n"
+                                          + rule.text())
+                              .collect(Collectors.joining("\n\n"));
+                }
+              } catch (AgentRules.Refused refused) {
+                // This pre-dispatch gate is outside the tool's exception handler. Refuse only
+                // the requested effect, preserving the rule requirement and the next model step.
                 fenced =
-                    "Applicable file instructions must be read before this operation. Nothing ran; "
-                        + "review these instructions and invoke the operation on the next model step.\n\n"
-                        + unread.stream()
-                            .map(
-                                rule ->
-                                    "Instructions from "
-                                        + rule.origin()
-                                        + " (scope: "
-                                        + rule.scope()
-                                        + "):\n"
-                                        + rule.text())
-                            .collect(Collectors.joining("\n\n"));
+                    "DENY: Required file instructions could not be loaded. Nothing ran.\n"
+                        + refused.getMessage();
+                rulesDenied = true;
               }
             }
             if (tool == null) {
@@ -3883,10 +3894,10 @@ public final class JobRuntime {
               told = ToolLines.REFUSED;
             } else if (fenced != null) {
               // Rule 4 (spec 2026-09-29 §3): refused before hooks, on the model's own
-              // arguments, and nothing ran, so the trail does not gain it. Told REFUSED, as
-              // a tool the run does not hold is: the harness said no, not a hook or a person.
+              // arguments, and nothing ran, so the trail does not gain it. Missing required
+              // instructions are a denial; other fences retain their existing refusal outcome.
               result = fenced;
-              told = ToolLines.REFUSED;
+              told = rulesDenied ? ToolLines.DENIED : ToolLines.REFUSED;
             } else {
               Hooks active = activeHooks(route, harnessRun, skillChecks);
               // run's gate stands around the chain and is no hook's to leave out:
@@ -5086,8 +5097,14 @@ public final class JobRuntime {
     if (skills != null) {
       for (AgentTool tool :
           skills.forRun(
-              definition, transcript, budget, cancelled, sessionId, callerHandle, extras.end()))
-        offered.putIfAbsent(tool.schema().name(), tool);
+              definition,
+              transcript,
+              budget,
+              cancelled,
+              sessionId,
+              callerHandle,
+              extras.end(),
+              operation)) offered.putIfAbsent(tool.schema().name(), tool);
     }
     if (extras.keepsTodos() && todos != null) {
       offered.putIfAbsent(TodoTools.READ_NAME, new TodoTools.Read(todos, transcript));

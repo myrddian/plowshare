@@ -52,6 +52,7 @@ from .limits import MAX_PORTS
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Preferences
 from .privacy_issues import IssueFields, IssueValidation
+from .product_research import ProductResearch
 from .profile_research import DAILY_LIMIT as RESEARCH_DAILY_LIMIT
 from .profile_research import ResearchReview, admitted_today
 from .reference_library import MAX_REFRESH_DAYS
@@ -99,6 +100,8 @@ def application(
     ask: AskService | None = None,
     ask_detail: str | None = None,
     advisory_origin: str | None = None,
+    product_research: ProductResearch | None = None,
+    product_research_detail: str | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -834,17 +837,32 @@ def application(
             return None
         try:
             waiting = reference_requests.pending()
+            research_entries = (
+                {entry.reference_id: entry for entry in product_research.view()}
+                if product_research
+                else {}
+            )
         except (ValueError, OSError):
             # A bad journal must not take the whole overview down; say why instead.
             return {"pending": 0, "products": [], "detail": REQUESTS_UNREADABLE}
         return {
             "pending": len(waiting),
             "products": [r.product for r in waiting],
+            "research": [
+                (entry.reference_id, entry.phase, entry.detail)
+                for r in waiting
+                if (entry := research_entries.get(r.id)) is not None
+            ],
             "detail": None,
         }
 
     def request_rows(waiting: tuple[ReferenceRequest, ...]) -> web.Response:
         # ``question`` is the agent's text: the dashboard shows it as text only.
+        research_entries = (
+            {entry.reference_id: entry for entry in product_research.view()}
+            if product_research
+            else {}
+        )
         return web.json_response(
             {
                 "requests": [
@@ -853,9 +871,25 @@ def application(
                         "product": r.product,
                         "question": r.question,
                         "created_at": r.created_at,
+                        "probe_available": r.device_id is not None,
+                        "research": (
+                            entry.encoded()
+                            if (entry := research_entries.get(r.id)) is not None
+                            else None
+                        ),
                     }
                     for r in waiting
+                ],
+                "research_available": product_research is not None,
+                "research_detail": product_research.error
+                if product_research
+                else product_research_detail,
+                "devices": [
+                    {"id": device, "name": card.name}
+                    for device, card in monitored_devices(worker.device_inventory())
                 ]
+                if product_research
+                else [],
             }
         )
 
@@ -871,6 +905,12 @@ def application(
     async def request_approve(request: web.Request) -> web.Response:
         journal = request_journal()
         try:
+            if product_research is not None and product_research.active(
+                request.match_info["request_id"]
+            ):
+                raise ValueError(
+                    "Research is still active; wait for its result before deciding the request"
+                )
             urls = object_fields(parse_json(await request.read()), {"urls"})["urls"]
             # The journal enforces the count and each link's rules; here only the
             # shape. A huge list is already bounded by the request body limit.
@@ -891,12 +931,51 @@ def application(
     async def request_dismiss(request: web.Request) -> web.Response:
         journal = request_journal()
         try:
+            if product_research is not None and product_research.active(
+                request.match_info["request_id"]
+            ):
+                raise ValueError(
+                    "Research is still active; wait for its result before dismissing the request"
+                )
             journal.dismiss(request.match_info["request_id"])
         except ValueError as error:
             return web.json_response({"error": str(error.args[0])}, status=400)
         except OSError:
             return unreadable()
         return request_rows(journal.pending())
+
+    async def request_research(request: web.Request) -> web.Response:
+        if product_research is None:
+            raise web.HTTPNotFound(text="Product research is not available")
+        row = object_fields(parse_json(await request.read()), {"probe"})
+        if type(row["probe"]) is not bool:
+            raise ValueError("Choose whether to include device checks")
+        product_research.queue(uuid(request.match_info["request_id"]), row["probe"])
+        return request_rows(request_journal().pending())
+
+    async def request_research_cancel(request: web.Request) -> web.Response:
+        if product_research is None:
+            raise web.HTTPNotFound(text="Product research is not available")
+        object_fields(parse_json(await request.read()), set())
+        await product_research.cancel(uuid(request.match_info["request_id"]))
+        return request_rows(request_journal().pending())
+
+    async def request_link_device(request: web.Request) -> web.Response:
+        if product_research is None:
+            raise web.HTTPNotFound(text="Product research is not available")
+        request_id = uuid(request.match_info["request_id"])
+        if product_research.entry(request_id) is not None:
+            raise ValueError(
+                "Link the device before starting research on this question"
+            )
+        row = object_fields(parse_json(await request.read()), {"device_id"})
+        device_id = parse_device_id(row["device_id"])
+        if device_id not in {
+            device for device, _ in monitored_devices(worker.device_inventory())
+        }:
+            raise ValueError("Choose a current monitored device")
+        request_journal().link_device(request_id, device_id)
+        return request_rows(request_journal().pending())
 
     def assistant() -> AskService:
         if ask is None:
@@ -1379,9 +1458,18 @@ def application(
     app.router.add_post("/api/references/retry", reference_retry)
     app.router.add_get("/api/references/settings", reference_settings)
     app.router.add_post("/api/references/settings", save_reference_settings)
+    app.router.add_post(
+        "/api/reference-requests/{request_id}/research/cancel", request_research_cancel
+    )
+    app.router.add_post(
+        "/api/reference-requests/{request_id}/device", request_link_device
+    )
     app.router.add_get("/api/reference-requests", request_list)
     app.router.add_post("/api/reference-requests/{request_id}/approve", request_approve)
     app.router.add_post("/api/reference-requests/{request_id}/dismiss", request_dismiss)
+    app.router.add_post(
+        "/api/reference-requests/{request_id}/research", request_research
+    )
     app.router.add_get("/api/ask", ask_view)
     app.router.add_post("/api/ask", ask_send)
     app.router.add_post("/api/ask/top-up", ask_top_up)

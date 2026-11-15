@@ -1,8 +1,22 @@
 package io.aeyer.plowshare.server.events;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.agents.Outcome;
@@ -117,6 +131,111 @@ class ApplicationInboxesTest {
             eq(Instant.EPOCH));
     verify(members, never()).managers(anyString());
     verifyNoInteractions(pushes, personal);
+  }
+
+  @Test
+  void
+      installed_application_without_inbox_policy_keeps_both_native_tick_receipts_out_of_personal_inbox()
+          throws Exception {
+    Files.writeString(root.resolve("plowshare.json"), "{\"name\":\"privacy\"}");
+    // Existing operator-managed installations are DISJOINT Applications, not managed deployments.
+    when(policy.source("privacy"))
+        .thenReturn(
+            new ApplicationPolicy.Source(
+                new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.APPLICATION, Map.of()),
+                Optional.of(
+                    new ProjectRecord(
+                        "privacy", root, List.of(), List.of(), "DISJOINT", List.of()))));
+    var run = run(OrchestrationState.FINISHED, "renamed_tick");
+    when(run.definitionSource()).thenReturn(nativeTick());
+    var trigger =
+        new TriggerRecord(
+            "scan", "scan", "privacy", null, "coordinator", "tick", 1, 8, 1, false, "installer");
+    var firing = mock(FiringRecord.class);
+    when(firing.id()).thenReturn("fir_tick");
+
+    assertTrue(
+        inboxes.scheduled(
+            trigger,
+            firing,
+            "cnv_event",
+            new Outcome(Outcome.Ending.ANSWERED, "receipt", 0, 0, "")));
+    assertTrue(inboxes.orchestration(run, "Occurrence available", null));
+
+    verify(store, times(2))
+        .append(eq(1L), anyString(), argThat(notice -> !notice.attention()), eq(List.of()), any());
+    verify(members, never()).managers(anyString());
+    verifyNoInteractions(pushes, personal);
+  }
+
+  @Test
+  void missing_policy_preserves_workflow_results_failures_questions_and_explicit_findings()
+      throws Exception {
+    Files.writeString(root.resolve("plowshare.json"), "{}");
+    var result = run(OrchestrationState.FINISHED, "investigate");
+    // A native script may orchestrate model work; false and absent declarations require attention.
+    when(result.definitionSource()).thenReturn(nativeTick().replace("true", "false"));
+    assertTrue(inboxes.orchestration(result, "Reviewed result", null));
+    var model = run(OrchestrationState.FINISHED, "model_workflow");
+    when(model.id()).thenReturn("orc_model_result");
+    when(model.definitionSource())
+        .thenReturn("---\nname: model_workflow\nmodel: reasoning\n---\nWork");
+    assertTrue(inboxes.orchestration(model, "Model finding", null));
+    var failed = run(OrchestrationState.FAILED, "tick");
+    when(failed.id()).thenReturn("orc_failed");
+    assertTrue(inboxes.orchestration(failed, "Failed", null));
+    assertTrue(
+        inboxes.question("cnv_source", "cnv_source", "producer", "approval", "Decide", "q1"));
+    inboxes.publish("collector", "privacy", UUID.randomUUID(), "finding", "A finding");
+
+    verify(store, times(5))
+        .append(eq(1L), anyString(), argThat(Notice::attention), eq(List.of("manager")), any());
+  }
+
+  @Test
+  void old_application_inbox_is_inspectable_and_acknowledgeable_without_manifest_changes()
+      throws Exception {
+    Files.writeString(root.resolve("plowshare.json"), "{}");
+    when(store.page(1, false, 0, 50)).thenReturn(new InboxStore.Page(List.of(), 0));
+    assertEquals(0, inboxes.page("reader", "privacy", false, 0, 50).unread());
+    inboxes.read("manager", "privacy", List.of("item"));
+    verify(members, times(2)).requireRole("privacy", "reader", ProjectRole.VIEWER);
+    verify(members).requireRole("privacy", "manager", ProjectRole.MANAGER);
+  }
+
+  @Test
+  void explicit_attention_policy_can_escalate_even_a_native_only_completion() throws Exception {
+    Files.writeString(
+        root.resolve("plowshare.json"),
+        "{\"inbox\":{\"attentionOrchestrations\":[\"native_finding\"]}}");
+    var run = run(OrchestrationState.FINISHED, "native_finding");
+    when(run.definitionSource()).thenReturn(nativeTick());
+    inboxes.orchestration(run, "A native result needing review", null);
+    verify(store)
+        .append(eq(1L), anyString(), argThat(Notice::attention), eq(List.of("manager")), any());
+  }
+
+  @Test
+  void external_project_retains_existing_account_delivery() {
+    when(policy.source("privacy"))
+        .thenReturn(
+            new ApplicationPolicy.Source(
+                new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.EXTERNAL, Map.of()),
+                Optional.empty()));
+    assertFalse(inboxes.orchestration(run(OrchestrationState.FINISHED, "work"), "Result", null));
+    verify(store, never()).append(anyLong(), anyString(), any(), anyList(), any());
+  }
+
+  private static String nativeTick() {
+    return """
+        // plowshare-script v1
+        export const manifest = {
+          name: 'renamed_tick', 'native-only': true,
+          stages: [{id: 'available'}], tools: [], calls: [], scopes: [],
+          'max-turns': 8, 'max-model-calls': 0
+        };
+        export function step() { throw new Error('Delivery must not run a workflow step'); }
+        """;
   }
 
   @Test

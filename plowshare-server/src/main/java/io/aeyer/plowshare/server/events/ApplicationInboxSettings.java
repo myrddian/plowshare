@@ -13,7 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
-/** Strict manifest boundary. Presence opts background output into project ownership. */
+/** Strict manifest boundary for optional successful-workflow attention overrides. */
 public record ApplicationInboxSettings(List<String> attentionOrchestrations) {
   private static final JsonMapper JSON =
       JsonMapper.builder()

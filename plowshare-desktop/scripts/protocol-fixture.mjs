@@ -126,7 +126,7 @@ export async function protocolFixture(options = {}) {
     recordRows[61] = { ordinal: 62, at: at(62), run: 'fixture-old-root', actor: 'conductor', kind: 'question_asked', text: 'Review marker. Do these objectives match?', body: 'Review marker. Do these objectives match?', detail: null };
   }
   const unreadInbox = () => inbox.filter(item => !readInbox.has(item.id));
-  const approvals = [approvalWire({ id: 'fixture-approval', conversation: 'fixture-first', agent: 'fixture-bot', command: ['echo','fixture approval'] })];
+  const approvals = options.emptyApprovals ? [] : [approvalWire({ id: 'fixture-approval', conversation: 'fixture-first', agent: 'fixture-bot', command: ['echo','fixture approval'] })];
   const conversationOnlyApprovals = new Set(options.foregroundApprovals ? ['fixture-approval'] : []);
   let socket;
   let logins = 0;

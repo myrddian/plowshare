@@ -208,8 +208,15 @@ A schedule does not expand tools or bypass an approval because it is unattended.
 
 ## Application inbox ownership
 
-An Application can retain background results in its own inspectable inbox by
-adding a root manifest policy:
+An Application owns its background results in its inspectable project inbox,
+including existing installations whose manifests have no `inbox` section.
+Successful schedule receipts and native-only orchestration completions stay there.
+Other successful orchestration results, failures and human questions also notify
+the current human RBAC Managers. Native-only classification uses the run's pinned
+script declaration, rather than result prose, a workflow name or an edited source.
+
+An optional root manifest policy replaces the default selection of successful
+orchestration results that need attention:
 
 ```json
 "inbox": {
@@ -222,7 +229,8 @@ application inbox. The named successful workflows, failures and human questions
 also notify the current human RBAC Managers of that Application. Recipients come
 from current project authority and the manifest role ceiling, rather than the
 installer or a configured account list. Foreground conversation delivery keeps its
-existing behavior. Omitting the policy preserves account-inbox delivery.
+existing behavior. Omitting the policy never transfers Application output to the
+installer's personal inbox. External projects retain their existing account delivery.
 
 Use `inbox.list` with `project` to inspect application output and `inbox.read` with
 that same project to acknowledge its shared items. Viewers can inspect; Managers

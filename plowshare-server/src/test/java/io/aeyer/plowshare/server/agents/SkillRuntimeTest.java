@@ -98,7 +98,7 @@ class SkillRuntimeTest {
 
   String invoke(AgentDefinition caller, String mode) {
     return skills
-        .forRun(caller, parent, budget, () -> false, "session", "alice", end)
+        .forRun(caller, parent, budget, () -> false, "session", "alice", end, null)
         .getFirst()
         .run(
             "{\"name\":\"review\",\"arguments\":\"Inspect the change\",\"invocation\":\""
@@ -227,7 +227,14 @@ class SkillRuntimeTest {
     assertTrue(
         skills
             .forRun(
-                agent.withSkills(List.of()), parent, budget, () -> false, "session", "alice", end)
+                agent.withSkills(List.of()),
+                parent,
+                budget,
+                () -> false,
+                "session",
+                "alice",
+                end,
+                null)
             .isEmpty());
     assertTrue(invoke(agent, "NEW").contains("configured context mode"));
     offer("mode: INHERITED\n");
@@ -280,7 +287,8 @@ class SkillRuntimeTest {
             null);
     assertTrue(
         skills
-            .dispatch(bound, home, agent, parent, budget, () -> false, "session", "alice", end)
+            .dispatch(
+                bound, home, agent, parent, budget, () -> false, "session", "alice", end, null)
             .contains("Pinned specialist instructions"));
     verify(executions).running("alice", id, "parent");
   }
@@ -305,7 +313,8 @@ class SkillRuntimeTest {
               "bound",
               null);
       String result =
-          skills.dispatch(bound, home, agent, parent, budget, () -> false, "session", "alice", end);
+          skills.dispatch(
+              bound, home, agent, parent, budget, () -> false, "session", "alice", end, null);
       assertTrue(result.contains("Pinned specialist instructions"));
       assertTrue(result.endsWith("Invocation arguments (user data):\n" + input));
     }
@@ -316,7 +325,7 @@ class SkillRuntimeTest {
   void malformed_skill_inputs_refuse_before_claiming() {
     offer("mode: DIRECT\n");
     var tool =
-        skills.forRun(agent, parent, budget, () -> false, "session", "alice", end).getFirst();
+        skills.forRun(agent, parent, budget, () -> false, "session", "alice", end, null).getFirst();
     for (String input : List.of("null", "42", "[]")) {
       String result =
           tool.run(

@@ -803,3 +803,14 @@ after reviewing the exact pinned plan. To record an action performed earlier,
 include its actual date in the assessment notes; the profile timestamp records when
 the operator entered that report. The UI's newer-plan reset is draft review guidance;
 it does not undo an already installed network rule.
+
+## Research a product question
+
+Open **Settings → Product questions** and choose **Research this question** on a
+missing-evidence request. The researcher searches documentation, advisories,
+privacy organisations, original research and independent reporting; selected
+pages go into the Library and a reviewer checks the answer. Read the reviewed
+answer on the same card. You can still enter source links yourself or dismiss
+completed requests. Optional device checks are separate and off by default.
+See [focused product research](PRODUCT_RESEARCH.md) for supported probes, limits,
+source policy, cancellation, update requirements and receipt-only recovery.
