@@ -2,7 +2,9 @@ package io.aeyer.plowshare.server.access;
 
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.faults.CallerFault;
-import io.aeyer.plowshare.server.llm.dispatch.*;
+import io.aeyer.plowshare.server.llm.dispatch.CallAuthorization;
+import io.aeyer.plowshare.server.llm.dispatch.InferenceAdmissions;
+import io.aeyer.plowshare.server.llm.dispatch.InferenceBinding;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -23,7 +25,23 @@ public final class OperationInference implements InferenceCalls {
   public CallAuthorization claimed(OperationAuthority.Admission operation, Budget.Claim claim) {
     if (!operation.actions().contains(AuthorityAction.RUN_MODEL))
       throw new CallerFault("RUN_MODEL is required");
-    return claimed(operation.id(), claim, () -> operations.require(operation));
+    // An ordinary account run can publish droppable job previews while retaining the same
+    // allowance and final authority checks. Contained/input-dependent/output-filtered paths
+    // independently withhold their streams; internal SYSTEM calls use the UUID overload below.
+    return claimed(
+        operation.id(),
+        claim,
+        new CallAuthorization() {
+          @Override
+          public void require() {
+            operations.require(operation);
+          }
+
+          @Override
+          public Disclosure disclosure() {
+            return Disclosure.LIVE;
+          }
+        });
   }
 
   /** Internal callers must supply the declared purpose's retained authority and validity check. */
@@ -45,6 +63,11 @@ public final class OperationInference implements InferenceCalls {
       @Override
       public void require() {
         authority.require();
+      }
+
+      @Override
+      public Disclosure disclosure() {
+        return authority.disclosure();
       }
 
       @Override

@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.llm.dispatch;
 import io.aeyer.plowshare.server.llm.MediaRequirements;
 import io.aeyer.plowshare.server.llm.ModelMediaCapabilities;
 import io.aeyer.plowshare.server.llm.ModelMediaProfiles;
+import io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.Disclosure;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -514,7 +515,7 @@ public final class LlmDispatcher implements AutoCloseable {
           () -> routing.pool().countChat(routing.wireModel(), filtered.withSampling(sampling)));
     var guard = responseGuards.forModel(routing.wireModel());
     boolean disclosureBuffer =
-        filtering.bufferOutput() || filtered.authorization().binding() != null;
+        filtering.bufferOutput() || filtered.authorization().disclosure() != Disclosure.LIVE;
     boolean buffered = guard.isPresent() || disclosureBuffer;
     var deferred = guard.isPresent() && !disclosureBuffer ? new DeferredReasoning() : null;
     Completion completion =
@@ -1086,7 +1087,7 @@ public final class LlmDispatcher implements AutoCloseable {
           observer, routing, () -> named.countChat(wireModel, filtered.withSampling(sampling)));
     var guard = responseGuards.forModel(routing.wireModel());
     boolean disclosureBuffer =
-        filtering.bufferOutput() || filtered.authorization().binding() != null;
+        filtering.bufferOutput() || filtered.authorization().disclosure() != Disclosure.LIVE;
     boolean buffered = guard.isPresent() || disclosureBuffer;
     var deferred = guard.isPresent() && !disclosureBuffer ? new DeferredReasoning() : null;
     Completion completion =

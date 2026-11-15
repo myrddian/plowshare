@@ -1073,7 +1073,10 @@ function renderTranscript() {
     selected,
     entries,
     history?.more,
+    job?.id,
     job?.text,
+    job?.thinking,
+    job?.thinkingTruncated,
     job?.status,
     job?.phase,
     job?.tool,
@@ -1090,6 +1093,25 @@ function renderTranscript() {
     100;
   const oldTop = transcript.scrollTop;
   const wasEmpty = !transcript.childElementCount;
+  // Repainting streamed text must preserve the reader's choice to close the preview.
+  // Scope that choice to this job so a different conversation/run starts expanded.
+  const previousReasoning = transcript.querySelector<HTMLDetailsElement>(
+    '[data-thinking-job]',
+  );
+  const sameReasoningJob =
+    previousReasoning !== null &&
+    previousReasoning.dataset['thinkingJob'] === job?.id;
+  const reasoningOpen = sameReasoningJob ? previousReasoning.open : true;
+  const previousReasoningText = sameReasoningJob
+    ? previousReasoning.querySelector('pre')
+    : null;
+  const followReasoning =
+    !previousReasoningText ||
+    previousReasoningText.scrollHeight -
+      previousReasoningText.clientHeight -
+      previousReasoningText.scrollTop <
+      32;
+  const reasoningScrollTop = previousReasoningText?.scrollTop ?? 0;
   let content = history?.more
     ? `<button class="load-earlier" id="load-earlier">${icon('history')}Load earlier entries</button>`
     : '';
@@ -1137,6 +1159,9 @@ function renderTranscript() {
   if (job && activeJob(job)) {
     if (job.source !== 'approval')
       content += message('person', 'You', job.task);
+    if (job.thinking) {
+      content += `<details class="published-reasoning" data-thinking-job="${esc(job.id)}"${reasoningOpen ? ' open' : ''}><summary>Published reasoning <span>Live preview</span></summary><pre>${esc(job.thinking)}</pre>${job.thinkingTruncated ? '<p class="history-note">Earlier text is omitted from this live preview. Open Trajectory for recorded reasoning when available.</p>' : ''}</details>`;
+    }
     const waiting =
       job.status === 'unknown'
         ? 'The connection was lost. This job may still be running on the server.'
@@ -1152,6 +1177,13 @@ function renderTranscript() {
   if (!content)
     content = `<div class="empty-chat"><div class="empty-mark">${icon('sparkles')}</div><h2>What are we thinking about?</h2><p>Ask a question, explore your sources, or work through something together.</p><div class="suggestions"><button data-suggestion="Help me explore an idea and find useful sources.">${icon('search')}Explore an idea</button><button data-suggestion="Help me turn these notes into a clear plan.">${icon('file')}Make a plan</button><button data-suggestion="Help me understand a problem step by step.">${icon('route')}Work through a problem</button></div></div>`;
   transcript.innerHTML = content;
+  const reasoningText = transcript.querySelector<HTMLElement>(
+    '[data-thinking-job] pre',
+  );
+  if (reasoningText)
+    reasoningText.scrollTop = followReasoning
+      ? reasoningText.scrollHeight
+      : reasoningScrollTop;
   transcript.classList.toggle(
     'is-empty',
     !!transcript.querySelector('.empty-chat'),

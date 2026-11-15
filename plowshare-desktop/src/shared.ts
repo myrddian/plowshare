@@ -140,6 +140,9 @@ export interface WorkspaceMessage {
   shortcut?: string;
 }
 
+/** Published reasoning is a transient tail, separate from the durable answer. */
+export const THINKING_PREVIEW_CHARACTERS = 16_384;
+
 export interface Job {
   id: string;
   conversation: string;
@@ -157,6 +160,8 @@ export interface Job {
     | 'unknown';
   text: string;
   thinking?: string;
+  /** Sticky while the live tail has omitted earlier published reasoning. */
+  thinkingTruncated?: boolean;
   phase?: 'thinking' | 'answer' | 'tool';
   tool?: string | undefined;
   answered?: boolean;

@@ -91,7 +91,12 @@ all dispatcher routes and direct helper owners. Production composition requires
 an `InferenceBoundary`; isolated fixtures retain explicit compatibility wiring.
 Chat complete/stream/fold/pinned-pool and embedding refuse missing evidence. Live
 checks run before queueing, on the lane worker and before result disclosure.
-Bounded streaming buffers output until that final check. Metadata and model
+Preview disclosure is separate from allowance binding. Ordinary account runs explicitly permit
+live, droppable job previews; the listener checks current job READ at enqueue, and already
+published or queued previews cannot be retracted. Their final result still requires the live
+post-inference check. Unknown and SYSTEM inference default to buffered disclosure. Contained,
+information-dependent, regeneration, output-filter and model-response-guard paths retain their
+withholding rules; a retained allowance alone does not enable their previews. Metadata and model
 selectors confer no authority.
 
 V160 retains immutable operation-to-budget identities, claimed ordinals/ceiling

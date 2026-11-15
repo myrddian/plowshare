@@ -58,7 +58,8 @@ public interface Deltas {
    *
    * <p><b>Does nothing unless overridden</b>, which is how "dropped by default" is spelled.
    * Override it only if there is somewhere for the text to go that has been thought about:
-   * reasoning is not stored, not archived and not part of an answer.
+   * reasoning is not part of an answer. A runtime may retain it as protected THINKING transcript
+   * entries; these ephemeral previews are not that durable record.
    *
    * @param delta the reasoning this chunk added, never null and never empty
    */
