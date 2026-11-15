@@ -44,6 +44,7 @@ directory.
 | --- | --- |
 | `plowshare.json` | Application identity `network-privacy-watch`, account grants and limits |
 | `agents/` | Built-in grants and dynamic opt-in; external access comes from manifest provider scopes |
+| `hooks/` | Ask-agent keyword recommendations before model requests; existing reports, scan evidence and vendor references have separate read paths |
 | `orchestrations/` | Deterministic schedule action, scan investigation, device profile research and per-device privacy assessment |
 | `schedules/network_scan.json` | Packaged scan schedule, initially paused |
 | `Relay/` | Project topics and the scan-completion route |
@@ -60,6 +61,35 @@ at runtime, and each call checks current registration, permission and availabili
 The Python service, private configuration, credentials and collector journal
 stay outside this folder. Deploying the Application does not start Python or
 install its dependencies.
+
+The Ask assistant retrieves existing reports and findings through the
+`information-discovery` skill and reads the matching report, including its draft
+and review status. Scan tools return collection evidence, not assessed reports.
+The `hooks/20-read-routing.js` `prompt.pre` handler reinforces that distinction
+with case-insensitive whole-word matches for reports/findings, documentation or
+settings, scans and coverage flags. It recommends reads only for
+`privacy_assistant`; unmatched questions and other agents get no addition.
+Its temporary guidance never quotes user text, starts work or changes grants.
+It is a keyword hint, not an intent classifier or a guarantee of model compliance.
+Other hooks can handle the same event: distinct hook names run in filename order
+and their prompt additions accumulate. See [hook authoring](../../../docs/manual/12-hooks.md).
+
+Each specialist has a defined input and handoff; tool grants remain specific to
+that role:
+
+| Agent | Input and workflow | Output and owner of the next step |
+| --- | --- | --- |
+| `privacy_assistant` | Household question → existing report discovery, device/evidence reads, or an explicit queued request | Sourced prose or a retained request receipt; specialist replies arrive later |
+| `privacy_coordinator` | Classify read/new-work requests → submit a requested scan once → reuse collection/workflow handles | Actual collection/investigation state; scripts own analysis, review and report writes |
+| `privacy_analyst` | Supplied scan texts → scope/coverage checks → missing operator context only when needed | Markdown assessment passed by `investigate_network` to the reviewer |
+| `privacy_reviewer` | Actual assessment plus scan texts or one dossier → check evidence → use the caller's network/device response schema | Review verdict and corrections; the script owns correction rounds and report retention |
+| `privacy_device_profiler` | Collector observations, confirmed-model context and NVD leads → optional bounded profile reads | Six-field JSON draft; the operator reviews it before saving a profile |
+| `privacy_device_assessor` | One retained dossier → relevant pinned context → structured concerns → one correction if requested | Assessment JSON; `assess_network_device` validates, reviews and renders the report |
+
+The shared `information-discovery` skill runs the read-only librarian with its
+own discovery tools. Specialists without that skill read only their allowed
+known revisions or explicitly documented run-home catalogue pages. A tool
+description never adds a grant.
 
 ## Set up a deployment
 

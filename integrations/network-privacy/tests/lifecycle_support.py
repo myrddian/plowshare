@@ -78,6 +78,7 @@ class LifecycleFixture(unittest.IsolatedAsyncioTestCase):
                             enabled=True,
                             handle="manager",
                             must_change_password=False,
+                            project_creator=False,
                             server_admin=False,
                         ),
                     ),

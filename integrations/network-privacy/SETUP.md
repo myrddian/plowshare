@@ -643,6 +643,16 @@ is kept unchanged. Only read tools may be added this way. Add both names to the
 
 ## Upgrade the Application and collector
 
+The scan/report guidance update changes two provider descriptions, which are
+part of the SDK journal identity. On collector startup, the frozen lookup binding
+in `state/relay-tools-lookup` is copied through the public SDK journal API into
+`state/relay-tools-read-guidance`. Earlier bindings and transition markers retain
+their exact identities. Pending and completed receipts keep their requests,
+results and phases; copying runs no handler and publishes nothing. An interrupted
+copy resumes after checking its retained prefix. Changed or foreign history is
+refused. Keep both journals and their markers; fresh installs create only the
+newest journal. The caller's existing collector process lock fences the upgrade.
+
 Stop the external collector first, including its enrolled background service.
 Wait for active work to settle. Keep the Application schedule paused while the
 collector is stopped; stopping Python does not pause a server schedule.
