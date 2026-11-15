@@ -5,9 +5,12 @@ import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Membership gates project logs; a private Personal union still requires its exact owner. */
 public final class ScopedRelayInspection implements RelayInspection {
+  private static final Logger log = LoggerFactory.getLogger(ScopedRelayInspection.class);
   private final ProjectMembers members;
   private final ProjectWorkspaces projects;
   private final RelayLogRepository logs;
@@ -45,12 +48,27 @@ public final class ScopedRelayInspection implements RelayInspection {
 
   public RelayLog.Page log(String account, RelayLog.Query query) {
     var scope = require(account, query.project(), query.system());
-    var read =
-        logs.read(
-            new Relay.TopicKey(scope, query.topic()),
-            query.after() == null ? 0 : Long.parseLong(query.after()),
-            query.limit() == null ? 100 : query.limit(),
-            account);
+    var key = new Relay.TopicKey(scope, query.topic());
+    long after = query.after() == null ? 0 : Long.parseLong(query.after());
+    int limit = query.limit() == null ? 100 : query.limit();
+    RelayLogRepository.Snapshot read;
+    try {
+      read = logs.read(key, after, limit, account);
+    } catch (RuntimeException failure) {
+      // Keep failed selections visible at the normal production log level, even when Faults maps
+      // an expected miss at DEBUG. Only validated selectors are logged, after scope authorization;
+      // payloads, account identities and exception messages may carry private data. Rethrow the
+      // original failure so the shared mapper still owns its status and unexpected stack trace.
+      log.warn(
+          "Relay inspection failed: operation=relay.log scope={} project={} topic={} after={} limit={} failure={}",
+          RelayScopeCodec.write(scope),
+          query.project(),
+          key.name(),
+          after,
+          limit,
+          failure.getClass().getSimpleName());
+      throw failure;
+    }
     var events = RelayPortEvents.bounded(read.events());
     var subscribers =
         read.subscribers().stream()
