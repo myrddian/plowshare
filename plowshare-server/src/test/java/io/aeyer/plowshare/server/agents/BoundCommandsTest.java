@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
 import java.util.LinkedHashMap;
@@ -28,6 +29,7 @@ class BoundCommandsTest {
           .withSkills(List.of("review"));
   final Budget budget = Budget.of(8);
   final TurnEnd end = new TurnEnd();
+  final OperationAuthority.Admission operation = mock(OperationAuthority.Admission.class);
   final UUID id = UUID.randomUUID();
   final BoundCommands commands = new BoundCommands(store, skills, orchestrations, callers, runtime);
   final AtomicReference<CommandInvocations.Bound> stored = new AtomicReference<>();
@@ -126,7 +128,8 @@ class BoundCommandsTest {
         "session",
         "alice",
         end,
-        new LinkedHashMap<>());
+        new LinkedHashMap<>(),
+        operation);
   }
 
   @Test
@@ -154,7 +157,8 @@ class BoundCommandsTest {
             any(),
             eq("session"),
             eq("alice"),
-            same(end)))
+            same(end),
+            same(operation)))
         .thenReturn("Reviewed");
     assertEquals("Reviewed", prepared.dispatchBound(id, Home.global()));
     assertEquals("finished", stored.get().state());
@@ -171,13 +175,14 @@ class BoundCommandsTest {
             any(),
             eq("session"),
             eq("alice"),
-            same(end));
+            same(end),
+            same(operation));
   }
 
   @Test
   void direct_instructions_are_loaded_during_preparation_without_a_model_dispatch_or_replay() {
     offer("mode: DIRECT\n");
-    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(
             "Read and execute these instructions.\nInstructions.\nOriginal arguments: request");
     var prepared = prepare(true, "/skill:review request");
@@ -207,13 +212,14 @@ class BoundCommandsTest {
             any(),
             any(),
             any(),
+            any(),
             any());
   }
 
   @Test
   void direct_activation_failure_is_recorded_and_not_presented_as_ready_to_execute() {
     offer("mode: DIRECT\n");
-    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenThrow(new IllegalStateException("The pinned definition changed. Nothing ran."));
     var prepared = prepare(true, "/skill:review request");
     assertTrue(prepared.refusal().contains("pinned definition changed"));
@@ -224,7 +230,7 @@ class BoundCommandsTest {
         .thenReturn(Optional.of(stored.get()));
     assertNotNull(prepare(false, "Resume").refusal());
     verify(runtime, times(1))
-        .dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        .dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -252,7 +258,7 @@ class BoundCommandsTest {
   @Test
   void portable_skills_default_to_direct_and_accept_no_arguments() {
     offer("");
-    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn("Instructions.");
     var prepared = prepare(true, "/skill:review");
     assertNull(prepared.refusal());
@@ -266,7 +272,7 @@ class BoundCommandsTest {
   @Test
   void explicit_direct_and_declared_delegated_modes_accept_no_arguments() {
     offer("");
-    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn("Instructions.");
     assertNull(prepare(true, "/skill:review --mode=DIRECT").refusal());
     assertEquals("DIRECT", stored.get().mode());
@@ -308,7 +314,8 @@ class BoundCommandsTest {
             "session",
             "alice",
             end,
-            new LinkedHashMap<>());
+            new LinkedHashMap<>(),
+            operation);
     assertTrue(prepared.refusal().contains("Describe the work after /orchestration:review"));
     assertTrue(prepared.refusal().contains("Work for the orchestration to do"));
     verify(store, never()).bind(any(), any(), any(), any(), any(), any(), any());
@@ -338,7 +345,7 @@ class BoundCommandsTest {
   @Test
   void dispatch_failure_is_durable_and_does_not_claim_success() {
     var prepared = prepare(true, "/skill:review request");
-    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenThrow(new IllegalStateException("The definition changed. Nothing ran."));
     assertThrows(IllegalStateException.class, () -> prepared.dispatchBound(id, Home.global()));
     assertEquals("failed", stored.get().state());
@@ -370,7 +377,8 @@ class BoundCommandsTest {
         "session",
         "alice",
         end,
-        new LinkedHashMap<>(Map.of("orchestrate_review", orchestrationOperation)));
+        new LinkedHashMap<>(Map.of("orchestrate_review", orchestrationOperation)),
+        operation);
   }
 
   @Test
@@ -449,7 +457,7 @@ class BoundCommandsTest {
   void every_explicit_delegated_mode_is_harness_dispatched_and_keeps_its_context_policy() {
     for (String mode : List.of("NEW", "INHERITED", "SUMMARISED")) {
       offer("mode: " + mode + "\n");
-      when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+      when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
           .thenReturn("Skill completed");
       var prepared = prepare(true, "/skill:review Original request\nwith details");
       assertNull(prepared.refusal());
@@ -462,6 +470,6 @@ class BoundCommandsTest {
       assertEquals("finished", stored.get().state());
     }
     verify(runtime, times(3))
-        .dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        .dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
   }
 }

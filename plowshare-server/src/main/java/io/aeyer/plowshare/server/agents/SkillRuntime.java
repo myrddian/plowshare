@@ -3,8 +3,10 @@ package io.aeyer.plowshare.server.agents;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -134,7 +136,8 @@ public final class SkillRuntime {
       BooleanSupplier cancelled,
       String session,
       String account,
-      TurnEnd end) {
+      TurnEnd end,
+      OperationAuthority.Admission operation) {
     if (caller.skills().isEmpty()) return List.of();
     return List.of(
         new AgentTool() {
@@ -147,7 +150,17 @@ public final class SkillRuntime {
           public String run(String json, Home home) {
             try {
               return invoke(
-                  json, home, caller, transcript, budget, cancelled, session, account, end, null);
+                  json,
+                  home,
+                  caller,
+                  transcript,
+                  budget,
+                  cancelled,
+                  session,
+                  account,
+                  end,
+                  null,
+                  operation);
             } catch (ToolArguments.BadArguments invalid) {
               return invalid.getMessage();
             }
@@ -180,7 +193,8 @@ public final class SkillRuntime {
       String session,
       String account,
       TurnEnd end,
-      String expectedHash) {
+      String expectedHash,
+      OperationAuthority.Admission operation) {
     JsonNode args =
         ToolArguments.parse(
             json,
@@ -245,7 +259,7 @@ public final class SkillRuntime {
       throw bad(
           "This server has no skill context provider. Nothing ran; the mode was not changed.");
     }
-    if (io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(caller.prompt())) {
+    if (ScriptProgram.isScript(caller.prompt())) {
       throw bad("A script driver cannot invoke agent skills. Nothing ran.");
     }
     AgentDefinition executor =
@@ -253,8 +267,7 @@ public final class SkillRuntime {
     // The conversation's owner may differ from this request's actor. Skill delegation must not
     // turn a human-owned parent into access to a SYSTEM definition for an Application.
     AgentExposure.requireAvailable(executor, account);
-    if (io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
-        executor.prompt())) {
+    if (ScriptProgram.isScript(executor.prompt())) {
       throw bad("A skill executor must be an Agent, not a script driver. Nothing ran.");
     }
     if (!executor.canUseSkill(name))
@@ -311,6 +324,9 @@ public final class SkillRuntime {
                   end,
                   account,
                   callers)
+              // SkillRuntime is shared across runs. Capture the invoking run's exact envelope
+              // on its per-invocation delegate, never re-admit from ambient account grants.
+              .underOperation(operation)
               .preparing(
                   child -> {
                     executions.running(account, id, child.conversationId());
@@ -349,7 +365,8 @@ public final class SkillRuntime {
       BooleanSupplier cancelled,
       String session,
       String account,
-      TurnEnd end) {
+      TurnEnd end,
+      OperationAuthority.Admission operation) {
     var args =
         JSON.createObjectNode()
             .put("name", bound.name())
@@ -366,7 +383,8 @@ public final class SkillRuntime {
         session,
         account,
         end,
-        bound.hash());
+        bound.hash(),
+        operation);
   }
 
   private String read(
