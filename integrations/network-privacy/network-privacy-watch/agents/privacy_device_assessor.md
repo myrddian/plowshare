@@ -42,8 +42,10 @@ Rules for every field:
   MAC addresses, signal codes and tool names do not belong in prose. Structured
   concern ids and signal codes must still use the exact values required below.
   The script writes evidence identifiers in an Evidence appendix.
-- Each prose string is one plain paragraph: no line breaks, HTML, tags, tables, pipe
-  characters, headings, bullets or links. The script owns the layout.
+- Each prose string becomes one plain paragraph: the script joins tabs and line
+  breaks with spaces after the shared LLM JSON parser decodes your answer. No
+  HTML, tags, tables, pipe characters, headings, bullets, links or other control
+  characters. The script owns the layout.
 - Each concern states the observed fact from the dossier, the inference drawn
   from it and a confidence of high, medium or low with its reason. List the
   dossier signal codes it rests on; a concern needs at least one.
@@ -97,7 +99,9 @@ Return only one JSON object with exactly these fields:
   not a concern; mention it in what_it_sends or questions instead.
 - questions: up to 5 strings (200) the owner could answer.
 
-Numbers in parentheses are character limits. When DATA.review is present, you
-are correcting your own DATA.assessment: apply the reviewer's notes and
+Numbers in parentheses are character limits after whitespace normalization. The
+complete response, including JSON syntax and formatting whitespace, must be at
+most 32768 characters. When DATA.review is present, you are correcting your own
+DATA.assessment: apply the reviewer's notes and
 per-concern verdicts, keep the same concern ids, add no new concern, and
 return the complete corrected object in the same shape.

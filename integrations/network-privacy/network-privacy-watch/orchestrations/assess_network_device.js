@@ -31,6 +31,10 @@ const OBJECTIVE = 'Identify what is privacy-relevant about this device from its 
 const MAX_DOSSIER = 32768;
 const MAX_REPLY = 32768;
 const MAX_WAITS = 8;
+const REVIEW_NOTE_LIMIT = 400;
+const REVIEW_NOTES_LIMIT = 2000;
+const REVIEW_NOTES_ITEM_LIMIT = 1000;
+const REVIEW_NOTES_ITEMS = 8;
 // Mirrors device_dossier.SignalCode and dns_activity.DestinationKind.
 const SIGNALS = ['measurement_dns', 'advertising_dns', 'telemetry_dominant', 'dns_bypass', 'upload_heavy', 'open_admin_service'];
 const PURPOSES = ['advertising', 'measurement', 'telemetry', 'streaming', 'unclassified', 'connectivity', 'local'];
@@ -90,7 +94,9 @@ function record(value, field, keys) {
   return value;
 }
 function list(value, field, min, max) {
-  if (!Array.isArray(value) || value.length < min || value.length > max) fail('Invalid ' + field);
+  if (!Array.isArray(value) || value.length < min || value.length > max) {
+    fail('Invalid ' + field + ': expected an array with ' + min + ' to ' + max + ' items');
+  }
   return value;
 }
 function member(value, field, allowed) {
@@ -104,15 +110,21 @@ function member(value, field, allowed) {
 // exfiltration claims, which DNS counts and byte totals can never support.
 // Reviewer text may name exfiltration in order to refute it; the reviewer is
 // told to do exactly that. Its notes go to report metadata, never the body.
+// llmJson.parse recovers JSON syntax, including line breaks inside strings.
+// Reflow ordinary layout whitespace after decoding, without changing claims or
+// spending the shared repair attempt. Check each original line for Markdown
+// structure before flattening it, so normalization cannot hide a heading/list.
 function prose(value, field, limit, options) {
-  if (typeof value !== 'string' || !value.trim() || value.length > limit) fail('Invalid ' + field);
-  if (/[\u0000-\u001f\u007f\u2028\u2029]/.test(value)) fail('Invalid ' + field + ': line breaks and control characters are not allowed');
+  if (typeof value !== 'string' || !value.trim()) fail('Invalid ' + field + ': expected a nonempty string of at most ' + limit + ' characters');
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) fail('Invalid ' + field + ': control characters other than tabs and line breaks are not allowed');
+  const normalized = value.replace(/[ \t\r\n\u2028\u2029]+/g, ' ').trim();
   if (value.includes('<')) fail('Invalid ' + field + ': HTML and markup are not allowed');
-  if (/\|.*\|/.test(value)) fail('Invalid ' + field + ': table rows are not allowed');
+  if (/\|.*\|/.test(normalized)) fail('Invalid ' + field + ': table rows are not allowed');
   if (UUID_ANYWHERE.test(value)) fail('Invalid ' + field + ': identifiers belong in the Evidence appendix');
-  if (/^\s*(?:#|>|[-*+]\s|\d+[.)]\s)/.test(value) || value.includes('](')) fail('Invalid ' + field + ': Markdown structure is not allowed');
+  if (/(?:^|[\r\n\u2028\u2029])\s*(?:#|>|[-*+]\s|\d+[.)]\s)/.test(value) || value.includes('](')) fail('Invalid ' + field + ': Markdown structure is not allowed');
   if (!(options && options.reviewer) && /exfiltrat/i.test(value)) fail('Invalid ' + field + ': DNS counts and byte totals cannot show exfiltration');
-  return value.trim();
+  if (normalized.length > limit) fail('Invalid ' + field + ': expected at most ' + limit + ' characters after whitespace normalization; got ' + normalized.length + '. Shorten this field without dropping its verdict or evidence limits.');
+  return normalized;
 }
 // Untrusted dossier text (device names, coverage) shown by the renderer.
 function plain(value, limit) {
@@ -282,7 +294,7 @@ function dossierRecord(source, request) {
 }
 
 function agentJson(raw, field) {
-  if (typeof raw !== 'string' || raw.length > MAX_REPLY) fail('Invalid ' + field + ' response size');
+  if (typeof raw !== 'string' || raw.length > MAX_REPLY) fail('Invalid ' + field + ' response size: expected a JSON response of at most ' + MAX_REPLY + ' characters');
   // A provider can return an undecoded assistant frame as ordinary completion text.
   if (/^(?:<\||<tool_call|<function=)/.test(toolResult(raw).trimStart())) {
     fail('Invalid ' + field + ': raw model protocol markup; inspect the retained delegate response.');
@@ -448,14 +460,14 @@ function reviewResult(raw, draft) {
   member(value.verdict, 'review verdict', ['accepted', 'needs_corrections', 'not_checked']);
   if (value.verdict === 'not_checked') fail('Reviewer did not check the assessment; no report was written.');
   let notes = value.notes;
-  if (Array.isArray(notes)) notes = list(notes, 'review notes', 1, 8).map((note, i) => prose(note, 'review notes[' + i + ']', 1000, {reviewer: true})).join(' ');
-  else notes = prose(notes, 'review notes', 2000, {reviewer: true});
+  if (Array.isArray(notes)) notes = list(notes, 'review notes', 1, REVIEW_NOTES_ITEMS).map((note, i) => prose(note, 'review notes[' + i + ']', REVIEW_NOTES_ITEM_LIMIT, {reviewer: true})).join(' ');
+  else notes = prose(notes, 'review notes', REVIEW_NOTES_LIMIT, {reviewer: true});
   const expected = draft.concerns.map(concern => concern.id);
   const concerns = list(value.concerns, 'review concerns', expected.length, expected.length).map((item, i) => {
     const field = 'review concerns[' + i + ']';
     const concern = record(item, field, ['id', 'verdict', 'note']);
     return {id: member(concern.id, field + '.id', expected), verdict: member(concern.verdict, field + '.verdict', CONCERN_VERDICTS),
-      note: prose(concern.note, field + '.note', 400, {reviewer: true})};
+      note: prose(concern.note, field + '.note', REVIEW_NOTE_LIMIT, {reviewer: true})};
   });
   if (new Set(concerns.map(concern => concern.id)).size !== expected.length) fail('Invalid review concerns: each concern needs one verdict');
   return {verdict: value.verdict, concerns, notes};
@@ -483,17 +495,20 @@ function handoff(state, role) {
   } else if (role === 'review') {
     data.assessment = state.draft;
     task = 'Review the device assessment in DATA.assessment against DATA.dossier, per concern. For each concern return holds, weakened or refuted: refute any claim that data was sent, uploaded or exfiltrated, since DNS lookups and byte totals cannot show it; weaken a concern whose level or confidence goes beyond its dossier fact. Check identity claims carry their basis and that coverage gaps are stated. In DATA.dossier.traffic, to_device_bytes is what the device received and from_device_bytes is what it sent; weaken any concern that states the direction the wrong way round. Return only JSON with verdict (accepted, needs_corrections or not_checked), concerns (one {id, verdict, note} for every concern in DATA.assessment, in any order) and notes (a nonempty string or list of strings). Notes are plain paragraphs without identifiers, HTML or tables. If DATA.assessment is missing, return not_checked immediately.';
+    task += '\nReviewer text limits: each concerns[i].note is nonempty and at most ' + REVIEW_NOTE_LIMIT + ' characters. Top-level notes is either one nonempty string of at most ' + REVIEW_NOTES_LIMIT + ' characters, or 1 to ' + REVIEW_NOTES_ITEMS + ' nonempty strings of at most ' + REVIEW_NOTES_ITEM_LIMIT + ' characters each. Limits count characters after tabs and paragraph breaks are joined with spaces. Keep verdicts and evidence limits explicit; use concise sentences, not headings, bullets or links. JSON formatting whitespace and paragraph breaks in prose do not require another model call.';
   } else {
     data.assessment = state.draft;
     data.review = {verdict: state.review.verdict, notes: state.review.notes, concerns: state.review.concerns};
     task = 'Correct your device assessment in DATA.assessment using the reviewer notes and per-concern verdicts in DATA.review. Keep the same concern ids and add no new concern. Return the complete corrected JSON object in the same shape.';
   }
+  task += '\nThe complete JSON response must be at most ' + MAX_REPLY + ' characters, including JSON syntax and formatting whitespace.';
   task += '\nDATA.dossier.supplemental is context, not observation: a model or firmware there is the device\'s own claim, an advisory concerns the model and does not show this device is affected, and a vendor note is something to check. Never restate them as observed behaviour; the script reports them in their own section.';
   // Name the exact codes this dossier allows, so a DNS purpose such as
   // telemetry is not mistaken for the telemetry_dominant signal.
   const signals = state.dossier.signals.map(signal => signal.code);
   const purposes = (state.dossier.dns?.groups || []).map(group => group.kind);
   if (role !== 'review') {
+    task += '\nDraft limits (characters after whitespace normalization): in_short at most 60 words and 480 characters; what_it_is.text 400, basis 1 to 6 strings of 200 each; who_it_talks_to up to 8 entries with party 80, observation 300 and meaning 300; what_it_sends.observed and unknown 400 each; concerns up to 5 entries with title 100, fact 400, inference 400, mitigation 400 and verify 300; questions up to 5 strings of 200 each. Prose strings must be nonempty. Tabs and paragraph breaks become spaces; do not use headings, bullets, links, HTML or tables.';
     task += '\nDo not state byte totals in in_short or what_it_sends; the script writes them from DATA.dossier.traffic, where to_device_bytes is what the device received and from_device_bytes is what it sent.';
     task += '\nAllowed concern signals for this device, copied exactly: ' + (signals.length ? signals.join(', ') : 'none, so return no concerns') + '.'
       + ' Allowed who_it_talks_to purposes: ' + (purposes.length ? purposes.join(', ') : 'none, so return an empty list') + '.';

@@ -181,8 +181,18 @@ and validates every field: no HTML, tables, Markdown structure or identifiers in
 agent text, only known levels and purposes, and only signals present in the
 dossier. `privacy_reviewer` returns a verdict per concern. `needs_corrections`
 allows one correction round, after which code removes refuted concerns and
-lowers weakened potential breaches to worth checking. `not_checked` or invalid
-JSON from either agent fails the run and writes nothing. Code renders the report
+lowers weakened potential breaches to worth checking. Model responses use the
+shared bounded LLM JSON parser, including recovery of common formatting errors.
+After decoding, tabs and paragraph breaks in prose become spaces; markup,
+identifiers and other control characters are still rejected. Reviewer concern
+notes are limited to 400 characters each; top-level notes allow one string of up
+to 2000 characters or 1 to 8 strings of up to 1000 characters each. Strings must
+be nonempty, and limits apply after whitespace normalization. Invalid agent
+responses share one repair attempt with the field name and applicable limit in
+length errors. A second invalid response or `not_checked` fails the run and
+writes nothing. Both agents receive field limits in their initial handoff and
+must keep the complete JSON response within 32768 characters, including syntax
+and formatting whitespace. Code renders the report
 (plain findings first, identifiers only in its Evidence appendix) and writes it
 as `Network privacy assessment / <device_id>`, a `feedback` revision of the
 previous assessment, with the dossier, profile and issue revisions as inputs and
