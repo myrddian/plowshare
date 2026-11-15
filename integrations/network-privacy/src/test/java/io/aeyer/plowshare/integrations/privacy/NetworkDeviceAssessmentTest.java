@@ -380,7 +380,7 @@ class NetworkDeviceAssessmentTest {
             "questions up to 5 strings of 200 each")) assertTrue(draft.contains(limit), draft);
     String initialReview = host.reviewerTasks.getFirst().split("\\nDATA:\\n", 2)[0];
     assertTrue(initialReview.contains("complete JSON response must be at most 32768 characters"));
-    assertTrue(initialReview.contains("concerns[i].note is nonempty and at most 400 characters"));
+    assertTrue(initialReview.contains("aim for about 400 words or fewer"));
     assertTrue(initialReview.contains("one nonempty string of at most 2000 characters"));
     assertTrue(initialReview.contains("1 to 8 nonempty strings of at most 1000 characters each"));
     assertFalse(initialReview.contains("rejected by the validator"));
@@ -434,11 +434,28 @@ class NetworkDeviceAssessmentTest {
   }
 
   @Test
-  void overlong_review_gets_actionable_repair_and_newlines_do_not_exhaust_it() throws Exception {
+  void concern_notes_beyond_the_word_target_are_retained_without_a_repair() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add(assessment().toString());
+    var reviewed = review("accepted", "c1", "holds");
+    // The prompt's 400 words is guidance. Preserve a longer judgment in full.
+    String note = "Evidence remains limited. ".repeat(200).trim();
+    ((ObjectNode) reviewed.path("concerns").get(0)).put("note", note);
+    host.reviewer.add(reviewed.toString());
+    host.finish();
+    assertEquals(1, host.reviewerTasks.size());
+    assertEquals(1, host.writes);
+    assertEquals(
+        note,
+        host.report.path("findings").get(0).path("rationale").asText().split(" Reviewer: ", 2)[1]);
+  }
+
+  @Test
+  void oversized_reply_gets_actionable_repair_and_newlines_do_not_exhaust_it() throws Exception {
     var host = new Host(PREVIOUS);
     host.assessor.add(assessment().toString());
     var first = review("needs_corrections", "c1", "weakened");
-    ((ObjectNode) first.path("concerns").get(0)).put("note", "x".repeat(1474));
+    ((ObjectNode) first.path("concerns").get(0)).put("note", "x".repeat(32768));
     host.reviewer.add(first.toString());
     var repaired = review("needs_corrections", "c1", "weakened");
     repaired.put("notes", "Names only.\n\nNo payload evidence.\n\nKeep the coverage limits.");
@@ -446,9 +463,8 @@ class NetworkDeviceAssessmentTest {
     host.assessor.add(assessment().toString());
     host.finish();
     String repair = host.reviewerTasks.get(1).split("\\nDATA:\\n", 2)[0];
-    assertTrue(repair.contains("review concerns[0].note: expected at most 400 characters"), repair);
-    assertTrue(repair.contains("got 1474"), repair);
-    assertTrue(repair.contains("Shorten this field"), repair);
+    assertTrue(repair.contains("Invalid Reviewer response size"), repair);
+    assertTrue(repair.contains("at most 32768 characters"), repair);
     assertEquals(2, host.reviewerTasks.size());
     assertEquals(1, host.writes);
     assertEquals("weakened", host.report.path("findings").get(0).path("verdict").asText());
@@ -467,7 +483,7 @@ class NetworkDeviceAssessmentTest {
       throws Exception {
     var host = new Host(PREVIOUS);
     host.assessor.add(assessment().toString());
-    for (int length : List.of(1474, 753)) {
+    for (int length : List.of(32768, 32769)) {
       var reviewed = review("accepted", "c1", "holds");
       ((ObjectNode) reviewed.path("concerns").get(0)).put("note", "x".repeat(length));
       reviewed.put("notes", "Paragraph one.\n\nParagraph two.\n\nParagraph three.");
@@ -475,8 +491,8 @@ class NetworkDeviceAssessmentTest {
     }
     var failure = assertThrows(IllegalStateException.class, host::finish);
     assertTrue(
-        failure.getMessage().contains("expected at most 400 characters"), failure.getMessage());
-    assertTrue(failure.getMessage().contains("got 753"), failure.getMessage());
+        failure.getMessage().contains("Invalid Reviewer response size"), failure.getMessage());
+    assertTrue(failure.getMessage().contains("at most 32768 characters"), failure.getMessage());
     assertEquals(2, host.reviewerTasks.size());
     assertEquals(0, host.writes);
   }
@@ -488,7 +504,7 @@ class NetworkDeviceAssessmentTest {
       host.assessor.add(assessment().toString());
       var reviewed = review("accepted", "c1", "holds");
       ((ObjectNode) reviewed.path("concerns").get(0))
-          .put("note", "x".repeat(199) + "\r\n\t" + "y".repeat(200));
+          .put("note", "x".repeat(599) + "\r\n\t" + "y".repeat(600));
       if (array) {
         var notes = reviewed.putArray("notes");
         for (int i = 0; i < 8; i++) notes.add("x".repeat(499) + "\n\n" + "y".repeat(500));
@@ -498,7 +514,7 @@ class NetworkDeviceAssessmentTest {
       assertEquals(1, host.reviewerTasks.size());
       assertEquals(1, host.writes);
       assertEquals(
-          400,
+          1200,
           host.report
               .path("findings")
               .get(0)

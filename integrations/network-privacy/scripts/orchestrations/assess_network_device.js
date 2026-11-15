@@ -31,7 +31,6 @@ const OBJECTIVE = 'Identify what is privacy-relevant about this device from its 
 const MAX_DOSSIER = 32768;
 const MAX_REPLY = 32768;
 const MAX_WAITS = 8;
-const REVIEW_NOTE_LIMIT = 400;
 const REVIEW_NOTES_LIMIT = 2000;
 const REVIEW_NOTES_ITEM_LIMIT = 1000;
 const REVIEW_NOTES_ITEMS = 8;
@@ -467,7 +466,9 @@ function reviewResult(raw, draft) {
     const field = 'review concerns[' + i + ']';
     const concern = record(item, field, ['id', 'verdict', 'note']);
     return {id: member(concern.id, field + '.id', expected), verdict: member(concern.verdict, field + '.verdict', CONCERN_VERDICTS),
-      note: prose(concern.note, field + '.note', REVIEW_NOTE_LIMIT, {reviewer: true})};
+      // The word target is guidance, not a field-size gate. The complete reply
+      // is already bounded by agentJson; retain the full evidence judgment.
+      note: prose(concern.note, field + '.note', MAX_REPLY, {reviewer: true})};
   });
   if (new Set(concerns.map(concern => concern.id)).size !== expected.length) fail('Invalid review concerns: each concern needs one verdict');
   return {verdict: value.verdict, concerns, notes};
@@ -495,7 +496,7 @@ function handoff(state, role) {
   } else if (role === 'review') {
     data.assessment = state.draft;
     task = 'Review the device assessment in DATA.assessment against DATA.dossier, per concern. For each concern return holds, weakened or refuted: refute any claim that data was sent, uploaded or exfiltrated, since DNS lookups and byte totals cannot show it; weaken a concern whose level or confidence goes beyond its dossier fact. Check identity claims carry their basis and that coverage gaps are stated. In DATA.dossier.traffic, to_device_bytes is what the device received and from_device_bytes is what it sent; weaken any concern that states the direction the wrong way round. Return only JSON with verdict (accepted, needs_corrections or not_checked), concerns (one {id, verdict, note} for every concern in DATA.assessment, in any order) and notes (a nonempty string or list of strings). Notes are plain paragraphs without identifiers, HTML or tables. If DATA.assessment is missing, return not_checked immediately.';
-    task += '\nReviewer text limits: each concerns[i].note is nonempty and at most ' + REVIEW_NOTE_LIMIT + ' characters. Top-level notes is either one nonempty string of at most ' + REVIEW_NOTES_LIMIT + ' characters, or 1 to ' + REVIEW_NOTES_ITEMS + ' nonempty strings of at most ' + REVIEW_NOTES_ITEM_LIMIT + ' characters each. Limits count characters after tabs and paragraph breaks are joined with spaces. Keep verdicts and evidence limits explicit; use concise sentences, not headings, bullets or links. JSON formatting whitespace and paragraph breaks in prose do not require another model call.';
+    task += '\nReviewer guidance: each concerns[i].note must be nonempty; aim for about 400 words or fewer. This is a writing target, not a per-note length limit. Top-level notes is either one nonempty string of at most ' + REVIEW_NOTES_LIMIT + ' characters, or 1 to ' + REVIEW_NOTES_ITEMS + ' nonempty strings of at most ' + REVIEW_NOTES_ITEM_LIMIT + ' characters each. Top-level limits count characters after tabs and paragraph breaks are joined with spaces. Keep verdicts and evidence limits explicit; use concise sentences, not headings, bullets or links. JSON formatting whitespace and paragraph breaks in prose do not require another model call.';
   } else {
     data.assessment = state.draft;
     data.review = {verdict: state.review.verdict, notes: state.review.notes, concerns: state.review.concerns};
