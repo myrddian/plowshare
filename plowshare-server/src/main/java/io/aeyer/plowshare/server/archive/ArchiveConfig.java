@@ -12,6 +12,7 @@ import java.util.function.Supplier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -159,8 +160,12 @@ public class ArchiveConfig {
       org.springframework.beans.factory.ObjectProvider<ConversationSearch> retrieval,
       io.aeyer.plowshare.server.cache.ProjectionCaches caches,
       io.aeyer.plowshare.server.information.InformationLogVisibility visibility,
-      TrajectoryArtifacts artifacts) {
+      TrajectoryArtifacts artifacts,
+      Environment environment) {
     return new EntryStore(jdbc, transactions, artifacts)
+        .useSearchBudget(
+            environment.getProperty(
+                "plowshare.retrieval.search-budget", Duration.class, Duration.ofSeconds(2)))
         .useVisibility(visibility)
         .retrieving(retrieval::getObject)
         .useTranscriptCache(

@@ -13,6 +13,25 @@ const input = (operation, value, valid) =>
 const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
+// Grouped conversation evidence must validate every occurrence, including native SDKs.
+input('conversation.search',{project:'atlas',q:'failure',conversation:'cnv_selected',mode:'semantic'},true);
+for(const conversation of [' padded ','', 'x'.repeat(257)])
+  input('conversation.search',{project:'atlas',q:'failure',conversation,mode:'semantic'},false);
+const conversationSearchOccurrence={conversationId:'cnv_selected',ordinal:1,turnOrdinal:1,
+  kind:'utterance',handle:null,recordedAt:null,sourceRevision:'a'.repeat(32),length:20,supersededBy:null};
+const conversationSearchHit={conversationId:'cnv_selected',ordinal:1,turnOrdinal:1,kind:'utterance',rank:0.5,
+  snippet:'evidence',length:20,supersededBy:null,handle:null,recordedAt:null,
+  sources:[conversationSearchOccurrence],sourceCount:1};
+const conversationSearchPage={hits:[conversationSearchHit],total:1,offset:0,limit:10,
+  reach:{searched:1,ejected:0,recordedOnly:0}};
+result('conversation.search',conversationSearchPage,true);
+result('conversation.search',{...conversationSearchPage,hits:[{...conversationSearchHit,
+  sources:[{...conversationSearchOccurrence,ordinal:0}]}]},false);
+result('conversation.search',{...conversationSearchPage,hits:[{...conversationSearchHit,
+  sources:Array(21).fill(conversationSearchOccurrence),sourceCount:21}]},false);
+const conversationSearchMissingCount={...conversationSearchHit};
+delete conversationSearchMissingCount.sourceCount;
+result('conversation.search',{...conversationSearchPage,hits:[conversationSearchMissingCount]},false);
 const discoveryScope='11111111-1111-1111-1111-111111111111';
 input('information.discovery.scopes',{limit:10},true);
 for(const limit of [0,51,1.5,'10']) input('information.discovery.scopes',{limit},false);

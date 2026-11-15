@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.archive;
 import io.aeyer.plowshare.server.documents.Chunking;
 import io.aeyer.plowshare.server.llm.*;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
+import java.time.Duration;
 import java.util.concurrent.*;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.*;
@@ -38,7 +39,11 @@ public class RetrievalIndexConfig {
     }
     int ceiling = Math.min(512, allowance);
     return new PassageIndex(
-        new io.aeyer.plowshare.server.archive.JdbcPassageRepository(jdbc, transactions),
+        new JdbcPassageRepository(
+            jdbc,
+            transactions,
+            env.getProperty(
+                "plowshare.retrieval.search-budget", Duration.class, Duration.ofSeconds(2))),
         embeddings,
         new Chunking(tokenizer, Math.min(384, ceiling), ceiling),
         generation,

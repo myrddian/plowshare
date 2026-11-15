@@ -16,6 +16,9 @@ import io.aeyer.plowshare.server.llm.accounting.MicrometerInferenceTelemetry;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.Lane;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
+import io.aeyer.plowshare.server.telemetry.FailureTelemetryConfiguration;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.net.URI;
@@ -33,10 +36,12 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 
 /** Real actuator HTTP wiring on ephemeral local ports, with no datasource or Plowshare runtime. */
 class PrometheusExportTest {
   @Configuration(proxyBeanMethods = false)
+  @Import(FailureTelemetryConfiguration.class)
   @EnableAutoConfiguration(
       exclude = {DataSourceAutoConfiguration.class, FlywayAutoConfiguration.class})
   static class ExportApplication {
@@ -88,6 +93,9 @@ class PrometheusExportTest {
       int managementPort =
           context.getEnvironment().getRequiredProperty("local.management.port", Integer.class);
       assertNotEquals(apiPort, managementPort);
+      context
+          .getBean(FailureReporter.class)
+          .report(FailureReporter.Source.WEBSOCKET, new ReadUnavailableException());
       try (var client = HttpClient.newHttpClient()) {
         assertEquals(404, get(client, apiPort).statusCode());
         var scrape = get(client, managementPort);
@@ -98,6 +106,11 @@ class PrometheusExportTest {
         assertTrue(scrape.body().contains("plowshare_projection_listener_reconnects_total 2.0"));
         assertTrue(scrape.body().contains("plowshare_projection_listener_proof_age_seconds"));
         assertTrue(scrape.body().contains("plowshare_jobs_active 0.0"));
+        assertTrue(
+            scrape
+                .body()
+                .contains(
+                    "plowshare_failures_total{kind=\"read_unavailable\",source=\"websocket\"} 1.0"));
         assertTrue(
             scrape.body().contains("plowshare_jobs_completed_total{ending=\"answered\"} 1.0"));
         assertTrue(scrape.body().contains("plowshare_jobs_duration_seconds_sum"));

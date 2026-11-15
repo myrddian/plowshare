@@ -52,7 +52,40 @@ public final class PassageIndex implements UsageAware {
 
   public record Source(String type, String id, String hash, String text, int next) {}
 
-  public record Match(String id, int position, String text, double similarity, String revision) {}
+  public record Occurrence(String id, String revision) {}
+
+  public record Match(
+      String id,
+      int position,
+      String text,
+      double similarity,
+      String revision,
+      List<Occurrence> sources,
+      int sourceCount) {
+    public Match(String id, int position, String text, double similarity, String revision) {
+      this(id, position, text, similarity, revision, List.of(new Occurrence(id, revision)), 1);
+    }
+
+    public Match {
+      sources = List.copyOf(sources);
+    }
+  }
+
+  /** Narrows ranking and coverage before candidate selection; never changes the reader or home. */
+  public PassageIndex inConversation(String conversation) {
+    EntryStore.validateConversation(conversation);
+    PassageIndex copy = new PassageIndex(repository, embeddings, bounds, generation, width);
+    copy.scope =
+        new PassageRepository.ReadScope(
+            scope.constrained(), scope.account(), scope.knowledgeOnly(), conversation);
+    copy.usageOwners = usageOwners;
+    copy.dualEmbeddings = dualEmbeddings;
+    copy.queries = queries;
+    copy.access = access;
+    copy.operations = operations;
+    copy.maintenancePolicy = maintenancePolicy;
+    return copy;
+  }
 
   private final PassageRepository repository;
   private final EmbeddingClient embeddings;

@@ -109,6 +109,38 @@ class OutputRecoveryDelegationTest {
   }
 
   @Test
+  void recovery_cannot_use_the_retained_child_retry_path_to_add_an_attempt() {
+    var worker = definition("recovery_worker", List.of(), List.of(), 1);
+    var caller = definition("caller", List.of("agent_run"), List.of(worker.name()), 3);
+    var registry = new AgentRegistry(Map.of(worker.name(), worker, caller.name(), caller));
+    var dispatcher = mock(LlmDispatcher.class);
+    var runtime = new JobRuntime(dispatcher, List.of(), () -> registry);
+    Budget budget = Budget.of(2);
+    var entries = new ArrayList<LoggedEntry>();
+    var tool =
+        new AgentRunTool(
+            registry,
+            runtime,
+            caller,
+            budget,
+            () -> false,
+            null,
+            recording(entries),
+            List.of(),
+            ImageStore.NONE);
+    String result =
+        tool.run(
+            "{\"agent\":\"recovery_worker\",\"task\":\"shorten\",\"recovery\":true,"
+                + "\"conversation\":\"cnv_retained_fixture\"}",
+            new Home("fixture"));
+    assertTrue(result.startsWith("E_NO_ACCESS:"));
+    assertTrue(result.contains("cannot retry a retained model attempt"));
+    assertEquals(0, budget.spent());
+    assertEquals(2, entries.stream().filter(e -> e.kind() == EntryKind.DIAGNOSTIC).count());
+    verifyNoInteractions(dispatcher);
+  }
+
+  @Test
   void the_runtime_retains_recovery_decisions_even_when_script_preparation_fails() {
     String source =
         ScriptProgram.MARKER

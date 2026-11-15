@@ -1,3 +1,4 @@
+import { retrievalReply } from './retrieval.ts';
 import { validateInformationTagVersions } from './information-validation.ts';
 import { validateDiscoveryReply } from './information-discovery.ts';
 import { interchangeProblem } from './interchange-validation.ts';
@@ -261,6 +262,11 @@ export function decodeReply<K extends keyof Replies>(
   ) as unknown as Replies[K];
   if (type === 'filestore.list' && !fileStoreCatalogCheck(decoded))
     throw new Error('Invalid FileStore catalogue');
+  if (
+    type === 'conversation.search' &&
+    retrievalReply('conversation.search', decoded) === undefined
+  )
+    throw new Error('Invalid grouped conversation search response');
   validateActingReply(type, decoded);
   validateNavigationMetadata(type, decoded);
   validateInformationTagVersions(type, decoded);

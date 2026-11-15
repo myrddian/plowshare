@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.BooleanSupplier;
@@ -105,14 +106,10 @@ import java.util.function.BooleanSupplier;
  * Outcome.Ending#AWAITING} requests the same ending on its parent's {@link TurnEnd}; one parent at
  * a time carries the question to the root turn.
  *
- * <p>One failure ending is not a tool result at all. A child that ended {@link
- * Outcome.Ending#UNAVAILABLE} or {@link Outcome.Ending#SUB_AGENT_FAILED} could not reach something
- * it depends on, and that is the same class of failure {@code JobRuntime.dependencyFailure} refuses
- * to render as a tool result one level down: handing it to the parent as prose would leave it
- * answering around a dead endpoint out of its own head, and spending the rest of the tree's budget
- * rediscovering that the endpoint is still dead. So it throws {@link SubAgentFailed} and the parent
- * ends {@link Outcome.Ending#SUB_AGENT_FAILED}, carrying the child's own detail. That is where that
- * constant, declared and unused since Task 4, earns its place.
+ * <p>A child model/dependency failure is a failed tool result, not the parent's ending. The parent
+ * can continue independent work. The result names the retained child conversation and explains how
+ * an explicitly requested retry continues its recorded task and tool results. A lost shared client
+ * session remains a tree-wide failure because both agents use that session.
  *
  * <p>{@link Outcome.Ending#TURN_CAP}, {@link Outcome.Ending#CALL_BUDGET} and {@link
  * Outcome.Ending#CANCELLED} are tool results and need no special case. The last two are the tree's
@@ -228,7 +225,7 @@ public final class AgentRunTool implements AgentTool {
 
   /** Uses the original call and conversation after a budget decision, with current grant checks. */
   String resumeExisting(BudgetCheckpoint.Frame frame, ToolCall opening, Home home) {
-    if (retainedChild != null)
+    if (retainedChild != null || retrying != null)
       throw new IllegalStateException("Delegation recovery is already active");
     retainedChild = frame;
     try {
@@ -298,6 +295,43 @@ public final class AgentRunTool implements AgentTool {
    * a time.
    */
   private Outcome.Ending returned;
+
+  private JobWatch watch = JobWatch.UNWATCHED;
+  private Transcript.DelegationRetry retrying;
+
+  /** Child reasoning remains a preview; child answers never become the parent's answer stream. */
+  AgentRunTool withWatch(JobWatch watching) {
+    watch = Objects.requireNonNull(watching, "watch").forDelegation();
+    return this;
+  }
+
+  /** One explicitly authorized child continuation, using its original tool-call identity. */
+  record RetriedDelegation(ToolCall call, String result, int modelCalls) {}
+
+  Optional<RetriedDelegation> retryInterruptedDelegation(Home home) {
+    if (retainedChild != null || retrying != null) {
+      throw new IllegalStateException("Delegation recovery is already active");
+    }
+    Optional<Transcript.DelegationRetry> pending = transcript.pendingDelegationRetry();
+    if (pending.isEmpty()) return Optional.empty();
+    Transcript.DelegationRetry retry = pending.orElseThrow();
+    if (!home.equals(retry.home())) {
+      throw new IllegalStateException("The retained delegation belongs to another execution home");
+    }
+    int spent = budget.spent();
+    retrying = retry;
+    calledAs(retry.call().id());
+    try {
+      String result = run(retry.call().arguments(), home);
+      if (returned == null) {
+        throw new IllegalStateException(
+            "The retained delegation could not be continued: " + result);
+      }
+      return Optional.of(new RetriedDelegation(retry.call(), result, budget.spent() - spent));
+    } finally {
+      retrying = null;
+    }
+  }
 
   /**
    * The id of the model's call being answered, set by the runtime just before {@link #run} and
@@ -477,6 +511,7 @@ public final class AgentRunTool implements AgentTool {
     // never leak into a later call on this same tool. See calledAs and callId.
     String opening = callId;
     callId = null;
+    Transcript.DelegationRetry inheritedRetry = retrying;
     try {
       return answer(argumentsJson, home, opening);
     } catch (BadArguments unusable) {
@@ -485,6 +520,8 @@ public final class AgentRunTool implements AgentTool {
       // into this clause, and SubAgentFailed below travels straight
       // through to the turn loop.
       return unusable.getMessage();
+    } finally {
+      retrying = inheritedRetry;
     }
   }
 
@@ -517,7 +554,16 @@ public final class AgentRunTool implements AgentTool {
                         + MemoryTools.oneLine(sent.toString())
                         + "."));
 
-    if (!recovery) return answer(wanted, task, named, home, openedBy, false);
+    String conversation =
+        ToolArguments.optionalText(
+            args,
+            "conversation",
+            sent ->
+                new BadArguments("agent_run conversation must name a retained child conversation"));
+    if (args.hasNonNull("conversation") && conversation == null) {
+      throw new BadArguments("agent_run conversation must not be blank; no new task was started");
+    }
+    if (!recovery) return answer(wanted, task, named, home, openedBy, conversation, false);
     int before = budget.spent();
     transcript.record(
         LoggedEntry.diagnostic(
@@ -528,7 +574,7 @@ public final class AgentRunTool implements AgentTool {
                 + " remainingCalls="
                 + budget.remaining()));
     try {
-      String result = answer(wanted, task, named, home, openedBy, true);
+      String result = answer(wanted, task, named, home, openedBy, conversation, true);
       transcript.record(
           LoggedEntry.diagnostic(
               "Output recovery returned: sourceCall="
@@ -572,7 +618,8 @@ public final class AgentRunTool implements AgentTool {
     Objects.requireNonNull(wanted, "wanted");
     Objects.requireNonNull(task, "task");
     Objects.requireNonNull(home, "home");
-    return answer(wanted, task, List.of(), home, null, false);
+    returned = null;
+    return answer(wanted, task, List.of(), home, null, null, false);
   }
 
   private String answer(
@@ -581,6 +628,7 @@ public final class AgentRunTool implements AgentTool {
       List<String> named,
       Home home,
       String openedBy,
+      String conversation,
       boolean recovery) {
 
     if (!callable.contains(wanted)) {
@@ -626,6 +674,11 @@ public final class AgentRunTool implements AgentTool {
           + callable;
     }
 
+    // A retained failure retry is a different lifecycle from the policy's single repair attempt.
+    // Recovery checkpoints require review after failure, not another attempt on child history.
+    if (recovery && (conversation != null || retrying != null))
+      return "E_NO_ACCESS: Output recovery cannot retry a retained model attempt; inspect its receipt";
+
     // This flag only narrows ordinary delegation. Replacement definitions cannot turn a repair
     // into another research run or acquire tools. Authority and allowance still follow the caller.
     if (recovery
@@ -653,6 +706,33 @@ public final class AgentRunTool implements AgentTool {
           + "' resolves to '"
           + callee.name()
           + "', whose workspace grants exceed the caller's; delegation is refused";
+    }
+    if (retainedChild != null
+        && conversation != null
+        && !conversation.equals(retainedChild.conversation())) {
+      throw new IllegalStateException("The budget checkpoint cannot replace its retained child");
+    }
+    if (conversation != null && retainedChild == null) {
+      try {
+        retrying = transcript.retainedDelegationRetry(conversation, callee, home);
+      } catch (IllegalStateException refused) {
+        return "The retained delegation could not be retried: " + refused.getMessage();
+      }
+      JsonNode original = ToolArguments.parse(retrying.call().arguments(), NAME, EXAMPLE);
+      String originalAgent =
+          ToolArguments.requireText(original, "agent", NAME, "the original agent");
+      String originalTask = ToolArguments.requireText(original, "task", NAME, "the original task");
+      List<String> originalImages =
+          ToolArguments.optionalTexts(
+              original,
+              "images",
+              sent -> new BadArguments("The retained delegation's image arguments are invalid"));
+      if (!wanted.equals(originalAgent)
+          || !task.equals(originalTask)
+          || !named.equals(originalImages)) {
+        throw new BadArguments(
+            "A retained delegation retry must keep its original task and images unchanged");
+      }
     }
 
     // THE THREE REFUSALS, IN THE ORDER A CALLER WOULD WANT THEM ANSWERED.
@@ -748,25 +828,42 @@ public final class AgentRunTool implements AgentTool {
     // authority-bound runtime requires its own durable child link and refuses before
     // model execution if opening that log failed.
     runtime.requireChild(operation, callee, home);
-    if (retainedChild != null && !retainedChild.agent().equals(callee.name()))
+    if (retainedChild != null && retrying != null) {
+      throw new IllegalStateException("A delegation cannot restore two different checkpoints");
+    }
+    if (retainedChild != null && !retainedChild.agent().equals(callee.name())) {
       throw new IllegalStateException("The retained callee cannot be replaced");
+    }
+    boolean restoringChild = retainedChild != null || retrying != null;
     Transcript child =
-        retainedChild == null
-            ? transcript.delegate(callee, home, openedBy)
-            : transcript.resumeDelegate(callee, retainedChild.conversation(), retainedChild.turn());
+        retainedChild != null
+            ? transcript.resumeDelegate(callee, retainedChild.conversation(), retainedChild.turn())
+            : retrying != null
+                ? transcript.resumeDelegation(retrying, callee)
+                : transcript.delegate(callee, home, openedBy);
     var childOperation =
-        retainedChild == null
+        !restoringChild
             ? runtime.childOperation(
                 operation, transcript.conversationId(), child, callee, home, budget)
             : runtime.restoredChildOperation(
                 operation, transcript.conversationId(), child, callee, home, budget);
-    if (prepareChild != null && retainedChild == null) prepareChild.accept(child);
+    // Retained children keep their original capability/skill snapshot. The restored operation
+    // above rechecks its immutable envelope before either inference or cached-result disclosure.
+    if (retrying != null && retrying.completedAnswer().isPresent()) {
+      runtime.requireLogReadable(retrying.conversation(), callerHandle);
+      returned = Outcome.Ending.ANSWERED;
+      return render(
+          callee.name(),
+          pictures,
+          new Outcome(Outcome.Ending.ANSWERED, retrying.completedAnswer().orElseThrow(), 0, 0, ""));
+    }
+    if (prepareChild != null && !restoringChild) prepareChild.accept(child);
     // The record's delegation lines (spec 2026-09-28 §2), on the caller's conversation: the
     // record follows the caller's run, and the child's own lines are its conversation's.
     // child.conversationId() names this specific delegation's own conversation (spec
     // 2026-09-29 §1a, fixed after review): two delegations to the same callee, live at once
     // in this run, each open a distinct one, and the facts footer reads that one back.
-    if (retainedChild == null)
+    if (!restoringChild)
       runtime
           .activity()
           .delegated(
@@ -838,6 +935,12 @@ public final class AgentRunTool implements AgentTool {
                 .handoffNote(transcript.conversationId())
                 .map(note -> framed + "\n\n" + note)
                 .orElse(framed);
+    if (retrying != null) {
+      handed =
+          "The person explicitly requested a retry after the model failure. Continue the original"
+              + " task from its recorded history and completed tool results. Do not repeat completed"
+              + " effects. This message is from the harness.";
+    }
     Outcome outcome =
         childOperation != null
             ? runtime.runOperation(
@@ -847,7 +950,7 @@ public final class AgentRunTool implements AgentTool {
                 budget,
                 cancelled,
                 sessionId,
-                JobWatch.UNWATCHED,
+                watch,
                 child,
                 TurnCap.from(callee),
                 pictures,
@@ -862,7 +965,7 @@ public final class AgentRunTool implements AgentTool {
                     budget,
                     cancelled,
                     sessionId,
-                    JobWatch.UNWATCHED,
+                    watch,
                     child,
                     TurnCap.from(callee),
                     pictures)
@@ -873,7 +976,7 @@ public final class AgentRunTool implements AgentTool {
                     budget,
                     cancelled,
                     sessionId,
-                    JobWatch.UNWATCHED,
+                    watch,
                     child,
                     TurnCap.from(callee),
                     pictures,
@@ -883,7 +986,7 @@ public final class AgentRunTool implements AgentTool {
     // caller still has its own record closed: the ending, the closing
     // answer, and the turn row naming which agent answered. A run whose
     // failure travels is exactly the one somebody will read back afterwards.
-    child.closed(handed, outcome);
+    child.closed(retrying == null ? handed : retrying.utterance(), outcome);
     returned = outcome.ending();
     // Told here, beside the close and before the propagation check, so a child whose failure
     // ends the caller is still told coming back -- with the ending that ended it. Not for a
@@ -921,6 +1024,16 @@ public final class AgentRunTool implements AgentTool {
       return outcome.text();
     }
     String rendered = render(callee.name(), pictures, outcome);
+    if (child.conversationId() != null
+        && (outcome.ending() == Outcome.Ending.UNAVAILABLE
+            || outcome.ending() == Outcome.Ending.SUB_AGENT_FAILED)) {
+      rendered +=
+          "\nRetained child conversation: "
+              + child.conversationId()
+              + ". Continue your other work. Retry only when the person requests it, using agent_run"
+              + " with conversation set to this id and the original agent, task and images unchanged."
+              + " The retry continues this child's recorded work; do not start the task again.";
+    }
     String facts = runtime.activity().delegationFacts(child.conversationId(), callee.name());
     return facts == null ? rendered : rendered + "\n\n" + facts;
   }
@@ -1003,38 +1116,11 @@ public final class AgentRunTool implements AgentTool {
   }
 
   /**
-   * Whether a child's ending is the parent's death rather than its reading.
-   *
-   * <p>The endings that mean <em>this run cannot go on</em>. {@link
-   * Outcome.Ending#SUB_AGENT_FAILED} is in the list so that a failure two levels down reaches the
-   * top rather than stopping at the first parent, which would report a grandchild's dead endpoint
-   * as an ordinary sub-agent that had nothing to say.
-   *
-   * <p><b>{@link Outcome.Ending#STUCK} is deliberately not in it</b>, and it is the newest constant
-   * to have been asked. A child that repeated itself did not fail: it reached no answer, which is
-   * what {@link Outcome.Ending#TURN_CAP} and {@link Outcome.Ending#CALL_BUDGET} also mean, and the
-   * parent is told so in a tool result and decides what to do about it. Nothing about the child's
-   * loop stops the parent working — the endings in the list below are conditions of the
-   * <em>tree</em>, and a stuck child is a condition of one agent.
-   *
-   * <p><b>{@link Outcome.Ending#CALL_FAILURES} is not in it either</b>, for STUCK's reason: a child
-   * that kept writing its calls as text is a condition of one agent, and the parent reads it in a
-   * tool result ({@code a_child_that_kept_writing_calls_as_text_is_reported_and_not_propagated}).
-   * So {@link SubAgentFailed#sentence()} never meets it.
-   *
-   * <p><b>{@link Outcome.Ending#SESSION_GONE} is in it for a reason the other two do not have:
-   * parent and child are the same session.</b> A child that lost the client's file channel lost the
-   * parent's too — one job, one session id — so a parent that carried on would call file tools down
-   * a channel already known to be dead, once per turn, until its budget ran out. Measured while
-   * this list was still two constants long: {@code
-   * a_child_whose_session_went_away_says_so_rather_than_naming_an_endpoint} ended {@code ANSWERED}
-   * and nothing else in the suite noticed. <b>A list of enum constants is not a compile check</b>,
-   * which is why a set that grows has to come back here.
+   * Only loss of the shared client session ends the calling tree. Model/dependency failures are
+   * returned to the parent as failed tool results; retrying a child is a separate explicit call.
    */
   public static boolean propagates(Outcome.Ending ending) {
-    return ending == Outcome.Ending.UNAVAILABLE
-        || ending == Outcome.Ending.SUB_AGENT_FAILED
-        || ending == Outcome.Ending.SESSION_GONE;
+    return ending == Outcome.Ending.SESSION_GONE;
   }
 
   /**
@@ -1202,6 +1288,12 @@ public final class AgentRunTool implements AgentTool {
                 + " ones you were told the id of. The picture has to belong to the"
                 + " project this run is in, and the agent has to be one that can"
                 + " see."));
+    properties.put(
+        "conversation",
+        ToolArguments.string(
+            "Optional. Retry a retained failed child conversation of this caller only when the person"
+                + " explicitly requests it. Keep the original agent, task and images unchanged; the"
+                + " child's recorded tool results are reused instead of starting its task again."));
     return ToolArguments.object(properties, List.of("agent", "task"));
   }
 
@@ -1217,7 +1309,7 @@ public final class AgentRunTool implements AgentTool {
     String why =
         outcome.ending() == Outcome.Ending.SESSION_GONE
             ? "the client session it was working in went away"
-            : "something it depends on could not be reached";
+            : "its model request or another dependency failed";
     return "This run could not go on: the sub-agent '" + agent + "' stopped because " + why + ".";
   }
 
@@ -1240,50 +1332,19 @@ public final class AgentRunTool implements AgentTool {
       this.outcome = outcome;
     }
 
-    /**
-     * The sentence the parent's outcome reads with. Distinct from every other ending's, because two
-     * endings sharing a sentence would be one ending to anybody reading the result.
-     *
-     * <p><b>And distinct from itself, across the endings it stands for.</b> The parent's ending is
-     * {@code SUB_AGENT_FAILED} whichever way the child died — deliberately, since the thing to look
-     * at is one agent further down rather than this run's own dependencies — so <b>one level up</b>
-     * the words are the only place the difference can survive. One sentence for both would tell an
-     * operator whose user closed a laptop to go and check whether an endpoint is up.
-     *
-     * <p><b>Two levels up they do not, and the first version of this paragraph said "to the top" as
-     * though they did.</b> At depth two the middle agent's own outcome is {@code SUB_AGENT_FAILED},
-     * so the ternary below takes its else arm and the top-level sentence says "something it depends
-     * on could not be reached" about a closed laptop — the exact reading this arm exists to
-     * prevent, one level further out. {@code
-     * a_session_two_levels_down_reaches_the_top_in_its_detail_and_not_its_sentence} says so rather
-     * than leaving it to be discovered.
-     *
-     * <p><b>Not keyed on the chain, and the reason is that nothing is lost where it matters.</b>
-     * {@link #detail} chains, so the top reads {@code middle: helper: SessionGoneException: …} and
-     * an operator has the fact one line down — exactly as they already do for a dead endpoint two
-     * levels down, which is the shape this class shipped with. Keying the ternary on the root cause
-     * means threading a root ending through every {@code SubAgentFailed}, because a middle's {@link
-     * Outcome} says only that its own child failed; matching on the detail string instead is the
-     * locale-and-wording guess this project forbids.
-     */
+    /** The shared client-session loss remains typed through every delegation level. */
+    Outcome.Ending ending() {
+      return outcome.ending() == Outcome.Ending.SESSION_GONE
+          ? Outcome.Ending.SESSION_GONE
+          : Outcome.Ending.SUB_AGENT_FAILED;
+    }
+
+    /** A readable explanation beside the typed session/delegation ending. */
     String sentence() {
       return stoppedSentence(agent, outcome);
     }
 
-    /**
-     * The child's own detail, under this child's name.
-     *
-     * <p>Chained rather than replaced, so a failure two levels down arrives as {@code middle:
-     * helper: LlmException: …} and an operator can see which agent actually met the dead endpoint.
-     * The child's detail is never blank for any of the three propagating endings — {@code
-     * JobRuntime.describe} falls back to the exception's type name, and this method supplies the
-     * other — so there is no empty-detail branch here to test. (It read "either propagating ending"
-     * while there were two.)
-     *
-     * <p><b>This chain is also the only thing that carries a session that went away past depth
-     * one</b>, for the reason {@link #sentence} sets out: the sentence generalises at the first
-     * level and stops.
-     */
+    /** Preserve the agent ancestry and original failure detail for the operator. */
     String detail() {
       return agent + ": " + outcome.detail();
     }

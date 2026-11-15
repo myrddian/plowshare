@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayCausation;
+import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.Redemption;
 import io.aeyer.plowshare.server.archive.StoredResults;
@@ -9,6 +10,7 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -513,6 +515,55 @@ public interface Transcript {
   /** Reopens a retained child, never creates another delegation identity. */
   default Transcript resumeDelegate(AgentDefinition callee, String child, int continuing) {
     throw new UnsupportedOperationException("This transcript cannot restore a retained delegation");
+  }
+
+  /**
+   * A failed delegation's exact durable call and child. Only explicit continuation transcripts
+   * expose these; ordinary turns never automatically retry a delegation.
+   */
+  record DelegationRetry(
+      ToolCall call,
+      String conversation,
+      String agent,
+      Home home,
+      int continuingTurn,
+      String utterance,
+      Optional<String> completedAnswer) {
+    public DelegationRetry {
+      Objects.requireNonNull(call, "call");
+      Objects.requireNonNull(conversation, "conversation");
+      Objects.requireNonNull(agent, "agent");
+      Objects.requireNonNull(home, "home");
+      Objects.requireNonNull(utterance, "utterance");
+      Objects.requireNonNull(completedAnswer, "completedAnswer");
+      if (!AgentRunTool.NAME.equals(call.name()) || continuingTurn < 1) {
+        throw new IllegalArgumentException("A delegation retry needs its retained call and turn");
+      }
+    }
+  }
+
+  /**
+   * The one interrupted delegation that must finish before this explicitly resumed run calls its
+   * own model. A missing or ambiguous child is an error, never permission to start a fresh child.
+   */
+  default Optional<DelegationRetry> pendingDelegationRetry() {
+    return Optional.empty();
+  }
+
+  /**
+   * Continue the validated child with its recorded results. Implementations recheck the exact
+   * parent/call relationship and current callee; this method never opens another child.
+   */
+  default Transcript resumeDelegation(DelegationRetry retry, AgentDefinition callee) {
+    throw new IllegalStateException("This transcript cannot continue a retained delegation");
+  }
+
+  /**
+   * An explicit agent_run retry naming an existing child of this exact parent. The owning
+   * transcript validates the durable parent, agent, home and outcome before returning a plan.
+   */
+  default DelegationRetry retainedDelegationRetry(String child, AgentDefinition callee, Home home) {
+    throw new IllegalStateException("This transcript cannot retry a retained delegation");
   }
 
   /**

@@ -100,6 +100,28 @@ The original request is locked for both explicit final replies and fallbacks;
 a database uniqueness constraint permits only one final reply. Completion can
 be retried without creating another final reply or wake.
 
+Recipient job errors notify the original sender even when `reply_expected` is false. The harness
+sends a bounded “The recipient job had an error” notice with the terminal ending and original
+message identity; private model output, reasoning, tool results and provider error details are not
+copied into that notice. This applies to unavailable model/dependency calls, failed delegates,
+lost file sessions, stuck runs and repeated tool-call failures. Cancellation and exhausted
+allowances keep their own outcome wording; they are not described as job errors.
+
+When no final reply exists, the generated error notice is the final reply. If the recipient already
+sent an explicit final reply and its handling job later fails, that reply remains intact: a separate
+`generated: true`, `final: false` status notice is correlated through `reply_to`. It reports the job
+status rather than pretending to be another conversational answer. Only one such generated status
+notice is retained per original message. Repeated completion/recovery does not create another
+notice or wake. Generated notices never expect a reply and their own handling failures do not
+create further automatic error notices, preventing notification loops.
+
+An error notice is asynchronous input to the sender's normal messaging lifecycle; a recipient's
+error does not stop the sending agent. Ordinary sends keep their existing receipt identity and do
+not automatically replay uncertain work. Inspect the delivery and recipient's authorized saved
+work before explicitly retrying. Current participant log/input visibility still gates disclosure;
+when that access is unavailable the terminal outcome is retained without republishing protected
+content.
+
 Failures and caps keep their actual outcome status. A generated reply is marked
 as harness-generated, rather than represented as an explicit message written by
 the recipient. An interrupted handling turn is reported as unavailable during

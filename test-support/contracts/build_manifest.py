@@ -167,7 +167,7 @@ def inventory():
     retrieval_types = [name for name in re.findall(r"^export interface (\w+)\s*\{", retrieval_text, re.M) if name != "RetrievalReplies"]
     retrieval_operations = re.findall(r"'([^']+)':", re.search(r"export interface RetrievalReplies \{([^}]+)\}", retrieval_text, re.S).group(1))
     retrieval_fixture = "test-support/contracts/ws-retrieval-fixtures.json"
-    assert len(retrieval_types) == 37 and len(retrieval_operations) == 21, "shared retrieval response inventory changed"
+    assert len(retrieval_types) == 38 and len(retrieval_operations) == 21, "shared retrieval response inventory changed"
     assert set(json.loads(read(retrieval_fixture))["replies"]) == set(retrieval_operations), "retrieval reply fixtures are stale"
     response_readers = re.findall(r"^export function (\w+)\(", read(views_source), re.M)
     response_types = re.findall(r"^export interface (\w+)\s*\{", read(views_source), re.M)

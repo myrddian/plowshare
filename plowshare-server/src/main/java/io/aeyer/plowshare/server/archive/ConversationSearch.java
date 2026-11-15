@@ -1,35 +1,65 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.api.LogSearchView;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
-import io.aeyer.plowshare.server.llm.accounting.*;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.accounting.UsageAware;
+import io.aeyer.plowshare.server.llm.accounting.UsageOwners;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 
-/** Shared direct/internal retrieval; old callers still use EntryStore's exact lexical search. */
+/** Scoped BM25 and passage retrieval. Snapshots retain identities, never authority leases. */
 public final class ConversationSearch implements UsageAware {
-  private UsageOwners usageOwners = UsageOwners.NONE;
-
-  @Override
-  public void useUsageOwners(UsageOwners source) {
-    usageOwners = java.util.Objects.requireNonNull(source);
-  }
-
   public static final int CANDIDATES = 200;
   private static final int WINDOWS = 128;
+  private UsageOwners usageOwners = UsageOwners.NONE;
+  private final ConversationSearchRepository entries;
+  private final PassageIndex index;
+  private String account;
+  // The lock protects bounded eviction plus insertion; reads use the concurrent map.
+  private ConcurrentMap<String, Window> windows = new ConcurrentHashMap<>();
 
   private record Candidate(
-      String id,
-      String revision,
-      double score,
+      double lexicalScore,
+      double semanticScore,
       String snippet,
-      String retrievedBy,
-      Integer position) {}
+      Integer position,
+      List<LogSearch.Reference> sources,
+      int sourceCount) {
+    private Candidate {
+      sources = List.copyOf(sources);
+    }
+
+    String id() {
+      return sources.getFirst().id();
+    }
+
+    double score() {
+      return lexicalScore + semanticScore;
+    }
+
+    String retrievedBy() {
+      return lexicalScore > 0 ? semanticScore > 0 ? "semantic+lexical" : "lexical" : "semantic";
+    }
+  }
 
   private record Window(
       String account,
       Home home,
+      String conversation,
       String question,
       String mode,
       Instant expires,
@@ -37,23 +67,21 @@ public final class ConversationSearch implements UsageAware {
       LogSearch.Reach reach,
       LogSearchView.Retrieval retrieval) {}
 
-  private final EntryStore entries;
-  private final PassageIndex index;
-  private String account;
-  private boolean informationScoped;
-  private Map<String, Window> windows = Collections.synchronizedMap(new LinkedHashMap<>());
-
-  public ConversationSearch(EntryStore entries, PassageIndex index) {
+  public ConversationSearch(ConversationSearchRepository entries, PassageIndex index) {
     this.entries = entries;
     this.index = index;
   }
 
+  @Override
+  public void useUsageOwners(UsageOwners source) {
+    usageOwners = Objects.requireNonNull(source);
+  }
+
   public ConversationSearch forAccount(String account) {
-    ConversationSearch copy =
-        new ConversationSearch(entries.forAccount(account), index.forAccount(account));
+    var copy = new ConversationSearch(entries.forAccount(account), index.forAccount(account));
     copy.account = account;
-    copy.informationScoped = true;
     copy.windows = windows;
+    copy.usageOwners = usageOwners;
     return copy;
   }
 
@@ -66,6 +94,17 @@ public final class ConversationSearch implements UsageAware {
 
   public LogSearchView search(
       Home home, String question, int skip, int most, String requested, String snapshot) {
+    return search(home, question, skip, most, requested, snapshot, (String) null);
+  }
+
+  public LogSearchView search(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String requested,
+      String snapshot,
+      String conversation) {
     return search(
         home,
         question,
@@ -73,7 +112,8 @@ public final class ConversationSearch implements UsageAware {
         most,
         requested,
         snapshot,
-        usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY));
+        usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY),
+        conversation);
   }
 
   public LogSearchView search(
@@ -84,119 +124,119 @@ public final class ConversationSearch implements UsageAware {
       String requested,
       String snapshot,
       UsageAttribution owner) {
+    return search(home, question, skip, most, requested, snapshot, owner, null);
+  }
+
+  public LogSearchView search(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String requested,
+      String snapshot,
+      UsageAttribution owner,
+      String conversation) {
     String mode = mode(requested);
-    if (skip < 0 || most < 1) throw new ValidationException("Invalid search window");
+    EntryStore.validateConversation(conversation);
+    if (skip < 0 || most < 1 || most > 200) throw new ValidationException("Invalid search window");
     if (mode.equals("lexical")) {
       if (snapshot != null)
-        throw new ValidationException(
-            "Lexical search uses exact offset paging, without a snapshot");
-      var lexical = entries.search(home, question, skip, most);
-      var view = LogSearchView.of(lexical, skip, most);
-      // Omitted mode preserves the original response exactly.
-      return requested == null
-          ? view
-          : new LogSearchView(
-              view.hits(),
-              view.total(),
-              skip,
-              most,
-              view.reach(),
-              new LogSearchView.Retrieval(
-                  mode,
-                  mode,
-                  "exact lexical matches",
-                  null,
-                  false,
-                  true,
-                  null,
-                  null,
-                  null,
-                  0,
-                  "PostgreSQL full-text search"));
+        throw new ValidationException("Lexical search uses offset paging without a snapshot");
+      var found = lexical(home, question, skip, most, conversation);
+      var view = LogSearchView.of(found, skip, most);
+      if (requested == null) return view;
+      return new LogSearchView(
+          view.hits(),
+          view.total(),
+          skip,
+          most,
+          view.reach(),
+          new LogSearchView.Retrieval(
+              mode,
+              mode,
+              "distinct matching passage groups",
+              null,
+              false,
+              true,
+              null,
+              null,
+              null,
+              0,
+              "Scoped BM25 (k1=1.2, b=0.75); repeated excerpts grouped before pagination"));
     }
     if (snapshot != null) {
-      Window window = windows.get(snapshot);
+      Window window;
+      synchronized (windows) {
+        window = windows.get(snapshot);
+      }
       if (window == null || window.expires().isBefore(Instant.now()))
         throw new ValidationException("Search snapshot expired; start again at offset 0");
       if (!Objects.equals(window.account(), account)
           || !window.home().equals(home)
+          || !Objects.equals(window.conversation(), conversation)
           || !window.question().equals(question)
           || !window.mode().equals(mode))
         throw new ValidationException(
-            "Search snapshot belongs to a different scope, question or mode");
+            "Search snapshot belongs to a different scope, conversation, question or mode");
       return page(window, skip, most, true);
     }
     if (skip != 0)
       throw new ValidationException(
           "Semantic/hybrid pages after offset 0 need the first page's snapshot");
-    var lexical = entries.search(home, question, 0, mode.equals("hybrid") ? CANDIDATES : 1);
+    var scoped = index.inConversation(conversation);
+    var lexical = lexical(home, question, 0, mode.equals("hybrid") ? CANDIDATES : 1, conversation);
     List<PassageIndex.Match> semantic = List.of();
     String fallback = null;
-    try {
-      try (var query = index.capture(question, owner, home)) {
-        semantic = index.rank(home, "entry", query, CANDIDATES + 1);
-      }
+    try (var query = scoped.capture(question, owner, home)) {
+      semantic = scoped.rank(home, "entry", query, CANDIDATES + 1);
     } catch (EmbeddingException unavailable) {
       if (mode.equals("semantic"))
         throw new EmbeddingException(
             "Semantic query embedding unavailable; lexical search remains available", unavailable);
-      fallback = "Query embedding unavailable; only lexical candidates were ranked";
+      fallback = "Query embedding unavailable; only BM25 candidates were ranked";
     }
     boolean truncated =
-        semantic.size() > CANDIDATES || (mode.equals("hybrid") && lexical.total() > CANDIDATES);
-    semantic = semantic.subList(0, Math.min(CANDIDATES, semantic.size()));
-    Map<String, Double> scores = new HashMap<>();
-    Map<String, String> snippets = new HashMap<>();
-    Map<String, String> revisions = new HashMap<>();
-    Map<String, String> origins = new HashMap<>();
-    Map<String, Integer> positions = new HashMap<>();
-    // Deduplicate BEFORE rank fusion: repeated passages cannot contribute extra votes.
-    Map<String, PassageIndex.Match> unique = new LinkedHashMap<>();
-    for (var match : semantic) unique.putIfAbsent(match.id(), match);
+        semantic.size() > CANDIDATES || mode.equals("hybrid") && lexical.total() > CANDIDATES;
+    List<Candidate> candidates = new ArrayList<>();
     int rank = 0;
-    for (var match : unique.values()) {
-      scores.put(match.id(), mode.equals("hybrid") ? 1.0 / (60 + (++rank)) : match.similarity());
-      snippets.put(match.id(), match.text());
-      revisions.put(match.id(), match.revision());
-      origins.put(match.id(), "semantic");
-      positions.put(match.id(), match.position());
+    for (var match : semantic.subList(0, Math.min(CANDIDATES, semantic.size()))) {
+      var sources = match.sources().stream().map(ConversationSearch::reference).toList();
+      merge(
+          candidates,
+          new Candidate(
+              0,
+              mode.equals("hybrid") ? 1.0 / (60 + (++rank)) : match.similarity(),
+              match.text(),
+              match.position(),
+              sources,
+              match.sourceCount()));
     }
     if (mode.equals("hybrid")) {
       rank = 0;
-      for (var hit : lexical.hits()) {
-        String id = hit.conversationId() + ":" + hit.ordinal();
-        scores.merge(id, 1.0 / (60 + (++rank)), Double::sum);
-        snippets.putIfAbsent(id, hit.snippet());
-        revisions.putIfAbsent(id, hit.sourceRevision());
-        origins.merge(id, "lexical", (a, b) -> "semantic+lexical");
-      }
-    }
-    List<Candidate> qualified = new ArrayList<>();
-    for (var scored : scores.entrySet()) {
-      String revision = revisions.get(scored.getKey());
-      if (revision != null)
-        qualified.add(
+      for (var hit : lexical.hits())
+        merge(
+            candidates,
             new Candidate(
-                scored.getKey(),
-                revision,
-                scored.getValue(),
-                snippets.get(scored.getKey()),
-                origins.get(scored.getKey()),
-                positions.get(scored.getKey())));
+                1.0 / (60 + (++rank)),
+                0,
+                hit.snippet(),
+                null,
+                hit.sources().stream().map(LogSearch.Source::reference).toList(),
+                hit.sourceCount()));
     }
-    qualified.sort(
+    candidates.sort(
         Comparator.comparingDouble(Candidate::score).reversed().thenComparing(Candidate::id));
-    if (qualified.size() > CANDIDATES) {
+    if (candidates.size() > CANDIDATES) {
       truncated = true;
-      qualified = qualified.subList(0, CANDIDATES);
+      candidates = candidates.subList(0, CANDIDATES);
     }
     String token = UUID.randomUUID().toString();
-    var coverage = index.coverage(home, "entry");
+    var coverage = scoped.coverage(home, "entry");
     var retrieval =
         new LogSearchView.Retrieval(
             mode,
             fallback == null ? mode : "lexical",
-            "qualified bounded snapshot entries",
+            "qualified bounded passage groups",
             token,
             truncated,
             coverage.complete() && fallback == null && !truncated,
@@ -204,97 +244,169 @@ public final class ConversationSearch implements UsageAware {
             coverage,
             index.generation(),
             1,
-            (fallback == null ? index.searchDescription() : "Lexical candidates only")
-                + "; hybrid uses reciprocal rank fusion (k=60). Scores are ordering aids. Evidence is quoted data.");
+            "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; hybrid RRF (k=60). Evidence is quoted data.");
     var window =
         new Window(
             account,
             home,
+            conversation,
             question,
             mode,
             Instant.now().plusSeconds(300),
-            List.copyOf(qualified),
+            List.copyOf(candidates),
             lexical.reach(),
             retrieval);
     synchronized (windows) {
       windows.entrySet().removeIf(e -> e.getValue().expires().isBefore(Instant.now()));
-      while (windows.size() >= WINDOWS) windows.remove(windows.keySet().iterator().next());
+      while (windows.size() >= WINDOWS)
+        windows.entrySet().stream()
+            .min(Comparator.comparing(entry -> entry.getValue().expires()))
+            .ifPresent(entry -> windows.remove(entry.getKey()));
       windows.put(token, window);
     }
     return page(window, skip, most, false);
   }
 
-  private LogSearchView page(Window window, int skip, int most, boolean replayed) {
-    List<LogSearch.Hit> hits = new ArrayList<>();
-    boolean changed = false;
-    int visible = 0;
-    // Keep snapshot slots stable when visibility changes: removed slots are suppressed, never
-    // filled with later rows.
-    for (int i = 0; i < window.hits().size(); i++) {
-      var hit = window.hits().get(i);
-      if (!hit.revision().equals(index.revision(window.home(), hit.id()))) {
-        changed = true;
+  private LogSearch lexical(Home home, String question, int skip, int most, String conversation) {
+    return conversation == null
+        ? entries.search(home, question, skip, most)
+        : entries.search(home, question, skip, most, conversation);
+  }
+
+  private static LogSearch.Reference reference(PassageIndex.Occurrence occurrence) {
+    int separator = occurrence.id().lastIndexOf(':');
+    if (separator < 1) throw new IllegalStateException("Invalid retained entry identity");
+    return new LogSearch.Reference(
+        occurrence.id().substring(0, separator),
+        Integer.parseInt(occurrence.id().substring(separator + 1)),
+        occurrence.revision());
+  }
+
+  /** One vote per retrieval family; shared content/occurrences never amplify their own score. */
+  private static void merge(List<Candidate> candidates, Candidate incoming) {
+    Candidate merged = incoming;
+    for (int i = 0; i < candidates.size(); ) {
+      var existing = candidates.get(i);
+      Set<String> ids =
+          merged.sources().stream().map(LogSearch.Reference::id).collect(Collectors.toSet());
+      boolean overlap = existing.sources().stream().anyMatch(source -> ids.contains(source.id()));
+      if (!overlap && !key(existing.snippet()).equals(key(merged.snippet()))) {
+        i++;
         continue;
       }
+      Map<String, LogSearch.Reference> sources = new LinkedHashMap<>();
+      existing.sources().forEach(source -> sources.put(source.id(), source));
+      boolean samePassage = key(existing.snippet()).equals(key(merged.snippet()));
+      // A shared entry can give the lexical and semantic readers different excerpts. Its rank may
+      // receive both votes, but another occurrence of the lexical excerpt does not attest to the
+      // semantic excerpt. Only references supporting the selected text may survive its revocation.
+      if (samePassage) merged.sources().forEach(source -> sources.putIfAbsent(source.id(), source));
+      merged =
+          new Candidate(
+              Math.max(existing.lexicalScore(), merged.lexicalScore()),
+              Math.max(existing.semanticScore(), merged.semanticScore()),
+              existing.snippet(),
+              existing.position(),
+              sources.values().stream().limit(20).toList(),
+              samePassage
+                  ? Math.max(sources.size(), Math.max(existing.sourceCount(), merged.sourceCount()))
+                  : existing.sourceCount());
+      candidates.remove(i);
+      // The union can bridge two formerly separate groups. Revisit them without giving either
+      // retrieval family another vote; this makes fusion independent of iteration order.
+      i = 0;
+    }
+    candidates.add(merged);
+  }
+
+  private static String key(String text) {
+    return text.strip().replaceAll("\\s+", " ");
+  }
+
+  /**
+   * Rechecks every retained reference together; hidden/deleted sources cannot survive in a group.
+   */
+  private LogSearchView page(Window window, int skip, int most, boolean replayed) {
+    var expected =
+        window.hits().stream().flatMap(candidate -> candidate.sources().stream()).toList();
+    Map<String, LogSearch.Source> current = new HashMap<>();
+    entries
+        .searchSources(window.home(), expected)
+        .forEach(source -> current.put(source.id(), source));
+    List<LogSearchView.Hit> hits = new ArrayList<>();
+    int visible = 0;
+    boolean changed = false;
+    boolean referencesTruncated =
+        window.hits().stream()
+            .anyMatch(candidate -> candidate.sourceCount() > candidate.sources().size());
+    for (int i = 0; i < window.hits().size(); i++) {
+      var candidate = window.hits().get(i);
+      var sources =
+          candidate.sources().stream()
+              .map(source -> current.get(source.id()))
+              .filter(Objects::nonNull)
+              .toList();
+      if (sources.size() != candidate.sources().size()) changed = true;
+      if (sources.isEmpty()) continue;
       visible++;
-      if (i >= skip && i - skip < most) {
-        var current =
-            index.hit(window.home(), hit.id(), hit.revision(), hit.score(), hit.snippet());
-        if (current != null) hits.add(current);
-        else changed = true;
-      }
+      if (i < skip || i - skip >= most) continue;
+      var representative = sources.getFirst();
+      var hit =
+          new LogSearch.Hit(
+              representative.conversationId(),
+              representative.ordinal(),
+              representative.turnOrdinal(),
+              EntryKind.of(representative.kind()),
+              candidate.score(),
+              candidate
+                  .snippet()
+                  .substring(
+                      0,
+                      Math.min(
+                          candidate.snippet().length(), EntryStore.MOST_CHARACTERS_PER_SNIPPET)),
+              representative.length(),
+              representative.supersededBy(),
+              representative.handle() == null ? null : UUID.fromString(representative.handle()),
+              representative.recordedAt(),
+              representative.sourceRevision(),
+              sources,
+              sources.size());
+      hits.add(
+          LogSearchView.Hit.of(hit)
+              .withEvidence(
+                  new LogSearchView.Evidence(
+                      candidate.retrievedBy(),
+                      candidate.position(),
+                      representative.sourceRevision())));
     }
     var r = window.retrieval();
-    if (changed)
-      r =
-          new LogSearchView.Retrieval(
-              r.requestedMode(),
-              r.effectiveMode(),
-              r.totalMeaning(),
-              r.snapshot(),
-              r.truncated(),
-              false,
-              "Source visibility/revision changed; invalid snapshot slots suppressed",
-              index.coverage(window.home(), "entry"),
-              r.generation(),
-              replayed ? 0 : r.queryEmbeddingCalls(),
-              r.provenance());
-    else if (replayed)
-      r =
-          new LogSearchView.Retrieval(
-              r.requestedMode(),
-              r.effectiveMode(),
-              r.totalMeaning(),
-              r.snapshot(),
-              r.truncated(),
-              r.complete(),
-              r.fallback(),
-              index.coverage(window.home(), "entry"),
-              r.generation(),
-              0,
-              r.provenance());
-    var view =
-        LogSearchView.of(
-            new LogSearch(
-                hits,
-                informationScoped ? visible : window.hits().size(),
-                informationScoped
-                    ? entries.search(window.home(), window.question(), 0, 1).reach()
-                    : window.reach()),
-            skip,
-            most);
-    Map<String, Candidate> candidates = new HashMap<>();
-    for (var candidate : window.hits()) candidates.put(candidate.id(), candidate);
-    var explained =
-        view.hits().stream()
-            .map(
-                hit -> {
-                  var candidate = candidates.get(hit.conversationId() + ":" + hit.ordinal());
-                  return hit.withEvidence(
-                      new LogSearchView.Evidence(
-                          candidate.retrievedBy(), candidate.position(), candidate.revision()));
-                })
-            .toList();
-    return new LogSearchView(explained, view.total(), skip, most, view.reach(), r);
+    var retrieval =
+        new LogSearchView.Retrieval(
+            r.requestedMode(),
+            r.effectiveMode(),
+            r.totalMeaning(),
+            r.snapshot(),
+            r.truncated(),
+            r.complete() && !changed && !referencesTruncated,
+            changed
+                ? "Source visibility/revision changed; invalid references suppressed"
+                : referencesTruncated
+                    ? "Occurrence references are limited to twenty per group"
+                    : r.fallback(),
+            index.inConversation(window.conversation()).coverage(window.home(), "entry"),
+            r.generation(),
+            replayed ? 0 : r.queryEmbeddingCalls(),
+            r.provenance());
+    var reach =
+        account == null
+            ? window.reach()
+            : entries.searchReach(window.home(), window.conversation());
+    return new LogSearchView(
+        hits,
+        visible,
+        skip,
+        most,
+        new LogSearchView.Reach(reach.searched(), reach.ejected(), reach.recordedOnly()),
+        retrieval);
   }
 }

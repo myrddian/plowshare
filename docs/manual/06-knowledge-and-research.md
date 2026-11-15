@@ -148,7 +148,37 @@ release and human Global Admin destination authority; the supplied `by` label is
 provenance. Memories carry formation provenance and lifecycle status. Historical or invalidated knowledge should be labelled rather than
 returned as current advice.
 
-Conversation retrieval searches retained history with bounded coverage. Digest
+Conversation retrieval searches retained history with bounded coverage. The agent's
+`conversation_search` tool searches its current home by default. Set
+`conversation: "current"` to search only the running conversation, or supply a
+specific conversation ID in that home. The WebSocket `conversation.search` and
+CLI `search` accept an explicit `conversation` ID alongside the project selector.
+The filter applies before lexical statistics, semantic ranking and candidate limits.
+
+Lexical search uses BM25 with term frequency saturation, document length
+normalization and inverse document frequency from the authorized selection.
+Repeated matching excerpts are grouped before pagination; semantic retrieval
+also groups identical passages across entries and conversations before its source
+limit. Whitespace differences are normalized for grouping; different wording is
+not treated as a duplicate. A group retains its representative evidence address
+and up to twenty `sources`, with conversation IDs, ordinals, revision hashes and
+available tool-result handles. `total` counts groups. Lexical `sourceCount` counts
+matching occurrences; semantic snapshots report the retained references that were
+revalidated, and mark coverage incomplete when the reference list is capped.
+
+Use `mode: "semantic"` for meaning-based retrieval or `mode: "hybrid"` (the agent
+tool's default) to combine BM25 and semantic rankings. Semantic/hybrid pagination
+requires the first page's snapshot and the same conversation selection. It never
+reuses a snapshot across homes, readers or queries. References are checked again
+before disclosure; deleted, moved or newly unreadable sources are suppressed.
+Embedding failures keep explicit lexical fallback in hybrid mode; semantic mode
+reports unavailable. Source indexing is asynchronous, so inspect coverage before
+claiming that no evidence exists.
+
+```json
+{"question":"why did the tool fail?","conversation":"current","mode":"semantic"}
+```
+ Digest
 navigation walks summaries and source spans to explain why a decision was made.
 A digest preserves lineage to the original history; it is not a second source
 invented by paraphrasing. A fold reduces future context pressure while leaving

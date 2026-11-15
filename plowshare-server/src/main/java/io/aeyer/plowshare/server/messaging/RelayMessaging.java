@@ -1004,20 +1004,48 @@ public final class RelayMessaging implements MessageService {
             return null;
           }
           Instance receiver = instance(original.recipient()).orElseThrow();
-          if (original.replyExpected() && finalReply(message).isEmpty()) {
-            String body =
-                outcome.text().isBlank()
-                    ? "The handling turn ended with " + outcome.ending().name() + " and no text."
-                    : outcome.text();
-            send(
-                receiver,
-                new SendMessageTool.Request(null, body, message, false, true, "persistent", null),
-                true,
-                outcome.ending().name());
+          boolean failed = jobError(outcome.ending()) && !original.generated();
+          boolean needsOutcome = original.replyExpected() || failed;
+          if (needsOutcome) {
+            boolean finalReplyMissing = finalReply(message).isEmpty();
+            // A job can fail after sending an explicit final reply. Preserve that reply and append
+            // a correlated generated status notice instead. The request lock + handled transition
+            // settle this once; the schema also permits only one non-final generated notice.
+            if (finalReplyMissing || failed) {
+              requireReadable(receiver);
+              requireReadable(instance(original.sender()).orElseThrow());
+              String body =
+                  failed
+                      ? "The recipient job had an error ("
+                          + outcome.ending().name()
+                          + ") while handling message "
+                          + message
+                          + ". Completed work is retained; "
+                          + "inspect the delivery before deciding whether to retry."
+                      : outcome.text().isBlank()
+                          ? "The handling turn ended with "
+                              + outcome.ending().name()
+                              + " and no text."
+                          : outcome.text();
+              send(
+                  receiver,
+                  new SendMessageTool.Request(
+                      null, body, message, false, finalReplyMissing, "persistent", null),
+                  true,
+                  outcome.ending().name());
+            }
           }
           endRequest(original, outcome.ending());
           return null;
         });
+  }
+
+  /** Actual job failures, distinct from a requested cancellation or an exhausted allowance. */
+  private static boolean jobError(Outcome.Ending ending) {
+    return switch (ending) {
+      case UNAVAILABLE, SUB_AGENT_FAILED, SESSION_GONE, STUCK, CALL_FAILURES -> true;
+      default -> false;
+    };
   }
 
   private void endRequest(Route original, Outcome.Ending ending) {

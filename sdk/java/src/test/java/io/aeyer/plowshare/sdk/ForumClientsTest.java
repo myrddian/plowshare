@@ -73,6 +73,73 @@ class ForumClientsTest {
   }
 
   @Test
+  void generated_error_status_can_follow_a_final_reply_but_cannot_request_another_reply() {
+    Instant now = Instant.parse("2026-11-16T00:00:00Z");
+    var status =
+        new MessagingClient.Delivery(
+            "bdm_Error",
+            "ins_Worker",
+            "ins_Sender",
+            "bdm_Request",
+            false,
+            false,
+            true,
+            "handled",
+            "UNAVAILABLE",
+            null,
+            null,
+            "cnv_Sender",
+            "cnv_Worker",
+            null,
+            now,
+            "The recipient job had an error.");
+    assertEquals(false, status.finalReply());
+    assertEquals(true, status.generated());
+    for (String ending : List.of("ANSWERED", "AWAITING")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              new MessagingClient.Delivery(
+                  "bdm_Error",
+                  "ins_Worker",
+                  "ins_Sender",
+                  "bdm_Request",
+                  false,
+                  false,
+                  true,
+                  "handled",
+                  ending,
+                  null,
+                  null,
+                  "cnv_Sender",
+                  "cnv_Worker",
+                  null,
+                  now,
+                  "Status"));
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new MessagingClient.Delivery(
+                "bdm_Error",
+                "ins_Worker",
+                "ins_Sender",
+                "bdm_Request",
+                true,
+                false,
+                true,
+                "handled",
+                "UNAVAILABLE",
+                null,
+                null,
+                "cnv_Sender",
+                "cnv_Worker",
+                null,
+                now,
+                "Status"));
+  }
+
+  @Test
   void native_agent_forum_authorship_is_readable_without_private_execution_log_links()
       throws Exception {
     ObjectNode value = fixture("board.open").path("message").deepCopy();

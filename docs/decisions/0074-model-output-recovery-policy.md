@@ -52,7 +52,9 @@ vLLM and not a call into SYSTEM document ingestion/compaction.
 Delegation retains the caller's account, home, allowance, cancellation and
 configured inference deadlines. There is no independent recovery allowance,
 automatic model escalation or retry of a provider failure. A one-call worker
-consumes the same root allowance as its parent. This capability adds no new
+consumes the same root allowance as its parent. Recovery-tagged calls cannot use
+the retained-child failure-retry path to add another attempt. Ordinary explicit
+delegation retries keep their existing lifecycle. This capability adds no new
 end-to-end workflow deadline; existing provider/queue deadline enforcement limits
 still apply. Hooks may refuse a recovery command but cannot rewrite it into
 research or change its retained input. Post-hook uncertainty retains the existing

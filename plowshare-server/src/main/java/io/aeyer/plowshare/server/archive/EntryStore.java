@@ -12,18 +12,26 @@ import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.Invocation;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.api.LogSearchView;
 import io.aeyer.plowshare.server.cache.ProjectionCache;
 import io.aeyer.plowshare.server.cache.SnapshotCache;
+import io.aeyer.plowshare.server.information.InformationLogSql;
+import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -32,9 +40,11 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.jdbc.core.ArgumentPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.RowMapperResultSetExtractor;
 
 /**
  * Every message each conversation has held, in the order it held them.
@@ -86,7 +96,7 @@ import org.springframework.jdbc.core.RowMapper;
  * <p>Framework-free apart from {@link JdbcTemplate}, and wired by {@link ArchiveConfig}, matching
  * {@link TurnStore}, {@link CompactionStore} and {@link ConversationStore}.
  */
-public final class EntryStore {
+public final class EntryStore implements ConversationSearchRepository {
 
   private static final String COLUMNS =
       "conversation_id, ordinal, kind, role, content, tool_call_id, tool_calls,"
@@ -871,125 +881,83 @@ public final class EntryStore {
   private static final String SNIPPET_OPTIONS =
       "StartSel=\"[\", StopSel=\"]\", MaxWords=60, MinWords=25, MaxFragments=2";
 
-  /*
-   * WHAT A SEARCH LOOKED AT AND WHAT IT COULD NOT, plus how many matched, in
-   * ONE statement.
+  /**
+   * BM25 (k1=1.2, b=.75) over the authorized selection. Corpus statistics and matches use the same
+   * statement snapshot and visibility predicate. Repeated matching excerpts are grouped before
+   * OFFSET/LIMIT, so a thousand copies cannot occupy the candidate window. Only twenty occurrence
+   * references per group cross the boundary; sourceCount reports any omitted copies.
    *
-   * ONE STATEMENT AND NOT FOUR, for DocumentStore.coverage's reason exactly:
-   * four counts asked separately are four questions with writes between them,
-   * and the arithmetic a reader does on them -- "so the tier is this big" --
-   * would be over a total that was never true. Here that matters more than it
-   * does for a corpus, because the three reach counts are asserted to PARTITION
-   * the tier, and a partition assembled out of four instants is not one.
-   *
-   * THE THREE ARE EXCLUSIVE AND EXHAUSTIVE, and the schema is what makes that
-   * exact rather than approximate. `entries_an_ejected_payload_is_gone` makes
-   * `content IS NULL` and `ejected_at IS NOT NULL` one fact, so the first
-   * FILTER's `content IS NOT NULL` and the second's predicate cannot both be
-   * true and cannot both be false for a row with a role;
-   * `entries_only_a_tool_result_is_ejected` keeps every ejected row on the
-   * role-carrying side, so the third FILTER cannot overlap the second.
-   *
-   * `matched` REPEATS THE READ'S PREDICATE and is not `count(*)` over a
-   * subquery of it, because the two have to agree about what a hit is and the
-   * cheapest way to make them agree is to write the same three clauses. The
-   * expensive way -- a window function on the read itself -- cannot answer at
-   * all for a page past the end, which is COUNT_OF's argument one method over.
-   */
-  static final String REACH_SQL =
-      """
-            SELECT count(*) FILTER (WHERE e.role IS NOT NULL AND e.content IS NOT NULL)
-                       AS searched,
-                   count(*) FILTER (WHERE e.ejected_at IS NOT NULL) AS ejected,
-                   count(*) FILTER (WHERE e.role IS NULL) AS recorded_only,
-                   count(*) FILTER (WHERE e.role IS NOT NULL AND e.text_search @@ q
-                                      AND ts_rank_cd(e.text_search, q) > 0) AS matched
-              FROM websearch_to_tsquery('%s', ?) AS q
-              CROSS JOIN entries e
-              JOIN conversations c ON c.id = e.conversation_id
-             WHERE c.project_id IS NOT DISTINCT FROM CAST(? AS BIGINT) /*information*/"""
-          .formatted(TEXT_SEARCH_CONFIGURATION);
-
-  /*
-   * ONE PAGE OF WHAT A QUESTION'S WORDS REACHED, best first.
-   *
-   * `role IS NOT NULL` IS THE WHOLE OF WHICH KINDS ARE SEARCHABLE, and it is
-   * half of THAT_PROJECT rather than a new list of kinds on purpose. The
-   * schema derives `role` from `kind` with a CASE that has no ELSE
-   * (`entries_role_matches_kind`) and `EntryKind.projects()` is `role != null`
-   * on the enum, so this clause selects exactly the four kinds that are the
-   * conversation -- and a ninth kind added later is invisible to search until
-   * somebody classifies it, which is EntryKind's own preference for a missing
-   * message over a leaked one, arriving here for free.
-   *
-   * THAT_PROJECT'S OTHER HALF IS DELIBERATELY ABSENT. `superseded_by IS NULL`
-   * is what a projection needs and is the opposite of what a search does: a
-   * fold does not unsay anything, and the part of a long conversation a model
-   * can no longer see is most of what somebody searching a log is after. A hit
-   * carries `superseded_by` so a reader knows which of the two it is looking
-   * at.
-   *
-   * AND THE `ts_rank_cd(...) > 0` PREDICATE IS LOAD-BEARING, which is V21's
-   * finding transferred and not a decoration. `websearch_to_tsquery` reads a
-   * leading dash as negation, so a question containing `-alpha` becomes
-   * `!'alpha'` -- which MOST ROWS SATISFY, at rank 0. `ts_rank_cd` is a plain
-   * function and answers 0 rather than declining to answer, so without this
-   * clause a question that named no word to match would come back as the whole
-   * tier, ranked, with a LIMIT scooping up whichever rows the scan reached
-   * first and every one of them carrying a real-looking rank.
-   *
-   * THE TIE IS BROKEN IN SQL, WHICH THE VECTOR HALF MAY NOT DO. A GIN index
-   * supplies the FILTER and the ranking is a Sort over the bitmap, so a second
-   * ORDER BY key costs the plan nothing -- measured, and asserted in
-   * LogSearchTest. An HNSW index supplies the ORDER instead, which is why
-   * DocumentStore.SEARCH_SQL breaks its ties in Java. It is required rather
-   * than tidy: a LIMIT over an unbroken tie takes an arbitrary subset of the
-   * tied rows, so the candidate SET and not merely its order would vary
-   * between two runs of one question. The key is conversation order --
-   * IN_CONVERSATION_ORDER, with the conversation in front of it because a
-   * search crosses conversations -- so equally ranked hits read in the order
-   * they were said.
-   *
-   * ts_headline IS COMPUTED ON THE OUTSIDE OF THE LIMIT, and that is not a
-   * style choice. It re-parses the whole document it is given, so computing it
-   * in the same SELECT as the filter would re-parse every entry that matched
-   * and then throw all but a page of them away. Here the subquery ranks,
-   * orders and cuts to the page, and the outer SELECT parses the handful of
-   * rows that survived.
-   *
-   * THE TIER JOIN IS `conversations`, because `entries` has no project column
-   * and V14 moved the project onto the conversation. HOME_MATCHES' predicate,
-   * spelled the same way, for the reason ConversationStore gives: `= NULL` is
-   * NULL, so a plain equality would return nothing for the global tier, which
-   * is the ordinary case.
-   *
-   * IT DOES NOT FILTER ON `origin`, unlike ConversationStore.inHome. That read
-   * lists what a person opened; this one searches what was said, and the work
-   * a delegated run did is said in a child conversation. A search that omitted
-   * those would answer "nothing" about a tier in which the thing was
-   * discussed at length, one conversation down -- which is the confident-empty
-   * answer the reach counts exist to prevent, arriving through a WHERE clause
-   * instead.
+   * <p>The existing web-search syntax still controls matching, including phrases and exclusions.
+   * Pure negation has no positive evidence and remains empty. No provider or asynchronous index is
+   * needed. Stored search_length avoids expanding every corpus vector to calculate average length.
    */
   static final String SEARCH_SQL =
       """
-            SELECT h.conversation_id, h.ordinal, h.turn_ordinal, h.kind, h.rank,
-                   left(ts_headline('%s', h.content, h.query, '%s'), ?) AS snippet,
-                   h.length, h.superseded_by, h.handle, h.recorded_at, md5(h.content) AS source_revision
-              FROM (SELECT e.conversation_id, e.ordinal, e.turn_ordinal, e.kind, e.content,
-                           length(e.content) AS length, e.superseded_by, e.handle,
-                           e.recorded_at, q AS query, ts_rank_cd(e.text_search, q) AS rank
-                      FROM websearch_to_tsquery('%s', ?) AS q
-                      CROSS JOIN entries e
-                      JOIN conversations c ON c.id = e.conversation_id
-                     WHERE c.project_id IS NOT DISTINCT FROM CAST(? AS BIGINT) /*information*/
-                       AND e.role IS NOT NULL
-                       AND e.text_search @@ q
-                       AND ts_rank_cd(e.text_search, q) > 0
-                     ORDER BY rank DESC, e.conversation_id, e.turn_ordinal, e.ordinal
-                     OFFSET ? LIMIT ?) AS h
-             ORDER BY h.rank DESC, h.conversation_id, h.turn_ordinal, h.ordinal"""
-          .formatted(TEXT_SEARCH_CONFIGURATION, SNIPPET_OPTIONS, TEXT_SEARCH_CONFIGURATION);
+      WITH params AS NOT MATERIALIZED (
+        SELECT websearch_to_tsquery('english', ?) AS query,
+               to_tsvector('english', ?) AS words, CAST(? AS bigint) AS project,
+               CAST(? AS text) AS conversation
+      ), owners AS MATERIALIZED (
+        SELECT c.id FROM conversations c CROSS JOIN params p
+         WHERE c.project_id IS NOT DISTINCT FROM p.project
+           AND (p.conversation IS NULL OR c.id=p.conversation) /*information*/
+      ), eligible AS MATERIALIZED (
+        SELECT e.role,e.ejected_at,e.search_length,e.text_search
+          FROM entries e JOIN owners o ON o.id=e.conversation_id
+      ), reach AS (
+        SELECT count(*) FILTER(WHERE role IS NOT NULL AND search_length IS NOT NULL)::integer AS searched,
+               count(*) FILTER(WHERE ejected_at IS NOT NULL)::integer AS ejected,
+               count(*) FILTER(WHERE role IS NULL)::integer AS recorded_only FROM eligible
+      ), corpus AS MATERIALIZED (
+        SELECT count(*)::double precision AS n, greatest(avg(search_length),1)::double precision AS avgdl
+          FROM eligible WHERE role IS NOT NULL AND search_length IS NOT NULL
+      ), terms AS (
+        SELECT unnest(tsvector_to_array(words)) AS term FROM params
+      ), frequencies AS MATERIALIZED (
+        SELECT term, count(*) FILTER(WHERE e.text_search @@ plainto_tsquery('simple',term)) AS df
+          FROM terms CROSS JOIN eligible e WHERE e.role IS NOT NULL GROUP BY term
+      ), scored AS MATERIALIZED (
+        SELECT e.conversation_id,e.ordinal,e.turn_ordinal,e.kind,e.content,e.superseded_by,
+               e.handle,e.recorded_at,md5(e.content) AS source_revision,length(e.content) AS source_length,
+               (SELECT sum(
+          ln(1+(c.n-f.df+0.5)/(f.df+0.5)) *
+          (greatest(cardinality(t.positions),1)*2.2) /
+          (greatest(cardinality(t.positions),1)+1.2*(0.25+0.75*e.search_length/c.avgdl)))
+          FROM unnest(e.text_search) t JOIN frequencies f ON f.term=t.lexeme CROSS JOIN corpus c) AS rank
+          FROM entries e JOIN owners o ON o.id=e.conversation_id CROSS JOIN params p
+         WHERE e.role IS NOT NULL AND e.content IS NOT NULL
+           AND e.text_search @@ p.query AND ts_rank_cd(e.text_search,p.query)>0
+      ), excerpts AS MATERIALIZED (
+        SELECT s.conversation_id,s.ordinal,s.turn_ordinal,s.kind,s.superseded_by,s.handle,
+               s.recorded_at,s.source_revision,s.source_length,s.rank,
+               left(ts_headline('english',s.content,p.query,
+          'StartSel="[", StopSel="]", MaxWords=60, MinWords=25, MaxFragments=2'),4000) AS snippet
+          FROM scored s CROSS JOIN params p WHERE s.rank>0
+      ), keyed AS MATERIALIZED (
+        SELECT e.*, regexp_replace(btrim(snippet),'\\s+',' ','g') AS passage_key FROM excerpts e
+      ), grouped AS (
+        SELECT passage_key, max(rank) AS score, count(*)::integer AS source_count,
+          (array_agg(conversation_id || ':' || ordinal ORDER BY rank DESC,conversation_id,ordinal))[1] AS id,
+          to_jsonb((array_agg(jsonb_build_object(
+            'conversationId',conversation_id,'ordinal',ordinal,'turnOrdinal',turn_ordinal,
+            'kind',kind,'handle',handle,'recordedAt',recorded_at,'sourceRevision',source_revision,
+            'length',source_length,'supersededBy',superseded_by)
+            ORDER BY rank DESC,conversation_id,ordinal))[1:20])::text AS sources
+          FROM keyed GROUP BY passage_key
+      ), page AS (
+        SELECT g.*,e.conversation_id AS representative_conversation,e.turn_ordinal AS representative_turn,
+               e.ordinal AS representative_ordinal
+          FROM grouped g JOIN keyed e ON e.conversation_id || ':' || e.ordinal=g.id
+         ORDER BY score DESC,e.conversation_id,e.turn_ordinal,e.ordinal OFFSET ? LIMIT ?
+      )
+      SELECT reach.*, (SELECT count(*)::integer FROM grouped) AS matched,
+             e.conversation_id,e.ordinal,e.turn_ordinal,e.kind,page.score AS rank,e.snippet,
+             e.source_length AS length,e.superseded_by,e.handle,e.recorded_at,
+             e.source_revision,page.sources,page.source_count
+        FROM reach LEFT JOIN page ON true
+        LEFT JOIN keyed e ON e.conversation_id || ':' || e.ordinal=page.id
+       ORDER BY page.score DESC,page.representative_conversation,page.representative_turn,page.representative_ordinal
+      """;
 
   /*
    * ordinal < ? excludes the summary entry itself, which carries the reach as
@@ -1093,8 +1061,78 @@ public final class EntryStore {
   private static final ObjectReader ASKED_IN =
       new ObjectMapper().readerFor(new TypeReference<List<EntryPage.Asked>>() {});
 
+  private static final ObjectReader SEARCH_SOURCES_IN =
+      new ObjectMapper()
+          .findAndRegisterModules()
+          .readerFor(new TypeReference<List<LogSearch.Source>>() {});
+
   private static final ObjectReader CALLS_IN =
       new ObjectMapper().readerFor(new TypeReference<List<ToolCall>>() {});
+
+  private Duration searchBudget = Duration.ofSeconds(2);
+
+  /** One finite SQL search budget; nested projection waits share its earlier deadline. */
+  public EntryStore useSearchBudget(Duration budget) {
+    if (budget == null
+        || budget.isZero()
+        || budget.isNegative()
+        || budget.compareTo(Duration.ofMinutes(1)) > 0)
+      throw new IllegalArgumentException("Search budget must be positive and at most one minute");
+    searchBudget = budget;
+    return this;
+  }
+
+  private <T> T searchQuery(String sql, ResultSetExtractor<T> mapper, Object... args) {
+    return ReadDeadline.within(
+        searchBudget,
+        () -> {
+          long deadline = ReadDeadline.deadlineNanos(searchBudget);
+          T result =
+              informationScoped
+                  ? visibility.read(
+                      informationAccount, facts -> searchQuery(sql, mapper, deadline, facts, args))
+                  : searchQuery(sql, mapper, deadline, null, args);
+          if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
+          return result;
+        });
+  }
+
+  private <T> T searchQuery(
+      String sql,
+      ResultSetExtractor<T> mapper,
+      long deadline,
+      InformationLogVisibility.Facts facts,
+      Object... args) {
+    var bound = new ArrayList<>(Arrays.asList(args));
+    if (facts != null) {
+      int at = sql.indexOf("/*information*/");
+      int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
+      var filter = InformationLogSql.visible("c.id", informationAccount, facts);
+      bound.addAll(before, filter.arguments());
+      sql = sql.replace("/*information*/", " AND " + filter.sql());
+    } else sql = sql.replace("/*information*/", "");
+    var setter = new ArgumentPreparedStatementSetter(bound.toArray());
+    try {
+      T result =
+          jdbc.query(
+              sql,
+              statement -> {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) throw new ReadUnavailableException();
+                // pgJDBC owns cancellation of the active statement; expiry never returns late data.
+                int timeout = (int) Math.max(1, (remaining + 999_999_999L) / 1_000_000_000L);
+                int transactionTimeout = statement.getQueryTimeout();
+                statement.setQueryTimeout(
+                    transactionTimeout > 0 ? Math.min(transactionTimeout, timeout) : timeout);
+                setter.setValues(statement);
+              },
+              mapper);
+      if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
+      return result;
+    } finally {
+      setter.cleanupParameters();
+    }
+  }
 
   private Supplier<ConversationSearch> retrieval;
 
@@ -1103,12 +1141,12 @@ public final class EntryStore {
     return this;
   }
 
-  public io.aeyer.plowshare.server.api.LogSearchView searchView(
+  public LogSearchView searchView(
       Home home, String question, int skip, int most, String mode, String snapshot) {
     return searchView(home, question, skip, most, mode, snapshot, null);
   }
 
-  public io.aeyer.plowshare.server.api.LogSearchView searchView(
+  public LogSearchView searchView(
       Home home,
       String question,
       int skip,
@@ -1116,14 +1154,26 @@ public final class EntryStore {
       String mode,
       String snapshot,
       UsageAttribution owner) {
+    return searchView(home, question, skip, most, mode, snapshot, owner, null);
+  }
+
+  public LogSearchView searchView(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String mode,
+      String snapshot,
+      UsageAttribution owner,
+      String conversation) {
+    validateConversation(conversation);
     if (mode == null && snapshot == null)
-      return io.aeyer.plowshare.server.api.LogSearchView.of(
-          search(home, question, skip, most), skip, most);
+      return LogSearchView.of(search(home, question, skip, most, conversation), skip, most);
     ConversationSearch.mode(mode);
     if (retrieval == null) throw new ValidationException("Semantic retrieval is not configured");
     return owner == null
-        ? retrieval.get().search(home, question, skip, most, mode, snapshot)
-        : retrieval.get().search(home, question, skip, most, mode, snapshot, owner);
+        ? retrieval.get().search(home, question, skip, most, mode, snapshot, conversation)
+        : retrieval.get().search(home, question, skip, most, mode, snapshot, owner, conversation);
   }
 
   private final JdbcTemplate jdbc;
@@ -1161,6 +1211,7 @@ public final class EntryStore {
    */
   public EntryStore forAccount(String account) {
     EntryStore copy = new EntryStore(jdbc, now, transactions, artifacts);
+    copy.searchBudget = searchBudget;
     copy.informationScoped = true;
     copy.visibility = visibility;
     copy.informationAccount = account;
@@ -1208,23 +1259,20 @@ public final class EntryStore {
   private <T> T informationQuery(
       String sql,
       org.springframework.jdbc.core.ResultSetExtractor<T> mapper,
-      io.aeyer.plowshare.server.information.InformationLogVisibility.Facts facts,
+      InformationLogVisibility.Facts facts,
       Object... args) {
     String marker = "/*information*/";
     int at = sql.indexOf(marker);
     var bound = new java.util.ArrayList<>(java.util.Arrays.asList(args));
     int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
-    var filter =
-        io.aeyer.plowshare.server.information.InformationLogSql.visible(
-            "c.id", informationAccount, facts);
+    var filter = InformationLogSql.visible("c.id", informationAccount, facts);
     bound.addAll(before, filter.arguments());
     return jdbc.query(sql.replace(marker, " AND " + filter.sql()), mapper, bound.toArray());
   }
 
   private <T> java.util.List<T> informationRows(
       String sql, org.springframework.jdbc.core.RowMapper<T> mapper, Object... args) {
-    return informationQuery(
-        sql, new org.springframework.jdbc.core.RowMapperResultSetExtractor<>(mapper), args);
+    return informationQuery(sql, new RowMapperResultSetExtractor<>(mapper), args);
   }
 
   public EntryStore(JdbcTemplate jdbc) {
@@ -1297,6 +1345,36 @@ public final class EntryStore {
    */
   public EntryRecord append(String conversationId, int turnOrdinal, LoggedEntry entry) {
     return append(conversationId, turnOrdinal, entry, null);
+  }
+
+  /** Original agent_run arguments for one exact parent/child link, including covered entries. */
+  public Optional<ToolCall> delegationCall(String parent, String child) {
+    String owner = ConversationStore.named(parent);
+    String wanted = ConversationStore.named(child);
+    requireInformation(owner);
+    List<ToolCall> found =
+        ArchiveUnavailableException.translating(
+            "read the original delegated call",
+            () ->
+                jdbc.query(
+                    """
+                SELECT tool ->> 'id' AS id, tool ->> 'name' AS name,
+                       tool ->> 'arguments' AS arguments
+                  FROM conversations c
+                  JOIN entries e ON e.conversation_id = c.parent_id
+                  CROSS JOIN LATERAL jsonb_array_elements(e.tool_calls) tool
+                 WHERE c.id = ? AND c.parent_id = ? AND e.kind = 'answer'
+                   AND tool ->> 'id' = c.opened_by_call AND tool ->> 'name' = 'agent_run'
+                 LIMIT 2
+                """,
+                    (row, index) ->
+                        new ToolCall(
+                            row.getString("id"), row.getString("name"), row.getString("arguments")),
+                    wanted,
+                    owner));
+    if (found.size() > 1)
+      throw new IllegalStateException("The retained delegation has ambiguous original arguments");
+    return found.stream().findFirst();
   }
 
   /** Records the immutable owning job; null means an unbound or legacy entry, never a guess. */
@@ -2453,81 +2531,130 @@ public final class EntryStore {
    *     up, in the tool
    */
   public LogSearch search(Home home, String question, int skip, int most) {
+    return search(home, question, skip, most, null);
+  }
+
+  /** A conversation narrows the home; a missing or foreign identity never widens the search. */
+  public LogSearch search(Home home, String question, int skip, int most, String conversation) {
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(question, "question");
-    if (skip < 0 || most < 1) {
-      throw new IllegalArgumentException(
-          "a page of hits starts at 0 or later and holds 1 or more, not " + skip + " and " + most);
-    }
+    if (skip < 0 || most < 1 || most > 200)
+      throw new IllegalArgumentException("Invalid search window");
+    validateConversation(conversation);
     return ArchiveUnavailableException.translating(
-        "search a tier's conversation log",
-        () -> {
-          Long project = ProjectIds.toRead(jdbc, home);
-          Counted counted = informationQuery(REACH_SQL, COUNTED, question, project);
-          if (counted == null || counted.reach.total() == 0) {
-            return LogSearch.NONE;
-          }
-          if (counted.matched == 0) {
-            // The reach still travels: "nothing matched" and "there was
-            // nothing here to match against" are different conclusions, and
-            // the caller is the one that has to tell a reader which.
-            return new LogSearch(List.of(), 0, counted.reach);
-          }
-          return new LogSearch(
-              informationRows(
-                  SEARCH_SQL,
-                  HIT_MAPPER,
-                  MOST_CHARACTERS_PER_SNIPPET,
-                  question,
-                  project,
-                  skip,
-                  most),
-              counted.matched,
-              counted.reach);
-        });
+        "search conversation evidence",
+        () ->
+            searchQuery(
+                SEARCH_SQL,
+                rs -> {
+                  if (!rs.next()) return LogSearch.NONE;
+                  var reach =
+                      new LogSearch.Reach(
+                          rs.getInt("searched"), rs.getInt("ejected"), rs.getInt("recorded_only"));
+                  int total = rs.getInt("matched");
+                  List<LogSearch.Hit> hits = new ArrayList<>();
+                  do {
+                    if (rs.getString("conversation_id") != null) hits.add(searchHit(rs));
+                  } while (rs.next());
+                  return new LogSearch(hits, total, reach);
+                },
+                question,
+                question,
+                ProjectIds.toRead(jdbc, home),
+                conversation,
+                skip,
+                most));
+  }
+
+  /** Fresh coverage for replayed snapshots, without reranking or fetching content. */
+  public LogSearch.Reach searchReach(Home home, String conversation) {
+    validateConversation(conversation);
+    return searchQuery(
+        "SELECT count(*) FILTER(WHERE e.role IS NOT NULL AND e.content IS NOT NULL)::integer AS searched,"
+            + "count(*) FILTER(WHERE e.ejected_at IS NOT NULL)::integer AS ejected,"
+            + "count(*) FILTER(WHERE e.role IS NULL)::integer AS recorded_only FROM entries e JOIN conversations c ON c.id=e.conversation_id"
+            + " WHERE c.project_id IS NOT DISTINCT FROM CAST(? AS bigint) AND (?::text IS NULL OR c.id=?::text) /*information*/",
+        rs -> {
+          rs.next();
+          return new LogSearch.Reach(
+              rs.getInt("searched"), rs.getInt("ejected"), rs.getInt("recorded_only"));
+        },
+        ProjectIds.toRead(jdbc, home),
+        conversation,
+        conversation);
+  }
+
+  public static void validateConversation(String conversation) {
+    if (conversation != null
+        && (conversation.isBlank()
+            || !conversation.equals(conversation.strip())
+            || conversation.length() > 256
+            || conversation.chars().anyMatch(Character::isISOControl)))
+      throw new ValidationException("Invalid conversation identity");
+  }
+
+  private static LogSearch.Hit searchHit(ResultSet rs) throws SQLException {
+    try {
+      List<LogSearch.Source> sources = SEARCH_SOURCES_IN.readValue(rs.getString("sources"));
+      return new LogSearch.Hit(
+          rs.getString("conversation_id"),
+          rs.getInt("ordinal"),
+          rs.getInt("turn_ordinal"),
+          EntryKind.of(rs.getString("kind")),
+          rs.getDouble("rank"),
+          rs.getString("snippet"),
+          rs.getInt("length"),
+          rs.getObject("superseded_by", Integer.class),
+          rs.getObject("handle", UUID.class),
+          instant(rs, "recorded_at"),
+          rs.getString("source_revision"),
+          sources,
+          rs.getInt("source_count"));
+    } catch (JsonProcessingException invalid) {
+      throw new SQLException("Invalid persisted search references", invalid);
+    }
   }
 
   /**
-   * The four numbers {@code REACH_SQL} answers with, kept together because they came out of one
-   * statement and describe one instant.
+   * Batch refresh of snapshot references before disclosure. Hash, home and current input authority
+   * must still match. One query replaces per-candidate revision and metadata reads; missing sources
+   * are suppressed without filling their snapshot slots with later results.
    */
-  private record Counted(LogSearch.Reach reach, int matched) {}
-
-  private static final ResultSetExtractor<Counted> COUNTED =
-      rs ->
-          rs.next()
-              ? new Counted(
-                  new LogSearch.Reach(
-                      rs.getInt("searched"), rs.getInt("ejected"), rs.getInt("recorded_only")),
-                  rs.getInt("matched"))
-              : null;
-
-  /*
-   * `snippet` is left(ts_headline(...), ?) and `length` is length(content),
-   * which is a different pair from PAGE_MAPPER's and is why LogSearch.Hit is
-   * not EntryPage.Row: an excerpt is the opening of an entry and a snippet is
-   * the middle of one, so `length > snippet.length()` says how much of the
-   * entry is elsewhere rather than how much of it comes after.
-   *
-   * `content IS NOT NULL` holds for every row this mapper sees -- an ejected
-   * payload carries no lexemes and cannot match -- so `snippet` is never NULL
-   * and Hit's requireNonNull is a claim about the SQL rather than a guard on a
-   * caller.
-   */
-  private static final RowMapper<LogSearch.Hit> HIT_MAPPER =
-      (rs, rowNum) ->
-          new LogSearch.Hit(
-              rs.getString("conversation_id"),
-              rs.getInt("ordinal"),
-              rs.getInt("turn_ordinal"),
-              EntryKind.of(rs.getString("kind")),
-              rs.getDouble("rank"),
-              rs.getString("snippet"),
-              rs.getInt("length"),
-              rs.getObject("superseded_by", Integer.class),
-              rs.getObject("handle", UUID.class),
-              instant(rs, "recorded_at"),
-              rs.getString("source_revision"));
+  public List<LogSearch.Source> searchSources(Home home, List<LogSearch.Reference> expected) {
+    if (expected.isEmpty()) return List.of();
+    if (expected.size() > 4000) throw new IllegalArgumentException("Too many search references");
+    var identities = expected.stream().map(LogSearch.Reference::id).distinct().toList();
+    String places = String.join(",", Collections.nCopies(identities.size(), "?"));
+    var args = new ArrayList<Object>();
+    args.add(ProjectIds.toRead(jdbc, home));
+    args.addAll(identities);
+    var rows =
+        searchQuery(
+            "SELECT e.conversation_id,e.ordinal,e.turn_ordinal,e.kind,e.handle,"
+                + "e.recorded_at,length(e.content) AS length,e.superseded_by,md5(e.content) AS source_revision FROM entries e JOIN conversations c ON c.id=e.conversation_id"
+                + " WHERE c.project_id IS NOT DISTINCT FROM CAST(? AS bigint) /*information*/"
+                + " AND e.content IS NOT NULL AND e.role IS NOT NULL AND e.conversation_id || ':' || e.ordinal IN ("
+                + places
+                + ")",
+            new RowMapperResultSetExtractor<LogSearch.Source>(
+                (rs, n) ->
+                    new LogSearch.Source(
+                        rs.getString("conversation_id"),
+                        rs.getInt("ordinal"),
+                        rs.getInt("turn_ordinal"),
+                        rs.getString("kind"),
+                        rs.getString("handle"),
+                        instant(rs, "recorded_at"),
+                        rs.getString("source_revision"),
+                        rs.getInt("length"),
+                        rs.getObject("superseded_by", Integer.class))),
+            args.toArray());
+    var hashes = new HashMap<String, String>();
+    expected.forEach(source -> hashes.put(source.id(), source.sourceRevision()));
+    return rows.stream()
+        .filter(source -> Objects.equals(hashes.get(source.id()), source.sourceRevision()))
+        .toList();
+  }
 
   /**
    * Mark everything a fold covers as covered by it.

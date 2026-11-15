@@ -58,7 +58,7 @@ public final class StandardModelOutputRecovery implements ModelOutputRecovery {
       return terminal(
           request,
           Action.NEEDS_REVIEW,
-          "Tool-call markup is not a profile or repair instruction",
+          "Tool-call markup is not a field object or repair instruction",
           List.of(new Issue(Problem.CONTENT, "response", 0, 0)),
           "none");
     Decoded decoded = ModelOutputRecoveryCodec.decode(raw);

@@ -459,6 +459,52 @@ threads. Scraping or a failing export backend cannot replay work or change admis
 authorization, cancellation or durable lifecycle decisions. Use the restricted
 management listener described below for exporting all of these meters.
 
+### Server failure diagnostics
+
+Handled server/dependency exceptions at the HTTP and WebSocket request boundaries, and
+runtime model/tool failures, export `plowshare.failures` (Prometheus:
+`plowshare_failures_total`). The fixed labels are `source` (`http`, `websocket`,
+`runtime`) and `kind` (`session_gone`, `read_unavailable`, `workspace_unavailable`,
+`archive_unavailable`, `inference`, `other`). Caller errors such as invalid input,
+missing handles and ordinary conflicts are excluded at the request boundaries.
+Session loss is classified before its workspace-unavailable superclass. Read capacity
+failures remain distinct from archive outages even though both retain the existing
+`ARCHIVE_UNAVAILABLE` response code. Reporting changes neither reply semantics nor
+retry/reconciliation rules.
+
+```promql
+sum by (instance, source, kind) (increase(plowshare_failures_total[5m]))
+```
+
+These process-local counters count observations at handling boundaries, not unique
+incidents. A dependency outage can affect multiple requests or a parent and delegated
+run. Counts reset at restart; there is no database scan or historical backfill. A
+handler returning a failure outcome directly, rather than throwing an exception, is
+not observed by this counter. Existing inference attempt counters also retain failures
+that recover through a successful retry:
+
+```promql
+sum by (instance, lane, operation) (
+  increase(plowshare_inference_attempts_total{outcome="failed"}[5m])
+)
+```
+
+The `AggregateFailureReporter` logger emits WARN diagnostics containing the source,
+kind, cumulative observation count, exception type and bounded stack locations. It
+omits exception messages, suppressed exceptions, payloads, user/session/job identifiers
+and filesystem paths. Cause diagnostics stop after four exceptions and twelve frames
+per exception. Logs are sampled independently for each source/kind, with the first
+observation logged immediately and at most one diagnostic per
+`plowshare.telemetry.failures.log-interval` (default `PT30S`, must be positive).
+Every observation still increments its counter. This sampling applies to the new
+reporter; existing subsystem logs retain their own behavior.
+
+The bundled Grafana dashboard includes failure, ERROR-log, failed-inference and
+unavailable/session-gone job panels. `logback_events_total{level="error"}` alone
+cannot expose handled exceptions that never produce an ERROR log. Failure diagnostics
+and counters operate independently of droppable client events; the metrics registry
+and restricted scrape listener are still required for Prometheus collection.
+
 ### Actuator endpoints
 
 The `health`, `info` and `metrics` actuator endpoints are exposed on the main API
@@ -1043,3 +1089,14 @@ identities are refused, and disabling the authentication filter does not bypass
 the controller's role check. Request parameters and servlet-principal names are
 not substitutes for the filter's account context. Successful writes retain the
 existing raw-text, live-key and deployment-pin behavior.
+
+### Conversation search budget
+
+`plowshare.retrieval.search-budget` defaults to `2s` (positive, at most `1m`).
+Lexical ranking, grouped-reference refresh and passage repository reads inherit
+any earlier read deadline. JDBC query cancellation uses the remaining budget,
+rounded up to JDBC's whole-second timeout, and late results are rejected. This
+bounds these SQL executions; connection acquisition and cancellation cleanup
+still have the owning datasource/driver limits described above. Query embeddings
+retain their separate provider/admission budget and run outside SQL transactions.
+V269 adds the stored lexical length used by BM25; no embedding rebuild is needed.

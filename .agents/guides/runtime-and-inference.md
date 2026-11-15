@@ -50,6 +50,27 @@ can change reconstructed references/seams; it does not certify the whole old req
 Keep current read authority, speaker/provenance and usage attribution distinct.
 Live deltas are droppable previews; they neither replace nor guarantee log retention.
 
+Failed streaming calls retain bounded beginning/end samples of reasoning, partial
+answer text and tool-call fragments in nonprojected `DIAGNOSTIC` error entries,
+with character counts, truncation and timing. They are diagnostic evidence, never
+completed assistant messages or executable tool calls. Large captures use numbered
+parts within the trajectory entry excerpt limit so every retained sample is readable.
+Failed turns record their
+terminal summary without adding a projected assistant answer. Explicit retry uses
+the existing conversation continuation boundary, preserving completed tool results
+and current authority; it never automatically repeats an uncertain effect. A
+delegate can publish authorized thinking on its parent's preview channel without
+replacing the parent's answer, progress counters or terminal lifecycle.
+Ordinary delegated `UNAVAILABLE`/`SUB_AGENT_FAILED` outcomes are failure tool
+results, not fatal parent exceptions. `agent_run` can explicitly retry its own
+retained child by conversation, checking the original task/images, home, callee
+and current authority. Session-loss and mandatory review/stage contracts retain
+their owning gates; a failed reviewer never certifies an answer.
+
+Trace [Transcript](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Transcript.java), [EntryKind](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/EntryKind.java),
+[Projection](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Projection.java)/[Compaction](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java) and [ContextCountFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java).
+See the [conversation manual](../../docs/manual/03-architecture.md#log-trajectory-and-model-projection) for the user-facing comparison.
+
 ## Model-output recovery
 
 `ModelOutputRecovery` and its sandbox `modelOutput.recover` bridge implement the
@@ -64,10 +85,6 @@ with retained source references. Keep them out of model projection and compactio
 input. `ScriptStore.Input` carries a host-only observer excluded from JSON; it is
 not a guest capability or a second journal. Native repair commands cannot be
 rewritten by hooks into a different task or a worker with capabilities.
-
-Trace [Transcript](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Transcript.java), [EntryKind](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/EntryKind.java),
-[Projection](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Projection.java)/[Compaction](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java) and [ContextCountFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java).
-See the [conversation manual](../../docs/manual/03-architecture.md#log-trajectory-and-model-projection) for the user-facing comparison.
 
 ## Rules that are easy to miss
 
@@ -98,6 +115,13 @@ tokens are subsets, never additional totals. Cache hit rate is token-weighted
 cache-read/input, only with full valid paired coverage and no active or incomplete
 attempts in the selected cohort; zero input has no rate. Unknown cost does not
 hide valid token metrics.
+
+Handled model/tool dependency failures are observed through `FailureReporter` before
+conversion to an outcome. Retained runtime copies preserve the same reporter. Session
+loss and read-capacity failures have distinct fixed metric kinds and sampled, message-free
+WARN diagnostics; counts do not depend on job event delivery. JobStore also reports
+unexpected task/listener exceptions. These are boundary observations, not unique incident
+counts; see [server failure diagnostics](../../docs/server-administration.md#server-failure-diagnostics).
 
 ## Agent budget consent
 

@@ -8,7 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
@@ -156,6 +158,48 @@ class ConversationStoreTest {
     assertTrue(
         store.find("cnv_9999").isEmpty(),
         "asking whether this server holds a conversation is a question, not a mistake");
+  }
+
+  @Test
+  void delegation_recovery_requires_one_exact_parent_and_call_link() {
+    ConversationRecord parent = store.open(PAYMENTS, Budget.of(12));
+    ConversationRecord other = store.open(PAYMENTS, Budget.of(12));
+    ConversationRecord child =
+        store.log(Origin.DELEGATION, PAYMENTS, "reviewer", parent.id(), null, null, "call-one");
+    store.log(Origin.DELEGATION, PAYMENTS, "reviewer", other.id(), null, null, "call-one");
+    store.log(Origin.DELEGATION, PAYMENTS, "reviewer", parent.id(), null, null, "call-two");
+
+    ConversationRecord recovered = store.delegationOpenedBy(parent.id(), "call-one").orElseThrow();
+    assertEquals(child.id(), recovered.id());
+    assertEquals(parent.id(), recovered.parentId());
+    assertEquals(PAYMENTS, recovered.home());
+    assertEquals("reviewer", recovered.agent());
+    assertEquals(Origin.DELEGATION, recovered.origin());
+    assertNull(recovered.budget(), "the recovered child must not receive a second owned allowance");
+    assertTrue(store.delegationOpenedBy(parent.id(), "missing").isEmpty());
+    EntryStore entries = new EntryStore(jdbc);
+    ToolCall original =
+        new ToolCall(
+            "call-one",
+            "agent_run",
+            "{\"agent\":\"reviewer\",\"task\":\"Preserve this exact task\",\"images\":[\"image-one\"]}");
+    entries.append(parent.id(), 1, LoggedEntry.answer("", List.of(original)));
+    assertEquals(original, entries.delegationCall(parent.id(), child.id()).orElseThrow());
+    assertTrue(entries.delegationCall(other.id(), child.id()).isEmpty());
+    EntryRecord summary = entries.append(parent.id(), 1, LoggedEntry.summary("covered history"));
+    jdbc.update(
+        "UPDATE entries SET superseded_by=? WHERE conversation_id=? AND ordinal<?",
+        summary.ordinal(),
+        parent.id(),
+        summary.ordinal());
+    assertEquals(
+        original,
+        entries.delegationCall(parent.id(), child.id()).orElseThrow(),
+        "covered original arguments remain available for exact-child retry");
+
+    store.log(Origin.DELEGATION, PAYMENTS, "reviewer", parent.id(), null, null, "call-one");
+    assertThrows(
+        IllegalStateException.class, () -> store.delegationOpenedBy(parent.id(), "call-one"));
   }
 
   /**

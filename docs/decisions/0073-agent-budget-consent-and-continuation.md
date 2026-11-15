@@ -69,6 +69,13 @@ creating another task. Expired/stopped messages and revoked execution authority
 cannot resume. Background SYSTEM work and board scheduling windows do not receive
 agent budget consent; their existing lifecycle owners remain authoritative.
 
+An internal mandatory reviewer has no parent model tool slot. Live budget consent
+can resume its waiting stack, but automatic restart recovery of such a checkpoint
+is currently refused with the retained child and an inspection diagnostic. It must
+not silently discard the reviewer, recreate its work, or certify an unreviewed
+answer. Restoring that internal review requires an explicit retained-review
+checkpoint contract beyond the ordinary delegated-call slots.
+
 The budget variant is optional in shared approval replies so older command-only
 records retain their wire shape. TypeScript, Python, Go and .NET contracts are
 regenerated from the owning schemas. Client prompts display exact counts and

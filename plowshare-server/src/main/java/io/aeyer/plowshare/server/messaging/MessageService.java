@@ -94,7 +94,18 @@ public interface MessageService
       if (replyTo != null) replyTo = MessagePayload.identifier(replyTo, "bdm_");
       if (message.equals(replyTo)
           || finalReply && replyTo == null
-          || generated && (!finalReply || ending == null))
+          || generated
+              && (replyTo == null
+                  || ending == null
+                  || !finalReply
+                      && (replyExpected
+                          || !Set.of(
+                                  "UNAVAILABLE",
+                                  "SUB_AGENT_FAILED",
+                                  "SESSION_GONE",
+                                  "STUCK",
+                                  "CALL_FAILURES")
+                              .contains(ending))))
         throw new IllegalArgumentException("Invalid message reply relationship");
       if (ending != null) Outcome.Ending.valueOf(ending);
     }

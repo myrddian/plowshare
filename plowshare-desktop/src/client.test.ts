@@ -61,6 +61,10 @@ function fixture(
     code: 'OK',
     payload: { id: payload.job, state: 'RUNNING' },
   });
+  let onResume: typeof onRun = async () => ({
+    code: 'ACCEPTED',
+    payload: { id: 'job-retry' },
+  });
   type HistoryReply = () => Outcome;
   let approvalRows: unknown[] = [];
   const conversationApprovalRows = new Map<string, unknown[]>();
@@ -170,6 +174,7 @@ function fixture(
             return onInformation(type, payload);
           if (type === 'orchestration.start') return onWorkflow(payload);
           if (type === 'agent.run') return onRun(payload);
+          if (type === 'conversation.resume') return onResume(payload);
           if (type === 'job.cancel')
             return {
               code: 'OK',
@@ -259,6 +264,9 @@ function fixture(
     },
     run: (value: typeof onRun) => {
       onRun = value;
+    },
+    resume: (value: typeof onResume) => {
+      onResume = value;
     },
     status: (value: typeof onStatus) => {
       onStatus = value;
@@ -3491,4 +3499,306 @@ await test('live configuration rechecks administration and discards replies afte
   } finally {
     f.client.dispose();
   }
+});
+
+await test('a confirmed server retry offer continues saved work once, preserving the original task', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Review the game',
+  });
+  f.status((payload) =>
+    payload.job !== 'job-one'
+      ? { code: 'OK', payload: { id: payload.job, state: 'RUNNING' } }
+      : {
+          code: 'OK',
+          payload: {
+            id: payload.job,
+            state: 'DONE',
+            outcome: {
+              ending: 'UNAVAILABLE',
+              answered: false,
+              resumable: true,
+              text: 'The model exceeded its time limit.',
+            },
+          },
+        },
+  );
+  f.push({ job: 'job-one', kind: 'ended', ending: 'UNAVAILABLE' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(present(f.client.state.jobs[0]).resumable, true);
+  assert.equal(
+    f.calls.filter((call) => call.type === 'conversation.resume').length,
+    0,
+  );
+  await f.client.dispatch({ action: 'conversation-retry', job: 'job-one' });
+  assert.deepEqual(
+    f.calls.filter((call) => call.type === 'conversation.resume'),
+    [
+      {
+        type: 'conversation.resume',
+        payload: { conversation: 'first', session: 'desktop-session' },
+      },
+    ],
+  );
+  const retry = present(f.client.state.jobs.at(-1));
+  assert.equal(retry.id, 'job-retry');
+  assert.equal(retry.task, 'Review the game');
+  assert.equal(retry.agent, 'bot');
+  assert.equal(retry.conversation, 'first');
+  assert.equal(retry.status, 'running');
+  await assert.rejects(
+    f.client.dispatch({ action: 'conversation-retry', job: 'job-one' }),
+    /newer work/,
+  );
+  assert.equal(f.calls.filter((call) => call.type === 'agent.run').length, 1);
+  assert.equal(
+    f.calls.filter((call) => call.type === 'conversation.resume').length,
+    1,
+  );
+});
+
+await test('retry refuses unknown outcomes and missing server offers without submitting', async (t) => {
+  for (const resumable of [undefined, false]) {
+    const f = fixture();
+    t.after(() => f.client.dispose());
+    await connect(f.client);
+    await f.client.dispatch({
+      action: 'run',
+      conversation: 'first',
+      agent: 'bot',
+      text: 'Task',
+    });
+    await assert.rejects(
+      f.client.dispatch({ action: 'conversation-retry', job: 'job-one' }),
+      /confirmed retry/,
+    );
+    f.status(() => ({
+      code: 'OK',
+      payload: {
+        id: 'job-one',
+        state: 'DONE',
+        outcome: {
+          ending: 'UNAVAILABLE',
+          answered: false,
+          ...(resumable === undefined ? {} : { resumable }),
+        },
+      },
+    }));
+    f.push({ job: 'job-one', kind: 'ended', ending: 'UNAVAILABLE' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await assert.rejects(
+      f.client.dispatch({ action: 'conversation-retry', job: 'job-one' }),
+      /confirmed retry/,
+    );
+    assert.equal(
+      f.calls.filter((call) => call.type === 'conversation.resume').length,
+      0,
+    );
+  }
+});
+
+await test('an uncertain retry stays tracked and cannot be resubmitted', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Task',
+  });
+  f.status(() => ({
+    code: 'OK',
+    payload: {
+      id: 'job-one',
+      state: 'DONE',
+      outcome: { ending: 'SUB_AGENT_FAILED', answered: false, resumable: true },
+    },
+  }));
+  f.push({ job: 'job-one', kind: 'ended', ending: 'SUB_AGENT_FAILED' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  f.resume(async () => {
+    throw new Error('Connection lost after sending');
+  });
+  await assert.rejects(
+    f.client.dispatch({ action: 'conversation-retry', job: 'job-one' }),
+    /Connection lost/,
+  );
+  assert.equal(present(f.client.state.jobs.at(-1)).status, 'unknown');
+  await assert.rejects(
+    f.client.dispatch({ action: 'conversation-retry', job: 'job-one' }),
+    /newer work/,
+  );
+  assert.equal(
+    f.calls.filter((call) => call.type === 'conversation.resume').length,
+    1,
+  );
+});
+
+await test('failed continuation receipts survive reopening and regain retry only after server reconciliation', async (t) => {
+  const f = fixture();
+  const reopened = fixture();
+  t.after(() => f.client.dispose());
+  t.after(() => reopened.client.dispose());
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Private task not journaled',
+  });
+  f.status(() => ({
+    code: 'OK',
+    payload: {
+      id: 'job-one',
+      state: 'DONE',
+      outcome: {
+        ending: 'UNAVAILABLE',
+        answered: false,
+        resumable: true,
+        text: 'Private partial output not journaled',
+      },
+    },
+  }));
+  f.push({ job: 'job-one', kind: 'ended', ending: 'UNAVAILABLE' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const receipts = f.client.savedJobs();
+  assert.equal(receipts.length, 1);
+  assert.equal(JSON.stringify(receipts).includes('Private'), false);
+  await connect(reopened.client);
+  reopened.status(() => ({
+    code: 'OK',
+    payload: {
+      id: 'job-one',
+      state: 'DONE',
+      outcome: { ending: 'UNAVAILABLE', answered: false, resumable: true },
+    },
+  }));
+  await reopened.client.restoreJobs(receipts);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(present(reopened.client.state.jobs[0]).resumable, true);
+  assert.equal(
+    reopened.calls.filter((call) => call.type === 'conversation.resume').length,
+    0,
+  );
+});
+
+await test('delegation retry is an explicit caller request for the exact recorded child, after the caller finishes', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Create the game',
+  });
+  const failedReview = () => {
+    f.client.state.history['first'] = {
+      entries: [
+        {
+          ordinal: 1,
+          turnOrdinal: 1,
+          kind: 'answer',
+          state: 'stands',
+          calls: [
+            {
+              id: 'failed-review',
+              name: 'agent_run',
+              arguments: '{}',
+              length: 2,
+              cut: false,
+              opened: { conversation: 'child-review', agent: 'reviewer' },
+            },
+          ],
+        },
+        {
+          ordinal: 2,
+          turnOrdinal: 1,
+          kind: 'tool_result',
+          state: 'stands',
+          toolCallId: 'failed-review',
+          outcome: 'unavailable',
+          text: 'The review timed out.',
+        },
+      ],
+      more: false,
+    };
+  };
+  failedReview();
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'delegate-retry',
+      conversation: 'first',
+      step: '1:failed-review',
+    }),
+    /calling agent to finish/,
+  );
+  f.status(() => ({
+    code: 'OK',
+    payload: {
+      id: 'job-one',
+      state: 'DONE',
+      outcome: {
+        ending: 'ANSWERED',
+        answered: true,
+        text: 'The game is complete; review failed.',
+      },
+    },
+  }));
+  f.push({ job: 'job-one', kind: 'ended', ending: 'ANSWERED' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  failedReview();
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'delegate-retry',
+      conversation: 'first',
+      step: 'invented',
+    }),
+    /recorded failed delegation/,
+  );
+  f.run(async () => ({
+    code: 'ACCEPTED',
+    payload: { id: 'job-parent-retry' },
+  }));
+  const approvals: Array<(reply: Outcome) => void> = [];
+  f.rawApprovals(() => new Promise((resolve) => approvals.push(resolve)));
+  const submitting = f.client.dispatch({
+    action: 'delegate-retry',
+    conversation: 'first',
+    step: '1:failed-review',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  // History catch-up may replace the local page while approval preflight is pending.
+  // Restore the same authoritative fixture so this exercises the submission guard.
+  failedReview();
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'delegate-retry',
+      conversation: 'first',
+      step: '1:failed-review',
+    }),
+    /already being submitted/,
+  );
+  f.rawApprovals(() => ({ code: 'OK', payload: { approvals: [] } }));
+  for (const finish of approvals)
+    finish({ code: 'OK', payload: { approvals: [] } });
+  await submitting;
+  const retry = present(
+    f.calls.filter((call) => call.type === 'agent.run').at(-1),
+  );
+  assert.equal(retry.payload.conversation, 'first');
+  assert.equal(retry.payload.agent, 'bot');
+  assert.match(String(retry.payload.task), /conversation="child-review"/);
+  assert.match(String(retry.payload.task), /do not start the task over/);
+  assert.equal(
+    f.calls.some((call) => call.type === 'conversation.resume'),
+    false,
+  );
+  assert.equal(f.calls.filter((call) => call.type === 'agent.run').length, 2);
 });

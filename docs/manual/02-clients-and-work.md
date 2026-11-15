@@ -77,8 +77,34 @@ separate from the answer, and completion replaces previews with the server's
 recorded result. Trajectory shows recorded reasoning when available. Providers
 that publish no reasoning text produce no preview; confined work and output
 inspection policies can also withhold streaming text.
+Authorized delegated agents publish their thinking on the owning job's preview
+channel too. A delegate's answer and lifecycle remain separate from its parent's.
 While tools are running, the main answer area shows “Waiting for tool replies…”
 until the next model response, even when the agent has already streamed answer text.
+
+If a model call fails, chat shows a run error and, when the server offers a safe
+continuation, **Retry from saved work**. Retry explicitly starts a new turn in the
+same conversation using recorded tool results and remaining allowance. It does
+not submit the original task again. A lost retry acknowledgement stays uncertain;
+reconnecting never resends it. Desktop keeps the latest failed job receipt and
+rechecks the server before restoring its retry offer after reopening.
+
+A delegated model failure returns an error result to the calling agent; it does
+not terminate that agent. The caller can continue other work. The failed tool
+step in Trajectory offers **Retry delegated work** when the caller is idle. This
+sends an explicit request to that caller to use `agent_run` with the failed
+child's `conversation`, original task and images. The server validates the
+recorded relationship and resumes the child's saved history. It never turns a
+private child conversation into an independently executable user session.
+
+Trajectory retains failed-call output as `ERROR` diagnostics excluded from model
+context: reasoning, partial answer and incomplete tool-call fragments, with
+character counts, elapsed time and first-output timing. Each channel keeps up to
+8,192 characters from its beginning and 8,192 from its end; omitted text is marked.
+Large captures are split into numbered error entries that fit Trajectory's
+excerpt limit, so the retained tail is readable through the normal log view.
+These fragments are evidence, not answers or executable tools. Providers that do
+not publish reasoning cannot supply reasoning text to retain.
 
 The command approvals bar appears only when there are pending approvals and hides
 after the last decision. Approval refresh failures use the normal error banner.

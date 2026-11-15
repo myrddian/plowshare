@@ -890,6 +890,11 @@ background(
       )
         throw new Error('Open Board or Swarm to inspect its topics.');
       if (held) {
+        if (request?.action === 'delegate-retry') {
+          if (request.conversation !== held.conversation)
+            throw new Error('Choose a failed delegation from this trajectory.');
+          return client.dispatch(request);
+        }
         if (request?.action === 'bootstrap')
           return {
             state: client.state,

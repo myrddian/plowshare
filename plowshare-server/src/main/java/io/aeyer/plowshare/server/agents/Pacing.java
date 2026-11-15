@@ -4,6 +4,8 @@ import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.LongSupplier;
 
 /**
@@ -60,7 +62,9 @@ final class Pacing {
     private final long sent;
     private long first = -1;
     private long thoughtCharacters;
-    private final StringBuilder thoughts = new StringBuilder();
+    private final CapturedText thoughts = new CapturedText();
+    private final CapturedText answers = new CapturedText();
+    private final CapturedText toolFragments = new CapturedText();
     private long answerCharacters;
 
     private Call(long sent) {
@@ -70,37 +74,98 @@ final class Pacing {
     /**
      * {@code sink}, with its first delta of either kind timed.
      *
-     * <p>The check is one comparison per chunk on the thread reading the response, and nothing is
-     * built.
+     * <p>Capture is bounded independently of the droppable preview. Both are called on the thread
+     * reading the response and must not block.
      */
     Deltas timing(Deltas sink) {
-      return new Deltas() {
-        @Override
-        public void answered(String delta) {
-          arrived();
-          answerCharacters += delta.length();
-          sink.answered(delta);
-        }
+      return Deltas.observing(
+          sink,
+          new Deltas() {
+            @Override
+            public void answered(String delta) {
+              arrived();
+              answerCharacters += delta.length();
+              answers.append(delta);
+            }
 
-        @Override
-        public void thought(String delta) {
-          arrived();
-          thoughtCharacters += delta.length();
-          thoughts.append(delta);
-          sink.thought(delta);
-        }
-      };
+            @Override
+            public void thought(String delta) {
+              arrived();
+              thoughtCharacters += delta.length();
+              thoughts.append(delta);
+            }
+
+            @Override
+            public void toolCall(int index, String name, String arguments) {
+              arrived();
+              toolFragments.append(
+                  "[tool index=" + index + " name=" + name + "] " + arguments + "\n");
+            }
+          });
     }
 
     /**
-     * Everything the model streamed as thinking during this call, in order, or null for a call that
-     * streamed none.
-     *
-     * <p>Every delta and not a preview's tail: the wrapper sits inside the call, before the
-     * client's droppable queue, so nothing here was lost.
+     * Bounded reasoning from this call, or null for a call that streamed none. Large calls retain
+     * their beginning and end, separated by an explicit omitted-character count. Capture sits
+     * before the client's droppable queue; the independent bound keeps runaway calls bounded.
      */
     String thought() {
-      return thoughts.isEmpty() ? null : thoughts.toString();
+      return thoughts.empty() ? null : thoughts.text();
+    }
+
+    /** A protected, nonprojected log record; never an assistant answer or executable tool call. */
+    String failedOutput(String reason) {
+      long elapsed = Math.max(0, (ticker.getAsLong() - sent) / NANOS_PER_MILLI);
+      String firstDelta =
+          first < 0 ? "none" : Long.toString(Math.max(0, (first - sent) / NANOS_PER_MILLI));
+      return "ERROR: incomplete model call; "
+          + reason
+          + "\nelapsed_ms="
+          + elapsed
+          + " first_delta_ms="
+          + firstDelta
+          + "\nreasoning_characters="
+          + thoughtCharacters
+          + " answer_characters="
+          + answerCharacters
+          + " tool_fragment_characters="
+          + toolFragments.characters
+          + "\n[diagnostic text: NUL is shown as ␀]\n[reasoning]\n"
+          + thoughts.text().replace('\0', '␀')
+          + "\n[partial answer; not projected]\n"
+          + answers.text().replace('\0', '␀')
+          + "\n[partial tool fragments; never executed]\n"
+          + toolFragments.text().replace('\0', '␀');
+    }
+
+    /**
+     * Each diagnostic row must fit the existing trajectory excerpt ceiling: DIAGNOSTIC has no
+     * full-text retrieval handle. Reserve 100 characters for a part label below that 8,000 limit.
+     * Splitting preserves UTF-16 pairs and keeps the head/tail of every channel publicly readable.
+     */
+    List<String> failedOutputParts(String reason) {
+      String output = failedOutput(reason);
+      if (output.length() <= 8000) return List.of(output);
+      List<String> chunks = new ArrayList<>();
+      for (int start = 0; start < output.length(); ) {
+        int end = Math.min(start + 7900, output.length());
+        if (end < output.length()
+            && Character.isHighSurrogate(output.charAt(end - 1))
+            && Character.isLowSurrogate(output.charAt(end))) end--;
+        chunks.add(output.substring(start, end));
+        start = end;
+      }
+      List<String> parts = new ArrayList<>();
+      for (int index = 0; index < chunks.size(); index++) {
+        parts.add(
+            "ERROR: incomplete model call; diagnostic part "
+                + (index + 1)
+                + "/"
+                + chunks.size()
+                + " (nonprojected)\n"
+                + chunks.get(index));
+      }
+      return List.copyOf(parts);
     }
 
     private void arrived() {
@@ -135,6 +200,47 @@ final class Pacing {
         generatingNanos += end - first;
       }
       return toFirst;
+    }
+  }
+
+  /** Fixed head plus rolling tail: memory and diagnostic volume stay bounded per call/channel. */
+  private static final class CapturedText {
+    private static final int HALF_LIMIT = 8192;
+    private final StringBuilder head = new StringBuilder();
+    private final StringBuilder tail = new StringBuilder();
+    private long characters;
+
+    void append(String text) {
+      characters += text.length();
+      int copied = Math.min(HALF_LIMIT - head.length(), text.length());
+      head.append(text, 0, copied);
+      int remaining = text.length() - copied;
+      if (remaining >= HALF_LIMIT) {
+        tail.setLength(0);
+        tail.append(text, text.length() - HALF_LIMIT, text.length());
+      } else if (remaining > 0) {
+        int excess = Math.max(0, tail.length() + remaining - HALF_LIMIT);
+        tail.delete(0, excess);
+        tail.append(text, copied, text.length());
+      }
+    }
+
+    boolean empty() {
+      return characters == 0;
+    }
+
+    String text() {
+      String beginning = head.toString();
+      String ending = tail.toString();
+      if (characters > head.length() + tail.length()) {
+        if (!beginning.isEmpty()
+            && Character.isHighSurrogate(beginning.charAt(beginning.length() - 1)))
+          beginning = beginning.substring(0, beginning.length() - 1);
+        if (!ending.isEmpty() && Character.isLowSurrogate(ending.charAt(0)))
+          ending = ending.substring(1);
+      }
+      long omitted = characters - beginning.length() - ending.length();
+      return beginning + (omitted > 0 ? "\n[" + omitted + " characters omitted]\n" : "") + ending;
     }
   }
 

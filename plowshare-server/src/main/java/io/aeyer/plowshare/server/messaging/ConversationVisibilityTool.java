@@ -12,6 +12,8 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.BiPredicate;
 
@@ -56,8 +58,12 @@ final class ConversationVisibilityTool implements AgentTool {
     try {
       JsonNode args = object(arguments);
       var selected = args.get("conversation");
-      if (selected != null && !selected.isNull() && !visibility.test(identity(selected), current))
-        return "That conversation is not visible to this participant.";
+      if (selected != null && !selected.isNull()) {
+        String target = identity(selected);
+        if (target.equals("current")) target = current;
+        if (target == null || !visibility.test(target, current))
+          return "That conversation is not visible to this participant.";
+      }
       String answer = delegate.run(arguments, home, owner);
       String name = schema().name();
       if (!name.equals("conversation_search") && !name.equals("conversation_list")) return answer;
@@ -65,18 +71,41 @@ final class ConversationVisibilityTool implements AgentTool {
       JsonNode rows = name.equals("conversation_list") ? result : result.get("hits");
       if (rows == null || !rows.isArray())
         throw new IllegalArgumentException("invalid archive projection");
-      record Row(String id, JsonNode value) {}
+      record Row(String id, JsonNode value, List<String> sources) {}
       var decoded = new ArrayList<Row>();
       for (var row : rows) {
         if (!row.isObject()) throw new IllegalArgumentException("invalid archive row");
         String id = identity(row.get(name.equals("conversation_list") ? "id" : "conversationId"));
-        decoded.add(new Row(id, row));
+        List<String> sourceIds = new ArrayList<>();
+        if (row.has("sources")) {
+          if (!row.get("sources").isArray())
+            throw new IllegalArgumentException("Invalid search sources");
+          for (var source : row.get("sources"))
+            sourceIds.add(identity(source.get("conversationId")));
+        }
+        decoded.add(new Row(id, row, List.copyOf(sourceIds)));
       }
       var visible = JSON.createArrayNode();
-      for (var row : decoded) if (visibility.test(row.id(), current)) visible.add(row.value());
+      var decisions = new HashMap<String, Boolean>();
+      boolean sourcesFiltered = false;
+      for (var row : decoded) {
+        if (!decisions.computeIfAbsent(row.id(), id -> visibility.test(id, current))) continue;
+        if (!row.sources().isEmpty()) {
+          var allowed = JSON.createArrayNode();
+          for (int i = 0; i < row.sources().size(); i++)
+            if (decisions.computeIfAbsent(row.sources().get(i), id -> visibility.test(id, current)))
+              allowed.add(row.value().get("sources").get(i));
+          if (allowed.size() != row.sources().size()) {
+            ((ObjectNode) row.value()).set("sources", allowed);
+            ((ObjectNode) row.value()).put("sourceCount", allowed.size());
+            sourcesFiltered = true;
+          }
+        }
+        visible.add(row.value());
+      }
       if (name.equals("conversation_list")) return JSON.writeValueAsString(visible);
       if (!result.isObject()) throw new IllegalArgumentException("invalid archive projection");
-      if (visible.size() != rows.size()) {
+      if (visible.size() != rows.size() || sourcesFiltered) {
         var output = (ObjectNode) result;
         output.set("hits", visible);
         output.put("visibilityFiltered", true);

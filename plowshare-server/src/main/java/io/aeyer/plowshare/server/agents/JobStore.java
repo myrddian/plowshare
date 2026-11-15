@@ -1270,6 +1270,7 @@ public final class JobStore
               try {
                 finish(job, watch, name, work.apply(watch, job::cancelRequested), ended);
               } catch (Throwable bug) {
+                telemetry.failed(bug);
                 // The genuine last resort, and narrower than it used to be:
                 // JobRuntime.run now catches RuntimeException around the
                 // dispatcher call itself, so everything that happens during
@@ -1337,6 +1338,7 @@ public final class JobStore
               try {
                 runEnds.ended(id, name, home);
               } catch (RuntimeException failed) {
+                telemetry.failed(failed);
                 log.warn("a run ended and its listener failed: {} ({})", id, name, failed);
               }
             } finally {

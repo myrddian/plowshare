@@ -7,6 +7,9 @@ public interface JobTelemetry {
 
   void rejected();
 
+  /** Unexpected task or completion-listener failure; independent of the task's final ending. */
+  default void failed(Throwable failure) {}
+
   interface Run {
     /** Records task termination once; cancellation requests alone are not completions. */
     void finished(Outcome.Ending ending);

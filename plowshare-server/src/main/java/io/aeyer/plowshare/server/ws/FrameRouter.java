@@ -8,8 +8,11 @@ import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import java.io.IOException;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -93,7 +96,8 @@ public final class FrameRouter {
 
   private final Map<String, FrameHandler> handlers;
   private final ActingRequests acting;
-  private final io.aeyer.plowshare.server.reads.ReadAdmission readAdmission;
+  private final FailureReporter failures;
+  private final ReadAdmission readAdmission;
 
   /**
    * @param handlers every type this router knows, keyed by the dotted discriminator a frame's
@@ -107,14 +111,21 @@ public final class FrameRouter {
   }
 
   public FrameRouter(Map<String, FrameHandler> handlers, ActingRequests acting) {
-    this(handlers, acting, io.aeyer.plowshare.server.reads.ReadAdmission.direct());
+    this(handlers, acting, ReadAdmission.direct());
+  }
+
+  public FrameRouter(
+      Map<String, FrameHandler> handlers, ActingRequests acting, ReadAdmission admission) {
+    this(handlers, acting, admission, FailureReporter.NONE);
   }
 
   public FrameRouter(
       Map<String, FrameHandler> handlers,
       ActingRequests acting,
-      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
-    this.readAdmission = java.util.Objects.requireNonNull(admission);
+      ReadAdmission admission,
+      FailureReporter failures) {
+    this.failures = Objects.requireNonNull(failures);
+    this.readAdmission = Objects.requireNonNull(admission);
     this.acting = acting;
     handlers.keySet().forEach(FrameTypes::requireWellFormed);
     this.handlers = Map.copyOf(handlers);
@@ -215,16 +226,14 @@ public final class FrameRouter {
     boolean observer = request.type().equals("information.await");
     if (!DispatchPolicy.independentRead(request.type()) && !observer)
       return routeAdmitted(request, asking, disclosureFence);
-    io.aeyer.plowshare.server.reads.ReadAdmission.Lease lease;
+    ReadAdmission.Lease lease;
     try {
       lease =
           readAdmission.admit(
               asking.handle(),
-              observer
-                  ? io.aeyer.plowshare.server.reads.ReadAdmission.Work.OBSERVER
-                  : io.aeyer.plowshare.server.reads.ReadAdmission.Work.INTERACTIVE);
+              observer ? ReadAdmission.Work.OBSERVER : ReadAdmission.Work.INTERACTIVE);
     } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException busy) {
-      Fault fault = Faults.of(busy);
+      Fault fault = observedFault(busy);
       return java.util.concurrent.CompletableFuture.completedFuture(
           Outcome.failed(fault.code(), fault.detail()));
     }
@@ -278,11 +287,11 @@ public final class FrameRouter {
               ? handler.handleAsync(request.payload(), asking)
               : java.util.concurrent.CompletableFuture.completedFuture(
                   handler.handle(request.payload(), asking));
-      return java.util.Objects.requireNonNull(completion)
+      return Objects.requireNonNull(completion)
           .thenApply(
               answer -> {
                 asking.queryValidity().run();
-                java.util.Objects.requireNonNull(answer, "Handler returned no outcome");
+                Objects.requireNonNull(answer, "Handler returned no outcome");
                 // A genuinely asynchronous handler may finish after a membership change. This is a
                 // disclosure freshness check, not another admission or a cached permission grant.
                 if (disclosureFence
@@ -312,14 +321,20 @@ public final class FrameRouter {
                 while (cause instanceof java.util.concurrent.CompletionException
                     && cause.getCause() != null) cause = cause.getCause();
                 if (cause instanceof Error fatal) throw fatal;
-                Fault fault = Faults.of(cause);
+                Fault fault = observedFault(cause);
                 return Outcome.failed(fault.code(), fault.detail());
               });
     } catch (RuntimeException thrown) {
-      Fault fault = Faults.of(thrown);
+      Fault fault = observedFault(thrown);
       return java.util.concurrent.CompletableFuture.completedFuture(
           Outcome.failed(fault.code(), fault.detail()));
     }
+  }
+
+  private Fault observedFault(Throwable failure) {
+    Fault fault = Faults.of(failure);
+    if (fault.httpStatus() >= 500) failures.report(FailureReporter.Source.WEBSOCKET, failure);
+    return fault;
   }
 
   /** Release temporary subject contexts on physical connection teardown. */
@@ -428,7 +443,7 @@ public final class FrameRouter {
     } catch (IOException notAFrame) {
       return java.util.concurrent.CompletableFuture.completedFuture(refuse(notAFrame));
     } catch (RuntimeException invalidSelection) {
-      var fault = Faults.of(invalidSelection);
+      var fault = observedFault(invalidSelection);
       return java.util.concurrent.CompletableFuture.completedFuture(
           Outcome.failed(fault.code(), fault.detail()));
     }
@@ -457,7 +472,7 @@ public final class FrameRouter {
         rootCause instanceof IllegalArgumentException versionMismatch
             ? new CallerFault(versionMismatch.getMessage(), versionMismatch)
             : new CallerFault(describe(cause), cause);
-    Fault mapped = Faults.of(fault);
+    Fault mapped = observedFault(fault);
     return Outcome.failed(mapped.code(), mapped.detail());
   }
 

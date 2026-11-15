@@ -58,8 +58,8 @@ public final class JobWatch {
   private static final Logger log = LoggerFactory.getLogger(JobWatch.class);
 
   /**
-   * A run nobody is watching: a delegated child, a curator's ruling, a test. Its id is empty
-   * because nothing reads it — {@link JobEvents#NONE} drops every event before the id can matter.
+   * A run nobody is watching: a curator's ruling or a test. Its id is empty because nothing reads
+   * it — {@link JobEvents#NONE} drops every event before the id can matter.
    */
   public static final JobWatch UNWATCHED = new JobWatch("", null, JobEvents.NONE);
 
@@ -72,6 +72,8 @@ public final class JobWatch {
   private final String session;
 
   private final JobEvents events;
+
+  private final boolean delegated;
 
   /**
    * What the last {@link #modelCall} reported, for {@link #alive} to repeat.
@@ -93,9 +95,24 @@ public final class JobWatch {
    * @param events where the events go
    */
   public JobWatch(String job, String session, JobEvents events) {
+    this(job, session, events, false);
+  }
+
+  private JobWatch(String job, String session, JobEvents events, boolean delegated) {
     this.job = Objects.requireNonNull(job, "job");
     this.session = session;
     this.events = Objects.requireNonNull(events, "events");
+    this.delegated = delegated;
+  }
+
+  /**
+   * Publish a delegate's authorized thinking on the owning job's preview channel. The delegate
+   * retains its own transcript; its answer and lifecycle must not replace the parent's answer,
+   * counters or terminal state. Nested delegates keep the same root preview identity. Dispatch
+   * still decides whether a particular call may publish any output.
+   */
+  public JobWatch forDelegation() {
+    return this == UNWATCHED || delegated ? this : new JobWatch(job, session, events, true);
   }
 
   /**
@@ -185,7 +202,7 @@ public final class JobWatch {
 
   /** A piece of the model answering, on its way past. Dropped freely. */
   public void answering(String text) {
-    if (this != UNWATCHED) stream(JobDelta.answering(job, text));
+    if (this != UNWATCHED && !delegated) stream(JobDelta.answering(job, text));
   }
 
   /**
@@ -206,6 +223,7 @@ public final class JobWatch {
   }
 
   private void publish(JobEvent event) {
+    if (delegated) return;
     try {
       events.publish(session, event);
     } catch (RuntimeException broken) {
