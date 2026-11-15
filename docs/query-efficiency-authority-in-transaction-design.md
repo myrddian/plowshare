@@ -104,6 +104,8 @@ graph TD
     A --> C[Java: typed repository, candidate cache and refresh]
     B --> D[Integration: regression checks, documentation and code review]
     C --> D
+    D --> E[BETA: guarded deployment and live functional proof]
+    E --> F[Measurement: controlled OFF / ON / OFF comparison]
 ```
 
 | Node | Implementer | Independent reviewer | Completion gate |
@@ -112,6 +114,8 @@ graph TD
 | B | Database implementer | Design reviewer | SQL/race review, focused real-PostgreSQL evidence, both agree |
 | C | Java implementer | Design reviewer | Contract/concurrency review, focused unit evidence, both agree |
 | D | Coordinator | Design reviewer plus both implementers | Integrated code review, formatting and repository checks; unresolved limits recorded |
+| E | Coordinator | Design reviewer | Backup, deployment identity/configuration checks and public SDK functional proof; both agree |
+| F | Coordinator, using Java implementer's native fixture | Design reviewer | Completed workflow receipts, measurement fences and explicitly bounded conclusions; both agree |
 
 Review findings are returned to the owning implementer, fixed, and reviewed again.
 A node does not close on an implementation report alone. Final acceptance records
@@ -165,4 +169,63 @@ also encountered a segmented packet-transport timeout; all six `PacketTransportT
 cases passed on the final broad run. That test's wiring does not instantiate this
 feature's cache, grant repository or worker.
 
-No live BETA or PROD deployment or performance claim is part of this acceptance.
+That code acceptance preceded the BETA trial below. PROD remains outside this trial.
+
+## BETA trial — 15 November 2026
+
+BETA deployed source `65aeda712e29c6c79bbf748308c6b29207f6b0e9` with schema
+261. The private database backup passed archive listing and complete restore-stream
+validation; it was not restored into a second database. Only the server container
+was recreated. The existing Qwen configuration, all eleven configuration file hashes,
+other environment settings, mounts, memory limit, networks and companion container
+identities were preserved. The source configuration still defaults the feature off.
+
+A public SDK fixture ran twenty deterministic native workflows successfully and
+verified that a completed request ID rejects a different payload without changing
+the original result. The fixture's conductor conversations made no inference calls.
+The fixture has no model calls or ordinary tool grants; it uses only the harness
+stage and finish commands. This proves the exercised native workflow and authority
+path; it does not reproduce a model-driven workload.
+
+The subsequent OFF / ON / OFF comparison completed twenty measured workflows in
+each phase, with ten excluded warmups per phase. Every measured workflow returned
+the expected result. Each phase retained the same image, fixture bytes, schema and
+configuration; authority was stable within each phase. Authority versions differed
+between restarts, so the phases are not claimed to share an identical authority
+version. Only the expected synthetic jobs and orchestrations appeared in the
+measurement windows. Automatic embedding repair continued and its per-model call
+counts and timing bounds were recorded; no other inference purpose appeared.
+
+| Observation | OFF control 1 | ON | OFF control 2 |
+| --- | ---: | ---: | ---: |
+| Live-grant SQL milliseconds per call | 1.729 | 0.243 | 1.790 |
+| Lineage SQL milliseconds per call | 1.733 | 0.222 | 1.730 |
+| Confirmed grant reads | 0 | 1,456 | 0 |
+| SQL fallback grant reads | 1,144 | 0 | 1,111 |
+| Median workflow completion milliseconds | 283 | 314 | 341 |
+
+The enabled phase confirmed all non-snapshot grant reads. SQL and telemetry
+snapshots have recorded timing envelopes rather than one atomic collection point.
+Grant calls per workflow differed between phases, and ambient repair remained
+active. These are descriptive per-call SQL observations, not a pooled causal
+percentage, a capacity result or evidence of improved end-to-end latency. The
+original representative model-driven job and PROD validation remain outstanding.
+
+E and F were accepted by the coordinator and independent design reviewer. After
+the comparison, the guarded final enablement passed health, image, migration and
+configuration checks. Three further native smoke workflows finished, their jobs
+became terminal, and their conversations had zero inference calls. The final
+validation receipt records BETA enabled and representative-job validation
+outstanding. The fixture driver was supplied by the Java implementer; the reviewer
+also reviewed measurement fences, deployment recovery and receipt publication.
+
+The private release retains raw counters, completed synthetic request IDs, source
+hashes and the comparison report. The initial ACCOUNT-scoped document fixture was
+blocked by retained authority; it was not used as a benchmark or fixed through
+unrelated core changes. The native fixture instead uses a dedicated external
+synthetic project and remains available for reproduction.
+
+V261 has now shipped on BETA and is immutable. Concurrent unshipped migrations
+using that number, including the migrations in PR #260, must be renumbered before
+combining branches. Do not replace the applied migration or skip lower versions
+to work around the collision.
