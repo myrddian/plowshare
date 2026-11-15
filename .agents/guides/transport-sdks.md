@@ -45,6 +45,13 @@ and the shared contract checks; feature parity is not permission to invent APIs.
 - Authentication transport and authorization are separate. Reconnect must not
   reuse an allow after session revocation, nor infer a session from an account name.
 
+HTTP advice and frame routing report thrown server/dependency failures through
+`FailureReporter` after the shared `Faults` mapping. Caller refusals keep their existing
+status and are excluded. Reporting uses fixed source/kind labels and sampled WARN
+code locations without messages or request/session identifiers; it changes neither
+wire outcomes nor replay rules. Directly returned failure outcomes are outside this
+exception observation counter. See [server failure diagnostics](../../docs/server-administration.md#server-failure-diagnostics).
+
 ## Bounded work
 
 Apply the [bounded-work rule](../../docs/coding-standards.md#bound-active-work-in-every-subsystem):

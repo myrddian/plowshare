@@ -101,6 +101,13 @@ cache-read/input, only with full valid paired coverage and no active or incomple
 attempts in the selected cohort; zero input has no rate. Unknown cost does not
 hide valid token metrics.
 
+Handled model/tool dependency failures are observed through `FailureReporter` before
+conversion to an outcome. Retained runtime copies preserve the same reporter. Session
+loss and read-capacity failures have distinct fixed metric kinds and sampled, message-free
+WARN diagnostics; counts do not depend on job event delivery. JobStore also reports
+unexpected task/listener exceptions. These are boundary observations, not unique incident
+counts; see [server failure diagnostics](../../docs/server-administration.md#server-failure-diagnostics).
+
 ## Agent budget consent
 
 Shipped agent defaults provide at least one model call per declared step; shared

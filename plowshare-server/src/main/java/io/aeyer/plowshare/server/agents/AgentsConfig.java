@@ -78,6 +78,7 @@ import io.aeyer.plowshare.server.session.ProjectRoots;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.Session;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import io.aeyer.plowshare.server.todos.TodoBoard;
 import io.aeyer.plowshare.server.union.UnionRouting;
 import java.nio.file.Files;
@@ -804,7 +805,8 @@ public class AgentsConfig {
       ObjectProvider<RelayToolInvocations> relayInvocations,
       ObjectProvider<ScopedTools> scopedTools,
       OperationAuthority operations,
-      InferenceCalls inferenceCalls) {
+      InferenceCalls inferenceCalls,
+      ObjectProvider<FailureReporter> failures) {
     JobRuntime runtime =
         new JobRuntime(
             dispatcher,
@@ -921,7 +923,8 @@ public class AgentsConfig {
               }
             },
             operations,
-            inferenceCalls);
+            inferenceCalls,
+            failures.getIfAvailable(() -> FailureReporter.NONE));
     // Before the registry reads knownTools(): see JobRuntime.useTodos. REQUIRED, not optional:
     // a todo list is how any agent keeps a task of several steps across turns and compactions,
     // so every boot binds todo_read and todo_write and a shipped definition may declare them.

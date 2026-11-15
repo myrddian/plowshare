@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.server.telemetry.DurationTotals;
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.FunctionTimer;
 import io.micrometer.core.instrument.Gauge;
@@ -14,6 +15,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 /** Pull-based lifecycle totals. Runtime updates are bounded and never invoke a metrics backend. */
 public final class MicrometerJobTelemetry implements JobTelemetry {
+  private final FailureReporter failures;
   private final LongAdder started = new LongAdder();
   private final LongAdder rejected = new LongAdder();
   private final AtomicLong active = new AtomicLong();
@@ -21,6 +23,11 @@ public final class MicrometerJobTelemetry implements JobTelemetry {
       new EnumMap<>(Outcome.Ending.class);
 
   public MicrometerJobTelemetry(MeterRegistry registry) {
+    this(registry, FailureReporter.NONE);
+  }
+
+  public MicrometerJobTelemetry(MeterRegistry registry, FailureReporter failures) {
+    this.failures = failures;
     FunctionCounter.builder("plowshare.jobs.started", started, LongAdder::sum).register(registry);
     FunctionCounter.builder("plowshare.jobs.rejected", rejected, LongAdder::sum).register(registry);
     Gauge.builder("plowshare.jobs.active", active, AtomicLong::get).register(registry);
@@ -53,6 +60,11 @@ public final class MicrometerJobTelemetry implements JobTelemetry {
       endings.get(ending).recordSeconds(Math.max(0, System.nanoTime() - began) / 1e9);
       active.decrementAndGet();
     };
+  }
+
+  @Override
+  public void failed(Throwable failure) {
+    failures.report(FailureReporter.Source.RUNTIME, failure);
   }
 
   @Override
