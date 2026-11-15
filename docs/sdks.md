@@ -60,6 +60,11 @@ SDK and console/desktop compositions supply platform codecs and timers.
 
 ## Concurrent request dispatch
 
+See [backpressure behavior](backpressure.md) for how SDK windows, pre-handler
+dispatch refusals, server read budgets, database connections and provider queues
+interact. Only an explicit refusal proving the entire request never started
+permits the SDK's capacity retry; an unavailable read or timeout does not.
+
 New public SDK connections select `concurrent-v1` with a private
 `transport.dispatch` exchange before submitting application operations. The server
 acknowledges the mode and its pending-request/ID bounds. This selection is

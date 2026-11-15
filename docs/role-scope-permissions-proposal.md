@@ -1,5 +1,11 @@
 # Role and scope permissions proposal
 
+> Current reading note: these dated proposal matrices are not the executable
+> permission catalogue. Use the [AUTH owner guide](../.agents/guides/auth.md) and
+> [ADR 0071](decisions/0071-role-exercised-issuance-and-project-creator.md) alongside
+> current roles/actions/issuance code. PROJECT_CREATOR has its own isolated scope;
+> creator provenance, ADMIN, SYSTEM and scoped grants remain distinct.
+
 Status: proposed permission matrix, 17 October 2026. Documentation only. These
 tables do not change current role names, grants, APIs or enforcement.
 
@@ -589,7 +595,7 @@ permissions or a requirement to implement every possible control/ACL capability.
 | Resource ownership, publication and policies | [InformationAccess](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationAccess.java), [JdbcInformationCatalogueRepository](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationCatalogueRepository.java), [DocumentNavigation](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/DocumentNavigation.java), [JdbcInformationNavigationRepository](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationNavigationRepository.java), [InformationContentTypeService](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationContentTypeService.java) |
 | Schedules and Application controls | [FileScheduleDefinitions](../plowshare-server/src/main/java/io/aeyer/plowshare/server/events/FileScheduleDefinitions.java), [ApplicationScheduleControlAuthority](../plowshare-server/src/main/java/io/aeyer/plowshare/server/events/ApplicationScheduleControlAuthority.java), [ScheduleActionAuthority](../plowshare-server/src/main/java/io/aeyer/plowshare/server/events/ScheduleActionAuthority.java) |
 | Files and provider credentials | [WorkspaceApplicationFiles](../plowshare-server/src/main/java/io/aeyer/plowshare/server/files/WorkspaceApplicationFiles.java), [FileStores](../plowshare-server/src/main/java/io/aeyer/plowshare/server/files/FileStores.java), [CurrentProviderCredentialAccess](../plowshare-server/src/main/java/io/aeyer/plowshare/server/providers/CurrentProviderCredentialAccess.java), [OwnedHostedToolScopes](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/OwnedHostedToolScopes.java) |
-| Owner-only controls and reporting | [ApprovalFrames](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ApprovalFrames.java), [JdbcOutgoingRepository](../plowshare-server/src/main/java/io/aeyer/plowshare/server/outgoing/JdbcOutgoingRepository.java), [JdbcUsageReportRepository](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcUsageReportRepository.java), [ConversationContextAccess](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ConversationContextAccess.java) |
+| Owner-only controls and reporting | [ApprovalFrames](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ApprovalFrames.java), `outgoing/JdbcOutgoingRepository.java` (removed historical site; current owners are in the [Messaging/Relay guide](../.agents/guides/messaging-relay.md)), [JdbcUsageReportRepository](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcUsageReportRepository.java), [ConversationContextAccess](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ConversationContextAccess.java) |
 | Acting ceilings and internal scopes | [ActingValues](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/ActingValues.java), [LiveActingAuthorization](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/LiveActingAuthorization.java), [Relay](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/Relay.java), [OwnedRelaySubscriptionWork](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/OwnedRelaySubscriptionWork.java) |
 
 For each future operation contract, record its action, actual resource resolver,

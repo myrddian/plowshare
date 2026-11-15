@@ -1,5 +1,11 @@
 # Server read work and capacity
 
+The [SQL completion deadline rule](coding-standards.md#bound-sql-work-by-a-completion-deadline)
+requires a configurable two-second default database-work ceiling. The mechanisms
+below describe current implementation, including narrower wait budgets and some
+longer path-specific SQL limits; they do not establish universal two-second SQL
+cancellation. See the rule's enforcement-gap note before relying on that guarantee.
+
 The server owns policy and disclosure. PostgreSQL owns durable facts, constraints and atomic
 state transitions. SQL predicates are one implementation of server policy, not a requirement
 that every internal fact fetched from PostgreSQL already be visible to the end user.
@@ -7,6 +13,11 @@ that every internal fact fetched from PostgreSQL already be visible to the end u
 A feed, socket or request is not a distinct budget owner. The same authenticated principal
 shares capacity across all of its connections. Server limits do not depend on client polling,
 retry, cancellation or connection behavior.
+
+For the complete layer map, waiting/refusal and retry semantics, the wait-only
+database throttle, provider pressure and saturation diagnosis, see
+[backpressure behavior](backpressure.md). This page owns the detailed read budgets
+and scheduling contract; those are distinct from SDK, connection and model limits.
 
 ## Execution and connection backpressure
 

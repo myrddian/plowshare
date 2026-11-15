@@ -40,6 +40,7 @@
     {"id":"a19-hooks","title":"Hook type contract and runtime behavior","path":"plowshare-hooks/README.md"},
     {"id":"a20-account-administration","title":"Accounts, project roles and service tokens","path":"docs/server-administration.md"},
     {"id":"a21-native-mcp","title":"Native MCP connections and sharing","path":"docs/native-mcp-hosting.md"},
-    {"id":"a22-relay","title":"Relay publication, delivery and recovery","path":"docs/relay.md"}
+    {"id":"a22-relay","title":"Relay publication, delivery and recovery","path":"docs/relay.md"},
+    {"id":"a23-backpressure","title":"Backpressure behavior and capacity ownership","path":"docs/backpressure.md"}
   ]
 }

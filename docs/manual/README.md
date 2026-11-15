@@ -21,6 +21,7 @@ Publishing the website or restarting the server does not update that snapshot.
 | Connect and have your first useful conversation | [First steps](01-first-steps.md) |
 | Find work in the desktop, terminal or CLI | [Clients and everyday work](02-clients-and-work.md) |
 | Understand what an agent, bot, project or job means | [Architecture and concepts](03-architecture.md) |
+| Understand recorded history, Trajectory and what a model sees | [Log, Trajectory and model projection](03-architecture.md#log-trajectory-and-model-projection) |
 | Build assistants, add skills and control what they can do | [Agents, bots and permissions](04-agents-and-permissions.md) |
 | Work safely with local or server files | [Projects and workspaces](05-projects-and-workspaces.md) |
 | Develop a personal wiki, memory and research collection | [Knowledge and research](06-knowledge-and-research.md) |
@@ -62,6 +63,7 @@ chapters. These are the canonical references rather than duplicated copies:
 - [A2A receiving](../a2a-receiving.md) and [A2A sending](../a2a-sending.md)
 - [Native MCP connections and sharing](../native-mcp-hosting.md)
 - [Relay publication, delivery and recovery](../relay.md)
+- [Backpressure behavior and capacity ownership](../backpressure.md)
 - [Integration runtime](../../integrations/runtime/README.md)
 - [Home Assistant](../../integrations/home-assistant/README.md)
 - [Distributions](../distributions.md) and [Docker deployment](../../deploy/docker/README.md)

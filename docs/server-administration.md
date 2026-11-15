@@ -40,13 +40,18 @@ queue behind a busy writer or block the shared scheduler.
 
 ## Request dispatch and capacity
 
+For the layer-by-layer behavior, ownership, retry rules and diagnostics, see
+[backpressure behavior](backpressure.md). Transport request windows, logical read
+budgets, database connections and provider queues are separate limits.
+
 Each event connection that selects concurrent dispatch is given a per-connection
 request depth in the handshake, and the server enforces it. A request beyond that
 depth, or beyond a server-wide pending or byte bound, is answered with
 `CAPACITY_EXHAUSTED` rather than closing the connection; nothing was started, so
-the client may send it again under the same id. The TypeScript SDK treats that
-answer as backpressure and waits; the other SDKs fail the call with
-`NOT_SUBMITTED`.
+the client may send it again under the same id. Public SDKs expose a waiting
+default and an explicit fail-fast form. Waiting absorbs this pre-handler refusal
+under the original request identity/deadline; fail-fast returns it to the caller.
+See [SDK capacity options](sdks.md#concurrent-request-dispatch) for each SDK's API.
 
 Startup settings live under `plowshare.transport`:
 
@@ -54,27 +59,32 @@ Startup settings live under `plowshare.transport`:
 | --- | --- | --- |
 | `request-depth` | `8` | Per-connection admission window (requests queued, including those executing) advertised to clients, between 1 and 64. |
 | `request-per-connection` | `2` | Requests of one connection executing at once. Inherited, not chosen; see below. |
-| `request-global` | `0` | Requests executing at once across all connections; `0` is unlimited. Admission stays bounded by the depth, the server-wide pending bound and the byte budgets, and the database pool bounds actual work. |
+| `request-global` | `0` | Requests executing at once across all connections; `0` is unlimited. Admission stays bounded by the depth, the server-wide pending bound and the byte budgets. Database connections are bounded separately by the pool. |
 | `request-observers` | `256` | Long parked waits (such as `information.await`) across all connections; must be at least `request-per-connection`. |
 
 `request-depth` defaults to 8 for honest backpressure: a shallow queue refuses
 sooner and more visibly instead of letting 64 requests pile up behind two
-executing ones. It bounds queueing, not execution, so it does not affect the
-database pool; `request-per-connection` governs that. At the defaults, 8 are
-admitted, 2 execute and 6 wait. The Java, Go, Python and .NET SDKs adopt the
-advertised depth and fail locally with `NOT_SUBMITTED` at that bound instead of
-waiting, so their consumers are refused at the 9th concurrent request. Only the
-TypeScript SDK blocks, and every first-party client uses it. A deployment serving
-the other four SDKs may want a higher value. Teaching those SDKs to block is
-separate work.
+executing ones. Depth bounds transport queueing; execution concurrency and
+downstream read admission, the throttle and Hikari separately determine database
+pressure. At the defaults the advertised window is 8, at most 2 execute and the
+rest wait, subject to resource/barrier ordering and the other admission bounds.
+One physical reply handoff is excluded from the depth check while retaining its
+body/byte ownership; depth is not a bound on every physical buffer. Waiting SDK
+requests park when their window is
+full; the explicit fail-fast option instead refuses before transmission with
+`NOT_SUBMITTED`. Do not raise the advertised depth to work around an assumed
+native-SDK inability to wait. Local parked callers and admitted physical buffers
+are different populations; the advertised depth does not bound every caller queue.
 
 `request-per-connection` was not chosen for request dispatch. Request dispatch
 originally shared the event-read setting (`event-read-concurrency`, default 2),
 and 2 was kept when the properties were split, purely to preserve behaviour. It
 is now more load-bearing: with `request-global` at 0 it is the only transport
-execution bound. Raising it is what would pressure the connection pool, and that
-should wait until Hikari starvation is expressed as `CAPACITY_EXHAUSTED`
-capacity, which is not done yet.
+execution bound at this layer. Raising it can increase pressure on downstream
+read budgets and the connection pool; measure those separately first. Never turn
+Hikari starvation or another mid-handler database failure into
+`CAPACITY_EXHAUSTED`: that code promises the whole request never started and can
+cause an SDK to replay work after earlier statements already committed.
 
 The main database pool is sized by environment variables:
 
@@ -147,19 +157,20 @@ wait has **no bound at all**. The throttle only ever waits, so a saturated pool 
 produces unbounded request latency instead of the 5-second pool-acquire failure it
 produced before. This is deliberate — a capacity refusal raised mid-request would
 let an SDK replay a partially applied operation — but it changes what an incident
-looks like: requests queue and slow down rather than failing, and nothing times out
-on the server's side.
+looks like: requests can remain blocked in the semaphore without a throttle
+timeout. Other request/transport deadlines can still expire without stopping that
+physical work. This current behavior does not implement the new
+[bounded-work rule](coding-standards.md#bound-active-work-in-every-subsystem).
 
 Watch `plowshare.pool.admission.saturation.wait` for it. It records only the
-semaphore wait, separately from the pacing delay, so it is the one meter that shows
-this stall. As a rule of thumb at the shipped settings, a maximum of a few hundred
-milliseconds is ordinary burst queuing; sustained waits past roughly one second mean
-callers are queueing for connections rather than being paced, and a maximum of
-several seconds means requests are being held for the duration of someone else's
-work. The usual cause is a connection held across a network or model call rather
-than too little pool; `PLOWSHARE_DB_POOL` is what to raise once that is ruled out.
-Compare it with `plowshare.pool.admission.delay` to tell the two apart: pacing rising
-while the saturation wait stays near zero is the throttle doing its job.
+semaphore wait, separately from the pacing delay. Its timer records completed
+waits, so a still-blocked caller has not yet contributed its final wait duration.
+Investigate connection hold time, slow SQL and a holder waiting for another
+thread's database work before changing pool size. Provider/model IO must not hold
+connections. Defaults and individual wait samples are not a measured latency SLO.
+Compare it with `plowshare.pool.admission.delay` to distinguish pacing from
+completed semaphore waits. Inspect live held/permit gauges and Hikari pending
+work too; a low completed-wait timer cannot rule out a currently stalled waiter.
 
 #### Meters
 

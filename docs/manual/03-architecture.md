@@ -39,7 +39,10 @@ separate services with their own failure and credential boundaries.
 | Agent definition | Prompt, model binding, tools, delegation, scopes and limits |
 | Bot | Human-facing definition that receives conversation messages |
 | Conversation | Durable exchange and the context lineage future turns use |
-| Run / log | One execution, with model steps, tools, outcomes and lineage |
+| Run | One execution, with model steps, tools, outcomes and lineage |
+| Conversation log | Retained, ordered entries recording work in a conversation across turns |
+| Trajectory | Human inspection view of recorded conversation entries |
+| Model projection | Messages assembled from eligible history and current request context |
 | Job | Durable admitted work that clients can inspect, follow or cancel |
 | Skill | Scoped instruction package invoked under explicit grants and context mode |
 | Orchestration | A staged workflow with its own state, checks, gates and recovery |
@@ -98,11 +101,9 @@ ask according to their event contract; a new prompt instruction does not bypass
 the tool's actual authorization. The [hook guide](12-hooks.md) lists the callback
 placements because in-turn, standalone and information-processing chains differ.
 
-Recorded history can outgrow the model's available context. Compaction/folding
-creates a bounded working projection while preserving the underlying recorded
-entries. Redeemable result handles and retrieval can recover relevant retained
-material. A folded summary is useful context, but precise quotations and claims
-still need the original retained evidence.
+The [conversation layers](#log-trajectory-and-model-projection) below
+explain how retained history becomes bounded model context. Retaining an entry
+and presenting it to a model are separate decisions.
 
 Tool effects and final answers are separate observations. A filesystem operation
 can commit before the run later reaches a cap. A remote action can have uncertain
@@ -139,6 +140,83 @@ specific inheritance contract. Board discussion exposes posted contributions
 while keeping seat histories distinct. Use the [routing](13-messaging-and-routing.md)
 and [swarm](14-swarm-board.md) guides when choosing the boundary your workflow needs.
 
+## Log, Trajectory and model projection
+
+A conversation has a durable log, human views of that log and a model-facing
+projection. A run can append several entries within one turn: a model response,
+its tool calls and results, published reasoning, or a runtime observation.
+Delegated work has its own linked history. The log is not a process log file and
+is not one run: it records conversation work across turns.
+
+| Layer | Purpose | What happens when history is folded |
+| --- | --- | --- |
+| Durable conversation log | Retain recorded entries, their order, kind and available provenance | Original entries remain; a replacement summary and fold relationship are recorded |
+| Trajectory | Let a person inspect recorded work, including non-model events and folded originals | Originals remain inspectable, with their replacement relationship |
+| Model projection | Construct the model-facing messages from eligible history, summaries, instructions and result handling | Covered history is replaced by the applicable summary in working context |
+
+Here **projection** means a model message construction, not a database read cache,
+embedding index or document retrieval projection. Trajectory is a presentation of
+the retained record, not another independently executed history. Access checks,
+filters and pagination still apply to what a caller can inspect. Folding is not
+a promise of permanent payload retention: a separate retention sweep can eject
+a tool result's payload while preserving its recorded identity and ejection
+metadata.
+
+Recorded does not mean replayed. Utterances, model answers, tool results and
+summary/notice kinds can contribute messages. Recorded thinking, hook decisions,
+approval diagnostics and failed-attempt diagnostics are not automatically model
+messages. A runtime note may have reached the active run without being replayed
+on future turns. **Model context eligible** describes entry policy and current
+fold state; it is not a receipt proving a particular inference received it.
+Current result-handling policy can also replace older tool output with a
+redeemable reference or omit it from working history.
+
+For example, a conversation might retain a request to compare two reports, a
+model's tool request, the returned excerpts, its answer and an approval record.
+After a fold, Trajectory can still show those originals. The next model context
+may instead contain a summary, newer messages and result references; the approval
+record remains available to the person inspecting the work. A readable original
+excerpt is not evidence that the next call included it verbatim. A summary is
+working context, not the original evidence needed for precise quotations.
+
+### Chat and context inspection are different views
+
+Chat presents a narrower exchange than Trajectory. The `conversation.chat` read
+returns currently projecting entries without folded originals or roleless kinds;
+it is still an entry view, not a fully assembled provider request. For example,
+it can show an original tool result where model construction substitutes a
+reference. Desktop's human chat also selects what to draw, so a simple chat is
+not an execution audit. Use [the client inspection table](02-clients-and-work.md#choose-the-right-history-view)
+for practical navigation.
+
+A next-context snapshot (`conversation.context.snapshot`) constructs messages,
+offered tools and settings for the selected agent **now**, before an unsent user
+draft. Its `captured_at` timestamps that preview read, and `projection: next`
+identifies a prospective view. Optional counting measures that construction; it
+never generates. Saving or displaying this snapshot does not make it an actual
+provider-attempt recording. Definition, rules, history or offered tools can
+change before the next run, and runtime processing can affect the actual request.
+
+A historical `conversation.projection` with a turn reconstructs the history that
+turn opened with, ending at its opening utterance rather than including its later
+answer and tool results. When a system block was recorded, `systemBlockAsSent`
+identifies that recorded block; otherwise today's definition is explicitly used.
+The flag is about the system block alone. Current tool declarations can still
+change summary seams and result references, so even this historical view is not
+an exact recording of every request byte or every inference within the turn.
+Use retained call/attempt provenance and provider-reported usage for actual
+inference observations; do not treat an eligibility label, preview count or
+system-block flag as proof of provider receipt.
+
+Live thinking and answer deltas are temporary progress. They may be dropped,
+truncated or withheld; the durable recorded outcome is authoritative. A recorded
+thinking entry can later appear in Trajectory, but a live preview itself is not
+a separate durable transcript or model input.
+
+The owning source contracts are [conversation entry storage](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java),
+[compaction and message assembly](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java)
+and [next-context preview/count reads](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java).
+
 ## Persistence and projections
 
 The durable record and its retrieval projection are different things. A source
@@ -147,11 +225,9 @@ summaries and tags are derived capabilities. A failed embedding does not mean
 the original text was never saved. Configuration fingerprints determine whether
 derived vectors remain compatible with the selected model space.
 
-Conversation entries retain execution history. Future model context can be a
-projection of that history: folds, summaries and redeemable result handles keep
-the context bounded. A fold does not erase the transcript or turn a summary into
-the original evidence. Retrieval and retention each have explicit coverage and
-lifecycle semantics.
+Conversation compaction follows the [log/projection distinction](#log-trajectory-and-model-projection):
+folding changes working context while retaining recorded originals. Retrieval,
+retention and model-context selection have different coverage and lifecycle rules.
 
 Database migrations are append-only Flyway changes. Runtime state machines use
 transactions, conditional updates, receipts and leases where needed. These

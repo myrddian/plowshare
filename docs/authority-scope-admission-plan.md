@@ -1,5 +1,12 @@
 # Completing the explicit-scope cutover in admission
 
+> Historical plan: the baseline, defect pins and task status below describe the
+> cutover then, not a claim that every listed defect exists now. Follow the
+> [AUTH owner guide](../.agents/guides/auth.md) for current scope/admission owners and
+> [ADR 0071](decisions/0071-role-exercised-issuance-and-project-creator.md) for current
+> grant lifetimes. Retained null locators are compatibility data, not permission to
+> select Global/SYSTEM; verify the actual boundary before changing one.
+
 Status: implementation plan, 22 October 2026. Baseline `c9a2cf67`; work in
 progress on `claude/personal-knowledge-write`. Server-side only.
 

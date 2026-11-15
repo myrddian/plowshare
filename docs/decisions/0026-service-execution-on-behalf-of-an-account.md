@@ -1,5 +1,12 @@
 # ADR 0026: Service execution on behalf of an account
 
+> Current reading note: the problem statement describes the pre-implementation
+> baseline. The bounded slices named in this ADR's status are implemented; remaining
+> operations/consent UX are still proposed. Acting actor/subject proof is distinct
+> from ordinary role issuance. Follow the [AUTH owner guide](../../.agents/guides/auth.md)
+> and [ADR 0071](0071-role-exercised-issuance-and-project-creator.md) for current
+> roles, scopes and exercised-versus-delegated grant lifetimes.
+
 Status: proposed beyond the five authorized implementation slices: typed authority
 and permission policy; declarations and consent persistence; socket-bound acting
 contexts and synchronous turn-history reads; retained-authority Personal

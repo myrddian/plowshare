@@ -1,5 +1,12 @@
 # ADR 0025: Service-account attribution and spending pools
 
+> Current authority note: keep this document's identity/accounting contracts and
+> its deferred monetary-reservation proposal separate from permission. A usage
+> owner, upstream credential or capacity pool grants no scoped authority. Use the
+> [AUTH owner guide](../../.agents/guides/auth.md) and
+> [ADR 0071](0071-role-exercised-issuance-and-project-creator.md) for current role
+> issuance/liveness; neither changes immutable booked attribution or prices.
+
 Status: proposed decision for review. Preserve the implemented identity rules below;
 adopt a general spending-pool capability, with implementation deferred to separately
 scoped platform work. This document does not enable or enforce a spending limit.
@@ -102,12 +109,13 @@ that the owning lifecycle still permits.
 
 ### Relationship to acting grants and SYSTEM
 
-The service-execution-on-behalf-of-an-account ADR remains **proposed**. Its actor
-and effective subject would require separate retained authorization/audit fields.
-This policy neither authorizes that implementation nor silently substitutes a
-provider-worker token for an acting grant. If the proposal is accepted, its effective
-subject remains the work/accounting owner and the actor remains provenance; any
-separate pool sponsorship must be explicitly admitted by server policy.
+ADR 0026 has implemented bounded acting slices; its remaining operations and
+consent-management work are still proposed. Its supported contexts retain actor
+and effective subject as separate authorization/audit coordinates. This accounting
+policy authorizes no additional acting capability and never substitutes a
+provider-worker token for an acting grant. The effective subject remains the
+work/accounting owner and the actor remains provenance; separate pool sponsorship
+must be explicitly admitted by server policy.
 
 Existing internal document processing remains SYSTEM-attributed. The admission
 owner still controls access, processing allowance, hooks and cancellation. Future

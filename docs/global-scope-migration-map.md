@@ -1,5 +1,12 @@
 # Global scope migration map
 
+> Current reading note: this migration map preserves historical/proposed cutover
+> contracts and compatibility locators. Use the
+> [AUTH owner guide](../.agents/guides/auth.md) for current owners and
+> [ADR 0071](decisions/0071-role-exercised-issuance-and-project-creator.md) for the
+> exercised/delegated issuance split and PROJECT_CREATOR. An issuer reference is not
+> uniformly a liveness dependency; null/Global locators are not authority grants.
+
 Status: baseline source map with implementation annotations, updated 18 October 2026.
 Slices 01–14 are implemented for their supported paths. Slice 14 includes
 classification/rehearsal and the bounded Global document destination and
@@ -74,7 +81,7 @@ runtime and remaining client cutovers remain later work.
 | Automatic definition/default inheritance | `DefinitionResolver.build` starts with inherited definitions; `defaultBot` searches nearer layers then Global/shipped; orchestration resolution also inherits | Explicit installed-catalogue availability, default bindings and imports, separate from worker registry lookup |
 | Skill and prompt inheritance | [SkillResolver.forCaller](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/SkillResolver.java) includes Global/shipped; [AgentRules.forPath](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/AgentRules.java) appends Global instructions | Explicit instruction/import policies. Preserve skill grants and the existing refusal to fall through unreadable skill authority tiers |
 | Shared information discovery | [InformationContext.Selection](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationContext.java) defaults human Personal/project selections to `includeShared=true`; service selections must exclude it | Explicit audience and corpus selection. Preserve existing authenticated readability before pagination; shared inclusion is not permission to read unshared Personal content |
-| Outgoing work | [OutgoingFrames](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OutgoingFrames.java) passes omitted project through; [JdbcOutgoingRepository](../plowshare-server/src/main/java/io/aeyer/plowshare/server/outgoing/JdbcOutgoingRepository.java) stores null project and uses project key zero for account-owned peer registration | Explicit owning scope, retaining account-bound reads/claims and original request UUIDs. Current null scope does not demonstrate cross-account access |
+| Outgoing work | Historical baseline: `ws/OutgoingFrames.java` passed omitted project through; `outgoing/JdbcOutgoingRepository.java` stored null project and used project key zero for account-owned peer registration. Both sites have since been removed; use the [Messaging/Relay owner guide](../.agents/guides/messaging-relay.md) to locate current contracts, without treating them as identical replacements | Explicit owning scope, retaining account-bound reads/claims and original request UUIDs. Historical null scope does not demonstrate cross-account access |
 | Public selection contracts | [CLI options](../plowshare-cli/src/options.ts), [SDK discovery](../sdk/typescript/src/operations/discovery.ts), [MCP tools](../plowshare-mcp/src/tools.json), [desktop scheduling](../plowshare-desktop/src/renderer/schedule-controls.ts) and [operator controls](../plowshare-desktop/src/renderer/operator.ts) encode Global | Update typed operations, generated catalogues, help and UI together; remove contradictory omission semantics |
 
 ### Current omitted scope behavior
