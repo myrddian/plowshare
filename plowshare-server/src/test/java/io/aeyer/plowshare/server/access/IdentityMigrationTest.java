@@ -369,4 +369,20 @@ class IdentityMigrationTest {
     assertFalse(accounts.bootstrap("unused"));
     new JdbcIdentityRepository(jdbc).verifyBuiltIns();
   }
+
+  /** V263 widens the registry; startup verification must still accept the migrated records. */
+  @Test
+  void latestRegistryIncludesTheCreatorRoleAndScopeAndStillVerifies() {
+    Flyway.configure().dataSource(source).load().migrate();
+    var identities = new JdbcIdentityRepository(jdbc);
+    identities.verifyBuiltIns();
+    assertTrue(identities.role(BuiltInIdentities.PROJECT_CREATOR).assignable());
+    assertEquals(
+        new AuthorityScope.ProjectCreation(BuiltInIdentities.PROJECT_CREATION),
+        identities.scope(BuiltInIdentities.PROJECT_CREATION));
+    assertTrue(
+        BuiltInIdentities.reservedAccount(BuiltInIdentities.PROJECT_CREATION.value().toString()));
+    assertTrue(
+        BuiltInIdentities.reservedAccount(BuiltInIdentities.PROJECT_CREATOR.value().toString()));
+  }
 }

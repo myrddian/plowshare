@@ -12,6 +12,7 @@ export {
 } from 'plowshare-client-ts/operations/pace';
 import type { PacePart } from 'plowshare-client-ts/operations/pace';
 export type { PacePart } from 'plowshare-client-ts/operations/pace';
+import { PROJECT_CREATOR_HINT } from 'plowshare-client-ts/operations/project-creator-hint';
 import { RETRIEVAL_HELP } from './retrieval.ts';
 import type { Asking } from './approval.ts';
 import type {
@@ -1555,15 +1556,23 @@ export function describeNoDirectory(): string {
   return 'this client was started without a directory to root, so there is nothing here to lend';
 }
 
-/** The server would not let this client root a project it asked to root. */
+/**
+ * The server would not let this client root a project it asked to root. A close
+ * code of 1008 is the server's policy refusal (no creator role for a new name,
+ * or no membership of an existing project), so it gets the creator hint on a
+ * line of its own; conflicts and races (1003) do not.
+ */
 export function describeRootRefused(
   project: string,
   reason: string | undefined,
+  code?: number,
 ): string {
   project = projectLabel(project);
-  return reason === undefined
-    ? `the server would not let this client root ${project}`
-    : `the server would not let this client root ${project}: ${reason}`;
+  const said =
+    reason === undefined
+      ? `the server would not let this client root ${project}`
+      : `the server would not let this client root ${project}: ${reason}`;
+  return code === 1008 ? `${said}\n${PROJECT_CREATOR_HINT}` : said;
 }
 
 /** A rooting this client held was lost — the file channel it ran over closed. */

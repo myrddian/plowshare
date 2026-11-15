@@ -8,8 +8,15 @@ public interface AccountAdministrationRepository {
   /** Serializes administrator changes with initial setup; call inside a transaction. */
   void lockAdministrators();
 
+  /**
+   * One permanent account. Its {@code projectCreator} is always false: grants are not read here,
+   * and {@code ServerAdministration} fills the field from {@code ProjectCreatorGrants}.
+   */
   Account account(String handle);
 
+  /**
+   * Every permanent account by handle, with {@code projectCreator} false as for {@link #account}.
+   */
   List<Account> list();
 
   void create(String handle, String passwordHash, boolean administrator);

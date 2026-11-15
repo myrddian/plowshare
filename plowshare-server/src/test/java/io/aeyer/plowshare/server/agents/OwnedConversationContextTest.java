@@ -119,7 +119,7 @@ class OwnedConversationContextTest {
   @Test
   void disabled_or_missing_human_and_missing_conversation_are_refused() {
     when(accounts.account("alice"))
-        .thenReturn(new Account("alice", false, false, false, OffsetDateTime.now()));
+        .thenReturn(new Account("alice", false, false, false, OffsetDateTime.now(), false));
     assertThrows(CallerFault.class, () -> access.owner("alice", "conversation"));
     verifyNoInteractions(conversations);
     enabledHuman();
@@ -132,6 +132,6 @@ class OwnedConversationContextTest {
 
   private void enabledHuman() {
     when(accounts.account("alice"))
-        .thenReturn(new Account("alice", true, true, false, OffsetDateTime.now()));
+        .thenReturn(new Account("alice", true, true, false, OffsetDateTime.now(), false));
   }
 }

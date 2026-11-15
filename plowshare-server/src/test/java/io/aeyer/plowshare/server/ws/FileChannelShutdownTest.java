@@ -26,6 +26,8 @@ class FileChannelShutdownTest {
             new io.aeyer.plowshare.server.session.PresenceRegistry(),
             mock(ProjectRoots.class),
             TestProjectMembers.allowed(),
+            TestProjectMembers.noCreation(),
+            TestProjectMembers.allRegistered(),
             java.time.Duration.ofSeconds(1),
             () -> java.util.List.of(session -> cleaned.incrementAndGet()));
     var first = socket("replaced");
@@ -60,6 +62,8 @@ class FileChannelShutdownTest {
             mock(ProjectRoots.class),
             context.getDefaultListableBeanFactory().getBeanProvider(SessionCloseListener.class),
             TestProjectMembers.allowed(),
+            TestProjectMembers.noCreation(),
+            TestProjectMembers.allRegistered(),
             mock(WebSocketKeepAlive.class));
     context.registerBean("fileChannel", FileChannelHandler.class, config::fileChannelHandler);
     // This listener depends on the handler, as DefinitionResolver does in production. Snapshot

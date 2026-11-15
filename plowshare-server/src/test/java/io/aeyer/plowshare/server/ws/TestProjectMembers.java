@@ -3,7 +3,9 @@ package io.aeyer.plowshare.server.ws;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRegistry;
 
 /** Membership policy for existing file-channel fixtures that test transport rather than access. */
 public final class TestProjectMembers {
@@ -28,5 +30,15 @@ public final class TestProjectMembers {
                           value -> io.aeyer.plowshare.server.archive.ProjectRole.MANAGER));
             });
     return members;
+  }
+
+  /** No account may create a project; transport fixtures root through membership only. */
+  public static ProjectCreation noCreation() {
+    return handle -> false;
+  }
+
+  /** Every name already has a row, so the creation path is never taken. */
+  public static ProjectRegistry allRegistered() {
+    return project -> true;
   }
 }

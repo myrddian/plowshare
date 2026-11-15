@@ -17,6 +17,16 @@ public final class BuiltInIdentities {
   public static final RoleId MANAGER = new RoleId(id(8));
   public static final RoleId CONTRIBUTOR = new RoleId(id(9));
   public static final RoleId READER = new RoleId(id(10));
+
+  /**
+   * The isolated scope that {@link #PROJECT_CREATOR} grants target. It contains no resource, and no
+   * other role may be granted at it (V263).
+   */
+  public static final ScopeId PROJECT_CREATION = new ScopeId(id(11));
+
+  /** Permits creating new projects and nothing else; its only action is {@code PROJECT_CREATE}. */
+  public static final RoleId PROJECT_CREATOR = new RoleId(id(12));
+
   private static final List<String> RESERVED =
       List.of(
           id(1).toString(),
@@ -28,7 +38,9 @@ public final class BuiltInIdentities {
           id(7).toString(),
           id(8).toString(),
           id(9).toString(),
-          id(10).toString());
+          id(10).toString(),
+          id(11).toString(),
+          id(12).toString());
 
   private BuiltInIdentities() {}
 

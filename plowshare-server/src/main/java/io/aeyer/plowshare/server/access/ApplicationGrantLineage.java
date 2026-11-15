@@ -9,7 +9,12 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-/** An issuing MANAGER must still be a manager under the current deployed manifest. */
+/**
+ * Along delegated (agent- or token-issued) lineage, an issuing MANAGER must still be a manager
+ * under the current deployed manifest. Person-issued grants are rooted at SYSTEM (V261), so their
+ * chain carries no issuer to narrow. They keep their own role, capped only by the manifest's entry
+ * for the grant's own recipient.
+ */
 @Component
 public final class ApplicationGrantLineage implements GrantLineage {
   private final ScopedGrantRepository grants;
@@ -97,7 +102,7 @@ public final class ApplicationGrantLineage implements GrantLineage {
             case READER -> Optional.of(ProjectRole.VIEWER);
             case CONTRIBUTOR -> Optional.of(ProjectRole.CONTRIBUTOR);
             case MANAGER -> Optional.of(ProjectRole.MANAGER);
-            case ADMIN, SYSTEM, GLOBAL_READ -> Optional.empty();
+            case ADMIN, SYSTEM, GLOBAL_READ, PROJECT_CREATOR -> Optional.empty();
           };
       if (role.isEmpty() || !valid(chain, policies)) continue;
       role = policies.computeIfAbsent(project, applications::read).limit(account, role);

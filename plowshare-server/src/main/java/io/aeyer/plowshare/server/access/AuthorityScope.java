@@ -57,6 +57,17 @@ public sealed interface AuthorityScope {
     }
   }
 
+  /**
+   * The single built-in scope that PROJECT_CREATOR grants target. It holds no project or other
+   * resource, so no scoped action is authorized against it: the creator role is answered by its own
+   * creation check, never by a scoped permission evaluated here.
+   */
+  record ProjectCreation(ScopeId id) implements AuthorityScope {
+    public ProjectCreation {
+      Objects.requireNonNull(id);
+    }
+  }
+
   private static long positive(long id) {
     if (id <= 0) throw new IllegalArgumentException("A project mapping requires an existing key");
     return id;

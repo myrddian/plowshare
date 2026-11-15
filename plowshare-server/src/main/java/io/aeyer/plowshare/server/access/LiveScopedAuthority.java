@@ -35,6 +35,9 @@ public final class LiveScopedAuthority implements ScopedAuthority {
     Objects.requireNonNull(recipient);
     Objects.requireNonNull(target);
     Objects.requireNonNull(action);
+    // The creation scope holds no resource. A PROJECT_CREATOR grant is answered by the creation
+    // check, never by a scoped action here, so that the role cannot be read as any permission.
+    if (target instanceof AuthorityScope.ProjectCreation) return false;
     if (!target.equals(identities.scope(target.id()))) return false;
     // Universal role eligibility is not an issuable grant. It can admit knowledge READ, but
     // cannot support allowsUsing, grant issuance, project membership or execution authority.
@@ -107,6 +110,9 @@ public final class LiveScopedAuthority implements ScopedAuthority {
     }
 
     boolean usable(AuthorityScope target, AuthorityAction action, UUID grant) {
+      // The creation scope authorizes nothing through scoped grants; project creation is decided
+      // only by authority_may_create_projects and its snapshot mirror.
+      if (target instanceof AuthorityScope.ProjectCreation) return false;
       return live.stream()
           .filter(binding -> binding.id().equals(grant))
           .anyMatch(
@@ -146,7 +152,7 @@ public final class LiveScopedAuthority implements ScopedAuthority {
                   case READ -> true;
                   case WRITE, CONVERSATION_CREATE, RUN_MODEL -> role != ProjectRole.VIEWER;
                   case MANAGE_ACCESS, MANAGE_SCOPE, SET_AUDIENCE -> role == ProjectRole.MANAGER;
-                  case ADMINISTER -> false;
+                  case ADMINISTER, PROJECT_CREATE -> false;
                 })
         .isPresent();
   }
@@ -160,7 +166,7 @@ public final class LiveScopedAuthority implements ScopedAuthority {
           (binding.scope().equals(target.id()) || target instanceof AuthorityScope.Project)
               && switch (action) {
                 case ADMINISTER, MANAGE_ACCESS, MANAGE_SCOPE, SET_AUDIENCE -> true;
-                case READ, WRITE, CONVERSATION_CREATE, RUN_MODEL -> false;
+                case READ, WRITE, CONVERSATION_CREATE, RUN_MODEL, PROJECT_CREATE -> false;
               };
     };
   }

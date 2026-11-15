@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.auth.AdminStore;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -113,7 +114,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * key and not {@code AgentsProperties}', which is evidence the old sentence's premise never
  * generalised past the one path it happened to name.
  */
-public final class ProjectStore implements ServerProjects, ProjectNames, ProjectCatalogue {
+public final class ProjectStore
+    implements ServerProjects, ProjectNames, ProjectCatalogue, ProjectRegistry {
 
   /*
    * `lent` sits between `workspace` and `exclusions` because that is the order
@@ -446,7 +448,7 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
 
   public ProjectRecord defineLending(
       String name, Path workspace, List<Path> lent, List<Path> exclusions, String handle) {
-    new io.aeyer.plowshare.server.auth.AdminStore(jdbc).requireServerAdmin(handle);
+    new AdminStore(jdbc).requireServerAdmin(handle);
     return withCreator(name, handle, () -> defineLending(name, workspace, lent, exclusions));
   }
 
@@ -474,15 +476,96 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
       asserted(root, "root");
       return; // A checkout attaches to the identity; it never relocates the server workspace.
     }
-    if (recorded.isEmpty())
-      new io.aeyer.plowshare.server.auth.AdminStore(jdbc).requireServerAdmin(handle);
-    withCreator(
+    Optional<Boolean> hasMembers = membership(name);
+    if (hasMembers.isEmpty()) {
+      createByRooting(name, machine, root, handle);
+      return;
+    }
+    if (!hasMembers.get()) {
+      // An orphan row (registered by a memory write, or left by removed members) stays
+      // administrator-only: an administrator adopts it and becomes its first manager.
+      if (!new AdminStore(jdbc).isServerAdmin(handle))
+        throw new ArchiveRefusedException(
+            "Only a server administrator may adopt a project with no members");
+      withCreator(
+          name,
+          handle,
+          () -> {
+            rootOn(name, machine, root);
+            return null;
+          });
+      return;
+    }
+    // A client-rooted project with members: any member re-roots it; nobody else attaches.
+    if (!new JdbcProjectMembers(jdbc).mayUse(name, handle))
+      throw new ArchiveRefusedException("This account may not attach this project");
+    rootOn(name, machine, root);
+  }
+
+  /**
+   * Create an unregistered project by rooting it: the branch {@link #rootOn(String, String, String,
+   * String)} takes once it has read that no row has this name. Only a PROJECT_CREATOR holder may;
+   * server administration alone does not create, and reserved names never do.
+   *
+   * <p>Package-private only so a test can enter it after that read, with a row already inserted in
+   * between, which is the race {@link #withSoleCreator} must refuse rather than adopt.
+   */
+  void createByRooting(String name, String machine, String root, String handle) {
+    ordinary(name);
+    if (!mayCreate(handle))
+      throw new ArchiveRefusedException("This account may not create projects");
+    withSoleCreator(
         name,
         handle,
         () -> {
           rootOn(name, machine, root);
           return null;
         });
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Any row counts: server, client-rooted, personal or orphan. Unlike {@link #find}, which
+   * answers only for this server's projects.
+   */
+  @Override
+  public boolean registered(String project) {
+    if (project == null) return false;
+    return ArchiveUnavailableException.translating(
+        "read whether a project is registered",
+        () ->
+            Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                    "SELECT EXISTS (SELECT 1 FROM projects WHERE name = ?)",
+                    Boolean.class,
+                    project)));
+  }
+
+  /** Empty when no row has this name; otherwise whether that row has any member. */
+  private Optional<Boolean> membership(String name) {
+    return ArchiveUnavailableException.translating(
+        "read whether a project has members",
+        () ->
+            jdbc
+                .queryForList(
+                    "SELECT EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id)"
+                        + " FROM projects p WHERE p.name = ?",
+                    Boolean.class,
+                    named(name))
+                .stream()
+                .findFirst());
+  }
+
+  /** {@code authority_may_create_projects} (V263): the live PROJECT_CREATOR decision. */
+  private boolean mayCreate(String handle) {
+    if (handle == null || handle.isBlank()) return false;
+    return ArchiveUnavailableException.translating(
+        "read whether an account may create projects",
+        () ->
+            Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                    "SELECT authority_may_create_projects(?)", Boolean.class, handle)));
   }
 
   /** Atomic create; an existing project can never be overwritten by a retried request. */
@@ -492,7 +575,7 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
       List<String> writePaths,
       String handle,
       Supplier<ServerWorkspace> workspace) {
-    new io.aeyer.plowshare.server.auth.AdminStore(jdbc).requireServerAdmin(handle);
+    new AdminStore(jdbc).requireServerAdmin(handle);
     ordinary(name);
     return withCreator(
         name,
@@ -525,7 +608,7 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
 
   @Override
   public ProjectRecord place(String name, ApplicationPlacement placement, String handle) {
-    new io.aeyer.plowshare.server.auth.AdminStore(jdbc).requireServerAdmin(handle);
+    new AdminStore(jdbc).requireServerAdmin(handle);
     ordinary(name);
     return withCreator(
         name,
@@ -563,7 +646,7 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
       ApplicationPlacement expected,
       Path verifiedRoot,
       String handle) {
-    new io.aeyer.plowshare.server.auth.AdminStore(jdbc).requireServerAdmin(handle);
+    new AdminStore(jdbc).requireServerAdmin(handle);
     ordinary(name);
     return withCreator(
         name,
@@ -673,6 +756,47 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
   }
 
   private <T> T withCreator(String name, String handle, Supplier<T> write) {
+    return founding(name, handle, false, write);
+  }
+
+  /**
+   * {@link #withCreator}, for a project being created rather than adopted: the row must be new, and
+   * the creator must end the transaction as its first member.
+   *
+   * <p><b>The row is inserted, never upserted.</b> {@link #withCreator} registers through {@link
+   * ProjectIds#toWrite}, which answers with an existing row's id. Here that would let a row created
+   * after the caller read "no row" (a racing creator, or a memory, conversation or job-log write
+   * that registered the name) be adopted, making the creator manager of another writer's data. An
+   * insert that returns no id means some row now exists, and creation is refused; the caller may
+   * retry, and then takes the existing-row branches of {@code rootOn}. A racing creator blocks on
+   * the first one's uncommitted insert and is refused the same way once it commits.
+   *
+   * <p>The sole-membership check after the member insert stays as defence in depth.
+   */
+  private <T> T withSoleCreator(String name, String handle, Supplier<T> write) {
+    return founding(name, handle, true, write);
+  }
+
+  /**
+   * The id of a row this transaction inserted for {@code name}, or a refusal if one existed. The
+   * same insert {@link ProjectIds} registers a new row with (only the name; every other column
+   * keeps its default), without the upsert that would answer with an existing row's id.
+   */
+  private Long inserted(String name) {
+    return jdbc
+        .queryForList(
+            "INSERT INTO projects (name) VALUES (?) ON CONFLICT (name) DO NOTHING RETURNING id",
+            Long.class,
+            name)
+        .stream()
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new ArchiveRefusedException(
+                    "A project with this name was just created; try again"));
+  }
+
+  private <T> T founding(String name, String handle, boolean sole, Supplier<T> write) {
     return ArchiveUnavailableException.translating(
         "create a project with its first member",
         () ->
@@ -680,7 +804,10 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
                     new DataSourceTransactionManager(Objects.requireNonNull(jdbc.getDataSource())))
                 .execute(
                     status -> {
-                      Long id = ProjectIds.toWrite(jdbc, Home.of(named(name)));
+                      Long id =
+                          sole
+                              ? inserted(named(name))
+                              : ProjectIds.toWrite(jdbc, Home.of(named(name)));
                       jdbc.queryForObject(
                           "SELECT id FROM projects WHERE id = ? FOR UPDATE", Long.class, id);
                       T result = write.get();
@@ -693,6 +820,16 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
                             handle,
                             id);
                       }
+                      if (sole
+                          && !Boolean.TRUE.equals(
+                              jdbc.queryForObject(
+                                  "SELECT EXISTS (SELECT 1 FROM project_members"
+                                      + " WHERE project_id = ? AND handle = ?)",
+                                  Boolean.class,
+                                  id,
+                                  handle)))
+                        throw new ArchiveRefusedException(
+                            "Another account created this project first");
                       return result;
                     }));
   }
@@ -1416,7 +1553,9 @@ public final class ProjectStore implements ServerProjects, ProjectNames, Project
     if (ClientProjects.privateProject(name))
       throw new ArchiveRefusedException(
           "Client projects cannot be published or administered as server projects");
-    if (name != null && (name.startsWith("personal:") || name.startsWith("Personal:"))) {
+    // Case-insensitive, as ContainedProjects reserves its prefix: no spelling of "personal:" may be
+    // created or changed as an ordinary project.
+    if (name != null && name.regionMatches(true, 0, "personal:", 0, "personal:".length())) {
       throw new ArchiveRefusedException(
           "Personal space is managed by its account and cannot be changed as an ordinary project");
     }
