@@ -1,4 +1,5 @@
 import type { UsageReport } from './usage.ts';
+import { usageCacheHitRate, usageTokenDetails } from './usage-metrics.ts';
 import {
   DEFAULT_REFERENCE,
   referenceCost,
@@ -35,6 +36,10 @@ export function usageText(
     `${report.filters.filter.from} → ${report.filters.filter.to} (UTC, end exclusive)`,
     `Calls ${t.calls} · attempts ${t.attempts} · active ${t.active_calls}`,
     `Recorded input ${t.input_tokens} · output ${t.output_tokens} (${t.usage_complete ? 'complete' : 'known subtotal; incomplete usage'})`,
+    ...usageTokenDetails(t).map(
+      (metric) => `${metric.label}: ${metric.value} · ${metric.detail}`,
+    ),
+    'Cache and reasoning tokens are subsets of input/output, not additional tokens.',
     `Booked estimates: ${costs(t)}${t.cost_complete ? '' : ' · incomplete pricing'}`,
     `Reference ${price.label}: ${estimate.amount === undefined ? 'Unavailable' : `${estimate.currency} ${estimate.amount}`}${estimate.complete ? '' : ' · partial known subtotal'}`,
     `Reference rates / million: input ${price.input}, output ${price.output}. Checked ${price.checked}.`,
@@ -58,7 +63,7 @@ export function usageText(
           .map((v) => (v === null ? '(unassigned)' : String(v)))
           .join(
             ' / ',
-          )}: input ${row.input_tokens}, output ${row.output_tokens}, ${costs(row)}${row.usage_complete ? '' : ' · known subtotal; incomplete usage'}${row.cost_complete ? '' : ' · incomplete pricing'}`,
+          )}: input ${row.input_tokens}, output ${row.output_tokens}, token cache hit rate ${usageCacheHitRate(row).value}, ${costs(row)}${row.usage_complete ? '' : ' · known subtotal; incomplete usage'}${row.cost_complete ? '' : ' · incomplete pricing'}`,
     ),
     ...(report.cursor ? ['More breakdown rows are available.'] : []),
   ].join('\n');

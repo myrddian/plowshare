@@ -50,6 +50,49 @@ const makeReport = (): UsageReport => ({
 });
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 describe('usage panel', () => {
+  it('shows provider cache coverage and a token-weighted hit rate independently of pricing', async () => {
+    const root = document.createElement('div'),
+      read = vi.fn(),
+      panel = mountUsagePanel(root, {
+        select: vi.fn(async () => {}),
+        read,
+        overview: true,
+      });
+    await tick();
+    const report = makeReport();
+    Object.assign(report.totals, {
+      cache_read_tokens: '750000',
+      cache_read_tokens_known: '2',
+      cache_write_tokens: '0',
+      cache_write_tokens_known: '0',
+      reasoning_tokens: '100',
+      reasoning_tokens_known: '2',
+      provider_total_tokens: '1500000',
+      provider_total_tokens_known: '2',
+      costs: { USD: '0' },
+    });
+    panel.update({ report, revision: 0, stale: false, loading: false });
+    const measurements = () =>
+      root.querySelector('[aria-label="Provider token measurements"]')
+        ?.textContent;
+    expect(measurements()).toContain('Cache read tokens750000');
+    expect(measurements()).toContain('Cache write tokensNot reported');
+    expect(measurements()).toContain('Reasoning tokens100');
+    expect(measurements()).toContain('Token cache hit rate75.00%');
+    expect(root.textContent).toContain('USD 0');
+    report.totals.costs = {};
+    report.totals.cost_complete = false;
+    report.totals.complete = false;
+    report.totals.unknown_cost_attempts = '2';
+    panel.update({ report, revision: 1, stale: false, loading: false });
+    expect(measurements()).toContain('Token cache hit rate75.00%');
+    report.totals.cache_read_tokens_known = '1';
+    panel.update({ report, revision: 2, stale: false, loading: false });
+    expect(measurements()).toContain('Token cache hit rateUnavailable');
+    expect(measurements()).toContain('1 of 2 attempts reported');
+    expect(read).not.toHaveBeenCalled();
+    panel.destroy();
+  });
   it('changes comparison locally, persists the default, and never replaces recorded costs', async () => {
     const root = document.createElement('div'),
       select = vi.fn(async () => {}),

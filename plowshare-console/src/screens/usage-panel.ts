@@ -1,4 +1,8 @@
 import { errorMessage } from '../../../sdk/typescript/src/binding/values.ts';
+import {
+  usageCacheHitRate,
+  usageTokenDetails,
+} from '../../../sdk/typescript/src/operations/usage-metrics.ts';
 import { background } from '../background.ts';
 import { decodePayload } from '../../../sdk/typescript/src/operations/schema.ts';
 import type { Replies } from '../../../sdk/typescript/src/operations/replies.ts';
@@ -613,6 +617,22 @@ export function mountUsagePanel(
       summary.append(stat);
     }
     reportBody.append(summary);
+    const tokenDetails = node('section');
+    tokenDetails.setAttribute('aria-label', 'Provider token measurements');
+    tokenDetails.append(
+      node('h3', 'Provider token measurements'),
+      facts(
+        usageTokenDetails(t).map((metric) => [
+          metric.label,
+          `${metric.value} · ${metric.detail}`,
+        ]),
+      ),
+      node(
+        'p',
+        'Cache and reasoning tokens are subsets of input/output, not additional tokens. The cache hit rate measures the cached share of input tokens, not the share of requests with hits.',
+      ),
+    );
+    reportBody.append(tokenDetails);
     const coverage = node('p');
     coverage.className = 'usage-coverage';
     coverage.append(
@@ -641,6 +661,7 @@ export function mountUsagePanel(
       'Work',
       'Input tokens',
       'Output tokens',
+      'Token cache hit rate',
       'Recorded estimate',
     ])
       headings.append(node('th', text));
@@ -668,6 +689,7 @@ export function mountUsagePanel(
         name,
         tokens(row, 'input'),
         tokens(row, 'output'),
+        usageCacheHitRate(row).value,
         costs(row) + (row.cost_complete ? '' : ' · incomplete'),
       ])
         entry.append(node('td', text));
@@ -1083,6 +1105,22 @@ export function mountUsagePanel(
                 [
                   'Output tokens',
                   displayText(attempt.output_tokens ?? 'Not reported'),
+                ],
+                [
+                  'Provider total tokens',
+                  displayText(attempt.provider_total_tokens ?? 'Not reported'),
+                ],
+                [
+                  'Cache read tokens',
+                  displayText(attempt.cache_read_tokens ?? 'Not reported'),
+                ],
+                [
+                  'Cache write tokens',
+                  displayText(attempt.cache_write_tokens ?? 'Not reported'),
+                ],
+                [
+                  'Reasoning tokens',
+                  displayText(attempt.reasoning_tokens ?? 'Not reported'),
                 ],
                 [
                   'Cost',
