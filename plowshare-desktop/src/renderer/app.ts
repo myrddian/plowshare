@@ -1093,15 +1093,13 @@ function renderTranscript() {
     100;
   const oldTop = transcript.scrollTop;
   const wasEmpty = !transcript.childElementCount;
-  // Repainting streamed text must preserve the reader's choice to close the preview.
-  // Scope that choice to this job so a different conversation/run starts expanded.
-  const previousReasoning = transcript.querySelector<HTMLDetailsElement>(
+  // Follow the live tail unless the reader scrolled back; never reuse another job's position.
+  const previousReasoning = transcript.querySelector<HTMLElement>(
     '[data-thinking-job]',
   );
   const sameReasoningJob =
     previousReasoning !== null &&
     previousReasoning.dataset['thinkingJob'] === job?.id;
-  const reasoningOpen = sameReasoningJob ? previousReasoning.open : true;
   const previousReasoningText = sameReasoningJob
     ? previousReasoning.querySelector('pre')
     : null;
@@ -1159,9 +1157,9 @@ function renderTranscript() {
   if (job && activeJob(job)) {
     if (job.source !== 'approval')
       content += message('person', 'You', job.task);
-    if (job.thinking) {
-      content += `<details class="published-reasoning" data-thinking-job="${esc(job.id)}"${reasoningOpen ? ' open' : ''}><summary>Published reasoning <span>Live preview</span></summary><pre>${esc(job.thinking)}</pre>${job.thinkingTruncated ? '<p class="history-note">Earlier text is omitted from this live preview. Open Trajectory for recorded reasoning when available.</p>' : ''}</details>`;
-    }
+    const reasoning = job.thinking
+      ? `<div class="published-reasoning" data-thinking-job="${esc(job.id)}" role="region" aria-label="Published reasoning"><pre tabindex="0">${esc(job.thinking)}</pre>${job.thinkingTruncated ? '<p class="history-note">Earlier text is omitted. Open Trajectory for recorded reasoning when available.</p>' : ''}</div>`
+      : '';
     const waiting =
       job.status === 'unknown'
         ? 'The connection was lost. This job may still be running on the server.'
@@ -1169,10 +1167,12 @@ function renderTranscript() {
           ? 'Stopping…'
           : job.phase === 'thinking'
             ? 'Reasoning…'
-            : job.phase === 'tool'
-              ? `Using ${job.tool || 'a tool'}…`
-              : 'Working on your request…';
-    content += `<article class="message answer live" data-copy-source="${esc(job.text)}"><div class="message-label"><span class="answer-mark">${icon('sparkles')}</span><span>${esc(job.agent)} · ${esc(job.status)}</span>${job.text ? copyButton('Copy answer as Markdown', 'answer') : ''}</div><div class="message-body markdown-body">${markdownHtml(job.text || waiting)}${job.status === 'running' && job.phase === 'answer' ? '<span class="stream-caret"></span>' : ''}</div>${job.detail ? `<p class="history-note">${esc(job.detail)}</p>` : ''}</article>`;
+            : 'Working on your request…';
+    const waitingOnTools = job.status === 'running' && job.phase === 'tool';
+    const toolStatus = waitingOnTools
+      ? `<p class="live-tool-status" role="status">Waiting for tool replies…${job.tool ? ` (${esc(job.tool)})` : ''}</p>`
+      : '';
+    content += `<article class="message answer live" data-copy-source="${esc(job.text)}"><div class="message-label"><span class="answer-mark">${icon('sparkles')}</span><span>${esc(job.agent)} · ${esc(job.status)}</span>${job.text ? copyButton('Copy answer as Markdown', 'answer') : ''}</div>${reasoning}<div class="message-body markdown-body">${markdownHtml(job.text || (waitingOnTools ? '' : waiting))}${job.status === 'running' && job.phase === 'answer' ? '<span class="stream-caret"></span>' : ''}</div>${toolStatus}${job.detail ? `<p class="history-note">${esc(job.detail)}</p>` : ''}</article>`;
   }
   if (!content)
     content = `<div class="empty-chat"><div class="empty-mark">${icon('sparkles')}</div><h2>What are we thinking about?</h2><p>Ask a question, explore your sources, or work through something together.</p><div class="suggestions"><button data-suggestion="Help me explore an idea and find useful sources.">${icon('search')}Explore an idea</button><button data-suggestion="Help me turn these notes into a clear plan.">${icon('file')}Make a plan</button><button data-suggestion="Help me understand a problem step by step.">${icon('route')}Work through a problem</button></div></div>`;
@@ -1536,7 +1536,9 @@ function refreshProjection(measure: boolean) {
 function renderApprovals() {
   const approvals = state.approvals.filter((row) => row.state === 'asked');
   const bar = $('#approval-bar');
-  bar.hidden = !approvals.length && !state.approvalError && !selected;
+  // An approval-colored surface means there is an actual pending decision.
+  // Refresh failures are also reported through the normal background-error banner.
+  bar.hidden = !approvals.length;
   bar.innerHTML =
     `<button id="retry-command-approvals" ${!state.connected ? 'disabled' : ''}>Check command approvals</button>${state.approvalError ? `<p role="alert">${esc(state.approvalError)}</p>` : ''}` +
     approvals

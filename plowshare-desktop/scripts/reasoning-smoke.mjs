@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { protocolFixture } from './protocol-fixture.mjs';
 
 const temporary = await mkdtemp(join(tmpdir(), 'plowshare-reasoning-'));
-const fixture = await protocolFixture({ conversationProject: 'Empty workspace' });
+const fixture = await protocolFixture({ conversationProject: 'Empty workspace', emptyApprovals: true });
 fixture.addConversation({ id: 'fixture-second', title: 'Another conversation', project: 'Empty workspace' });
 const env = {
   ...process.env,
@@ -30,23 +30,42 @@ try {
   await page.locator('.conversation-row[data-conversation="fixture-second"]').click();
   await expect(page.locator('.conversation-row[data-conversation="fixture-second"]')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#chat-title')).toHaveText('Another conversation');
+  await expect(page.locator('#approval-bar')).toBeHidden();
   await request({ action: 'run', conversation: 'fixture-second', agent: 'fixture-bot', text: 'Reasoning display acceptance' });
   const id = fixture.latestJob;
   assert.equal((await request({ action: 'bootstrap' })).state.jobs.find(job => job.id === id).conversation, 'fixture-second');
   const preview = page.locator(`[data-thinking-job="${id}"]`);
   await expect(preview).toBeVisible();
   await expect(preview.locator('pre')).toContainText('Fixture reasoning: Reasoning display acceptance');
+  await expect(preview.locator('summary')).toHaveCount(0);
+  await expect(preview.locator('pre')).toHaveCSS('font-style', 'italic');
+  await expect(preview).toHaveCSS('border-top-width', '0px');
+  const answer = page.locator('.message.answer.live .message-body');
+  await expect(answer).toContainText('Fixture streaming: Reasoning display acceptance');
+  assert.notEqual(await preview.evaluate(node => getComputedStyle(node).color), await answer.evaluate(node => getComputedStyle(node).color));
   // Repeated thought-only deltas keep the same phase. Each must still repaint.
   fixture.publish({ job: id, part: 'THINKING', text: ' first update' });
   await expect(preview.locator('pre')).toContainText('first update');
   fixture.publish({ job: id, part: 'THINKING', text: ' second update' });
   await expect(preview.locator('pre')).toContainText('second update');
-  await preview.locator('summary').click();
-  assert.equal(await preview.evaluate(node => node.open), false);
-  fixture.publish({ job: id, part: 'THINKING', text: ' while closed' });
-  await expect(preview.locator('pre')).toContainText('while closed');
-  assert.equal(await preview.evaluate(node => node.open), false, 'New deltas preserve the reader\'s collapsed choice.');
-  await preview.locator('summary').click();
+  fixture.publish({ job: id, part: 'ANSWER', text: ' More answer text.' });
+  await expect(answer).toContainText('More answer text.');
+  fixture.publish({ job: id, part: 'THINKING', text: '\nReasoning continues alongside the answer.' });
+  await expect(preview).toContainText('Reasoning continues alongside the answer.');
+  await expect(answer).toContainText('More answer text.');
+  const toolStatus = page.locator('.live-tool-status');
+  fixture.publish({ job: id, kind: 'tool_called', tool: 'run' });
+  await expect(toolStatus).toHaveText('Waiting for tool replies… (run)');
+  await expect(answer).toContainText('More answer text.');
+  await mkdir('build/smoke', { recursive: true });
+  await page.screenshot({ path: 'build/smoke/published-reasoning.png' });
+  fixture.publish({ job: id, kind: 'model_call' });
+  await expect(toolStatus).toHaveCount(0);
+  fixture.publish({ job: id, kind: 'tool_called', tool: '<img src=x>' });
+  await expect(toolStatus).toContainText('<img src=x>');
+  await expect(toolStatus.locator('img')).toHaveCount(0);
+  fixture.publish({ job: id, part: 'ANSWER', text: ' Answer resumes.' });
+  await expect(toolStatus).toHaveCount(0);
   const markup = '<img src=x onerror="window.reasoningInjection=true">';
   fixture.publish({ job: id, part: 'THINKING', text: markup });
   await expect(preview.locator('pre')).toContainText(markup);
@@ -71,8 +90,6 @@ try {
   await expect(page.locator('.conversation-row[data-conversation="fixture-second"]')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#chat-title')).toHaveText('Another conversation');
   await expect(preview.locator('pre')).toContainText('visible tail');
-  await mkdir('build/smoke', { recursive: true });
-  await page.screenshot({ path: 'build/smoke/published-reasoning.png' });
   fixture.completeLatest('Authoritative final answer.');
   await expect(page.locator('[data-thinking-job]')).toHaveCount(0);
   await expect(page.locator('#transcript')).toContainText('Authoritative final answer.');
@@ -80,7 +97,7 @@ try {
   await expect(page.locator('[data-thinking-job]')).toHaveCount(0);
   assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 1);
   assert.deepEqual(errors, []);
-  console.log('Published reasoning passed: early delivery, repeated delta repaint, collapse preservation, escaping, bounded tail, scope switching and authoritative final answer.');
+  console.log('Published reasoning passed: subtle italic stream alongside answers, tool waiting status, escaping, bounded tail, scroll preservation, scope switching and authoritative final answer.');
 } finally {
   await app?.close();
   await fixture.close();
