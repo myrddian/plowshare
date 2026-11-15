@@ -3,20 +3,33 @@ package io.aeyer.plowshare.server.agents;
 import io.aeyer.plowshare.server.agents.DefinitionResolver.Caller;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.SessionChannel;
+import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiPredicate;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 /** Scoped Markdown instructions, separate from role definitions and capability grants. */
 public final class AgentRules {
   public record Rule(String origin, String scope, String text) {}
 
-  private java.util.function.Function<Caller, Long> personalIds = caller -> null;
+  /**
+   * Required instructions were refused or invalid. A scoped tool call must deny its effect rather
+   * than skip these instructions. Transport outages retain their own exception types.
+   */
+  public static final class Refused extends IllegalArgumentException {
+    public Refused(String reason) {
+      super(reason);
+    }
+  }
 
-  public void usePersonalResources(java.util.function.Function<Caller, Long> ids) {
+  private Function<Caller, Long> personalIds = caller -> null;
+
+  public void usePersonalResources(Function<Caller, Long> ids) {
     personalIds = ids;
   }
 
@@ -58,8 +71,7 @@ public final class AgentRules {
         for (Path segment : parent) {
           current = current.resolve(segment);
           scopes.add(current.toString());
-          if (scopes.size() > 64)
-            throw new IllegalArgumentException("agent rules exceed 64 directory scopes");
+          if (scopes.size() > 64) throw new Refused("agent rules exceed 64 directory scopes");
         }
       }
     }
@@ -93,16 +105,14 @@ public final class AgentRules {
       addDisk(rules, tier.resolve("agents").resolve(agent), "agent:" + agent);
     }
     long bytes =
-        rules.stream()
-            .mapToLong(rule -> rule.text().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
-            .sum();
+        rules.stream().mapToLong(rule -> rule.text().getBytes(StandardCharsets.UTF_8).length).sum();
     if (bytes > ChannelDefinitions.MAX_SOURCE_BYTES)
-      throw new IllegalArgumentException("agent rules exceed source limit");
+      throw new Refused("agent rules exceed source limit");
     if (remote != null) {
       remote.requireCurrent();
       // A still-open connection may have stopped rooting this project during the reads.
       if (!live.test(caller.sessionId()) || !roots.test(caller.projectId(), caller.sessionId()))
-        throw new io.aeyer.plowshare.server.files.WorkspaceUnavailableException(
+        throw new WorkspaceUnavailableException(
             "The file session no longer roots the selected project; reconnect files and refresh");
     }
     return List.copyOf(rules);
@@ -137,8 +147,7 @@ public final class AgentRules {
       for (Path part : parent) {
         current = current.resolve(part);
         directories.add(current);
-        if (directories.size() > 64)
-          throw new IllegalArgumentException("agent rules exceed 64 directory scopes");
+        if (directories.size() > 64) throw new Refused("agent rules exceed 64 directory scopes");
       }
     ChannelDefinitions remote =
         remoteSession == null ? null : ChannelDefinitions.skills(channel, remoteSession);
@@ -148,11 +157,9 @@ public final class AgentRules {
       else addChannel(rules, remote, directory.toString(), scope);
     }
     long bytes =
-        rules.stream()
-            .mapToLong(rule -> rule.text().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
-            .sum();
+        rules.stream().mapToLong(rule -> rule.text().getBytes(StandardCharsets.UTF_8).length).sum();
     if (bytes > ChannelDefinitions.MAX_SOURCE_BYTES)
-      throw new IllegalArgumentException("agent rules exceed source limit");
+      throw new Refused("agent rules exceed source limit");
     if (remote != null) remote.requireCurrent();
     return List.copyOf(rules);
   }
@@ -167,8 +174,12 @@ public final class AgentRules {
     Path file = directory.resolve(name);
     if (!Files.exists(file)) return null;
     // Same bounded UTF-8 and canonical containment checks as packages.
-    return SkillSource.disk(directory.getParent())
-        .readResource(directory.getFileName().toString(), name);
+    try {
+      return SkillSource.disk(directory.getParent())
+          .readResource(directory.getFileName().toString(), name);
+    } catch (IllegalArgumentException invalid) {
+      throw new Refused("cannot read agent rules " + file + ": " + invalid.getMessage());
+    }
   }
 
   private static void addChannel(
@@ -186,15 +197,14 @@ public final class AgentRules {
     ChannelDefinitions.FileRead read = files.resource(path);
     if (read.absent()) return null;
     if (read.unreadable() != null)
-      throw new IllegalArgumentException(
-          "cannot read agent rules " + path + ": " + read.unreadable());
+      throw new Refused("cannot read agent rules " + path + ": " + read.unreadable());
     return read.text();
   }
 
   private static void add(
       List<Rule> rules, String origin, String scope, String canonical, String alias) {
     if (canonical != null && alias != null && !canonical.equals(alias)) {
-      throw new IllegalArgumentException("conflicting AGENTS.md and AGENT.md in " + origin);
+      throw new Refused("conflicting AGENTS.md and AGENT.md in " + origin);
     }
     String text = canonical != null ? canonical : alias;
     if (text != null && !text.isBlank())
