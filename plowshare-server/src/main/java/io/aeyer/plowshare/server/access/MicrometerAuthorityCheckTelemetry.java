@@ -14,13 +14,23 @@ import java.util.Objects;
  */
 public final class MicrometerAuthorityCheckTelemetry implements AuthorityCheckTelemetry {
   public static final String ADMISSIONS = "plowshare.authority.admission.checks";
+  public static final String GRANTS = "plowshare.authority.grant.reads";
   public static final String SESSIONS = "plowshare.authority.session.checks";
 
   private final Map<AdmissionOutcome, Counter> admissions = new EnumMap<>(AdmissionOutcome.class);
+  private final Map<GrantOutcome, Counter> grants = new EnumMap<>(GrantOutcome.class);
   private final Map<SessionOutcome, Counter> sessions = new EnumMap<>(SessionOutcome.class);
 
   public MicrometerAuthorityCheckTelemetry(MeterRegistry registry) {
     Objects.requireNonNull(registry);
+    for (var outcome : GrantOutcome.values()) {
+      grants.put(
+          outcome,
+          Counter.builder(GRANTS)
+              .description("Grant reads by how they were answered")
+              .tag("outcome", outcome.name().toLowerCase(Locale.ROOT))
+              .register(registry));
+    }
     for (var outcome : AdmissionOutcome.values()) {
       admissions.put(
           outcome,
@@ -37,6 +47,11 @@ public final class MicrometerAuthorityCheckTelemetry implements AuthorityCheckTe
               .tag("outcome", outcome.name().toLowerCase(Locale.ROOT))
               .register(registry));
     }
+  }
+
+  @Override
+  public void grant(GrantOutcome outcome) {
+    grants.get(outcome).increment();
   }
 
   @Override

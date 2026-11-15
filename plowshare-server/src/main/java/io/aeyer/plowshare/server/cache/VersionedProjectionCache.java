@@ -130,6 +130,9 @@ public final class VersionedProjectionCache<T>
   // entry is simply not found and is loaded again; the map vouches for nothing.
   private final ConcurrentHashMap<SnapshotCache.Key, ProjectionItemVersions.ItemToken> stored =
       new ConcurrentHashMap<>();
+  // Domain candidates hold only lookup evidence, never another reference to the resident DTO.
+  private final ConcurrentHashMap<SnapshotCache.Key, ProjectionVersions.Token> domainStored =
+      new ConcurrentHashMap<>();
   private static final int STORED_KEYS = 4096;
   private final ProjectionCacheStatistics statistics = new ProjectionCacheStatistics();
 
@@ -293,6 +296,7 @@ public final class VersionedProjectionCache<T>
   private void forget() {
     changes.incrementAndGet();
     trusted.clear();
+    domainStored.clear();
     itemChanged.clear();
   }
 
@@ -367,6 +371,30 @@ public final class VersionedProjectionCache<T>
       throw new IllegalArgumentException("Items must belong to this projection's domains");
     return ReadDeadline.within(
         budget, () -> readItems(key, selected, cacheable, boundedLoader, uncachedLoader, weight));
+  }
+
+  @Override
+  public Optional<ProjectionCache.Candidate<T>> candidate(SnapshotCache.Key key) {
+    Objects.requireNonNull(key);
+    if (versions == null || !ready()) return Optional.empty();
+    long epoch = changes.get();
+    var token = domainStored.get(key);
+    if (token == null) return Optional.empty();
+    var value =
+        cache.peek(request(key, token, null)).map(SnapshotCache.Tracked::value).orElse(null);
+    // A notification or reconnect during lookup retires the candidate. SQL still confirms the
+    // original loader token: the lookup index itself is never freshness evidence.
+    if (value == null || !token.equals(value.token()) || !ready() || changes.get() != epoch)
+      return Optional.empty();
+    return Optional.of(new ProjectionCache.Candidate<>(value.value(), value.token()));
+  }
+
+  @Override
+  public void invalidate(SnapshotCache.Key key) {
+    Objects.requireNonNull(key);
+    domainStored.remove(key);
+    trusted.remove(key);
+    cache.invalidate(key);
   }
 
   private T readDomains(
@@ -618,6 +646,12 @@ public final class VersionedProjectionCache<T>
             })) {
       var stored = await(read, loaded[0]).value();
       if (ready() && current.test(stored)) {
+        if (stored.token() != null
+            && stored.token().pendingTransactions().size() <= TRUSTED_PENDING) {
+          if (domainStored.size() >= TRUSTED_ENTRIES) domainStored.clear();
+          domainStored.put(request.key(), stored.token());
+          if (changes.get() != seen.epoch()) domainStored.remove(request.key(), stored.token());
+        }
         if (notifiedNanos > 0)
           remember(
               request.key(),

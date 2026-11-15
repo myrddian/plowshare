@@ -403,7 +403,13 @@ await test('withdrawal waits for a command that ignores SIGTERM to be killed', a
       let pid = 0;
       for (let attempt = 0; ; attempt++) {
         try {
-          pid = Number(await readFile(join(root, 'pid'), 'utf8'));
+          // The file can exist before writeFileSync writes its PID; an empty read becomes 0,
+          // which makes kill(0, 0) probe this test's process group instead of the child.
+          const written = (await readFile(join(root, 'pid'), 'utf8')).trim();
+          const candidate = Number(written);
+          if (!written || !Number.isSafeInteger(candidate) || candidate <= 0)
+            throw new Error('Command PID is not ready');
+          pid = candidate;
           break;
         } catch {
           assert.ok(attempt < 200, 'Command failed to start');
