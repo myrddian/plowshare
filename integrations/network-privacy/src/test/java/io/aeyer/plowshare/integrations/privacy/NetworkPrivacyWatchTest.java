@@ -54,7 +54,8 @@ class NetworkPrivacyWatchTest {
           "outgoing_peers",
           "outgoing_send",
           "outgoing_read",
-          "relay_tool_read");
+          "relay_tool_read",
+          "search");
   private final Path application = Path.of(System.getProperty("privacy.application"));
 
   private static SwarmScheduler.Pools emptyPools() {
@@ -207,7 +208,9 @@ class NetworkPrivacyWatchTest {
             "privacy_reviewer",
             "privacy_device_profiler",
             "privacy_device_assessor",
-            "privacy_assistant"),
+            "privacy_assistant",
+            "privacy_product_researcher",
+            "privacy_product_reviewer"),
         agents.names());
     assertTrue(agents.get("privacy_coordinator").calls().contains("privacy_device_assessor"));
     for (String name :
@@ -215,7 +218,8 @@ class NetworkPrivacyWatchTest {
             "investigate_network",
             "privacy_tick",
             "profile_network_device",
-            "assess_network_device")) {
+            "assess_network_device",
+            "research_product_question")) {
       String suffix = ".js";
       Path source = definitions.resolve("orchestrations/" + name + suffix);
       var loaded =

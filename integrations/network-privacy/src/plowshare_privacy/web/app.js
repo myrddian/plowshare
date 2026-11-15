@@ -1905,24 +1905,71 @@ async function retryReference(url) {
 // the library. Product and question are agent text and are shown as text only.
 const MAX_REQUEST_LINKS = 5;
 let requestsSeen = null;
-function requestsSignature(products) {
-  return `${products.length}:${products.join(',')}`;
+const requestLinks = new Map();
+const requestProbeChoices = new Map();
+function requestsSignature(products, research = []) {
+  return JSON.stringify([products, research]);
 }
 function renderRequests(value) {
   byId('reference-requests').hidden = value.requests.length === 0;
-  requestsSeen = requestsSignature(value.requests.map(item => item.product));
+  requestsSeen = requestsSignature(value.requests.map(item => item.product), value.requests.filter(item => item.research).map(item => [item.id, item.research.phase, item.research.detail]));
   byId('reference-request-list').replaceChildren(...value.requests.map(item => {
     const row = element('div', undefined, 'record');
     const area = element('textarea');
     area.rows = 3;
+    area.value = requestLinks.get(item.id) || '';
+    area.addEventListener('input', () => requestLinks.set(item.id, area.value));
     area.placeholder = 'https://…';
-    const label = element('label', 'Documentation links, one per line (up to 5, https only)');
+    const label = element('label', 'Source links, one per line (up to 5, https only)');
     label.append(area);
     row.append(element('strong', item.product), element('p', item.question), label);
     const actions = element('div', undefined, 'actions');
+    const research = item.research;
+    const active = research && !['finished', 'failed'].includes(research.phase);
+    if (value.research_available && (!research || research.phase === 'failed')) {
+      const probe = element('input');
+      probe.type = 'checkbox';
+      probe.checked = requestProbeChoices.get(item.id) || false;
+      probe.disabled = !item.probe_available;
+      probe.addEventListener('change', () => requestProbeChoices.set(item.id, probe.checked));
+      const option = element('label', undefined, 'check');
+      option.append(probe, element('span', 'Include read-only HTTP checks of the linked device (no control commands)'));
+      row.append(option);
+      if (!item.probe_available) {
+        row.append(element('p', 'Device checks need a monitored device linked to this question.', 'hint'));
+        if (!research && value.devices?.length) {
+          const devices = element('select');
+          for (const device of value.devices) {
+            const choice = element('option', device.name);
+            choice.value = device.id;
+            devices.append(choice);
+          }
+          const deviceLabel = element('label', 'Device for this question');
+          deviceLabel.append(devices);
+          row.append(deviceLabel, actionButton('Link device', 'secondary', () => linkResearchDevice(item.id, devices.value)));
+        }
+      }
+      actions.append(actionButton(research ? 'Try research again' : 'Research this question', undefined, () => researchRequest(item.id, probe.checked)));
+    }
+    if (research) {
+      if (['queued', 'running'].includes(research.phase)) actions.append(actionButton('Stop research', 'secondary', () => cancelResearchRequest(item.id)));
+      const labels = {queued:'Research queued', preparing:'Preparing device evidence', submitted:'Confirming research admission', running:'Researcher and reviewer working', retaining:'Registering reviewed sources', finished:'Reviewed answer ready', failed:'Research needs attention'};
+      row.append(element('p', labels[research.phase] || 'Research status unavailable', 'hint'));
+      if (research.detail) row.append(element('p', research.detail, 'notice'));
+      if (research.result) {
+        const answer = element('details');
+        answer.open = research.phase === 'finished';
+        answer.append(element('summary', 'Read the reviewed answer'), PrivacyMarkdown.render(research.result.answer));
+        row.append(answer);
+      }
+    }
+    if (value.research_detail) row.append(element('p', value.research_detail, 'notice'));
+    const approve = actionButton('Approve', undefined, () => approveRequest(item.id, area.value));
+    const dismiss = actionButton('Dismiss', 'secondary', () => dismissRequest(item.id));
+    approve.disabled = !!active;
+    dismiss.disabled = !!active;
     actions.append(
-      actionButton('Approve', undefined, () => approveRequest(item.id, area.value)),
-      actionButton('Dismiss', 'secondary', () => dismissRequest(item.id)));
+      approve, dismiss);
     row.append(actions);
     return row;
   }));
@@ -1935,11 +1982,21 @@ function followRequests(value, force = false) {
   // Nothing waits: forget what was drawn so a later request always reloads.
   if (!waiting?.pending) requestsSeen = null;
   if (!waiting?.pending || currentView !== 'settings') return;
-  if (!force && requestsSeen === requestsSignature(waiting.products)) return;
+  if (!force && requestsSeen === requestsSignature(waiting.products, waiting.research || [])) return;
   loadRequests().catch(error => notice(error.message, true));
 }
 async function loadRequests() {
   renderRequests(await api('/api/reference-requests'));
+}
+async function researchRequest(id, probe) {
+  renderRequests(await api(`/api/reference-requests/${encodeURIComponent(id)}/research`, {method:'POST', body:JSON.stringify({probe})}));
+  notice('Research queued. It will search official and independent security and privacy sources, fetch selected pages into the Library, and return a reviewed answer here.');
+}
+async function linkResearchDevice(id, deviceId) {
+  renderRequests(await api(`/api/reference-requests/${encodeURIComponent(id)}/device`, {method:'POST', body:JSON.stringify({device_id:deviceId})}));
+}
+async function cancelResearchRequest(id) {
+  renderRequests(await api(`/api/reference-requests/${encodeURIComponent(id)}/research/cancel`, {method:'POST', body:'{}'}));
 }
 async function approveRequest(id, text) {
   const urls = text.split('\n').map(line => line.trim()).filter(Boolean);
@@ -2536,8 +2593,8 @@ function renderAttention(value) {
     `${deviceNames(unseen)} answered on ports outside the usual checks.`, ...reviewAction(unseen)));
   const asked = value.reference_requests;
   if (asked?.detail) items.push(attentionItem('!', 'Docs requests unavailable', asked.detail, 'Open Settings', () => showView('settings', true)));
-  if (asked?.pending) items.push(attentionItem(formatCount(asked.pending), 'Docs requested',
-    `Privacy Watch could not answer about ${asked.products.join(', ')}. Add a documentation link or dismiss.`, 'Review', () => {
+  if (asked?.pending) items.push(attentionItem(formatCount(asked.pending), 'Product questions',
+    `Privacy Watch could not answer about ${asked.products.join(', ')}. Research the question, add a source link or dismiss.`, 'Review', () => {
       showView('settings', true);
       byId('reference-requests').scrollIntoView?.({block:'start'});
     }));

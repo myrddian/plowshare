@@ -48,6 +48,23 @@ class ReferenceRequestsTest(unittest.TestCase):
     ) -> ReferenceRequest:
         return self.requests.request(product, QUESTION, None, identity or str(uuid4()))
 
+    def test_owner_can_link_an_unlinked_pending_question_but_cannot_switch_identity(
+        self,
+    ) -> None:
+        request = self.ask()
+        linked = self.requests.link_device(request.id, "mac:02:00:00:00:00:01")
+        self.assertEqual("mac:02:00:00:00:00:01", linked.device_id)
+        self.assertEqual(
+            linked, self.requests.link_device(request.id, linked.device_id or "")
+        )
+        with self.assertRaises(ValueError):
+            self.requests.link_device(request.id, "mac:02:00:00:00:00:02")
+        with self.assertRaises(ValueError):
+            self.requests.link_device(request.id, "192.168.1.10")
+        self.requests.dismiss(request.id)
+        with self.assertRaises(ValueError):
+            self.requests.link_device(request.id, "mac:02:00:00:00:00:01")
+
     def test_same_invocation_is_idempotent(self) -> None:
         identity = str(uuid4())
         first = self.ask(identity=identity)

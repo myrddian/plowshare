@@ -6,7 +6,7 @@ dynamic: true
 tools: [information_read, information_write, memory_recall, memory_read, agent_run, relay_tool_read]
 skills: [information-discovery]
 calls: [privacy_analyst, privacy_reviewer, privacy_device_assessor]
-orchestrations: [privacy_tick, investigate_network, profile_network_device, assess_network_device]
+orchestrations: [privacy_tick, investigate_network, profile_network_device, assess_network_device, research_product_question]
 exported: true
 max-turns: 60
 max-model-calls: 40

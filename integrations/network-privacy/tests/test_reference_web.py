@@ -401,7 +401,7 @@ class ReferenceWebTest(unittest.IsolatedAsyncioTestCase):
         )
         overview = await (await client.get("/api/overview", headers=HEADERS)).json()
         self.assertEqual(
-            {"pending": 1, "products": ["caddy"], "detail": None},
+            {"pending": 1, "products": ["caddy"], "research": [], "detail": None},
             overview["reference_requests"],
         )
         approved = await client.post(

@@ -20,6 +20,13 @@ for arguments in (
     )
 
 subprocess.run(
+    ["node", "scripts/build_workflows.mjs", "--check"],
+    cwd=root,
+    env=environment,
+    check=True,
+)
+
+subprocess.run(
     ["node", "scripts/build_web.mjs", "--check"],
     cwd=root,
     env=environment,

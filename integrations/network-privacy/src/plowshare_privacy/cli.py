@@ -37,7 +37,7 @@ from .console import FileManualInvestigations, OperatorConsole
 from .console_port import SdkConsolePort
 from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
-from .deep_scan import compose_scanner
+from .deep_scan import collector_identities, compose_scanner
 from .device_assessments import AssessmentJournal, DeviceAssessments
 from .device_describer import LocalDeviceDescriber
 from .device_facts import DeviceFactsJournal, DeviceFactsService
@@ -54,6 +54,10 @@ from .operator_state import FileOperatorStore
 from .peer_journal import require_settled_legacy_peer
 from .ports import SdkPrivacyPort
 from .presence import PresenceHistory, PresenceView, PresenceWatch
+from .product_context import CurrentProductContext
+from .product_probe import HttpProductProbe
+from .product_research import ProductResearch, ProductResearchJournal
+from .product_research_port import SdkProductResearchPort
 from .profile_port import SdkProfilePort
 from .profile_research import ProfileResearch, ResearchJournal, reviewed_model
 from .profile_research_port import SdkResearchPort
@@ -270,6 +274,28 @@ async def execute(args: argparse.Namespace) -> None:
                 if request_journal is not None
                 else None
             )
+            product_research = None
+            product_research_detail = None
+            if (
+                request_journal is not None
+                and references is not None
+                and dossiers is not None
+            ):
+                try:
+                    product_research = ProductResearch(
+                        ProductResearchJournal(config.state_directory),
+                        SdkProductResearchPort(lambda: client, config.project),
+                        request_journal,
+                        references.library,
+                        CurrentProductContext(
+                            worker,
+                            dossiers,
+                            HttpProductProbe(),
+                            collector_identities(worker),
+                        ),
+                    )
+                except (ValueError, OSError):
+                    product_research_detail = "Product research is unavailable because its saved state could not be read."
             # The household's Ask conversation. An unreadable journal disables it
             # only; collection starts and /api/status says why.
             ask, ask_detail = compose_ask(
@@ -566,6 +592,8 @@ async def execute(args: argparse.Namespace) -> None:
                     references=references,
                     references_detail=references_detail,
                     reference_requests=request_journal,
+                    product_research=product_research,
+                    product_research_detail=product_research_detail,
                     ask=ask,
                     ask_detail=ask_detail,
                     advisory_origin=advisory_origin,
@@ -587,6 +615,7 @@ async def execute(args: argparse.Namespace) -> None:
             assessment_task: asyncio.Task[None] | None = None
             deep_scan_task: asyncio.Task[None] | None = None
             reference_task: asyncio.Task[None] | None = None
+            product_research_task: asyncio.Task[None] | None = None
             ask_task: asyncio.Task[None] | None = None
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
@@ -638,6 +667,10 @@ async def execute(args: argparse.Namespace) -> None:
                     deep_scan_task = asyncio.create_task(deep_scans.run(stop))
                 if references is not None:
                     reference_task = asyncio.create_task(references.run(stop))
+                if product_research is not None:
+                    product_research_task = asyncio.create_task(
+                        product_research.run(stop)
+                    )
                 if ask is not None:
                     ask_task = asyncio.create_task(ask.run(stop))
                 await stop.wait()
@@ -647,6 +680,7 @@ async def execute(args: argparse.Namespace) -> None:
                     (
                         ask_task,
                         reference_task,
+                        product_research_task,
                         deep_scan_task,
                         assessment_task,
                         research_task,
