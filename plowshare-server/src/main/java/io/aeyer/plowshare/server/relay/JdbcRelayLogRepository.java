@@ -1,14 +1,18 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.protocol.transport.SegmentedMessages;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.cache.ProjectionCache;
 import io.aeyer.plowshare.server.cache.SnapshotCache;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.faults.NotFoundFault;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -56,7 +60,7 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
     this.pagesCache = Objects.requireNonNull(pagesCache);
   }
 
-  public java.util.List<Relay.Topic> topics(Relay.Scope scope, int limit) {
+  public List<Relay.Topic> topics(Relay.Scope scope, int limit) {
     RelayValues.limit(limit, 100);
     String key = RelayScopeCodec.write(new Relay.TopicKey(scope, "inspection"));
     return topicsCache.read(
@@ -94,7 +98,7 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
                       key.name())
                   .stream()
                   .findFirst();
-          if (topic.isEmpty()) return new Head(0, java.util.Optional.empty());
+          if (topic.isEmpty()) return new Head(0, Optional.empty());
           var publication =
               jdbc
                   .query(
@@ -150,9 +154,9 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
                       key.name())
                   .stream()
                   .findFirst()
-                  .orElseThrow(() -> new IllegalArgumentException("Relay topic is unavailable"));
+                  .orElseThrow(() -> new NotFoundFault("Relay topic is unavailable"));
           if (after > topic.lastPosition())
-            throw new IllegalArgumentException("Relay position is beyond the topic log");
+            throw new CallerFault("Relay position is beyond the topic log");
           var events =
               boundedProjection(
                   // Apply the byte prefix in SQL, before JDBC materializes/decodes large rows.
@@ -186,8 +190,7 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
                   // Row-count and byte budgets are independent. The public projection selects
                   // a frame-sized prefix and advances next only through that returned prefix.
                   Math.min(limit, 16),
-                  io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_MESSAGE_BYTES
-                      - 1024 * 1024);
+                  SegmentedMessages.MAX_MESSAGE_BYTES - 1024 * 1024);
           var subscribers =
               boundedProjection(
                   "SELECT subscriber,seen_through,seen_at,generation FROM relay_subscriptions WHERE scope_key=? AND topic=? ORDER BY subscriber LIMIT 1000",
@@ -273,7 +276,7 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
   private <T> List<T> boundedProjection(
       String sql, String order, Long bound, RowMapper<T> mapper, Object... arguments) {
     if (bound == null) return List.copyOf(jdbc.query(sql, mapper, arguments));
-    var args = new ArrayList<Object>(java.util.Arrays.asList(arguments));
+    var args = new ArrayList<Object>(Arrays.asList(arguments));
     args.add(bound);
     var rows =
         jdbc.query(
