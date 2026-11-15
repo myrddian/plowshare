@@ -1,23 +1,97 @@
 package io.aeyer.plowshare.server.relay;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.RelayLog;
-import io.aeyer.plowshare.server.archive.*;
-import io.aeyer.plowshare.server.cache.*;
+import io.aeyer.plowshare.protocol.frames.Code;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.cache.ProjectionCacheProperties;
+import io.aeyer.plowshare.server.cache.ProjectionCaches;
+import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.faults.NotFoundFault;
 import java.sql.ResultSet;
-import java.time.*;
-import java.util.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 class RelayProjectionCacheTest {
+  @Test
+  void directReadsReportMissingTopicsWithoutLoadingDetailsOrWriting() {
+    var jdbc = mock(JdbcTemplate.class);
+    var store = new JdbcRelayLogRepository(jdbc, UnitOfWork.NONE);
+    var key = new Relay.TopicKey(7, "notices.status");
+    var fault = assertThrows(NotFoundFault.class, () -> store.read(key, 0, 10, "reader"));
+    assertEquals(Code.NOT_FOUND, Faults.of(fault).code());
+    verify(jdbc)
+        .query(
+            anyString(),
+            ArgumentMatchers.<RowMapper<Object>>any(),
+            eq(RelayScopeCodec.write(key)),
+            eq(key.name()));
+    verifyNoMoreInteractions(jdbc);
+  }
+
+  @Test
+  void missingTopicsAreNotFoundAndDoNotCacheAbsence() throws Exception {
+    try (var fixture = new Fixture()) {
+      fixture.missing.set(true);
+      for (var scope : List.of(new Relay.ProjectScope(7), Relay.SystemScope.SERVER)) {
+        var key = new Relay.TopicKey(scope, fixture.key.name());
+        var fault =
+            assertThrows(NotFoundFault.class, () -> fixture.store.read(key, 0, 10, "reader"));
+        assertEquals(Code.NOT_FOUND, Faults.of(fault).code());
+      }
+      assertEquals(2, fixture.queries.size(), "Missing topics stop before loading page details");
+
+      fixture.missing.set(false);
+      assertEquals(1, fixture.store.read(fixture.key, 0, 10, "reader").events().size());
+      assertEquals(7, fixture.queries.size(), "A later creation must remain readable");
+    }
+  }
+
+  @Test
+  void positionsBeyondTheCurrentLogAreBadRequests() throws Exception {
+    try (var fixture = new Fixture()) {
+      var fault =
+          assertThrows(CallerFault.class, () -> fixture.store.read(fixture.key, 2, 10, "reader"));
+      assertEquals(Code.BAD_REQUEST, Faults.of(fault).code());
+      assertEquals(1, fixture.queries.size());
+      assertEquals(1, fixture.store.read(fixture.key, 0, 10, "reader").events().size());
+    }
+  }
+
   @Test
   void warmTopicsAndPagesReuseTrackedDtosWithoutAnyOwnerProjectionQuery() throws Exception {
     try (var fixture = new Fixture()) {
@@ -118,6 +192,7 @@ class RelayProjectionCacheTest {
     final Relay.TopicKey key = new Relay.TopicKey(7, "notices.status");
     final CopyOnWriteArrayList<String> queries = new CopyOnWriteArrayList<>();
     final AtomicBoolean oversized = new AtomicBoolean();
+    final AtomicBoolean missing = new AtomicBoolean();
     final ResultSet refused = mock(ResultSet.class);
     final ProjectionCaches caches;
     final JdbcRelayLogRepository store;
@@ -170,6 +245,7 @@ class RelayProjectionCacheTest {
                 Object[] args = (Object[]) call.getRawArguments()[2];
                 RowMapper<?> mapper = call.getArgument(1);
                 if (sql.contains("FROM relay_topics")) {
+                  if (missing.get()) return List.of();
                   when(topic.getString("scope_key")).thenReturn((String) args[0]);
                   when(topic.getString("name"))
                       .thenReturn(
@@ -185,10 +261,7 @@ class RelayProjectionCacheTest {
                 return List.of();
               })
           .when(jdbc)
-          .query(
-              anyString(),
-              org.mockito.ArgumentMatchers.<RowMapper<Object>>any(),
-              any(Object[].class));
+          .query(anyString(), ArgumentMatchers.<RowMapper<Object>>any(), any(Object[].class));
       var domains = Set.of(ProjectionVersions.Domain.RELAY, ProjectionVersions.Domain.AUTHORITY);
       store =
           new JdbcRelayLogRepository(
