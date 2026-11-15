@@ -6,8 +6,10 @@ import asyncio
 import json
 import tempfile
 import unittest
+from contextlib import AsyncExitStack
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from plowshare import PROTOCOL_VERSION, Client
@@ -79,6 +81,90 @@ def batch_wire(value: RelayBatchDto) -> dict[str, object]:
 class SdkTest(unittest.IsolatedAsyncioTestCase):
     # These fixtures own legacy JSON envelopes. Select that transport explicitly;
     # SDK packet tests separately own segmented negotiation and reassembly.
+
+    async def test_dropped_socket_automatically_opens_a_fresh_read_only_session(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            config = configuration(Path(folder))
+            config = replace(
+                config, collection=replace(config.collection, enabled=False)
+            )
+            stop = asyncio.Event()
+            sessions = 0
+            operations: list[str] = []
+
+            async def handle(socket: ServerConnection) -> None:
+                nonlocal sessions
+                sessions += 1
+                first = sessions == 1
+                async for source in socket:
+                    frame = json.loads(source)
+                    operations.append(frame["type"])
+                    self.assertEqual(frame["type"], "relay.topics")
+                    if first:
+                        await socket.close()
+                        return
+                    await socket.send(
+                        json.dumps(
+                            {
+                                **frame,
+                                "payload": {
+                                    "code": "OK",
+                                    "said": None,
+                                    "payload": {
+                                        "scope": {
+                                            "project": config.project,
+                                            "system": False,
+                                        },
+                                        "topics": [],
+                                    },
+                                },
+                            }
+                        )
+                    )
+                    if len(operations) == 3:
+                        stop.set()
+
+            async with serve(handle, "127.0.0.1", 0) as server:
+                port = server.sockets[0].getsockname()[1]
+                config = replace(config, origin=f"http://127.0.0.1:{port}")
+                async with AsyncExitStack() as owners:
+
+                    async def connect() -> Client:
+                        return await owners.enter_async_context(
+                            await Client.connect(
+                                config.origin,
+                                "fixture-token",
+                                timeout=1,
+                                legacy_transport=True,
+                                dispatch_mode="ordered",
+                            )
+                        )
+
+                    client = await connect()
+                    worker = Worker(
+                        config,
+                        SdkPrivacyPort(client, config),
+                        MemoryReceipts(),
+                        CountingCollector(config),
+                    )
+
+                    async def recover() -> None:
+                        nonlocal client
+                        old, client = client, await connect()
+                        worker.port = SdkPrivacyPort(client, config)
+                        await old.close()
+                        await worker.port.available_topics()
+                        await worker.reconcile()
+
+                    with patch(
+                        "plowshare_privacy.recovery.INITIAL_RECONNECT_SECONDS", 0
+                    ):
+                        await asyncio.wait_for(worker.run(stop, recover=recover), 3)
+                self.assertEqual(sessions, 2)
+                self.assertEqual(operations, ["relay.topics"] * 3)
+                self.assertEqual(worker.state, "configuration_required")
 
     async def test_report_list_hydrates_omitted_dependencies_through_scoped_status(
         self,

@@ -862,8 +862,19 @@ Absence after retention, mismatched text, or missing evidence leaves the outcome
 unresolved. Retention gaps require explicit operator inspection and acknowledgement
 of the exact loss; the worker does not skip them. An expired parent cannot be
 replaced with a fresh root to bypass causation. SDK disconnection stops collection;
-the dashboard remains available with an attention state. Reconnect by restarting
-after inspecting the recorded outcomes.
+the dashboard remains available while the collector automatically opens a fresh
+session using the same configured service credential. Reconnect attempts back off
+from 2 seconds to at most 60 seconds. A disabled collector without a tool provider
+checks its connection every 30 seconds without starting collection.
+
+Before resuming intake, recovery reads retained scan, upload, tool-result,
+profile/issue and manual-investigation receipts through the public SDK. It never
+resends an uncertain request. Only a positive matching receipt settles an unknown
+effect; missing/conflicting evidence, retention gaps, invalid responses and
+permission refusals leave the collector in an attention state for operator review.
+After resolving those conditions, choose **Check retained work** to run the same
+receipt checks explicitly. Shutdown interrupts reconnect waits and attempts; no
+credentials are rotated and the collector journals keep their original identities.
 
 Journal identity includes deployment scope and collection configuration. A foreign
 journal, competing local owner, excessive queue or corrupt source refuses work.

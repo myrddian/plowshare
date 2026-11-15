@@ -338,7 +338,9 @@ class OperatorConsole:
             recovery = []
             if self.worker.state == "attention_required":
                 recovery.append(
-                    "Inspect the retained receipts. Fix connectivity or grants, then choose Check retained work. Unknown effects will not be resent."
+                    "Connection dropped. Reconnecting automatically and checking retained receipts before resuming. Unknown effects will not be resent."
+                    if self.worker.reconnecting
+                    else "Inspect the retained receipts. Fix connectivity or grants, then choose Check retained work. Unknown effects will not be resent."
                 )
             if any(
                 item.phase in {"uploading", "publishing"}
