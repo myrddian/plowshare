@@ -336,6 +336,8 @@ export interface AdministrativeReplies {
   'provider.deregister': null;
   'inbox.list': InboxPage;
   'inbox.read': InboxMarked;
+  'inbox.publish': void;
+  'inbox.receipt': { readonly found: boolean };
   'todos.read': readonly TodoView[];
   'orchestration.definitions': Definitions;
   'orchestration.list': OrchestrationListed;
@@ -632,6 +634,8 @@ const readers = {
   'provider.deregister': noContent,
   'inbox.list': record({ items: list(inbox), unread: count }),
   'inbox.read': record({ marked: count, unread: count }),
+  'inbox.publish': noContent,
+  'inbox.receipt': record({ found: bool }),
   'todos.read': list(todo),
   'orchestration.definitions': record({ definitions: list(definition) }),
   'orchestration.list': record({ orchestrations: list(run) }),
@@ -672,6 +676,7 @@ const readers = {
   'firing.list': list(firing),
 } satisfies Record<AdministrativeOperation, Check>;
 const emptyOperations: readonly AdministrativeOperation[] = [
+  'inbox.publish',
   'provider.deregister',
   'schedule.pause',
   'schedule.forget',

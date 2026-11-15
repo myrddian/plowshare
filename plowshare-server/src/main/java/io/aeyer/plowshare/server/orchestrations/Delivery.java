@@ -8,6 +8,7 @@ import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.delivery.PersonDelivery;
 import io.aeyer.plowshare.server.delivery.PersonDelivery.Result;
+import io.aeyer.plowshare.server.events.ApplicationNotices;
 import io.aeyer.plowshare.server.hooks.Handover;
 import io.aeyer.plowshare.server.information.InformationJobs;
 import java.time.Instant;
@@ -193,6 +194,13 @@ public final class Delivery implements DeliveryPort, ChildCompletionDelivery {
     this.logStages = Objects.requireNonNull(logStages, "logStages");
   }
 
+  private ApplicationNotices applications;
+
+  /** Preserve background output in its Application inbox and escalate attention to Managers. */
+  public void useApplications(ApplicationNotices applications) {
+    this.applications = Objects.requireNonNull(applications);
+  }
+
   @Override
   public void questionAsked(OrchestrationRecord run, OrchestrationMessage question) {
     guarded("question " + question.id(), () -> deliverQuestion(run, question));
@@ -238,6 +246,11 @@ public final class Delivery implements DeliveryPort, ChildCompletionDelivery {
         "the person's copy of question " + question.id(),
         () -> {
           if (run.callerHandle() == null || !stillOpen(run, question) || !aModelHears(run)) {
+            return;
+          }
+          if (applications != null
+              && applications.orchestration(run, question.text(), about(question))) {
+            settleIfClosed(run, question);
             return;
           }
           people.sendFromLog(
@@ -421,6 +434,12 @@ public final class Delivery implements DeliveryPort, ChildCompletionDelivery {
       if (!undelivered) {
         return;
       }
+      if (applications != null
+          && applications.orchestration(run, question.text(), about(question))) {
+        store.messageDelivered(question.id());
+        settleIfClosed(run, question);
+        return;
+      }
       if (people
               .sendFromLog(
                   null,
@@ -559,6 +578,17 @@ public final class Delivery implements DeliveryPort, ChildCompletionDelivery {
                   utterance)
               : utterance;
       requireLease.run();
+      if (applications != null
+          && applications.orchestration(
+              fresh,
+              question == null ? said : question.text(),
+              question == null ? null : about(question))) {
+        requireLease.run();
+        markDelivered.run();
+        if (anEnding) logStages.deliveryPost(source, Handover.INBOX, said);
+        if (question != null) settleIfClosed(fresh, question);
+        return;
+      }
       PersonDelivery.Sent sent =
           people.sendFromLog(
               fresh.callerConversation(),

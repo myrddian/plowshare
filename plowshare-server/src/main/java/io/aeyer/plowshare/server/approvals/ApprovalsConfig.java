@@ -7,6 +7,7 @@ import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.delivery.PersonDelivery;
+import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.events.SpeakerHandles;
 import java.time.Instant;
@@ -133,6 +134,7 @@ public class ApprovalsConfig {
       Turn turn,
       Callers callers,
       Inbox inbox,
+      ApplicationInbox applications,
       JobRuntime runtime,
       io.aeyer.plowshare.server.agents.RunningConversations running,
       io.aeyer.plowshare.server.relay.RelayProperties relay,
@@ -177,6 +179,7 @@ public class ApprovalsConfig {
                 inbox.notifyOnceFromLog(handle, kind, text, source, about);
               }
             });
+    people.useApplications(applications);
     ApprovalDelivery delivery = new ApprovalDelivery(store, people, inbox::settle);
     delivery.useRelayDelivery(relay.isInternalEnabled());
     delivery.whenNotificationReady(

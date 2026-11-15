@@ -12,6 +12,7 @@ from plowshare import Delivery, Refusal, TransportError
 from plowshare.contracts import RelayPublishRequest
 from plowshare.tools import ToolAttention
 
+from .attention import AttentionOutbox
 from .collection import Collector, scope_fingerprint
 from .contracts import (
     Configuration,
@@ -67,6 +68,7 @@ class Worker:
         presence: PresenceWatch | None = None,
         facts: DeviceFactsStep | None = None,
     ):
+        self.attention: AttentionOutbox | None = None
         self.operator = operator
         self.presence = presence
         self.facts = facts
@@ -420,6 +422,8 @@ class Worker:
                             "Completion publication remains unknown"
                         )
                     self.receipts.save(replace(receipt, phase="done"))
+            if self.attention is not None:
+                await self.attention.reconcile()
 
     def presence_view(self) -> PresenceView:
         if self.presence is None:
@@ -522,6 +526,10 @@ class Worker:
                     self.operation = "external tool provider"
                     await external.poll()
                 await self.poll()
+                if self.attention is not None:
+                    self.attention.recovered()
+                    if self.attention.pending:
+                        self.detail += f" {self.attention.pending} inbox alert(s) await confirmation."
                 self.last_contact = utc_now()
                 self.failure_kind = None
             except (
@@ -546,6 +554,21 @@ class Worker:
                         + ")."
                     )
                 )
+                if self.attention is not None:
+                    try:
+                        alert = await self.attention.stopped(
+                            self.failure_kind, self.operation
+                        )
+                    except (OSError, ValueError) as journal_error:
+                        # The collector's original stop remains primary and the dashboard
+                        # explicitly reports that even its alert could not be retained.
+                        alert = (
+                            "Inbox alert could not be retained ("
+                            + type(journal_error).__name__
+                            + ")."
+                        )
+                    if alert:
+                        self.detail += " " + alert
                 stopped = asyncio.create_task(stop.wait())
                 resumed = asyncio.create_task(self.recovery_requested.wait())
                 try:

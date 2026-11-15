@@ -43,6 +43,7 @@ from .contracts import (
     parse_json,
     text,
 )
+from .inbox_settings import InboxSettings
 
 T = TypeVar("T")
 
@@ -192,8 +193,10 @@ def prepare(setup: Setup, *, owned: bool = False) -> None:
     manifest = object_fields(
         load_json(setup.source / "plowshare.json"),
         {"version", "name", "access", "caps", "commands"},
-        {"executionAccount", "toolScopes", "toolGrants", "service"},
+        {"executionAccount", "toolScopes", "toolGrants", "service", "inbox"},
     )
+    if "inbox" in manifest:
+        InboxSettings.decode(manifest["inbox"])
     if manifest["name"] != config.project or manifest["version"] != 1:
         raise ValueError("Collector and application project must match")
     if setup.output.exists():
@@ -254,7 +257,7 @@ def bind_provider(setup: Setup, account: str) -> None:
     manifest = object_fields(
         load_json(manifest_path),
         {"version", "name", "access", "caps", "commands"},
-        {"executionAccount", "toolScopes", "toolGrants", "service"},
+        {"executionAccount", "toolScopes", "toolGrants", "service", "inbox"},
     )
     manifest["executionAccount"] = account
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")

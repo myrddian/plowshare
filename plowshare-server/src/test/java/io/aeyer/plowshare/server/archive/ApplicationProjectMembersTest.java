@@ -5,6 +5,7 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,24 @@ class ApplicationProjectMembersTest {
   ApplicationProjectMembers members =
       new ApplicationProjectMembers(
           stored, policy, io.aeyer.plowshare.server.access.GrantLineageFixture.passthrough());
+
+  @Test
+  void attention_recipients_are_current_managers_under_both_rbac_and_manifest_ceilings() {
+    when(stored.managers("chatbot")).thenReturn(List.of("manager", "capped", "removed"));
+    when(policy.read("chatbot"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION,
+                Map.of("manager", ProjectRole.MANAGER, "capped", ProjectRole.CONTRIBUTOR)));
+    assertEquals(List.of("manager"), members.managers("chatbot"));
+    when(stored.managers("chatbot")).thenReturn(List.of("replacement"));
+    when(policy.read("chatbot"))
+        .thenReturn(
+            new ApplicationPolicy.Boundary(
+                ApplicationPolicy.Kind.APPLICATION, Map.of("replacement", ProjectRole.MANAGER)));
+    assertEquals(List.of("replacement"), members.managers("chatbot"));
+    verify(stored, never()).isServerAdmin(anyString());
+  }
 
   @Test
   void manifest_cannot_grant_membership_and_caps_existing_roles() {
@@ -92,8 +111,7 @@ class ApplicationProjectMembersTest {
     var lineage = mock(io.aeyer.plowshare.server.access.GrantLineage.class);
     var effective = new ApplicationProjectMembers(stored, policy, lineage);
     var candidates =
-        java.util.List.of(
-            "viewer", "worker", "manager", "external", "invalid", "removed", "broken-chain");
+        List.of("viewer", "worker", "manager", "external", "invalid", "removed", "broken-chain");
     when(stored.readableProjects(candidates.stream().sorted().toList(), "reader"))
         .thenReturn(java.util.Set.copyOf(candidates));
     when(lineage.projectRole(anyString(), eq("reader"), any(), any()))
@@ -116,7 +134,7 @@ class ApplicationProjectMembersTest {
     when(stored.role("external", "reader")).thenReturn(Optional.of(ProjectRole.VIEWER));
     when(policy.read("external"))
         .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.EXTERNAL, Map.of()));
-    for (String project : java.util.List.of("invalid", "removed", "broken-chain"))
+    for (String project : List.of("invalid", "removed", "broken-chain"))
       when(stored.role(project, "reader")).thenReturn(Optional.of(ProjectRole.MANAGER));
     when(policy.read("invalid"))
         .thenReturn(new ApplicationPolicy.Boundary(ApplicationPolicy.Kind.INVALID, Map.of()));
@@ -146,7 +164,7 @@ class ApplicationProjectMembersTest {
     var lineage = mock(io.aeyer.plowshare.server.access.GrantLineage.class);
     var effective = new ApplicationProjectMembers(stored, policy, lineage);
     String principal = "@service/fixture";
-    var projects = java.util.List.of("allowed", "denied");
+    var projects = List.of("allowed", "denied");
     when(stored.readableProjects(projects, principal)).thenReturn(java.util.Set.copyOf(projects));
     when(stored.authorityAccount(principal)).thenReturn(Optional.of("integration"));
     when(lineage.projectRole(anyString(), eq("integration"), any(), any()))

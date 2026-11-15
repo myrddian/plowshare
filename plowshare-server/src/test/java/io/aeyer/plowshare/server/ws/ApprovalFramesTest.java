@@ -22,6 +22,7 @@ import io.aeyer.plowshare.server.approvals.ConductorContinuation;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.events.ApplicationInbox;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -109,6 +110,48 @@ class ApprovalFramesTest {
                 new io.aeyer.plowshare.server.approvals.RunApprovalContinuations.Resumed(
                     null, false, null)));
     frames.useContinuations(continuation);
+  }
+
+  @Test
+  void manager_decision_uses_retained_executor_and_records_the_actual_deciding_person() {
+    var applications = mock(ApplicationInbox.class);
+    frames.useApplicationInbox(applications);
+    var approval =
+        new RunApproval(
+            ASKED.id(),
+            ASKED.projectId(),
+            ASKED.conversation(),
+            ASKED.askedIn(),
+            "collector",
+            ASKED.agent(),
+            ASKED.side(),
+            ASKED.argv(),
+            ASKED.cwd(),
+            ASKED.reason(),
+            ASKED.state(),
+            ASKED.scope(),
+            ASKED.prefix(),
+            ASKED.answeredBy(),
+            ASKED.answeredAt(),
+            ASKED.deliveredAt(),
+            ASKED.createdAt());
+    when(store.find("apr_1")).thenReturn(Optional.of(approval));
+    when(applications.managesQuestion("cnv_1", "cnv_1", "enzo")).thenReturn(true);
+    when(store.deny("apr_1", "enzo")).thenReturn(true);
+    useRetainedContinuation();
+
+    assertEquals(
+        Code.OK,
+        route(FrameTypes.APPROVAL_ANSWER, "{\"id\":\"apr_1\",\"decision\":\"deny\"}").code());
+    verify(store).deny("apr_1", "enzo");
+    verify(callers).requireSession("tab-1", "enzo");
+    verify(callers).requireConversationProject("cnv_1", "enzo");
+    verify(runs, never()).start(any(), any());
+
+    when(applications.managesQuestion("cnv_1", "cnv_1", "enzo")).thenReturn(false);
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(FrameTypes.APPROVAL_ANSWER, "{\"id\":\"apr_1\",\"decision\":\"deny\"}").code());
   }
 
   @Test

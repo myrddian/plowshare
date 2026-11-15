@@ -252,6 +252,7 @@ public class ProjectAuthorization {
         || operation.equals("swarm.types")
         || operation.equals("document.detail")
         || operation.equals("schedule.list")
+        || operation.startsWith("inbox.")
         || operation.equals("schedule.files")
         || operation.equals("schedule.pause")
         || operation.startsWith("orchestration.")
@@ -295,6 +296,7 @@ public class ProjectAuthorization {
       return ProjectRole.MANAGER;
     if (operation.equals("schedule.files")) return ProjectRole.VIEWER;
     if (MANAGE.contains(operation)) return ProjectRole.MANAGER;
+    if (operation.equals("inbox.receipt")) return ProjectRole.CONTRIBUTOR;
     if (READ.contains(operation)
         || Set.of("message.instances", "message.instance", "message.deliveries", "message.delivery")
             .contains(operation)) return ProjectRole.VIEWER;

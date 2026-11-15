@@ -28,6 +28,7 @@ from plowshare.contracts import (
 
 from .bootstrap import SetupProblem
 from .contracts import Configuration, load_json, object_fields, text, uuid
+from .inbox_settings import InboxSettings
 from .private_files import replace_private
 from .setup import Setup, SetupClient, prepare, private_write
 
@@ -198,7 +199,7 @@ async def prepare_upgrade(
     manifest = object_fields(
         load_json(current_source / "plowshare.json"),
         {"version", "name", "access", "caps", "commands"},
-        {"executionAccount", "service", "toolScopes", "toolGrants"},
+        {"executionAccount", "service", "toolScopes", "toolGrants", "inbox"},
     )
     candidate_setup = Setup(
         setup.collector,
@@ -213,6 +214,15 @@ async def prepare_upgrade(
     prepare(candidate_setup, owned="service" in manifest)
     candidate = candidate_setup.output / "application"
     tailor(candidate, model_selection(current_source))
+    # Adopt the package's reviewed output policy for installations predating application
+    # inboxes. Existing custom output policies and every grant/identity remain unchanged.
+    candidate_manifest = object_fields(
+        load_json(candidate / "plowshare.json"),
+        {"version", "name", "access", "caps", "commands"},
+        {"executionAccount", "service", "toolScopes", "toolGrants", "inbox"},
+    )
+    if "inbox" not in manifest and "inbox" in candidate_manifest:
+        manifest["inbox"] = InboxSettings.decode(candidate_manifest["inbox"]).encode()
     # A package update does not automatically acquire new grants or change its execution identity.
     (candidate / "plowshare.json").write_text(json.dumps(manifest, indent=2) + "\n")
     proposed = hashes(candidate)

@@ -738,6 +738,12 @@ public final class FrameTypes {
   /** Mark user-inbox items read; the account's other sockets are told. {@link InboxReadHandler}. */
   public static final String INBOX_READ = "inbox.read";
 
+  /** Publish an application notice and notify its current Managers. */
+  public static final String INBOX_PUBLISH = "inbox.publish";
+
+  /** Inspect one exact application publication without resubmitting it. */
+  public static final String INBOX_RECEIPT = "inbox.receipt";
+
   /**
    * Open questions of a conversation, or a project's standing approvals. {@link ApprovalFrames}.
    */

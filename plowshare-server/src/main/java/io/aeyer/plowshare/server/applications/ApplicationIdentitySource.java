@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.applications;
 
 import io.aeyer.plowshare.protocol.ApplicationIdentity.Declaration;
+import io.aeyer.plowshare.server.events.ApplicationInboxSettings;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -33,6 +34,7 @@ public record ApplicationIdentitySource(
         if (bytes.length > 65536) throw new CallerFault("Application identity source is oversized");
         String source =
             StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+        ApplicationInboxSettings.read(root);
         return new ApplicationIdentitySource(
             ApplicationServiceManifest.declaration(source).orElse(null),
             ApplicationToolScopes.parse(source).executionAccount(),

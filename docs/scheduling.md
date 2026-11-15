@@ -206,6 +206,39 @@ Targets reuse ordinary authority rules:
 Grants, membership and destinations are validated on each scan and before starting.
 A schedule does not expand tools or bypass an approval because it is unattended.
 
+## Application inbox ownership
+
+An Application can retain background results in its own inspectable inbox by
+adding a root manifest policy:
+
+```json
+"inbox": {
+  "attentionOrchestrations": ["investigate_network", "assess_network_device"]
+}
+```
+
+Successful schedule receipts and ordinary background completions stay in the
+application inbox. The named successful workflows, failures and human questions
+also notify the current human RBAC Managers of that Application. Recipients come
+from current project authority and the manifest role ceiling, rather than the
+installer or a configured account list. Foreground conversation delivery keeps its
+existing behavior. Omitting the policy preserves account-inbox delivery.
+
+Use `inbox.list` with `project` to inspect application output and `inbox.read` with
+that same project to acknowledge its shared items. Viewers can inspect; Managers
+can acknowledge. Omitting project continues to select the authenticated account's
+personal inbox. An application acknowledgement does not mark a personal alert
+read, and inspection does not grant access to private execution logs.
+
+Public SDK producers can send explicit `finding`, `failure` and `attention`
+notices through `inbox.publish` using a project and retained request UUID. The
+server chooses current Managers; clients cannot supply recipients. Inspect an
+unknown result with `inbox.receipt` under the original producer, project and UUID.
+Do not automatically resubmit when a receipt is absent.
+
+The existing mailbox target continues to run the configured action. No Relay-only
+schedule or discard target is required to keep routine application work inspectable.
+
 ## CLI and TUI
 
 The CLI uses the same authenticated WebSocket operations, offline validation and

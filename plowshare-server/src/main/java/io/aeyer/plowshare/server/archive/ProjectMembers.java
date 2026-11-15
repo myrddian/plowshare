@@ -32,6 +32,12 @@ public interface ProjectMembers {
 
   List<String> members(String project);
 
+  /**
+   * Current human Managers, resolved as one recipient snapshot; never includes server admins by
+   * implication.
+   */
+  List<String> managers(String project);
+
   void add(String project, String handle);
 
   void remove(String project, String handle);

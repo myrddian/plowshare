@@ -170,6 +170,9 @@ export function constrain(graph) {
       if (k === 'requestId') add(v, { pattern: uuid });
     }
     // Operation-specific bounds follow generic defaults so narrower identities stay narrow.
+    if (op === 'inbox.publish') {
+      field(s, 'text', {...text(131072, 1), nonblank:true});
+    }
     if (op === 'board.close') {
       field(s, 'topic', {pattern:'^bdt_[A-Za-z0-9]+$', minLength:5, maxLength:256});
       field(s, 'body', {...text(16000,1),maxUtf8Bytes:64000,nonblank:true});

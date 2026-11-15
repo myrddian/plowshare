@@ -440,7 +440,7 @@ async def install(
     manifest = object_fields(
         load_json(setup.output / "application/plowshare.json"),
         {"version", "name", "access", "caps", "commands"},
-        {"executionAccount", "toolScopes", "toolGrants", "service"},
+        {"executionAccount", "toolScopes", "toolGrants", "service", "inbox"},
     )
     if "service" in manifest:
         from .owned_setup import provision_owned

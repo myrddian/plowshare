@@ -67,7 +67,7 @@ describe('shared Board, Swarm, union and job inspection replies', () => {
       'job.cancel',
     ]);
     expect([...VALIDATED_OPERATIONS].sort()).toEqual([...exposed].sort());
-    expect(exposed.size).toBe(274);
+    expect(exposed.size).toBe(276);
     expectTypeOf<keyof Replies>().toEqualTypeOf<Operation>();
     expect(Object.keys(fixtures).sort()).toEqual(
       [...INSPECTION_OPERATIONS].sort(),

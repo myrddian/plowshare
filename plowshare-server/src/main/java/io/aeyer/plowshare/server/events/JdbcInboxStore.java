@@ -36,12 +36,13 @@ public class JdbcInboxStore implements InboxStore {
       "id, handle, kind, firing, conversation, ending, answer, arrived_at, read_at, about";
 
   /** Neither read nor settled: what the person still has to look at. */
-  private static final String UNREAD = " AND read_at IS NULL AND settled_at IS NULL";
+  private static final String UNREAD =
+      " AND application_project_id IS NULL AND read_at IS NULL AND settled_at IS NULL";
 
   private static final String SINCE_LAST_TURN =
       """
             FROM user_inbox i, conversations c
-             WHERE i.handle = ? AND i.read_at IS NULL AND i.settled_at IS NULL AND c.id = ?
+             WHERE i.application_project_id IS NULL AND i.handle = ? AND i.read_at IS NULL AND i.settled_at IS NULL AND c.id = ?
                AND i.arrived_at > COALESCE(c.last_turn_at, c.created_at)
             """;
 
@@ -82,7 +83,7 @@ public class JdbcInboxStore implements InboxStore {
           args.add(limit);
           return jdbc.query(
               "WITH visible AS MATERIALIZED (SELECT id,arrived_at,read_at"
-                  + " FROM user_inbox WHERE handle=? AND settled_at IS NULL"
+                  + " FROM user_inbox WHERE application_project_id IS NULL AND handle=? AND settled_at IS NULL"
                   + filter
                   + "), page_keys AS (SELECT id,arrived_at FROM visible"
                   + (unreadOnly ? " WHERE read_at IS NULL" : "")
@@ -195,7 +196,7 @@ public class JdbcInboxStore implements InboxStore {
         jdbc.query(
             "SELECT "
                 + COLUMNS
-                + " FROM user_inbox WHERE handle=? AND kind=? AND about=? ORDER BY arrived_at,id LIMIT 1",
+                + " FROM user_inbox WHERE application_project_id IS NULL AND handle=? AND kind=? AND about=? ORDER BY arrived_at,id LIMIT 1",
             JdbcInboxStore::row,
             handle,
             kind,
@@ -245,7 +246,7 @@ public class JdbcInboxStore implements InboxStore {
     return jdbc.update(
             """
         UPDATE user_inbox SET question_alert_attempted_at=?
-        WHERE handle=? AND id=? AND about IS NOT NULL AND kind='approval'
+        WHERE application_project_id IS NULL AND handle=? AND id=? AND about IS NOT NULL AND kind='approval'
           AND read_at IS NULL AND settled_at IS NULL
           AND (question_alert_attempted_at IS NULL OR question_alert_attempted_at<=?)
         """,
@@ -288,7 +289,7 @@ public class JdbcInboxStore implements InboxStore {
           return jdbc.query(
               "SELECT "
                   + COLUMNS
-                  + " FROM user_inbox WHERE handle=? AND settled_at IS NULL"
+                  + " FROM user_inbox WHERE application_project_id IS NULL AND handle=? AND settled_at IS NULL"
                   + filter
                   + (unreadOnly ? " AND read_at IS NULL" : "")
                   + (ordinaryOnly ? " AND kind<>'approval'" : "")
