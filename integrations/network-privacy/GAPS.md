@@ -1,7 +1,32 @@
 # Public capability gaps
 
-These are platform follow-ups, not requirements for deploying the external
-Network Privacy Watch integration. This Application uses only public SDK contracts.
+These are platform follow-ups for affected capabilities of the external
+Network Privacy Watch integration. This Application uses only public SDK contracts;
+deploying the collector does not resolve a missing server capability.
+
+## Scheduled completion requires known Relay causation
+
+Automatic scan intake can discover the project's opaque `SCHEDULE_DUE` stream
+through `relay.topics` and use its exact EGRESS grant. That does not establish
+authority for a downstream effect. A server-emitted occurrence with absent or
+unknown `causation` can be collected and its evidence uploaded, but the public
+`relay.publish` completion is refused with "Relay parent has no remaining effect
+budget". The collector retains the evidence in `uploaded` and stops for attention;
+it must not replace the schedule parent, invent a fresh root, erase the receipt,
+or resend an uncertain effect.
+
+The general platform capability needed is known, immutable ancestry for a newly
+published independent scheduled occurrence, so supported consumers can derive a
+bounded descendant through the public SDK. The adapter cannot assign or repair
+server-owned ancestry. This needs a separately authorized scheduling/Relay task,
+not an SDK wrapper or an adapter-side bypass. Its design must distinguish fresh
+occurrences from retained legacy events, preserve current authority and depth
+limits, and define supported recovery for evidence already retained under a
+refused parent. New publication ancestry alone does not repair that older receipt.
+
+Until this capability is deployed and retained work is explicitly settled,
+automatic collection is not verified end to end. A ready SDK connection or an
+enabled schedule is insufficient proof.
 
 ## Application-owned background output
 
