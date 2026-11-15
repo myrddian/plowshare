@@ -107,8 +107,7 @@ class MemoryActingAxisTest {
 
   /** The write binding, given one axis's value, driven once. */
   private void write(String axis, Home home) {
-    var tool =
-        new MemoryTools.Write(archive, () -> scribe).forRun(null, "log", axis, alive, authority);
+    var tool = new MemoryTools.Write(archive, () -> scribe).forRun("log", axis, alive, authority);
     tool.calledAs("call");
     tool.run(ARGS, home);
   }

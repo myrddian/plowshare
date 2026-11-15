@@ -128,6 +128,19 @@ not a substitute for the audit or counter-evidence.
 ## Memory and history
 
 Memory recall retrieves useful retained items; memory read fetches an actual item.
+Reading a document does not disable memory writes. A run's memory proposals retain
+an atomic snapshot of the document inputs available when they are filed. This
+allows operational lessons to be saved without claiming that an agent can safely
+declare its own output independent of those inputs. Later document reads do not
+add restrictions to earlier memories; merging a proposal unions its dependencies.
+
+Recall, index summaries and full reads require the reader's current access to all
+retained source selections and dependencies, as well as access to the memory's
+home. Revoking source access or withdrawing a source also blocks the dependent
+memory. When an agent receives a memory, its restrictions enter that run's input
+ledger before disclosure. Unbound digests and Global promotion cannot publish
+source-restricted memories. SYSTEM indexing does not grant anyone read access.
+
 Writing or resolving proposals and curating knowledge have their own ownership
 and model-work contracts. Confident curator recommendations remain pending
 proposals. Existing acceptance checks the authenticated caller's source Manager

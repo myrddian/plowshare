@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Memory;
+import io.aeyer.plowshare.server.access.KnowledgeReadScope;
 import io.aeyer.plowshare.server.embedding.QueryEmbeddings;
 import java.util.List;
 import java.util.Objects;
@@ -36,9 +37,12 @@ public interface MemoryQueries {
       int limit,
       boolean runBound,
       QueryEmbeddings.Origin origin) {
-    public io.aeyer.plowshare.server.access.KnowledgeReadScope readScope() {
-      return new io.aeyer.plowshare.server.access.KnowledgeReadScope(
-          home, !runBound || origin.globalRead());
+    public MemoryReadRepository.Reader reader() {
+      return new MemoryReadRepository.Reader(acting, origin.receivingLog());
+    }
+
+    public KnowledgeReadScope readScope() {
+      return new KnowledgeReadScope(home, !runBound || origin.globalRead());
     }
 
     public Request {
@@ -47,6 +51,7 @@ public interface MemoryQueries {
       Objects.requireNonNull(home);
       Objects.requireNonNull(kind);
       Objects.requireNonNull(origin);
+      new MemoryReadRepository.Reader(acting, origin.receivingLog());
       if (runBound && (home.isGlobal() || origin.invocation() == null))
         throw new IllegalArgumentException("Memory query needs its retained home and invocation");
       if (kind == Kind.REMINDER && !runBound)

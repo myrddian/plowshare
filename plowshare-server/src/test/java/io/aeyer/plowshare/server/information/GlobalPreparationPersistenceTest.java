@@ -9,9 +9,11 @@ import io.aeyer.plowshare.server.access.*;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.ApplicationPolicy;
+import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.LogStages;
+import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.documents.*;
@@ -773,6 +775,12 @@ class GlobalPreparationPersistenceTest {
     } else store.saveEmbedding(id, vector);
   }
 
+  private String memoryReceivingLog() {
+    return new ConversationStore(jdbc)
+        .open(Home.of("memory-project"), Budget.of(5), TurnCap.of(5), "reader")
+        .id();
+  }
+
   MemoryQueries.Request memoryRead(
       String actor, boolean runBound, String invocation, MemoryQueries.Kind kind) {
     return new MemoryQueries.Request(
@@ -782,7 +790,7 @@ class GlobalPreparationPersistenceTest {
         "knowledge",
         5,
         runBound,
-        new QueryEmbeddings.Origin(invocation, () -> {}));
+        new QueryEmbeddings.Origin(invocation, () -> {}).withLog(memoryReceivingLog()));
   }
 
   @ParameterizedTest
@@ -1070,10 +1078,11 @@ class GlobalPreparationPersistenceTest {
               5,
               true,
               new QueryEmbeddings.Origin(
-                  "cancelled-during-read",
-                  () -> {
-                    if (!alive.get()) throw new IllegalStateException("turn ended");
-                  }));
+                      "cancelled-during-read",
+                      () -> {
+                        if (!alive.get()) throw new IllegalStateException("turn ended");
+                      })
+                  .withLog(memoryReceivingLog()));
       assertThrows(IllegalStateException.class, () -> archive.recall(request));
       assertEquals(1, embedded.get());
       assertEquals(

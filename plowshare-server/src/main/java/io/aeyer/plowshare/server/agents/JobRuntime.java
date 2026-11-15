@@ -2892,7 +2892,8 @@ public final class JobRuntime {
                           operations.requireReadTargets(operation, Home.global(), List.of());
                       })
                   // Acting/retained-work authority remains an additional exact-home ceiling.
-                  .withGlobalRead(operation.globalRead() && !confined);
+                  .withGlobalRead(operation.globalRead() && !confined)
+                  .withLog(transcript.conversationId());
             });
     Optional<ChatMessage> reminder =
         transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
@@ -4909,6 +4910,8 @@ public final class JobRuntime {
       if (tool instanceof MemoryTools.Read read && operation != null)
         tool =
             read.forRun(
+                memoryActingAxis(informationActor),
+                transcript.conversationId(),
                 ids -> {
                   if (cancelled.getAsBoolean())
                     throw new IllegalStateException("Memory read run ended");
@@ -4921,6 +4924,16 @@ public final class JobRuntime {
                                   new AccessRequest.Resource(
                                       ResourceScopeRepository.Kind.MEMORY, id))
                           .toList());
+                });
+      if (tool instanceof ArchiveReadTools.Index index && operation != null)
+        tool =
+            index.forRun(
+                memoryActingAxis(informationActor),
+                transcript.conversationId(),
+                () -> {
+                  if (operation == null || cancelled.getAsBoolean())
+                    throw new IllegalStateException("Memory index run ended");
+                  operations.requireReadTargets(operation, toolHome, List.of());
                 });
       if (tool instanceof MemoryTools.Recall recall)
         tool =
@@ -4982,7 +4995,6 @@ public final class JobRuntime {
       if (tool instanceof MemoryTools.Write write)
         tool =
             write.forRun(
-                informationInputs,
                 transcript.conversationId(),
                 // The ACTING axis. MemoryWrites.Request's `acting` is the authority subject
                 // of MemoryStore.pin's `authority_accounts` arm, of V232's
@@ -5003,10 +5015,6 @@ public final class JobRuntime {
                   if (operation == null || !operation.actions().contains(AuthorityAction.WRITE))
                     throw new IllegalStateException("Memory write action unavailable");
                   operations.requireTargets(operation, toolHome, List.of());
-                  if (informationInputs != null
-                      && informationInputs.hasInputs(transcript.conversationId()))
-                    throw new IllegalStateException(
-                        "Document inputs cannot be published as memory");
                 });
       if (tool instanceof ScopedDocumentTool reading) {
         tool =

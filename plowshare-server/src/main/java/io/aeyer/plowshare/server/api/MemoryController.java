@@ -6,8 +6,13 @@ import io.aeyer.plowshare.protocol.MemoryProposal;
 import io.aeyer.plowshare.protocol.WriteResult;
 import io.aeyer.plowshare.server.agents.scribe.Scribe;
 import io.aeyer.plowshare.server.archive.Archive;
+import io.aeyer.plowshare.server.archive.MemoryQueries;
+import io.aeyer.plowshare.server.archive.MemoryReadRepository;
+import io.aeyer.plowshare.server.archive.MemoryWrites;
 import io.aeyer.plowshare.server.archive.TocEntry;
 import io.aeyer.plowshare.server.archive.Validation;
+import io.aeyer.plowshare.server.auth.AuthFilter;
+import io.aeyer.plowshare.server.embedding.QueryEmbeddings;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.requests.RequestedHome;
 import io.aeyer.plowshare.server.requests.RequestedInvalidation;
@@ -18,6 +23,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -99,7 +105,7 @@ public class MemoryController {
   public ResponseEntity<WriteResult> write(
       @RequestBody WriteMemoryRequest request,
       @org.springframework.web.bind.annotation.RequestAttribute(
-              name = io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE,
+              name = AuthFilter.HANDLE_ATTRIBUTE,
               required = false)
           String handle) {
     // Refused, not ignored, and refused before anything is written. A stale
@@ -118,11 +124,11 @@ public class MemoryController {
       Thread requester = Thread.currentThread();
       return ResponseEntity.ok(
           archive.write(
-              new io.aeyer.plowshare.server.archive.MemoryWrites.Request(
+              new MemoryWrites.Request(
                   handle,
                   home,
                   proposal,
-                  io.aeyer.plowshare.server.archive.MemoryWrites.Origin.request(
+                  MemoryWrites.Origin.request(
                       () -> {
                         if (requester.isInterrupted())
                           throw new IllegalStateException("Request ended");
@@ -167,7 +173,7 @@ public class MemoryController {
   public ResponseEntity<RecallResponse> recall(
       @RequestBody RecallRequest request,
       @org.springframework.web.bind.annotation.RequestAttribute(
-              name = io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE,
+              name = AuthFilter.HANDLE_ATTRIBUTE,
               required = false)
           String handle) {
     String question = RequestedMemoryQuestion.recalled(request.question());
@@ -177,14 +183,14 @@ public class MemoryController {
     Archive.Recall recalled =
         archive.querying()
             ? archive.recall(
-                new io.aeyer.plowshare.server.archive.MemoryQueries.Request(
+                new MemoryQueries.Request(
                     handle,
                     home,
-                    io.aeyer.plowshare.server.archive.MemoryQueries.Kind.RECALL,
+                    MemoryQueries.Kind.RECALL,
                     question,
                     limit,
                     false,
-                    io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin.request(
+                    QueryEmbeddings.Origin.request(
                         () -> {
                           if (Thread.currentThread().isInterrupted())
                             throw new IllegalStateException("Request ended");
@@ -217,7 +223,7 @@ public class MemoryController {
   public ResponseEntity<Archive.Repair> reembed(
       @RequestParam(required = false) String project,
       @org.springframework.web.bind.annotation.RequestAttribute(
-              name = io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE,
+              name = AuthFilter.HANDLE_ATTRIBUTE,
               required = false)
           String handle) {
     return ResponseEntity.ok(
@@ -247,8 +253,15 @@ public class MemoryController {
    * null body — the plan's own required test.
    */
   @GetMapping("/v1/memories/{id}")
-  public ResponseEntity<Memory> get(@PathVariable String id) {
-    Memory memory = archive.read(List.of(id)).get(0);
+  public ResponseEntity<Memory> get(
+      @PathVariable String id,
+      @RequestAttribute(name = AuthFilter.HANDLE_ATTRIBUTE, required = false) String handle) {
+    Memory memory =
+        handle == null
+            ? archive.read(List.of(id)).get(0)
+            : archive
+                .read(List.of(id), new MemoryReadRepository.Reader(handle, null), () -> {})
+                .get(0);
     return ResponseEntity.ok(memory);
   }
 
@@ -257,9 +270,14 @@ public class MemoryController {
    * summary lines with no body.
    */
   @GetMapping("/v1/memories/index")
-  public ResponseEntity<List<TocEntry>> index(@RequestParam(required = false) String project) {
+  public ResponseEntity<List<TocEntry>> index(
+      @RequestParam(required = false) String project,
+      @RequestAttribute(name = AuthFilter.HANDLE_ATTRIBUTE, required = false) String handle) {
     Home home = RequestedHome.in(project);
-    return ResponseEntity.ok(archive.index(home));
+    return ResponseEntity.ok(
+        handle == null
+            ? archive.index(home)
+            : archive.index(home, new MemoryReadRepository.Reader(handle, null), () -> {}));
   }
 
   /**
@@ -268,12 +286,16 @@ public class MemoryController {
    */
   @PostMapping("/v1/memories/{id}/invalidate")
   public ResponseEntity<Memory> invalidate(
-      @PathVariable String id, @RequestBody InvalidateRequest request) {
+      @PathVariable String id,
+      @RequestBody InvalidateRequest request,
+      @RequestAttribute(name = AuthFilter.HANDLE_ATTRIBUTE, required = false) String handle) {
+    String reason = RequestedInvalidation.reason(request.reason());
+    String by = RequestedInvalidation.by(request.by());
     Memory dead =
-        archive.invalidate(
-            id,
-            RequestedInvalidation.reason(request.reason()),
-            RequestedInvalidation.by(request.by()));
+        handle == null
+            ? archive.invalidate(id, reason, by)
+            : archive.invalidate(
+                id, reason, by, new MemoryReadRepository.Reader(handle, null), () -> {});
     return ResponseEntity.ok(dead);
   }
 

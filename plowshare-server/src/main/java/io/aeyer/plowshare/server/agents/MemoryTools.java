@@ -9,8 +9,12 @@ import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
 import io.aeyer.plowshare.server.agents.scribe.Scribe;
 import io.aeyer.plowshare.server.archive.Archive;
 import io.aeyer.plowshare.server.archive.ArchiveException;
+import io.aeyer.plowshare.server.archive.MemoryQueries;
+import io.aeyer.plowshare.server.archive.MemoryReadRepository;
+import io.aeyer.plowshare.server.archive.MemoryWrites;
 import io.aeyer.plowshare.server.archive.Validation;
 import io.aeyer.plowshare.server.archive.ValidationException;
+import io.aeyer.plowshare.server.embedding.QueryEmbeddings;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
@@ -20,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -184,12 +189,12 @@ public final class MemoryTools {
       call = id;
     }
 
-    private io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin origin() {
+    private QueryEmbeddings.Origin origin() {
       if (acting == null || log == null || call == null || validity == null)
         throw new IllegalStateException("Memory recall needs its retained invocation");
-      return new io.aeyer.plowshare.server.embedding.QueryEmbeddings.Origin(
-              "memory-tool:" + log + ":" + call, validity)
-          .withGlobalRead(globalRead);
+      return new QueryEmbeddings.Origin("memory-tool:" + log + ":" + call, validity)
+          .withGlobalRead(globalRead)
+          .withLog(log);
     }
 
     public Recall(Archive archive) {
@@ -238,14 +243,8 @@ public final class MemoryTools {
       Archive.Recall found =
           archive.querying()
               ? archive.recall(
-                  new io.aeyer.plowshare.server.archive.MemoryQueries.Request(
-                      acting,
-                      home,
-                      io.aeyer.plowshare.server.archive.MemoryQueries.Kind.RECALL,
-                      question,
-                      limit,
-                      true,
-                      origin()))
+                  new MemoryQueries.Request(
+                      acting, home, MemoryQueries.Kind.RECALL, question, limit, true, origin()))
               : owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
                   ? archive.recall(question, home, limit)
                   : archive.recall(question, home, limit, owner);
@@ -359,9 +358,16 @@ public final class MemoryTools {
 
     private final Archive archive;
     private final ToolSchema schema;
-    private java.util.function.Consumer<List<String>> targetFence;
+    private Consumer<List<String>> targetFence;
+    private MemoryReadRepository.Reader reader;
 
-    public Read forRun(java.util.function.Consumer<List<String>> fence) {
+    public Read forRun(String acting, String log, Consumer<List<String>> fence) {
+      var bound = forRun(fence);
+      bound.reader = new MemoryReadRepository.Reader(acting, log);
+      return bound;
+    }
+
+    public Read forRun(Consumer<List<String>> fence) {
       var bound = new Read(archive);
       bound.targetFence = Objects.requireNonNull(fence);
       return bound;
@@ -395,9 +401,11 @@ public final class MemoryTools {
       List<Memory> memories;
       try {
         memories =
-            targetFence == null
-                ? archive.read(ids)
-                : archive.read(ids, () -> targetFence.accept(ids));
+            reader != null
+                ? archive.read(ids, reader, () -> targetFence.accept(ids))
+                : targetFence == null
+                    ? archive.read(ids)
+                    : archive.read(ids, () -> targetFence.accept(ids));
       } catch (ArchiveException unknownId) {
         return missing(ids, unknownId);
       }
@@ -436,7 +444,8 @@ public final class MemoryTools {
       List<String> absent = new ArrayList<>();
       for (String id : ids) {
         try {
-          archive.get(id);
+          if (reader == null) archive.get(id);
+          else archive.get(id, reader);
         } catch (ArchiveException gone) {
           absent.add("'" + id + "'");
         }
@@ -538,13 +547,8 @@ public final class MemoryTools {
      * row's own author is {@code formed_by}, which {@link #author} reads from the model's
      * arguments. A run inside a contained Application presents its child principal.
      */
-    public Write forRun(
-        io.aeyer.plowshare.server.information.InformationJobs inputs,
-        String log,
-        String acting,
-        Runnable alive,
-        Runnable authority) {
-      Write copy = forRun(inputs, log);
+    public Write forRun(String log, String acting, Runnable alive, Runnable authority) {
+      Write copy = new Write(archive, scribe);
       copy.acting = acting;
       copy.log = log;
       copy.alive = Objects.requireNonNull(alive);
@@ -555,14 +559,6 @@ public final class MemoryTools {
     @Override
     public void calledAs(String id) {
       call = id;
-    }
-
-    private java.util.function.BooleanSupplier restricted = () -> false;
-
-    public Write forRun(io.aeyer.plowshare.server.information.InformationJobs inputs, String log) {
-      Write copy = new Write(archive, scribe);
-      copy.restricted = () -> inputs != null && log != null && inputs.hasInputs(log);
-      return copy;
     }
 
     @Override
@@ -579,8 +575,6 @@ public final class MemoryTools {
     public String run(String argumentsJson, Home home, UsageAttribution owner) {
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
-      if (restricted.getAsBoolean())
-        return "Document-derived material must retain its input restrictions. Record it with information_write as a report; memory_write cannot publish it into the memory archive.";
       try {
         return filed(argumentsJson, home, owner);
       } catch (BadArguments unusable) {
@@ -627,12 +621,12 @@ public final class MemoryTools {
           throw new IllegalStateException("Memory write requires its retained origin");
         return render(
             archive.write(
-                new io.aeyer.plowshare.server.archive.MemoryWrites.Request(
+                new MemoryWrites.Request(
                     acting,
                     home,
                     proposal,
-                    new io.aeyer.plowshare.server.archive.MemoryWrites.Origin(
-                        "tool:" + log + ":" + call, alive, authority, null))));
+                    new MemoryWrites.Origin("tool:" + log + ":" + call, alive, authority, null)
+                        .withSourceLog(log))));
       }
       Scribe.Judgement judged =
           owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
@@ -768,7 +762,9 @@ public final class MemoryTools {
             that would retire a memory you never read.
 
             You cannot choose which archive is written: it is the one this job was \
-            started for.""";
+            started for. Reading documents does not disable this tool. The server \
+            retains this run's current source restrictions on the memory; later \
+            reads of the memory require access to those sources.""";
 
   // --- the schemas -------------------------------------------------------------
 

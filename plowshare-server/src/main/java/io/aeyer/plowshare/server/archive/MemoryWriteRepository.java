@@ -24,6 +24,12 @@ public interface MemoryWriteRepository {
 
   void provenance(String id, MemoryWrites.Learning source);
 
+  /** Union the source's current inputs into the memory atomically with content/reason changes. */
+  void retainInputs(String id, MemoryWrites.Request request);
+
+  /** Committed output for SYSTEM indexing; this is not a recipient disclosure capability. */
+  Memory indexingOutput(String id);
+
   /** Source identity/revision, home and live/private state are checked atomically. */
   void publishLegacy(
       MemoryWrites.Request request,

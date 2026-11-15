@@ -7,6 +7,7 @@ import io.aeyer.plowshare.server.api.EntryPageView;
 import io.aeyer.plowshare.server.archive.Archive;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.EntryStore;
+import io.aeyer.plowshare.server.archive.MemoryReadRepository;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.requests.RequestedLifecycle;
@@ -63,6 +64,15 @@ public final class ArchiveReadTools {
 
   public static final class Index extends Read {
     private final Archive archive;
+    private MemoryReadRepository.Reader reader;
+    private Runnable validity;
+
+    public Index forRun(String acting, String log, Runnable validity) {
+      var bound = new Index(archive);
+      bound.reader = new MemoryReadRepository.Reader(acting, log);
+      bound.validity = Objects.requireNonNull(validity);
+      return bound;
+    }
 
     public Index(Archive archive) {
       super(INDEX, "List the memory index, including unsearchable markers.", Map.of(), List.of());
@@ -71,7 +81,7 @@ public final class ArchiveReadTools {
 
     @Override
     Object read(JsonNode args, Home home) {
-      return archive.index(home);
+      return reader == null ? archive.index(home) : archive.index(home, reader, validity);
     }
   }
 

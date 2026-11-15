@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.archive.Archive;
+import io.aeyer.plowshare.server.archive.MemoryReadRepository;
 import io.aeyer.plowshare.server.requests.RequestedHome;
 import java.util.Map;
 import java.util.Objects;
@@ -35,6 +36,12 @@ public final class MemoryIndexHandler implements FrameHandler {
   @Override
   public Outcome handle(Map<String, Object> payload, Asking asking) {
     Tiered asked = Payloads.as(payload, Tiered.class, FrameTypes.MEMORY_INDEX);
-    return Outcome.ok(archive.index(RequestedHome.in(asked.project())));
+    return Outcome.ok(
+        asking.handle() == null
+            ? archive.index(RequestedHome.in(asked.project()))
+            : archive.index(
+                RequestedHome.in(asked.project()),
+                new MemoryReadRepository.Reader(asking.handle(), null),
+                asking.queryValidity()));
   }
 }

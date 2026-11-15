@@ -43,6 +43,16 @@ disabled or exhausted can leave valid content flat or unsearchable; authority,
 cancellation or stale-source failures cannot authorize that fallback. Keep
 uncertain equivalent attempts from silently retrying under a different phase.
 
+Document reads do not disable explicit memory writes. Filing snapshots the run's
+current input selections in the same transaction as the memory and its reason;
+later document reads do not alter an earlier snapshot. Merges union dependencies.
+The source log and receiving log are server-selected, not model-declared relevance
+or independence. Authenticated recall, index and body reads require current access
+to the retained inputs and propagate their restrictions into receiving runs before
+disclosure. Unbound digests and Global promotion remain closed to restricted
+memories. SYSTEM indexing validates the committed output separately and grants no
+recipient read access. Legacy provenance remains fenced until completely captured.
+
 Recall, filing, navigation/digests and repair have separate operation bindings and
 budgets. A nearby conversation allowance does not automatically fund them. Count
 actual requests under the owning policy and preserve retained usage evidence.

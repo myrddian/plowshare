@@ -71,7 +71,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
 
   private static String eligible(Store store) {
     return switch (store) {
-      case MEMORIES -> "s.state IN ('active','cold') AND information_memory_safe(s.id)";
+      case MEMORIES -> "s.state IN ('active','cold') AND information_memory_indexable(s.id)";
       case DIGESTS -> "information_digest_safe(s.id)";
       case DOCUMENTS -> "s.summary IS NOT NULL";
       default -> "true";

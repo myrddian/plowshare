@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.archive.Archive;
+import io.aeyer.plowshare.server.archive.MemoryReadRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -47,6 +48,14 @@ public final class MemoryReadHandler implements FrameHandler {
             "memory",
             FrameTypes.MEMORY_READ,
             "the id memory.index answers with. Nothing was read.");
-    return Outcome.ok(archive.read(List.of(memory)).get(0));
+    return Outcome.ok(
+        asking.handle() == null
+            ? archive.read(List.of(memory)).get(0)
+            : archive
+                .read(
+                    List.of(memory),
+                    new MemoryReadRepository.Reader(asking.handle(), null),
+                    asking.queryValidity())
+                .get(0));
   }
 }
