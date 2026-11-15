@@ -50,6 +50,23 @@ can change reconstructed references/seams; it does not certify the whole old req
 Keep current read authority, speaker/provenance and usage attribution distinct.
 Live deltas are droppable previews; they neither replace nor guarantee log retention.
 
+Failed streaming calls retain bounded beginning/end samples of reasoning, partial
+answer text and tool-call fragments in nonprojected `DIAGNOSTIC` error entries,
+with character counts, truncation and timing. They are diagnostic evidence, never
+completed assistant messages or executable tool calls. Large captures use numbered
+parts within the trajectory entry excerpt limit so every retained sample is readable.
+Failed turns record their
+terminal summary without adding a projected assistant answer. Explicit retry uses
+the existing conversation continuation boundary, preserving completed tool results
+and current authority; it never automatically repeats an uncertain effect. A
+delegate can publish authorized thinking on its parent's preview channel without
+replacing the parent's answer, progress counters or terminal lifecycle.
+Ordinary delegated `UNAVAILABLE`/`SUB_AGENT_FAILED` outcomes are failure tool
+results, not fatal parent exceptions. `agent_run` can explicitly retry its own
+retained child by conversation, checking the original task/images, home, callee
+and current authority. Session-loss and mandatory review/stage contracts retain
+their owning gates; a failed reviewer never certifies an answer.
+
 Trace [Transcript](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Transcript.java), [EntryKind](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/EntryKind.java),
 [Projection](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Projection.java)/[Compaction](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java) and [ContextCountFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java).
 See the [conversation manual](../../docs/manual/03-architecture.md#log-trajectory-and-model-projection) for the user-facing comparison.

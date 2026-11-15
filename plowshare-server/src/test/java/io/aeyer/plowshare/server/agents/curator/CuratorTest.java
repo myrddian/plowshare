@@ -1331,19 +1331,9 @@ class CuratorTest {
     assertEquals(2, outcome.modelCalls());
   }
 
-  /**
-   * A judge whose own sub-agent could not reach what it depends on ends the pass, and does not come
-   * back as a candidate nobody could rule on.
-   *
-   * <p>{@code SUB_AGENT_FAILED} shares its arm with {@code UNAVAILABLE} because they are the same
-   * fact one level apart — {@code AgentRunTool} propagates rather than rendering, so a dead
-   * endpoint two agents down reaches the top. Reachable only through a runtime that serves {@code
-   * agent_run}: the shipped {@code promotion_judge} declares no callees, so without this the
-   * constant would sit in that arm with nothing to pin it, and deleting it would leave the pass
-   * carrying on past a dead endpoint.
-   */
+  /** A helper model failure is a failed tool result, so the judge can still finish its ruling. */
   @Test
-  void a_judge_whose_sub_agent_failed_ends_the_pass() {
+  void a_judge_can_finish_after_its_helper_model_failed() {
     Scripted transport =
         new Scripted()
             .then(
@@ -1351,10 +1341,11 @@ class CuratorTest {
                     calling(
                         AgentRegistry.AGENT_RUN,
                         "{\"agent\": \"helper\", \"task\": \"look it up\"}"))
-            .thenAlways(
+            .then(
                 () -> {
                   throw new LlmException("connect timed out");
-                });
+                })
+            .thenAlways(KEEP);
     AgentDefinition delegatingJudge =
         new AgentDefinition(
             Curator.AGENT,
@@ -1386,11 +1377,13 @@ class CuratorTest {
 
     Outcome outcome = world.pass();
 
-    assertEquals(Ending.UNAVAILABLE, outcome.ending());
-    // Named, so an operator looking for a broken endpoint knows it was one
-    // agent further down than the judge.
-    assertTrue(outcome.detail().contains("helper"), outcome.detail());
-    verify(world.proposals, never()).propose(anyString(), anyString(), anyString(), anyString());
+    assertEquals(Ending.ANSWERED, outcome.ending());
+    assertTrue(promptOf(transport, 2).contains("helper' did not reach an answer"));
+    assertEquals(4, transport.calls().size(), "the judge continued and ruled on both candidates");
+    verify(world.proposals)
+        .propose("mem_000001", "promote", "this is about one service alone", "curator");
+    verify(world.proposals)
+        .propose("mem_000002", "promote", "this is about one service alone", "curator");
   }
 
   /**

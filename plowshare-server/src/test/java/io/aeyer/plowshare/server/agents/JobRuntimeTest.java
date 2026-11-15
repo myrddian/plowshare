@@ -9,8 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.JobDelta;
+import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import io.aeyer.plowshare.server.archive.ArchiveException;
@@ -20,6 +26,11 @@ import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
+import io.aeyer.plowshare.server.hooks.HookContext;
+import io.aeyer.plowshare.server.hooks.Hooks;
+import io.aeyer.plowshare.server.hooks.ToolPost;
+import io.aeyer.plowshare.server.hooks.ToolPre;
+import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.ModelMediaProfiles;
 import io.aeyer.plowshare.server.llm.dispatch.CallerAbandonedException;
@@ -34,6 +45,7 @@ import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
 import io.aeyer.plowshare.server.llm.dispatch.LlmTransport;
+import io.aeyer.plowshare.server.llm.dispatch.LlmTransportException;
 import io.aeyer.plowshare.server.llm.dispatch.ModelResponseGuards;
 import io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger;
 import io.aeyer.plowshare.server.llm.dispatch.PromptImages;
@@ -59,10 +71,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.mockito.AdditionalAnswers;
 
 /**
  * The runtime, against fixture agents and a scripted transport. No model and no socket: every
@@ -156,6 +170,13 @@ class JobRuntimeTest {
     /** Thinking every streamed call sends before its answer, or none. */
     private volatile String thinks;
 
+    private Consumer<Deltas> streamPrelude = sink -> {};
+
+    Scripted streaming(Consumer<Deltas> prelude) {
+      streamPrelude = prelude;
+      return this;
+    }
+
     Scripted thinking(String thought) {
       this.thinks = thought;
       return this;
@@ -240,6 +261,7 @@ class JobRuntimeTest {
       // assertion in this class — what a turn was offered, what it sent,
       // what came back — meaning exactly what it meant.
       this.streamed.incrementAndGet();
+      streamPrelude.accept(sink);
       Completion streamed = complete(wireModel, messages, sampling, tools);
       // Asked after the call, which is where a fake can honestly ask it:
       // the real transport asks once per chunk, and this one has exactly
@@ -1426,6 +1448,359 @@ class JobRuntimeTest {
     assertFalse(
         transport.conversation(1).toString().contains(thought),
         "the call after it is sent the conversation, and thinking is not part of it");
+  }
+
+  @Test
+  void failed_stream_output_is_diagnostic_and_completed_tool_work_is_preserved() throws Exception {
+    Scripted transport =
+        new Scripted()
+            .then(() -> asking("looking", call("c1", "probe_read", "{}")))
+            .then(
+                () -> {
+                  throw LlmTransportException.timedOut("stream deadline", null);
+                });
+    // Emit only on the failing second call, after the completed tool result.
+    transport.streaming(
+        sink -> {
+          if (transport.streamed.get() == 2) {
+            sink.thought("repeat this forever");
+            sink.answered("unfinished answer");
+            sink.toolCall(0, "probe_read", "{unfinished");
+          }
+        });
+    Recorded recorded = new Recorded(List.of());
+    Outcome outcome =
+        new JobRuntime(
+                dispatcherOver(transport, 4),
+                List.of(Probe.returning("probe_read", "completed result")))
+            .run(
+                agent("looper"),
+                "review",
+                Home.global(),
+                generous(),
+                () -> false,
+                null,
+                JobWatch.UNWATCHED,
+                recorded);
+
+    assertEquals(Ending.UNAVAILABLE, outcome.ending());
+    assertTrue(outcome.text().contains("did not finish within its allowed time"), outcome.text());
+    assertFalse(outcome.text().contains("could not be reached"));
+    assertEquals(
+        List.of(EntryKind.UTTERANCE, EntryKind.ANSWER, EntryKind.TOOL_RESULT, EntryKind.DIAGNOSTIC),
+        recorded.entries().stream()
+            .filter(
+                entry ->
+                    entry.kind() != EntryKind.NOTICE
+                        || !(entry.content().startsWith("[Runtime allowance:")
+                            || entry.content().startsWith("[Allowance warning:")
+                            || entry.content().startsWith("[Final allowance warning:")))
+            .map(LoggedEntry::kind)
+            .toList());
+    LoggedEntry diagnostic = recorded.entries().getLast();
+    assertTrue(diagnostic.content().contains("ERROR: incomplete model call"));
+    assertTrue(diagnostic.content().contains("repeat this forever"));
+    assertTrue(diagnostic.content().contains("unfinished answer"));
+    assertTrue(diagnostic.content().contains("{unfinished"));
+    assertFalse(diagnostic.kind().projects());
+    assertEquals(2, outcome.modelCalls());
+  }
+
+  @Test
+  void failed_mandatory_review_does_not_certify_an_answer_and_can_be_retried() throws Exception {
+    Scripted transport =
+        new Scripted()
+            .then(() -> answer("first unreviewed draft"))
+            .then(
+                () -> {
+                  throw LlmTransportException.timedOut("review deadline", null);
+                })
+            .then(() -> answer("second unreviewed draft"))
+            .then(() -> answer("independent review completed"))
+            .then(() -> answer("reviewed final answer"));
+    AgentRegistry registry = AgentRegistry.of(fixtures(), FIXTURE_TOOLS);
+    JobRuntime runtime = new JobRuntime(dispatcherOver(transport, 4), List.of(), () -> registry);
+    AgentDefinition plain = agent("boss");
+    AgentDefinition reviewed =
+        new AgentDefinition(
+            plain.name(),
+            plain.description(),
+            plain.model(),
+            plain.intent(),
+            plain.sampling(),
+            plain.tools(),
+            plain.calls(),
+            plain.scopes(),
+            8,
+            12,
+            plain.prompt(),
+            plain.exported(),
+            plain.delegable(),
+            plain.vision(),
+            plain.bot(),
+            plain.announcesInbox(),
+            plain.fallback(),
+            plain.orchestrations(),
+            "helper",
+            plain.board());
+    Recorded recorded = new Recorded(List.of());
+    Outcome result =
+        runtime.run(
+            reviewed,
+            "review the answer",
+            Home.global(),
+            generous(),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            recorded);
+
+    assertEquals(Ending.ANSWERED, result.ending());
+    assertEquals("reviewed final answer", result.text());
+    assertEquals(
+        5, transport.calls().size(), "a failed reviewer cannot count as the successful review");
+    assertTrue(
+        transport.conversation(2).stream()
+            .anyMatch(message -> message.content().contains("answer is still unreviewed")));
+    assertTrue(
+        recorded.entries().stream()
+            .anyMatch(
+                entry ->
+                    entry.kind() == EntryKind.DIAGNOSTIC
+                        && entry.content().contains("mandatory answer review did not complete")));
+    assertEquals(
+        List.of("reviewed final answer"),
+        recorded.entries().stream()
+            .filter(entry -> entry.kind() == EntryKind.ANSWER)
+            .map(LoggedEntry::content)
+            .toList());
+  }
+
+  @Test
+  void repeated_mandatory_review_failure_exhausts_allowance_without_publishing_a_draft()
+      throws Exception {
+    Scripted transport =
+        new Scripted()
+            .then(() -> answer("unreviewed draft"))
+            .then(
+                () -> {
+                  throw LlmTransportException.timedOut("review deadline", null);
+                })
+            .then(() -> answer("still unreviewed"));
+    AgentRegistry registry = AgentRegistry.of(fixtures(), FIXTURE_TOOLS);
+    JobRuntime runtime = new JobRuntime(dispatcherOver(transport, 4), List.of(), () -> registry);
+    AgentDefinition plain = agent("boss");
+    AgentDefinition reviewed =
+        new AgentDefinition(
+            plain.name(),
+            plain.description(),
+            plain.model(),
+            plain.intent(),
+            plain.sampling(),
+            plain.tools(),
+            plain.calls(),
+            plain.scopes(),
+            8,
+            12,
+            plain.prompt(),
+            plain.exported(),
+            plain.delegable(),
+            plain.vision(),
+            plain.bot(),
+            plain.announcesInbox(),
+            plain.fallback(),
+            plain.orchestrations(),
+            "helper",
+            plain.board());
+    Recorded recorded = new Recorded(List.of());
+    Outcome result =
+        runtime.run(
+            reviewed,
+            "review the answer",
+            Home.global(),
+            Budget.of(3),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            recorded);
+
+    assertEquals(Ending.CALL_BUDGET, result.ending());
+    assertEquals(3, transport.calls().size());
+    assertTrue(recorded.entries().stream().noneMatch(entry -> entry.kind() == EntryKind.ANSWER));
+    assertFalse(result.text().contains("unreviewed draft"));
+  }
+
+  @Test
+  void retry_rechecks_tool_hooks_and_never_rewrites_the_retained_delegation() throws Exception {
+    for (String gate : List.of("deny", "rewrite", "withhold")) {
+      ToolCall original =
+          call(
+              "interrupted-review",
+              AgentRunTool.NAME,
+              "{\"agent\":\"helper\",\"task\":\"original review\"}");
+      Recorded recorded =
+          new Recorded(
+              List.of(
+                  ChatMessage.assistant("", List.of(original)),
+                  ChatMessage.tool(original.id(), Projection.NEVER_COMPLETED)),
+              "parent-log");
+      Transcript retained = mock(Transcript.class, AdditionalAnswers.delegatesTo(recorded));
+      when(retained.pendingDelegationRetry())
+          .thenReturn(
+              Optional.of(
+                  new Transcript.DelegationRetry(
+                      original,
+                      "child-log",
+                      "helper",
+                      Home.global(),
+                      1,
+                      "original review",
+                      Optional.of("retained completed review"))));
+      doReturn(new Recorded(List.of(), "child-log"))
+          .when(retained)
+          .resumeDelegation(any(Transcript.DelegationRetry.class), any(AgentDefinition.class));
+      doAnswer(
+              invocation -> {
+                recorded.record(invocation.getArgument(0));
+                return null;
+              })
+          .when(retained)
+          .recordDurably(any());
+      Scripted transport = new Scripted().then(() -> answer("parent finished"));
+      AgentRegistry registry = AgentRegistry.of(fixtures(), FIXTURE_TOOLS);
+      JobRuntime runtime = new JobRuntime(dispatcherOver(transport, 4), List.of(), () -> registry);
+      runtime.useHooks(
+          new Hooks() {
+            @Override
+            public ToolPre toolPre(HookContext context, String tool, String arguments) {
+              if (gate.equals("deny"))
+                return new ToolPre(arguments, "current hook denied", List.of());
+              return ToolPre.allowed(gate.equals("rewrite") ? "{}" : arguments);
+            }
+
+            @Override
+            public ToolPost toolPost(
+                HookContext context, String tool, String arguments, String result) {
+              throw new IllegalStateException("current result hook failed");
+            }
+          });
+      Outcome failed =
+          runtime.run(
+              agent("boss"),
+              "continue",
+              Home.global(),
+              generous(),
+              () -> false,
+              null,
+              JobWatch.UNWATCHED,
+              retained);
+      assertEquals(Ending.UNAVAILABLE, failed.ending(), gate);
+      assertTrue(transport.calls().isEmpty(), "neither parent nor child model runs after " + gate);
+      assertTrue(
+          recorded.entries().stream().noneMatch(entry -> entry.kind() == EntryKind.TOOL_RESULT));
+      if (gate.equals("withhold")) {
+        // The child has completed, but its parent result was withheld. A later explicit retry
+        // reconciles that answer and spends only the parent's next call.
+        runtime.useHooks(Hooks.NONE);
+        Outcome resumed =
+            runtime.run(
+                agent("boss"),
+                "continue",
+                Home.global(),
+                generous(),
+                () -> false,
+                null,
+                JobWatch.UNWATCHED,
+                retained);
+        assertEquals(Ending.ANSWERED, resumed.ending());
+        assertEquals(1, transport.calls().size());
+        assertTrue(
+            transport.conversation(0).stream()
+                .anyMatch(
+                    message ->
+                        message.role() == ChatMessage.Role.TOOL
+                            && message.content().contains("retained completed review")));
+      }
+    }
+  }
+
+  @Test
+  void guarded_failed_call_retains_diagnostics_without_publishing_previews() {
+    Scripted transport =
+        new Scripted()
+            .streaming(
+                sink -> {
+                  sink.thought("protected loop");
+                  sink.answered("guarded partial");
+                })
+            .then(
+                () -> {
+                  throw LlmTransportException.timedOut("deadline", null);
+                });
+    Recorded recorded = new Recorded(List.of());
+    AtomicInteger previews = new AtomicInteger();
+    JobEvents events =
+        new JobEvents() {
+          @Override
+          public void publish(String session, JobEvent event) {}
+
+          @Override
+          public boolean streaming(String session) {
+            return true;
+          }
+
+          @Override
+          public void stream(String session, JobDelta delta) {
+            previews.incrementAndGet();
+          }
+        };
+    try (LlmDispatcher dispatcher = guardedDispatcher(transport, "malformed")) {
+      Outcome outcome =
+          new JobRuntime(dispatcher, List.of())
+              .run(
+                  patient("probe_read"),
+                  "review",
+                  Home.global(),
+                  generous(),
+                  () -> false,
+                  null,
+                  new JobWatch("guarded-job", "session", events),
+                  recorded);
+      assertEquals(Ending.UNAVAILABLE, outcome.ending());
+      assertEquals(0, previews.get());
+      assertTrue(recorded.entries().getLast().content().contains("protected loop"));
+      assertTrue(recorded.entries().getLast().content().contains("guarded partial"));
+      assertFalse(recorded.entries().getLast().kind().projects());
+    }
+  }
+
+  @Test
+  void failed_stream_output_is_withheld_after_information_access_is_lost() throws Exception {
+    Scripted transport =
+        new Scripted()
+            .streaming(sink -> sink.thought("protected reasoning"))
+            .then(
+                () -> {
+                  throw new LlmException("request failed");
+                });
+    JobRuntime runtime = runtimeOver(transport);
+    InformationJobs inputs = mock(InformationJobs.class);
+    runtime.useInformationInputs(inputs);
+    Recorded recorded = new Recorded(List.of(), "private-log");
+    Outcome outcome =
+        runtime.run(
+            agent("echo"),
+            "review",
+            Home.global(),
+            generous(),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            recorded);
+    assertEquals(Ending.UNAVAILABLE, outcome.ending());
+    assertTrue(
+        recorded.entries().stream().noneMatch(entry -> entry.kind() == EntryKind.DIAGNOSTIC));
+    assertTrue(outcome.text().contains("model request failed before completing"));
   }
 
   /**
@@ -4815,15 +5190,17 @@ class JobRuntimeTest {
                               "c1",
                               AgentRegistry.AGENT_RUN,
                               "{\"agent\": \"helper\", \"task\": \"go\"}")))
-              .thenAlways(
-                  () -> {
-                    throw new LlmException("the endpoint is gone");
-                  });
+              .then(() -> asking("", call("child-read", "probe_read", "{}")));
       AgentRegistry registry = AgentRegistry.of(fixtures(), FIXTURE_TOOLS);
       JobRuntime runtime =
           new JobRuntime(
               dispatcherOver(transport, 4),
-              List.of(Probe.returning("probe_read", "m")),
+              List.of(
+                  new Probe(
+                      "probe_read",
+                      arguments -> {
+                        throw new SessionGoneException("the child's file session closed");
+                      })),
               () -> registry);
       subAgentFailed = runtime.run(agent("boss"), "go", Home.global(), generous(), null);
     }
@@ -4901,7 +5278,7 @@ class JobRuntimeTest {
     assertEquals(Ending.CALL_BUDGET, callBudget.ending());
     assertEquals(Ending.CANCELLED, cancelled.ending());
     assertEquals(Ending.UNAVAILABLE, unavailable.ending());
-    assertEquals(Ending.SUB_AGENT_FAILED, subAgentFailed.ending());
+    assertEquals(Ending.SESSION_GONE, subAgentFailed.ending());
     assertEquals(Ending.SESSION_GONE, sessionGone.ending());
     assertEquals(Ending.UNAVAILABLE, unavailableFromATool.ending());
     assertEquals(Ending.UNAVAILABLE, unavailableFromABug.ending());

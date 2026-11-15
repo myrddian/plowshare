@@ -29,6 +29,38 @@ describe('messaging contracts and controls', () => {
       ).toBeUndefined();
     },
   );
+  it('accepts correlated generated failure status while preserving final reply semantics', () => {
+    const notice: MessagingReplies['message.delivery'] = {
+      message: 'bdm_Error',
+      sender: 'ins_Worker',
+      recipient: 'ins_Sender',
+      replyTo: 'bdm_Request',
+      replyExpected: false,
+      finalReply: false,
+      generated: true,
+      state: 'handled',
+      ending: 'UNAVAILABLE',
+      reply: null,
+      job: null,
+      deadlineAt: null,
+      postedAt: '2026-11-16T00:00:00Z',
+      body: 'The recipient job had an error.',
+    };
+    expect(
+      messagingReply('message.delivery', { code: 'OK', payload: notice })
+        ?.payload,
+    ).toEqual(notice);
+    for (const invalid of [
+      { ...notice, ending: 'ANSWERED' },
+      { ...notice, ending: 'AWAITING' },
+      { ...notice, replyExpected: true },
+      { ...notice, replyTo: null },
+    ])
+      expect(
+        messagingReply('message.delivery', { code: 'OK', payload: invalid }),
+      ).toBeUndefined();
+  });
+
   it('discovers every operation, mutation and retained opening identity offline', () => {
     const operations = discovery().commands.filter((row) =>
       row.operation.startsWith('message.'),

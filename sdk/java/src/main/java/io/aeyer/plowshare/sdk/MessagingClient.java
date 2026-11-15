@@ -110,7 +110,19 @@ public final class MessagingClient {
       ForumChecks.optional(sourceConversation);
       Objects.requireNonNull(postedAt);
       RelayPort.text(body);
-      if (finalReply && replyTo == null || generated && (!finalReply || ending == null))
+      if (finalReply && replyTo == null
+          || generated
+              && (replyTo == null
+                  || ending == null
+                  || !finalReply
+                      && (replyExpected
+                          || !Set.of(
+                                  "UNAVAILABLE",
+                                  "SUB_AGENT_FAILED",
+                                  "SESSION_GONE",
+                                  "STUCK",
+                                  "CALL_FAILURES")
+                              .contains(ending))))
         throw new IllegalArgumentException("Inconsistent reply lifecycle");
     }
   }

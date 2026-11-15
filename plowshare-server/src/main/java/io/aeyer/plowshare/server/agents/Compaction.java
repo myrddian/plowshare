@@ -30,6 +30,7 @@ import io.aeyer.plowshare.server.llm.tokens.TokenCount;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -1739,6 +1740,10 @@ public final class Compaction implements SkillSummaries {
 
     private final TurnTranscript turn;
     private final int continuing;
+    private List<EntryRecord> retained;
+    private Optional<DelegationRetry> pendingRetry;
+    private final Set<String> reconciledToolCalls = new HashSet<>();
+    private boolean expectsFailedDelegate;
 
     private ResumedTranscript(TurnTranscript turn, int continuing) {
       this.turn = turn;
@@ -1763,34 +1768,125 @@ public final class Compaction implements SkillSummaries {
      * the <em>new</em> turn and never against the one it is continuing. The stopped turn's row is
      * already written, which is what makes that number the next one.
      *
-     * <p><b>It makes no model call and never throws</b>, on {@link TurnTranscript#before()}'s terms
-     * exactly. A resumed run whose history could not be assembled is worse than an ordinary turn
-     * that loses its history — it would re-do work somebody has already paid for — so this is
-     * logged at {@code warn} and the run goes on with the note alone rather than the grant being
-     * lost to an exception.
+     * <p>It makes no model call. A failure to recover history stops the retry before execution:
+     * starting with the note alone could repeat effects or discard work already paid for.
      */
     @Override
     public List<ChatMessage> before() {
-      try {
-        turn.turnOrdinal();
-        return Projection.of(
-            whatWasSaidAndWhatTheRunLearned(
-                entries.thatProjectFor(turn.conversationId),
-                continuing,
-                turn.definition.canRedeem()),
-            turn.definition.canList());
-      } catch (RuntimeException failed) {
-        if (failed instanceof InvalidToolObservationException) throw failed;
-        // First line only; see JobRuntime.describe. A constraint
-        // violation's second line quotes the failing row, and an
-        // `entries` row holds whatever a tool read off a disk.
-        log.warn(
-            "conversation {}: the run it is continuing could not be read back, so"
-                + " this run starts without what that one learned. Reason: {}",
-            turn.conversationId,
-            JobRuntime.describe(failed));
-        return List.of();
+      turn.retainedAuthority.run();
+      turn.turnOrdinal();
+      // Continuing without the retained history can repeat effects or silently discard paid
+      // work. Unlike a fresh conversation, a retry must fail closed when this read fails.
+      List<TurnRecord> spoken = turns.forConversation(turn.conversationId);
+      retained =
+          withoutLegacyFailureAnswers(
+              ApprovalProjection.settledResults(entries.thatProjectFor(turn.conversationId)),
+              spoken);
+      int openingTurn = continuationOpeningTurn();
+      expectsFailedDelegate =
+          spoken.stream()
+              .anyMatch(
+                  row ->
+                      row.ordinal() >= openingTurn
+                          && row.ordinal() <= continuing
+                          && row.ending() == Outcome.Ending.SUB_AGENT_FAILED);
+      return Projection.of(
+          whatWasSaidAndWhatTheRunLearned(
+              retained, continuationOpeningTurn(), continuing, turn.definition.canRedeem()),
+          turn.definition.canList());
+    }
+
+    private int continuationOpeningTurn() {
+      int openingTurn = 1;
+      for (EntryRecord entry : retained) {
+        if (entry.kind() == EntryKind.UTTERANCE && entry.turnOrdinal() <= continuing) {
+          openingTurn = Math.max(openingTurn, entry.turnOrdinal());
+        }
       }
+      return openingTurn;
+    }
+
+    @Override
+    public Optional<DelegationRetry> pendingDelegationRetry() {
+      if (retained == null) {
+        throw new IllegalStateException("A retry must load its retained history before recovery");
+      }
+      if (pendingRetry != null) return pendingRetry;
+      // A failed child can fail again before the parent's next model call. Such retry turns
+      // have no new utterance or agent_run row: follow the current utterance's whole chain.
+      int openingTurn = continuationOpeningTurn();
+      Set<String> answered = new HashSet<>(reconciledToolCalls);
+      for (EntryRecord entry : retained) {
+        if (entry.kind() == EntryKind.TOOL_RESULT) answered.add(entry.toolCallId());
+      }
+      DelegationRetry pending = null;
+      boolean hasRecordedDelegation = false;
+      for (EntryRecord entry : retained) {
+        if (entry.turnOrdinal() < openingTurn || entry.turnOrdinal() > continuing) continue;
+        for (ToolCall call : entry.toolCalls()) {
+          if (AgentRunTool.NAME.equals(call.name())) hasRecordedDelegation = true;
+          if (answered.contains(call.id())) continue;
+          if (!AgentRunTool.NAME.equals(call.name())) {
+            throw new IllegalStateException(
+                "An interrupted tool has no recorded result; inspect its original receipt before retrying. No uncertain effect was replayed");
+          }
+          if (pending != null) {
+            throw new IllegalStateException("The failed turn has multiple interrupted delegations");
+          }
+          ConversationRecord child =
+              conversations
+                  .delegationOpenedBy(turn.conversationId, call.id())
+                  .orElseThrow(
+                      () ->
+                          new IllegalStateException(
+                              "The interrupted delegation has no retained child"));
+          List<TurnRecord> spoken = turns.forConversation(child.id());
+          if (spoken.isEmpty()) {
+            throw new IllegalStateException("The interrupted delegation has no recorded outcome");
+          }
+          TurnRecord stopped = spoken.get(spoken.size() - 1);
+          if (child.origin() != Origin.DELEGATION
+              || !turn.conversationId.equals(child.parentId())
+              || stopped.ending() != Outcome.Ending.UNAVAILABLE
+                  && stopped.ending() != Outcome.Ending.SUB_AGENT_FAILED
+                  && stopped.ending() != Outcome.Ending.ANSWERED) {
+            throw new IllegalStateException(
+                "The interrupted delegation is not a recorded retryable failure");
+          }
+          pending =
+              new DelegationRetry(
+                  call,
+                  child.id(),
+                  child.agent(),
+                  child.home(),
+                  stopped.ordinal(),
+                  stopped.utterance(),
+                  stopped.ending() == Outcome.Ending.ANSWERED
+                      ? Optional.of(stopped.answer())
+                      : Optional.empty());
+        }
+      }
+      if (pending == null && expectsFailedDelegate && !hasRecordedDelegation) {
+        throw new IllegalStateException(
+            "The failed delegate's exact recovery link is unavailable. No task was restarted");
+      }
+      pendingRetry = Optional.ofNullable(pending);
+      return pendingRetry;
+    }
+
+    @Override
+    public Transcript resumeDelegation(DelegationRetry retry, AgentDefinition callee) {
+      if (retry.agent().equals(callee.name())
+          && pendingDelegationRetry().filter(retry::equals).isPresent()) {
+        return turn.failedDelegateTranscript(retry, callee);
+      }
+      return turn.resumeDelegation(retry, callee);
+    }
+
+    @Override
+    public DelegationRetry retainedDelegationRetry(
+        String child, AgentDefinition callee, Home home) {
+      return turn.retainedDelegationRetry(child, callee, home);
     }
 
     /**
@@ -1825,6 +1921,7 @@ public final class Compaction implements SkillSummaries {
     @Override
     public void recordDurably(LoggedEntry entry) {
       turn.recordDurably(entry);
+      if (entry.kind() == EntryKind.TOOL_RESULT) reconciledToolCalls.add(entry.toolCallId());
     }
 
     @Override
@@ -2010,6 +2107,70 @@ public final class Compaction implements SkillSummaries {
 
   /** One turn's transcript, and the one number the conversation takes back from it. */
   public final class TurnTranscript implements Transcript {
+    private DelegationRetry retainedRetry;
+
+    @Override
+    public DelegationRetry retainedDelegationRetry(
+        String child, AgentDefinition callee, Home home) {
+      ConversationRecord retainedChild =
+          conversations
+              .find(child)
+              .orElseThrow(() -> new IllegalStateException("The retained delegate does not exist"));
+      if (retainedChild.origin() != Origin.DELEGATION
+          || !conversationId.equals(retainedChild.parentId())
+          || !home.equals(retainedChild.home())
+          || !callee.name().equals(retainedChild.agent())) {
+        throw new IllegalStateException(
+            "The retained delegate does not belong to this parent, agent and home");
+      }
+      List<TurnRecord> spoken = turns.forConversation(child);
+      if (spoken.isEmpty())
+        throw new IllegalStateException("The retained delegate has no settled outcome");
+      TurnRecord stopped = spoken.get(spoken.size() - 1);
+      if (stopped.ending() != Outcome.Ending.UNAVAILABLE
+          && stopped.ending() != Outcome.Ending.SUB_AGENT_FAILED
+          && stopped.ending() != Outcome.Ending.ANSWERED) {
+        throw new IllegalStateException("The retained delegate has no retryable settled outcome");
+      }
+      ToolCall original =
+          entries
+              .delegationCall(conversationId, child)
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "The delegate's original arguments are unavailable"));
+      DelegationRetry retry =
+          new DelegationRetry(
+              original,
+              child,
+              callee.name(),
+              home,
+              stopped.ordinal(),
+              stopped.utterance(),
+              stopped.ending() == Outcome.Ending.ANSWERED
+                  ? Optional.of(stopped.answer())
+                  : Optional.empty());
+      retainedRetry = retry;
+      return retry;
+    }
+
+    @Override
+    public Transcript resumeDelegation(DelegationRetry retry, AgentDefinition callee) {
+      if (!retry.equals(retainedRetry) || !retry.agent().equals(callee.name())) {
+        throw new IllegalStateException(
+            "The retained delegation was not validated for this parent");
+      }
+      return failedDelegateTranscript(retry, callee);
+    }
+
+    private ResumedTranscript failedDelegateTranscript(
+        DelegationRetry retry, AgentDefinition callee) {
+      ResumedTranscript resumed =
+          resumedTranscriptFor(retry.conversation(), callee, retry.continuingTurn());
+      if (confined) resumed.turn.confine(retainedAuthority, retainedSubject);
+      return resumed;
+    }
+
     private Integer budgetContinuing;
 
     /** Keeps the original inference execution and its complete working across budget segments. */
@@ -2357,7 +2518,9 @@ public final class Compaction implements SkillSummaries {
         // Budget recovery must fail closed if history is unavailable. Returning an empty context
         // here would turn a continuation into a second attempt at the original task.
         List<EntryRecord> log =
-            ApprovalProjection.settledResults(entries.thatProjectFor(conversationId));
+            withoutLegacyFailureAnswers(
+                ApprovalProjection.settledResults(entries.thatProjectFor(conversationId)),
+                turns.forConversation(conversationId));
         List<EntryRecord> earlier =
             log.stream().filter(entry -> entry.turnOrdinal() < budgetContinuing).toList();
         List<EntryRecord> working =
@@ -3497,7 +3660,7 @@ public final class Compaction implements SkillSummaries {
         // single model call produced it.
         // entries_only_a_completed_operation_is_timed would accept a
         // number here and there is none to give.
-        record(LoggedEntry.answer(outcome.text(), List.of()));
+        record(LoggedEntry.diagnostic(outcome.text()));
       }
       try {
         turns.recordAt(
@@ -3525,7 +3688,10 @@ public final class Compaction implements SkillSummaries {
       // wrote is committed, and this runs on the job's own thread before JobStore.finish
       // publishes `ended` — so a client streaming this turn is told before it hears it end.
       if (!confined) told();
-      foldWhenTheTurnIsOver();
+      // A retry needs its original unresolved delegation and completed tool results. Folding a
+      // transiently failed turn could hide that evidence before the person requests recovery.
+      if (outcome.ending() != Outcome.Ending.UNAVAILABLE
+          && outcome.ending() != Outcome.Ending.SUB_AGENT_FAILED) foldWhenTheTurnIsOver();
       // log.close, last: a machine log takes no more turns once its run ends on anything
       // but AWAITING, which a person's answer continues (spec 2026-09-28-hooks-reach-the-log
       // §3). At most once per log, and never throws: LogStages' contract. Lower case, as every
@@ -5248,18 +5414,52 @@ public final class Compaction implements SkillSummaries {
    */
   static List<EntryRecord> whatWasSaidAndWhatTheRunLearned(
       List<EntryRecord> log, int continuing, boolean canRedeem) {
+    return whatWasSaidAndWhatTheRunLearned(log, continuing, continuing, canRedeem);
+  }
+
+  static List<EntryRecord> whatWasSaidAndWhatTheRunLearned(
+      List<EntryRecord> log, int openingTurn, int continuing, boolean canRedeem) {
     List<EntryRecord> earlier = new ArrayList<>();
     List<EntryRecord> inTheRun = new ArrayList<>();
     for (EntryRecord entry : log) {
-      if (entry.turnOrdinal() < continuing) {
+      if (entry.turnOrdinal() < openingTurn) {
         earlier.add(entry);
-      } else if (entry.turnOrdinal() == continuing) {
+      } else if (entry.turnOrdinal() <= continuing) {
         inTheRun.add(entry);
       }
     }
     List<EntryRecord> history = new ArrayList<>(whatWasSaidAndWhatCameBack(earlier, canRedeem));
     history.addAll(inTheRun);
     return history;
+  }
+
+  /**
+   * Older servers wrote a synthetic failure sentence as an assistant answer after the failure
+   * marker. Keep the durable row readable, but exclude exactly the terminal matching sentence from
+   * resumed model history. Intermediate model answers and completed tool results survive.
+   */
+  static List<EntryRecord> withoutLegacyFailureAnswers(
+      List<EntryRecord> log, List<TurnRecord> spoken) {
+    Map<Integer, TurnRecord> failed = new HashMap<>();
+    for (TurnRecord turn : spoken) {
+      if (turn.ending() != Outcome.Ending.ANSWERED && turn.ending() != Outcome.Ending.AWAITING)
+        failed.put(turn.ordinal(), turn);
+    }
+    Map<Integer, Integer> terminal = new HashMap<>();
+    for (EntryRecord entry : log) {
+      if (entry.kind() == EntryKind.ANSWER) terminal.put(entry.turnOrdinal(), entry.ordinal());
+    }
+    return log.stream()
+        .filter(
+            entry -> {
+              TurnRecord stopped = failed.get(entry.turnOrdinal());
+              return stopped == null
+                  || entry.kind() != EntryKind.ANSWER
+                  || !entry.toolCalls().isEmpty()
+                  || !Objects.equals(terminal.get(entry.turnOrdinal()), entry.ordinal())
+                  || !Objects.equals(stopped.answer(), entry.content());
+            })
+        .toList();
   }
 
   // --- what the decision no longer reads out of the conversation ----------------------

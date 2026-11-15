@@ -68,6 +68,7 @@ import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
+import io.aeyer.plowshare.server.llm.dispatch.LlmTransportException;
 import io.aeyer.plowshare.server.llm.dispatch.ModelResponseRejected;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
@@ -2256,7 +2257,8 @@ public final class JobRuntime {
             owner,
             runHooks,
             home,
-            operation);
+            operation,
+            watch);
     offered.replaceAll(
         (name, tool) ->
             tool instanceof AgentRunTool delegate
@@ -2525,7 +2527,7 @@ public final class JobRuntime {
           // automatically. Retain its causal detail beside the call for trajectory inspection.
           Outcome failure =
               new Outcome(
-                  Ending.SUB_AGENT_FAILED,
+                  child.ending(),
                   child.sentence(),
                   taken - 1,
                   budget.spent() - callsBefore,
@@ -2739,7 +2741,8 @@ public final class JobRuntime {
             owner,
             runHooks,
             home,
-            operation);
+            operation,
+            watch);
     BoundCommands.Prepared bound =
         boundCommands == null
             ? null
@@ -2782,9 +2785,68 @@ public final class JobRuntime {
     // reviewer that can only read is never told it has only read (measured 2026-09-30).
     HookContext hookContext = declared.holding(offered.keySet());
     var restoringBudget = budgetRequests.restoring(transcript.conversationId());
+    int restoredModelCalls = 0;
     if (restoringBudget.isPresent()) {
       budgetRequests.recoveryStarted(transcript.conversationId());
-      restoreBudgetTools(restoringBudget.get(), offered, transcript, home);
+      RunExtras.Extras recoveryExtras = extras;
+      int beforeRestoration = budget.spent();
+      try {
+        restoreBudgetTools(
+            restoringBudget.get(),
+            offered,
+            transcript,
+            home,
+            pending -> {
+              requireRetainedDelegationGates(
+                  pending,
+                  definition,
+                  transcript,
+                  home,
+                  sessionId,
+                  owner,
+                  recoveryExtras,
+                  bound,
+                  activeHooks(route, harnessRun, skillChecks),
+                  hookContext,
+                  List.of());
+              if (cancelled.getAsBoolean())
+                throw new CallerFault(
+                    "The retained delegation continuation was cancelled before execution");
+              admittedAuthority.run();
+              if (operation != null) operations.require(operation);
+            },
+            (pending, result) ->
+                checkedRetainedDelegationResult(
+                    pending,
+                    result,
+                    transcript,
+                    owner,
+                    activeHooks(route, harnessRun, skillChecks),
+                    hookContext,
+                    operation),
+            () -> recoveryExtras.end().requested().isPresent());
+      } catch (AgentRunTool.SubAgentFailed failed) {
+        return stopped(
+            failed.ending(),
+            failed.sentence(),
+            List.of(),
+            restoringBudget.get().steps(),
+            budget.spent() - beforeRestoration,
+            failed.detail());
+      } catch (RuntimeException failed) {
+        // A restored child can spend calls before a current disclosure hook refuses its result.
+        // Keep those actual charges on the outcome; leave the started checkpoint to its owner,
+        // which must reconcile uncertainty rather than replaying the child or acknowledging it.
+        return stopped(
+            cancelled.getAsBoolean() ? Ending.CANCELLED : Ending.UNAVAILABLE,
+            "The retained budget continuation could not be completed. Its checkpoint and saved "
+                + "work are retained; no uncertain operation was replayed.",
+            List.of(),
+            restoringBudget.get().steps(),
+            budget.spent() - beforeRestoration,
+            describe(failed));
+      }
+      restoredModelCalls = budget.spent() - beforeRestoration;
       // A restored child may itself be waiting on command consent. Propagate that wait
       // before another parent inference, exactly as the ordinary delegation path does.
       var requested = extras.end().requested();
@@ -2794,7 +2856,7 @@ public final class JobRuntime {
             requested.get().ending(),
             requested.get().text(),
             restoringBudget.get().steps(),
-            0,
+            restoredModelCalls,
             "",
             Pace.NONE,
             true);
@@ -3111,13 +3173,100 @@ public final class JobRuntime {
         trail.add(RunTool.NAME);
       }
     }
+    // An explicit resume repairs the exact interrupted child before asking the parent model.
+    // Completed child tools remain in its own projection; no parent tool batch is replayed.
+    int resumedSteps = restoringBudget.map(BudgetCheckpoint.Frame::steps).orElse(0);
+    int retriedModelCalls = restoredModelCalls;
+    int beforeDelegationRetry = budget.spent();
+    try {
+      // Budget recovery already settled its checkpoint slots before loading history. It must not
+      // also enter the legacy failed-child recovery path in this same activation.
+      Optional<Transcript.DelegationRetry> pendingDelegation =
+          restoringBudget.isPresent() ? Optional.empty() : transcript.pendingDelegationRetry();
+      if (pendingDelegation.isPresent()) {
+        var original = pendingDelegation.orElseThrow().call();
+        AgentTool delegate = offered.get(AgentRunTool.NAME);
+        if (!(delegate instanceof AgentRunTool runner))
+          throw new IllegalStateException("The interrupted delegation is no longer available");
+        requireRetainedDelegationGates(
+            original,
+            definition,
+            transcript,
+            home,
+            sessionId,
+            owner,
+            extras,
+            bound,
+            activeHooks(route, harnessRun, skillChecks),
+            hookContext,
+            history);
+        if (cancelled.getAsBoolean())
+          return stopped(
+              Ending.CANCELLED,
+              "The delegation retry was cancelled before continuation.",
+              trail,
+              0,
+              0,
+              "");
+        admittedAuthority.run();
+        if (operation != null) operations.require(operation);
+        // A retry can itself request more allowance. Retain this exact parent call in any new
+        // root-to-leaf checkpoint so interruption cannot strand or recreate the resumed child.
+        budgetStack.current().progress(resumedSteps, List.of(original));
+        var retried = runner.retryInterruptedDelegation(home).orElseThrow();
+        retriedModelCalls = retried.modelCalls();
+        admittedAuthority.run();
+        if (operation != null) operations.require(operation);
+        requireLogReadable(transcript.conversationId(), owner);
+        var requested = extras.end().requested();
+        if (requested.isPresent())
+          return new Outcome(
+              requested.get().ending(),
+              requested.get().text(),
+              resumedSteps,
+              retriedModelCalls,
+              "",
+              Pace.NONE,
+              true);
+        String result =
+            checkedRetainedDelegationResult(
+                retried.call(),
+                retried.result(),
+                transcript,
+                owner,
+                activeHooks(route, harnessRun, skillChecks),
+                hookContext,
+                operation);
+        String told = ToolLines.delegation(runner.returned());
+        transcript.recordDurably(LoggedEntry.toolResult(retried.call().id(), result).told(told));
+        replaceRetainedResult(history, retried.call(), result);
+        budgetStack.current().progress(resumedSteps, List.of());
+        trail.add(AgentRunTool.NAME);
+      }
+    } catch (AgentRunTool.SubAgentFailed child) {
+      return stopped(
+          child.ending(),
+          child.sentence(),
+          trail,
+          0,
+          budget.spent() - beforeDelegationRetry,
+          child.detail());
+    } catch (RuntimeException failed) {
+      return stopped(
+          Ending.UNAVAILABLE,
+          "The interrupted delegation could not be continued. Completed tools were not replayed.",
+          trail,
+          0,
+          budget.spent() - beforeDelegationRetry,
+          describe(failed));
+    }
     // Per run, and that is the whole of its lifetime rule; see Repeats.
     Repeats repeats = new Repeats();
     // Counts across the whole run rather than within a batch, so two steps
     // that each lose an id cannot mint the same one twice.
     int synthesised = 0;
-    int steps = restoringBudget.map(BudgetCheckpoint.Frame::steps).orElse(0);
-    int modelCalls = 0;
+    int steps = resumedSteps;
+    int modelCalls = retriedModelCalls;
     AllowanceNotices allowanceNotices = new AllowanceNotices();
     boolean answerReviewed = false;
     boolean regenerateResponse = false;
@@ -3362,6 +3511,7 @@ public final class JobRuntime {
                 modelCalls,
                 "");
           steps++;
+          recordFailedModelOutput(transcript, timed, owner, "response rejected");
           recordRejectedResponse(transcript, home, owner, rejected);
           // A turn with a required tool cannot be repaired by accepting a prose answer.
           // Re-enter the normal admission loop so the extra call spends its own allowance.
@@ -3384,6 +3534,7 @@ public final class JobRuntime {
           regenerateResponse = true;
           continue;
         } catch (CallerAbandonedException cancelledMidStream) {
+          recordFailedModelOutput(transcript, timed, owner, "cancelled");
           // The run was cancelled while the model was still generating.
           //
           // Caught ahead of LlmException, and the ordering is the whole of
@@ -3413,15 +3564,25 @@ public final class JobRuntime {
               steps,
               modelCalls,
               "");
-        } catch (LlmException unreachable) {
+        } catch (LlmException failed) {
+          boolean timedOut =
+              failed instanceof LlmTransportException transport && transport.timedOut();
+          recordFailedModelOutput(
+              transcript,
+              timed,
+              owner,
+              timedOut ? "completion deadline exceeded" : "model request failed");
           return stopped(
               Ending.UNAVAILABLE,
-              "This run could not go on: the model could not be reached.",
+              timedOut
+                  ? "This run paused because the model did not finish within its allowed time."
+                  : "This run paused because the model request failed before completing.",
               trail,
               steps,
               modelCalls,
-              describe(unreachable));
+              describe(failed));
         } catch (RuntimeException broken) {
+          recordFailedModelOutput(transcript, timed, owner, "model dispatch failed");
           // Wider than LlmException on purpose, and it is about the
           // counters rather than about the ending. Anything else escaping
           // here — an IllegalArgumentException out of ChatRequest for a
@@ -3770,21 +3931,40 @@ public final class JobRuntime {
                     "A draft answer was withheld for independent review:\n" + draft));
             final String review;
             try {
+              budgetStack.current().progress(steps, List.of());
               review = runner.runDeclared(definition.reviewWith(), reviewTask(draft), home);
             } catch (AgentRunTool.SubAgentFailed child) {
               return stopped(
-                  Ending.SUB_AGENT_FAILED,
-                  child.sentence(),
-                  trail,
+                  child.ending(), child.sentence(), trail, steps, modelCalls, child.detail());
+            }
+            // A reviewer awaiting command or budget consent has not failed or completed. Preserve
+            // that parked stack and never spend another parent call while the question stands.
+            var reviewWait = extras.end().requested();
+            if (reviewWait.isPresent())
+              return new Outcome(
+                  reviewWait.get().ending(),
+                  reviewWait.get().text(),
                   steps,
                   modelCalls,
-                  child.detail());
-            }
+                  "",
+                  Pace.NONE,
+                  true);
+            boolean reviewed = runner.returned() == Ending.ANSWERED;
             transcript.record(
-                LoggedEntry.diagnostic("The mandatory answer reviewer reported:\n" + review));
+                LoggedEntry.diagnostic(
+                    (reviewed
+                            ? "The mandatory answer reviewer reported:\n"
+                            : "ERROR: the mandatory answer review did not complete:\n")
+                        + review));
             history.add(ChatMessage.assistant(draft, List.of()));
-            history.add(ChatMessage.user(revisionRequest(review)));
-            answerReviewed = true;
+            history.add(
+                ChatMessage.user(
+                    reviewed
+                        ? revisionRequest(review)
+                        : "The mandatory reviewer did not complete, so this answer is still unreviewed. "
+                            + "Continue useful work or prepare another draft for review; do not claim the "
+                            + "review passed. Another draft will be checked again within the remaining allowance."));
+            answerReviewed = reviewed;
             continue;
           }
           transcript.record(
@@ -4261,14 +4441,9 @@ public final class JobRuntime {
                                 : ToolLines.outcome(wanted.name(), result);
                   }
                 } catch (AgentRunTool.SubAgentFailed child) {
-                  // Its own clause, above the general one, and not folded
-                  // into dependencyFailure: the ending differs. A child
-                  // that could not reach what it depends on is the same
-                  // class of failure as a dead endpoint here — see
-                  // AgentRunTool for why it is not a tool result — but a
-                  // caller reading UNAVAILABLE would look for a broken
-                  // endpoint of this run's own, and the thing to look at
-                  // is one agent further down. The detail names it.
+                  // Ordinary child model failures are tool results. An owning-session
+                  // failure still fences the tree; preserve its typed ending at every depth
+                  // instead of turning it into a nonfatal model/dependency failure.
                   //
                   // steps - 1 for the reason the two clauses below give:
                   // this step's tool results were never appended, so the
@@ -4284,7 +4459,7 @@ public final class JobRuntime {
                   withParked(toolRecords, runHooks)
                       .forEach(record -> transcript.record(LoggedEntry.hook(record)));
                   return stopped(
-                      Ending.SUB_AGENT_FAILED,
+                      child.ending(),
                       child.sentence(),
                       trail,
                       steps - 1,
@@ -4539,7 +4714,7 @@ public final class JobRuntime {
         failed = withheld(after);
       } catch (AgentRunTool.SubAgentFailed child) {
         result = child.sentence();
-        failureEnding = Ending.SUB_AGENT_FAILED;
+        failureEnding = child.ending();
         failed = true;
       } catch (RuntimeException broken) {
         result = "Bound command dispatch stopped: " + describe(broken);
@@ -4774,7 +4949,8 @@ public final class JobRuntime {
                 account,
                 RunHooks.NONE,
                 home,
-                null)
+                null,
+                JobWatch.UNWATCHED)
             .values()
             .stream()
             .map(AgentTool::schema)
@@ -4819,7 +4995,8 @@ public final class JobRuntime {
       String callerHandle,
       RunHooks runHooks,
       Home toolHome,
-      OperationAuthority.Admission operation) {
+      OperationAuthority.Admission operation,
+      JobWatch watch) {
     var runInformation =
         informationAccess == null
             ? null
@@ -4960,7 +5137,8 @@ public final class JobRuntime {
                     extras.end(),
                     callerHandle,
                     delegates)
-                .underOperation(operation));
+                .underOperation(operation)
+                .withWatch(watch));
         continue;
       }
       if (router != null && FileTools.NAMES.contains(name)) {
@@ -5375,14 +5553,79 @@ public final class JobRuntime {
             "budget approval pending");
   }
 
+  /** Current tool/effect gates apply to every retained delegation, independent of retry owner. */
+  private void requireRetainedDelegationGates(
+      ToolCall original,
+      AgentDefinition definition,
+      Transcript transcript,
+      Home home,
+      String session,
+      String owner,
+      RunExtras.Extras extras,
+      BoundCommands.Prepared bound,
+      Hooks active,
+      HookContext context,
+      List<ChatMessage> history) {
+    String refusal = extras.fence().refusal(original.name(), original.arguments());
+    if (refusal == null && skills != null)
+      refusal = skills.refusal(transcript.conversationId(), original.name());
+    if (refusal == null && bound != null) refusal = bound.fence(original.name());
+    if (refusal != null) throw new CallerFault(refusal);
+    for (AgentRules.Rule rule :
+        fileRules.forTool(
+            definition, home, session, owner, original.name(), original.arguments())) {
+      if (!definition.prompt().contains(rule.text())
+          && history.stream().noneMatch(message -> message.content().contains(rule.text())))
+        throw new CallerFault(
+            "Current file instructions must be read before retrying the delegation");
+    }
+    ToolPre before = toolPre(active, context, original.name(), original.arguments());
+    before.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+    if (before.isDenied()) throw new CallerFault(before.denied());
+    if (!original.arguments().equals(before.arguments()))
+      throw new CallerFault("A retry cannot replace the original delegation arguments");
+  }
+
+  /** Never publish a restored result before today's authority, input and output hooks allow it. */
+  private String checkedRetainedDelegationResult(
+      ToolCall original,
+      String result,
+      Transcript transcript,
+      String owner,
+      Hooks active,
+      HookContext context,
+      OperationAuthority.Admission operation) {
+    admittedAuthority.run();
+    if (operation != null) operations.require(operation);
+    requireLogReadable(transcript.conversationId(), owner);
+    ToolPost post = toolPost(active, context, original.name(), original.arguments(), result);
+    post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+    if (withheld(post))
+      throw new CallerFault("The continued delegation result was withheld by a hook");
+    return usable(post.result(), original.name());
+  }
+
   /** Restore the paused child and settle its original call slot before consulting the parent. */
   private void restoreBudgetTools(
       BudgetCheckpoint.Frame frame,
       Map<String, AgentTool> offered,
       Transcript transcript,
-      Home home) {
+      Home home,
+      Consumer<ToolCall> beforeDelegation,
+      BiFunction<ToolCall, String, String> afterDelegation,
+      BooleanSupplier awaiting) {
     budgetStack.current().progress(frame.steps(), frame.pending());
     Optional<BudgetCheckpoint.Frame> child = budgetRequests.restoringChild(frame.conversation());
+    if (child.isPresent() && frame.pending().isEmpty()) {
+      // Harness-mandated review currently has no durable parent tool slot. Refuse this unsupported
+      // restoration instead of silently dropping its saved child and spending another parent call.
+      String refusal =
+          "The saved child continuation has no parent tool-call slot. Its checkpoint "
+              + "and work are retained; automatic recovery was refused before inference. Inspect the "
+              + "original child before retrying.";
+      transcript.recordDurably(LoggedEntry.diagnostic("ERROR: " + refusal));
+      throw new CallerFault(refusal);
+    }
     String decision = budgetRequests.restorationDecision(frame.conversation()).orElseThrow();
     for (int index = 0; index < frame.pending().size(); index++) {
       ToolCall pending = frame.pending().get(index);
@@ -5391,7 +5634,12 @@ public final class JobRuntime {
         if (!AgentRunTool.NAME.equals(pending.name())
             || !(offered.get(AgentRunTool.NAME) instanceof AgentRunTool runner))
           throw new CallerFault("The original delegation is not available for budget continuation");
+        beforeDelegation.accept(pending);
         result = runner.resumeExisting(child.get(), pending, home);
+        // A child parked on another consent is not a completed tool result. Keep its original
+        // slot and all unstarted siblings pending for their owning checkpoint lifecycle.
+        if (awaiting.getAsBoolean()) return;
+        result = afterDelegation.apply(pending, result);
       } else if (index == 0 && RequestBudgetTool.NAME.equals(pending.name())) {
         result = decision;
       } else {
@@ -5782,6 +6030,16 @@ public final class JobRuntime {
                 + "and tool results. If the evidence is insufficient, say what is missing. "
                 + "Do not call tools, emit protocol markup, or claim a new action was performed."));
     return retry;
+  }
+
+  /** Failed output is evidence, never a completed answer or a later prompt. */
+  private void recordFailedModelOutput(
+      Transcript transcript, Pacing.Call call, String owner, String reason) {
+    if (informationInputs != null
+        && !informationInputs.logAllowed(transcript.conversationId(), owner)) return;
+    for (String part : call.failedOutputParts(reason)) {
+      transcript.record(LoggedEntry.diagnostic(part));
+    }
   }
 
   private static void recordRejectedResponse(
@@ -6327,15 +6585,17 @@ public final class JobRuntime {
     // policy is explicit, while contained and information-dependent callers keep their own gates.
     // The listener checks current job READ when enqueueing each delta. Ordinary previews are
     // droppable and irretractable; all calls still recheck authority before their final result.
-    Deltas authorized = originalAuthorization.disclosure() == Disclosure.LIVE ? sink : DISCARDS;
+    Deltas authorized =
+        originalAuthorization.disclosure() == Disclosure.LIVE ? sink.previews() : DISCARDS;
+    // Failure capture is protected log evidence, independent of whether previews may be public.
+    // Its bounded observer is retained even for guarded/confined calls; recording rechecks log
+    // access.
+    Deltas observed = Deltas.observing(confined ? DISCARDS : authorized, sink.diagnostics());
     Completion completed =
         slot.pool() == null
-            ? dispatcher.stream(request, confined ? DISCARDS : authorized, cancelled)
+            ? dispatcher.stream(request, observed, cancelled)
             : dispatcher.streamOn(
-                slot.pool(),
-                request.withBudget(LlmPool.NO_DEADLINE),
-                confined ? DISCARDS : authorized,
-                cancelled);
+                slot.pool(), request.withBudget(LlmPool.NO_DEADLINE), observed, cancelled);
     // Revocation during inference prevents publishing its final result or starting another effect.
     admittedAuthority.run();
     originalAuthorization.require();

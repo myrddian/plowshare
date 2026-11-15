@@ -366,7 +366,12 @@ function section(label: string, text: string, note = '', direction = '') {
 }
 function renderDetail() {
   const row = [...visible, ...runItems].find((item) => item.key === selected);
-  const stamp = JSON.stringify(row);
+  const stamp = JSON.stringify([
+    row,
+    state.connected,
+    state.jobs.filter((job) => job.conversation === conversation).at(-1)
+      ?.status,
+  ]);
   if (stamp === detailStamp) return;
   detailStamp = stamp;
   const detail = $('#trajectory-detail-content');
@@ -405,6 +410,17 @@ function renderDetail() {
         : '',
       linked && call.result ? '<' : '',
     );
+    if (
+      call.tool === 'agent_run' &&
+      call.opened &&
+      ['unavailable', 'sub_agent_failed'].includes(call.result?.outcome ?? '')
+    ) {
+      const parent = state.jobs
+        .filter((job) => job.conversation === conversation)
+        .at(-1);
+      const ready = state.connected && parent?.status === 'finished';
+      body += `<p class="history-note">This delegate failed; its caller can continue independently. Retry continues the child's recorded history through the calling agent.</p><button class="secondary-button" data-retry-delegate="${esc(stepKey(call))}" ${ready ? '' : 'disabled'} title="${ready ? 'Ask the calling agent to retry this exact child' : 'Available when the calling agent finishes; open its chat to request a retry otherwise'}">Retry delegated work</button>`;
+    }
     for (const hook of call.hooks)
       body += section(
         'Hook',
@@ -592,6 +608,27 @@ document.addEventListener('keydown', (event) => {
   }
 });
 document.addEventListener('click', (event) => {
+  const retry = (event.target as HTMLElement).closest<HTMLButtonElement>(
+    '[data-retry-delegate]',
+  );
+  if (retry?.dataset.retryDelegate) {
+    retry.disabled = true;
+    background(
+      window.plowshare
+        .request({
+          action: 'delegate-retry',
+          conversation,
+          step: retry.dataset.retryDelegate,
+        })
+        .then((reply) => update(replyState(reply)))
+        .catch((reason: unknown) => {
+          retry.disabled = false;
+          $('#trajectory-error').textContent = errorMessage(reason);
+          $('#trajectory-error').hidden = false;
+        }),
+    );
+    return;
+  }
   const delegate = (event.target as HTMLElement).closest<HTMLElement>(
     '[data-delegate-step]',
   );
