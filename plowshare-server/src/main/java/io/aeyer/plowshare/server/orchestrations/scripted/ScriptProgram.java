@@ -45,6 +45,19 @@ public final class ScriptProgram {
     return evaluate(source, null);
   }
 
+  /**
+   * Whether a pinned script declares native-only execution. Ordinary model definitions return
+   * false. Read only its manifest in the bounded pure sandbox; do not run a workflow step or
+   * inspect its result text. Malformed declarations fail rather than suppressing attention.
+   */
+  public static boolean nativeOnly(String source) {
+    if (!isScript(source)) return false;
+    JsonNode declaration = manifest(source).get("native-only");
+    if (declaration == null) return false;
+    if (!declaration.isBoolean()) throw new IllegalStateException("native-only must be a boolean");
+    return declaration.booleanValue();
+  }
+
   public static JsonNode step(String source, JsonNode input) {
     return evaluate(source, input);
   }

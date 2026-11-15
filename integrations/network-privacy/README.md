@@ -478,8 +478,11 @@ Python independently consumes that exact schedule from the project's
 `schedule.due` stream. Other schedules are ignored. Legacy global schedules are
 not used: SDK ports do not expose system scope.
 
-The packaged `inbox` manifest setting keeps successful background bookkeeping,
-including both `privacy_tick` receipts, in the application's project inbox.
+Application-owned background output does not require an `inbox` manifest upgrade.
+Older installations retain both successful `privacy_tick` receipts in the application's
+project inbox because its pinned script declares native-only execution. Other
+successful workflow results, failures and questions notify current Managers by default.
+The packaged `inbox` manifest setting selects successful workflows needing review.
 Successful `investigate_network` and `assess_network_device` results need review
 and notify the application's **current human RBAC Managers**. Failures, approval
 requests and human questions also notify Managers. Installing the application or
