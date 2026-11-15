@@ -758,6 +758,34 @@ public final class ConversationStore {
     return found.isEmpty() ? Optional.empty() : Optional.of(withBoundBudget(found.get(0)));
   }
 
+  /**
+   * The exact child opened by one recorded call. Two matches are corrupt/ambiguous recovery
+   * evidence and are refused rather than choosing a child or starting another delegation.
+   */
+  public Optional<ConversationRecord> delegationOpenedBy(String parent, String call) {
+    String wanted = named(parent);
+    if (call == null || call.isBlank()) {
+      throw new IllegalArgumentException("A delegation recovery needs its original call id");
+    }
+    List<ConversationRecord> found =
+        ArchiveUnavailableException.translating(
+            "read the child opened by a delegated call",
+            () ->
+                jdbc.query(
+                    "SELECT "
+                        + COLUMNS
+                        + FROM_CONVERSATIONS
+                        + " JOIN conversations child ON child.id = c.id"
+                        + " WHERE c.parent_id = ? AND child.opened_by_call = ? LIMIT 2",
+                    ROW_MAPPER,
+                    wanted,
+                    call));
+    if (found.size() > 1) {
+      throw new IllegalStateException("The delegated call has more than one retained child");
+    }
+    return found.stream().findFirst();
+  }
+
   private ConversationRecord withBoundBudget(ConversationRecord record) {
     if (record.budget() != null) bindBudget(record.id(), record.budget());
     return record;

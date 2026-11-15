@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -74,13 +75,20 @@ final class BudgetExecutionStack {
       Transcript.Spoken spoken = transcript.spokenIn();
       if (spoken == null)
         throw new IllegalStateException("Budget recovery needs a durable transcript");
+      UsageAttribution usage = transcript.usage();
+      String attributedConversation = usage.conversations().id();
+      if (attributedConversation != null && !spoken.conversationId().equals(attributedConversation))
+        throw new IllegalStateException(
+            "Budget recovery execution belongs to another conversation");
+      int originalTurn =
+          transcript.continuingTurn() == null ? spoken.turnOrdinal() : transcript.continuingTurn();
+      // A failed-call retry can have several newer log segments. Its immutable execution
+      // attribution still names the original task; checkpointing the latest failed segment
+      // would omit the paid tool results from earlier segments after approval/restart.
+      if (attributedConversation != null && usage.turnOrdinal() != null && usage.turnOrdinal() > 0)
+        originalTurn = Math.toIntExact(usage.turnOrdinal());
       return new BudgetCheckpoint.Frame(
-          spoken.conversationId(),
-          agent.name(),
-          transcript.continuingTurn() == null ? spoken.turnOrdinal() : transcript.continuingTurn(),
-          steps,
-          cap.ceiling(),
-          pending);
+          spoken.conversationId(), agent.name(), originalTurn, steps, cap.ceiling(), pending);
     }
 
     @Override

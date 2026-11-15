@@ -1347,6 +1347,36 @@ public final class EntryStore implements ConversationSearchRepository {
     return append(conversationId, turnOrdinal, entry, null);
   }
 
+  /** Original agent_run arguments for one exact parent/child link, including covered entries. */
+  public Optional<ToolCall> delegationCall(String parent, String child) {
+    String owner = ConversationStore.named(parent);
+    String wanted = ConversationStore.named(child);
+    requireInformation(owner);
+    List<ToolCall> found =
+        ArchiveUnavailableException.translating(
+            "read the original delegated call",
+            () ->
+                jdbc.query(
+                    """
+                SELECT tool ->> 'id' AS id, tool ->> 'name' AS name,
+                       tool ->> 'arguments' AS arguments
+                  FROM conversations c
+                  JOIN entries e ON e.conversation_id = c.parent_id
+                  CROSS JOIN LATERAL jsonb_array_elements(e.tool_calls) tool
+                 WHERE c.id = ? AND c.parent_id = ? AND e.kind = 'answer'
+                   AND tool ->> 'id' = c.opened_by_call AND tool ->> 'name' = 'agent_run'
+                 LIMIT 2
+                """,
+                    (row, index) ->
+                        new ToolCall(
+                            row.getString("id"), row.getString("name"), row.getString("arguments")),
+                    wanted,
+                    owner));
+    if (found.size() > 1)
+      throw new IllegalStateException("The retained delegation has ambiguous original arguments");
+    return found.stream().findFirst();
+  }
+
   /** Records the immutable owning job; null means an unbound or legacy entry, never a guess. */
   public EntryRecord append(String conversationId, int turnOrdinal, LoggedEntry entry, String job) {
     if (job != null) ArchiveValues.identity(job, "job id");

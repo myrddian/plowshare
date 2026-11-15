@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.approvals.ActiveRunApprovals;
+import io.aeyer.plowshare.server.approvals.BudgetExtension;
 import io.aeyer.plowshare.server.approvals.BudgetRequestAccess;
 import io.aeyer.plowshare.server.approvals.BudgetRequestContinuations;
 import io.aeyer.plowshare.server.approvals.BudgetRequestRepository;
@@ -18,6 +19,10 @@ import io.aeyer.plowshare.server.approvals.RetainedBudgetRequests;
 import io.aeyer.plowshare.server.approvals.TestBudgetRequests;
 import io.aeyer.plowshare.server.archive.EntryRecord;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.hooks.HookContext;
+import io.aeyer.plowshare.server.hooks.Hooks;
+import io.aeyer.plowshare.server.hooks.ToolPost;
+import io.aeyer.plowshare.server.hooks.ToolPre;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
@@ -35,6 +40,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -57,6 +63,8 @@ class BudgetRequestFlowTest {
     private int resumedChildren;
     private Log retainedChild;
     private boolean failResults;
+    private DelegationRetry failureRetry;
+    private int failureResumptions;
 
     Log(String id, Origin origin) {
       this(id, origin, false);
@@ -130,6 +138,20 @@ class BudgetRequestFlowTest {
       Log child = new Log("cnv_child", Origin.DELEGATION);
       children.add(child);
       return child;
+    }
+
+    @Override
+    public Optional<DelegationRetry> pendingDelegationRetry() {
+      return Optional.ofNullable(failureRetry);
+    }
+
+    @Override
+    public Transcript resumeDelegation(DelegationRetry retry, AgentDefinition callee) {
+      assertEquals(failureRetry, retry);
+      assertEquals("helper", callee.name());
+      failureResumptions++;
+      if (retainedChild == null) throw new IllegalStateException("No saved failed child");
+      return retainedChild;
     }
 
     @Override
@@ -265,6 +287,286 @@ class BudgetRequestFlowTest {
         TurnCap.of(4),
         List.of(),
         "owner");
+  }
+
+  /** Returns a retained pending decision without holding a thread, so no live model is needed. */
+  private static BudgetRequests pendingConsent(
+      AtomicReference<BudgetCheckpoint> saved, AtomicInteger questions) {
+    return new BudgetRequests() {
+      @Override
+      public boolean available(Transcript transcript, String executor) {
+        return transcript.conversationId() != null && "owner".equals(executor);
+      }
+
+      @Override
+      public Optional<Decision> await(
+          BudgetCheckpoint checkpoint,
+          Budget budget,
+          TurnCap cap,
+          BudgetExtension extension,
+          String reason,
+          BooleanSupplier cancelled) {
+        questions.incrementAndGet();
+        saved.set(checkpoint);
+        return Optional.of(new Decision("apr_budget", false, "Budget consent is pending", true));
+      }
+    };
+  }
+
+  @Test
+  void mandatory_reviewer_awaiting_budget_parks_parent_without_another_call_or_draft_publication()
+      throws Exception {
+    AgentRegistry agents = agents();
+    Scripted transport = new Scripted(answer("unreviewed draft"));
+    JobRuntime runtime = runtime(transport, agents, new AtomicInteger());
+    AtomicReference<BudgetCheckpoint> saved = new AtomicReference<>();
+    AtomicInteger questions = new AtomicInteger();
+    runtime.useBudgetRequests(pendingConsent(saved, questions));
+    AgentDefinition plain = agents.get("boss");
+    AgentDefinition reviewed =
+        new AgentDefinition(
+            plain.name(),
+            plain.description(),
+            plain.model(),
+            plain.intent(),
+            plain.sampling(),
+            plain.tools(),
+            plain.calls(),
+            plain.scopes(),
+            8,
+            8,
+            plain.prompt(),
+            plain.exported(),
+            plain.delegable(),
+            plain.vision(),
+            plain.bot(),
+            plain.announcesInbox(),
+            plain.fallback(),
+            plain.orchestrations(),
+            "helper");
+    Log root = new Log("cnv_root", Origin.TURN);
+    Outcome result =
+        runtime.run(
+            reviewed,
+            "The original task",
+            HOME,
+            Budget.of(1),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            root,
+            TurnCap.of(8),
+            List.of(),
+            "owner");
+
+    assertEquals(Outcome.Ending.AWAITING, result.ending());
+    assertEquals(1, questions.get(), "the parent must not ask a second question or spin");
+    assertEquals(1, transport.calls.get(), "only the original draft was generated");
+    assertTrue(root.entries.stream().noneMatch(entry -> entry.kind() == EntryKind.ANSWER));
+    assertEquals(
+        List.of("cnv_root", "cnv_child"),
+        saved.get().frames().stream().map(BudgetCheckpoint.Frame::conversation).toList());
+  }
+
+  @Test
+  void restored_child_without_a_parent_call_slot_retains_diagnostic_and_refuses_new_inference()
+      throws Exception {
+    AgentRegistry agents = agents();
+    Scripted transport = new Scripted();
+    AtomicInteger effects = new AtomicInteger();
+    JobRuntime runtime = runtime(transport, agents, effects);
+    var parent = new BudgetCheckpoint.Frame("cnv_root", "boss", 1, 1, 4, List.of());
+    var reviewer = new BudgetCheckpoint.Frame("cnv_child", "helper", 1, 0, 4, List.of());
+    runtime.useBudgetRequests(
+        new BudgetRequests() {
+          @Override
+          public Optional<BudgetCheckpoint.Frame> restoring(String conversation) {
+            return "cnv_root".equals(conversation) ? Optional.of(parent) : Optional.empty();
+          }
+
+          @Override
+          public Optional<BudgetCheckpoint.Frame> restoringChild(String conversation) {
+            return "cnv_root".equals(conversation) ? Optional.of(reviewer) : Optional.empty();
+          }
+
+          @Override
+          public Optional<String> restorationDecision(String conversation) {
+            return Optional.of("Budget extension approved");
+          }
+        });
+    Log root = new Log("cnv_root", Origin.TURN, true);
+    root.entries.add(LoggedEntry.utterance("The original task", null));
+    root.retainedChild = new Log("cnv_child", Origin.DELEGATION, true);
+    root.retainedChild.entries.add(LoggedEntry.utterance("Saved review work", null));
+
+    Outcome refused = run(runtime, agents, "boss", Budget.of(4), root);
+
+    assertEquals(Outcome.Ending.UNAVAILABLE, refused.ending());
+    assertEquals(0, refused.modelCalls());
+    assertTrue(refused.detail().contains("no parent tool-call slot"));
+    assertEquals(0, transport.calls.get());
+    assertEquals(0, effects.get());
+    assertEquals(0, root.resumedChildren);
+    assertTrue(root.children.isEmpty());
+    assertEquals(1, root.retainedChild.entries.size());
+    assertTrue(
+        root.entries.stream()
+            .anyMatch(
+                entry ->
+                    entry.kind() == EntryKind.DIAGNOSTIC
+                        && entry.content().contains("checkpoint and work are retained")));
+  }
+
+  @Test
+  void failed_child_retry_keeps_original_parent_call_in_new_budget_checkpoint_and_stays_awaiting()
+      throws Exception {
+    AgentRegistry agents = agents();
+    Scripted transport = new Scripted();
+    JobRuntime runtime = runtime(transport, agents, new AtomicInteger());
+    AtomicReference<BudgetCheckpoint> saved = new AtomicReference<>();
+    AtomicInteger questions = new AtomicInteger();
+    runtime.useBudgetRequests(pendingConsent(saved, questions));
+    Log root = new Log("cnv_root", Origin.TURN, true);
+    root.entries.add(LoggedEntry.utterance("The original task", null));
+    root.entries.add(LoggedEntry.answer("", List.of(delegation())));
+    root.retainedChild = new Log("cnv_child", Origin.DELEGATION, true);
+    root.retainedChild.entries.add(LoggedEntry.utterance("Read the evidence", null));
+    root.retainedChild.entries.add(LoggedEntry.answer("", List.of(probe())));
+    root.retainedChild.entries.add(LoggedEntry.toolResult(probe().id(), "saved evidence"));
+    root.failureRetry =
+        new Transcript.DelegationRetry(
+            delegation(), "cnv_child", "helper", HOME, 1, "Read the evidence", Optional.empty());
+    Budget budget = Budget.of(1);
+    budget.tryClaim().orElseThrow(); // The original failed call already spent this allowance.
+
+    Outcome result = run(runtime, agents, "boss", budget, root);
+
+    assertEquals(Outcome.Ending.AWAITING, result.ending());
+    assertEquals(1, questions.get());
+    assertEquals(0, transport.calls.get());
+    assertEquals(1, root.failureResumptions);
+    assertTrue(root.children.isEmpty(), "retry must not create another child");
+    assertEquals(
+        List.of("cnv_root", "cnv_child"),
+        saved.get().frames().stream().map(BudgetCheckpoint.Frame::conversation).toList());
+    assertEquals(List.of(delegation()), saved.get().frames().getFirst().pending());
+    assertTrue(
+        root.entries.stream().noneMatch(entry -> entry.kind() == EntryKind.TOOL_RESULT),
+        "a pending child must not be recorded as a completed delegation");
+  }
+
+  private static BudgetRequests restoringDelegation() {
+    var parent = new BudgetCheckpoint.Frame("cnv_root", "boss", 1, 1, 4, List.of(delegation()));
+    var child = new BudgetCheckpoint.Frame("cnv_child", "helper", 1, 1, 4, List.of());
+    return new BudgetRequests() {
+      @Override
+      public Optional<BudgetCheckpoint.Frame> restoring(String conversation) {
+        return "cnv_root".equals(conversation)
+            ? Optional.of(parent)
+            : "cnv_child".equals(conversation) ? Optional.of(child) : Optional.empty();
+      }
+
+      @Override
+      public Optional<BudgetCheckpoint.Frame> restoringChild(String conversation) {
+        return "cnv_root".equals(conversation) ? Optional.of(child) : Optional.empty();
+      }
+
+      @Override
+      public Optional<String> restorationDecision(String conversation) {
+        return Optional.of("Budget extension approved");
+      }
+    };
+  }
+
+  private static Log retainedDelegationLog() {
+    Log root = new Log("cnv_root", Origin.TURN, true);
+    root.entries.add(LoggedEntry.utterance("The original task", null));
+    root.entries.add(LoggedEntry.answer("", List.of(delegation())));
+    root.retainedChild = new Log("cnv_child", Origin.DELEGATION, true);
+    root.retainedChild.entries.add(LoggedEntry.utterance("Read the evidence", null));
+    root.retainedChild.entries.add(LoggedEntry.answer("", List.of(probe())));
+    root.retainedChild.entries.add(LoggedEntry.toolResult(probe().id(), "saved evidence"));
+    return root;
+  }
+
+  @Test
+  void budget_restarted_delegation_rechecks_current_hooks_and_does_not_publish_withheld_output()
+      throws Exception {
+    AgentRegistry agents = agents();
+    for (String gate : List.of("deny", "rewrite", "withhold")) {
+      Scripted transport = new Scripted(answer("private resumed child answer"));
+      AtomicInteger effects = new AtomicInteger();
+      JobRuntime runtime = runtime(transport, agents, effects);
+      runtime.useBudgetRequests(restoringDelegation());
+      runtime.useHooks(
+          new Hooks() {
+            @Override
+            public ToolPre toolPre(HookContext context, String tool, String arguments) {
+              if (gate.equals("deny"))
+                return new ToolPre(arguments, "current gate denied", List.of());
+              return ToolPre.allowed(gate.equals("rewrite") ? "{}" : arguments);
+            }
+
+            @Override
+            public ToolPost toolPost(
+                HookContext context, String tool, String arguments, String result) {
+              throw new IllegalStateException("current output hook unavailable");
+            }
+          });
+      Log root = retainedDelegationLog();
+      Budget budget = Budget.of(4);
+      budget.tryClaim().orElseThrow();
+      budget.tryClaim().orElseThrow(); // Original parent dispatch and completed child read.
+      Outcome refused = run(runtime, agents, "boss", budget, root);
+      assertEquals(Outcome.Ending.UNAVAILABLE, refused.ending(), gate);
+      assertEquals(
+          gate.equals("withhold") ? 1 : 0,
+          refused.modelCalls(),
+          "a disclosed-result refusal must not erase already spent child calls");
+      assertEquals(gate.equals("withhold") ? 1 : 0, transport.calls.get(), gate);
+      assertEquals(0, effects.get(), "saved child tool effects must not run again");
+      assertTrue(
+          root.entries.stream().noneMatch(entry -> entry.kind() == EntryKind.TOOL_RESULT),
+          "the restored result cannot reach a parent prompt after " + gate);
+      assertTrue(
+          root.entries.stream()
+              .noneMatch(
+                  entry ->
+                      entry.kind() == EntryKind.ANSWER
+                          && entry.content().contains("private resumed child answer")));
+      if (gate.equals("withhold"))
+        assertTrue(root.entries.stream().anyMatch(entry -> entry.kind() == EntryKind.HOOK));
+    }
+  }
+
+  @Test
+  void budget_restoration_counts_child_calls_and_runs_parent_once_after_authorized_result()
+      throws Exception {
+    AgentRegistry agents = agents();
+    Scripted transport = new Scripted(answer("Recovered child answer"), answer("Final answer"));
+    AtomicInteger effects = new AtomicInteger();
+    JobRuntime runtime = runtime(transport, agents, effects);
+    runtime.useBudgetRequests(restoringDelegation());
+    Log root = retainedDelegationLog();
+    Budget budget = Budget.of(4);
+    budget.tryClaim().orElseThrow();
+    budget.tryClaim().orElseThrow(); // Original parent dispatch and completed child read.
+
+    Outcome result = run(runtime, agents, "boss", budget, root);
+
+    assertEquals(Outcome.Ending.ANSWERED, result.ending());
+    assertEquals(
+        2, result.modelCalls(), "resumed child calls remain charged in the parent outcome");
+    assertEquals(4, budget.spent());
+    assertEquals(0, effects.get());
+    assertEquals(1, root.resumedChildren);
+    assertTrue(
+        transport.prompts.get(1).stream()
+            .anyMatch(
+                message ->
+                    message.role() == ChatMessage.Role.TOOL
+                        && message.content().contains("Recovered child answer")));
+    assertTrue(root.children.isEmpty());
   }
 
   @Test

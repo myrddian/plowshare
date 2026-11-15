@@ -642,6 +642,10 @@ parameters:
       "items": {
         "type": "string"
       }
+    },
+    "conversation": {
+      "type": "string",
+      "description": "Optional. Retry a retained failed child conversation of this caller only when the person explicitly requests it. Keep the original agent, task and images unchanged; the child's recorded tool results are reused instead of starting its task again."
     }
   },
   "required": [

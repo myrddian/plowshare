@@ -524,7 +524,9 @@ public final class LlmDispatcher implements AutoCloseable {
             filtered.messages(),
             sampling,
             filtered.tools(),
-            deferred != null ? deferred : buffered ? Deltas.DISCARDING : sink,
+            Deltas.observing(
+                deferred != null ? deferred : buffered ? Deltas.DISCARDING : sink.previews(),
+                sink.diagnostics()),
             abandoned,
             filtered.toolChoice(),
             filtered.submitTimeout(),
@@ -532,8 +534,8 @@ public final class LlmDispatcher implements AutoCloseable {
             fold ? foldTimeoutFor(routing.pool()) : promptTimeout);
     Completion approved = approved(routing, filtered, completion, observer.capture(), guard);
     if (buffered && !abandoned.getAsBoolean()) {
-      if (deferred != null) deferred.deliverTo(sink);
-      if (!approved.content().isEmpty()) sink.answered(approved.content());
+      if (deferred != null) deferred.deliverTo(sink.previews());
+      if (!approved.content().isEmpty()) sink.previews().answered(approved.content());
     }
     return approved;
   }
@@ -1096,7 +1098,9 @@ public final class LlmDispatcher implements AutoCloseable {
             filtered.messages(),
             sampling,
             filtered.tools(),
-            deferred != null ? deferred : buffered ? Deltas.DISCARDING : sink,
+            Deltas.observing(
+                deferred != null ? deferred : buffered ? Deltas.DISCARDING : sink.previews(),
+                sink.diagnostics()),
             abandoned,
             filtered.toolChoice(),
             filtered.submitTimeout(),
@@ -1104,8 +1108,8 @@ public final class LlmDispatcher implements AutoCloseable {
             promptTimeout);
     Completion approved = approved(routing, filtered, completion, observer.capture(), guard);
     if (buffered && !abandoned.getAsBoolean()) {
-      if (deferred != null) deferred.deliverTo(sink);
-      if (!approved.content().isEmpty()) sink.answered(approved.content());
+      if (deferred != null) deferred.deliverTo(sink.previews());
+      if (!approved.content().isEmpty()) sink.previews().answered(approved.content());
     }
     return approved;
   }

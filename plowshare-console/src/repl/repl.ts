@@ -67,8 +67,8 @@ import {
  * A run that reaches its cap without answering used to be the end of the
  * screen's story: the ending was rendered, and the only thing left to do was
  * say something else. `POST /v1/conversations/{id}/resume` continues one, and a
- * resumable ending now carries two controls -- **grant more turns**, and
- * **finish**. Three rules hold them:
+ * resumable ending offers more allowance when a limit was reached, or **Retry from saved work**
+ * after a failed request, alongside **finish**. Retry uses the existing allowance. These rules hold:
  *
  * - **The number that ran out, and only that one.** "Approve for another
  *   CAP_TURNS" is what was first asked for, and a run can also stop at the
@@ -292,6 +292,8 @@ export function createRepl(options: ReplOptions): Repl {
    * alone, checked before this is ever set.
    */
   let grantKind: GrantField = null;
+  /** Explicit retry uses the existing allowance; it never raises a model or turn budget. */
+  let retryFromSavedWork = false;
   let modelCallsSeen = 0;
   let endedSeen = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -471,63 +473,10 @@ export function createRepl(options: ReplOptions): Repl {
   }
 
   /**
-   * The two things a person may do about a run that stopped before it
-   * answered: give it more turns, or let it be.
-   *
-   * <h2>Which endings these appear beside is not decided here</h2>
-   *
-   * **`outcome.resumable` is read and no ending is enumerated.** Which endings
-   * a grant continues is the server's decision -- `Turn` holds the table
-   * beside the code that continues one -- and it is not the same list as the
-   * one this console would put controls next to: `CANCELLED` is continued on
-   * request and never offered, because the person asked it to stop. A copy of
-   * either list here would go on offering a grant the server had stopped
-   * taking, with nothing failing. The server also folds in what this console
-   * could not know: a run with nothing left in the conversation's budget
-   * cannot be continued by a grant of *turns*, so it is not offered one.
-   *
-   * <h2>Why it is here and not on the ending's own line</h2>
-   *
-   * The sentence describing an ending is rendered into the scrollback by
-   * `render.ts`, and **the scrollback is replaced whole from the server on
-   * every refresh** -- a control built into it would be destroyed by the next
-   * `refreshTranscript`, which is the same reason the runtime's own notes are
-   * kept beside the transcript rather than merged into it. This panel is the
-   * console's own and survives one.
-   *
-   * <h2>Which number to raise is a different question from whether to offer,
-   * and looks alike enough to be confused with it</h2>
-   *
-   * The section above is about *whether* an offer stands at all, and that is
-   * `outcome.resumable` and nothing else -- read once, above, and no ending is
-   * named to decide it. What follows is a second, narrower question this
-   * function still has to answer once the server has already said yes: a
-   * resumable, stopped run ran out of exactly one thing, either its turn cap
-   * or the conversation's model-call budget, and a grant that raises the wrong
-   * one buys nothing -- the new run stops again immediately, at the number
-   * that was never touched. `outcome.ending` is read here to tell the two
-   * apart. That is not the enumeration the section above forbids: it is not
-   * used to decide *if* a grant is offered -- `resumable` already settled
-   * that -- only to decide *which field* a grant already agreed to offer
-   * should carry. Branching on the ending for the first question would
-   * recreate a table `Turn.CONTINUABLE` owns and this console must not; branching
-   * on it for the second is answering something the server's `resumable` bit
-   * never spoke to in the first place. The two reads sit two lines apart in
-   * this function and are easy to fold into "one enum read, so one rule" --
-   * they are not the same rule.
-   *
-   * `TURN_CAP` and `CALL_BUDGET` are the two endings a stopped, resumable run
-   * currently has. An ending outside that pair -- one the server has added
-   * since this file was last read, which it is free to do -- leaves this
-   * console knowing an offer is owed but not which field would mean anything
-   * on the wire. Guessing is worse than the alternative in both directions: a
-   * body with the wrong field grants nothing, and a body with an invented
-   * field is a number this console has no method for, which is the exact
-   * complaint that put an allowance field on this screen in the first place
-   * and took it back off. So the grant control itself is withheld for such an
-   * ending -- `grantKind` stays `null` and {@link grantMore} refuses to run --
-   * while "finish" is still offered, because dismissing commits to nothing and
-   * needs no knowledge this console lacks.
+   * Present only continuations the server reports as resumable. Limit exhaustion raises the
+   * corresponding allowance; a failed model/delegation offers an explicit retry with saved work
+   * and the current allowance. Unknown endings retain only the harmless dismiss control.
+   * Controls live outside the refreshed scrollback so reconciliation does not destroy them.
    */
   function considerOffer(job: JobView): void {
     const outcome = job.outcome;
@@ -540,6 +489,17 @@ export function createRepl(options: ReplOptions): Repl {
       return;
     }
     grantKind = grantFieldFor(outcome.ending);
+    retryFromSavedWork =
+      outcome.ending === 'UNAVAILABLE' || outcome.ending === 'SUB_AGENT_FAILED';
+    if (retryFromSavedWork) {
+      grantable = null;
+      grantTotal = null;
+      grantButton.hidden = false;
+      grantButton.textContent = 'Retry from saved work';
+      offerNote.textContent = 'this run paused; completed work is saved.';
+      offer.hidden = false;
+      return;
+    }
     if (grantKind === null) {
       grantable = null;
       grantTotal = null;
@@ -596,6 +556,7 @@ export function createRepl(options: ReplOptions): Repl {
     grantable = null;
     grantTotal = null;
     grantKind = null;
+    retryFromSavedWork = false;
   }
 
   /**
@@ -612,11 +573,10 @@ export function createRepl(options: ReplOptions): Repl {
    *   case that first asked for this control, and the shape they describe
    *   still holds one layer down: a grant is one number, not a pair, and not
    *   the number that was never touched.
-   * - **Nothing at all when {@link considerOffer} could not tell which field
-   *   to send.** `grantKind === null` means an ending this console does not
-   *   know how to top up; the button for it is not drawn (see
-   *   {@link considerOffer}), and this guard is the second half of the same
-   *   refusal in case something else ever calls this function.
+   * - **No allowance change for a retry from saved work.** A retry after a failed request sends
+   *   only the current session. Unknown endings remain unsupported by this control.
+   * - **No automatic replay.** The offer is withdrawn before sending once. A lost reply does not
+   *   restore or resubmit it; the server's retained job/conversation must be inspected.
    * - **The session, said again rather than inherited.** A session is a socket
    *   somebody is holding now, not a fact the stopped run left behind, so the
    *   grant says which one this run reaches. Without it the continued run
@@ -627,7 +587,11 @@ export function createRepl(options: ReplOptions): Repl {
    *   record does.
    */
   async function grantMore(): Promise<void> {
-    if (conversationId === null || offer.hidden || grantKind === null) {
+    if (
+      conversationId === null ||
+      offer.hidden ||
+      (grantKind === null && !retryFromSavedWork)
+    ) {
       return;
     }
     const body: { session: string; maxTurns?: number; maxModelCalls?: number } =

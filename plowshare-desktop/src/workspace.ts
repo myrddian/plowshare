@@ -1332,13 +1332,17 @@ export class DesktopWorkspace {
       owner = await this.clientFor(request.project);
     } else if (
       request.action === 'workflow-start' ||
+      request.action === 'delegate-retry' ||
       request.action === 'run' ||
       request.action === 'history' ||
       request.action === 'context' ||
       request.action === 'context-snapshot'
     )
       owner = await this.conversationOwner(request.conversation);
-    else if (request.action === 'cancel')
+    else if (
+      request.action === 'cancel' ||
+      request.action === 'conversation-retry'
+    )
       owner =
         [...this.children.values(), this.control].find((client) =>
           client.state.jobs.some((row) => row.id === request.job),
@@ -1362,12 +1366,21 @@ export class DesktopWorkspace {
       this.emit();
       return { state: this.state };
     }
-    if (request.action === 'run') {
-      await this.prepareProject(
-        this.projectOfConversation(request.conversation),
-      );
+    if (
+      request.action === 'run' ||
+      request.action === 'delegate-retry' ||
+      request.action === 'conversation-retry'
+    ) {
+      const conversation =
+        request.action === 'run' || request.action === 'delegate-retry'
+          ? request.conversation
+          : owner.state.jobs.find((job) => job.id === request.job)
+              ?.conversation;
+      if (!conversation)
+        throw new Error('Open the stopped conversation before retrying.');
+      await this.prepareProject(this.projectOfConversation(conversation));
       const mapping = this.saved.find(
-        (row) => row.name === this.projectOfConversation(request.conversation),
+        (row) => row.name === this.projectOfConversation(conversation),
       );
       if (mapping && owner.state.files.status !== 'ready')
         throw new Error(
