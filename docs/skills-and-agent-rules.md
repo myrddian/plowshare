@@ -362,8 +362,12 @@ server resolves parent-to-child instructions within the selected filesystem root
 Moves check both source and destination scopes. New or changed rules are returned
 to the model before any operation runs; every affected call in the current batch
 is refused until the next model step has received those instructions. Conflicting
-aliases and unreadable rules refuse. The client continues to transport filesystem
-operations and enforce its existing path boundaries; it does not parse rules.
+aliases and refused or invalid rules deny the affected operation with a `DENY`
+tool result; the model can continue with other work. The operation does not run
+without its required instructions. Session loss and transport outages retain their
+failure behavior, and required root rules still load before inference. The client
+continues to transport filesystem operations and enforce its existing path
+boundaries; it does not parse rules.
 Searches and shell commands retain the normal root instructions and tool policies;
 they do not imply exhaustive discovery of every descendant directory's rules.
 
