@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.ws;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.api.InvalidateRequest;
 import io.aeyer.plowshare.server.archive.Archive;
+import io.aeyer.plowshare.server.archive.MemoryReadRepository;
 import io.aeyer.plowshare.server.requests.RequestedInvalidation;
 import java.util.Map;
 import java.util.Objects;
@@ -48,10 +49,16 @@ public final class MemoryInvalidateHandler implements FrameHandler {
             "the id memory.index answers with. Nothing was retired.");
     InvalidateRequest request =
         Payloads.as(payload, InvalidateRequest.class, FrameTypes.MEMORY_INVALIDATE);
+    String reason = RequestedInvalidation.reason(request.reason());
+    String by = RequestedInvalidation.by(request.by());
     return Outcome.ok(
-        archive.invalidate(
-            memory,
-            RequestedInvalidation.reason(request.reason()),
-            RequestedInvalidation.by(request.by())));
+        asking.handle() == null
+            ? archive.invalidate(memory, reason, by)
+            : archive.invalidate(
+                memory,
+                reason,
+                by,
+                new MemoryReadRepository.Reader(asking.handle(), null),
+                asking.queryValidity()));
   }
 }

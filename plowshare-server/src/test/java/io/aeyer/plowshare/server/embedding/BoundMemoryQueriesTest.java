@@ -100,7 +100,10 @@ class BoundMemoryQueriesTest {
                       });
               return bound;
             });
-    when(memories.searchByVector(eq(vector), any(), anyInt())).thenReturn(List.of(memory));
+    when(memories.searchByVector(
+            eq(vector), any(), anyInt(), any(MemoryReadRepository.Reader.class)))
+        .thenReturn(List.of(memory));
+    when(memory.id()).thenReturn("mem_one");
     when(memories.used(eq(memory), any())).thenReturn(memory);
     queries =
         new BoundMemoryQueries(
@@ -124,10 +127,11 @@ class BoundMemoryQueriesTest {
         limit,
         runBound,
         new QueryEmbeddings.Origin(
-            runBound ? "retained-turn:1" : null,
-            () -> {
-              if (!alive.get()) throw new IllegalStateException("ended");
-            }));
+                runBound ? "retained-turn:1" : null,
+                () -> {
+                  if (!alive.get()) throw new IllegalStateException("ended");
+                })
+            .withLog("log"));
   }
 
   @Test
@@ -152,7 +156,9 @@ class BoundMemoryQueriesTest {
     assertEquals(List.of(memory), found.memories());
     assertEquals(1, calls.get());
     verify(sources).open(eq(pin), anyString(), eq("retained-turn:1"), isNull());
-    verify(memories, never()).searchByVector(eq(vector), eq(Home.global()), anyInt());
+    verify(memories, never())
+        .searchByVector(
+            eq(vector), eq(Home.global()), anyInt(), any(MemoryReadRepository.Reader.class));
     verify(memories).used(eq(memory), any());
     verify(sources).close(any());
     assertThrows(IllegalStateException.class, () -> authorization.get().require());
@@ -174,7 +180,8 @@ class BoundMemoryQueriesTest {
     verify(memories, never()).used(any(), any());
     var found = queries.read(request(MemoryQueries.Kind.RECALL, false, 1));
     assertEquals(1, found.memories().size());
-    verify(memories).searchByVector(vector, Home.global(), 1);
+    verify(memories)
+        .searchByVector(vector, Home.global(), 1, new MemoryReadRepository.Reader("reader", "log"));
   }
 
   @Test
@@ -199,7 +206,8 @@ class BoundMemoryQueriesTest {
     assertThrows(
         IllegalStateException.class,
         () -> queries.read(request(MemoryQueries.Kind.RECALL, true, 5)));
-    verify(memories, never()).searchByVector(eq(vector), any(), anyInt());
+    verify(memories, never())
+        .searchByVector(eq(vector), any(), anyInt(), any(MemoryReadRepository.Reader.class));
     verify(sources).close(any());
     alive.set(true);
     when(permissions.allows(any(), any(), any())).thenReturn(false);
@@ -237,5 +245,23 @@ class BoundMemoryQueriesTest {
     assertThrows(
         IllegalStateException.class,
         () -> archive.recall(new Archive.Precomputed(vector, "query"), home, 5));
+  }
+
+  @Test
+  void aRetainedRunCannotReadWithoutAReceiverAndSummaryDisclosureRetainsItsInputs() {
+    var unbound =
+        new MemoryQueries.Request(
+            "reader",
+            home,
+            MemoryQueries.Kind.RECALL,
+            "query",
+            5,
+            true,
+            new QueryEmbeddings.Origin("call", () -> {}));
+    assertThrows(IllegalArgumentException.class, () -> queries.read(unbound));
+    assertEquals(0, calls.get());
+    queries.read(request(MemoryQueries.Kind.REMINDER, true, 5));
+    verify(memories)
+        .retainInputs(List.of("mem_one"), new MemoryReadRepository.Reader("reader", "log"));
   }
 }

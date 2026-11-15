@@ -24,6 +24,16 @@ public interface MemoryRepository extends MemoryReadRepository, MemoryWriteRepos
 
   Optional<Memory> load(String id);
 
+  Optional<Memory> load(String id, Reader reader);
+
+  /** One authorized batch; caller resolves missing ids before any telemetry or disclosure. */
+  List<Memory> load(List<String> ids, Reader reader);
+
+  List<TocEntry> index(Home home, Reader reader);
+
+  /** Short disclosure transaction, ordered identically to recall and write publication. */
+  void lockDisclosure();
+
   List<Memory> loadAll(Home home);
 
   void saveEmbedding(String id, float[] embedding);

@@ -320,7 +320,7 @@ Nobody has to ask you to write. When something qualifies, write it when you lear
 
 You do not choose what happens to it. The answer says whether it was filed as a new claim, merged into one already held, or made the replacement for one, and why. You cannot name a memory to supersede: that would retire a memory you never read.
 
-You cannot choose which archive is written: it is the one this job was started for.
+You cannot choose which archive is written: it is the one this job was started for. Reading documents does not disable this tool. The server retains this run's current source restrictions on the memory; later reads of the memory require access to those sources.
 
 parameters:
 {

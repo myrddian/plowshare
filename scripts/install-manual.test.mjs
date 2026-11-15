@@ -75,9 +75,16 @@ function installation(server, extra = {}) {
 test('actual chapters are bounded and deterministic; dry run is offline', async () => {
   const first = await loadManual();
   assert.ok(first.chapters.every(chapter => chapter.name === `Plowshare manual / ${chapter.id}.md`));
-  assert.equal(first.chapters.length, 39); assert.deepEqual(first, await loadManual());
+  assert.equal(first.chapters.length, 40); assert.deepEqual(first, await loadManual());
+  const backpressure = first.chapters.find(chapter => chapter.id === 'a23-backpressure');
+  assert.ok(backpressure, 'backpressure must be an installed chapter, not just a repository reference');
+  assert.equal(backpressure.path, 'docs/backpressure.md');
+  assert.match(backpressure.text, /^# Backpressure:/);
+  const administration = first.chapters.find(chapter => chapter.id === 'a20-account-administration');
+  assert.ok(administration);
+  assert.match(administration.text, /\(plowshare-manual:a23-backpressure\)/);
   const dry = await execute(['--dry-run'], { PLOWSHARE_URL: 'http://unreachable.invalid' });
-  assert.equal(dry.code, 0, dry.stderr); assert.match(dry.stdout, /39 chapters validated; no requests/);
+  assert.equal(dry.code, 0, dry.stderr); assert.match(dry.stdout, /40 chapters validated; no requests/);
 });
 
 test('manifest refuses escaping symlinks/duplicates, and Library links preserve fenced examples', async () => {
@@ -245,8 +252,14 @@ test('real Node SDK publishes all chapters over WS and resumes a dropped admissi
     const failed = await execute(args, env); assert.equal(failed.code, 1); assert.equal(server.rows.size, 1);
     const denied = await execute(args, env); assert.equal(denied.code, 1); assert.match(denied.stderr, /uncertain delivery/);
     const done = await execute([...args, '--resume'], env);
-    assert.equal(done.code, 0, done.stderr); assert.match(done.stdout, /Installed 39 generally available chapters/);
-    assert.equal(server.rows.size, 39);
+    assert.equal(done.code, 0, done.stderr); assert.match(done.stdout, /Installed 40 generally available chapters/);
+    assert.equal(server.rows.size, 40);
+    const backpressure = [...server.rows.entries()].find(([, row]) => row.name === 'Plowshare manual / a23-backpressure.md');
+    assert.ok(backpressure, 'the new chapter must be retained by the catalogue');
+    assert.match(backpressure[1].text, /^# Backpressure:/);
+    assert.ok(frames.some(frame => frame.type === 'information.read'
+      && frame.payload.revision === backpressure[0] && frame.payload.scope.kind === 'global_read'),
+    'publication must verify that the backpressure chapter is readable in the shared audience');
     assert.ok([...server.rows.values()].every(row => row.shared && row.tags.includes('plowshare-manual') && row.tags.includes(`manual-chapter-${row.name.split('/ ')[1].slice(0, -3)}`)));
     assert.ok(frames.some(frame => frame.type === 'information.read' && frame.payload.scope.kind === 'global_read'));
     assert.ok(paths.every(path => ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/ticket'].includes(path)));

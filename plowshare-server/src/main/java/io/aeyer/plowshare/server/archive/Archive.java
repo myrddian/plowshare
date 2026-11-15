@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -312,6 +313,26 @@ public class Archive implements UsageAware, MemoryFiling {
     return store.index(home);
   }
 
+  /** Authenticated index disclosure, with input propagation before summaries leave the archive. */
+  public List<TocEntry> index(Home home, MemoryReadRepository.Reader reader, Runnable fence) {
+    return unitOfWork.inTransaction(
+        () -> {
+          store.lockDisclosure();
+          fence.run();
+          var found = store.index(home, reader);
+          store.retainInputs(found.stream().map(TocEntry::id).toList(), reader);
+          fence.run();
+          return found;
+        });
+  }
+
+  /** Reader-specific source restrictions also apply to direct identity lookup. */
+  public Memory get(String id, MemoryReadRepository.Reader reader) {
+    return store
+        .load(id, reader)
+        .orElseThrow(() -> new ArchiveException("no memory with id " + id));
+  }
+
   /**
    * Fetch by id without touching counters — for internal and agent use.
    *
@@ -368,6 +389,30 @@ public class Archive implements UsageAware, MemoryFiling {
             found.add(get(id));
           }
           var used = countUses(found, at);
+          fence.run();
+          return used;
+        });
+  }
+
+  /**
+   * Atomic authenticated batch disclosure; no dependency or use counter survives a refused batch.
+   */
+  public List<Memory> read(List<String> ids, MemoryReadRepository.Reader reader, Runnable fence) {
+    return unitOfWork.inTransaction(
+        () -> {
+          store.lockDisclosure();
+          fence.run();
+          var selected =
+              store.load(ids, reader).stream()
+                  .collect(Collectors.toMap(Memory::id, memory -> memory));
+          var found = new ArrayList<Memory>(ids.size());
+          for (String id : ids) {
+            var memory = selected.get(id);
+            if (memory == null) throw new ArchiveException("no memory with id " + id);
+            found.add(memory);
+          }
+          store.retainInputs(ids, reader);
+          var used = countUses(found, now.get());
           fence.run();
           return used;
         });
@@ -1070,6 +1115,23 @@ public class Archive implements UsageAware, MemoryFiling {
         () -> {
           Memory dead = Lifecycle.invalidate(get(id), now.get(), by, reason);
           store.save(dead);
+          return dead;
+        });
+  }
+
+  /**
+   * A source-restricted tombstone remains available to authorized readers with its inputs intact.
+   */
+  public Memory invalidate(
+      String id, String reason, String by, MemoryReadRepository.Reader reader, Runnable fence) {
+    return unitOfWork.inTransaction(
+        () -> {
+          store.lockDisclosure();
+          fence.run();
+          var dead = Lifecycle.invalidate(get(id, reader), now.get(), by, reason);
+          store.retainInputs(List.of(id), reader);
+          store.save(dead);
+          fence.run();
           return dead;
         });
   }

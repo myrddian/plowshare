@@ -254,6 +254,60 @@ state transitions. Do not call remote services while holding a database
 transaction or publish a successful external effect before its durable state is
 committed. Use the system's existing durable delivery mechanisms.
 
+## Bound active work in every subsystem
+
+Every active request or work step must have an explicit, configurable, positive
+finite completion budget. Short interactive reads, controls and asynchronous
+acceptance replies use a **2-second default ceiling**, with normal execution
+expected substantially faster. A long-running task should return its durable
+acceptance/status rather than hold an interactive request until completion.
+
+Model/provider calls, embeddings, file transfers, workflow stages, adapter actions
+and operator tasks need explicit finite budgets appropriate to their operation.
+Use an existing owning setting where available; do not invent a second timer
+framework or silently change a public operation into an asynchronous one. A
+different budget must be configured and justified for that operation, not inferred
+from its subsystem or exempted because it runs in the background.
+
+Define the unit and start of the deadline at admission. Queueing, capacity waits,
+connect/handshake, execution, IO and result processing draw on the same remaining
+monotonic budget for that unit. Nested calls inherit the earlier deadline; allowed
+retries do not extend it. Carry remaining time across worker boundaries explicitly.
+No new work starts after expiry. Keep cleanup bounded and observable; retain
+resource accounting until physical work and cleanup actually settle. Cancellation
+and drain after expiry have their own explicit finite cleanup budget; a caller
+deadline does not promise instantaneous physical abort. Escalate failed cleanup
+through the owning recovery contract without falsely releasing occupied capacity.
+
+On expiry cancel work at its owning boundary where supported, fence late effects
+and disclosure, and report timeout/unavailable/unknown through the owning typed
+contract. A caller giving up does not prove remote work stopped. Preserve possible
+commit/effect uncertainty, stable intent and receipt reconciliation; do not replay
+mutations, rotating refreshes, model calls or external actions to obtain a reply.
+Existing explicitly safe transport flow-control retries retain their original
+identity/deadline and proof that the entire request was not started.
+
+Durable workflows may park for human input, a future schedule or an external event
+without holding active threads, connections or capacity permits. Each activation,
+provider call, lease renewal, poll, heartbeat and shutdown/drain step is bounded.
+A long-lived service or subscription is not a single never-ending request. Counts,
+byte limits and renewable leases complement deadlines; a lease alone neither
+cancels a remote call nor proves an effect is still authorized. Preserve current
+authority, generation and publication fences on resumption and late completion.
+
+Review the relevant subsystem guide for its timeout owner and recovery behavior.
+Verify queue saturation, slow/silent peers, expiry before/after possible effects,
+late results, cancellation failure and physical resource release. Use fake clocks
+and transports where possible; live provider calls and PostgreSQL are not routine
+timeout tests. Only database-specific assertions justify selected database tests.
+
+**Current enforcement:** these are required contracts, not a claim of universal
+end-to-end deadlines today. Existing request, packet, provider, lease and shutdown
+limits cover different phases and can have different values. Some caller timers
+start only at transmission or do not cancel underlying work. Trace actual owners
+before reporting enforcement; document remaining gaps without silently replacing
+the existing lifecycle. SQL's specific rule and implementation gap follow below.
+
 ## Query efficiency and reuse
 
 Fetch-discard-refetch is an anti-pattern: do not query for an entity, discard its
@@ -304,6 +358,53 @@ k entries costs O(k). Reuse must not expose stale protected state. Notifications
 are invalidation hints; durable versions and recovery establish correctness.
 The [query efficiency and cache design](query-efficiency-and-cache-design.md)
 defines the proposed implementation and its acceptance criteria.
+
+### Bound SQL work by a completion deadline
+
+Every request-serving database work unit must resolve within one configurable
+completion budget, with a **2-second default ceiling**. This is a generous failure
+boundary, not a latency target: ordinary queries, especially cache-backed paths,
+should finish substantially sooner. Fix duplicated work, query shape, projections
+and indexes rather than raising the limit to conceal slow SQL.
+
+A work unit is the database phase that produces one repository operation's result
+or atomic effect, not an entire agent job spanning provider calls. Its monotonic
+deadline starts before database admission and covers admission/connection waits,
+lock waits, every statement, result materialization and transaction completion.
+Nested database work inherits the earlier enclosing deadline. Multiple statements,
+cache misses, fallback SQL and permitted retries consume the remaining budget;
+none starts a new two-second allowance. Keep provider work outside this unit.
+
+Enforce the remaining budget at database/JDBC execution as well as caller waits.
+A future, socket or cache-wait timeout alone does not cancel SQL. At expiry stop
+new statements, cancel outstanding SQL, roll back the active transaction and
+return the owning typed timeout/unavailable failure. Do not publish late results,
+admit further effects or deliberately commit after observing expiry. Retain
+physical-work accounting until cancellation/completion actually releases resources.
+
+A timeout cannot undo earlier committed work or establish whether an interrupted
+commit succeeded. Preserve that uncertainty and original mutation identity; use
+the owning receipt/reconciliation contract. Never map a mid-operation timeout to
+`CAPACITY_EXHAUSTED` or another promise that nothing started, automatically replay
+the mutation, return an empty success, or catch the timeout and continue writing.
+
+Background SQL, maintenance, migrations and DDL also require bounded execution.
+A different budget must be explicitly configured, justified and reviewed for the
+specific work; being a background task is not an implicit unlimited exemption.
+Configuration must reject nonpositive/unbounded durations. Changes to deadline
+enforcement need evidence for lock/slow-query cancellation, active transaction
+rollback, no late result publication, resource release and mutation uncertainty.
+Use mocks for deadline propagation; select PostgreSQL tests only for behavior
+that requires actual cancellation, locks or transactional effects.
+
+**Current enforcement gap:** this is the required contract, not a claim that
+every existing SQL path already enforces it. `plowshare.projection-cache.timeout`
+defaults to two seconds and bounds read waits; an elected cache loader may outlive
+that caller budget. Some paths set their own SQL/transaction timeouts. Connection
+admission remains wait-only, and no universal two-second SQL cancellation default
+is configured. Treat these gaps as implementation work; do not report a timeout
+guarantee without tracing the actual database cancellation and transaction path.
+Preserve the throttle's no-mid-handler-replay contract when implementing deadlines.
 
 ### Hold connections briefly
 

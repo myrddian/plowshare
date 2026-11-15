@@ -2966,7 +2966,8 @@ public final class JobRuntime {
                           operations.requireReadTargets(operation, Home.global(), List.of());
                       })
                   // Acting/retained-work authority remains an additional exact-home ceiling.
-                  .withGlobalRead(operation.globalRead() && !confined);
+                  .withGlobalRead(operation.globalRead() && !confined)
+                  .withLog(transcript.conversationId());
             });
     Optional<ChatMessage> reminder =
         transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
@@ -3980,32 +3981,42 @@ public final class JobRuntime {
             }
             if (fenced == null && tool != null && bound != null)
               fenced = bound.fence(wanted.name());
+            boolean rulesDenied = false;
             if (fenced == null && tool != null) {
-              List<AgentRules.Rule> applicable =
-                  fileRules.forTool(
-                      definition, home, sessionId, owner, wanted.name(), wanted.arguments());
-              List<AgentRules.Rule> unread =
-                  applicable.stream()
-                      .filter(
-                          rule ->
-                              !fileRulesForThisStep.contains(rule)
-                                  && !definition.prompt().contains(rule.text()))
-                      .toList();
-              if (!unread.isEmpty()) {
-                deliveredFileRules.addAll(unread);
+              try {
+                List<AgentRules.Rule> applicable =
+                    fileRules.forTool(
+                        definition, home, sessionId, owner, wanted.name(), wanted.arguments());
+                List<AgentRules.Rule> unread =
+                    applicable.stream()
+                        .filter(
+                            rule ->
+                                !fileRulesForThisStep.contains(rule)
+                                    && !definition.prompt().contains(rule.text()))
+                        .toList();
+                if (!unread.isEmpty()) {
+                  deliveredFileRules.addAll(unread);
+                  fenced =
+                      "Applicable file instructions must be read before this operation. Nothing ran; "
+                          + "review these instructions and invoke the operation on the next model step.\n\n"
+                          + unread.stream()
+                              .map(
+                                  rule ->
+                                      "Instructions from "
+                                          + rule.origin()
+                                          + " (scope: "
+                                          + rule.scope()
+                                          + "):\n"
+                                          + rule.text())
+                              .collect(Collectors.joining("\n\n"));
+                }
+              } catch (AgentRules.Refused refused) {
+                // This pre-dispatch gate is outside the tool's exception handler. Refuse only
+                // the requested effect, preserving the rule requirement and the next model step.
                 fenced =
-                    "Applicable file instructions must be read before this operation. Nothing ran; "
-                        + "review these instructions and invoke the operation on the next model step.\n\n"
-                        + unread.stream()
-                            .map(
-                                rule ->
-                                    "Instructions from "
-                                        + rule.origin()
-                                        + " (scope: "
-                                        + rule.scope()
-                                        + "):\n"
-                                        + rule.text())
-                            .collect(Collectors.joining("\n\n"));
+                    "DENY: Required file instructions could not be loaded. Nothing ran.\n"
+                        + refused.getMessage();
+                rulesDenied = true;
               }
             }
             if (tool == null) {
@@ -4013,10 +4024,10 @@ public final class JobRuntime {
               told = ToolLines.REFUSED;
             } else if (fenced != null) {
               // Rule 4 (spec 2026-09-29 §3): refused before hooks, on the model's own
-              // arguments, and nothing ran, so the trail does not gain it. Told REFUSED, as
-              // a tool the run does not hold is: the harness said no, not a hook or a person.
+              // arguments, and nothing ran, so the trail does not gain it. Missing required
+              // instructions are a denial; other fences retain their existing refusal outcome.
               result = fenced;
-              told = ToolLines.REFUSED;
+              told = rulesDenied ? ToolLines.DENIED : ToolLines.REFUSED;
             } else {
               Hooks active = activeHooks(route, harnessRun, skillChecks);
               // run's gate stands around the chain and is no hook's to leave out:
@@ -5049,6 +5060,8 @@ public final class JobRuntime {
       if (tool instanceof MemoryTools.Read read && operation != null)
         tool =
             read.forRun(
+                memoryActingAxis(informationActor),
+                transcript.conversationId(),
                 ids -> {
                   if (cancelled.getAsBoolean())
                     throw new IllegalStateException("Memory read run ended");
@@ -5061,6 +5074,16 @@ public final class JobRuntime {
                                   new AccessRequest.Resource(
                                       ResourceScopeRepository.Kind.MEMORY, id))
                           .toList());
+                });
+      if (tool instanceof ArchiveReadTools.Index index && operation != null)
+        tool =
+            index.forRun(
+                memoryActingAxis(informationActor),
+                transcript.conversationId(),
+                () -> {
+                  if (operation == null || cancelled.getAsBoolean())
+                    throw new IllegalStateException("Memory index run ended");
+                  operations.requireReadTargets(operation, toolHome, List.of());
                 });
       if (tool instanceof MemoryTools.Recall recall)
         tool =
@@ -5122,7 +5145,6 @@ public final class JobRuntime {
       if (tool instanceof MemoryTools.Write write)
         tool =
             write.forRun(
-                informationInputs,
                 transcript.conversationId(),
                 // The ACTING axis. MemoryWrites.Request's `acting` is the authority subject
                 // of MemoryStore.pin's `authority_accounts` arm, of V232's
@@ -5143,10 +5165,6 @@ public final class JobRuntime {
                   if (operation == null || !operation.actions().contains(AuthorityAction.WRITE))
                     throw new IllegalStateException("Memory write action unavailable");
                   operations.requireTargets(operation, toolHome, List.of());
-                  if (informationInputs != null
-                      && informationInputs.hasInputs(transcript.conversationId()))
-                    throw new IllegalStateException(
-                        "Document inputs cannot be published as memory");
                 });
       if (tool instanceof ScopedDocumentTool reading) {
         tool =

@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.embedding;
 
+import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.information.InformationContext;
 import java.util.*;
 import java.util.function.Supplier;
@@ -33,24 +34,38 @@ public interface QueryEmbeddings {
   record Origin(
       String invocation,
       Runnable validity,
-      io.aeyer.plowshare.server.agents.Budget budget,
-      boolean globalRead) {
+      Budget budget,
+      boolean globalRead,
+      String receivingLog) {
+    public Origin(String invocation, Runnable validity, Budget budget, boolean globalRead) {
+      this(invocation, validity, budget, globalRead, null);
+    }
+
+    /** Retain source restrictions before recalled summaries enter this runtime-owned log. */
+    public Origin withLog(String log) {
+      return new Origin(invocation, validity, budget, globalRead, Objects.requireNonNull(log));
+    }
+
     public Origin(String invocation, Runnable validity) {
       this(invocation, validity, null, false);
     }
 
-    public Origin(
-        String invocation, Runnable validity, io.aeyer.plowshare.server.agents.Budget budget) {
+    public Origin(String invocation, Runnable validity, Budget budget) {
       this(invocation, validity, budget, false);
     }
 
     /** Only a runtime with a retained read envelope may include the Global tier. */
     public Origin withGlobalRead(boolean include) {
-      return new Origin(invocation, validity, budget, include);
+      return new Origin(invocation, validity, budget, include, receivingLog);
     }
 
     public Origin {
       Objects.requireNonNull(validity);
+      if (receivingLog != null
+          && (receivingLog.isBlank()
+              || receivingLog.length() > 1024
+              || receivingLog.codePoints().anyMatch(Character::isISOControl)))
+        throw new IllegalArgumentException("Valid receiving log required");
       if (invocation != null
           && (invocation.isBlank()
               || invocation.length() > 1024
@@ -63,8 +78,7 @@ public interface QueryEmbeddings {
     }
 
     /** Internal ask retrieval spends the owning pass's policy, never a new search allowance. */
-    public static Origin operation(
-        Runnable validity, io.aeyer.plowshare.server.agents.Budget budget) {
+    public static Origin operation(Runnable validity, Budget budget) {
       return new Origin(null, validity, Objects.requireNonNull(budget));
     }
   }

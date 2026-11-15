@@ -38,13 +38,36 @@ on the effective definitions and grants. Type a normal message to converse.
 An administrative command performs the named operation and need not involve a
 model. `/information` is the terminal path for retained documents and the manual.
 
-Desktop's trajectory shows each recorded model response, including responses that
-only request tools. Model rows carry the recorded model duration and provider-reported
-input and output token counts; selecting one also shows any recorded reasoning-token
-count, which is a subset of output tokens. A response requesting several tools is one
-inference. Each tool has its own execution time. Missing usage is shown as not recorded,
-and a recorded zero remains zero. These counts describe past inference calls; the
-Context panel constructs the next request and its separate token count.
+### Choose the right history view
+
+The **log** is the server's retained conversation record. **Trajectory** is the
+human inspection view of that record; the **model projection** is the message
+list constructed from eligible history for model use. They answer different
+questions. See [the architecture explanation](03-architecture.md#log-trajectory-and-model-projection)
+for how these layers fit together.
+
+| What you want to know | What to inspect | What it does not prove |
+| --- | --- | --- |
+| What was recorded: model responses, tools, reasoning, approvals, failures or folds | **Trajectory**, including the selected entry's detail | That every visible row entered model context |
+| What was said in the visible exchange | **Chat** | A complete execution record or exact provider request |
+| What the selected agent would currently carry forward | **Context → Constructed projection**, offered tools and request settings | That an earlier call used this construction, or that your unsent draft is included |
+| What an actual inference consumed and how it ended | Recorded model row and **Usage** call/attempt detail | Full request bytes, or complete usage when the provider did not report it |
+
+Desktop's trajectory shows recorded model responses, including responses that
+only request tools. Model rows carry the recorded model duration and
+provider-reported input and output token counts; selecting one also shows any
+recorded reasoning-token count, which is a subset of output tokens. A response
+requesting several tools is one inference. Each tool has its own execution time.
+Missing usage is shown as not recorded, and a recorded zero remains zero. These
+are past-call observations, distinct from the Context panel's prospective count.
+
+The Context panel constructs a preview for the selected conversation and agent
+**before your next prompt**; your draft is excluded. Refresh after work or a
+definition change. Its capture time is the time that preview was read, not a
+provider dispatch receipt. An explicit token measurement asks a tokenizer to
+count that construction; it does not generate an answer. Image references may
+be shown with their bytes omitted. A last snapshot retained after a failed read
+or disconnect remains an older preview, not evidence of the current request.
 
 During an ordinary live run, desktop chat streams the model's published reasoning
 as subtle italic text above its answer, including while the answer is streaming.

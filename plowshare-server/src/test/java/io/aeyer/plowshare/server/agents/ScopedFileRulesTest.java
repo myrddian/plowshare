@@ -19,6 +19,28 @@ class ScopedFileRulesTest {
   @TempDir Path temporary;
 
   @Test
+  void invalid_disk_instructions_refuse_instead_of_returning_the_parent_rules() throws Exception {
+    Path root = Files.createDirectories(temporary.resolve("workspace")).toRealPath();
+    Path child = Files.createDirectories(root.resolve("src"));
+    Files.writeString(root.resolve("AGENTS.md"), "Root instructions");
+    Path invalid = child.resolve("AGENTS.md");
+    Files.write(invalid, new byte[] {(byte) 0xc3, 0x28});
+    var rules =
+        new AgentRules(
+            DataLayout.NONE,
+            mock(SessionChannel.class),
+            session -> false,
+            (project, session) -> false);
+
+    var refused =
+        assertThrows(
+            AgentRules.Refused.class, () -> rules.forFile(root, child.resolve("source.txt"), null));
+
+    assertTrue(refused.getMessage().contains(invalid.toString()), refused.getMessage());
+    assertTrue(refused.getMessage().contains("not UTF-8"), refused.getMessage());
+  }
+
+  @Test
   void selected_root_rules_apply_parent_first_and_moves_check_both_scopes() throws Exception {
     Path root = Files.createDirectories(temporary.resolve("workspace")).toRealPath();
     Path first = Files.createDirectories(root.resolve("first"));
@@ -65,7 +87,7 @@ class ScopedFileRulesTest {
             .toList());
     Files.writeString(first.resolve("AGENTS.md"), "Conflicting alias");
     assertThrows(
-        IllegalArgumentException.class,
+        AgentRules.Refused.class,
         () -> rules.forTool(agent, Home.global(), null, "alice", "file_read", json));
     assertThrows(
         IllegalArgumentException.class,

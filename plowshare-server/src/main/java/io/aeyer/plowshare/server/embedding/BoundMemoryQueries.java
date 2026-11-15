@@ -106,6 +106,8 @@ public final class BoundMemoryQueries implements MemoryQueries {
 
   public Result read(Request request) {
     request.origin().validity().run();
+    if (request.runBound() && request.reader().log() == null)
+      throw new IllegalArgumentException("Run-bound memory reads require their receiving log");
     requireScope(request);
     var selection = memories.pin(request);
     memories.require(request, selection);
@@ -164,14 +166,15 @@ public final class BoundMemoryQueries implements MemoryQueries {
           for (var tier : selection.tiers()) {
             hits.addAll(
                 query == null
-                    ? memories.searchByVector(vector, tier, request.limit())
-                    : memories.searchByVector(query, tier, request.limit()));
+                    ? memories.searchByVector(vector, tier, request.limit(), request.reader())
+                    : memories.searchByVector(query, tier, request.limit(), request.reader()));
             missing +=
                 query == null
-                    ? memories.countUnsearchable(tier)
-                    : memories.countUnsearchable(query.profile(), tier);
+                    ? memories.countUnsearchable(tier, request.reader())
+                    : memories.countUnsearchable(query.profile(), tier, request.reader());
           }
           var result = hits.subList(0, Math.min(request.limit(), hits.size()));
+          memories.retainInputs(result.stream().map(Memory::id).toList(), request.reader());
           var response =
               request.kind() == Kind.RECALL
                   ? new Result(
@@ -206,6 +209,7 @@ public final class BoundMemoryQueries implements MemoryQueries {
                   selection.pin().account().toString(),
                   selection.pin().scope().toString(),
                   Boolean.toString(request.runBound()),
+                  Objects.toString(request.reader().log(), ""),
                   selection.tiers().toString(),
                   request.text(),
                   Integer.toString(request.limit())));

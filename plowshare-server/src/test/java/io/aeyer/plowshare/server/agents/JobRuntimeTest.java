@@ -809,10 +809,10 @@ class JobRuntimeTest {
     JobRuntime runtime = runtimeOver(transport);
     runtime.useAgentRules(
         (definition, home, session, account) -> {
-          throw new IllegalArgumentException("conflicting rules");
+          throw new AgentRules.Refused("conflicting rules");
         });
     assertThrows(
-        IllegalArgumentException.class,
+        AgentRules.Refused.class,
         () -> runtime.run(agent("echo"), "hello", Home.global(), Budget.of(2), "rooted"));
     assertTrue(transport.calls().isEmpty());
   }
