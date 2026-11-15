@@ -35,6 +35,7 @@ from plowshare_privacy.contracts import (
     parse_json,
 )
 from plowshare_privacy.journal import FileReceipts
+from plowshare_privacy.ports import AvailableTopics
 from plowshare_privacy.worker import ReconciliationRequired, Worker
 
 
@@ -165,7 +166,7 @@ class WorkflowTest(unittest.IsolatedAsyncioTestCase):
         stop = asyncio.Event()
         reached = asyncio.Event()
 
-        async def denied() -> frozenset[str]:
+        async def denied() -> AvailableTopics:
             reached.set()
             raise Refusal("REFUSED", "Project access was revoked")
 
@@ -184,6 +185,25 @@ class WorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.port.events["schedule.due"] = [event()]
         await self.worker.poll()
         self.port.events["schedule.due"] = [event()]
+        await self.worker.poll()
+        self.assertEqual(self.collector.count, 1)
+        self.assertEqual(self.port.uploads, 1)
+        self.assertEqual(len(self.port.published), 1)
+
+    async def test_opaque_schedule_topic_selects_exact_schedule_and_deduplicates(
+        self,
+    ) -> None:
+        topic = "opaque-schedule-stream"
+        self.port.registered_topics.remove("schedule.due")
+        self.port.registered_topics.add(topic)
+        self.port.events[topic] = [event(schedule="other"), event()]
+        await self.worker.poll()
+        receipt = self.receipts.all()[0]
+        self.assertEqual(receipt.source_topic, topic)
+        self.assertEqual(receipt.phase, "done")
+        self.assertEqual(self.collector.count, 1)
+        self.assertEqual(self.port.published[0].parent_topic, topic)
+        self.port.events[topic] = [event()]
         await self.worker.poll()
         self.assertEqual(self.collector.count, 1)
         self.assertEqual(self.port.uploads, 1)

@@ -10,6 +10,7 @@ import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.images.ImageVanishedException;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -526,6 +527,9 @@ public final class AgentRunTool implements AgentTool {
 
   private String answer(String argumentsJson, Home home, String openedBy) {
     JsonNode args = ToolArguments.parse(argumentsJson, NAME, EXAMPLE);
+    if (args.has("recovery") && !args.get("recovery").isBoolean())
+      throw new BadArguments("agent_run recovery must be a boolean");
+    boolean recovery = args.path("recovery").asBoolean(false);
     String wanted =
         ToolArguments.requireText(args, "agent", NAME, "the name of an agent you may call");
     String task =
@@ -559,7 +563,38 @@ public final class AgentRunTool implements AgentTool {
     if (args.hasNonNull("conversation") && conversation == null) {
       throw new BadArguments("agent_run conversation must not be blank; no new task was started");
     }
-    return answer(wanted, task, named, home, openedBy, conversation);
+    if (!recovery) return answer(wanted, task, named, home, openedBy, conversation, false);
+    int before = budget.spent();
+    transcript.record(
+        LoggedEntry.diagnostic(
+            "Output recovery requested: worker="
+                + MemoryTools.oneLine(wanted)
+                + " sourceCall="
+                + openedBy
+                + " remainingCalls="
+                + budget.remaining()));
+    try {
+      String result = answer(wanted, task, named, home, openedBy, conversation, true);
+      transcript.record(
+          LoggedEntry.diagnostic(
+              "Output recovery returned: sourceCall="
+                  + openedBy
+                  + " callsConsumed="
+                  + (budget.spent() - before)
+                  + " ending="
+                  + (returned == null ? "REFUSED_BEFORE_DISPATCH" : returned.name())));
+      return result;
+    } catch (RuntimeException failed) {
+      transcript.record(
+          LoggedEntry.diagnostic(
+              "Output recovery stopped: sourceCall="
+                  + openedBy
+                  + " callsConsumed="
+                  + (budget.spent() - before)
+                  + " failure="
+                  + failed.getClass().getSimpleName()));
+      throw failed;
+    }
   }
 
   /**
@@ -584,7 +619,7 @@ public final class AgentRunTool implements AgentTool {
     Objects.requireNonNull(task, "task");
     Objects.requireNonNull(home, "home");
     returned = null;
-    return answer(wanted, task, List.of(), home, null, null);
+    return answer(wanted, task, List.of(), home, null, null, false);
   }
 
   private String answer(
@@ -593,7 +628,8 @@ public final class AgentRunTool implements AgentTool {
       List<String> named,
       Home home,
       String openedBy,
-      String conversation) {
+      String conversation,
+      boolean recovery) {
 
     if (!callable.contains(wanted)) {
       return refuse(wanted);
@@ -637,6 +673,30 @@ public final class AgentRunTool implements AgentTool {
           + " yourself, or use one of "
           + callable;
     }
+
+    // A retained failure retry is a different lifecycle from the policy's single repair attempt.
+    // Recovery checkpoints require review after failure, not another attempt on child history.
+    if (recovery && (conversation != null || retrying != null))
+      return "E_NO_ACCESS: Output recovery cannot retry a retained model attempt; inspect its receipt";
+
+    // This flag only narrows ordinary delegation. Replacement definitions cannot turn a repair
+    // into another research run or acquire tools. Authority and allowance still follow the caller.
+    if (recovery
+        && (!named.isEmpty()
+            || !callee.tools().isEmpty()
+            || !callee.calls().isEmpty()
+            || !callee.scopes().isEmpty()
+            || !callee.orchestrations().isEmpty()
+            || !callee.skills().isEmpty()
+            || callee.board()
+            || callee.dynamic()
+            || callee.announcesInbox()
+            || callee.vision()
+            || !callee.fallback().equals(AgentDefinition.Fallback.NONE)
+            || callee.reviewWith() != null
+            || callee.maxTurns() != 1
+            || ScriptProgram.isScript(callee.prompt())))
+      return "E_NO_ACCESS: Output recovery requires a one-turn model-only worker with no capabilities";
 
     // Resolution may use a different tier than the caller's admission. An alias never makes
     // that difference permission to widen the caller's filesystem authority.
@@ -862,15 +922,19 @@ public final class AgentRunTool implements AgentTool {
     // not against the conductor's retelling. First, so it reads as the frame the task is
     // given in, and it is read from the store: nothing in the task can change it.
     String framed =
-        runtime
-            .taskFacts(transcript.conversationId(), callee)
-            .map(facts -> facts + "\n\n" + task)
-            .orElse(task);
+        recovery
+            ? task
+            : runtime
+                .taskFacts(transcript.conversationId(), callee)
+                .map(facts -> facts + "\n\n" + task)
+                .orElse(task);
     String handed =
-        runtime
-            .handoffNote(transcript.conversationId())
-            .map(note -> framed + "\n\n" + note)
-            .orElse(framed);
+        recovery
+            ? framed
+            : runtime
+                .handoffNote(transcript.conversationId())
+                .map(note -> framed + "\n\n" + note)
+                .orElse(framed);
     if (retrying != null) {
       handed =
           "The person explicitly requested a retry after the model failure. Continue the original"
@@ -1205,6 +1269,13 @@ public final class AgentRunTool implements AgentTool {
         ToolArguments.string(
             "What that agent should do, in plain language, complete enough to act on"
                 + " without seeing this conversation."));
+    properties.put(
+        "recovery",
+        Map.of(
+            "type",
+            "boolean",
+            "description",
+            "Optional. Restrict this delegation to a one-turn model-only output recovery worker."));
     // OPTIONAL, and last, so that the two required arguments read first and a
     // delegation with nothing to look at is the shape it always was. The
     // description is the same for a run holding no picture at all -- see

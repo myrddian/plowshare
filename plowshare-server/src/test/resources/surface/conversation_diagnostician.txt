@@ -621,6 +621,10 @@ parameters:
       "type": "string",
       "description": "What that agent should do, in plain language, complete enough to act on without seeing this conversation."
     },
+    "recovery": {
+      "type": "boolean",
+      "description": "Optional. Restrict this delegation to a one-turn model-only output recovery worker."
+    },
     "images": {
       "type": "array",
       "description": "Optional. Ids of pictures to show that agent: ones you are being shown, or ones you were told the id of. The picture has to belong to the project this run is in, and the agent has to be one that can see.",

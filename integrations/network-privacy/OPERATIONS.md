@@ -139,8 +139,9 @@ MACs can change which device holds it.
 Enable **Quick presence checks every 2–5 minutes** in **Settings → Choose what
 to monitor** alongside ordinary collection. File-managed collectors can set
 `collection.quickScan` to `true`. The option defaults to off. The collector chooses a new random
-delay after each quick check and waits for the normal collection lock. A restart
-starts a fresh delay. The quick check covers only saved private IPv4 addresses
+delay after each quick check and waits for the normal collection lock. Startup
+and recovery prime a fresh baseline on the next collector loop, without another
+2–5 minute delay. DNS deltas require two fresh samples after recovery. The quick check covers only saved private IPv4 addresses
 and never publishes evidence, fires the scan schedule, or starts an investigation.
 
 Quick checks use connected UniFi clients first, then a Pi-hole v6 network-table
@@ -539,6 +540,21 @@ operation remains available on other platforms. A service manager's status is no
 proof that Plowshare checks or investigations are succeeding; inspect the dashboard.
 
 ## Recover without repeating uncertain work
+
+If the schedule is enabled but collection waits for its first event, inspect
+project-scoped `relay.topics`. The collector discovers schedule streams by kind
+`SCHEDULE_DUE`, not by a fixed topic name. Its Application EGRESS binding must
+allow the returned topic and the existing collector group. Back up the deployment
+before replacing a legacy `schedule.due` grant; preserve request/completion grants
+and do not grant schedule INGRESS. A new schedule group begins at `LATEST`, so
+the fix waits for the next automatic occurrence rather than running historical
+scans. Existing cursors and retention gaps are preserved.
+
+Device-profile research drafts use word budgets: name and model hypothesis allow
+128 words each, purpose 512, expected services and research notes 1,024 each, and
+questions 512. Words are separated by whitespace. The complete response also has
+an independent 64 KiB UTF-8 budget. Invalid drafts stay retained for inspection;
+changing these limits does not resume or rewrite an already-failed orchestration.
 
 Keep the dashboard open when collection stops. Its detail includes available
 refusal codes/reasons; local evidence stays readable. Fix credentials, connectivity

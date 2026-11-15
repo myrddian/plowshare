@@ -43,6 +43,9 @@ import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.TurnRecord;
 import io.aeyer.plowshare.server.archive.TurnStore;
+import io.aeyer.plowshare.server.llm.ModelOutputRecovery;
+import io.aeyer.plowshare.server.llm.ModelOutputRecoveryCodec;
+import io.aeyer.plowshare.server.llm.StandardModelOutputRecovery;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
@@ -52,6 +55,7 @@ import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
@@ -177,13 +181,27 @@ class SystemCompactionTest {
                     90000,
                     "worker",
                     null)));
-    when(fixture.entries.thatProjectFor("conversation"))
-        .thenReturn(
-            List.of(
-                entry(1, 1, EntryKind.UTTERANCE, "first"),
-                entry(2, 1, EntryKind.ANSWER, "answer"),
-                entry(3, 2, EntryKind.UTTERANCE, "second"),
-                entry(4, 2, EntryKind.ANSWER, "answer")));
+    var contract =
+        new ModelOutputRecovery.Contract(
+            "fixture", Map.of("notes", new ModelOutputRecovery.Limit(10, true)), "recovery_worker");
+    var plan =
+        new StandardModelOutputRecovery()
+            .examine(
+                new ModelOutputRecovery.Request(
+                    "{\"notes\":\"Unconfirmed device\"}", contract, Optional.empty()));
+    String diagnostic =
+        ModelOutputRecoveryCodec.diagnostic(plan.diagnostic(), "conversation", 2, "sha256:fixture");
+    var ledger =
+        List.of(
+            entry(1, 1, EntryKind.UTTERANCE, "first"),
+            entry(2, 1, EntryKind.ANSWER, "answer"),
+            entry(3, 1, EntryKind.DIAGNOSTIC, diagnostic),
+            entry(4, 2, EntryKind.UTTERANCE, "second"),
+            entry(5, 2, EntryKind.ANSWER, "answer"));
+    when(fixture.entries.forConversation("conversation")).thenReturn(ledger);
+    // Deliberately hand projection the wider log as well: its roleless-kind check must
+    // defend both the next context and the actual compaction request, independent of SQL.
+    when(fixture.entries.thatProjectFor("conversation")).thenReturn(ledger);
     try {
       Compaction.TurnTranscript transcript =
           assertInstanceOf(
@@ -213,6 +231,17 @@ class SystemCompactionTest {
       assertNull(fixture.claims.getFirst().limit());
       verify(fixture.evidence)
           .retain(argThat(e -> e.purpose() == SystemOperations.Purpose.CONVERSATION_COMPACTION));
+      assertTrue(
+          fixture.request.messages().stream()
+              .noneMatch(message -> message.content().contains("model_output_recovery")),
+          "the actual summarisation request must exclude recovery diagnostics");
+      assertTrue(
+          fixture.compaction.projectionFor("conversation", fixture.folder).stream()
+              .noneMatch(message -> message.content().contains("model_output_recovery")));
+      assertTrue(
+          fixture.entries.forConversation("conversation").stream()
+              .anyMatch(entry -> entry.content().equals(diagnostic)),
+          "the ledger keeps the recovery decision even though neither model sees it");
     } finally {
       fixture.compaction.close();
     }

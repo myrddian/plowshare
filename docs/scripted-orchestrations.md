@@ -322,9 +322,38 @@ exactly as you would strict JSON. Use strict parsing for service/request payload
 this utility is for model-emitted text, not tool failure messages. See the
 [research recovery contract](scripted-research.md#bounded-output-repair-and-context-cost).
 
-The shipped worker has no tools/callees/scopes and at most one turn/model call.
+The shipped research worker has no tools/callees/scopes and at most one turn/model call.
 Author, editor, Blue, Red and Yellow are separate calls to that bounded worker
 with different task instructions. They are not guaranteed independent models.
+
+### Shared recovery for fielded model results
+
+Use `modelOutput.recover(raw, contract, checkpoint)` for model-produced objects
+with string fields. The contract supplies `name`, an explicitly declared model-only
+`worker`, and `fields: {name: {words: 128, required: true}, ...}`. Word budgets count
+whitespace-delimited words. Domain evidence and factual validators still apply.
+
+The returned `action` is `ACCEPT`, `SUMMARISE`, `CORRECT`, `NEEDS_REVIEW` or `STOP`.
+On acceptance use `value`. On summarisation/correction retain `checkpoint` in
+script state and return its `command` unchanged; it is a normal journaled
+`agent_run` with `recovery: true`. Feed the returned model text and that checkpoint
+back into the helper. There is at most one model attempt. Summaries return only
+the overlong fields; code preserves and merges all other fields. A review result
+must ask the operator or retain a disclosed gap, not complete an invalid stage.
+Host failures are not model-repair candidates.
+
+The worker uses its configured model binding, shared root allowance, cancellation
+and inference deadlines. It must have exactly one model turn and no tools,
+delegates, scopes, skills, dynamic capabilities or native script. Hooks may refuse
+the command but cannot change its input or remove its recovery restriction. No
+privileged document-processing allowance is borrowed.
+
+Both this helper and ordinary scripted `llmJson.parse` append host diagnostics
+to the owning trajectory. They identify the policy, execution command, hashes,
+validation result and recovery choice; recovery delegation records its call
+spending and outcome. Diagnostics have no model role and remain excluded from
+projection and compaction. The original response stays retained in the command
+journal. See [the complete recovery policy](decisions/0074-model-output-recovery-policy.md).
 
 ## Tool result contracts
 

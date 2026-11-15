@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.orchestrations.scripted;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -14,6 +15,15 @@ final class ScriptCommands {
           .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
   private ScriptCommands() {}
+
+  static boolean outputRecovery(String name, String arguments) {
+    if (!name.equals("agent_run")) return false;
+    try {
+      return JSON.readTree(arguments).path("recovery").asBoolean(false);
+    } catch (IOException invalid) {
+      throw new IllegalArgumentException("Invalid recovery command arguments", invalid);
+    }
+  }
 
   static Optional<UUID> reportRequest(ScriptStore.Command command) {
     if (!(command instanceof ScriptStore.Tool tool) || !tool.name().equals("information_write"))

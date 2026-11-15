@@ -36,7 +36,7 @@ from plowshare_privacy.identity_source import (
 )
 from plowshare_privacy.journal import Publication, Receipt
 from plowshare_privacy.pihole import DeviceDataSource
-from plowshare_privacy.ports import evidence_name
+from plowshare_privacy.ports import AvailableTopics, evidence_name
 from plowshare_privacy.source_set import (
     Bound,
     DnsActivityReader,
@@ -279,8 +279,15 @@ class FixturePort:
         self.uploads = 0
         self.registered_topics = set(self.events)
 
-    async def available_topics(self) -> frozenset[str]:
-        return frozenset(self.registered_topics)
+    async def available_topics(self) -> AvailableTopics:
+        return AvailableTopics(
+            frozenset(self.registered_topics),
+            frozenset(
+                topic
+                for topic in self.registered_topics
+                if topic == "schedule.due" or topic.startswith("opaque-schedule-")
+            ),
+        )
 
     async def consume(self, topic: str, consumer: str) -> RelayBatchDto:
         events = tuple(self.events[topic])

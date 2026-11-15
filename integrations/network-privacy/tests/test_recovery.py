@@ -14,6 +14,7 @@ from plowshare import Delivery, Refusal, TransportError
 from plowshare.contracts import RelayPublishRequest, RelayPublishResultDto
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration, event
 
+from plowshare_privacy.ports import AvailableTopics
 from plowshare_privacy.recovery import wait_for_recovery
 from plowshare_privacy.worker import ReconciliationRequired, Worker
 
@@ -195,13 +196,13 @@ class WorkerRecoveryTest(unittest.IsolatedAsyncioTestCase):
         stop = asyncio.Event()
         checks = 0
 
-        async def topics() -> frozenset[str]:
+        async def topics() -> AvailableTopics:
             nonlocal checks
             checks += 1
             if checks == 1:
                 raise TransportError(Delivery.NOT_SUBMITTED, "closed")
             stop.set()
-            return frozenset()
+            return AvailableTopics(frozenset(), frozenset())
 
         recover = AsyncMock()
         with (

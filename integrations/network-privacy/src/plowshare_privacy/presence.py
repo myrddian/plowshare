@@ -695,7 +695,12 @@ class PresenceWatch:
             self.scope = scope
             self._previous = None
             self.since = self.clock()
-            self.due = self.monotonic() + self.delay()
+            # Startup and recovery must not show old presence for another full
+            # jitter window. Prime the read-only baseline on the next loop;
+            # subsequent samples retain the ordinary randomized interval. DNS
+            # deltas still require two fresh samples, never a fabricated window
+            # spanning the stopped period.
+            self.due = self.monotonic()
             self.issues = ()
             return
         if self.monotonic() < self.due:

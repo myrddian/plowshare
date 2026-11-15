@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from plowshare import Client
@@ -30,8 +31,21 @@ from .contracts import Configuration, Evidence
 from .limits import MAX_EVIDENCE_BYTES
 
 
+@dataclass(frozen=True)
+class AvailableTopics:
+    """One authorized topic snapshot; schedule addresses remain opaque.
+
+    Discover schedule streams by their public payload kind, never by reproducing
+    the server's private naming scheme. Workers still select the exact configured
+    schedule inside each occurrence before admitting collection.
+    """
+
+    names: frozenset[str]
+    schedules: frozenset[str]
+
+
 class PrivacyPort(Protocol):
-    async def available_topics(self) -> frozenset[str]: ...
+    async def available_topics(self) -> AvailableTopics: ...
     async def consume(self, topic: str, consumer: str) -> RelayBatchDto: ...
     async def acknowledge(self, batch: RelayBatchDto) -> None: ...
     async def upload(
@@ -58,7 +72,7 @@ class SdkPrivacyPort:
             kind="project", project=config.project, include_global=False
         )
 
-    async def available_topics(self) -> frozenset[str]:
+    async def available_topics(self) -> AvailableTopics:
         """Inspect registration before intake; a paused source may have no topic yet.
 
         Topic absence does not mean delivery completion or permission to acknowledge
@@ -80,7 +94,17 @@ class SdkPrivacyPort:
             raise ValueError(
                 "Relay topic listing is full; cannot establish topic availability"
             )
-        return frozenset(topic.name for topic in result.topics)
+        names = frozenset(topic.name for topic in result.topics)
+        if len(names) != len(result.topics):
+            raise ValueError("Duplicate Relay topics")
+        scheduled = frozenset(
+            topic.name for topic in result.topics if topic.kind == "SCHEDULE_DUE"
+        )
+        if scheduled.intersection(
+            (self.config.request_topic, self.config.result_topic)
+        ):
+            raise ValueError("Scan request/result topics cannot carry schedules")
+        return AvailableTopics(names, scheduled)
 
     async def consume(self, topic: str, consumer: str) -> RelayBatchDto:
         batch = (
@@ -90,7 +114,13 @@ class SdkPrivacyPort:
                     topic=topic,
                     group=self.config.group,
                     consumer_id=consumer,
-                    start="OLDEST_RETAINED",
+                    # A newly discovered schedule stream begins with future
+                    # occurrences, not a burst of historical household scans.
+                    # Existing groups keep their cursor, including retention gaps.
+                    # Manual requests retain their original backlog and identities.
+                    start="OLDEST_RETAINED"
+                    if topic == self.config.request_topic
+                    else "LATEST",
                     limit=25,
                     wait_ms=0,
                 )

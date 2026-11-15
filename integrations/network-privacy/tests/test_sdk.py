@@ -236,7 +236,10 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             config = configuration(Path(folder))
             fixture = FixturePort(config)
-            fixture.events["schedule.due"] = [event()]
+            scheduled_topic = "opaque-schedule-stream"
+            fixture.registered_topics.remove("schedule.due")
+            fixture.registered_topics.add(scheduled_topic)
+            fixture.events[scheduled_topic] = [event()]
             requests: list[str] = []
             batches: dict[str, RelayBatchDto] = {}
 
@@ -248,7 +251,9 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                         "topics": [
                             {
                                 "name": topic,
-                                "kind": "TEXT",
+                                "kind": "SCHEDULE_DUE"
+                                if topic == scheduled_topic
+                                else "TEXT",
                                 "generation": str(uuid4()),
                                 "through": "0",
                                 "expiredThrough": "0",
@@ -261,6 +266,12 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                 if operation == "relay.consume":
                     self.assertEqual(row["project"], config.project)
                     self.assertEqual(row["group"], config.group)
+                    self.assertEqual(
+                        row["start"],
+                        "LATEST"
+                        if row["topic"] == scheduled_topic
+                        else "OLDEST_RETAINED",
+                    )
                     result = await fixture.consume(
                         identifier(row["topic"]), uuid(row["consumerId"])
                     )
