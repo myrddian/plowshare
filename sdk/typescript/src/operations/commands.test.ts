@@ -505,6 +505,18 @@ describe('server account administration', () => {
       },
     });
     expect(
+      parseCommand(
+        'admin account update {"handle":"sam","projectCreator":true}',
+        'repo',
+      ),
+    ).toMatchObject({
+      kind: 'request',
+      request: {
+        type: 'admin.account.update',
+        payload: { handle: 'sam', projectCreator: true },
+      },
+    });
+    expect(
       parseCommand('admin audit {"before":0,"limit":100}', 'repo'),
     ).toMatchObject({
       kind: 'request',
@@ -512,6 +524,7 @@ describe('server account administration', () => {
     });
     for (const command of [
       'admin account update {"handle":"worker"}',
+      'admin account update {"handle":"worker","projectCreator":"yes"}',
       'admin account create {"handle":"worker","serverAdmin":"yes"}',
       'admin audit {"limit":101}',
     ])

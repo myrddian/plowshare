@@ -31,6 +31,7 @@ import assert from 'node:assert/strict';
 import { DesktopWorkspace } from './workspace.ts';
 import type { Connector, Connected } from './client.ts';
 import type { JobStore, SavedJob } from './job-store.ts';
+import { PROJECT_CREATOR_HINT } from 'plowshare-client-node/rooter';
 import type { ProjectStore } from './project-config.ts';
 import type { ConnectionStore, SavedConnection } from './connection-config.ts';
 
@@ -54,6 +55,7 @@ function fixture(
   }[] = [];
   const fileClaims: string[] = [];
   let fileRefusal: string | undefined;
+  let fileRefusalCode = 1003;
   const storedProjects: SavedProject[] = [];
   let peerWait = Promise.resolve();
   const create = async (
@@ -83,7 +85,7 @@ function fixture(
                 if (fileRefusal) {
                   const closing = {
                     data: undefined,
-                    code: 1003,
+                    code: fileRefusalCode,
                     reason: fileRefusal,
                   };
                   listeners.get('close')?.(closing);
@@ -145,6 +147,19 @@ function fixture(
             };
             local.push(project);
             return { code: 'OK', payload: project };
+          }
+          if (type === 'conversation.list' || type === 'agent.list') {
+            // The server refuses project-scoped reads before membership exists; an
+            // accepted file claim is what registers a newly chosen folder's project.
+            const project = decodePayload(type, payload).project;
+            if (
+              project &&
+              ![...serverProjects, ...local].some((row) => row.name === project)
+            )
+              return {
+                code: 'BAD_REQUEST',
+                said: 'This account does not have the required project access',
+              };
           }
           if (type === 'conversation.list') {
             const project = decodePayload('conversation.list', payload).project;
@@ -324,8 +339,9 @@ function fixture(
     },
     storedProjects,
     fileClaims,
-    refuseFiles: (reason?: string) => {
+    refuseFiles: (reason?: string, code = 1003) => {
       fileRefusal = reason;
+      fileRefusalCode = code;
     },
     delayPeer: () => {
       let release!: () => void;
@@ -875,10 +891,13 @@ await test('a server refusal of a newly chosen folder stays unavailable and writ
   );
   try {
     await connect(workspace);
-    refuseFiles('This account may not root this project.');
+    refuseFiles('This account may not root this project.', 1008);
     await assert.rejects(
       workspace.rootDirectory(root, 'Unavailable'),
-      /may not root/,
+      (error: unknown) =>
+        error instanceof Error &&
+        /may not root/.test(error.message) &&
+        error.message.includes(PROJECT_CREATOR_HINT),
     );
     assert.deepEqual(fileClaims, ['Unavailable']);
     assert.ok(

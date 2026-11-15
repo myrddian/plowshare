@@ -541,7 +541,8 @@ public final class PinnedOperationAuthority implements OperationAuthority {
       case READ -> true;
       case WRITE, CONVERSATION_CREATE, RUN_MODEL -> role != ProjectRole.VIEWER;
       case SET_AUDIENCE, MANAGE_ACCESS, MANAGE_SCOPE -> role == ProjectRole.MANAGER;
-      case ADMINISTER -> false;
+      // Project creation is not an action on an existing project, so no project role supplies it.
+      case ADMINISTER, PROJECT_CREATE -> false;
     };
   }
 

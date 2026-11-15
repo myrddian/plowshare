@@ -407,6 +407,7 @@ function reachingPackages(home: string): string[] {
               'union',
               'views',
               'project-label',
+              'project-creator-hint',
               'activity',
               'records',
               'inspection',

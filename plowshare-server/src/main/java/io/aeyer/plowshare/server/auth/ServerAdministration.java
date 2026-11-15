@@ -1,11 +1,13 @@
 package io.aeyer.plowshare.server.auth;
 
 import io.aeyer.plowshare.server.access.BuiltInIdentities;
+import io.aeyer.plowshare.server.access.ProjectCreatorGrants;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.context.ApplicationEventPublisher;
@@ -20,6 +22,7 @@ public class ServerAdministration {
   private final PasswordHasher passwords;
   private final TokenStore tokens;
   private final ApplicationEventPublisher events;
+  private final ProjectCreatorGrants creators;
 
   public ServerAdministration(
       AccountAdministrationRepository repository,
@@ -27,21 +30,33 @@ public class ServerAdministration {
       AdminStore accounts,
       PasswordHasher passwords,
       TokenStore tokens,
-      ApplicationEventPublisher events) {
+      ApplicationEventPublisher events,
+      ProjectCreatorGrants creators) {
     this.repository = repository;
     this.transactions = transactions;
     this.accounts = accounts;
     this.passwords = passwords;
     this.tokens = tokens;
     this.events = events;
+    this.creators = creators;
   }
 
+  /**
+   * A permanent USER account. {@code projectCreator} is whether the account holds the
+   * PROJECT_CREATOR role ({@link ProjectCreatorGrants#holds}); the account repository does not read
+   * grants, so its rows carry {@code false} until this service fills the field.
+   */
   public record Account(
       String handle,
       boolean enabled,
       boolean serverAdmin,
       boolean mustChangePassword,
-      OffsetDateTime createdAt) {}
+      OffsetDateTime createdAt,
+      boolean projectCreator) {
+    Account withProjectCreator(boolean holder) {
+      return new Account(handle, enabled, serverAdmin, mustChangePassword, createdAt, holder);
+    }
+  }
 
   public record Credential(Account account, String temporaryPassword) {
     @Override
@@ -70,12 +85,17 @@ public class ServerAdministration {
 
   private Account account(String handle) {
     BuiltInIdentities.requireOrdinaryAccount(handle);
-    return repository.account(handle);
+    return repository.account(handle).withProjectCreator(creators.holds(handle));
   }
 
+  /** Every permanent account, with the creator role resolved in one read for the whole listing. */
   public List<Account> list(String actor) {
     accounts.requireServerAdmin(actor);
-    return repository.list();
+    List<Account> listed = repository.list();
+    Set<String> holders = creators.holdersAmong(listed.stream().map(Account::handle).toList());
+    return listed.stream()
+        .map(account -> account.withProjectCreator(holders.contains(account.handle())))
+        .toList();
   }
 
   private <T> T change(String actor, Supplier<T> work) {
@@ -113,34 +133,60 @@ public class ServerAdministration {
         });
   }
 
-  public Account update(String actor, String handle, Boolean enabled, Boolean serverAdmin) {
-    if (enabled == null && serverAdmin == null)
-      throw new CallerFault("Supply enabled or serverAdmin");
+  /**
+   * Changes the supplied flags in one transaction under the administrator lock. Account flags apply
+   * first, audited as {@code account.update} with the session revocation they imply; then a
+   * supplied {@code projectCreator} grants or revokes the role (both idempotent) and, only when
+   * that changed something, is audited as {@code account.project-creator.grant} or {@code .revoke}.
+   * Any refusal rolls back every change.
+   */
+  public Account update(
+      String actor, String handle, Boolean enabled, Boolean serverAdmin, Boolean projectCreator) {
+    if (enabled == null && serverAdmin == null && projectCreator == null)
+      throw new CallerFault("Supply enabled, serverAdmin or projectCreator");
     return change(
         actor,
         () -> {
-          Account previous = account(handle);
-          boolean nextEnabled = enabled == null ? previous.enabled() : enabled;
-          boolean nextAdmin = serverAdmin == null ? previous.serverAdmin() : serverAdmin;
-          if (previous.enabled()
-              && previous.serverAdmin()
-              && !(nextEnabled && nextAdmin)
-              && repository.enabledAdministrators(false) <= 1)
-            throw new CallerFault(
-                "The last enabled server administrator cannot be disabled or demoted");
-          if (previous.enabled()
-              && previous.serverAdmin()
-              && !previous.mustChangePassword()
-              && !(nextEnabled && nextAdmin)
-              && repository.enabledAdministrators(true) <= 1)
-            throw new CallerFault(
-                "Keep an enabled administrator with a completed password setup before removing this role");
-          repository.update(handle, nextEnabled, nextAdmin);
-          if (!nextEnabled || previous.serverAdmin() != nextAdmin) revoke(handle);
-          Account updated = account(handle);
-          audit(actor, "account.update", updated);
+          Account current = account(handle);
+          if (enabled != null || serverAdmin != null)
+            current = updateFlags(actor, current, enabled, serverAdmin);
+          if (projectCreator == null) return current;
+          boolean changed =
+              projectCreator ? creators.grant(actor, handle) : creators.revoke(actor, handle);
+          // A no-op (already a holder, or not one) is neither audited nor re-read: the account
+          // read above already carries the holder state. A change leaves the requested state.
+          if (!changed) return current;
+          Account updated = current.withProjectCreator(projectCreator);
+          audit(
+              actor,
+              projectCreator ? "account.project-creator.grant" : "account.project-creator.revoke",
+              updated);
           return updated;
         });
+  }
+
+  private Account updateFlags(
+      String actor, Account previous, Boolean enabled, Boolean serverAdmin) {
+    String handle = previous.handle();
+    boolean nextEnabled = enabled == null ? previous.enabled() : enabled;
+    boolean nextAdmin = serverAdmin == null ? previous.serverAdmin() : serverAdmin;
+    if (previous.enabled()
+        && previous.serverAdmin()
+        && !(nextEnabled && nextAdmin)
+        && repository.enabledAdministrators(false) <= 1)
+      throw new CallerFault("The last enabled server administrator cannot be disabled or demoted");
+    if (previous.enabled()
+        && previous.serverAdmin()
+        && !previous.mustChangePassword()
+        && !(nextEnabled && nextAdmin)
+        && repository.enabledAdministrators(true) <= 1)
+      throw new CallerFault(
+          "Keep an enabled administrator with a completed password setup before removing this role");
+    repository.update(handle, nextEnabled, nextAdmin);
+    if (!nextEnabled || previous.serverAdmin() != nextAdmin) revoke(handle);
+    Account updated = account(handle);
+    audit(actor, "account.update", updated);
+    return updated;
   }
 
   private void revoke(String handle) {

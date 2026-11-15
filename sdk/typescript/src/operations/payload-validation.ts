@@ -391,7 +391,10 @@ export const SHAPES: Record<
   'admin.status': [[], []],
   'admin.accounts': [[], []],
   'admin.account.create': [['handle'], ['serverAdmin']],
-  'admin.account.update': [['handle'], ['enabled', 'serverAdmin']],
+  'admin.account.update': [
+    ['handle'],
+    ['enabled', 'serverAdmin', 'projectCreator'],
+  ],
   'admin.account.reset': [['handle'], []],
   'admin.sessions': [['handle'], []],
   'admin.session.revoke': [['handle'], []],
@@ -1040,6 +1043,7 @@ const ARRAY_FIELDS = [
 const BOOLEAN_FIELDS = [
   'enabled',
   'serverAdmin',
+  'projectCreator',
   'makeDefault',
   'archived',
   'newConversation',
@@ -1345,9 +1349,10 @@ export function commandProblem(
   if (
     type === 'admin.account.update' &&
     !('enabled' in body) &&
-    !('serverAdmin' in body)
+    !('serverAdmin' in body) &&
+    !('projectCreator' in body)
   )
-    return 'admin.account.update needs enabled or serverAdmin';
+    return 'admin.account.update needs enabled, serverAdmin or projectCreator';
   if (
     type === 'admin.audit' &&
     typeof body['limit'] === 'number' &&

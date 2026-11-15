@@ -3,6 +3,9 @@ package io.aeyer.plowshare.server.archive;
 import io.aeyer.plowshare.protocol.Home;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
+import org.postgresql.util.PSQLException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
@@ -376,13 +379,7 @@ public class JdbcProjectMembers implements ProjectMembers {
             throw new ArchiveRefusedException(
                 "That account is already a member; use project.member.role to change its role");
           protectManager(id, actor, previous, role);
-          jdbc.queryForObject(
-              "SELECT authority_issue_membership(?,?,?,?)",
-              java.util.UUID.class,
-              project,
-              handle,
-              actor,
-              role.name());
+          issueMembership(project, handle, role, actor);
           if (add)
             jdbc.update(
                 "INSERT INTO project_members(project_id,handle,role) VALUES (?,?,?)",
@@ -405,6 +402,31 @@ public class JdbcProjectMembers implements ProjectMembers {
           protectResultingManagers(id, project, actor, previous, role);
           return null;
         });
+  }
+
+  /** Keep the database's self-replacement guard a domain refusal without exposing SQL details. */
+  private void issueMembership(String project, String handle, ProjectRole role, String actor) {
+    try {
+      jdbc.queryForObject(
+          "SELECT authority_issue_membership(?,?,?,?)",
+          UUID.class,
+          project,
+          handle,
+          actor,
+          role.name());
+    } catch (DataAccessException failure) {
+      // Translate only the owning function's exact business guard. Other SQL failures must keep
+      // their failure semantics. Do not query here: PostgreSQL has aborted the transaction, which
+      // must unwind and roll back before the caller receives this refusal.
+      String refusal = "Replacing your issuing membership requires another manager";
+      if (failure.getMostSpecificCause() instanceof PSQLException postgres
+          && "P0001".equals(postgres.getSQLState())
+          && postgres.getServerErrorMessage() != null
+          && refusal.equals(postgres.getServerErrorMessage().getMessage())) {
+        throw new ArchiveRefusedException(refusal);
+      }
+      throw failure;
+    }
   }
 
   public void remove(String project, String handle, String actor) {

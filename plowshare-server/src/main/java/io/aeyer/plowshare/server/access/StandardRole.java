@@ -9,7 +9,12 @@ public enum StandardRole {
   MANAGER,
   CONTRIBUTOR,
   READER,
-  GLOBAL_READ;
+  GLOBAL_READ,
+  /**
+   * Creates projects; held only at the PROJECT_CREATION scope, issues nothing and reaches no
+   * existing resource.
+   */
+  PROJECT_CREATOR;
 
   public static StandardRole project(ProjectRole role) {
     return switch (role) {

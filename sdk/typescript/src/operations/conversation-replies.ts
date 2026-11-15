@@ -291,6 +291,7 @@ export interface ServerAccount {
   readonly serverAdmin: boolean;
   readonly mustChangePassword: boolean;
   readonly createdAt: string;
+  readonly projectCreator: boolean;
 }
 export interface AccountCredential {
   readonly account: ServerAccount;
@@ -718,6 +719,7 @@ const serverAccount = record({
   serverAdmin: bool,
   mustChangePassword: bool,
   createdAt: named,
+  projectCreator: bool,
 });
 const credential = record({ account: serverAccount, temporaryPassword: named });
 const role: Check = (value) =>

@@ -26,7 +26,8 @@ public final class AdministrationClient {
       boolean enabled,
       boolean serverAdmin,
       boolean mustChangePassword,
-      OffsetDateTime createdAt) {
+      OffsetDateTime createdAt,
+      boolean projectCreator) {
     public Account {
       handle = ContractChecks.identity(handle, "handle");
       Objects.requireNonNull(createdAt, "createdAt");

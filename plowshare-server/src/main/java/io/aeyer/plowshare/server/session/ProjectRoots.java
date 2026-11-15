@@ -48,7 +48,8 @@ public interface ProjectRoots {
    * @param handle the account declaring the presence, recorded as a new project's first member
    * @throws io.aeyer.plowshare.server.archive.ArchiveRefusedException if some other place already
    *     holds the project — another machine, or this server. A project exists in exactly one
-   *     location
+   *     location. Also when the account may not attach it, or may not create it (no row exists and
+   *     it lacks the creator role), or another account created it first
    */
   void rootOn(String project, String machine, String root, String handle);
 }

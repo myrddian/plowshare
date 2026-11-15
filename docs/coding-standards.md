@@ -19,6 +19,7 @@ select AOSP style or disable formatting to preserve a preferred layout.
 ./gradlew :plowshare-server:spotlessApply # One module while iterating.
 ./gradlew :plowshare-server:check         # Includes that module's formatting check.
 ./gradlew check                          # Repository verification, including formatting.
+./gradlew :plowshare-server:largeTransportTest # Large socket acceptance in a fresh 1 GiB JVM; included in check.
 ./gradlew installGitHooks                # Once per clone; enable the pre-push gate.
 ```
 

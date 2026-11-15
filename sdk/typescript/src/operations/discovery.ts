@@ -220,7 +220,7 @@ const examples: Record<string, unknown> = {
     rates: { input: '0.40', output: '1.60' },
   },
   'admin.account.create': { handle: 'sam', serverAdmin: false },
-  'admin.account.update': { handle: 'sam', enabled: false },
+  'admin.account.update': { handle: 'sam', projectCreator: true },
   'admin.audit': { limit: 25 },
   'information.acquire': {
     scope: { kind: 'personal' },

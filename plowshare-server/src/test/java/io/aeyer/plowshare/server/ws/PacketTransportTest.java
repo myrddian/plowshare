@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
@@ -104,6 +105,7 @@ class PacketTransportTest {
   }
 
   @Test
+  @Tag("large-transport")
   void real_server_and_java_sdk_exchange_worst_case_text_as_small_packets_and_keep_legacy_explicit()
       throws Exception {
     try (var context =

@@ -417,7 +417,7 @@ import {
   thisMachine,
   within,
 } from './files/marker.ts';
-import { rooter, sameClaim } from './files/rooter.ts';
+import { RootRefused, rooter, sameClaim } from './files/rooter.ts';
 import { plain } from './plain.ts';
 import { terminal } from './terminal/mounting.ts';
 import type { Surface } from './surface.ts';
@@ -4223,6 +4223,7 @@ export async function converse(talking: Talking): Promise<void> {
           describeRootRefused(
             target.claim.project,
             refused instanceof Error ? refused.message : undefined,
+            refused instanceof RootRefused ? refused.code : undefined,
           ),
         );
         // THE ROOTER LET GO OF THE OLD CLAIM BEFORE IT TRIED THE NEW ONE,

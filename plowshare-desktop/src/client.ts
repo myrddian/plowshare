@@ -1651,7 +1651,17 @@ export class DesktopClient {
           this.state.serverAdmin = opened.serverAdmin === true;
           ok(await this.send(streaming(true)));
           await this.readProjects();
-          await this.loadScope(this.options.project);
+          // A project client can open before its account holds membership: a newly
+          // chosen folder registers the project only through the later file claim
+          // (`rootDirectory` loads the scope after it), and an inspector-validated log
+          // may name a project absent from the listing. The server refuses
+          // project-scoped listings without membership, so read them only when listed.
+          const project = this.options.project;
+          if (
+            !project ||
+            this.state.projects.some((row) => row.name === project)
+          )
+            await this.loadScope(project);
           await this.refresh();
           await this.syncFollows();
           if (this.options.accountActivity !== false) {
@@ -1982,10 +1992,16 @@ export class DesktopClient {
       case 'refresh':
         if (this.state.mode === 'live' && this.state.connected) {
           await this.readProjects();
+          // A revoked (or not yet registered) project's roster is refused by the server;
+          // drop it rather than failing the whole refresh or keeping a stale roster.
+          const listed = Object.keys(this.state.agents).filter(
+            (key) =>
+              !key || this.state.projects.some((row) => row.name === key),
+          );
+          for (const key of Object.keys(this.state.agents))
+            if (!listed.includes(key)) delete this.state.agents[key];
           await Promise.all(
-            Object.keys(this.state.agents).map((key) =>
-              this.readAgents(key || undefined),
-            ),
+            listed.map((key) => this.readAgents(key || undefined)),
           );
         }
         await this.refresh();

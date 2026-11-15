@@ -2218,6 +2218,9 @@
           "handle": {
             "$ref": "#/$defs/shape1"
           },
+          "projectCreator": {
+            "$ref": "#/$defs/shape8"
+          },
           "serverAdmin": {
             "$ref": "#/$defs/shape8"
           }
@@ -10934,6 +10937,9 @@
           "mustChangePassword": {
             "$ref": "#/$defs/shape8"
           },
+          "projectCreator": {
+            "$ref": "#/$defs/shape8"
+          },
           "serverAdmin": {
             "$ref": "#/$defs/shape8"
           }
@@ -10943,6 +10949,7 @@
           "enabled",
           "handle",
           "mustChangePassword",
+          "projectCreator",
           "serverAdmin"
         ],
         "additionalProperties": false,

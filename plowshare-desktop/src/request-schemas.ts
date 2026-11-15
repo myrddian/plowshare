@@ -7580,6 +7580,9 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
         "handle": {
           "$ref": "#/$defs/shape6"
         },
+        "projectCreator": {
+          "$ref": "#/$defs/shape29"
+        },
         "serverAdmin": {
           "$ref": "#/$defs/shape29"
         }

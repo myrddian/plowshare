@@ -86,6 +86,7 @@ public class JdbcIdentityRepository implements IdentityRepository {
           case AuthorityScope.Personal value -> value.projectId();
           case AuthorityScope.AccountKnowledge ignored -> 0L;
           case AuthorityScope.Administration ignored -> 0L;
+          case AuthorityScope.ProjectCreation ignored -> 0L;
           // Refused, not defaulted. A contained scope does carry a project key, so answering
           // value.projectId() here would compile, return a name, and silently make a child project
           // addressable through every Home-keyed path in the server -- which is the one thing
@@ -184,6 +185,7 @@ public class JdbcIdentityRepository implements IdentityRepository {
       // the kind to the schema and to the sealed interface; nothing yet creates a contained row, so
       // nothing may read one back into a resolved scope either.
       case "CONTAINED" -> throw contained();
+      case "PROJECT_CREATION" -> new AuthorityScope.ProjectCreation(id);
       default -> throw absent();
     };
   }
