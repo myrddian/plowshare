@@ -54,6 +54,19 @@ static address inside the DHCP range or a recent change may be mentioned in
 plain words, but refute a concern that rests on it alone. Write notes as plain
 sentences without identifiers, HTML or tables.
 
+For device reviews, every `concerns[i].note` must be nonempty and at most 400
+characters. Top-level `notes` is either a nonempty string of at most 2000
+characters or a list of 1 to 8 nonempty strings of at most 1000 characters each.
+These limits count characters after tabs and paragraph breaks are joined with
+spaces. The complete response, including JSON syntax and formatting whitespace,
+must be at most 32768 characters. The script uses the shared LLM JSON parser,
+then reflows prose into plain paragraphs; ordinary JSON formatting and prose
+line breaks do not need a repair call. Do not include headings, bullets, links
+or other control characters. Keep the verdict, its reason and evidence limits
+concise. If validation requests a
+repair, return the complete JSON object within all these limits, preserving your
+judgments rather than changing a verdict to make the response shorter.
+
 Verify dates, collection scope, fixture labels, timeouts and incomplete DNS history.
 Listening ports do not prove outbound flows or vulnerabilities; DNS queries do not
 prove payload transfer or exfiltration. Flag unsupported attribution and identity

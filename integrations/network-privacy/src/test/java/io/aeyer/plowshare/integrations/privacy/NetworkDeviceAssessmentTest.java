@@ -194,7 +194,7 @@ class NetworkDeviceAssessmentTest {
             a -> ((ObjectNode) a.path("what_it_is")).put("text", "A <b>TV</b>."),
             a -> ((ObjectNode) a.path("who_it_talks_to").get(0)).put("meaning", "|---|---|"),
             a -> ((ObjectNode) a.path("what_it_sends")).put("unknown", "See " + PROFILE),
-            a -> ((ObjectNode) a.path("concerns").get(0)).put("fact", "Line one\nLine two"),
+            a -> ((ObjectNode) a.path("concerns").get(0)).put("fact", "Line one\n## Heading"),
             a -> ((ObjectNode) a.path("concerns").get(0)).put("title", "## Heading"),
             a -> ((ObjectNode) a.path("concerns").get(0)).put("inference", "It exfiltrates data."),
             a -> ((ArrayNode) a.path("questions")).add("<script>alert(1)</script>"),
@@ -360,6 +360,210 @@ class NetworkDeviceAssessmentTest {
     String repair = host.reviewerTasks.get(1).split("\\nDATA:\\n", 2)[0];
     assertTrue(repair.contains("Your previous review was rejected by the validator"), repair);
     assertTrue(repair.contains("HTML and markup are not allowed"), repair);
+  }
+
+  @Test
+  void initial_draft_and_review_handoffs_include_limits_before_any_repair() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add(assessment().toString());
+    host.reviewer.add(review("accepted", "c1", "holds").toString());
+    host.finish();
+    String draft = host.assessorTasks.getFirst().split("\\nDATA:\\n", 2)[0];
+    assertTrue(draft.contains("complete JSON response must be at most 32768 characters"));
+    for (String limit :
+        List.of(
+            "in_short at most 60 words and 480 characters",
+            "what_it_is.text 400, basis 1 to 6 strings of 200 each",
+            "who_it_talks_to up to 8 entries with party 80, observation 300 and meaning 300",
+            "what_it_sends.observed and unknown 400 each",
+            "concerns up to 5 entries with title 100, fact 400, inference 400, mitigation 400 and verify 300",
+            "questions up to 5 strings of 200 each")) assertTrue(draft.contains(limit), draft);
+    String initialReview = host.reviewerTasks.getFirst().split("\\nDATA:\\n", 2)[0];
+    assertTrue(initialReview.contains("complete JSON response must be at most 32768 characters"));
+    assertTrue(initialReview.contains("concerns[i].note is nonempty and at most 400 characters"));
+    assertTrue(initialReview.contains("one nonempty string of at most 2000 characters"));
+    assertTrue(initialReview.contains("1 to 8 nonempty strings of at most 1000 characters each"));
+    assertFalse(initialReview.contains("rejected by the validator"));
+    String role =
+        Files.readString(
+            Path.of(System.getProperty("privacy.application"))
+                .resolve("agents/privacy_reviewer.md"));
+    for (String limit : List.of("400", "2000", "1 to 8", "1000"))
+      assertTrue(role.contains(limit), role);
+  }
+
+  @Test
+  void shared_json_parser_and_prose_reflow_accept_escaped_and_literal_line_breaks()
+      throws Exception {
+    // The parser recovers literal newlines in model JSON too. Neither syntax
+    // recovery nor paragraph reflow should spend the one semantic repair.
+    for (boolean literal : List.of(false, true)) {
+      var host = new Host(PREVIOUS);
+      var draft = assessment();
+      draft.put("in_short", "A television.\r\n\r\nIt looked up measurement names.");
+      host.assessor.add(draft.toPrettyString());
+      var reviewed = review("accepted", "c1", "holds");
+      reviewed.put("notes", "Coverage checked.\n\nCounters have gaps.\n\nNo payload evidence.");
+      ((ObjectNode) reviewed.path("concerns").get(0))
+          .put(
+              "note", "Observed names.\r\n\tPayload unknown.\u2028Coverage limited.\u2029Checked.");
+      String reply = "```json\n" + reviewed.toPrettyString() + "\n```";
+      if (literal) reply = reply.replace("\\r", "\r").replace("\\n", "\n").replace("\\t", "\t");
+      host.reviewer.add(reply);
+      host.finish();
+      assertEquals(1, host.writes);
+      assertEquals(1, host.assessorTasks.size());
+      assertEquals(1, host.reviewerTasks.size());
+      assertEquals(
+          "Coverage checked. Counters have gaps. No payload evidence.",
+          host.report.path("reviews").get(0).path("text").asText());
+      assertEquals(
+          "Observed names. Payload unknown. Coverage limited. Checked.",
+          host.report
+              .path("findings")
+              .get(0)
+              .path("rationale")
+              .asText()
+              .split(" Reviewer: ", 2)[1]);
+      assertTrue(
+          host.report
+              .path("text")
+              .asText()
+              .contains("A television. It looked up measurement names."));
+    }
+  }
+
+  @Test
+  void overlong_review_gets_actionable_repair_and_newlines_do_not_exhaust_it() throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add(assessment().toString());
+    var first = review("needs_corrections", "c1", "weakened");
+    ((ObjectNode) first.path("concerns").get(0)).put("note", "x".repeat(1474));
+    host.reviewer.add(first.toString());
+    var repaired = review("needs_corrections", "c1", "weakened");
+    repaired.put("notes", "Names only.\n\nNo payload evidence.\n\nKeep the coverage limits.");
+    host.reviewer.add(repaired.toString());
+    host.assessor.add(assessment().toString());
+    host.finish();
+    String repair = host.reviewerTasks.get(1).split("\\nDATA:\\n", 2)[0];
+    assertTrue(repair.contains("review concerns[0].note: expected at most 400 characters"), repair);
+    assertTrue(repair.contains("got 1474"), repair);
+    assertTrue(repair.contains("Shorten this field"), repair);
+    assertEquals(2, host.reviewerTasks.size());
+    assertEquals(1, host.writes);
+    assertEquals("weakened", host.report.path("findings").get(0).path("verdict").asText());
+    assertEquals("needs_corrections", host.report.path("reviews").get(0).path("outcome").asText());
+    assertTrue(
+        host.report
+            .path("reviews")
+            .get(0)
+            .path("text")
+            .asText()
+            .startsWith("Names only. No payload evidence. Keep the coverage limits."));
+  }
+
+  @Test
+  void a_second_oversized_review_still_fails_without_silently_truncating_judgments()
+      throws Exception {
+    var host = new Host(PREVIOUS);
+    host.assessor.add(assessment().toString());
+    for (int length : List.of(1474, 753)) {
+      var reviewed = review("accepted", "c1", "holds");
+      ((ObjectNode) reviewed.path("concerns").get(0)).put("note", "x".repeat(length));
+      reviewed.put("notes", "Paragraph one.\n\nParagraph two.\n\nParagraph three.");
+      host.reviewer.add(reviewed.toString());
+    }
+    var failure = assertThrows(IllegalStateException.class, host::finish);
+    assertTrue(
+        failure.getMessage().contains("expected at most 400 characters"), failure.getMessage());
+    assertTrue(failure.getMessage().contains("got 753"), failure.getMessage());
+    assertEquals(2, host.reviewerTasks.size());
+    assertEquals(0, host.writes);
+  }
+
+  @Test
+  void reviewer_text_limits_are_inclusive_after_whitespace_normalization() throws Exception {
+    for (boolean array : List.of(false, true)) {
+      var host = new Host(PREVIOUS);
+      host.assessor.add(assessment().toString());
+      var reviewed = review("accepted", "c1", "holds");
+      ((ObjectNode) reviewed.path("concerns").get(0))
+          .put("note", "x".repeat(199) + "\r\n\t" + "y".repeat(200));
+      if (array) {
+        var notes = reviewed.putArray("notes");
+        for (int i = 0; i < 8; i++) notes.add("x".repeat(499) + "\n\n" + "y".repeat(500));
+      } else reviewed.put("notes", "x".repeat(999) + "\n\n" + "y".repeat(1000));
+      host.reviewer.add(reviewed.toString());
+      host.finish();
+      assertEquals(1, host.reviewerTasks.size());
+      assertEquals(1, host.writes);
+      assertEquals(
+          400,
+          host.report
+              .path("findings")
+              .get(0)
+              .path("rationale")
+              .asText()
+              .split(" Reviewer: ", 2)[1]
+              .length());
+      assertEquals(
+          array ? 8007 : 2000, host.report.path("reviews").get(0).path("text").asText().length());
+    }
+  }
+
+  @Test
+  void reviewer_notes_errors_report_string_and_array_bounds() throws Exception {
+    List<Consumer<ObjectNode>> edits =
+        List.of(
+            r -> r.put("notes", "x".repeat(2001)),
+            r -> r.putArray("notes").add("x".repeat(1001)),
+            r -> {
+              var notes = r.putArray("notes");
+              for (int i = 0; i < 9; i++) notes.add("Checked.");
+            });
+    var messages =
+        List.of(
+            "review notes: expected at most 2000 characters",
+            "review notes[0]: expected at most 1000 characters",
+            "review notes: expected an array with 1 to 8 items");
+    for (int i = 0; i < edits.size(); i++) {
+      var host = new Host(PREVIOUS);
+      host.assessor.add(assessment().toString());
+      var invalid = review("accepted", "c1", "holds");
+      edits.get(i).accept(invalid);
+      host.reviewer.add(invalid.toString());
+      host.reviewer.add(invalid.toString());
+      var failure = assertThrows(IllegalStateException.class, host::finish);
+      assertTrue(failure.getMessage().contains(messages.get(i)), failure.getMessage());
+      assertTrue(host.reviewerTasks.get(1).contains(messages.get(i)));
+      assertEquals(0, host.writes);
+    }
+  }
+
+  @Test
+  void prose_reflow_does_not_hide_markup_or_other_control_characters() throws Exception {
+    for (String unsafe :
+        List.of(
+            "Checked.\n## Heading",
+            "Checked.\r\n- Bullet",
+            "Checked.\u2028> Quoted",
+            "Checked.\u20291. List",
+            "Checked.\n<b>Markup</b>",
+            "Checked.\n| A | B |",
+            "Checked. | A\n B |",
+            "Checked.\n[link](https://example.com)",
+            "Checked.\n" + DOSSIER,
+            "Checked.\u0000Hidden",
+            "Checked.\u0007Hidden",
+            "Checked.\u007fHidden")) {
+      var host = new Host(PREVIOUS);
+      host.assessor.add(assessment().toString());
+      var invalid = review("accepted", "c1", "holds").put("notes", unsafe).toString();
+      host.reviewer.add(invalid);
+      host.reviewer.add(invalid);
+      assertThrows(IllegalStateException.class, host::finish, unsafe);
+      assertEquals(0, host.writes);
+    }
   }
 
   @Test
