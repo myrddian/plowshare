@@ -119,7 +119,7 @@ from .reference_seed import MAX_TOPICS, SLUG, SeedEntry, product_slug, reference
 Phase = Literal[
     "queued", "submitted", "awaiting", "blocked", "retained", "tagged", "failed"
 ]
-Origin = Literal["seed", "owner"]
+Origin = Literal["seed", "owner", "research"]
 
 LIBRARY_TAG = "device-reference"
 MAX_RECEIPTS = 256
@@ -147,7 +147,7 @@ _PHASES: dict[str, Phase] = {
     "tagged": "tagged",
     "failed": "failed",
 }
-_ORIGINS: dict[str, Origin] = {"seed": "seed", "owner": "owner"}
+_ORIGINS: dict[str, Origin] = {"seed": "seed", "owner": "owner", "research": "research"}
 # Phases that hold a live ticket id; ``submitted`` never does (see the module doc).
 _TICKETED = {"awaiting", "blocked"}
 _UNRESOLVED = (
@@ -510,6 +510,87 @@ class ReferenceLibrary:
 
     def refresh_days(self) -> int:
         return self.journal.read().refresh_days
+
+    async def adopt_research(
+        self, product: str, title: str, url: str, kind: str, revision_id: str
+    ) -> ReferenceReceipt:
+        """Register an already-fetched source after the product answer passes review.
+
+        The owner explicitly requested discovery/acquisition. Verify the retained
+        source at the SDK boundary, then reuse the ordinary tagging/refresh loop;
+        never acquire its URL again here. Repeating after a crash is a no-op.
+        A known URL keeps its acquisition lifecycle. Additional product/category
+        tags are journaled as topics so one shared page stays discoverable for
+        both products, including after refresh, without a duplicate receipt.
+        """
+        product_slug(product)
+        text(title, MAX_TITLE)
+        reference_url(url)
+        uuid(revision_id)
+        if kind not in {"official", "advisory", "privacy", "research", "reporting"}:
+            raise ValueError("Unsupported research source kind")
+        async with self._lock:
+            ledger = self.journal.read()
+            existing = next((r for r in ledger.receipts if r.url == url), None)
+            if existing is not None:
+                return self._research_alias(ledger, existing, product, kind)
+            status = await self.port.revision(revision_id)
+            if (
+                status.id != revision_id
+                or status.kind != "source"
+                or status.source_uri != url
+                or not isinstance(status.source_name, str)
+            ):
+                raise ValueError("Research source does not match its retained revision")
+            receipt = replace(
+                _queued(url, product, title, (kind,), "research"),
+                phase="retained",
+                revision_id=revision_id,
+                resource_name=status.source_name,
+            )
+            # The SDK read yielded: preserve synchronous owner/seed additions.
+            ledger = self.journal.read()
+            existing = next((r for r in ledger.receipts if r.url == url), None)
+            if existing is not None:
+                return self._research_alias(ledger, existing, product, kind)
+            self.journal.save(replace(ledger, receipts=(*ledger.receipts, receipt)))
+            return receipt
+
+    def _research_alias(
+        self,
+        ledger: ReferenceLedger,
+        existing: ReferenceReceipt,
+        product: str,
+        kind: str,
+    ) -> ReferenceReceipt:
+        topics = tuple(
+            dict.fromkeys(
+                (
+                    *existing.topics,
+                    kind,
+                    *(() if product == existing.product else (product,)),
+                )
+            )
+        )
+        owned = replace(
+            _revived(existing),
+            topics=topics,
+            origin="research"
+            if existing.retired or product != existing.product
+            else existing.origin,
+        )
+        if owned.phase == "tagged" and topics != existing.topics:
+            owned = replace(owned, phase="retained")
+        if owned != existing:
+            self.journal.save(
+                replace(
+                    ledger,
+                    receipts=tuple(
+                        owned if r.url == existing.url else r for r in ledger.receipts
+                    ),
+                )
+            )
+        return owned
 
     def set_refresh_days(self, days: int) -> None:
         """Set the refresh interval; anything but a whole 1 to 365 is refused."""

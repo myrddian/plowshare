@@ -46,6 +46,7 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .device_dossier import parse_device_id
 from .private_files import replace_private
 from .reference_library import ReferenceLibrary
 from .reference_seed import product_slug, reference_url
@@ -289,6 +290,32 @@ class ReferenceRequests:
 
     def pending(self) -> tuple[ReferenceRequest, ...]:
         return tuple(r for r in self.journal.read().requests if r.state == "pending")
+
+    def get(self, request_id: str) -> ReferenceRequest:
+        """Read a recorded question by identity, including an owner's decision."""
+        request_id = uuid(request_id)
+        for request in self.journal.read().requests:
+            if request.id == request_id:
+                return request
+        raise ValueError("Unknown reference request")
+
+    def link_device(self, request_id: str, device_id: str) -> ReferenceRequest:
+        """Attach an owner-selected device to an unlinked pending question.
+
+        The dashboard verifies current monitoring scope before calling. A linked
+        request cannot silently switch devices; the original evidence stays tied
+        to that identity.
+        """
+        device_id = parse_device_id(device_id)
+        ledger = self.journal.read()
+        index, current = self._pending(ledger, request_id)
+        if current.device_id is not None and current.device_id != device_id:
+            raise ValueError("This question is already linked to a different device")
+        linked = replace(current, device_id=device_id)
+        entries = list(ledger.requests)
+        entries[index] = linked
+        self.journal.save(RequestLedger(tuple(entries)))
+        return linked
 
     def approve(self, request_id: str, urls: tuple[str, ...]) -> ReferenceRequest:
         """Queue the owner's pages for fetching and mark the request filled."""
