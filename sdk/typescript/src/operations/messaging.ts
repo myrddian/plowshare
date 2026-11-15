@@ -109,6 +109,13 @@ const instance = record(
       (row['lifetime'] === 'persistent' && row['active'] === true)) &&
     (!row['archived'] || row['active'] === false),
 );
+const FAILURE_ENDINGS = new Set([
+  'UNAVAILABLE',
+  'SUB_AGENT_FAILED',
+  'SESSION_GONE',
+  'STUCK',
+  'CALL_FAILURES',
+]);
 const delivery = record(
   {
     message: named,
@@ -131,7 +138,11 @@ const delivery = record(
   (row) =>
     (!row['finalReply'] || row['replyTo'] !== null) &&
     (!row['generated'] ||
-      (row['finalReply'] === true && row['ending'] !== null)),
+      (row['replyTo'] !== null &&
+        typeof row['ending'] === 'string' &&
+        (row['finalReply'] === true ||
+          (row['replyExpected'] === false &&
+            FAILURE_ENDINGS.has(row['ending']))))),
 );
 /** Conversation identities do not grant permission; opening one still goes through the server. */
 export function validateMessagingOrigins(type: string, value: unknown): void {

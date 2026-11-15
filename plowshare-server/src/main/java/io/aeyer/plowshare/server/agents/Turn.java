@@ -2048,10 +2048,10 @@ public final class Turn {
   /**
    * The endings a grant continues, and the refusal for every other.
    *
-   * <p>Not "the ones that failed" — the ones that stopped at a boundary where the history is whole.
-   * {@code JobRuntime}'s loop checks the cap, then cancellation, then the budget, all at the top of
-   * the loop and before the model call, so a run stopped by any of the three has completed its
-   * previous iteration and every call it made has its result already appended.
+   * <p>Caps, spent allowance and cancellation can be continued from their recorded boundary.
+   * Dependency/model failures require explicit retry as well. The resumed transcript preserves
+   * completed tool results, reconciles an exact failed delegation in its own child history, and
+   * refuses an uncertain tool effect with no recorded result. A retry never replays such a tool.
    *
    * <p>{@code CANCELLED} is in the set and the console will never offer it. Mechanically it stops
    * at the same boundary as the other two, so refusing it would be an invented restriction; but the
@@ -2059,7 +2059,12 @@ public final class Turn {
    * not ask. Reachable on request, never suggested.
    */
   private static final Set<Outcome.Ending> CONTINUABLE =
-      EnumSet.of(Outcome.Ending.TURN_CAP, Outcome.Ending.CALL_BUDGET, Outcome.Ending.CANCELLED);
+      EnumSet.of(
+          Outcome.Ending.TURN_CAP,
+          Outcome.Ending.CALL_BUDGET,
+          Outcome.Ending.CANCELLED,
+          Outcome.Ending.UNAVAILABLE,
+          Outcome.Ending.SUB_AGENT_FAILED);
 
   /**
    * The endings this server <em>suggests</em> continuing, which is the set above minus the one
@@ -2293,7 +2298,7 @@ public final class Turn {
   static final String CONTINUING =
       """
             This run is being continued. The run before it stopped at %s without reaching an \
-            answer, and a person has since granted it more allowance. Everything above this \
+            answer, and a person has explicitly requested continuation. Everything above this \
             message is that run's own history, including every result its tool calls returned.
 
             Those results were read at the time above and describe things as they were then. \

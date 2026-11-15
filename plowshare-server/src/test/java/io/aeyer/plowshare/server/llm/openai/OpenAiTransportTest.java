@@ -2753,6 +2753,7 @@ class OpenAiTransportTest {
         Duration took = Duration.ofNanos(System.nanoTime() - start);
 
         assertTrue(failed.getMessage().contains("max-stream-duration"), failed.getMessage());
+        assertTrue(failed.timedOut(), "completion deadline keeps its typed classification");
         assertTrue(failed.getMessage().contains("studio"), failed.getMessage());
         assertTrue(
             took.compareTo(Duration.ofSeconds(20)) < 0,
@@ -2807,9 +2808,46 @@ class OpenAiTransportTest {
         Duration took = Duration.ofNanos(System.nanoTime() - start);
 
         assertTrue(failed.getMessage().contains("max-stream-duration"), failed.getMessage());
+        assertTrue(failed.timedOut(), "completion deadline keeps its typed classification");
         assertTrue(
             took.compareTo(Duration.ofSeconds(20)) < 0,
             "gave up after " + took.toMillis() + "ms, which is not the budget");
+      }
+    }
+  }
+
+  @Test
+  void partial_tool_arguments_are_delivered_for_diagnostics_before_stream_failure()
+      throws Exception {
+    try (MockWebServer server = new MockWebServer()) {
+      server.enqueue(
+          sse(
+              "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read\",\"arguments\":\"unfinished\"}}]}}]}\n\n"));
+      server.start();
+      List<String> fragments = new ArrayList<>();
+      Deltas sink =
+          new Deltas() {
+            @Override
+            public void answered(String delta) {}
+
+            @Override
+            public void toolCall(int index, String name, String arguments) {
+              fragments.add(index + ":" + name + ":" + arguments);
+            }
+          };
+      try (OpenAiTransport transport =
+          new OpenAiTransport(poolAt(server.url("/v1").toString()), new ObjectMapper())) {
+        assertThrows(
+            LlmTransportException.class,
+            () ->
+                transport.stream(
+                    "model",
+                    ChatMessage.conversation(null, "read"),
+                    Sampling.NONE,
+                    List.of(),
+                    sink,
+                    () -> false));
+        assertEquals(List.of("0:read:unfinished"), fragments);
       }
     }
   }

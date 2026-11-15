@@ -3046,7 +3046,7 @@ class CompactionTest {
     assertEquals(List.of(EntryKind.ANSWER), asked.stream().map(EntryRecord::kind).toList());
     assertEquals("Which database?", asked.get(0).content());
     assertEquals(
-        List.of(EntryKind.ATTEMPT_FAILED, EntryKind.ANSWER),
+        List.of(EntryKind.ATTEMPT_FAILED, EntryKind.DIAGNOSTIC),
         entries.forConversation(stuck).stream().map(EntryRecord::kind).toList());
   }
 

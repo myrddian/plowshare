@@ -41,6 +41,14 @@ capabilities. A topic, route or wake cannot authorize a model/tool effect. Keep
 message instance lifetimes, reply/final-reply identity, retained caller lineage
 and delivery leases separate from broker offsets.
 
+Recipient execution errors owe the original sender a generated status notice regardless of
+`reply_expected`, under the original request's lock and terminal transition. An existing explicit
+final reply stays final; a later error is one correlated generated non-final status with an actual
+error ending and no reply expectation. Generated outcome handling failures never produce another
+automatic error notice. Keep notices generic: no failed model/diagnostic text or private tool data,
+and current participant log/input visibility still fences disclosure. A recipient failure becomes
+asynchronous sender input, never an exception that stops the sending agent.
+
 Payload staging and topic generation checks have a lock order. Use the owning
 append operation rather than pre-locking a topic or converting storage errors
 into a successful unavailable/empty result. Retention and topic recreation must

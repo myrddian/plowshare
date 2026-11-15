@@ -749,7 +749,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
     for (int number = 1; number <= 2; number++) {
       if (abandoned.getAsBoolean()) throw new CallerAbandonedException(props.getName());
       if (deadline - System.nanoTime() <= 0)
-        throw new LlmTransportException(
+        throw LlmTransportException.timedOut(
             prefix() + "streaming chat failed: " + overran(budget, budgetKey), first);
       StreamConnectionAttempt connection = new StreamConnectionAttempt();
       // Prevent the first POST from finding a stale reused socket after delivery has started.
@@ -764,7 +764,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       try {
         if (abandoned.getAsBoolean()) throw new CallerAbandonedException(props.getName());
         if (deadline - System.nanoTime() <= 0)
-          throw new LlmTransportException(
+          throw LlmTransportException.timedOut(
               prefix() + "streaming chat failed: " + overran(budget, budgetKey), first);
         Completion completion =
             consumeStream(
@@ -805,7 +805,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       LlmTransportException failure, StreamConnectionAttempt connection, int number) {
     String cause =
         failure.getCause() == null ? "none" : failure.getCause().getClass().getSimpleName();
-    return new LlmTransportException(
+    return failure.describedAs(
         failure.getMessage()
             + " (HTTP phase: "
             + connection.phase()
@@ -813,8 +813,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
             + number
             + "; cause: "
             + cause
-            + ")",
-        failure);
+            + ")");
   }
 
   @Override
@@ -917,7 +916,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
             // sufficient either (onEvent never runs for a heartbeat-only
             // stream). Neither is redundant.
             if (System.nanoTime() - deadline >= 0) {
-              terminate(events, terminated, new Failure(overran(budget, budgetKey), null));
+              terminate(events, terminated, new Failure(overran(budget, budgetKey), null, true));
               source.cancel();
               return;
             }
@@ -989,6 +988,14 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
             // characters it absorbed, so that arguments count against the
             // runaway cap like everything else the box generated.
             int arguments = drafts.accept(delta);
+            for (JsonNode fragment : delta.path("tool_calls")) {
+              JsonNode function = fragment.path("function");
+              events.add(
+                  new ToolFragment(
+                      fragment.path("index").asInt(0),
+                      function.path("name").asText(""),
+                      function.path("arguments").asText("")));
+            }
 
             String token = delta.path("content").asText("");
             if (thought > 0
@@ -1097,14 +1104,16 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
           continue;
         }
         if (event == null) {
-          throw new LlmTransportException(
-              prefix() + "streaming chat failed: " + overran(budget, budgetKey));
+          throw LlmTransportException.timedOut(
+              prefix() + "streaming chat failed: " + overran(budget, budgetKey), null);
         }
         if (event instanceof Thought reasoning) {
           // Never appended to `content`: reasoning is not the answer,
           // and a `Completion` that carried it would make the outcome
           // disagree with itself.
           sink.thought(reasoning.text());
+        } else if (event instanceof ToolFragment fragment) {
+          sink.toolCall(fragment.index(), fragment.name(), fragment.arguments());
         } else if (event instanceof String delta) {
           content.append(delta);
           // Anything this throws leaves through the caller's frame
@@ -1119,8 +1128,10 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
           // this does to the caller's own work is not decided here.
           throw new CallerAbandonedException(props.getName());
         } else if (event instanceof Failure failure) {
-          throw new LlmTransportException(
-              prefix() + "streaming chat failed: " + failure.detail(), failure.cause());
+          String message = prefix() + "streaming chat failed: " + failure.detail();
+          throw failure.timedOut()
+              ? LlmTransportException.timedOut(message, failure.cause())
+              : new LlmTransportException(message, failure.cause());
         } else if (event == CLOSED_MARKER && finishReason.get() == null) {
           // A connection that closed with neither [DONE] nor a finish
           // reason did not deliver an answer, and handing back what
@@ -1212,7 +1223,13 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
   }
 
   /** Why a stream ended badly, in words already safe to print — see {@link #streamDetail}. */
-  private record Failure(String detail, Throwable cause) {}
+  private record Failure(String detail, Throwable cause, boolean timedOut) {
+    Failure(String detail, Throwable cause) {
+      this(detail, cause, false);
+    }
+  }
+
+  private record ToolFragment(int index, String name, String arguments) {}
 
   /**
    * {@code delta.tool_calls} fragments, accumulated into what {@code message.tool_calls} would have

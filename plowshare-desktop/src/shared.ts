@@ -165,6 +165,8 @@ export interface Job {
   phase?: 'thinking' | 'answer' | 'tool';
   tool?: string | undefined;
   answered?: boolean;
+  /** Server-owned offer to continue this completed job's conversation. */
+  resumable?: boolean;
   allowance?: Allowance | undefined;
   pace?: Pace | undefined;
   events: JobNotification[];
@@ -752,6 +754,7 @@ export type Request =
   | { action: 'run-trajectory'; id: string; actor: 'conductor' | 'caller' }
   | { action: 'run-stage-trajectory'; id: string; stage: string }
   | { action: 'delegate-trajectory'; conversation: string; step: string }
+  | { action: 'delegate-retry'; conversation: string; step: string }
   | {
       action: 'board-inspection' | 'board-view';
       view: BoardView;
@@ -772,6 +775,7 @@ export type Request =
       requestId: string;
     }
   | { action: 'run'; conversation: string; agent: string; text: string }
+  | { action: 'conversation-retry'; job: string }
   | { action: 'cancel'; job: string }
   | { action: 'answer'; id: string; decision: 'once' | 'deny' }
   | { action: 'native-mcp'; command: string }

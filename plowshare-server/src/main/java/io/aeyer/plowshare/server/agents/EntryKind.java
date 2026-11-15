@@ -195,7 +195,9 @@ public enum EntryKind {
   DIAGNOSTIC("diagnostic"),
 
   /**
-   * What a model streamed as reasoning during one call, in order and whole.
+   * What a model streamed as reasoning during a completed call, in order. Large captures retain
+   * bounded beginning/end samples with explicit omission counts. Failed calls retain their
+   * reasoning and other partial output as {@link #DIAGNOSTIC} error records instead.
    *
    * <p><b>A fact about the call, never part of the conversation.</b> No role, so it never projects:
    * a later call is sent what was said and what the tools returned, and not what a model thought on

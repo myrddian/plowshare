@@ -66,4 +66,63 @@ public interface Deltas {
   default void thought(String delta) {
     // Dropped. See the class javadoc.
   }
+
+  /**
+   * A fragment of a requested tool, for bounded failure diagnostics only. It is not an executable
+   * tool call: execution requires the completed, validated {@link Completion}. Names and arguments
+   * are the strings present in this fragment, possibly empty; index identifies interleaved calls.
+   * The default discards them and this channel must not be presented as answer text.
+   */
+  default void toolCall(int index, String name, String arguments) {
+    // Diagnostic capture is explicit, just as reasoning capture is.
+  }
+
+  /** Live/deferred presentation sink, separated from protected diagnostic observation. */
+  default Deltas previews() {
+    return this;
+  }
+
+  /**
+   * Protected diagnostic sink. Dispatchers preserve it when previews are buffered or withheld; its
+   * owner must bound capture and authorize durable log retention before recording any text.
+   */
+  default Deltas diagnostics() {
+    return DISCARDING;
+  }
+
+  /**
+   * Observe raw deltas independently of preview disclosure. Never use a public watcher as the
+   * diagnostic sink: observation is for protected, nonprojected failure evidence only.
+   */
+  static Deltas observing(Deltas previews, Deltas diagnostics) {
+    return new Deltas() {
+      @Override
+      public void answered(String delta) {
+        diagnostics.answered(delta);
+        previews.answered(delta);
+      }
+
+      @Override
+      public void thought(String delta) {
+        diagnostics.thought(delta);
+        previews.thought(delta);
+      }
+
+      @Override
+      public void toolCall(int index, String name, String arguments) {
+        diagnostics.toolCall(index, name, arguments);
+        previews.toolCall(index, name, arguments);
+      }
+
+      @Override
+      public Deltas previews() {
+        return previews;
+      }
+
+      @Override
+      public Deltas diagnostics() {
+        return diagnostics;
+      }
+    };
+  }
 }

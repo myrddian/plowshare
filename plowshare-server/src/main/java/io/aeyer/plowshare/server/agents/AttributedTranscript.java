@@ -136,4 +136,20 @@ public record AttributedTranscript(
     return new AttributedTranscript(
         delegate.delegate(callee, home, openedBy), UsageAttribution.LEGACY, usage);
   }
+
+  @Override
+  public Optional<DelegationRetry> pendingDelegationRetry() {
+    return delegate.pendingDelegationRetry();
+  }
+
+  @Override
+  public Transcript resumeDelegation(DelegationRetry retry, AgentDefinition callee) {
+    return new AttributedTranscript(
+        delegate.resumeDelegation(retry, callee), UsageAttribution.LEGACY, usage);
+  }
+
+  @Override
+  public DelegationRetry retainedDelegationRetry(String child, AgentDefinition callee, Home home) {
+    return delegate.retainedDelegationRetry(child, callee, home);
+  }
 }

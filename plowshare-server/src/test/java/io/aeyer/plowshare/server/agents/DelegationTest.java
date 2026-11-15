@@ -1434,55 +1434,34 @@ class DelegationTest {
 
   // --- a child that fails ------------------------------------------------------
 
-  /**
-   * A child that could not reach what it depends on ends the parent too, and this is where {@link
-   * Ending#SUB_AGENT_FAILED} earns its place.
-   *
-   * <p>The rule is {@code JobRuntime.dependencyFailure}'s, one level up: an ending that means
-   * <em>something this run depends on could not be reached</em> is not a mistake the model made and
-   * not one it can correct by calling again. Rendering it as an ordinary tool result would leave
-   * the parent to answer around a dead endpoint out of its own head — the confident-empty-answer
-   * shape — and to spend the rest of the tree's budget discovering the endpoint is still dead.
-   */
+  /** A failed child returns an explicit failure result so its parent can keep working. */
   @Test
-  void a_child_that_fails_is_reported_and_does_not_kill_the_parent_silently() throws Exception {
+  void a_child_model_failure_is_reported_and_the_parent_continues() throws Exception {
     Scripted transport =
         new Scripted()
             .then(() -> delegates("helper", "go"))
-            .thenAlways(
+            .then(
                 () -> {
                   throw new LlmException("pool 'scripted' is shut down and cannot take work");
-                });
+                })
+            .thenAlways(() -> answer("I can continue the other work"));
     JobRuntime runtime = delegating(transport);
 
     Outcome outcome = runtime.run(agent("boss"), "ask helper", Home.global(), generous(), null);
 
-    assertEquals(Ending.SUB_AGENT_FAILED, outcome.ending());
-    assertTrue(outcome.text().contains("helper"), outcome.text());
-    // The endpoint arm of the sentence, in as many words. It became an arm
-    // when SESSION_GONE landed, and without this line a build whose two arms
-    // said the same thing would tell an operator whose endpoint is down that
-    // somebody closed a laptop, with the session test still green.
-    assertTrue(
-        outcome.text().contains("something it depends on could not be reached"), outcome.text());
-    // The child's detail, carried through rather than summarised away.
-    assertTrue(outcome.detail().contains("helper"), outcome.detail());
-    assertTrue(outcome.detail().contains("LlmException"), outcome.detail());
-    assertTrue(outcome.detail().contains("shut down"), outcome.detail());
-    // The turn the child failed in never completed: its tool results were
-    // never appended. The model call the parent made is still counted.
-    assertEquals(0, outcome.steps());
-    assertEquals(1, outcome.modelCalls());
-    // And the trail says how far it got.
-    assertTrue(outcome.text().contains(AgentRegistry.AGENT_RUN), outcome.text());
+    assertEquals(Ending.ANSWERED, outcome.ending());
+    assertEquals("I can continue the other work", outcome.text());
+    String failure = toolResults(transport, 2);
+    assertTrue(failure.contains("helper"), failure);
+    assertTrue(failure.contains("did not reach an answer"), failure);
+    assertTrue(failure.contains("model request failed"), failure);
+    assertEquals(2, outcome.steps());
+    assertEquals(2, outcome.modelCalls(), "the parent's calls remain distinct from child spending");
   }
 
-  /**
-   * Two levels down is the same rule applied twice, and the detail chains so an operator can see
-   * which agent actually hit the dead endpoint.
-   */
+  /** A failed grandchild is reported to the middle agent, which can finish its own work. */
   @Test
-  void a_failure_two_levels_down_reaches_the_top() throws Exception {
+  void a_grandchild_model_failure_does_not_kill_either_calling_agent() throws Exception {
     Scripted transport =
         new Scripted()
             .then(() -> delegates("middle", "pass it on"))
@@ -1491,35 +1470,23 @@ class DelegationTest {
                     asking(
                         "handing it on",
                         call("c2", AgentRegistry.AGENT_RUN, delegate("helper", "go"))))
-            .thenAlways(
+            .then(
                 () -> {
                   throw new LlmException("the endpoint refused the connection");
-                });
+                })
+            .then(() -> answer("middle finished other work"))
+            .thenAlways(() -> answer("parent finished other work"));
     JobRuntime runtime = delegating(transport);
 
     Outcome outcome = runtime.run(agent("boss"), "ask middle", Home.global(), generous(), null);
 
-    assertEquals(Ending.SUB_AGENT_FAILED, outcome.ending());
-    assertTrue(outcome.detail().startsWith("middle: helper: "), outcome.detail());
-    assertTrue(outcome.detail().contains("refused the connection"), outcome.detail());
+    assertEquals(Ending.ANSWERED, outcome.ending());
+    assertTrue(toolResults(transport, 3).contains("helper' did not reach an answer"));
+    assertTrue(toolResults(transport, 4).contains("middle finished other work"));
+    assertEquals("parent finished other work", outcome.text());
   }
 
-  /**
-   * A child whose client session went away kills the parent too, and says which of the two failures
-   * it was.
-   *
-   * <p>{@code AgentRunTool.propagates} is a list of endings and not a compile check, so {@link
-   * Ending#SESSION_GONE} arriving without being added to it would have been <b>silence</b>: the
-   * parent would render "the child did not reach an answer" as an ordinary tool result and carry on
-   * calling file tools down the same dead channel — the session it shares with the child — once per
-   * turn until its budget ran out. Measured: with the constant left out of that list, this test
-   * ends {@code ANSWERED} and every other test in this file stays green.
-   *
-   * <p>The sentence is asserted as well as the ending because the parent's ending is {@code
-   * SUB_AGENT_FAILED} either way. That is the shipped rule — the thing to look at is one agent
-   * further down, so the parent names the child rather than adopting its ending — and it means the
-   * only place the distinction can survive to the top is the words.
-   */
+  /** Loss of the shared client session stops both caller and child, with its typed ending. */
   @Test
   void a_child_whose_session_went_away_says_so_rather_than_naming_an_endpoint() throws Exception {
     Scripted transport =
@@ -1540,7 +1507,7 @@ class DelegationTest {
 
     Outcome outcome = runtime.run(agent("boss"), "ask helper", Home.global(), generous(), null);
 
-    assertEquals(Ending.SUB_AGENT_FAILED, outcome.ending());
+    assertEquals(Ending.SESSION_GONE, outcome.ending());
     assertTrue(outcome.detail().contains("SessionGoneException"), outcome.detail());
     // Asserted for what the sentence must SAY, not against the spelling of
     // the one it replaces: an assertFalse naming the old wording verbatim
@@ -1549,25 +1516,9 @@ class DelegationTest {
     assertTrue(outcome.text().contains("went away"), outcome.text());
   }
 
-  /**
-   * Two levels down, a session that went away reaches the top in the <b>detail</b> and not in the
-   * sentence — and that is a limit of the sentence rather than a bug in it.
-   *
-   * <p>{@code SubAgentFailed.sentence()} keys on the child's ending, and at depth two the child is
-   * the <em>middle</em> agent, whose own ending is {@code SUB_AGENT_FAILED}. So the else arm fires
-   * and the top-level sentence says "something it depends on could not be reached" about a closed
-   * laptop. That paragraph claimed the words carried the difference "to the top"; they carry it one
-   * level. <b>The claim was wrong and the behaviour is not</b>: the detail chains, so an operator
-   * reads {@code middle: helper: SessionGoneException: …} one line down — exactly what they get for
-   * a dead endpoint at the same depth, which is the shape this class shipped with.
-   *
-   * <p>Untested until now, and the gap was structural rather than accidental: {@code
-   * a_failure_two_levels_down_reaches_the_top} uses an {@code LlmException}, so no test in this
-   * file had ever driven a session-gone failure through a middle agent.
-   */
+  /** The shared session loss stays typed through nested delegations. */
   @Test
-  void a_session_two_levels_down_reaches_the_top_in_its_detail_and_not_its_sentence()
-      throws Exception {
+  void a_session_two_levels_down_keeps_its_typed_ending_and_session_sentence() throws Exception {
     Scripted transport =
         new Scripted()
             .then(() -> delegates("middle", "pass it on"))
@@ -1591,19 +1542,13 @@ class DelegationTest {
 
     Outcome outcome = runtime.run(agent("boss"), "ask middle", Home.global(), generous(), null);
 
-    assertEquals(Ending.SUB_AGENT_FAILED, outcome.ending());
+    assertEquals(Ending.SESSION_GONE, outcome.ending());
     // The chain is what carries it, and it names the agent that actually met
     // the closed socket rather than the one that reported it.
     assertTrue(outcome.detail().startsWith("middle: helper: "), outcome.detail());
     assertTrue(outcome.detail().contains("SessionGoneException"), outcome.detail());
-    // And the sentence is the endpoint one, asserted rather than tolerated:
-    // a later change that DID carry the distinction further would fail here
-    // and should, because it would mean this comment is out of date.
-    assertTrue(
-        outcome.text().contains("something it depends on could not be reached"),
-        "at depth two the middle's own ending is SUB_AGENT_FAILED, so the ternary"
-            + " cannot see a session: "
-            + outcome.text());
+    assertTrue(outcome.text().contains("session"), outcome.text());
+    assertTrue(outcome.text().contains("went away"), outcome.text());
   }
 
   /**
@@ -2189,7 +2134,7 @@ class DelegationTest {
     Object properties = tool.schema().parameters().properties();
     assertTrue(
         properties instanceof Map<?, ?> map
-            && map.keySet().equals(Set.of("agent", "task", "images")),
+            && map.keySet().equals(Set.of("agent", "task", "images", "conversation")),
         String.valueOf(properties));
     // `images` is offered and not required, and it is offered to a caller
     // holding no picture at all: a schema that appeared and disappeared with

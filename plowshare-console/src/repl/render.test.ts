@@ -87,6 +87,11 @@ describe('describeEnding', () => {
     expect(describeEnding('CALL_FAILURES')).not.toBe(describeEnding('STUCK'));
   });
 
+  it('does not describe every model failure as an unreachable endpoint', () => {
+    expect(describeEnding('UNAVAILABLE')).toContain('request');
+    expect(describeEnding('UNAVAILABLE')).not.toContain('could not be reached');
+  });
+
   it('renders an ending it has never heard of, rather than failing over one', () => {
     // TurnView sends the constant's own name and nothing enumerates them,
     // exactly so that an ending added on the server reaches this console

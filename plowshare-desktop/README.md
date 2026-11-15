@@ -148,6 +148,19 @@ Successful completion returns **Follow latest** to the recorded answer. Raw
 lifecycle events and heartbeats remain available under the collapsed **Job
 diagnostics** disclosure, with expandable, copyable records for each job.
 
+Failed model calls show **Retry from saved work** when the server offers a safe
+continuation. The control continues the existing conversation with recorded tool
+results, rather than submitting the task again. The latest failed job receipt is
+retained across reopening and reconciled with the server before retry is offered;
+uncertain retry submissions are never automatically resent. Run errors are visible
+in chat and remain outside model context. Trajectory's failed-call diagnostics
+retain bounded beginning/end samples of reasoning, partial answers and tool-call
+fragments, with timing and omission counts. Authorized delegated reasoning streams
+on the parent's live preview; delegate answers stay in their own conversation.
+Delegated model failures return an error to the caller while it keeps working.
+The failed tool step offers **Retry delegated work** once the caller is idle;
+this requests continuation of that exact child through its owning agent.
+
 In **Runs**, click a stage to open its conductor trajectory filtered to that stage's
 recorded visits, including returns to an earlier stage. Older entries load when needed.
 Pending agent questions also appear in chat. A popup opens for the active workspace
