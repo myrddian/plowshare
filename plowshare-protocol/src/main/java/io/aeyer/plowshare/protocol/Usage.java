@@ -264,7 +264,8 @@ public final class Usage {
     }
   }
 
-  @JsonInclude(JsonInclude.Include.NON_NULL)
+  // Audit contracts require nullable fields to remain present, unlike absent Filter selectors.
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   public record Attempt(
       @JsonProperty("attempt_id") String attemptId,
       @JsonProperty("attempt_number") int attemptNumber,
@@ -343,7 +344,8 @@ public final class Usage {
     }
   }
 
-  @JsonInclude(JsonInclude.Include.NON_NULL)
+  // Audit contracts require nullable fields to remain present, unlike absent Filter selectors.
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   public record Call(
       @JsonProperty("call_id") String callId,
       @JsonFormat(shape = JsonFormat.Shape.STRING) @JsonProperty("created_at") Instant createdAt,
