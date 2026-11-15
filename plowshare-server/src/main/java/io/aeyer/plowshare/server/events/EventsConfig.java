@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.server.access.SystemOperations;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
+import io.aeyer.plowshare.server.agents.ApplicationPolicy;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.GlobalAgentDefinitions;
@@ -10,6 +11,7 @@ import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.Noticing;
 import io.aeyer.plowshare.server.agents.Turn;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
@@ -94,6 +96,31 @@ public class EventsConfig {
         properties.getQuestionAlertRetryInterval());
   }
 
+  @Bean
+  public ApplicationInboxStore applicationInboxStore(JdbcTemplate jdbc, UnitOfWork work) {
+    return new JdbcApplicationInboxStore(jdbc, work);
+  }
+
+  @Bean
+  public ApplicationInbox applicationInboxes(
+      ApplicationPolicy policy,
+      ProjectMembers members,
+      ApplicationInboxStore store,
+      ObjectProvider<AccountPushes> pushes,
+      InboxStore personal,
+      EventsProperties properties) {
+    var applications =
+        new ApplicationInboxes(
+            policy,
+            members,
+            store,
+            (handle, body) -> pushes.getIfAvailable(() -> AccountPushes.NONE).push(handle, body),
+            personal,
+            Instant::now);
+    applications.useQuestionRetry(properties.getQuestionAlertRetryInterval());
+    return applications;
+  }
+
   /**
    * The notice a bot declaring {@code announces-inbox} gets, and the {@code inbox_read} tool that
    * reads it — wired onto {@link JobRuntime} by a setter rather than a constructor argument,
@@ -125,6 +152,7 @@ public class EventsConfig {
       JobStore jobs,
       Turn turns,
       Inbox inbox,
+      ApplicationInbox applications,
       ObjectProvider<ScheduleDefinitions> definitions,
       ObjectProvider<ScheduleDefinitions.Authority> authority,
       ObjectProvider<MessageService> messages,
@@ -134,6 +162,7 @@ public class EventsConfig {
         definitions::getIfAvailable, authority::getIfAvailable, messages::getIfAvailable);
     if (personal.getIfAvailable() != null) runner.usePersonalSpaces(personal.getIfAvailable());
     Dispatcher dispatcher = new Dispatcher(firings, triggers, runner, inbox, Instant::now);
+    dispatcher.useApplications(applications);
     turns.whenFree(
         conversation -> {
           dispatcher.drain("conversation:" + conversation);

@@ -154,6 +154,13 @@ public class Dispatcher {
   private final Supplier<Instant> clock;
   private volatile LogStages logStages = LogStages.NONE;
 
+  private ApplicationNotices applications;
+
+  /** Application ownership affects delivery only; registered execution authority is retained. */
+  public void useApplications(ApplicationNotices applications) {
+    this.applications = Objects.requireNonNull(applications);
+  }
+
   public Dispatcher(
       FiringStore firings,
       TriggerStore triggers,
@@ -183,6 +190,11 @@ public class Dispatcher {
 
   /** One queued firing's way to start, whichever kind it is. */
   private interface Start {
+    /** Reuse the exact trigger admitted by this operation, including if it is edited meanwhile. */
+    default Optional<TriggerRecord> trigger() {
+      return Optional.empty();
+    }
+
     boolean busy();
 
     Started start();
@@ -264,6 +276,33 @@ public class Dispatcher {
         log.info(
             "firing {} of {} was refused: {}", next.id(), start.describe(), refused.getMessage());
         firings.refuse(next.id(), String.valueOf(refused.getMessage()));
+        if (applications != null) {
+          try {
+            start
+                .trigger()
+                .ifPresent(
+                    trigger ->
+                        applications.scheduled(
+                            trigger,
+                            next,
+                            null,
+                            new Outcome(
+                                Outcome.Ending.UNAVAILABLE,
+                                "Scheduled application work could not start. Inspect firing "
+                                    + next.id()
+                                    + " ("
+                                    + refused.getClass().getSimpleName()
+                                    + ").",
+                                0,
+                                0,
+                                "")));
+          } catch (RuntimeException notificationFailed) {
+            log.warn(
+                "firing {} was refused; its application failure notice could not be retained",
+                next.id(),
+                notificationFailed);
+          }
+        }
         if (next.topic() != null) {
           settled(next);
         }
@@ -315,6 +354,11 @@ public class Dispatcher {
         .map(
             trigger ->
                 new Start() {
+                  @Override
+                  public Optional<TriggerRecord> trigger() {
+                    return Optional.of(trigger);
+                  }
+
                   @Override
                   public boolean busy() {
                     return runner.busy(trigger);
@@ -391,7 +435,21 @@ public class Dispatcher {
     String said;
     try {
       said = logStages.deliveryPre(conversation, Handover.INBOX, outcome.text());
-      inbox.deliver(trigger.definedBy(), firing.id(), conversation, outcome.ending().name(), said);
+      if (applications == null
+          || !applications.scheduled(
+              trigger,
+              firing,
+              conversation,
+              new Outcome(
+                  outcome.ending(),
+                  said,
+                  outcome.steps(),
+                  outcome.modelCalls(),
+                  outcome.detail(),
+                  outcome.pace(),
+                  outcome.requested())))
+        inbox.deliver(
+            trigger.definedBy(), firing.id(), conversation, outcome.ending().name(), said);
     } catch (RuntimeException undelivered) {
       log.error(
           "firing {} ended {} and its result could not be delivered to {}",

@@ -7,6 +7,7 @@ import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
 import io.aeyer.plowshare.server.agents.OrchestrationResolver;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationCancel;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage;
@@ -22,7 +23,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -43,7 +46,7 @@ public class OrchestrationFrames implements FrameArea {
 
   private io.aeyer.plowshare.server.personal.PersonalSpaces personal;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void usePersonalSpaces(io.aeyer.plowshare.server.personal.PersonalSpaces personal) {
     this.personal = personal;
   }
@@ -91,7 +94,7 @@ public class OrchestrationFrames implements FrameArea {
   private io.aeyer.plowshare.server.agents.Callers callers;
   private ObjectProvider<io.aeyer.plowshare.server.orchestrations.CallerOrchestrations> grants;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useStartAuthority(
       io.aeyer.plowshare.server.agents.Callers callers,
       ObjectProvider<io.aeyer.plowshare.server.orchestrations.CallerOrchestrations> grants) {
@@ -99,9 +102,9 @@ public class OrchestrationFrames implements FrameArea {
     this.grants = grants;
   }
 
-  private static java.util.UUID requestId(String value) {
+  private static UUID requestId(String value) {
     try {
-      var id = java.util.UUID.fromString(value);
+      var id = UUID.fromString(value);
       if (!id.toString().equalsIgnoreCase(value)) throw new IllegalArgumentException();
       return id;
     } catch (IllegalArgumentException | NullPointerException invalid) {
@@ -208,7 +211,7 @@ public class OrchestrationFrames implements FrameArea {
 
   private io.aeyer.plowshare.server.information.InformationJobs inputs;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useInformationInputs(io.aeyer.plowshare.server.information.InformationJobs inputs) {
     this.inputs = inputs;
   }
@@ -377,21 +380,33 @@ public class OrchestrationFrames implements FrameArea {
     return Outcome.ok(new Changed(body.id(), "cancelled"));
   }
 
+  private ApplicationInbox applications;
+
+  @Autowired
+  public void useApplicationInbox(ApplicationInbox applications) {
+    this.applications = applications;
+  }
+
   // -- shared -------------------------------------------------------------------------------
 
   /**
    * The run named by {@code id}, and owned by {@code handle} — the one check every frame in this
-   * area past {@code definitions} makes, and the same refusal whether the run does not exist at all
-   * or belongs to somebody else, so neither answer tells a caller which.
+   * area past {@code definitions} makes. Current Application Managers may also answer published
+   * background questions; that exception grants neither private-log reads nor executor identity.
+   * Other refusals do not disclose whether the run belongs to another account or is absent.
    */
   private OrchestrationRecord owned(String type, String id, String handle) {
     if (id == null || id.isBlank()) {
       throw new CallerFault(type + " needs the orchestration id; nothing was done.");
     }
-    if (inputs != null) inputs.requireLog(id, handle);
-    return store
-        .find(id)
-        .filter(run -> handle.equals(run.callerHandle()))
+    var found = store.find(id);
+    boolean managerAnswer =
+        type.equals(FrameTypes.ORCHESTRATION_ANSWER)
+            && applications != null
+            && found.filter(run -> applications.manages(run, handle)).isPresent();
+    if (!managerAnswer && inputs != null) inputs.requireLog(id, handle);
+    return found
+        .filter(run -> managerAnswer || handle.equals(run.callerHandle()))
         .orElseThrow(
             () -> new CallerFault("No orchestration with that id is owned by this account."));
   }

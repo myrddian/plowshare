@@ -75,6 +75,23 @@ public class JdbcProjectMembers implements ProjectMembers {
                 project));
   }
 
+  @Override
+  public List<String> managers(String project) {
+    return jdbc.queryForList(
+        """
+        SELECT DISTINCT a.handle FROM authority_live_grants() live
+        JOIN authority_grants g ON g.id=live.id
+        JOIN authority_roles r ON r.id=g.role_id AND r.name='MANAGER'
+        JOIN authority_scopes s ON s.id=g.scope_id AND s.kind='PROJECT'
+        JOIN projects p ON p.id=s.project_id AND p.name=?
+        JOIN authority_accounts account ON account.id=g.subject_account
+        JOIN admins a ON a.handle=account.legacy_handle AND a.enabled AND a.account_kind='USER'
+        WHERE g.subject_agent IS NULL AND g.coverage='SELF' ORDER BY a.handle
+        """,
+        String.class,
+        project);
+  }
+
   private void ordinary(String project) {
     if (ClientProjects.privateProject(project))
       throw new ArchiveRefusedException("Client projects cannot be shared with accounts");

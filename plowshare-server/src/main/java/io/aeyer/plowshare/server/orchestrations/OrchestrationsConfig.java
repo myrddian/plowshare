@@ -37,6 +37,7 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.board.BoardRunExtras;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.events.AccountPushes;
+import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.hooks.HookContext;
 import io.aeyer.plowshare.server.information.InformationGateRepository;
@@ -211,14 +212,18 @@ public class OrchestrationsConfig {
       Turn turn,
       Callers callers,
       Inbox inbox,
+      ApplicationInbox applications,
       ObjectProvider<Orchestrations> orchestrations) {
-    return new Delivery(
-        store,
-        conversations,
-        callerVoice(turn, callers),
-        inboxPort(inbox),
-        turn::isSpeaking,
-        parentVoice(store, turn::isSpeaking, orchestrations));
+    Delivery delivery =
+        new Delivery(
+            store,
+            conversations,
+            callerVoice(turn, callers),
+            inboxPort(inbox),
+            turn::isSpeaking,
+            parentVoice(store, turn::isSpeaking, orchestrations));
+    delivery.useApplications(applications);
+    return delivery;
   }
 
   /**

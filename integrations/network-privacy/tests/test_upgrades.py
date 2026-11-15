@@ -74,6 +74,29 @@ class UpgradeTest(LifecycleFixture):
         ]
         return client
 
+    async def test_reviewed_upgrade_adopts_inbox_ownership_without_changing_grants_or_identity(
+        self,
+    ) -> None:
+        self.installed()
+        path = self.setup.output / "application/plowshare.json"
+        original = json.loads(path.read_text())
+        original.pop("inbox")
+        path.write_text(json.dumps(original))
+        stage = await prepare_upgrade(self.setup, self.planning(), self.setup.source)
+        proposed = json.loads(
+            (stage / "prepared/application/plowshare.json").read_text()
+        )
+        self.assertEqual(
+            proposed.pop("inbox"),
+            {
+                "attentionOrchestrations": [
+                    "investigate_network",
+                    "assess_network_device",
+                ]
+            },
+        )
+        self.assertEqual(original, proposed)
+
     async def test_plan_preserves_identity_local_edits_and_pending_fence(self) -> None:
         self.installed()
         application = self.setup.output / "application"

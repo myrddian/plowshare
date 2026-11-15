@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.events.InboxItem;
 import io.aeyer.plowshare.server.events.InboxStore;
@@ -17,6 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class InboxFramesTest {
 
@@ -31,6 +33,37 @@ class InboxFramesTest {
     when(inbox.page(anyString(), anyBoolean(), anyInt(), anyInt()))
         .thenReturn(new InboxStore.Page(List.of(), 0));
     router = new FrameRoutingConfig().frameRouter(List.of(new InboxFrames(inbox, store)));
+  }
+
+  @Test
+  void application_selection_is_delegated_with_the_authenticated_account() {
+    var applications = mock(ApplicationInbox.class);
+    when(applications.page("enzo", "privacy", false, 0, 50))
+        .thenReturn(new InboxStore.Page(List.of(), 3));
+    var applicationRouter =
+        new FrameRoutingConfig().frameRouter(List.of(new InboxFrames(inbox, store, applications)));
+    Outcome outcome =
+        applicationRouter.route(
+            FrameParity.frame(FrameTypes.INBOX_LIST, "{\"project\":\"privacy\"}"),
+            new Asking("s", "enzo"));
+    assertEquals(Code.OK, outcome.code());
+    assertEquals(new InboxListHandler.Page(List.of(), 3), outcome.payload());
+    verify(inbox, never()).page(anyString(), anyBoolean(), anyInt(), anyInt());
+  }
+
+  @Test
+  void application_publication_rejects_caller_selected_recipients_before_side_effects() {
+    var applications = mock(ApplicationInbox.class);
+    var applicationRouter =
+        new FrameRoutingConfig().frameRouter(List.of(new InboxFrames(inbox, store, applications)));
+    Outcome outcome =
+        applicationRouter.route(
+            FrameParity.frame(
+                FrameTypes.INBOX_PUBLISH,
+                "{\"project\":\"privacy\",\"requestId\":\"11111111-1111-4111-8111-111111111111\",\"kind\":\"failure\",\"text\":\"Stopped\",\"recipients\":[\"other\"]}"),
+            new Asking("s", "enzo"));
+    assertEquals(Code.BAD_REQUEST, outcome.code());
+    Mockito.verifyNoInteractions(applications);
   }
 
   @Test

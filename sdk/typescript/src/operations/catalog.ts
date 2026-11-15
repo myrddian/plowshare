@@ -584,6 +584,8 @@ export const CLI_OPERATIONS = {
   'provider deregister': 'provider.deregister',
   'inbox list': 'inbox.list',
   'inbox read': 'inbox.read',
+  'inbox publish': 'inbox.publish',
+  'inbox receipt': 'inbox.receipt',
   'todos read': 'todos.read',
   'orchestration start': 'orchestration.start',
   'orchestration receipt': 'orchestration.receipt',

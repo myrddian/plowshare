@@ -5,6 +5,7 @@ import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.archive.ArchiveException;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.events.ApplicationNotices;
 import io.aeyer.plowshare.server.hooks.Handover;
 import java.util.Objects;
 
@@ -58,6 +59,12 @@ public final class PersonDelivery {
     }
   }
 
+  private ApplicationNotices applications;
+
+  public void useApplications(ApplicationNotices applications) {
+    this.applications = Objects.requireNonNull(applications);
+  }
+
   private final ConversationStore conversations;
   private final Voice voice;
   private final Inbox inbox;
@@ -73,6 +80,9 @@ public final class PersonDelivery {
     Objects.requireNonNull(about, "question identity");
     String recipient = handle != null ? handle : conversations.ownerOf(conversation).orElse(null);
     if (recipient == null) return new Sent(Result.NOWHERE, Handover.NOWHERE);
+    if (applications != null
+        && applications.question(conversation, source, recipient, kind, text, about))
+      return new Sent(Result.DELIVERED, Handover.INBOX);
     if (information != null && source != null) information.requireLog(source, recipient);
     inbox.notifyOnceFromLog(recipient, kind, text, about, source);
     return new Sent(Result.DELIVERED, Handover.INBOX);

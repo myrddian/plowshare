@@ -34,6 +34,7 @@ function fakeStream(replies: Record<string, FrameOutcome | Error>) {
 const item = {
   id: 'inb_1',
   handle: 'enzo',
+  kind: 'run',
   firing: 'fir_1',
   conversation: 'cnv_1',
   ending: 'ANSWERED',
@@ -43,6 +44,46 @@ const item = {
 };
 
 describe('the INBOX screen', () => {
+  it('inspects and acknowledges an application inbox without clearing the personal selection', async () => {
+    const stream = fakeStream({
+      'inbox.list': { code: 'OK', payload: { items: [item], unread: 1 } },
+      'inbox.read': { code: 'OK', payload: { marked: 1, unread: 0 } },
+    });
+    const root = document.createElement('div');
+    const screen = createInbox({ root, openStream: stream.open, session: 's' });
+    await screen.load();
+    const field = root.querySelector<HTMLInputElement>(
+      '[aria-label="Application project"]',
+    );
+    const inspect = root.querySelector<HTMLButtonElement>('.application-inbox');
+    if (!field || !inspect)
+      throw new Error('Application inbox selector missing');
+    field.value = 'network-privacy-watch';
+    inspect.click();
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain(
+        'network-privacy-watch · application inbox',
+      ),
+    );
+    expect(stream.ask).toHaveBeenCalledWith('inbox.list', {
+      limit: 50,
+      project: 'network-privacy-watch',
+    });
+    root
+      .querySelector<HTMLButtonElement>('[data-item="inb_1"] button')
+      ?.click();
+    await vi.waitFor(() =>
+      expect(stream.ask).toHaveBeenCalledWith('inbox.read', {
+        items: ['inb_1'],
+        project: 'network-privacy-watch',
+      }),
+    );
+    root.querySelector<HTMLButtonElement>('.personal-inbox')?.click();
+    await vi.waitFor(() =>
+      expect(stream.ask).toHaveBeenLastCalledWith('inbox.list', { limit: 50 }),
+    );
+  });
+
   it("lists the account's items, unread first marked as such", async () => {
     const stream = fakeStream({
       'inbox.list': { code: 'OK', payload: { items: [item], unread: 1 } },

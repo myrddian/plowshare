@@ -80,5 +80,11 @@
       "toolScope": "network_assistant",
       "agent": "privacy_assistant"
     }
-  ]
+  ],
+  "inbox": {
+    "attentionOrchestrations": [
+      "investigate_network",
+      "assess_network_device"
+    ]
+  }
 }

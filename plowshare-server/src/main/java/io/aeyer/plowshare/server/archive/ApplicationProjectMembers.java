@@ -46,6 +46,19 @@ public final class ApplicationProjectMembers implements ProjectMembers {
   }
 
   @Override
+  public List<String> managers(String project) {
+    var boundary = applications.read(project);
+    return stored.managers(project).stream()
+        .filter(
+            account ->
+                boundary
+                    .limit(account, Optional.of(ProjectRole.MANAGER))
+                    .filter(role -> role == ProjectRole.MANAGER)
+                    .isPresent())
+        .toList();
+  }
+
+  @Override
   public List<String> members(String project) {
     return stored.members(project);
   }

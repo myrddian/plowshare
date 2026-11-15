@@ -13,8 +13,9 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from aiohttp import web
-from plowshare import Client, Refusal, Reply
+from plowshare import Client, Delivery, Refusal, Reply, TransportError
 from plowshare.contracts import (
+    InboxReceiptResultDto,
     RelayTopicDto,
     RelayTopicsResultDto,
     RelayTopicsResultDtoScopeDto,
@@ -28,7 +29,14 @@ from plowshare_privacy.worker import ExternalRequests, Worker
 
 
 class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
-    async def run_recovery(self, *, pending: bool) -> tuple[int, list[str]]:
+    async def run_recovery(
+        self,
+        *,
+        pending: bool,
+        automatic: bool = False,
+        empty_topics: bool = False,
+        reconnections: int = 1,
+    ) -> tuple[int, list[str]]:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             row = json.loads((EXAMPLES / "config.json").read_text())
@@ -36,11 +44,22 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
             config = root / "collector.json"
             config.write_text(json.dumps(row))
             old, fresh = AsyncMock(spec=Client), AsyncMock(spec=Client)
-            old.__aenter__.return_value = old
-            fresh.__aenter__.return_value = fresh
-            old.request.side_effect = AssertionError(
-                "Recovery must not use the stopped socket"
-            )
+            clients = [old, fresh] + [
+                AsyncMock(spec=Client) for _ in range(reconnections - 1)
+            ]
+            for candidate in clients:
+                candidate.__aenter__.return_value = candidate
+
+            old_operations: list[str] = []
+
+            async def disconnected(command: object) -> Reply[object]:
+                # Main's stop-alert path may try one new alert on the failed
+                # session. Recovery must inspect that identity on the fresh one.
+                # Background readers may also observe the same closed session.
+                old_operations.append(getattr(command, "operation"))
+                raise TransportError(Delivery.NOT_SUBMITTED, "fixture closed socket")
+
+            old.request.side_effect = disconnected
             operations: list[str] = []
 
             async def request(command: object) -> Reply[object]:
@@ -48,6 +67,8 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 operations.append(operation)
                 if operation == "orchestration.receipt":
                     raise Refusal("NOT_FOUND", "fixture receipt absent")
+                if operation == "inbox.receipt":
+                    return Reply("OK", None, InboxReceiptResultDto(found=False))
                 self.assertEqual(operation, "relay.topics")
                 return Reply(
                     "OK",
@@ -65,13 +86,17 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                                 max_records=None,
                                 retention_seconds="3600",
                             )
-                            for field in ("requestTopic", "resultTopic")
+                            for field in (
+                                () if empty_topics else ("requestTopic", "resultTopic")
+                            )
                         ),
                     ),
                 )
 
-            fresh.request.side_effect = request
+            for candidate in clients[1:]:
+                candidate.request.side_effect = request
             captured: OperatorConsole | None = None
+            original_run = Worker.run
 
             def application(
                 worker: Worker, token: str, **options: object
@@ -87,6 +112,7 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 stop: asyncio.Event,
                 external: ExternalRequests | None,
                 apply_settings: Callable[[], Awaitable[None]] | None,
+                recover: Callable[[], Awaitable[None]],
             ) -> None:
                 assert captured is not None
                 worker.state = "attention_required"
@@ -96,6 +122,49 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                             str(uuid4()), str(uuid4()), utc_now(), "pending"
                         )
                     )
+                if automatic:
+                    polls = 0
+
+                    async def poll() -> None:
+                        nonlocal polls
+                        polls += 1
+                        if polls == 1:
+                            raise TransportError(Delivery.UNKNOWN, "fixture drop")
+                        stop.set()
+
+                    async def reconnect() -> None:
+                        try:
+                            await recover()
+                        except Refusal:
+                            stop.set()
+                            raise
+
+                    with (
+                        patch.object(worker, "poll", side_effect=poll),
+                        patch(
+                            "plowshare_privacy.recovery.INITIAL_RECONNECT_SECONDS",
+                            0.001,
+                        ),
+                    ):
+                        await original_run(worker, stop, recover=reconnect)
+                    self.assertEqual(polls, 1 if pending else 2)
+                    if pending:
+                        self.assertEqual(captured.manual[0].phase, "pending")
+                        self.assertEqual(worker.state, "attention_required")
+                    else:
+                        self.assertEqual(worker.state, "ready")
+                    assert worker.attention is not None
+                    self.assertEqual(worker.attention.pending, 1)
+                    self.assertEqual(len(worker.attention.rows), 1)
+                    self.assertEqual(old_operations.count("inbox.publish"), 1)
+                    self.assertFalse(
+                        {
+                            "relay.publish",
+                            "information.upload",
+                            "orchestration.start",
+                        }.intersection(old_operations)
+                    )
+                elif pending:
                     with self.assertRaises(Refusal):
                         await captured.check_and_resume()
                     self.assertFalse(worker.recovery_requested.is_set())
@@ -103,14 +172,40 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 else:
                     await captured.check_and_resume()
                     self.assertTrue(worker.recovery_requested.is_set())
-                old.close.assert_awaited_once()
+                    for _ in range(reconnections - 1):
+                        worker.recovery_requested.clear()
+                        await captured.check_and_resume()
+                    # Retired sessions are closed now, not retained as cleanup
+                    # callbacks until this long-running service exits.
+                    for candidate in clients[:-1]:
+                        candidate.__aexit__.assert_awaited_once()
+                    clients[-1].__aexit__.assert_not_awaited()
+                old.__aexit__.assert_awaited_once()
                 stop.set()
 
-            connect = AsyncMock(side_effect=(old, fresh))
+            failures: list[Exception] = []
+
+            async def checked_run(
+                worker: Worker,
+                stop: asyncio.Event,
+                external: ExternalRequests | None,
+                apply_settings: Callable[[], Awaitable[None]] | None,
+                recover: Callable[[], Awaitable[None]],
+            ) -> None:
+                # Production shutdown logs background errors. Assertions in this
+                # fixture must fail the test after cleanup has finished.
+                try:
+                    await run(worker, stop, external, apply_settings, recover)
+                except Exception as error:
+                    failures.append(error)
+                finally:
+                    stop.set()
+
+            connect = AsyncMock(side_effect=clients)
             with (
                 patch("plowshare_privacy.cli.Client.connect", connect),
                 patch("plowshare_privacy.cli.application", application),
-                patch.object(Worker, "run", run),
+                patch.object(Worker, "run", checked_run),
                 patch.dict(
                     "os.environ",
                     {
@@ -130,7 +225,10 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                         port=0,
                     )
                 )
-            fresh.__aexit__.assert_awaited_once()
+            if failures:
+                raise failures[0]
+            for candidate in clients:
+                candidate.__aexit__.assert_awaited_once()
             return connect.await_count, operations
 
     async def test_explicit_recovery_opens_fresh_sdk_session_without_replaying_requests(
@@ -138,7 +236,7 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         connections, operations = await self.run_recovery(pending=False)
         self.assertEqual(connections, 2)
-        self.assertEqual(operations, ["relay.topics", "relay.topics"])
+        self.assertEqual(operations, ["relay.topics"])
 
     async def test_unknown_manual_receipt_uses_new_session_and_prevents_resume(
         self,
@@ -147,3 +245,31 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connections, 2)
         self.assertEqual(operations[-1], "orchestration.receipt")
         self.assertNotIn("orchestration.start", operations)
+
+    async def test_drop_automatically_reconnects_before_resuming_intake(self) -> None:
+        connections, operations = await self.run_recovery(pending=False, automatic=True)
+        self.assertEqual(connections, 2)
+        self.assertEqual(operations, ["relay.topics", "inbox.receipt"])
+
+    async def test_automatic_recovery_keeps_unknown_manual_admission_fenced(
+        self,
+    ) -> None:
+        connections, operations = await self.run_recovery(pending=True, automatic=True)
+        self.assertEqual(connections, 2)
+        self.assertEqual(
+            operations, ["relay.topics", "inbox.receipt", "orchestration.receipt"]
+        )
+
+    async def test_lazy_topics_do_not_block_an_unused_collectors_recovery(self) -> None:
+        connections, operations = await self.run_recovery(
+            pending=False, automatic=True, empty_topics=True
+        )
+        self.assertEqual(connections, 2)
+        self.assertEqual(operations, ["relay.topics", "inbox.receipt"])
+
+    async def test_repeated_drops_release_each_retired_session_once(self) -> None:
+        connections, operations = await self.run_recovery(
+            pending=False, reconnections=3
+        )
+        self.assertEqual(connections, 4)
+        self.assertEqual(operations, ["relay.topics"] * 3)

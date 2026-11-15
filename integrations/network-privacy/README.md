@@ -478,6 +478,35 @@ Python independently consumes that exact schedule from the project's
 `schedule.due` stream. Other schedules are ignored. Legacy global schedules are
 not used: SDK ports do not expose system scope.
 
+The packaged `inbox` manifest setting keeps successful background bookkeeping,
+including both `privacy_tick` receipts, in the application's project inbox.
+Successful `investigate_network` and `assess_network_device` results need review
+and notify the application's **current human RBAC Managers**. Failures, approval
+requests and human questions also notify Managers. Installing the application or
+being a server administrator does not itself make someone an alert recipient.
+
+Inspect the application inbox in the console's Inbox screen by entering the
+application project and choosing **Inspect application inbox**, or use the CLI:
+
+```sh
+bin/plowshare-cli --server "$PLOWSHARE_ORIGIN" inbox list '{"project":"network-privacy-watch","limit":50}'
+```
+
+Project Viewers can inspect published application output; Managers can mark its
+shared items read. Personal and application acknowledgements are independent.
+Source-log links retain their separate access checks. The Python SDK exposes the
+same selection through `InboxListRequest(project="network-privacy-watch")`.
+
+Collector stops publish one failure alert per stopped episode. A disconnected
+server can leave the private alert pending; its status remains visible in the
+dashboard. **Check retained work** reads exact publication receipts without
+resending unknown mutations. After restoring connectivity, an operator can stop
+the collector and explicitly send pending alerts with
+`plowshare-privacy --config "$PRIVACY_CONFIG" send-pending-alerts`; this retains the
+original alert identities and never repeats a scan. Deploy compatible server,
+Application source and collector versions together. Existing personal inbox
+history is preserved.
+
 The result route starts `investigate_network` under `privacy_coordinator` for the
 baseline or a changed observation/coverage gap. Unchanged collections are retained
 without launching another model investigation. The
@@ -833,8 +862,19 @@ Absence after retention, mismatched text, or missing evidence leaves the outcome
 unresolved. Retention gaps require explicit operator inspection and acknowledgement
 of the exact loss; the worker does not skip them. An expired parent cannot be
 replaced with a fresh root to bypass causation. SDK disconnection stops collection;
-the dashboard remains available with an attention state. Reconnect by restarting
-after inspecting the recorded outcomes.
+the dashboard remains available while the collector automatically opens a fresh
+session using the same configured service credential. Reconnect attempts back off
+from 2 seconds to at most 60 seconds. A disabled collector without a tool provider
+checks its connection every 30 seconds without starting collection.
+
+Before resuming intake, recovery reads retained scan, upload, tool-result,
+profile/issue and manual-investigation receipts through the public SDK. It never
+resends an uncertain request. Only a positive matching receipt settles an unknown
+effect; missing/conflicting evidence, retention gaps, invalid responses and
+permission refusals leave the collector in an attention state for operator review.
+After resolving those conditions, choose **Check retained work** to run the same
+receipt checks explicitly. Shutdown interrupts reconnect waits and attempts; no
+credentials are rotated and the collector journals keep their original identities.
 
 Journal identity includes deployment scope and collection configuration. A foreign
 journal, competing local owner, excessive queue or corrupt source refuses work.

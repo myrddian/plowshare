@@ -1,3 +1,4 @@
+import { isOneOf } from '../binding/values.ts';
 import { interchangeProblem } from './interchange-validation.ts';
 import { decodeImageAdmissionRequest } from './image-admissions.ts';
 import { procProblem } from './proc.ts';
@@ -955,8 +956,10 @@ export const SHAPES: Record<
   'board.close': [['project', 'topic', 'body', 'requestId'], ['cites']],
   'provider.list': [[], []],
   'provider.deregister': [['provider'], []],
-  'inbox.list': [[], ['unread', 'offset', 'limit']],
-  'inbox.read': [[], ['items']],
+  'inbox.list': [[], ['unread', 'offset', 'limit', 'project']],
+  'inbox.read': [[], ['items', 'project']],
+  'inbox.publish': [['project', 'requestId', 'kind', 'text'], []],
+  'inbox.receipt': [['project', 'requestId'], []],
   'orchestration.start': [
     ['agent', 'definition', 'request', 'requestId'],
     ['project', 'context'],
@@ -1263,7 +1266,9 @@ export function commandProblem(
     type === 'board.open' ||
     type === 'board.close' ||
     type === 'board.retry' ||
-    type === 'message.instance.open'
+    type === 'message.instance.open' ||
+    type === 'inbox.publish' ||
+    type === 'inbox.receipt'
   ) {
     if (
       typeof body['requestId'] !== 'string' ||
@@ -1639,6 +1644,16 @@ export function commandProblem(
     (typeof body['answer'] !== 'string' || body['answer'].trim() === '')
   )
     return 'orchestration.answer needs answer text or structured choices';
+  if (
+    type === 'inbox.publish' &&
+    (!isOneOf(body['kind'], ['finding', 'failure', 'attention']) ||
+      typeof body['text'] !== 'string' ||
+      !body['text'].trim() ||
+      body['text'].length > 131072 ||
+      body['text'].includes('\0'))
+  ) {
+    return 'inbox.publish needs a supported kind and bounded nonblank text';
+  }
   if (
     type === 'inbox.read' &&
     (!isList(body['items']) || body['items'].length === 0)

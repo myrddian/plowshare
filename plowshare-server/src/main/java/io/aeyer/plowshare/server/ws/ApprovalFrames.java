@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.approvals.ConductorContinuation;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.hooks.ApprovalAnswer;
 import java.time.Instant;
@@ -23,6 +24,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -48,13 +50,13 @@ public class ApprovalFrames implements FrameArea {
   private io.aeyer.plowshare.server.approvals.SuspendedRunCalls suspendedCalls;
   private io.aeyer.plowshare.server.approvals.RunApprovalContinuations continuations;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useContinuations(
       io.aeyer.plowshare.server.approvals.RunApprovalContinuations continuations) {
     this.continuations = continuations;
   }
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useSuspendedCalls(io.aeyer.plowshare.server.approvals.SuspendedRunCalls calls) {
     suspendedCalls = calls;
   }
@@ -79,7 +81,7 @@ public class ApprovalFrames implements FrameArea {
   private java.util.function.Supplier<io.aeyer.plowshare.server.agents.Messaging> messageTransport =
       () -> null;
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useMessageProvider(
       ObjectProvider<io.aeyer.plowshare.server.agents.Messaging> provider) {
     messageTransport = provider::getIfAvailable;
@@ -100,6 +102,13 @@ public class ApprovalFrames implements FrameArea {
 
   public void useInformationInputs(io.aeyer.plowshare.server.information.InformationJobs inputs) {
     information = inputs;
+  }
+
+  private ApplicationInbox applications;
+
+  @Autowired
+  public void useApplicationInbox(ApplicationInbox applications) {
+    this.applications = applications;
   }
 
   private boolean readable(RunApproval approval, String handle) {
@@ -242,11 +251,22 @@ public class ApprovalFrames implements FrameArea {
               + " 'decision': once, conversation, project or deny. Nothing was answered.");
     }
     RunApproval approval = found(body.id(), FrameTypes.APPROVAL_ANSWER);
-    if (information != null) information.requireLog(approval.askedIn(), asking.handle());
-    if (approval.handle() == null) {
+    boolean applicationManager =
+        applications != null
+            && applications.managesQuestion(
+                approval.conversation(), approval.askedIn(), asking.handle());
+    if (!applicationManager && information != null)
+      information.requireLog(approval.askedIn(), asking.handle());
+    if (applicationManager) {
+      asking.requireHandle(FrameTypes.APPROVAL_ANSWER);
+    } else if (approval.handle() == null) {
       asking.callerForConversation(callers, approval.conversation());
     } else if (!approval.handle().equals(asking.requireHandle(FrameTypes.APPROVAL_ANSWER))) {
       throw new CallerFault("approval " + approval.id() + " belongs to another account.");
+    }
+    if (applicationManager && approval.handle() == null) {
+      throw new CallerFault(
+          "This background approval has no retained executor identity; nothing was answered.");
     }
     callers.requireSession(asking.sessionId(), asking.handle());
     callers.requireConversationProject(approval.conversation(), asking.handle());

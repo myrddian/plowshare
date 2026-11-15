@@ -33,6 +33,7 @@ import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.auth.AdminStore;
+import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationCancel;
@@ -744,6 +745,36 @@ class OrchestrationFramesTest {
   }
 
   // -- answer ------------------------------------------------------------------------------
+
+  @Test
+  void application_manager_can_answer_but_cannot_read_private_run_or_keep_revoked_authority() {
+    var applications = mock(ApplicationInbox.class);
+    var inputs = mock(InformationJobs.class);
+    var frame =
+        new OrchestrationFrames(
+            store, orchestrations, cancel, todos, providerOf(resolver), projects);
+    frame.useApplicationInbox(applications);
+    frame.useInformationInputs(inputs);
+    router = new FrameRoutingConfig().frameRouter(List.of(frame));
+    var run = run("orc_1", "collector", OrchestrationState.ASKING);
+    when(store.find("orc_1")).thenReturn(Optional.of(run));
+    when(applications.manages(run, "enzo")).thenReturn(true);
+    when(orchestrations.answer("orc_1", "Proceed", "enzo")).thenReturn(true);
+    doThrow(new CallerFault("Private execution log")).when(inputs).requireLog("orc_1", "enzo");
+
+    assertEquals(
+        Code.OK,
+        route(FrameTypes.ORCHESTRATION_ANSWER, "{\"id\":\"orc_1\",\"answer\":\"Proceed\"}").code());
+    verify(inputs, never()).requireLog(any(), any());
+    assertEquals(
+        Code.BAD_REQUEST, route(FrameTypes.ORCHESTRATION_STATUS, "{\"id\":\"orc_1\"}").code());
+
+    when(applications.manages(run, "enzo")).thenReturn(false);
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(FrameTypes.ORCHESTRATION_ANSWER, "{\"id\":\"orc_1\",\"answer\":\"Proceed\"}").code());
+    verify(orchestrations, times(1)).answer("orc_1", "Proceed", "enzo");
+  }
 
   @Test
   void answer_routes_through_the_engine_with_the_handle_as_author() {

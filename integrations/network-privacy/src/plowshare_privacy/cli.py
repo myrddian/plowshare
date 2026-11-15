@@ -31,6 +31,7 @@ from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 from .advisories import NvdAdvisories
 from .ask import compose_ask
 from .assessment_port import SdkAssessmentPort
+from .attention import AttentionOutbox, SdkAttentionPort
 from .collection import NetworkCollector
 from .collector_factory import configured_collector
 from .console import FileManualInvestigations, OperatorConsole
@@ -211,6 +212,12 @@ async def execute(args: argparse.Namespace) -> None:
                 operator_store,
                 PresenceWatch(PresenceHistory(config.state_directory)),
             )
+            worker.attention = AttentionOutbox(
+                config.state_directory, SdkAttentionPort(lambda: client, config.project)
+            )
+            if args.command == "send-pending-alerts":
+                print(json.dumps({"confirmed": await worker.attention.send_pending()}))
+                return
             # The record and request services are composed before the native tool
             # provider, whose assistant tools use them (see assistant_tools).
             issues = (
@@ -405,88 +412,80 @@ async def execute(args: argparse.Namespace) -> None:
             async def recover(reconcile_manual: Callable[[], Awaitable[None]]) -> None:
                 nonlocal client, native
                 async with worker.request_lock:
+                    if worker.recovery_requested.is_set():
+                        return  # A serialized manual/automatic check already settled this stop.
                     if worker.state == "attention_required":
-                        # Explicit operator recovery creates one fresh SDK session.
-                        # No request is retried; journals remain their owning stores.
-                        replacement = await connections.enter_async_context(
-                            await Client.connect(
-                                worker.config.origin,
-                                credential(worker.config.token_environment),
-                                timeout=15,
-                            )
+                        # Recovery replaces the session, never an application
+                        # request. Candidate ownership includes cancellation;
+                        # only one adopted session remains on the exit stack.
+                        replacement = await Client.connect(
+                            worker.config.origin,
+                            credential(worker.config.token_environment),
+                            timeout=15,
                         )
                         candidate_port = SdkPrivacyPort(replacement, worker.config)
                         try:
-                            available = await candidate_port.available_topics()
-                            if (
-                                not {
-                                    worker.config.request_topic,
-                                    worker.config.result_topic,
-                                }
-                                <= available
-                            ):
-                                raise ReconciliationRequired(
-                                    "Required Relay topics remain unavailable"
-                                )
-                        except (
-                            Refusal,
-                            TransportError,
-                            ValueError,
-                            ReconciliationRequired,
-                        ):
+                            # Establish current project access. Topics are created
+                            # lazily on publication; an unused/paused collector
+                            # may legitimately have no request or result topic.
+                            await candidate_port.available_topics()
+                        except BaseException:
                             await replacement.close()
                             raise
-                        old = client
-                        client = replacement
-                        worker.port = candidate_port
-                        if issues is not None:
-                            issues.port = SdkIssuePort(
-                                replacement, worker.config, worker.port
-                            )
-                        if profiles is not None:
-                            profiles.port = SdkProfilePort(
-                                replacement, worker.config, worker.port
-                            )
-                        if console is not None:
-                            console.port = SdkConsolePort(
-                                replacement, worker.config, assistant_conversation
-                            )
-                        if references is not None:
-                            references.library.port = SdkReferencePort(
-                                replacement, project_scope(worker.config.project)
-                            )
-                        if dossiers is not None:
-                            dossiers.port = SdkDossierPort(
-                                replacement, worker.config, worker.port
-                            )
-                        if native_journal is not None:
-                            native = ToolProvider(
-                                replacement,
-                                project=worker.config.project,
-                                provider=args.tool_provider,
-                                account=args.tool_account,
-                                tools=registered(assistant_tools()),
-                                journal=native_journal,
-                            )
-                            if active_requests is None:
-                                raise ValueError("Missing configured provider dispatch")
-                            active_requests.target = CataloguedProvider(
-                                native,
-                                worker.config.state_directory,
-                                args.tool_catalog_renew_seconds,
-                            )
-                        await old.close()
+                        previous = connections.pop_all()
+                        try:
+                            client = await connections.enter_async_context(replacement)
+                            worker.port = candidate_port
+                            if issues is not None:
+                                issues.port = SdkIssuePort(
+                                    replacement, worker.config, worker.port
+                                )
+                            if profiles is not None:
+                                profiles.port = SdkProfilePort(
+                                    replacement, worker.config, worker.port
+                                )
+                            if console is not None:
+                                console.port = SdkConsolePort(
+                                    replacement, worker.config, assistant_conversation
+                                )
+                            if references is not None:
+                                references.library.port = SdkReferencePort(
+                                    replacement, project_scope(worker.config.project)
+                                )
+                            if dossiers is not None:
+                                dossiers.port = SdkDossierPort(
+                                    replacement, worker.config, worker.port
+                                )
+                            if native_journal is not None:
+                                native = ToolProvider(
+                                    replacement,
+                                    project=worker.config.project,
+                                    provider=args.tool_provider,
+                                    account=args.tool_account,
+                                    tools=registered(assistant_tools()),
+                                    journal=native_journal,
+                                )
+                                if active_requests is None:
+                                    raise ValueError(
+                                        "Missing configured provider dispatch"
+                                    )
+                                active_requests.target = CataloguedProvider(
+                                    native,
+                                    worker.config.state_directory,
+                                    args.tool_catalog_renew_seconds,
+                                )
+                        finally:
+                            await previous.aclose()
+                    else:
+                        await worker.port.available_topics()
                     await worker.reconcile()
                     if native is not None:
                         await native.reconcile()
-                    topics = await worker.port.available_topics()
-                    if (
-                        not {worker.config.request_topic, worker.config.result_topic}
-                        <= topics
-                    ):
-                        raise ReconciliationRequired(
-                            "Required Relay topics remain unavailable"
-                        )
+                        if native_journal is not None and any(
+                            receipt.phase == "publishing"
+                            for receipt in native_journal.all()
+                        ):
+                            raise ToolAttention("Tool result outcome remains unknown")
                     if issues is not None:
                         await issues.reconcile()
                     if profiles is not None:
@@ -510,6 +509,17 @@ async def execute(args: argparse.Namespace) -> None:
                 if operator_store and settings and discovery
                 else None
             )
+
+            async def automatic_recovery() -> None:
+                # Share the console's lock and manual-admission receipt checks.
+                # Standalone collectors have no manual admission surface.
+                if console is not None:
+                    await console.check_and_resume()
+                else:
+                    await recover(no_manual_receipts)
+
+            async def no_manual_receipts() -> None:
+                return
 
             def schedule_runtime(current: Configuration) -> ScheduleRuntime:
                 if (
@@ -657,6 +667,7 @@ async def execute(args: argparse.Namespace) -> None:
                         stop,
                         active_requests,
                         settings.apply_pending if settings else None,
+                        automatic_recovery,
                     )
                 )
                 if research is not None:
@@ -725,6 +736,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands.add_parser(
         "reconcile", help="Read retained records to settle unknown receipts"
+    )
+    commands.add_parser(
+        "send-pending-alerts",
+        help="Explicitly submit unconfirmed inbox alerts using their retained identities; stop the collector first",
     )
     schedule = commands.add_parser(
         "install-schedule", help="Create a paused project schedule through the SDK"
