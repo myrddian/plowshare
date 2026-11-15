@@ -18,6 +18,10 @@ public interface RelayLogRepository {
 
   List<Relay.Topic> topics(Relay.Scope scope, int limit);
 
+  /**
+   * Reads an existing scoped topic without creating it. Missing topics raise {@code NotFoundFault};
+   * a position beyond the current log raises {@code CallerFault}. Neither failure is cached.
+   */
   Snapshot read(Relay.TopicKey topic, long after, int limit, String account);
 
   record Branch(

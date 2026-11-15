@@ -1103,6 +1103,12 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
     if (project == null || machine == null || root == null) {
       return true;
     }
+    // Match ordinary names' Unicode whitespace rule as well as Presence's ASCII trimming. Reject
+    // before normalization can turn a refused client claim into creation of a different name.
+    if (!project.equals(project.strip()) || !project.equals(project.trim())) {
+      refuse(socket, id, "Project names must not start or end with whitespace");
+      return false;
+    }
     Presence claim;
     try {
       claim = new Presence(id, machine, root, project);

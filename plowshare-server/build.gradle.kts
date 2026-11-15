@@ -321,8 +321,24 @@ tasks.named<Test>("test") {
     inputs.file(rootProject.file("docs/examples/scripted-orchestrations/catalogue_inventory.js"))
     inputs.file(rootProject.file("deploy/docker/server-filestores.sh"))
     systemProperty("plowshare.docker.filestores", rootProject.file("deploy/docker/server-filestores.sh").absolutePath)
-    useJUnitPlatform { excludeTags("node-source") }
+    useJUnitPlatform { excludeTags("node-source", "large-transport") }
 }
+
+// The worst-case escaped request and its echoed response retain several large byte/character
+// copies in the same process. A fresh JVM avoids a late-suite heap exhaustion being misreported
+// as packet expiry. Keep this real socket acceptance in ordinary check, without database opt-in.
+val largeTransportTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs the large segmented-message socket acceptance in an isolated JVM."
+    dependsOn(tasks.named("testClasses"))
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform { includeTags("large-transport") }
+    filter { includeTestsMatching("io.aeyer.plowshare.server.ws.PacketTransportTest") }
+    maxHeapSize = "1g"
+    shouldRunAfter(tasks.named("test"))
+}
+tasks.named("check") { dependsOn(largeTransportTest) }
 
 // Cross-runtime file-channel acceptance belongs to the TS adapter check. Keep
 // the ordinary Java server test task usable without a Node installation.

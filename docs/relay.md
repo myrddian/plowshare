@@ -523,6 +523,13 @@ receipts and conversation links are returned only to their submitting owner.
 Owned conversation links carry their current project metadata so clients route
 archived handler logs through the normal authorized project session.
 
+Reading a topic that does not exist in the selected scope returns `not_found`;
+an `after` position beyond its current log returns `bad_request`. A failed
+authorized log read emits a warning with the operation, scope, project, topic,
+effective position and limit, and failure type. These diagnostics omit account
+identities, payloads and exception messages; unexpected failures retain the
+shared fault handler's error stack trace.
+
 A Relay-started agent or conductor's initial trajectory utterance records
 `source: {kind: "relay", reference: <delivery UUID>}`. This is the immediate
 delivery identity, distinct from the event ID and effect-budget ancestry; the

@@ -860,7 +860,8 @@ plowshare-cli admin account update '{"handle":"sam","projectCreator":true}'
 
 In the desktop server administration dialog, **Allow creating projects** grants
 the role and **Revoke project creator role** removes it; an account that holds
-it shows "May create projects". `projectCreator:false` revokes the role. The
+it shows "May create projects" while enabled. Disabled holders show "Project creator
+role held; creation blocked while disabled". `projectCreator:false` revokes the role. The
 account listing reports it, including for a disabled account, which keeps the
 role but cannot create projects until it is enabled again.
 

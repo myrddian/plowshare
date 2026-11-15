@@ -14,6 +14,8 @@ import io.aeyer.plowshare.server.session.SessionRegistry;
 import io.aeyer.plowshare.server.ws.EventChannelHandler;
 import io.aeyer.plowshare.server.ws.FileChannelHandler;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -29,8 +31,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -163,6 +169,74 @@ class ProjectMembersTest {
     assertEquals(List.of("carol"), members.members("sundial"));
     assertEquals(ProjectRole.MANAGER, members.role("sundial", "carol").orElseThrow());
     assertEquals("laptop", store().rootedElsewhere("sundial").orElseThrow());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {" sundial", "sundial ", "\u2003sundial", "sundial\u2003"})
+  void file_channel_refuses_edge_whitespace_without_creating_a_normalized_row(String name)
+      throws Exception {
+    creator("carol");
+    var presences = new PresenceRegistry();
+    ProjectStore projects = store();
+    var channel =
+        new FileChannelHandler(
+            new SessionRegistry(),
+            presences,
+            projects::rootOn,
+            members,
+            new JdbcProjectCreatorGrants(jdbc)::mayCreate,
+            projects);
+    var socket = mock(WebSocketSession.class);
+    when(socket.getUri())
+        .thenReturn(
+            URI.create(
+                "ws://localhost/v1/files?session=desk&project="
+                    + URLEncoder.encode(name, StandardCharsets.UTF_8)
+                    + "&machine=laptop&root=/repo&ready=1"));
+    var attributes = new HashMap<String, Object>();
+    attributes.put(EventChannelHandler.HANDLE, "carol");
+    when(socket.getAttributes()).thenReturn(attributes);
+
+    channel.afterConnectionEstablished(socket);
+
+    var status = ArgumentCaptor.forClass(CloseStatus.class);
+    verify(socket).close(status.capture());
+    assertEquals(1003, status.getValue().getCode());
+    assertEquals(0, rows(name));
+    assertEquals(0, rows(name.strip()));
+    assertTrue(members.members(name.strip()).isEmpty());
+    assertTrue(presences.serving(name.strip()).isEmpty());
+    assertFalse(channel.isConnected("desk"));
+  }
+
+  @Test
+  void self_replacement_returns_a_domain_refusal_and_preserves_membership_and_audit() {
+    creator("carol");
+    store().rootOn("sundial", "laptop", "/repo", "carol");
+    var grants =
+        jdbc.queryForList(
+            "SELECT to_jsonb(g)::text FROM authority_grants g ORDER BY id", String.class);
+    var audit =
+        jdbc.queryForList(
+            "SELECT to_jsonb(a)::text FROM authority_grant_audit a ORDER BY id", String.class);
+
+    var refused =
+        assertThrows(
+            ArchiveRefusedException.class,
+            () -> members.assign("sundial", "carol", ProjectRole.MANAGER, "carol", false));
+
+    assertEquals(
+        "Replacing your issuing membership requires another manager", refused.getMessage());
+    assertEquals(List.of("carol"), members.members("sundial"));
+    assertEquals(ProjectRole.MANAGER, members.role("sundial", "carol").orElseThrow());
+    assertEquals(
+        grants,
+        jdbc.queryForList(
+            "SELECT to_jsonb(g)::text FROM authority_grants g ORDER BY id", String.class));
+    assertEquals(
+        audit,
+        jdbc.queryForList(
+            "SELECT to_jsonb(a)::text FROM authority_grant_audit a ORDER BY id", String.class));
   }
 
   @Test
