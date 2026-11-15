@@ -80,7 +80,7 @@ publishes no personal alert.
 
 ## Compatibility, verification and rollout
 
-V264 adds application ownership/attention columns and an application page index,
+V265 adds application ownership/attention columns and an application page index,
 and extends the complete V74 inbox category constraint. Existing rows retain
 personal ownership. It does not rewrite shipped migrations or move inbox history.
 Shared TypeScript contracts and generated Java/Python/Go/.NET catalogs include

@@ -1,13 +1,29 @@
 package io.aeyer.plowshare.protocol;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.time.*;
-import java.util.*;
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.Arrays;
+import java.util.Currency;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 
 /** Immutable usage snapshot contracts; quantities use decimal strings to preserve precision. */
 public final class Usage {
   private Usage() {}
 
+  /**
+   * Selectors shared by requests and their resolved response echo. Unselected fields are omitted on
+   * the wire: public operation contracts allow absent selectors, not explicit null values.
+   */
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   public record Filter(
       String conversation,
       String project,
@@ -78,8 +94,7 @@ public final class Usage {
     }
   }
 
-  @com.fasterxml.jackson.annotation.JsonInclude(
-      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   public record Aggregate(
       String day,
       String model,
@@ -154,22 +169,14 @@ public final class Usage {
     }
   }
 
-  @com.fasterxml.jackson.annotation.JsonInclude(
-      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   public record Health(
-      @com.fasterxml.jackson.annotation.JsonFormat(
-              shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
-          @JsonProperty("tracking_started_at")
+      @JsonFormat(shape = JsonFormat.Shape.STRING) @JsonProperty("tracking_started_at")
           Instant trackingStartedAt,
-      @com.fasterxml.jackson.annotation.JsonFormat(
-              shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
-          @JsonProperty("last_projected_at")
+      @JsonFormat(shape = JsonFormat.Shape.STRING) @JsonProperty("last_projected_at")
           Instant lastProjectedAt,
       String watermark,
-      @com.fasterxml.jackson.annotation.JsonFormat(
-              shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
-          @JsonProperty("as_of")
-          Instant asOf,
+      @JsonFormat(shape = JsonFormat.Shape.STRING) @JsonProperty("as_of") Instant asOf,
       @JsonProperty("historical_usage") String historicalUsage,
       @JsonProperty("capture_enabled") boolean captureEnabled,
       @JsonProperty("pending_events") String pendingEvents,
@@ -177,9 +184,7 @@ public final class Usage {
       @JsonProperty("journal_capacity_bytes") String journalCapacityBytes,
       @JsonProperty("journal_problem") String journalProblem,
       @JsonProperty("projection_lag_millis") String projectionLagMillis,
-      @com.fasterxml.jackson.annotation.JsonFormat(
-              shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
-          @JsonProperty("oldest_pending_at")
+      @JsonFormat(shape = JsonFormat.Shape.STRING) @JsonProperty("oldest_pending_at")
           Instant oldestPendingAt,
       @JsonProperty("buffered_terminal_events") Integer bufferedTerminalEvents,
       @JsonProperty("lost_terminal_events") String lostTerminalEvents,
@@ -207,7 +212,7 @@ public final class Usage {
 
   public record Updated(String subscription, long revision, Report report) implements ServerPush {
     public Updated {
-      java.util.UUID.fromString(subscription);
+      UUID.fromString(subscription);
       if (revision < 1) throw new IllegalArgumentException("invalid snapshot revision");
       Objects.requireNonNull(report);
     }
@@ -215,7 +220,7 @@ public final class Usage {
 
   public record Closed(String subscription, String code) implements ServerPush {
     public Closed {
-      java.util.UUID.fromString(subscription);
+      UUID.fromString(subscription);
       if (!"BAD_REQUEST".equals(code))
         throw new IllegalArgumentException("invalid subscription close code");
     }
@@ -224,7 +229,7 @@ public final class Usage {
   private static void currency(String value) {
     if (value == null || !value.matches("[A-Z]{3}"))
       throw new IllegalArgumentException("invalid cost currency");
-    java.util.Currency.getInstance(value);
+    Currency.getInstance(value);
   }
 
   private static void count(String value, String field, boolean optional) {
@@ -235,7 +240,7 @@ public final class Usage {
 
   private static void decimal(String value, String field, boolean optional) {
     if (value == null && optional) return;
-    if (value == null || value.length() > 128 || new java.math.BigDecimal(value).signum() < 0)
+    if (value == null || value.length() > 128 || new BigDecimal(value).signum() < 0)
       throw new IllegalArgumentException(field + " must be a nonnegative decimal string");
   }
 
@@ -259,8 +264,7 @@ public final class Usage {
     }
   }
 
-  @com.fasterxml.jackson.annotation.JsonInclude(
-      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   public record Attempt(
       @JsonProperty("attempt_id") String attemptId,
       @JsonProperty("attempt_number") int attemptNumber,
@@ -284,7 +288,7 @@ public final class Usage {
       @JsonProperty("start_accounting_millis") Long startAccountingMillis,
       @JsonProperty("cost_reasons") List<String> costReasons) {
     public Attempt {
-      java.util.UUID.fromString(attemptId);
+      UUID.fromString(attemptId);
       if (attemptNumber < 1) throw new IllegalArgumentException("attemptNumber must be positive");
       for (String quantity :
           new String[] {
@@ -339,18 +343,11 @@ public final class Usage {
     }
   }
 
-  @com.fasterxml.jackson.annotation.JsonInclude(
-      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   public record Call(
       @JsonProperty("call_id") String callId,
-      @com.fasterxml.jackson.annotation.JsonFormat(
-              shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
-          @JsonProperty("created_at")
-          Instant createdAt,
-      @com.fasterxml.jackson.annotation.JsonFormat(
-              shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
-          @JsonProperty("ended_at")
-          Instant endedAt,
+      @JsonFormat(shape = JsonFormat.Shape.STRING) @JsonProperty("created_at") Instant createdAt,
+      @JsonFormat(shape = JsonFormat.Shape.STRING) @JsonProperty("ended_at") Instant endedAt,
       String lifecycle,
       String pool,
       @JsonProperty("wire_model") String wireModel,
@@ -374,7 +371,7 @@ public final class Usage {
       List<Attempt> attempts,
       @JsonProperty("attempts_truncated") boolean attemptsTruncated) {
     public Call {
-      java.util.UUID.fromString(callId);
+      UUID.fromString(callId);
       Objects.requireNonNull(createdAt);
       Objects.requireNonNull(lifecycle);
       Usage.lifecycle(lifecycle);

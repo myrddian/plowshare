@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.cache;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
 
@@ -215,6 +216,15 @@ public interface SnapshotCache<T> extends AutoCloseable {
    * independently enforce every caller's current authorization and disclosure/audit boundary.
    */
   Read<T> readInline(Request request, Loader<T> loader);
+
+  /**
+   * Looks up a resident value and updates its recency without loading, joining an in-flight load,
+   * allocating a waiter or waiting for SQL. Recovery and misses return empty.
+   */
+  default Optional<Tracked<T>> peek(Request request) {
+    Objects.requireNonNull(request);
+    return Optional.empty();
+  }
 
   /** Invalidates all versions for this address in O(affected entries/loads/dependencies). */
   void invalidate(Key key);

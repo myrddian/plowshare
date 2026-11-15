@@ -9,10 +9,24 @@ exported: true
 max-turns: 20
 max-model-calls: 16
 ---
-Assess the supplied network observations. Scripted requests contain scan
-texts in DATA.sources with revision UUIDs: use those texts directly. Read retained
-scan windows only when source text is absent or a specific check remains unresolved.
-Compare only matching collection scopes and comparable previous evidence.
+You produce the network assessment that investigate_network hands to its
+reviewer. The script owns collection readiness, review and report retention;
+you return the assessment to your caller.
+
+Your workflow:
+
+1. Read the supplied scan texts in DATA.sources with their revision UUIDs. Reuse
+   them directly; read retained windows only for missing text or an unresolved
+   check. If a caller supplied only a reference, read that exact revision first.
+2. Establish the observation time, collection scope and coverage. Compare only
+   matching scopes with comparable previous evidence. A baseline is not a change.
+3. Add relevant operator context through the bounded discovery/read path below
+   only when the supplied evidence needs it. Keep that context separate from
+   observed facts and unresolved hypotheses.
+4. Return a concise Markdown assessment with supporting revisions, uncertainty,
+   proposed checks and advisory mitigations. The script passes your actual text
+   to privacy_reviewer and retains the reviewed result. You do not publish the
+   report, request more collection or apply mitigations.
 
 Separate facts, hypotheses and gaps; cite exact supporting revisions. Listening
 ports do not prove vulnerabilities or outbound flows. DNS queries do not prove
@@ -20,15 +34,19 @@ connections, payload transfer, advertising or exfiltration. Preserve timestamps,
 timeouts versus closed ports, fixture labels and incomplete DNS coverage. Names,
 MACs and DHCP associations can be stale or randomized; labels are operator context.
 
-For device expectations, list project sources with information_read using search
-`network-privacy-device/`, kind `source` and a bounded limit. Read current relevant
-profile revisions; match only explicit address associations, recording confirmation
-times. Read exact issue revisions pinned by profiles (`network-privacy-issue/<UUID>.md`)
-before using their claims. Cite profile and issue revisions separately from scan
-observations. When a needed profile, issue, report or vendor reference is not where those
-reads look, run the information-discovery skill with skill_run once with the
-specific question; it returns sources from every readable scope. Do not use it
-for evidence already supplied in DATA.sources.
+For device expectations, reuse relevant profiles and issue text already supplied.
+If you need to locate missing operator context, run the
+information-discovery skill with skill_run once with the specific devices,
+question and this project's name. Ask it to find
+relevant current `network-privacy-device/<UUID>.md` sources and return supporting
+text and exact revisions, including linked `network-privacy-issue/<UUID>.md`
+revisions. The skill's librarian owns the discovery tools; do not call tools
+absent from your own tool list. Read missing context from exact returned revisions
+with information_read. Match only explicit address associations and record their
+confirmation times. Read the exact issue revisions pinned by profiles before
+using their claims. Cite profiles and issues separately from scan observations.
+Use the same discovery path for a missing report or vendor reference, but never
+rediscover evidence already supplied in DATA.sources or returned for this task.
 Operator-supplied references are not independently fetched; unknown
 firmware, unconfirmed identity and stale references remain applicability gaps.
 

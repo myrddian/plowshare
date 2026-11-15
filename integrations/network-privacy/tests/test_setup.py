@@ -103,11 +103,11 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
                 None,
                 (
                     ServerAccountDto(
-                        project_creator=False,
                         created_at=STAMP,
                         enabled=True,
                         handle="operator",
                         must_change_password=False,
+                        project_creator=False,
                         server_admin=False,
                     ),
                 ),

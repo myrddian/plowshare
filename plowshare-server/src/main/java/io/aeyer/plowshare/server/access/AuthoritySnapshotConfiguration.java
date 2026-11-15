@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -69,8 +70,19 @@ public class AuthoritySnapshotConfiguration {
   @Primary
   public ScopedGrantRepository cachedScopedGrantRepository(
       @Qualifier("jdbcScopedGrantRepository") ScopedGrantRepository stored,
-      AuthoritySnapshots snapshots) {
-    return new CachedScopedGrantRepository(stored, snapshots);
+      @Qualifier("jdbcScopedGrantRepository") CheckedScopedGrants checked,
+      AuthoritySnapshots snapshots,
+      AuthoritySnapshotRefresh refresh,
+      AuthorityCheckTelemetry telemetry,
+      @Value("${plowshare.authority.confirm-in-transaction:false}") boolean confirmInTransaction) {
+    return new CachedScopedGrantRepository(
+        stored, checked, snapshots, refresh, telemetry, confirmInTransaction);
+  }
+
+  /** A single coalesced worker reloads committed snapshots outside grant readers' transactions. */
+  @Bean(destroyMethod = "close")
+  public AsyncAuthoritySnapshotRefresh authoritySnapshotRefresh(AuthoritySnapshots snapshots) {
+    return new AsyncAuthoritySnapshotRefresh(snapshots);
   }
 
   /**

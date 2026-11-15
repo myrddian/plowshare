@@ -32,6 +32,19 @@ public interface AuthorityCheckTelemetry {
     REFUSED
   }
 
+  /** How one live-grant or lineage read was answered; tags never contain identities. */
+  enum GrantOutcome {
+    SNAPSHOT,
+    CONFIRMED,
+    SQL_DIRTY,
+    SQL_VERSION,
+    SQL_ISOLATION,
+    SQL_INELIGIBLE
+  }
+
+  /** Default keeps existing telemetry consumers source compatible. */
+  default void grant(GrantOutcome outcome) {}
+
   void admission(AdmissionOutcome outcome);
 
   void session(SessionOutcome outcome);

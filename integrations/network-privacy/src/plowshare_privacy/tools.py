@@ -106,12 +106,12 @@ DEFINITIONS = (
     ),
     ToolDefinition(
         "network.scan_list",
-        "List paged local collection receipts (offset/limit), with bounded previews and full counts.",
+        "List paged local collection receipts (offset/limit), with bounded previews and full counts. These are scans, not investigation reports or assessed findings. Reports are retained separately in the information store; the Ask assistant locates and reads them with its information-discovery skill.",
         "read",
     ),
     ToolDefinition(
         "network.evidence",
-        "Read retained evidence. Large scans return counts; use section tcp/dns/devices/changes/issues with offset/limit and follow next_offset.",
+        "Read retained scan evidence, not an investigation report or assessment. Counts describe records: TCP probe outcomes, DNS observations and monitored address identities, which can be unidentified. Coverage issues are collection gaps, not diagnosed device faults. Large scans return counts; use section tcp/dns/devices/changes/issues with offset/limit and follow next_offset. When issues_complete is false, read section issues for the omitted issues. The Ask assistant retrieves reports separately with its information-discovery skill.",
         "read",
         "scan_id",
     ),

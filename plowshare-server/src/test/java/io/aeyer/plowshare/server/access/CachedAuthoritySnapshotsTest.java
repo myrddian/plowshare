@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -161,5 +162,20 @@ class CachedAuthoritySnapshotsTest {
             () -> fail("A disabled cache must not load a snapshot"),
             ReadAdmission.direct());
     assertTrue(disabled.current().isEmpty());
+  }
+
+  @Test
+  void refreshRetiresTrustedEvidenceBeforeStartingTheVersionedLoad() {
+    @SuppressWarnings("unchecked")
+    ProjectionCache<Optional<AuthoritySnapshot>> cache = mock(ProjectionCache.class);
+    when(cache.enabled()).thenReturn(true);
+    when(cache.read(any(), eq(true), any(), any(), any())).thenReturn(Optional.empty());
+    var snapshots =
+        new CachedAuthoritySnapshots(cache, () -> Optional.of(facts()), ReadAdmission.direct());
+    snapshots.refresh();
+    var order = inOrder(cache);
+    order.verify(cache).invalidate(any(SnapshotCache.Key.class));
+    order.verify(cache).enabled();
+    order.verify(cache).read(any(), eq(true), any(), any(), any());
   }
 }
