@@ -121,7 +121,13 @@ import { FilePresence } from './files.ts';
 import { DesktopSync } from './sync.ts';
 import type { FileOpener } from './files.ts';
 import { ActivityClient } from './activity.ts';
-import { activeJob, homeKey, contextKey, emptyActivity } from './shared.ts';
+import {
+  activeJob,
+  homeKey,
+  contextKey,
+  emptyActivity,
+  THINKING_PREVIEW_CHARACTERS,
+} from './shared.ts';
 import type {
   DesktopState,
   Job,
@@ -2712,7 +2718,14 @@ export class DesktopClient {
       job.text += delta.text;
       job.phase = 'answer';
     } else if (delta?.part === 'thinking') {
-      job.thinking = (job.thinking ?? '') + delta.text;
+      // Bound the model-published preview before state is emitted over IPC.
+      // Answer/history text has a different, durable owner and is not capped here.
+      const previous = job.thinking ?? '';
+      if (previous.length + delta.text.length > THINKING_PREVIEW_CHARACTERS)
+        job.thinkingTruncated = true;
+      job.thinking = (previous + delta.text).slice(
+        -THINKING_PREVIEW_CHARACTERS,
+      );
       job.phase = 'thinking';
     } else if (!delta) {
       job.events.push(notice);
@@ -2810,6 +2823,8 @@ export class DesktopClient {
     const ending = outcome?.ending;
     if (tracked?.state === 'finished' && typeof ending === 'string') {
       job.status = 'finished';
+      delete job.thinking;
+      delete job.thinkingTruncated;
       job.ending = ending;
       if (typeof outcome?.text === 'string') job.text = outcome.text;
       job.detail = ended?.detail;

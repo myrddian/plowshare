@@ -24,7 +24,12 @@ import assert from 'node:assert/strict';
 import { DesktopClient, validatedBase } from './client.ts';
 import type { Connector } from './client.ts';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
-import { contextKey, replyState, stoppedJob } from './shared.ts';
+import {
+  contextKey,
+  replyState,
+  stoppedJob,
+  THINKING_PREVIEW_CHARACTERS,
+} from './shared.ts';
 import { runWire, statusWire } from './run-fixtures.ts';
 
 function fixture(
@@ -1692,6 +1697,122 @@ await test('early events and simultaneous runs are attributed by job handle, ind
     f.calls.find((call) => call.type === 'agent.run')?.payload.session,
     'desktop-session',
   );
+});
+
+await test('published reasoning retains a bounded tail across chunks and phases without mixing jobs', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Task',
+  });
+  const job = present(f.client.state.jobs[0]);
+  f.push({ job: 'unrelated-job', part: 'THINKING', text: 'foreign reasoning' });
+  assert.equal(Object.hasOwn(job, 'thinking'), false);
+  f.push({ job: 'job-one', part: 'THINKING', text: 'a'.repeat(8000) });
+  f.push({
+    job: 'job-one',
+    part: 'THINKING',
+    text: 'b'.repeat(THINKING_PREVIEW_CHARACTERS - 8000),
+  });
+  assert.equal(job.thinking?.length, THINKING_PREVIEW_CHARACTERS);
+  assert.equal(job.thinkingTruncated, undefined);
+  f.push({ job: 'job-one', part: 'THINKING', text: ' tail' });
+  assert.equal(
+    job.thinking,
+    'a'.repeat(7995) + 'b'.repeat(THINKING_PREVIEW_CHARACTERS - 8000) + ' tail',
+  );
+  assert.equal(job.thinkingTruncated, true);
+  f.push({ job: 'job-one', part: 'ANSWER', text: 'partial answer' });
+  assert.equal(job.phase, 'answer');
+  assert.equal(job.text, 'partial answer');
+  assert.equal(job.thinkingTruncated, true);
+  f.push({ job: 'job-one', part: 'THINKING', text: ' continued' });
+  assert.equal(job.thinking?.length, THINKING_PREVIEW_CHARACTERS);
+  assert.equal(job.thinking?.endsWith(' tail continued'), true);
+  assert.equal(job.thinkingTruncated, true);
+  assert.equal(job.text, 'partial answer');
+});
+
+await test('an oversized reasoning delta before acceptance is bounded when its job is identified', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  const preview = 'prefix' + 'x'.repeat(THINKING_PREVIEW_CHARACTERS) + 'suffix';
+  f.run(async () => {
+    f.push({ job: 'early-job', part: 'THINKING', text: preview });
+    return { code: 'ACCEPTED', payload: { id: 'early-job' } };
+  });
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Task',
+  });
+  const job = present(f.client.state.jobs[0]);
+  assert.equal(job.id, 'early-job');
+  assert.equal(job.thinking, preview.slice(-THINKING_PREVIEW_CHARACTERS));
+  assert.equal(job.thinkingTruncated, true);
+  f.push({ job: 'early-job', part: 'THINKING', text: '\0invalid' });
+  assert.equal(job.thinking, preview.slice(-THINKING_PREVIEW_CHARACTERS));
+  await f.client.dispatch({ action: 'demo' });
+  f.push({ job: 'early-job', part: 'THINKING', text: 'late old-account text' });
+  assert.equal(
+    f.client.state.jobs.some((row) => row.id === 'early-job'),
+    false,
+  );
+  assert.equal(
+    f.client.state.jobs.some((row) =>
+      row.thinking?.includes('late old-account'),
+    ),
+    false,
+  );
+});
+
+await test('durable completion clears reasoning and its truncation while preserving the full final answer', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Task',
+  });
+  f.push({
+    job: 'job-one',
+    part: 'THINKING',
+    text: 'r'.repeat(THINKING_PREVIEW_CHARACTERS + 1),
+  });
+  f.push({
+    job: 'job-one',
+    part: 'ANSWER',
+    text: 'incomplete streamed answer',
+  });
+  const finalAnswer =
+    'authoritative ' + 'z'.repeat(THINKING_PREVIEW_CHARACTERS + 100);
+  f.status(() => ({
+    code: 'OK',
+    payload: {
+      id: 'job-one',
+      state: 'DONE',
+      outcome: { ending: 'ANSWERED', answered: true, text: finalAnswer },
+    },
+  }));
+  f.push({ job: 'job-one', kind: 'ended', ending: 'ANSWERED' });
+  await tick();
+  const job = present(f.client.state.jobs[0]);
+  assert.equal(job.status, 'finished');
+  assert.equal(job.text, finalAnswer);
+  assert.equal('thinking' in job, false);
+  assert.equal('thinkingTruncated' in job, false);
+  f.push({ job: 'job-one', part: 'THINKING', text: 'late preview' });
+  f.push({ job: 'job-one', part: 'ANSWER', text: 'late incomplete answer' });
+  assert.equal(job.text, finalAnswer);
+  assert.equal(job.thinking, undefined);
 });
 
 await test('cancellation remains pending until job.status confirms an outcome', async (t) => {

@@ -47,6 +47,7 @@
     "test:builder": "node scripts/build.mjs && node --experimental-strip-types scripts/builder-smoke.mjs",
     "test:controls": "node scripts/build.mjs && node --experimental-strip-types scripts/controls-smoke.mjs",
     "test:transport": "node scripts/build.mjs && node --experimental-strip-types scripts/transport-smoke.mjs",
+    "test:reasoning": "node scripts/build.mjs && node --experimental-strip-types scripts/reasoning-smoke.mjs",
     "test:recovery": "node scripts/build.mjs && node --experimental-strip-types scripts/recovery-smoke.mjs",
     "test:commands": "node scripts/build.mjs && node --experimental-strip-types scripts/commands-smoke.mjs",
     "test:usage": "node scripts/build.mjs && node --experimental-strip-types scripts/usage-smoke.mjs",

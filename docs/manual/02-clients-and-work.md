@@ -46,6 +46,15 @@ inference. Each tool has its own execution time. Missing usage is shown as not r
 and a recorded zero remains zero. These counts describe past inference calls; the
 Context panel constructs the next request and its separate token count.
 
+During an ordinary live run, desktop chat shows the model's **Published reasoning**
+above its answer. The preview opens automatically and can be collapsed; new text
+does not reopen it or move your reading position when you scroll back. It retains
+the latest 16,384 characters and marks omitted earlier text. Reasoning stays
+separate from the answer, and completion replaces previews with the server's
+recorded result. Trajectory shows recorded reasoning when available. Providers
+that publish no reasoning text produce no preview; confined work and output
+inspection policies can also withhold streaming text.
+
 Trajectory entries also explain their model-context policy. Approval diagnostics say
 “Not sent to model”; runtime notes say “Active run only” because they were delivered
 in that run and are not replayed later. Hook records stay outside model context,

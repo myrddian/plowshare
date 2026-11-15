@@ -56,6 +56,7 @@ import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.CallAuthorization;
+import io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.Disclosure;
 import io.aeyer.plowshare.server.llm.dispatch.CallerAbandonedException;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
@@ -6068,9 +6069,11 @@ public final class JobRuntime {
     admittedAuthority.run();
     var originalAuthorization = request.authorization();
     request = request.withAuthorization(originalAuthorization.and(admittedAuthority::run));
-    // Bounded answers are disclosed whole after the final check. Delta sinks must not perform
-    // database IO while draining a transport, and cannot retract already delivered fragments.
-    Deltas authorized = originalAuthorization == CallAuthorization.DIRECT ? sink : DISCARDS;
+    // A retained allowance alone does not make an ordinary job preview confidential. Preview
+    // policy is explicit, while contained and information-dependent callers keep their own gates.
+    // The listener checks current job READ when enqueueing each delta. Ordinary previews are
+    // droppable and irretractable; all calls still recheck authority before their final result.
+    Deltas authorized = originalAuthorization.disclosure() == Disclosure.LIVE ? sink : DISCARDS;
     Completion completed =
         slot.pool() == null
             ? dispatcher.stream(request, confined ? DISCARDS : authorized, cancelled)
@@ -6079,7 +6082,7 @@ public final class JobRuntime {
                 request.withBudget(LlmPool.NO_DEADLINE),
                 confined ? DISCARDS : authorized,
                 cancelled);
-    // Revocation during inference prevents publishing its output or starting another effect.
+    // Revocation during inference prevents publishing its final result or starting another effect.
     admittedAuthority.run();
     originalAuthorization.require();
     return completed;
