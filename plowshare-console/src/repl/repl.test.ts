@@ -902,6 +902,57 @@ describe('a run that stopped, and the two things a person may do about it', () =
     expect(offer.textContent).toContain('finish');
   });
 
+  it.each(['UNAVAILABLE', 'SUB_AGENT_FAILED'])(
+    'offers one retry from saved work for %s without raising allowance',
+    async (ending) => {
+      await repl.start();
+      await repl.resume('conv-a');
+      await repl.submit('go');
+      server.turns = [turn({ ending, answer: 'request did not complete' })];
+      server.job = offered(ending, 'request did not complete');
+      await repl.reconcile();
+      post.mockClear();
+
+      expect(grant().hidden).toBe(false);
+      expect(grant().textContent).toBe('Retry from saved work');
+      expect(root.querySelector('[data-offer]')?.textContent).toContain(
+        'completed work is saved',
+      );
+      grant().click();
+      grant().click();
+      await vi.waitFor(() => expect(granted).not.toBeNull());
+
+      expect(post).toHaveBeenCalledExactlyOnceWith(
+        '/v1/conversations/conv-a/resume',
+        {
+          session: 'session-under-test',
+        },
+      );
+      expect(granted).not.toHaveProperty('maxTurns');
+      expect(granted).not.toHaveProperty('maxModelCalls');
+      expect((root.querySelector('[data-offer]') as HTMLElement).hidden).toBe(
+        true,
+      );
+    },
+  );
+
+  it('does not replay a retry after an uncertain reply', async () => {
+    await repl.start();
+    await repl.resume('conv-a');
+    await repl.submit('go');
+    server.job = offered('UNAVAILABLE', 'request did not complete');
+    await repl.reconcile();
+    post.mockClear();
+    post.mockRejectedValueOnce(new Error('reply lost'));
+
+    grant().click();
+    await vi.waitFor(() => expect(said('refusal')).not.toBe(''));
+    expect(post).toHaveBeenCalledTimes(1);
+    expect((root.querySelector('[data-offer]') as HTMLElement).hidden).toBe(
+      true,
+    );
+  });
+
   it('offers nothing when the server does not, whatever the ending is called', async () => {
     // CANCELLED is continuable on request and never suggested, and this
     // console does not know that -- it reads the bit. A test that asserted

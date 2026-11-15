@@ -188,9 +188,9 @@ export async function protocolFixture(options = {}) {
     log.push({ ordinal, turnOrdinal: job.turnOrdinal, kind: 'answer', state: 'stands', excerpt: text });
     grew(job.conversation);
   }
-  function finish(job, ending = 'ANSWERED', text, pace = null) {
+  function finish(job, ending = 'ANSWERED', text, pace = null, resumable = false) {
     if (job.outcome) return;
-    job.outcome = { ending, answered: ending === 'ANSWERED', text: text ?? job.committedText ?? (ending === 'ANSWERED' ? `Fixture answer: ${job.task}` : 'Fixture run cancelled.'), pace };
+    job.outcome = { ending, answered: ending === 'ANSWERED', ...(resumable ? {resumable:true} : {}), text: text ?? job.committedText ?? (ending === 'ANSWERED' ? `Fixture answer: ${job.task}` : 'Fixture run cancelled.'), pace };
     if (ending === 'ANSWERED') {
       commit(job, job.outcome.text);
     }
@@ -765,6 +765,16 @@ export async function protocolFixture(options = {}) {
       conversations.push(conversationWire(row.id, row)); entries.set(row.id, []);
       if (bot) botLatest.set(JSON.stringify([row.project, bot]), row.id);
     },
+    appendFailedDelegation(parent, child) {
+      const log = entries.get(parent);
+      const ordinal = (log.at(-1)?.ordinal ?? 0) + 1;
+      const id = 'fixture-failed-review';
+      const args = JSON.stringify({agent:'fixture-bot',task:'Review the game'});
+      log.push({ordinal,turnOrdinal:1,kind:'answer',excerpt:'',toolCalls:[{id,name:'agent_run',arguments:args,length:args.length,cut:false,salient:null,opened:{conversation:child,agent:'fixture-bot'}}]},
+        {ordinal:ordinal+1,turnOrdinal:1,kind:'tool_result',toolCallId:id,outcome:'unavailable',excerpt:'The child model timed out. The caller can continue.'});
+      grew(parent);
+      return `${ordinal}:${id}`;
+    },
     awaitApproval(id) {
       const job = [...jobs.values()].findLast(row => !row.outcome);
       if (!job) throw new Error('No active fixture run');
@@ -809,6 +819,13 @@ export async function protocolFixture(options = {}) {
     setRefusePost(value) { refusePost=value; },
     appendBoardMessage() { const detail = board.details['demo-board'].value; const previous = detail.messages.at(-1); detail.messages.push({ ...previous, id: 'fixture-board-update', kind: 'post', author: 'critic', title: null, body: 'A fresh swarm update from another session.', replyTo: previous.id, alert: true, postedAt: new Date().toISOString() }); board.topics.value[0].messages++; },
     get latestJob() { return [...jobs.values()].at(-1)?.id; },
+    failLatest(text) {
+      const job = [...jobs.values()].at(-1);
+      const log = entries.get(job.conversation);
+      log.push({ordinal:(log.at(-1)?.ordinal ?? 0)+1,turnOrdinal:job.turnOrdinal,kind:'attempt_failed',state:'stands',excerpt:text});
+      finish(job, 'UNAVAILABLE', text, null, true);
+      grew(job.conversation);
+    },
     completeLatest: (text, pace) => finish([...jobs.values()].at(-1), 'ANSWERED', text, pace),
     commitLatest: text => commit([...jobs.values()].at(-1), text),
     completeJob: id => finish(jobs.get(id)),

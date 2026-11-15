@@ -163,7 +163,7 @@ const ENDINGS: Readonly<Record<string, string>> = Object.freeze({
     'stopped: this conversation has spent its whole model-call budget',
   CANCELLED: 'cancelled',
   STUCK: 'stopped: it kept making the same call and was getting nowhere',
-  UNAVAILABLE: 'stopped: the model could not be reached',
+  UNAVAILABLE: 'paused: a model request or another dependency failed',
   SUB_AGENT_FAILED: 'stopped: an agent this one delegated to failed',
   SESSION_GONE: 'stopped: the client that owned the files went away',
   AWAITING: 'waiting for an answer to its question',

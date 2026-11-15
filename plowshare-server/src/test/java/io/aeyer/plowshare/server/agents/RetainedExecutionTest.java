@@ -245,21 +245,31 @@ class RetainedExecutionTest {
     when(dispatcher.stream(any(), any(), any()))
         .thenAnswer(
             call -> {
-              if (calls.getAndIncrement() == 0)
+              int attempt = calls.getAndIncrement();
+              if (attempt == 0)
                 return calls(
                     new ToolCall("one", "agent_run", "{\"agent\":\"child\",\"task\":\"Help\"}"));
+              if (attempt > 1) {
+                call.<ChatRequest>getArgument(0).authorization().require();
+                assertTrue(
+                    call.<ChatRequest>getArgument(0).messages().stream()
+                        .anyMatch(
+                            message ->
+                                message.content().contains("child' did not reach an answer")));
+                return answer();
+              }
               registry.set(
                   new AgentRegistry(
                       Map.of("parent", parent, "child", child.withPrompt("Changed source"))));
               // The actual LlmPool invokes this after queueing, before the transport sends bytes.
-              call.<ChatRequest>getArgument(0).authorization().require();
-              fail("Changed child definition cannot dispatch");
-              return answer();
+              throw assertThrows(
+                  CallerFault.class,
+                  () -> call.<ChatRequest>getArgument(0).authorization().require());
             });
     var outcome =
         run(new JobRuntime(dispatcher, List.of(), registry::get, null, Instant::now), parent);
-    assertEquals(Outcome.Ending.SUB_AGENT_FAILED, outcome.ending());
-    assertEquals(2, calls.get());
+    assertEquals(Outcome.Ending.ANSWERED, outcome.ending());
+    assertEquals(3, calls.get(), "the child was refused and the still-authorized parent continued");
   }
 
   @Test

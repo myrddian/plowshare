@@ -213,6 +213,18 @@ truncated or withheld; the durable recorded outcome is authoritative. A recorded
 thinking entry can later appear in Trajectory, but a live preview itself is not
 a separate durable transcript or model input.
 
+Failed streaming calls retain bounded reasoning, answer and tool-fragment samples
+as nonprojected error diagnostics. Failure summaries are not assistant answers in
+future model context. Explicit continuation reads the existing history and fails
+if that history cannot be loaded; it must not restart from empty context. When a
+parent stopped on a failed delegation, recovery resolves the exact recorded child
+and resumes its history before delivering its result to the parent. Completed tool
+results are preserved, and uncertain ordinary tool effects are not replayed.
+Ordinary delegated model/dependency failures return a failure tool result to the
+parent instead of terminating its run. The child conversation remains available
+for explicit same-child retry through `agent_run`. Its raw failed output remains
+diagnostic evidence, excluded from the parent's model context.
+
 The owning source contracts are [conversation entry storage](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/EntryStore.java),
 [compaction and message assembly](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java)
 and [next-context preview/count reads](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java).

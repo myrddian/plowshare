@@ -1056,6 +1056,37 @@ function renderStatus() {
         `<div class="conversation-alert ${row.kind}">${icon(row.kind === 'warning' ? 'alert' : 'file')}<strong>${esc(row.label)}</strong><span>${esc(row.text)}</span></div>`,
     )
     .join('');
+  if (job?.status === 'finished' && job.resumable) {
+    const retry = document.createElement('button');
+    const needsAllowance =
+      job.allowance?.noBudget === false &&
+      job.allowance.maxModelCalls !== undefined &&
+      job.allowance.modelCallsSpent >= job.allowance.maxModelCalls;
+    retry.id = 'retry-conversation';
+    retry.className = 'secondary-button';
+    retry.textContent = needsAllowance
+      ? 'Review continuation allowance…'
+      : 'Retry from saved work';
+    retry.title =
+      'Continue this conversation with its recorded tool results. Failed model output stays outside model context.';
+    retry.disabled = !state.connected;
+    retry.addEventListener('click', () => {
+      if (needsAllowance) {
+        openWorkControls();
+        return;
+      }
+      retry.disabled = true;
+      background(
+        request({ action: 'conversation-retry', job: job.id }).catch(
+          (error: unknown) => {
+            retry.disabled = !state.connected;
+            throw error;
+          },
+        ),
+      );
+    });
+    panel.append(retry);
+  }
 }
 function renderTranscript() {
   const history = state.history[selected];
@@ -1118,23 +1149,29 @@ function renderTranscript() {
       if (
         !entry.text ||
         (entry.kind === 'answer' && (entry.asked ?? 0) > 0) ||
-        !['utterance', 'answer', 'summary'].includes(entry.kind)
+        !['utterance', 'answer', 'summary', 'attempt_failed'].includes(
+          entry.kind,
+        )
       )
         return '';
       const kind =
-        entry.kind === 'utterance'
-          ? 'person'
-          : entry.kind === 'summary'
-            ? 'summary'
-            : 'answer';
+        entry.kind === 'attempt_failed'
+          ? 'summary'
+          : entry.kind === 'utterance'
+            ? 'person'
+            : entry.kind === 'summary'
+              ? 'summary'
+              : 'answer';
       const label =
-        kind === 'person'
-          ? entry.speaker === 'harness'
-            ? `Harness · ${entry.speakerName ?? 'external'}`
-            : 'You'
-          : kind === 'summary'
-            ? 'Conversation summary'
-            : 'Assistant';
+        entry.kind === 'attempt_failed'
+          ? 'Run error · excluded from model context'
+          : kind === 'person'
+            ? entry.speaker === 'harness'
+              ? `Harness · ${entry.speakerName ?? 'external'}`
+              : 'You'
+            : kind === 'summary'
+              ? 'Conversation summary'
+              : 'Assistant';
       const approval = noticeApproval(state, {
         kind: 'approval',
         answer: entry.text,

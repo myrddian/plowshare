@@ -233,9 +233,9 @@ public record Outcome(
     STUCK,
 
     /**
-     * Something the run depends on could not be reached: the model endpoint, or an endpoint a tool
-     * needs. Not a mistake the model made and not one it can correct, which is the whole reason
-     * this is an ending rather than a tool result.
+     * A model request or another runtime dependency failed, including an incomplete stream whose
+     * endpoint was reached successfully. This ends the affected run; an agent_run caller receives
+     * its child's failed tool result and may continue independent work.
      */
     UNAVAILABLE,
 
