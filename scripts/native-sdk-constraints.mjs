@@ -419,10 +419,19 @@ export function constrain(graph) {
   field(actingOpened,'subject',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'});
   field(actingOpened,'expiresAt',instant);
   for (const shape of Object.values(graph.$defs)) {
+    if (shape.title === 'InputProvenance') {
+      field(shape,'start',integer());field(shape,'end',integer(1));
+      field(shape,'sources',{maxItems:1});field(shape,'sourceCount',integer(0,1024));
+      rules(shape,{gt:[g('end'),g('start')]},implies(present('sources'),{gt:[g('sourceCount'),0]}));
+    }
+    if (shape.title === 'InputReference') {
+      for (const key of ['id','revision']) field(shape,key,{...identity,maxLength:256,pattern:'^[^\\s\\x00-\\x1f\\x7f-\\x9f]+$'});
+    }
     if (shape.title === 'SearchSource') {
       field(shape,'conversationId',{...identity,maxLength:256});
       field(shape,'ordinal',integer(1));field(shape,'turnOrdinal',integer(1));
       field(shape,'length',integer());field(shape,'supersededBy',integer(1));
+      rules(shape,implies(present('inputProvenance'),not({gt:[g('inputProvenance.end'),g('length')]})));
     }
     if (shape.title === 'LogSearchHit') {
       field(shape,'sources',{minItems:1,maxItems:20});field(shape,'sourceCount',integer(1));

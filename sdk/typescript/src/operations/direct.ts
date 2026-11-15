@@ -85,6 +85,7 @@ export interface Payloads extends ExtendedPayloads, BoundPayloads {
   };
   'memory.reembed': Tier;
   'conversation.search': Tier & {
+    readonly includeInputs?: boolean;
     readonly q: string;
     readonly conversation?: string;
     readonly mode?: 'lexical' | 'semantic' | 'hybrid';

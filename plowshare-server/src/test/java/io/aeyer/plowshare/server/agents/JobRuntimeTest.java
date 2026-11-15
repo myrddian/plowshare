@@ -688,7 +688,8 @@ class JobRuntimeTest {
     org.mockito.Mockito.when(conversations.find("cnv_1"))
         .thenReturn(Optional.of(CapabilityReadToolsTest.conversation(home)));
     org.mockito.Mockito.when(turns.forConversation("cnv_1")).thenReturn(List.of());
-    org.mockito.Mockito.when(entries.searchView(home, "claim", 0, 10, "hybrid", null))
+    org.mockito.Mockito.when(
+            entries.searchView(home, "claim", 0, 10, "hybrid", null, null, null, false))
         .thenReturn(
             io.aeyer.plowshare.server.api.LogSearchView.of(
                 new io.aeyer.plowshare.server.archive.LogSearch(
@@ -778,7 +779,8 @@ class JobRuntimeTest {
                     message.role() == ChatMessage.Role.TOOL
                         && message.content().contains("\"ejected\":2")
                         && message.content().contains("\"recordedOnly\":1")));
-    org.mockito.Mockito.verify(entries).searchView(home, "claim", 0, 10, "hybrid", null);
+    org.mockito.Mockito.verify(entries)
+        .searchView(home, "claim", 0, 10, "hybrid", null, null, null, false);
     assertTrue(runtime.schemasOfferedTo(CapabilityReadToolsTest.definition(List.of())).isEmpty());
   }
 

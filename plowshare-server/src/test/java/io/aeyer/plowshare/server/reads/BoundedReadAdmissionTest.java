@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.reads;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -239,7 +241,7 @@ class BoundedReadAdmissionTest {
     var admission = new BoundedReadAdmission(new ReadCapacityProperties(4, 2, 2, 1, 8, 2));
     var held = admission.admit("deny-sets", ReadAdmission.Work.FETCH);
     var other = admission.admit("deny-sets", ReadAdmission.Work.FETCH);
-    var order = new java.util.concurrent.CopyOnWriteArrayList<String>();
+    var order = new CopyOnWriteArrayList<String>();
     try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
       var first =
           callers.submit(
@@ -259,12 +261,14 @@ class BoundedReadAdmissionTest {
           "snapshot",
           admission.read("authority-snapshot", ReadAdmission.Work.FETCH, () -> "snapshot"),
           "A busy cache must not hold up another cache's fetch");
+      // FIFO admission does not promise execution order for two simultaneously admitted
+      // workers. Observe the first waiter using one freed slot before releasing the other.
       held.close();
-      other.close();
       assertTrue(first.get(5, TimeUnit.SECONDS));
+      other.close();
       assertTrue(second.get(5, TimeUnit.SECONDS));
     }
-    assertEquals(java.util.List.of("first", "second"), order);
+    assertEquals(List.of("first", "second"), order);
     assertEquals(0, admission.active(ReadAdmission.Work.FETCH));
     assertEquals(0, admission.waitingFetches());
   }

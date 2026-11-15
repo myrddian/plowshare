@@ -9,7 +9,16 @@ import java.util.Optional;
 /** Committed retrieval sources and atomic derived-vector publication, without model dispatch. */
 public interface PassageRepository {
   record ReadScope(
-      boolean constrained, String account, boolean knowledgeOnly, String conversation) {
+      boolean constrained,
+      String account,
+      boolean knowledgeOnly,
+      String conversation,
+      boolean includeInputs) {
+    public ReadScope(
+        boolean constrained, String account, boolean knowledgeOnly, String conversation) {
+      this(constrained, account, knowledgeOnly, conversation, false);
+    }
+
     public ReadScope(boolean constrained, String account, boolean knowledgeOnly) {
       this(constrained, account, knowledgeOnly, null);
     }
@@ -54,6 +63,33 @@ public interface PassageRepository {
       String generation,
       Runnable fence) {
     throw new UnsupportedOperationException("Passage publication fence unavailable");
+  }
+
+  /** Publishes passage provenance atomically with its text and vectors. */
+  default boolean publishProjected(
+      Source expected,
+      List<PassageText> texts,
+      List<float[]> vectors,
+      boolean complete,
+      String generation,
+      Runnable fence) {
+    if (texts.stream().anyMatch(PassageText::suppliedContext))
+      throw new UnsupportedOperationException("Projected publication is unavailable");
+    return publish(
+        expected,
+        texts.stream().map(PassageText::text).toList(),
+        vectors,
+        complete,
+        generation,
+        fence);
+  }
+
+  default boolean publishProjectedText(
+      Source expected, List<PassageText> texts, boolean complete, String generation) {
+    if (texts.stream().anyMatch(PassageText::suppliedContext))
+      throw new UnsupportedOperationException("Projected publication is unavailable");
+    return publishText(
+        expected, texts.stream().map(PassageText::text).toList(), complete, generation);
   }
 
   /**

@@ -32,6 +32,17 @@ result('conversation.search',{...conversationSearchPage,hits:[{...conversationSe
 const conversationSearchMissingCount={...conversationSearchHit};
 delete conversationSearchMissingCount.sourceCount;
 result('conversation.search',{...conversationSearchPage,hits:[conversationSearchMissingCount]},false);
+// Supplied-context spans and retained-reference counts have the same contract in every SDK.
+const suppliedInputProvenance={start:5,end:20,sources:[{id:'evidence-1',revision:'revision-1'}],sourceCount:100};
+const withInputProvenance=inputProvenance=>({...conversationSearchPage,hits:[{...conversationSearchHit,
+  sources:[{...conversationSearchOccurrence,inputProvenance}]}]});
+result('conversation.search',withInputProvenance(suppliedInputProvenance),true);
+result('conversation.search',withInputProvenance(null),true);
+result('conversation.search',withInputProvenance({...suppliedInputProvenance,sources:[],sourceCount:0}),true);
+result('conversation.search',withInputProvenance({...suppliedInputProvenance,end:21}),false);
+result('conversation.search',withInputProvenance({...suppliedInputProvenance,end:5}),false);
+result('conversation.search',withInputProvenance({...suppliedInputProvenance,sourceCount:0}),false);
+result('conversation.search',withInputProvenance({...suppliedInputProvenance,sources:Array(2).fill(suppliedInputProvenance.sources[0])}),false);
 const discoveryScope='11111111-1111-1111-1111-111111111111';
 input('information.discovery.scopes',{limit:10},true);
 for(const limit of [0,51,1.5,'10']) input('information.discovery.scopes',{limit},false);

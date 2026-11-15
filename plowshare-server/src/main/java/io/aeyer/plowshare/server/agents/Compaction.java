@@ -2004,6 +2004,16 @@ public final class Compaction implements SkillSummaries {
      * delegated work look like two unrelated runs.
      */
     @Override
+    public void prepareInput(InputProvenance provenance) {
+      turn.prepareInput(provenance);
+    }
+
+    @Override
+    public InputProvenance inputProvenance() {
+      return turn.inputProvenance();
+    }
+
+    @Override
     public Transcript delegate(AgentDefinition callee, Home home, String openedBy) {
       return turn.delegate(callee, home, openedBy);
     }
@@ -2107,6 +2117,18 @@ public final class Compaction implements SkillSummaries {
 
   /** One turn's transcript, and the one number the conversation takes back from it. */
   public final class TurnTranscript implements Transcript {
+    private InputProvenance inputProvenance;
+
+    @Override
+    public void prepareInput(InputProvenance provenance) {
+      inputProvenance = provenance;
+    }
+
+    @Override
+    public InputProvenance inputProvenance() {
+      return inputProvenance;
+    }
+
     private DelegationRetry retainedRetry;
 
     @Override

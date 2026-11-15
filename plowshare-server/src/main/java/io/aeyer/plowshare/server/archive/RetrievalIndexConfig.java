@@ -51,8 +51,13 @@ public class RetrievalIndexConfig {
   }
 
   @Bean
-  public ConversationSearch conversationSearch(EntryStore entries, PassageIndex index) {
-    return new ConversationSearch(entries, index);
+  public ConversationSearch conversationSearch(
+      EntryStore entries, PassageIndex index, Environment env) {
+    return new ConversationSearch(
+        entries,
+        index,
+        env.getProperty(
+            "plowshare.retrieval.search-budget", Duration.class, Duration.ofSeconds(2)));
   }
 
   @Bean

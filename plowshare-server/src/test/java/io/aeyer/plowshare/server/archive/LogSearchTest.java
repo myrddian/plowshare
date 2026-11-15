@@ -14,10 +14,13 @@ import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import java.nio.charset.StandardCharsets;
 import java.sql.Types;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import org.flywaydb.core.Flyway;
@@ -90,6 +93,53 @@ class LogSearchTest {
     conversations = new ConversationStore(jdbc);
     entries = new EntryStore(jdbc);
     conversation = conversations.open(Home.global(), Budget.of(20)).id();
+  }
+
+  @Test
+  void aBlockedSearchIsCancelledWithinItsConfiguredBudgetAndDoesNotReturnAnEmptySuccess() {
+    assertBlockedSearchIsCancelled("LOCK TABLE entries IN ACCESS EXCLUSIVE MODE", Home.global());
+  }
+
+  @Test
+  void projectResolutionIsAlsoCancelledWithinTheSameSearchBudget() {
+    conversations.open(PAYMENTS, Budget.of(10));
+    assertBlockedSearchIsCancelled("LOCK TABLE projects IN ACCESS EXCLUSIVE MODE", PAYMENTS);
+  }
+
+  private void assertBlockedSearchIsCancelled(String lockSql, Home home) {
+    entries.useSearchBudget(Duration.ofMillis(1500));
+    jdbc.execute(
+        (ConnectionCallback<Void>)
+            connection -> {
+              connection.setAutoCommit(false);
+              try (var statement = connection.createStatement()) {
+                statement.execute(lockSql);
+                var completed = new CompletableFuture<Void>();
+                Thread.ofVirtual()
+                    .start(
+                        () -> {
+                          try {
+                            assertThrows(
+                                ArchiveUnavailableException.class,
+                                () -> entries.search(home, "failure", 0, 10));
+                            completed.complete(null);
+                          } catch (Throwable failure) {
+                            completed.completeExceptionally(failure);
+                          }
+                        });
+                try {
+                  completed.get(3, TimeUnit.SECONDS);
+                } catch (Exception failure) {
+                  throw new AssertionError(
+                      "The configured search budget did not cancel the blocked SQL", failure);
+                }
+              } finally {
+                connection.rollback();
+                connection.setAutoCommit(true);
+              }
+              return null;
+            });
+    assertEquals(0, entries.search(home, "failure", 0, 10).total());
   }
 
   // --- the column V23 built ------------------------------------------------------
@@ -564,7 +614,7 @@ class LogSearchTest {
     String plan = explain(EntryStore.SEARCH_SQL);
 
     assertTrue(
-        plan.contains("entries_by_text"),
+        plan.contains("entries_evidence_text_search"),
         "the search is not using the GIN index V23 built for it:\n" + plan);
   }
 
@@ -585,9 +635,9 @@ class LogSearchTest {
     String withoutTheTieBreak =
         explain(EntryStore.SEARCH_SQL.replace("ORDER BY score DESC,id", "ORDER BY score DESC"));
 
-    assertTrue(plan.contains("Bitmap Index Scan on entries_by_text"), plan);
+    assertTrue(plan.contains("Bitmap Index Scan on entries_evidence_text_search"), plan);
     assertTrue(plan.contains("Sort"), plan);
-    assertTrue(withoutTheTieBreak.contains("entries_by_text"), withoutTheTieBreak);
+    assertTrue(withoutTheTieBreak.contains("entries_evidence_text_search"), withoutTheTieBreak);
   }
 
   /**
@@ -602,10 +652,13 @@ class LogSearchTest {
     entries.append(
         conversation, 1, LoggedEntry.utterance("the retry budget refilled", Speaker.person(null)));
 
-    String plan = explain(EntryStore.SEARCH_SQL.replace("e.text_search @@ p.query AND ", ""));
+    String plan =
+        explain(
+            EntryStore.SEARCH_SQL.replace(
+                "coalesce(e.evidence_text_search,e.text_search) @@ p.query AND ", ""));
 
     assertFalse(
-        plan.contains("entries_by_text"),
+        plan.contains("entries_evidence_text_search"),
         "the match predicate is no longer what earns the GIN index, so SEARCH_SQL"
             + " could drop it after all:\n"
             + plan);

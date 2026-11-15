@@ -525,6 +525,32 @@ public final class AgentRunTool implements AgentTool {
     }
   }
 
+  private static SuppliedContext suppliedContext(JsonNode value) {
+    if (value == null) return null;
+    try {
+      if (!value.isObject()
+          || value.size() != 2
+          || !value.path("text").isTextual()
+          || !value.path("sources").isArray()
+          || value.get("sources").size() > 1024)
+        throw new IllegalArgumentException("Context needs text and a bounded sources array");
+      List<InputProvenance.Reference> sources = new ArrayList<>();
+      for (JsonNode source : value.get("sources")) {
+        if (!source.isObject()
+            || source.size() != 2
+            || !source.path("id").isTextual()
+            || !source.path("revision").isTextual())
+          throw new IllegalArgumentException("Context references need id and revision");
+        sources.add(
+            new InputProvenance.Reference(
+                source.get("id").textValue(), source.get("revision").textValue()));
+      }
+      return new SuppliedContext(value.get("text").textValue(), sources);
+    } catch (IllegalArgumentException invalid) {
+      throw new BadArguments("Invalid agent_run context: " + invalid.getMessage());
+    }
+  }
+
   private String answer(String argumentsJson, Home home, String openedBy) {
     JsonNode args = ToolArguments.parse(argumentsJson, NAME, EXAMPLE);
     if (args.has("recovery") && !args.get("recovery").isBoolean())
@@ -563,7 +589,8 @@ public final class AgentRunTool implements AgentTool {
     if (args.hasNonNull("conversation") && conversation == null) {
       throw new BadArguments("agent_run conversation must not be blank; no new task was started");
     }
-    if (!recovery) return answer(wanted, task, named, home, openedBy, conversation, false);
+    SuppliedContext context = suppliedContext(args.get("context"));
+    if (!recovery) return answer(wanted, task, named, home, openedBy, conversation, false, context);
     int before = budget.spent();
     transcript.record(
         LoggedEntry.diagnostic(
@@ -574,7 +601,7 @@ public final class AgentRunTool implements AgentTool {
                 + " remainingCalls="
                 + budget.remaining()));
     try {
-      String result = answer(wanted, task, named, home, openedBy, conversation, true);
+      String result = answer(wanted, task, named, home, openedBy, conversation, true, context);
       transcript.record(
           LoggedEntry.diagnostic(
               "Output recovery returned: sourceCall="
@@ -619,7 +646,7 @@ public final class AgentRunTool implements AgentTool {
     Objects.requireNonNull(task, "task");
     Objects.requireNonNull(home, "home");
     returned = null;
-    return answer(wanted, task, List.of(), home, null, null, false);
+    return answer(wanted, task, List.of(), home, null, null, false, null);
   }
 
   private String answer(
@@ -629,7 +656,8 @@ public final class AgentRunTool implements AgentTool {
       Home home,
       String openedBy,
       String conversation,
-      boolean recovery) {
+      boolean recovery,
+      SuppliedContext context) {
 
     if (!callable.contains(wanted)) {
       return refuse(wanted);
@@ -729,7 +757,8 @@ public final class AgentRunTool implements AgentTool {
               sent -> new BadArguments("The retained delegation's image arguments are invalid"));
       if (!wanted.equals(originalAgent)
           || !task.equals(originalTask)
-          || !named.equals(originalImages)) {
+          || !named.equals(originalImages)
+          || !Objects.equals(context, suppliedContext(original.get("context")))) {
         throw new BadArguments(
             "A retained delegation retry must keep its original task and images unchanged");
       }
@@ -940,6 +969,10 @@ public final class AgentRunTool implements AgentTool {
           "The person explicitly requested a retry after the model failure. Continue the original"
               + " task from its recorded history and completed tool results. Do not repeat completed"
               + " effects. This message is from the harness.";
+    }
+    if (context != null && retrying == null) {
+      handed += SuppliedContext.SEPARATOR + context.text();
+      child.prepareInput(context.provenance(handed));
     }
     Outcome outcome =
         childOperation != null
@@ -1269,6 +1302,34 @@ public final class AgentRunTool implements AgentTool {
         ToolArguments.string(
             "What that agent should do, in plain language, complete enough to act on"
                 + " without seeing this conversation."));
+    // Property iteration order is part of the model-visible schema and its pinned surface.
+    Map<String, Object> references = new LinkedHashMap<>();
+    references.put("id", ToolArguments.string("Evidence identity"));
+    references.put("revision", ToolArguments.string("Evidence revision"));
+    Map<String, Object> context = new LinkedHashMap<>();
+    context.put("text", Map.of("type", "string", "minLength", 1, "maxLength", 1000000));
+    context.put(
+        "sources",
+        Map.of(
+            "type",
+            "array",
+            "maxItems",
+            1024,
+            "items",
+            ToolArguments.object(references, List.of("id", "revision"))));
+    properties.put(
+        "context",
+        Map.of(
+            "type",
+            "object",
+            "description",
+            "Optional supplied evidence and prior assessments. Retained verbatim, excluded from default conversation search; sources are declared provenance, not read grants.",
+            "properties",
+            context,
+            "required",
+            List.of("text", "sources"),
+            "additionalProperties",
+            false));
     properties.put(
         "recovery",
         Map.of(

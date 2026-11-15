@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.agents.InputProvenance;
 import io.aeyer.plowshare.server.documents.Chunker;
 import io.aeyer.plowshare.server.documents.Chunking;
 import io.aeyer.plowshare.server.embedding.*;
@@ -50,7 +51,19 @@ public final class PassageIndex implements UsageAware {
     }
   }
 
-  public record Source(String type, String id, String hash, String text, int next) {}
+  public record Source(
+      String type, String id, String hash, String text, int next, InputProvenance inputProvenance) {
+    public Source(String type, String id, String hash, String text, int next) {
+      this(type, id, hash, text, next, null);
+    }
+
+    public Source {
+      if (inputProvenance != null) inputProvenance.validate(text);
+    }
+  }
+
+  /** Provenance belongs to a passage, never inferred from its text at query time. */
+  public record PassageText(String text, boolean suppliedContext) {}
 
   public record Occurrence(String id, String revision) {}
 
@@ -77,13 +90,30 @@ public final class PassageIndex implements UsageAware {
     PassageIndex copy = new PassageIndex(repository, embeddings, bounds, generation, width);
     copy.scope =
         new PassageRepository.ReadScope(
-            scope.constrained(), scope.account(), scope.knowledgeOnly(), conversation);
+            scope.constrained(),
+            scope.account(),
+            scope.knowledgeOnly(),
+            conversation,
+            scope.includeInputs());
     copy.usageOwners = usageOwners;
     copy.dualEmbeddings = dualEmbeddings;
     copy.queries = queries;
     copy.access = access;
     copy.operations = operations;
     copy.maintenancePolicy = maintenancePolicy;
+    return copy;
+  }
+
+  /** Full-input mode is part of both candidate selection and coverage. */
+  public PassageIndex includingInputs(boolean includeInputs) {
+    var copy = inConversation(scope.conversation());
+    copy.scope =
+        new PassageRepository.ReadScope(
+            scope.constrained(),
+            scope.account(),
+            scope.knowledgeOnly(),
+            scope.conversation(),
+            includeInputs);
     return copy;
   }
 
@@ -247,10 +277,10 @@ public final class PassageIndex implements UsageAware {
       if (source.text() == null || source.text().isBlank()) continue;
       boolean repairInFlight = false;
       try {
-        var chunks = passages(source.text());
+        var chunks = projectedPassages(source);
         if (dualEmbeddings != null) {
           int start = source.next(), end = Math.min(start + 16, chunks.size());
-          if (repository.publishText(
+          if (repository.publishProjectedText(
               source, chunks.subList(start, end), end == chunks.size(), generation)) written++;
           continue;
         }
@@ -267,15 +297,23 @@ public final class PassageIndex implements UsageAware {
           }
         }
         int start = source.next(), end = Math.min(start + 16, chunks.size());
-        var texts = chunks.subList(start, end);
+        var projected = chunks.subList(start, end);
+        var texts = projected.stream().map(PassageText::text).toList();
         UsageAttribution owner = repairOwner(source);
         if (operations == null) {
           var batch = EmbeddingClient.owned(embeddings, texts, owner);
           if (batch.size() != texts.size())
             throw new EmbeddingException("Embedding batch count mismatch");
-          if (publish(
-              source, texts, batch.stream().map(this::checked).toList(), end == chunks.size()))
-            written++;
+          if (source.inputProvenance() == null
+              ? publish(
+                  source, texts, batch.stream().map(this::checked).toList(), end == chunks.size())
+              : repository.publishProjected(
+                  source,
+                  projected,
+                  batch.stream().map(this::checked).toList(),
+                  end == chunks.size(),
+                  generation,
+                  () -> {})) written++;
         } else {
           if (allowance.exhausted()) break;
           var home =
@@ -290,9 +328,9 @@ public final class PassageIndex implements UsageAware {
             var batch = embeddings.forOperation(permit).embedAll(texts, owner);
             if (batch.size() != texts.size())
               throw new EmbeddingException("Embedding batch count mismatch");
-            if (repository.publish(
+            if (repository.publishProjected(
                 source,
-                texts,
+                projected,
                 batch.stream().map(this::checked).toList(),
                 end == chunks.size(),
                 generation,
@@ -324,6 +362,21 @@ public final class PassageIndex implements UsageAware {
             .orElseThrow(
                 () -> new IllegalStateException("Retrieval source has no accounting owner"));
     return usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_REPAIR);
+  }
+
+  /** Split at declared boundaries before tokenization so no chunk mixes copied and new text. */
+  List<PassageText> projectedPassages(Source source) {
+    var provenance = source.inputProvenance();
+    if (provenance == null)
+      return passages(source.text()).stream().map(text -> new PassageText(text, false)).toList();
+    String text = source.text();
+    int start = text.offsetByCodePoints(0, provenance.start());
+    int end = text.offsetByCodePoints(0, provenance.end());
+    List<PassageText> result = new ArrayList<>();
+    passages(text.substring(0, start)).forEach(part -> result.add(new PassageText(part, false)));
+    passages(text.substring(start, end)).forEach(part -> result.add(new PassageText(part, true)));
+    passages(text.substring(end)).forEach(part -> result.add(new PassageText(part, false)));
+    return List.copyOf(result);
   }
 
   /** Keep the entire matched passage visible inside the existing snippet contract. */
