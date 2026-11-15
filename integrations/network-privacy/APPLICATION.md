@@ -185,8 +185,9 @@ lowers weakened potential breaches to worth checking. Model responses use the
 shared bounded LLM JSON parser, including recovery of common formatting errors.
 After decoding, tabs and paragraph breaks in prose become spaces; markup,
 identifiers and other control characters are still rejected. Reviewer concern
-notes are limited to 400 characters each; top-level notes allow one string of up
-to 2000 characters or 1 to 8 strings of up to 1000 characters each. Strings must
+notes have a writing target of about 400 words, with no separate per-note length
+limit; top-level notes allow one string of up to 2000 characters or 1 to 8 strings
+of up to 1000 characters each. Strings must
 be nonempty, and limits apply after whitespace normalization. Invalid agent
 responses share one repair attempt with the field name and applicable limit in
 length errors. A second invalid response or `not_checked` fails the run and
