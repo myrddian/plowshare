@@ -9,6 +9,7 @@ import io.aeyer.plowshare.server.events.ApplicationInboxStore.Notice;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationRecord;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationState;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -31,7 +32,8 @@ public final class ApplicationInboxes implements ApplicationInbox {
     this.questionRetry = retry;
   }
 
-  private record Destination(long id, String project, ApplicationInboxSettings settings) {}
+  private record Destination(
+      long id, String project, Optional<ApplicationInboxSettings> settings) {}
 
   private final ApplicationPolicy policy;
   private final ProjectMembers members;
@@ -62,16 +64,16 @@ public final class ApplicationInboxes implements ApplicationInbox {
     if (source.boundary().kind() != ApplicationPolicy.Kind.APPLICATION
         || source.workspace().isEmpty())
       throw new CallerFault("Application inbox source is unavailable");
-    return ApplicationInboxSettings.read(source.workspace().orElseThrow().workspace())
-        .map(
-            settings ->
-                new Destination(
-                    store
-                        .project(project)
-                        .orElseThrow(
-                            () -> new CallerFault("Application inbox project is unavailable")),
-                    project,
-                    settings));
+    // Application ownership must not depend on upgrading an installed manifest. The optional
+    // policy selects successful results that need attention; it never selects the inbox owner.
+    var settings = ApplicationInboxSettings.read(source.workspace().orElseThrow().workspace());
+    return Optional.of(
+        new Destination(
+            store
+                .project(project)
+                .orElseThrow(() -> new CallerFault("Application inbox project is unavailable")),
+            project,
+            settings));
   }
 
   private Destination authorized(String account, String project, ProjectRole role) {
@@ -82,7 +84,7 @@ public final class ApplicationInboxes implements ApplicationInbox {
     }
     members.requireRole(project, account, role);
     return destination(project)
-        .orElseThrow(() -> new CallerFault("This Application has no configured inbox"));
+        .orElseThrow(() -> new CallerFault("Choose an Application project for its inbox"));
   }
 
   public InboxStore.Page page(
@@ -170,8 +172,11 @@ public final class ApplicationInboxes implements ApplicationInbox {
             || destination
                 .get()
                 .settings()
-                .attentionOrchestrations()
-                .contains(run.definitionName());
+                .map(settings -> settings.attentionOrchestrations().contains(run.definitionName()))
+                // Older Applications have no policy. Keep model workflow results visible while
+                // treating successful native-only bookkeeping as routine. Inspect the pinned
+                // declaration, never model prose, a workflow name or a later edited definition.
+                .orElseGet(() -> !ScriptProgram.nativeOnly(run.definitionSource()));
     append(
         destination.get(),
         about == null ? "orchestration:" + run.id() + ":" + run.endedAt() : about,
