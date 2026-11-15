@@ -55,6 +55,41 @@ describe('shared retrieval response boundary', () => {
     expect(retrievalReply('conversation.search', payload)).toBeUndefined();
   });
 
+  it('validates bounded supplied-context navigation metadata', () => {
+    const payload = clone('conversation.search');
+    const hits = payload['hits'];
+    if (!isList(hits) || !isObject(hits[0]))
+      throw new Error('Missing search fixture');
+    const source = {
+      conversationId: 'cnv_selected',
+      ordinal: 1,
+      turnOrdinal: 1,
+      kind: 'utterance',
+      handle: null,
+      recordedAt: null,
+      sourceRevision: 'hash',
+      length: 20,
+      supersededBy: null,
+      inputProvenance: {
+        start: 5,
+        end: 20,
+        sources: [{ id: 'evidence-1', revision: 'revision-1' }],
+        sourceCount: 100,
+      },
+    };
+    hits[0]['sources'] = [source];
+    hits[0]['sourceCount'] = 1;
+    expect(retrievalReply('conversation.search', payload)).toBe(payload);
+    source.inputProvenance.end = 5;
+    expect(retrievalReply('conversation.search', payload)).toBeUndefined();
+    source.inputProvenance.end = 20;
+    source.inputProvenance.sources.push({
+      id: 'extra',
+      revision: 'revision-1',
+    });
+    expect(retrievalReply('conversation.search', payload)).toBeUndefined();
+  });
+
   it('covers every reviewed response fixture and retains raw arrays, metadata and future fields', async () => {
     expect([...RETRIEVAL_OPERATIONS].sort()).toEqual(
       Object.keys(fixtures.replies).sort(),
@@ -371,7 +406,22 @@ describe('shared retrieval response boundary', () => {
         'SearchSource',
         'server/archive/LogSearch',
         'Source',
-        ['handle', 'recordedAt', 'sourceRevision', 'supersededBy'],
+        [
+          'handle',
+          'recordedAt',
+          'sourceRevision',
+          'supersededBy',
+          'inputProvenance',
+        ],
+        { InputContext: 'InputProvenance' },
+      ],
+      ['InputReference', 'server/agents/InputProvenance', 'Reference', []],
+      [
+        'InputProvenance',
+        'server/archive/LogSearch',
+        'InputContext',
+        [],
+        { 'InputProvenance.Reference': 'InputReference' },
       ],
       [
         'SearchEvidence',
@@ -467,6 +517,8 @@ describe('shared retrieval response boundary', () => {
             const optional =
               ((type === 'MemoryNavigation' || type === 'LogSearchResponse') &&
                 field.name.getText(source) === 'retrieval') ||
+              (type === 'SearchSource' &&
+                field.name.getText(source) === 'inputProvenance') ||
               (type === 'LogSearchHit' &&
                 ['evidence', 'sources', 'sourceCount'].includes(
                   field.name.getText(source),

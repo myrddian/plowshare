@@ -160,11 +160,13 @@ class ArchivePublicationQueryReuseTest {
     assertTrue(sql.getAllValues().get(0).startsWith("DELETE FROM retrieval_passages"));
     assertEquals(16, sql.getAllValues().get(1).split("CAST\\(\\? AS vector\\)", -1).length - 1);
     var inserted = parameters.getAllValues().get(1);
-    assertEquals(80, inserted.length);
+    assertEquals(96, inserted.length);
     assertEquals(List.of("entry", "log:1", 0, "text-0"), Arrays.asList(inserted).subList(0, 4));
-    assertEquals(15, inserted[77]);
-    assertEquals("text-15", inserted[78]);
-    assertNull(inserted[79]);
+    assertEquals(false, inserted[4]);
+    assertEquals(15, inserted[92]);
+    assertEquals("text-15", inserted[93]);
+    assertEquals(false, inserted[94]);
+    assertNull(inserted[95]);
     assertTrue(sql.getAllValues().get(2).startsWith("UPDATE retrieval_sources"));
     when(jdbc.queryForList(startsWith("SELECT source_hash"), any(Object[].class)))
         .thenReturn(

@@ -28,6 +28,7 @@ class ConversationSearchClientTest {
                         assertEquals(
                             "cnv_selected", frame.path("payload").path("conversation").asText());
                         assertEquals("semantic", frame.path("payload").path("mode").asText());
+                        assertEquals(true, frame.path("payload").path("includeInputs").asBoolean());
                         socket.send(
                             "{\"id\":\""
                                 + frame.path("id").asText()
@@ -50,7 +51,7 @@ class ConversationSearchClientTest {
             client
                 .searchEntriesAsync(
                     new ServerClient.LogQuery(
-                        "project", "question", "cnv_selected", "semantic", null, 0, 10),
+                        "project", "question", "cnv_selected", "semantic", null, 0, 10, true),
                     RequestOptions.defaults(Duration.ofSeconds(2)))
                 .toCompletableFuture()
                 .get(3, TimeUnit.SECONDS);

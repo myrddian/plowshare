@@ -1095,8 +1095,18 @@ existing raw-text, live-key and deployment-pin behavior.
 `plowshare.retrieval.search-budget` defaults to `2s` (positive, at most `1m`).
 Lexical ranking, grouped-reference refresh and passage repository reads inherit
 any earlier read deadline. JDBC query cancellation uses the remaining budget,
-rounded up to JDBC's whole-second timeout, and late results are rejected. This
+rounded down to JDBC's whole-second timeout. A new statement is refused when less
+than one second remains, and late results are rejected. This
 bounds these SQL executions; connection acquisition and cancellation cleanup
 still have the owning datasource/driver limits described above. Query embeddings
 retain their separate provider/admission budget and run outside SQL transactions.
 V269 adds the stored lexical length used by BM25; no embedding rebuild is needed.
+V270 adds explicit input provenance, stored evidence-search projections and semantic
+passage provenance. It preserves complete transcript content and unclassified historical
+inputs. Sparse evidence projections reuse historical text and vectors instead of
+duplicating the full transcript payloads. New classified inputs are indexed by the existing bounded repair worker; no
+heuristic historical rewrite or global embedding rebuild is performed. Search SQL uses
+`plowshare.retrieval.search-budget` (default `2s`, maximum `1m`) across nested stages.
+Full-input debugging search requires `includeInputs: true`; this also belongs to snapshot
+identity. V270 table/index maintenance has a five-minute statement and two-second lock
+budget; a timeout fails migration rather than continuing with a partial schema.

@@ -57,7 +57,49 @@ public record LoggedEntry(
     Speaker speaker,
     String outcome,
     Map<String, String> salients,
-    ToolObservation observation) {
+    ToolObservation observation,
+    InputProvenance inputProvenance) {
+
+  /** Compatibility for entries without classified supplied context. */
+  public LoggedEntry(
+      EntryKind kind,
+      String content,
+      String toolCallId,
+      List<ToolCall> toolCalls,
+      Long tookMillis,
+      Invocation invocation,
+      Speaker speaker,
+      String outcome,
+      Map<String, String> salients,
+      ToolObservation observation) {
+    this(
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        invocation,
+        speaker,
+        outcome,
+        salients,
+        observation,
+        null);
+  }
+
+  public LoggedEntry withInputProvenance(InputProvenance provenance) {
+    return new LoggedEntry(
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        invocation,
+        speaker,
+        outcome,
+        salients,
+        observation,
+        provenance);
+  }
 
   /** Compatibility for text-only entries. */
   public LoggedEntry(
@@ -97,11 +139,17 @@ public record LoggedEntry(
         speaker,
         outcome,
         salients,
-        observation);
+        observation,
+        inputProvenance);
   }
 
   public LoggedEntry {
     Objects.requireNonNull(kind, "kind");
+    if (inputProvenance != null) {
+      if (kind != EntryKind.UTTERANCE)
+        throw new IllegalArgumentException("Only an input can retain supplied context");
+      inputProvenance.validate(content);
+    }
     if (observation != null && kind != EntryKind.TOOL_RESULT)
       throw new IllegalArgumentException("Only a tool result can retain images");
     Objects.requireNonNull(content, "content");
@@ -227,7 +275,8 @@ public record LoggedEntry(
         speaker,
         outcome,
         salients,
-        observation);
+        observation,
+        inputProvenance);
   }
 
   /**
@@ -247,7 +296,8 @@ public record LoggedEntry(
         speaker,
         outcome,
         salients,
-        observation);
+        observation,
+        inputProvenance);
   }
 
   /**
@@ -265,7 +315,8 @@ public record LoggedEntry(
         speaker,
         outcome,
         salients,
-        observation);
+        observation,
+        inputProvenance);
   }
 
   /**
@@ -283,7 +334,8 @@ public record LoggedEntry(
         speaker,
         outcome,
         salients,
-        observation);
+        observation,
+        inputProvenance);
   }
 
   /**

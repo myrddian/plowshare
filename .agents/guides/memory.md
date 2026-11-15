@@ -67,6 +67,25 @@ pagination/source limits. Semantic entry ranking is exact to preserve that group
 digest consumers retain their existing index policy. Each group exposes at most
 twenty authorized source references. Snapshot refresh rechecks all retained revisions
 in a batch and suppresses changed/moved/hidden references without filling later slots.
+New delegated research inputs carry explicit supplied-context spans and declared
+source references. Default lexical statistics/snippets use the stored evidence
+projection; semantic passage provenance is filtered before ranking and limits.
+`includeInputs` opts into complete-input search and is part of snapshot identity.
+Unclassified historical inputs remain searchable. Search source metadata caps
+declared context references at one, with the complete count retained; provenance
+never grants access to the original source. Metadata changes invalidate revisions
+and the derived passage queue atomically. Skill handoffs retain typed provenance
+and exclude derived search columns.
+
+All search SQL stages share `plowshare.retrieval.search-budget` (default 2s), including
+an earlier cache/admission deadline. Resolve the project name once under that
+deadline and reuse the operation-local selection across lexical, passage, coverage
+and source-refresh reads; writes never reuse this selection. Do not reset the budget per query or reread
+initial coverage during the same operation. Whole-second JDBC cancellation rounds
+down; less than one remaining second refuses a new statement. Provider embedding
+IO keeps its own finite transport budget; late results cannot initiate another SQL
+stage or be disclosed as success.
+
 Lexical totals count groups; semantic totals describe a bounded snapshot. Inspect
 coverage, fallback and capped references before claiming completeness.
 

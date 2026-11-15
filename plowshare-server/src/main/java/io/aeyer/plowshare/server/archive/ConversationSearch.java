@@ -7,6 +7,8 @@ import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageAware;
 import io.aeyer.plowshare.server.llm.accounting.UsageOwners;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -28,6 +30,7 @@ public final class ConversationSearch implements UsageAware {
   private UsageOwners usageOwners = UsageOwners.NONE;
   private final ConversationSearchRepository entries;
   private final PassageIndex index;
+  private final Duration searchBudget;
   private String account;
   // The lock protects bounded eviction plus insertion; reads use the concurrent map.
   private ConcurrentMap<String, Window> windows = new ConcurrentHashMap<>();
@@ -62,14 +65,26 @@ public final class ConversationSearch implements UsageAware {
       String conversation,
       String question,
       String mode,
+      boolean includeInputs,
       Instant expires,
       List<Candidate> hits,
       LogSearch.Reach reach,
       LogSearchView.Retrieval retrieval) {}
 
   public ConversationSearch(ConversationSearchRepository entries, PassageIndex index) {
+    this(entries, index, Duration.ofSeconds(2));
+  }
+
+  public ConversationSearch(
+      ConversationSearchRepository entries, PassageIndex index, Duration searchBudget) {
+    if (searchBudget == null
+        || searchBudget.isZero()
+        || searchBudget.isNegative()
+        || searchBudget.compareTo(Duration.ofMinutes(1)) > 0)
+      throw new IllegalArgumentException("Search budget must be positive and at most one minute");
     this.entries = entries;
     this.index = index;
+    this.searchBudget = searchBudget;
   }
 
   @Override
@@ -78,7 +93,9 @@ public final class ConversationSearch implements UsageAware {
   }
 
   public ConversationSearch forAccount(String account) {
-    var copy = new ConversationSearch(entries.forAccount(account), index.forAccount(account));
+    var copy =
+        new ConversationSearch(
+            entries.forAccount(account), index.forAccount(account), searchBudget);
     copy.account = account;
     copy.windows = windows;
     copy.usageOwners = usageOwners;
@@ -136,13 +153,61 @@ public final class ConversationSearch implements UsageAware {
       String snapshot,
       UsageAttribution owner,
       String conversation) {
+    return search(home, question, skip, most, requested, snapshot, owner, conversation, false);
+  }
+
+  public LogSearchView search(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String requested,
+      String snapshot,
+      UsageAttribution owner,
+      String conversation,
+      boolean includeInputs) {
+    return ReadDeadline.within(
+        searchBudget,
+        () -> {
+          ReadDeadline.check();
+          var result =
+              entries.withinSearchScope(
+                  home,
+                  () ->
+                      searchWithinDeadline(
+                          home,
+                          question,
+                          skip,
+                          most,
+                          requested,
+                          snapshot,
+                          owner,
+                          conversation,
+                          includeInputs));
+          ReadDeadline.check();
+          return result;
+        });
+  }
+
+  private LogSearchView searchWithinDeadline(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String requested,
+      String snapshot,
+      UsageAttribution owner,
+      String conversation,
+      boolean includeInputs) {
+    if (owner == null || owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED)
+      owner = usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY);
     String mode = mode(requested);
     EntryStore.validateConversation(conversation);
     if (skip < 0 || most < 1 || most > 200) throw new ValidationException("Invalid search window");
     if (mode.equals("lexical")) {
       if (snapshot != null)
         throw new ValidationException("Lexical search uses offset paging without a snapshot");
-      var found = lexical(home, question, skip, most, conversation);
+      var found = lexical(home, question, skip, most, conversation, includeInputs);
       var view = LogSearchView.of(found, skip, most);
       if (requested == null) return view;
       return new LogSearchView(
@@ -162,7 +227,8 @@ public final class ConversationSearch implements UsageAware {
               null,
               null,
               0,
-              "Scoped BM25 (k1=1.2, b=0.75); repeated excerpts grouped before pagination"));
+              "Scoped BM25 (k1=1.2, b=0.75); repeated excerpts grouped before pagination; "
+                  + inputSelection(includeInputs)));
     }
     if (snapshot != null) {
       Window window;
@@ -175,7 +241,8 @@ public final class ConversationSearch implements UsageAware {
           || !window.home().equals(home)
           || !Objects.equals(window.conversation(), conversation)
           || !window.question().equals(question)
-          || !window.mode().equals(mode))
+          || !window.mode().equals(mode)
+          || window.includeInputs() != includeInputs)
         throw new ValidationException(
             "Search snapshot belongs to a different scope, conversation, question or mode");
       return page(window, skip, most, true);
@@ -184,7 +251,10 @@ public final class ConversationSearch implements UsageAware {
       throw new ValidationException(
           "Semantic/hybrid pages after offset 0 need the first page's snapshot");
     var scoped = index.inConversation(conversation);
-    var lexical = lexical(home, question, 0, mode.equals("hybrid") ? CANDIDATES : 1, conversation);
+    if (includeInputs) scoped = scoped.includingInputs(true);
+    var lexical =
+        lexical(
+            home, question, 0, mode.equals("hybrid") ? CANDIDATES : 1, conversation, includeInputs);
     List<PassageIndex.Match> semantic = List.of();
     String fallback = null;
     try (var query = scoped.capture(question, owner, home)) {
@@ -244,7 +314,8 @@ public final class ConversationSearch implements UsageAware {
             coverage,
             index.generation(),
             1,
-            "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; hybrid RRF (k=60). Evidence is quoted data.");
+            "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; hybrid RRF (k=60). Evidence is quoted data; "
+                + inputSelection(includeInputs));
     var window =
         new Window(
             account,
@@ -252,6 +323,7 @@ public final class ConversationSearch implements UsageAware {
             conversation,
             question,
             mode,
+            includeInputs,
             Instant.now().plusSeconds(300),
             List.copyOf(candidates),
             lexical.reach(),
@@ -267,7 +339,15 @@ public final class ConversationSearch implements UsageAware {
     return page(window, skip, most, false);
   }
 
-  private LogSearch lexical(Home home, String question, int skip, int most, String conversation) {
+  private static String inputSelection(boolean includeInputs) {
+    return includeInputs
+        ? "full recorded inputs included; supplied context is not independent evidence"
+        : "explicit supplied context excluded; legacy inputs remain unclassified";
+  }
+
+  private LogSearch lexical(
+      Home home, String question, int skip, int most, String conversation, boolean includeInputs) {
+    if (includeInputs) return entries.search(home, question, skip, most, conversation, true);
     return conversation == null
         ? entries.search(home, question, skip, most)
         : entries.search(home, question, skip, most, conversation);
@@ -379,6 +459,8 @@ public final class ConversationSearch implements UsageAware {
                       candidate.position(),
                       representative.sourceRevision())));
     }
+    var scopedIndex = index.inConversation(window.conversation());
+    if (window.includeInputs()) scopedIndex = scopedIndex.includingInputs(true);
     var r = window.retrieval();
     var retrieval =
         new LogSearchView.Retrieval(
@@ -393,7 +475,7 @@ public final class ConversationSearch implements UsageAware {
                 : referencesTruncated
                     ? "Occurrence references are limited to twenty per group"
                     : r.fallback(),
-            index.inConversation(window.conversation()).coverage(window.home(), "entry"),
+            replayed ? scopedIndex.coverage(window.home(), "entry") : r.coverage(),
             r.generation(),
             replayed ? 0 : r.queryEmbeddingCalls(),
             r.provenance());

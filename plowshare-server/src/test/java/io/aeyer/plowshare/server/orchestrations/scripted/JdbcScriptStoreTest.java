@@ -90,7 +90,8 @@ class JdbcScriptStoreTest {
     assertEquals("research_analyst", json.readTree(delegation.arguments()).path("agent").asText());
     assertTrue(
         json.readTree(delegation.arguments())
-            .path("task")
+            .path("context")
+            .path("text")
             .asText()
             .contains("Compare research findings"));
     verify(jdbc).update(anyString(), eq("cnv_fixture"), eq(1), eq(hash), anyString(), anyString());

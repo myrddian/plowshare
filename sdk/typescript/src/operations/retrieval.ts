@@ -228,7 +228,19 @@ export interface CitationsResponse {
   readonly citations: readonly Citation[];
 }
 /** Bounded, authorized occurrences of one repeated matching passage. */
+export interface InputProvenance {
+  readonly start: number;
+  readonly end: number;
+  readonly sources: readonly InputReference[];
+  readonly sourceCount: number;
+}
+export interface InputReference {
+  readonly id: string;
+  readonly revision: string;
+}
 export interface SearchSource {
+  /** Present only when the input explicitly identifies supplied context; null/absent is unclassified. */
+  readonly inputProvenance?: InputProvenance | null;
   readonly conversationId: string;
   readonly ordinal: number;
   readonly turnOrdinal: number;
@@ -537,7 +549,25 @@ const evidence = record({
   passagePosition: nullable(count),
   sourceRevision: nullable(named),
 });
+const inputProvenance = record(
+  {
+    start: count,
+    end: positive,
+    sources: list(record({ id: named, revision: named })),
+    sourceCount: count,
+  },
+  (row) =>
+    typeof row['start'] === 'number' &&
+    typeof row['end'] === 'number' &&
+    row['end'] > row['start'] &&
+    Array.isArray(row['sources']) &&
+    row['sources'].length <= 1 &&
+    typeof row['sourceCount'] === 'number' &&
+    row['sourceCount'] >= row['sources'].length &&
+    row['sourceCount'] <= 1024,
+);
 const searchSource = record({
+  inputProvenance: optional(nullable(inputProvenance)),
   conversationId: named,
   ordinal: positive,
   turnOrdinal: positive,

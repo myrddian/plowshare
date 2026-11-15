@@ -55,7 +55,8 @@ public final class ConversationSearchHandler implements FrameHandler {
       Integer limit,
       String mode,
       String snapshot,
-      String conversation) {}
+      String conversation,
+      Boolean includeInputs) {}
 
   private final EntryStore entries;
 
@@ -71,7 +72,10 @@ public final class ConversationSearchHandler implements FrameHandler {
     Asked asked = Payloads.as(payload, Asked.class, FrameTypes.CONVERSATION_SEARCH);
     String question = RequestedLogQuestion.in(asked.q());
     RequestedWindow window = RequestedWindow.in(asked.offset(), asked.limit());
-    if (asked.mode() == null && asked.snapshot() == null && asked.conversation() == null)
+    if (asked.mode() == null
+        && asked.snapshot() == null
+        && asked.conversation() == null
+        && !Boolean.TRUE.equals(asked.includeInputs()))
       return Outcome.ok(
           LogSearchView.of(
               entries.search(
@@ -87,6 +91,7 @@ public final class ConversationSearchHandler implements FrameHandler {
             asked.mode(),
             asked.snapshot(),
             null,
-            asked.conversation()));
+            asked.conversation(),
+            Boolean.TRUE.equals(asked.includeInputs())));
   }
 }
