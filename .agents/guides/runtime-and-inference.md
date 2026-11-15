@@ -50,6 +50,21 @@ can change reconstructed references/seams; it does not certify the whole old req
 Keep current read authority, speaker/provenance and usage attribution distinct.
 Live deltas are droppable previews; they neither replace nor guarantee log retention.
 
+## Model-output recovery
+
+`ModelOutputRecovery` and its sandbox `modelOutput.recover` bridge implement the
+[bounded recovery policy](../../docs/decisions/0074-model-output-recovery-policy.md).
+Use declared contracts and existing journaled, model-only delegation; never run
+the document summariser as a privileged shortcut or replay research/tools to fix
+formatting. One targeted summary or structural correction consumes the original
+allowance. Invalid results require review; domain evidence checks still apply.
+
+Runtime recovery decisions and scripted JSON parsing append roleless diagnostics
+with retained source references. Keep them out of model projection and compaction
+input. `ScriptStore.Input` carries a host-only observer excluded from JSON; it is
+not a guest capability or a second journal. Native repair commands cannot be
+rewritten by hooks into a different task or a worker with capabilities.
+
 Trace [Transcript](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Transcript.java), [EntryKind](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/EntryKind.java),
 [Projection](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Projection.java)/[Compaction](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java) and [ContextCountFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java).
 See the [conversation manual](../../docs/manual/03-architecture.md#log-trajectory-and-model-projection) for the user-facing comparison.

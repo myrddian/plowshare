@@ -5,9 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.hooks.script.HookEngine;
 import io.aeyer.plowshare.server.hooks.script.ScriptLocation;
 import io.aeyer.plowshare.server.llm.LlmJson;
+import io.aeyer.plowshare.server.llm.ModelOutputRecovery;
+import io.aeyer.plowshare.server.llm.ModelOutputRecoveryCodec;
+import io.aeyer.plowshare.server.llm.StandardModelOutputRecovery;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Source;
@@ -62,6 +66,12 @@ public final class ScriptProgram {
     return evaluate(source, input);
   }
 
+  /** The host observer records decisions even when later script validation throws. */
+  public static JsonNode step(
+      String source, JsonNode input, Consumer<ModelOutputRecovery.Diagnostic> diagnostics) {
+    return evaluate(source, input, diagnostics);
+  }
+
   /** Keep the real script leaf when retained provenance has one, otherwise use its definition. */
   public static String fileName(String definition, String origin) {
     if (origin != null) {
@@ -90,6 +100,11 @@ public final class ScriptProgram {
   }
 
   private static JsonNode evaluate(String source, JsonNode input) {
+    return evaluate(source, input, ignored -> {});
+  }
+
+  private static JsonNode evaluate(
+      String source, JsonNode input, Consumer<ModelOutputRecovery.Diagnostic> diagnostics) {
     if (source.length() > 524288)
       throw new IllegalStateException("orchestration script exceeds 512 KiB");
     var script =
@@ -103,7 +118,8 @@ public final class ScriptProgram {
         context.eval(
             "js",
             "globalThis.Date=undefined; Math.random=()=>{throw new Error(\"random is unavailable; use input.requestId\")};");
-        installJsonUtility(context);
+        installJsonUtility(context, diagnostics);
+        installRecoveryUtility(context, new StandardModelOutputRecovery(), diagnostics);
         var module = context.eval(script);
         if (!module.hasMember("manifest")
             || !module.hasMember("step")
@@ -136,7 +152,8 @@ public final class ScriptProgram {
     }
   }
 
-  private static void installJsonUtility(Context context) {
+  private static void installJsonUtility(
+      Context context, Consumer<ModelOutputRecovery.Diagnostic> diagnostics) {
     // A single bounded pure function, not Java object/class access. Return a primitive
     // JSON string so the guest receives its own plain objects, never Jackson host nodes.
     context
@@ -147,7 +164,10 @@ public final class ScriptProgram {
                 args -> {
                   if (args.length != 1 || !args[0].isString())
                     throw new IllegalArgumentException("llmJson.parse requires one string");
-                  return LlmJson.parse(args[0].asString()).json().toString();
+                  String raw = args[0].asString();
+                  var parsed = LlmJson.parse(raw);
+                  diagnostics.accept(ModelOutputRecoveryCodec.parsingDiagnostic(raw, parsed));
+                  return parsed.json().toString();
                 });
     context.eval(
         "js",
@@ -162,5 +182,43 @@ public final class ScriptProgram {
                   delete globalThis.__llmJsonParser;
                 })(__llmJsonParser);
                 """);
+  }
+
+  private static void installRecoveryUtility(
+      Context context,
+      ModelOutputRecovery recovery,
+      Consumer<ModelOutputRecovery.Diagnostic> diagnostics) {
+    context
+        .getBindings("js")
+        .putMember(
+            "__modelOutputRecovery",
+            (ProxyExecutable)
+                args -> {
+                  if (args.length != 3
+                      || !args[0].isString()
+                      || !args[1].isString()
+                      || !args[2].isString())
+                    throw new IllegalArgumentException(
+                        "modelOutput.recover requires text, contract and checkpoint");
+                  var plan =
+                      recovery.examine(
+                          ModelOutputRecoveryCodec.request(
+                              args[0].asString(), args[1].asString(), args[2].asString()));
+                  diagnostics.accept(plan.diagnostic());
+                  return ModelOutputRecoveryCodec.result(plan);
+                });
+    context.eval(
+        "js",
+        """
+        (recover => {
+          Object.defineProperty(globalThis, 'modelOutput', {
+            value: Object.freeze({recover: (raw, contract, checkpoint = null) => {
+              if (typeof raw !== 'string') throw new TypeError('modelOutput.recover requires model text');
+              return JSON.parse(recover(raw, JSON.stringify(contract), JSON.stringify(checkpoint)));
+            }})
+          });
+          delete globalThis.__modelOutputRecovery;
+        })(__modelOutputRecovery);
+        """);
   }
 }

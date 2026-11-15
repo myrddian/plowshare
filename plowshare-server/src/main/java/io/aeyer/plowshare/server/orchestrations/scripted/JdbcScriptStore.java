@@ -82,7 +82,7 @@ public final class JdbcScriptStore implements ScriptStore {
     object.remove("previousSequence");
     object.remove("hash");
     object.set("state", state);
-    var evaluated = ScriptProgram.step(source, object);
+    var evaluated = ScriptProgram.step(source, object, input.recoveryDiagnostics());
     if (!evaluated.has("state") || !evaluated.path("command").isObject())
       throw new IllegalStateException("script step must return state and one command");
     if (evaluated.size() != 2)

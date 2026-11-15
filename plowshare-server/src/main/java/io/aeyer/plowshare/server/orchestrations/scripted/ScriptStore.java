@@ -1,12 +1,15 @@
 package io.aeyer.plowshare.server.orchestrations.scripted;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.aeyer.plowshare.protocol.Orchestration.CheckpointRepair;
+import io.aeyer.plowshare.server.llm.ModelOutputRecovery.Diagnostic;
 import io.aeyer.plowshare.server.todos.TodoItem;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Durable script journal. Script-owned state is read only by the sandbox/persistence boundary.
@@ -36,6 +39,11 @@ public interface ScriptStore {
 
   /** Arguments are the bounded object encoding handed to the owning tool's request codec. */
   record Tool(String name, String arguments, boolean readinessObserver) implements Command {
+    /** Hooks may deny recovery, but cannot turn it into research or change its retained input. */
+    public boolean outputRecovery() {
+      return ScriptCommands.outputRecovery(name, arguments);
+    }
+
     public Tool {
       if (name == null || !name.matches("[A-Za-z0-9_\\-]{1,128}"))
         throw new IllegalArgumentException("script tool name is invalid");
@@ -55,8 +63,22 @@ public interface ScriptStore {
       Integer previousSequence,
       String result,
       List<TodoItem> todos,
-      String hash) {
+      String hash,
+      @JsonIgnore Consumer<Diagnostic> recoveryDiagnostics) {
+    public Input(
+        String run,
+        String message,
+        int sequence,
+        UUID requestId,
+        Integer previousSequence,
+        String result,
+        List<TodoItem> todos,
+        String hash) {
+      this(run, message, sequence, requestId, previousSequence, result, todos, hash, ignored -> {});
+    }
+
     public Input {
+      Objects.requireNonNull(recoveryDiagnostics, "recoveryDiagnostics");
       run = identity(run, "conversation");
       hash = identity(hash, "source hash");
       if (sequence < 0

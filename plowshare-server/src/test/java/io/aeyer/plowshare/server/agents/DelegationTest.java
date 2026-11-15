@@ -2192,7 +2192,7 @@ class DelegationTest {
     Object properties = tool.schema().parameters().properties();
     assertTrue(
         properties instanceof Map<?, ?> map
-            && map.keySet().equals(Set.of("agent", "task", "images")),
+            && map.keySet().equals(Set.of("agent", "task", "images", "recovery")),
         String.valueOf(properties));
     // `images` is offered and not required, and it is offered to a caller
     // holding no picture at all: a schema that appeared and disappeared with

@@ -40,6 +40,14 @@ Native scripts emit bounded typed commands through their owning runtime. They do
 not acquire arbitrary host IO or model-selected authority. Keep stage checkpoints,
 child completion delivery and effect replay rules intact across interruption.
 
+For model-produced string-field objects, use the shared
+[model-output recovery policy](../../docs/decisions/0074-model-output-recovery-policy.md)
+with an explicit contract. Persist its checkpoint in script state and execute its
+ordinary returned delegation command. Review exhaustion must not complete an
+unvalidated stage. Domain-specific semantic checks remain mandatory. Existing
+script JSON parsing and contract decisions are recorded as diagnostics hidden
+from model context; installing this policy never resumes source-pinned old runs.
+
 Application inbox routing and human attention ownership are distinct. Root
 applications retain background output in the project inbox without manifest opt-in.
 Successful schedule receipts and pinned native-only completions are routine by

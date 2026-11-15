@@ -401,9 +401,10 @@ public record LoggedEntry(
    * entries_role_matches_kind} confines a roleless kind to a NULL role, which {@link Projection}
    * skips. This factory cannot ask for a role and no caller can give it one.
    *
-   * <p>The content is free-form prose about the machinery, in the third person, addressed to
-   * whoever reads the conversation back. It is not an event type with fields: nothing parses it,
-   * and a shape nothing reads is a shape that goes stale.
+   * <p>The content addresses whoever reads the conversation back, never the model. Most callers
+   * write prose about the machinery. Model-output recovery writes versioned JSON diagnostics with
+   * source command references, policy decisions and validation metadata; these retain the same
+   * non-projecting kind and do not duplicate the source response into model context.
    */
   public static LoggedEntry diagnostic(String note) {
     return new LoggedEntry(EntryKind.DIAGNOSTIC, note, null, List.of());

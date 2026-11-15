@@ -56,6 +56,7 @@ import io.aeyer.plowshare.server.information.InformationActor;
 import io.aeyer.plowshare.server.information.InformationContext;
 import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
+import io.aeyer.plowshare.server.llm.ModelOutputRecoveryCodec;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.CallAuthorization;
 import io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.Disclosure;
@@ -2319,7 +2320,12 @@ public final class JobRuntime {
               previous == null ? null : previous.sequence(),
               previous == null ? null : previous.result(),
               todos == null ? List.of() : todos.list(conversation),
-              hash);
+              hash,
+              decision ->
+                  transcript.record(
+                      LoggedEntry.diagnostic(
+                          ModelOutputRecoveryCodec.diagnostic(
+                              decision, conversation, sequence, hash))));
       var pending = previous;
       if (!resuming) {
         ScriptStore.Preparation next;
@@ -2396,13 +2402,20 @@ public final class JobRuntime {
               budget.spent() - callsBefore,
               reason);
         }
-        if (next instanceof ScriptStore.NeedsCall)
+        if (next instanceof ScriptStore.NeedsCall) {
+          transcript.record(
+              LoggedEntry.diagnostic(
+                  "Script command "
+                      + sequence
+                      + " was not dispatched: the shared model-call allowance is exhausted."
+                      + " Prepared recovery decisions do not authorize another call."));
           return new Outcome(
               Ending.CALL_BUDGET,
               "script needs another model call",
               taken,
               budget.spent() - callsBefore,
               "");
+        }
         pending = ((ScriptStore.Prepared) next).step();
       }
       taken++;
@@ -2465,6 +2478,12 @@ public final class JobRuntime {
             "Script command refused by its execution fence: " + fenced,
             taken,
             budget.spent() - callsBefore);
+      if (command.outputRecovery() && !ScriptStore.sameArguments(arguments, pre.arguments())) {
+        String reason = "Output recovery refused: a hook changed the retained recovery command.";
+        transcript.record(LoggedEntry.diagnostic(reason));
+        return pauseScript(
+            offered, home, transcript, end, reason, taken, budget.spent() - callsBefore);
+      }
       String raw = pending.raw();
       if (raw != null
           && pending.arguments() != null

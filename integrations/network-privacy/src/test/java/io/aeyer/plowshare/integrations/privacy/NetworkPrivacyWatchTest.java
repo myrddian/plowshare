@@ -2,7 +2,6 @@ package io.aeyer.plowshare.integrations.privacy;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -210,7 +209,8 @@ class NetworkPrivacyWatchTest {
             "privacy_device_assessor",
             "privacy_assistant",
             "privacy_product_researcher",
-            "privacy_product_reviewer"),
+            "privacy_product_reviewer",
+            "privacy_output_recovery"),
         agents.names());
     assertTrue(agents.get("privacy_coordinator").calls().contains("privacy_device_assessor"));
     for (String name :
@@ -411,7 +411,9 @@ class NetworkPrivacyWatchTest {
             .put("notes", "")
             .put("questions", "");
     input.put("result", "<tool_call>" + draft);
-    assertThrows(IllegalStateException.class, () -> ScriptProgram.step(source, input));
+    assertEquals(
+        "orchestration_ask",
+        ScriptProgram.step(source, input).path("command").path("tool").asText());
     input.put("result", draft.toString());
     var retained = ScriptProgram.step(source, input);
     assertEquals("todo_write", retained.path("command").path("tool").asText());
