@@ -46,6 +46,16 @@ append operation rather than pre-locking a topic or converting storage errors
 into a successful unavailable/empty result. Retention and topic recreation must
 not silently target a replacement incarnation.
 
+## Budget consent and message continuation
+
+A pending budget checkpoint keeps the original message route and task instance
+open. Approval queues continuation of that same route/root, with nested delegates
+restored from their original conversations. It does not add messaging's legacy
+default command-continuation allowance on top of the explicit grant. Expiry, stop,
+cancellation and current authority still fence resumption; denied or uncertain
+recovery settles the original route without starting another paid turn. See
+[ADR 0073](../../docs/decisions/0073-agent-budget-consent-and-continuation.md).
+
 ## Bounded work
 
 Required contract: active publish/read/control/delivery units need configured

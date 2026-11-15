@@ -56,6 +56,12 @@ export interface ApprovalView {
   readonly answeredAt: string | null;
   readonly commands: readonly (readonly string[])[] | null;
   readonly judged: string | null;
+  readonly budget?: BudgetExtension;
+}
+/** A one-time additive grant for the same retained execution. */
+export interface BudgetExtension {
+  readonly calls: number;
+  readonly steps: number;
 }
 export interface ApprovalListed {
   readonly approvals: readonly ApprovalView[];
@@ -381,7 +387,17 @@ const approval = record({
   answeredAt: nullable(named),
   commands: nullable(list(strings)),
   judged: nullable(text),
+  budget: (value) => value === undefined || budgetExtensionCheck(value),
 });
+const budgetExtensionCheck = record(
+  { calls: count, steps: count },
+  (row) =>
+    typeof row.calls === 'number' &&
+    typeof row.steps === 'number' &&
+    row.calls <= 2147483647 &&
+    row.steps <= 2147483647 &&
+    row.calls + row.steps > 0,
+);
 export const boardTopicCheck: Check = record({
   swarm: nullable(swarmSelectionCheck),
   id: named,

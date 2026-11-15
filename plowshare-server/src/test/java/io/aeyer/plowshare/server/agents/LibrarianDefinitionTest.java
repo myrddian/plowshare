@@ -84,8 +84,8 @@ class LibrarianDefinitionTest {
   }
 
   @Test
-  void navigation_has_a_bounded_model_budget() {
-    assertTrue(librarian.maxModelCalls() > 1);
-    assertTrue(librarian.maxTurns() > librarian.maxModelCalls());
+  void navigation_can_use_all_64_steps() {
+    assertEquals(64, librarian.maxTurns());
+    assertEquals(64, librarian.maxModelCalls());
   }
 }

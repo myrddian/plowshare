@@ -283,17 +283,19 @@ export function installOperator(
     } else if (view.kind.startsWith('approval-')) {
       fields += select(
         'id',
-        'Command approval',
+        'Approval',
         (data.approvals ?? []).map((r) => [
           String(r.id),
-          `${displayText(isList(r.command) ? r.command.join(' ') : r.id)} · ${displayText(r.side)} · ${displayText(r.cwd)}`,
+          r.budget
+            ? `${r.budget.calls} additional calls · ${r.budget.steps} additional steps · ${r.id}`
+            : `${displayText(isList(r.command) ? r.command.join(' ') : r.id)} · ${displayText(r.side)} · ${displayText(r.cwd)}`,
         ]),
       );
       fields += `<div class="operator-items">${
         (data.approvals ?? [])
           .map(
             (r) =>
-              `<article><strong>${esc(r.id)}</strong><pre>${esc((isList(r.commands) ? r.commands : [r.command]).map((c) => (isList(c) ? c.join(' ') : '')).join('\n'))}</pre><p>${esc(r.reason)} · ${esc(r.scope ?? 'awaiting decision')}</p></article>`,
+              `<article><strong>${esc(r.id)}</strong><pre>${esc(r.budget ? `${r.budget.calls} additional model calls · ${r.budget.steps} additional steps` : (isList(r.commands) ? r.commands : [r.command]).map((c) => (isList(c) ? c.join(' ') : '')).join('\n'))}</pre><p>${esc(r.reason)} · ${esc(r.scope ?? 'awaiting decision')}${r.budget ? ' · Budget: once or deny; continue the same work.' : ''}</p></article>`,
           )
           .join('') || '<p>No approvals in this scope.</p>'
       }</div>`;

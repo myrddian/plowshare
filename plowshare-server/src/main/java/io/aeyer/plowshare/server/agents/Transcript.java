@@ -510,6 +510,11 @@ public interface Transcript {
     return NONE;
   }
 
+  /** Reopens a retained child, never creates another delegation identity. */
+  default Transcript resumeDelegate(AgentDefinition callee, String child, int continuing) {
+    throw new UnsupportedOperationException("This transcript cannot restore a retained delegation");
+  }
+
   /**
    * Whether the answer the previous turn came to was written by the agent's fallback rather than by
    * its own model.

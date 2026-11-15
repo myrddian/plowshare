@@ -22,7 +22,7 @@ delegable: false
 bot: true
 skills: ["*"]
 max-turns: 200
-max-model-calls: 100
+max-model-calls: 200
 calls: [diagnosis_verifier, code_reviewer, image_reader, close_reader, coder]
 orchestrations: [code_implementation, deep_research, implement_specification]
 ---

@@ -95,6 +95,11 @@ import org.slf4j.LoggerFactory;
  * the thing it is guarding.
  */
 public final class Turn {
+  private volatile BudgetRequests budgetRequests = BudgetRequests.NONE;
+
+  public void useBudgetRequests(BudgetRequests requests) {
+    budgetRequests = Objects.requireNonNull(requests);
+  }
 
   private static final Logger log = LoggerFactory.getLogger(Turn.class);
 
@@ -1356,6 +1361,9 @@ public final class Turn {
     boolean started = false;
     try {
       admissible.accept(record);
+      if (budgetRequests.restoring(id).isEmpty() && budgetRequests.awaiting(id))
+        throw new Refused(
+            "This conversation is waiting on a budget decision; answer its approval before starting another task.");
       Budget budget =
           given != null
               ? given
@@ -1434,6 +1442,14 @@ public final class Turn {
           causation == null
               ? compaction.transcriptFor(id, definition, speaker)
               : compaction.transcriptFor(id, definition, speaker, causation);
+      var budgetContinuation = budgetRequests.restoring(id);
+      if (budgetContinuation.isPresent()) {
+        var frame = budgetContinuation.get();
+        if (!frame.agent().equals(definition.name()))
+          throw new Refused("A budget continuation cannot replace its original agent");
+        transcript.continueBudget(frame.turn());
+        turnCap = frame.stepLimit() == null ? TurnCap.none() : TurnCap.of(frame.stepLimit());
+      }
       if (causation != null) transcript.reserveCausalSource();
       if (automaticBudgetGrant)
         transcript.record(

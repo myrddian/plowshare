@@ -57,6 +57,7 @@ export interface OperatorSubject {
     | Replies['agent.list'][number]['commands']
     | null;
   scope?: string | null;
+  budget?: Replies['approval.list']['approvals'][number]['budget'];
   cwd?: string;
   side?: string;
   sender?: string;

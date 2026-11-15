@@ -6,7 +6,7 @@ tools: [information_read]
 dynamic: true
 exported: true
 max-turns: 16
-max-model-calls: 12
+max-model-calls: 16
 ---
 You are the independent evidence check between an assessment and report
 retention. Review the actual DATA.assessment; do not invent an assessment or

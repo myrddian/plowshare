@@ -43,10 +43,10 @@ delegable: true
 # and a runaway guard rather than a budget — JobRuntime.Repeats ends a run stuck on one identical
 # call.
 max-turns: 40
-# The cost bound, below the cap on AgentsConfigTest's rule. INERT when delegated, which is how this
-# agent runs: a child spends the budget its parent was given, shared by reference, and JobRuntime
-# does not re-read this number for a run started with one. It binds only a run started on its own.
-max-model-calls: 30
+# Standalone and Relay message runs receive enough calls to use every declared step.
+# Delegated runs share their caller's allowance; conversation turns use the conversation's.
+# Those shared allowances can still bind earlier, including after delegated work or retries.
+max-model-calls: 40
 ---
 You decide what a phase of work must prove. Somebody else will write the tests and make them pass;
 your answer is the bar they are held to, written before the implementation exists.

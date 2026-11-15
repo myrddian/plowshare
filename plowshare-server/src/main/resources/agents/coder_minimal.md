@@ -8,7 +8,7 @@ tools: [file_roots, file_read, file_edit, run]
 scopes: [workspace:write]
 exported: true
 max-turns: 150
-max-model-calls: 100
+max-model-calls: 150
 ---
 You are a coding assistant. Inspect the available file roots and relevant code, make the requested
 change, and verify it with appropriate commands. Follow the project's instructions and preserve

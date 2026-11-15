@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.agents;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.images.ImageRefusedException;
@@ -222,6 +223,21 @@ public final class AgentRunTool implements AgentTool {
   }
 
   private final JobRuntime runtime;
+  private BudgetCheckpoint.Frame retainedChild;
+
+  /** Uses the original call and conversation after a budget decision, with current grant checks. */
+  String resumeExisting(BudgetCheckpoint.Frame frame, ToolCall opening, Home home) {
+    if (retainedChild != null)
+      throw new IllegalStateException("Delegation recovery is already active");
+    retainedChild = frame;
+    try {
+      calledAs(opening.id());
+      return run(opening.arguments(), home);
+    } finally {
+      retainedChild = null;
+    }
+  }
+
   private final AgentDefinition caller;
   private final Budget budget;
   private final BooleanSupplier cancelled;
@@ -673,23 +689,33 @@ public final class AgentRunTool implements AgentTool {
     // authority-bound runtime requires its own durable child link and refuses before
     // model execution if opening that log failed.
     runtime.requireChild(operation, callee, home);
-    Transcript child = transcript.delegate(callee, home, openedBy);
+    if (retainedChild != null && !retainedChild.agent().equals(callee.name()))
+      throw new IllegalStateException("The retained callee cannot be replaced");
+    Transcript child =
+        retainedChild == null
+            ? transcript.delegate(callee, home, openedBy)
+            : transcript.resumeDelegate(callee, retainedChild.conversation(), retainedChild.turn());
     var childOperation =
-        runtime.childOperation(operation, transcript.conversationId(), child, callee, home, budget);
-    if (prepareChild != null) prepareChild.accept(child);
+        retainedChild == null
+            ? runtime.childOperation(
+                operation, transcript.conversationId(), child, callee, home, budget)
+            : runtime.restoredChildOperation(
+                operation, transcript.conversationId(), child, callee, home, budget);
+    if (prepareChild != null && retainedChild == null) prepareChild.accept(child);
     // The record's delegation lines (spec 2026-09-28 §2), on the caller's conversation: the
     // record follows the caller's run, and the child's own lines are its conversation's.
     // child.conversationId() names this specific delegation's own conversation (spec
     // 2026-09-29 §1a, fixed after review): two delegations to the same callee, live at once
     // in this run, each open a distinct one, and the facts footer reads that one back.
-    runtime
-        .activity()
-        .delegated(
-            transcript.conversationId(),
-            caller.name(),
-            callee.name(),
-            task,
-            child.conversationId());
+    if (retainedChild == null)
+      runtime
+          .activity()
+          .delegated(
+              transcript.conversationId(),
+              caller.name(),
+              callee.name(),
+              task,
+              child.conversationId());
 
     // The full form, called directly and on this thread. Not
     // JobStore.submit: that builds a fresh Budget from the child's own

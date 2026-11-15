@@ -38,7 +38,7 @@ public class RunApprovalStore implements ApprovalNotificationStore {
   private static final String COLUMNS =
       "id, project_id, conversation, asked_in, handle, agent, side,"
           + " argv::text AS argv, cwd, reason, state, scope, prefix::text AS prefix, answered_by,"
-          + " answered_at, delivered_at, created_at, commands::text AS commands, judged";
+          + " answered_at, delivered_at, created_at, commands::text AS commands, judged, budget_calls, budget_steps";
   private static final String SELECT = "SELECT " + COLUMNS + " FROM run_approvals";
 
   private static final Logger log = LoggerFactory.getLogger(RunApprovalStore.class);
@@ -315,7 +315,7 @@ public class RunApprovalStore implements ApprovalNotificationStore {
     var answered =
         jdbc.query(
             "UPDATE run_approvals SET state = ?, scope = ?, prefix = ?::jsonb,"
-                + " answered_by = ?, answered_at = ? WHERE id = ? AND state = ? RETURNING "
+                + " answered_by = ?, answered_at = ? WHERE id = ? AND state = ? AND budget_calls IS NULL RETURNING "
                 + COLUMNS,
             ROW,
             RunApproval.ALLOWED,
@@ -408,7 +408,7 @@ public class RunApprovalStore implements ApprovalNotificationStore {
         jdbc.query(
             SELECT
                 + " WHERE project_id = ? AND conversation = ?"
-                + " AND side = ? AND argv = ?::jsonb AND cwd = ? AND state = ? AND scope IN (?, ?)"
+                + " AND budget_calls IS NULL AND side = ? AND argv = ?::jsonb AND cwd = ? AND state = ? AND scope IN (?, ?)"
                 + " ORDER BY CASE scope WHEN 'conversation' THEN 0 ELSE 1 END, answered_at, id",
             ROW,
             projectId,
@@ -528,5 +528,8 @@ public class RunApprovalStore implements ApprovalNotificationStore {
               instant(row, "delivered_at"),
               instant(row, "created_at"),
               setOf(row.getString("commands")),
-              row.getString("judged"));
+              row.getString("judged"),
+              row.getObject("budget_calls", Integer.class) == null
+                  ? null
+                  : new BudgetExtension(row.getInt("budget_calls"), row.getInt("budget_steps")));
 }

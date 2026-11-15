@@ -504,10 +504,23 @@ public final class JdbcMessagingRepository implements MessagingRepository {
         "SELECT r.message FROM message_routes r"
             + " JOIN firings f ON f.data->>'direct_message' = r.message"
             + " WHERE r.handled_at IS NULL AND f.status = 'started' AND f.finished_at IS NOT NULL"
+            + " AND NOT EXISTS (SELECT 1 FROM budget_extension_requests b WHERE b.allowance_id=r.allowance_id AND b.acknowledged_at IS NULL)"
             + " AND (f.reason IS NOT NULL OR (NOT r.awaiting AND NOT EXISTS (SELECT 1 FROM firings pending"
             + " WHERE pending.data->>'direct_message' = r.message AND (pending.status = 'queued'"
             + " OR (pending.status = 'started' AND pending.finished_at IS NULL)))))",
         String.class);
+  }
+
+  @Override
+  public boolean awaitingBudget(String message) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+        SELECT EXISTS(SELECT 1 FROM message_routes r JOIN budget_extension_requests b
+          ON b.allowance_id=r.allowance_id WHERE r.message=? AND b.acknowledged_at IS NULL)
+        """,
+            Boolean.class,
+            message));
   }
 
   public List<String> answeredApprovals() {
@@ -517,7 +530,7 @@ public final class JdbcMessagingRepository implements MessagingRepository {
             + " JOIN message_instances i ON i.conversation = a.conversation"
             + " JOIN message_routes r ON r.recipient = i.id"
             + " WHERE r.started_at IS NOT NULL AND r.handled_at IS NULL AND i.active"
-            + " AND a.state IN ('allowed', 'denied') AND a.answered_at >= r.started_at"
+            + " AND a.budget_calls IS NULL AND a.state IN ('allowed', 'denied') AND a.answered_at >= r.started_at"
             + " AND NOT EXISTS (SELECT 1 FROM firings f WHERE f.data->>'message_approval' = a.id)",
         String.class);
   }

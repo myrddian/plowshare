@@ -46,16 +46,12 @@ package io.aeyer.plowshare.server.agents;
  * AgentRunTool} reaches {@link JobRuntime#run} with the child's definition and no cap of the
  * parent's, which is what makes that true.
  *
- * <h2>Nothing here reaches the model</h2>
+ * <h2>Read-only advice reaches the model</h2>
  *
- * <p>No tool takes one, no schema mentions one, and no system prompt names one. An agent that could
- * read or write its own ceiling would negotiate with it, and a ceiling an agent can raise is not a
- * ceiling. {@code ModelSurfaceTest} pins every shipped agent's system message and tool schemas, so
- * a knob leaking into either fails it.
- *
- * <p>The one sentence a model may see about the cap is {@code JobRuntime}'s second repeat note,
- * which states the number as an observation about the run it is in the way it states the count of
- * identical calls. It is read-only, it is not a control, and it predates this class.
+ * <p>{@link AllowanceNotices} reports the current ceiling and remaining steps at the start of a run
+ * and at diminishing-allowance checkpoints. These notices are retained in the transcript; seeing a
+ * ceiling never authorizes the model to raise it. Existing caller and policy checks continue to own
+ * every increase.
  *
  * <h2>Volatile, though a run reads it on one thread</h2>
  *
@@ -193,6 +189,11 @@ public final class TurnCap {
               + " turns to report; ask capped() first");
     }
     return ceiling;
+  }
+
+  /** One coherent ceiling read for runtime advice; null means uncapped. */
+  Integer ceiling() {
+    return turns;
   }
 
   /**

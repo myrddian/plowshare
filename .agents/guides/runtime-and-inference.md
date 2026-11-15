@@ -84,6 +84,18 @@ cache-read/input, only with full valid paired coverage and no active or incomple
 attempts in the selected cohort; zero input has no rate. Unknown cost does not
 hide valid token metrics.
 
+## Agent budget consent
+
+Shipped agent defaults provide at least one model call per declared step; shared
+parent/delegate spending and retries can still exhaust the allowance first.
+The runtime tells eligible agents their remaining steps/calls and warns at
+50/20/10/5 percent. `request_budget` asks for a one-time extension through existing
+approval controls; reaching a limit can ask without another model call.
+Approval resumes the retained task, preserving spending, original conversations,
+working history and delegated call slots. Recovery rechecks immutable authority;
+it does not create replacement work or replay uncertain effects. SYSTEM work and
+board wake windows retain their existing owners. See [ADR 0073](../../docs/decisions/0073-agent-budget-consent-and-continuation.md).
+
 ## Bounded work
 
 Required contract: each active admission/turn/provider unit needs a configured,

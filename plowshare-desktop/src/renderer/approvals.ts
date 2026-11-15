@@ -75,7 +75,22 @@ export function installApprovalControls(
       const busy =
         pending.has(row.id) || state().answeringApprovals?.includes(row.id);
       const disabled = busy || (state().mode === 'live' && !state().connected);
-      return `<section class="command-approval" data-approval-prompt="${esc(row.id)}" aria-label="Command approval"><strong class="section-label">${icon('shield')}Approval requested · ${esc(row.side)}${context ? ` · ${esc(context)}` : ''}</strong><pre>${esc((row.commands ?? [row.command]).map((command) => command.join(' ')).join('\n'))}</pre><p>${esc(row.cwd)}${row.reason ? ` · ${esc(row.reason)}` : ''}</p><div class="approval-actions"><button data-approval="${esc(row.id)}" data-decision="once" ${disabled ? 'disabled' : ''}>${icon('check')}${busy ? 'Recording…' : 'Approve'}</button><button data-approval="${esc(row.id)}" data-decision="deny" ${disabled ? 'disabled' : ''}>${icon('close')}Deny</button><span>Approval allows this command once.</span></div>${errors.has(row.id) ? `<p class="approval-error" role="alert">${esc(errors.get(row.id))}</p>` : ''}</section>`;
+      const budget = row.budget;
+      const title =
+        budget === undefined ? 'Command approval' : 'Budget extension approval';
+      const subject =
+        budget === undefined ? row.side : 'Continue the same work';
+      const details =
+        budget === undefined
+          ? (row.commands ?? [row.command])
+              .map((command) => command.join(' '))
+              .join('\n')
+          : `${budget.calls} additional model calls · ${budget.steps} additional steps`;
+      const effect =
+        budget === undefined
+          ? 'Approval allows this command once.'
+          : 'Approval extends the original allowance once; history and prior spending are retained.';
+      return `<section class="command-approval" data-approval-prompt="${esc(row.id)}" aria-label="${title}"><strong class="section-label">${icon('shield')}Approval requested · ${esc(subject)}${context ? ` · ${esc(context)}` : ''}</strong><pre>${esc(details)}</pre><p>${esc(row.cwd)}${row.reason ? ` · ${esc(row.reason)}` : ''}</p><div class="approval-actions"><button data-approval="${esc(row.id)}" data-decision="once" ${disabled ? 'disabled' : ''}>${icon('check')}${busy ? 'Recording…' : 'Approve'}</button><button data-approval="${esc(row.id)}" data-decision="deny" ${disabled ? 'disabled' : ''}>${icon('close')}Deny</button><span>${effect}</span></div>${errors.has(row.id) ? `<p class="approval-error" role="alert">${esc(errors.get(row.id))}</p>` : ''}</section>`;
     },
   };
 }

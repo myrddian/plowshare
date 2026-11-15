@@ -416,21 +416,9 @@ plowshare:
   # still refused rather than folded into this — a caller sending 0 has said
   # something, and it is not the same as saying nothing.
   #
-  # WHY 240. Arithmetic on a measurement that is already in the tree, rather than
-  # a round number: interlocutor.md records that "a full turn of this agent costs
-  # about twelve calls", measured, and sets its own max-model-calls at 40 for
-  # "three of those with room" — a number that bounds a run started on the
-  # agent's own behalf and is inert for a turn of an actual conversation, which
-  # spends the conversation's. Twenty such turns is 240, and twenty utterances is
-  # a conversation rather than a question.
-  #
-  # The two directions of being wrong are not symmetric here either. Too SMALL
-  # stops a person mid-thought at a bound they never set, and the remedy —
-  # opening another conversation — loses the history. Too LARGE costs a tab left
-  # open on a loop more of somebody's inference budget before CALL_BUDGET ends
-  # it. Neither breaks anything: spending a budget is a designed ending, the
-  # conversation says so, and every turn it did take is in the archive. That is
-  # what makes a number in the middle safe to ship and an operator's to change.
+  # Conversation policy is independent of agent definition allowances. The default is
+  # unlimited; an operator may set a finite total through PLOWSHARE_CONVERSATION_BUDGET.
+  # Agent definitions supply standalone and message-run allowances, not this default.
   conversations:
     default-budget: ${PLOWSHARE_CONVERSATION_BUDGET:unlimited}
     # What becomes of a conversation's stored tool results, and where they are
