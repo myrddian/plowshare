@@ -107,6 +107,7 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
                         enabled=True,
                         handle="operator",
                         must_change_password=False,
+                        project_creator=False,
                         server_admin=False,
                     ),
                 ),

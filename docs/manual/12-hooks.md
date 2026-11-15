@@ -16,6 +16,7 @@ sensor names, HTTP requests or filesystem changes.
 | --- | --- | --- |
 | Harness | Built-in Java checks, wired by the server harness | Server code/configuration lifecycle; cannot be replaced by a user file |
 | Personal | Your account's Personal `Resources/hooks/`, synchronized to `<PLOWSHARE_DATA_DIR>/projects/<personal-numeric-id>/hooks/` | Server-side directory reload when its fingerprint changes |
+| Application | `hooks/` directly under the registered Application resource root | Loaded as that project's hook tier; refreshed on the next callback after a detected file change |
 | Project | `<PLOWSHARE_DATA_DIR>/projects/<numeric-project-id>/hooks/` | Loaded lazily and refreshed on the next callback after a detected file change |
 | Local | Attached client's `.plowshare/hooks/` | Read and pinned when the log opens; edits apply to a newly opened log |
 
@@ -25,8 +26,11 @@ files reach the server through the account's existing union synchronization.
 Allow that synchronization to finish before opening new work.
 
 There is no loaded `<PLOWSHARE_DATA_DIR>/global/hooks/` directory. A hook file does
-not go into `agents/`, `orchestrations/`, or the project workspace's ordinary
-`hooks/` folder. Use the supported data tier or `.plowshare/hooks/` placement.
+not go into `agents/`, `orchestrations/`, or an ordinary workspace's `hooks/`
+folder. A registered Application's resource-root `hooks/` is supported; it is
+distinct from an attached client workspace. Applications must not nest their
+resources under `.plowshare/`. Other projects use the supported data tier or
+`.plowshare/hooks/` placement.
 
 The current callback wiring differs by subsystem:
 
@@ -54,6 +58,8 @@ declared `name` is the recorded identity and must be unique within its directory
 Use names such as `10-write-policy.ts` and `20-event-notice.js` for ordering;
 renaming the file does not implicitly rename the declared hook. Repeated names
 within one directory are a load failure rather than an override.
+Multiple files may handle the same event. Their prompt additions and notes
+accumulate in chain order; a deny on a gating event stops the remaining chain.
 
 ## The 14 callback events
 
