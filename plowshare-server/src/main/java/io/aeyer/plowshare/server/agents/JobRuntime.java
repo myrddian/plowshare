@@ -76,7 +76,9 @@ import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
 import io.aeyer.plowshare.server.pool.OperationStatements;
 import io.aeyer.plowshare.server.reads.BusyReadRetry;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.relay.RelayPublishing;
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import io.aeyer.plowshare.server.todos.TodoLists;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -270,6 +272,7 @@ public final class JobRuntime {
 
   private OperationAuthority operations;
   private InferenceCalls inferenceCalls;
+  private FailureReporter failures = FailureReporter.NONE;
 
   /** Runtime with required authority, used by focused policy fixtures. */
   public JobRuntime(
@@ -295,6 +298,43 @@ public final class JobRuntime {
     this(dispatcher, tools, agents, files, clock, reminding, images, refusals, ticker, delegates);
     this.operations = Objects.requireNonNull(operations);
     this.inferenceCalls = Objects.requireNonNull(inferenceCalls);
+  }
+
+  /** Production runtime with failure observations independent of durable job/event publication. */
+  public JobRuntime(
+      LlmDispatcher dispatcher,
+      List<AgentTool> tools,
+      Supplier<AgentRegistry> agents,
+      RunProviders files,
+      Supplier<Instant> clock,
+      Reminding reminding,
+      ImageStore images,
+      RefusalDetector refusals,
+      LongSupplier ticker,
+      AgentDelegates delegates,
+      OperationAuthority operations,
+      InferenceCalls inferenceCalls,
+      FailureReporter failures) {
+    this(
+        dispatcher,
+        tools,
+        agents,
+        files,
+        clock,
+        reminding,
+        images,
+        refusals,
+        ticker,
+        delegates,
+        operations,
+        inferenceCalls);
+    this.failures = Objects.requireNonNull(failures);
+  }
+
+  /** Standalone leaf runtime using the same failure boundary as the production runtime. */
+  public JobRuntime(FailureReporter failures, LlmDispatcher dispatcher, List<AgentTool> tools) {
+    this(dispatcher, tools);
+    this.failures = Objects.requireNonNull(failures);
   }
 
   private SystemOperations.Work systemWork;
@@ -378,6 +418,7 @@ public final class JobRuntime {
     retained.retainedResources = authority;
     retained.operations = operations;
     retained.inferenceCalls = inferenceCalls;
+    retained.failures = failures;
     retained.systemWork = systemWork;
     retained.runUsage = runUsage;
     retained.hooks = hooks;
@@ -3153,6 +3194,7 @@ public final class JobRuntime {
                     replaceRetainedResult(history, pending.tool(), result);
                   });
         } catch (RuntimeException interrupted) {
+          failures.report(FailureReporter.Source.RUNTIME, interrupted);
           return stopped(
               interrupted instanceof SessionGoneException
                   ? Ending.SESSION_GONE
@@ -3565,6 +3607,7 @@ public final class JobRuntime {
               modelCalls,
               "");
         } catch (LlmException failed) {
+          failures.report(FailureReporter.Source.RUNTIME, failed);
           boolean timedOut =
               failed instanceof LlmTransportException transport && transport.timedOut();
           recordFailedModelOutput(
@@ -3582,6 +3625,7 @@ public final class JobRuntime {
               modelCalls,
               describe(failed));
         } catch (RuntimeException broken) {
+          failures.report(FailureReporter.Source.RUNTIME, broken);
           recordFailedModelOutput(transcript, timed, owner, "model dispatch failed");
           // Wider than LlmException on purpose, and it is about the
           // counters rather than about the ending. Anything else escaping
@@ -4284,6 +4328,7 @@ public final class JobRuntime {
                                             : Duration.between(executedAt.get(), clock.get())));
                           });
                 } catch (RuntimeException interrupted) {
+                  failures.report(FailureReporter.Source.RUNTIME, interrupted);
                   return stopped(
                       interrupted instanceof SessionGoneException
                           ? Ending.SESSION_GONE
@@ -4472,7 +4517,10 @@ public final class JobRuntime {
                   result = withheldForAuthority(wanted.name());
                   told = ToolLines.ERROR;
                 } catch (RuntimeException failed) {
+                  if (failed instanceof ReadUnavailableException)
+                    failures.report(FailureReporter.Source.RUNTIME, failed);
                   if (failed instanceof SessionGoneException) {
+                    failures.report(FailureReporter.Source.RUNTIME, failed);
                     // ABOVE dependencyFailure AND NOT INSIDE IT, AND THE
                     // ORDER IS THE WHOLE MECHANISM. SessionGoneException
                     // extends WorkspaceUnavailableException, which that
@@ -4504,6 +4552,7 @@ public final class JobRuntime {
                         wanted.name() + ": " + describe(failed));
                   }
                   if (dependencyFailure(failed)) {
+                    failures.report(FailureReporter.Source.RUNTIME, failed);
                     // steps - 1, matching the LlmException path above
                     // and Outcome.steps's own definition: a step is one
                     // model call plus every tool result it asked for,
@@ -4717,6 +4766,7 @@ public final class JobRuntime {
         failureEnding = child.ending();
         failed = true;
       } catch (RuntimeException broken) {
+        failures.report(FailureReporter.Source.RUNTIME, broken);
         result = "Bound command dispatch stopped: " + describe(broken);
         failureEnding =
             broken instanceof SessionGoneException

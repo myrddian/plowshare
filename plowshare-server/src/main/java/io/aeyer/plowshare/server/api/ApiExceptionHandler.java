@@ -14,9 +14,12 @@ import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.images.UnstorableImageException;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.session.PresenceConflictException;
+import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import java.util.Map;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -135,11 +138,28 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  */
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+  private final FailureReporter failures;
+
+  public ApiExceptionHandler() {
+    this(FailureReporter.NONE);
+  }
+
+  @Autowired
+  public ApiExceptionHandler(FailureReporter failures) {
+    this.failures = Objects.requireNonNull(failures, "failures");
+  }
+
+  private Fault observedFault(Throwable failure) {
+    Fault fault = Faults.of(failure);
+    if (fault.httpStatus() >= 500) failures.report(FailureReporter.Source.HTTP, failure);
+    return fault;
+  }
+
   /** Same sanitized binary-storage refusal on HTTP and WebSocket tool boundaries. */
   @ExceptionHandler(io.aeyer.plowshare.server.blobs.BlobUnavailableException.class)
   public ResponseEntity<Map<String, String>> blobUnavailable(
       io.aeyer.plowshare.server.blobs.BlobUnavailableException failure) {
-    return toResponse(Faults.of(failure));
+    return toResponse(observedFault(failure));
   }
 
   private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
@@ -164,7 +184,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(CallerFault.class)
   public ResponseEntity<Map<String, String>> callerFault(CallerFault e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /** Same bounded, value-free diagnostics as the authored-information WebSocket boundary. */
@@ -192,7 +212,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(NotFoundException.class)
   public ResponseEntity<Map<String, String>> noSuchHandle(NotFoundException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -204,12 +224,12 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(ConflictException.class)
   public ResponseEntity<Map<String, String>> nameCollision(ConflictException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   @ExceptionHandler(ArchiveException.class)
   public ResponseEntity<Map<String, String>> notFound(ArchiveException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -229,7 +249,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(ArchiveRefusedException.class)
   public ResponseEntity<Map<String, String>> conflict(ArchiveRefusedException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -247,7 +267,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(Turn.Refused.class)
   public ResponseEntity<Map<String, String>> conversationRefused(Turn.Refused e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -264,7 +284,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(PresenceConflictException.class)
   public ResponseEntity<Map<String, String>> presenceInTheWay(PresenceConflictException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -281,7 +301,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(UnreadableDocumentException.class)
   public ResponseEntity<Map<String, String>> unreadableDocument(UnreadableDocumentException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -300,7 +320,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(UnstorableImageException.class)
   public ResponseEntity<Map<String, String>> unstorableImage(UnstorableImageException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -309,12 +329,12 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
   @ExceptionHandler(io.aeyer.plowshare.server.media.MediaInspectionException.class)
   public ResponseEntity<Map<String, String>> mediaInspection(
       io.aeyer.plowshare.server.media.MediaInspectionException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   @ExceptionHandler(ValidationException.class)
   public ResponseEntity<Map<String, String>> invalidProposal(ValidationException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -328,7 +348,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(ArchiveUnavailableException.class)
   public ResponseEntity<Map<String, String>> archiveUnavailable(ArchiveUnavailableException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -342,7 +362,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(EmbeddingException.class)
   public ResponseEntity<Map<String, String>> embeddingUnavailable(EmbeddingException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -363,7 +383,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(ConfigUnavailableException.class)
   public ResponseEntity<Map<String, String>> configUnavailable(ConfigUnavailableException e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
@@ -376,7 +396,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler(Throwable.class)
   public ResponseEntity<Map<String, String>> unexpected(Throwable e) {
-    return toResponse(Faults.of(e));
+    return toResponse(observedFault(e));
   }
 
   /**
