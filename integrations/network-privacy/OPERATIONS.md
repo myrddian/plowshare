@@ -139,7 +139,9 @@ MACs can change which device holds it.
 Enable **Quick presence checks every 2–5 minutes** in **Settings → Choose what
 to monitor** alongside ordinary collection. File-managed collectors can set
 `collection.quickScan` to `true`. The option defaults to off. The collector chooses a new random
-delay after each quick check and waits for the normal collection lock. Startup
+delay after each quick check and shares the monitoring configuration fence with
+full collection. It also samples during a slow scan, so a backlog cannot postpone
+checks until an entire batch finishes. Startup
 and recovery prime a fresh baseline on the next collector loop, without another
 2–5 minute delay. DNS deltas require two fresh samples after recovery. The quick check covers only saved private IPv4 addresses
 and never publishes evidence, fires the scan schedule, or starts an investigation.
@@ -170,6 +172,18 @@ own history. Full-scan evidence and scheduled investigations keep their
 existing path.
 
 ### DNS activity profiles
+
+Retained DNS profiles and traffic totals follow the device's confirmed MAC, not
+the timestamp, name or source of its latest identity observation. A newer full
+scan of the same MAC keeps those histories visible with their original observation
+windows. A conflicting MAC or an unconfirmed address cannot inherit them.
+
+Queued scans finish one per worker pass. While a full scan performs its read-only
+network collection, a single quick-check sampler continues on the existing
+randomized cadence and sample/DNS deadlines. Both use the same locked monitoring
+configuration; settings cannot change scope mid-read. Cancellation joins the
+collection before releasing that fence. Upload and completion receipt rules are
+unchanged: unknown effects still require positive read-only reconciliation.
 
 With Pi-hole configured, select **Profile device DNS activity with Pi-hole** in
 Settings and save monitoring. File-managed collectors can set
