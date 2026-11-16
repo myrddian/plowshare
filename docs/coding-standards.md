@@ -458,6 +458,32 @@ parameterized SQL and destination-specific escaping when used. Validation and
 sanitization at conversion do not make arbitrary HTML, SQL or shell interpolation
 safe.
 
+## Model prose budgets and recovery
+
+Use word targets for model-written titles, summaries, explanations and review
+notes. Do not require an LLM, local or hosted, to count characters or hit an exact
+presentation boundary. Declare a reasonable overrun tolerance alongside the target
+and accept output within it; 25% is the default for new prose contracts unless the
+owning product documents a different tolerance. Prompts and downstream consumers
+must agree on these word semantics, including Unicode whitespace.
+
+Overlong prose is recoverable work. Preserve the original result and completed
+tools, then use the [shared model-output recovery policy](decisions/0074-model-output-recovery-policy.md)
+for one bounded, model-only shortening attempt targeting just the affected fields.
+Do not repeat discovery, acquisition or other effects, truncate facts silently,
+or replace valid fields. Nested domain objects keep their evidence, identifiers,
+URLs, verdicts and membership under their owning validator; only explicitly
+selected prose fields may be shortened. If safe recovery is unavailable or
+exhausted, retain the draft and ask for review without publishing an accepted
+result. Formatting alone must not turn completed research into a terminal failure.
+
+Word targets do not replace finite raw-response/byte, parser, context, collection,
+identifier or URL bounds. Keep those resource/protocol limits explicit and
+independent, including protection against an unbounded single word. Actual
+authorization, evidence and semantic violations remain refusals; presentation
+tolerance does not weaken them. Existing exact-limit consumers need migration;
+this rule does not establish that every workflow already implements recovery.
+
 ## Strict validation and safe inputs
 
 Validate untrusted input when it enters the server or adapter, before it becomes

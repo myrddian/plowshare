@@ -115,6 +115,7 @@ from .diagnostics import refusal_detail
 from .private_files import replace_private
 from .reference_port import ReferencePort
 from .reference_seed import MAX_TOPICS, SLUG, SeedEntry, product_slug, reference_url
+from .research_text import research_title
 
 Phase = Literal[
     "queued", "submitted", "awaiting", "blocked", "retained", "tagged", "failed"
@@ -261,7 +262,10 @@ class ReferenceReceipt:
     def __post_init__(self) -> None:
         reference_url(self.url)
         product_slug(self.product)
-        text(self.title, MAX_TITLE)
+        if self.origin == "research":
+            research_title(self.title)
+        else:
+            text(self.title, MAX_TITLE)
         if len(self.topics) > MAX_TOPICS or len(set(self.topics)) != len(self.topics):
             raise ValueError("Invalid reference topics")
         for topic in self.topics:
@@ -338,7 +342,9 @@ class ReferenceReceipt:
         return cls(
             reference_url(row["url"]),
             product_slug(row["product"]),
-            text(row["title"], MAX_TITLE),
+            research_title(row["title"])
+            if row["origin"] == "research"
+            else text(row["title"], MAX_TITLE),
             tuple(_topic(t) for t in items(row["topics"], MAX_TOPICS)),
             _origin(row["origin"]),
             uuid(row["request_id"]),
@@ -524,7 +530,7 @@ class ReferenceLibrary:
         both products, including after refresh, without a duplicate receipt.
         """
         product_slug(product)
-        text(title, MAX_TITLE)
+        research_title(title)
         reference_url(url)
         uuid(revision_id)
         if kind not in {"official", "advisory", "privacy", "research", "reporting"}:

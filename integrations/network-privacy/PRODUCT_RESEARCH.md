@@ -39,6 +39,19 @@ date and source independence. A needed correction gets one correction and a
 second review. A second rejection or invalid output writes no accepted report.
 A candid gap answer can pass review without manufacturing findings.
 
+Model prose uses word targets with 25% overrun tolerance: 200 words for source
+titles, applicability, individual gaps and checks; 250 for claims; 400 for the
+summary; and 600 for review notes. These are presentation targets rather than
+character cutoffs. Beyond the tolerance, the script uses the existing model-only
+recovery worker for one targeted shortening attempt per response. Only the
+overlong prose is sent; source URLs, evidence IDs, verdicts, other valid fields
+and completed discovery/acquisition work remain unchanged. The resulting draft
+still goes through independent review. An unsuccessful shortening asks for review
+and retains the original response rather than restarting research or writing an
+accepted report. Raw reply, parser, source-window and delivery limits remain
+separate resource bounds. Research titles keep the same word tolerance through
+collector decoding and reference-library journal reloads.
+
 The script retains a draft report with source/dossier inputs, exact evidence
 citations and review metadata. The collector shows the answer on its request
 card, registers accepted source revisions with the reference library and applies
@@ -105,3 +118,6 @@ collection. A deployed installation needs both the updated collector package and
 updated Application resources, with the normal search and information services
 available. The existing native tool binding digest is unchanged. Installing
 these files is not a deployment or a live TV validation.
+The server must support `modelOutput.recover` before installing this workflow;
+missing support is refused before research starts. New definitions do not
+automatically resume already-failed, source-pinned runs.
