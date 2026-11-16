@@ -40,6 +40,13 @@ public final class ConversationSearchTool implements AgentTool {
         "conversation",
         ToolArguments.string(
             "Omit to search this home; current searches this conversation, or supply a conversation ID in this home"));
+    parameters.put(
+        "includeInputs",
+        Map.of(
+            "type",
+            "boolean",
+            "description",
+            "Include explicitly supplied copied context for debugging; default false. Copies are not independent evidence."));
     parameters.put("mode", ToolArguments.string("lexical, semantic or hybrid; default hybrid"));
     parameters.put(
         "snapshot", ToolArguments.string("Snapshot from the first page for subsequent pages"));
@@ -66,13 +73,17 @@ public final class ConversationSearchTool implements AgentTool {
     var args = ToolArguments.parse(json, NAME, "{\"question\":\"previous decision\"}");
     if (args.has("project") || args.has("home"))
       throw new IllegalArgumentException("The run owns its search home");
-    Set<String> allowed = Set.of("question", "conversation", "mode", "snapshot", "offset", "limit");
+    Set<String> allowed =
+        Set.of("question", "conversation", "mode", "snapshot", "offset", "limit", "includeInputs");
     args.fieldNames()
         .forEachRemaining(
             field -> {
               if (!allowed.contains(field))
                 throw new IllegalArgumentException("Unknown conversation search field: " + field);
             });
+    if (args.has("includeInputs") && !args.get("includeInputs").isBoolean())
+      throw new IllegalArgumentException("includeInputs must be a boolean");
+    boolean includeInputs = args.path("includeInputs").asBoolean(false);
     String question = ToolArguments.requireText(args, "question", NAME, "a historical question");
     String mode =
         args.has("mode")
@@ -98,28 +109,16 @@ public final class ConversationSearchTool implements AgentTool {
       return new ObjectMapper()
           .findAndRegisterModules()
           .writeValueAsString(
-              owner == null || owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                  ? selected == null
-                      ? entries.searchView(
-                          home, question, offset, Math.min(limit, 20), mode, snapshot)
-                      : entries.searchView(
-                          home,
-                          question,
-                          offset,
-                          Math.min(limit, 20),
-                          mode,
-                          snapshot,
-                          null,
-                          selected)
-                  : entries.searchView(
-                      home,
-                      question,
-                      offset,
-                      Math.min(limit, 20),
-                      mode,
-                      snapshot,
-                      owner,
-                      selected));
+              entries.searchView(
+                  home,
+                  question,
+                  offset,
+                  Math.min(limit, 20),
+                  mode,
+                  snapshot,
+                  owner,
+                  selected,
+                  includeInputs));
     } catch (JsonProcessingException impossible) {
       throw new IllegalStateException(impossible);
     }

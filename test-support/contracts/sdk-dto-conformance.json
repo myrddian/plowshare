@@ -435,6 +435,373 @@
     "valid": false
   },
   {
+    "boundary": "result",
+    "operation": "conversation.search",
+    "value": {
+      "hits": [
+        {
+          "conversationId": "cnv_selected",
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "rank": 0.5,
+          "snippet": "evidence",
+          "length": 20,
+          "supersededBy": null,
+          "handle": null,
+          "recordedAt": null,
+          "sources": [
+            {
+              "conversationId": "cnv_selected",
+              "ordinal": 1,
+              "turnOrdinal": 1,
+              "kind": "utterance",
+              "handle": null,
+              "recordedAt": null,
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "length": 20,
+              "supersededBy": null,
+              "inputProvenance": {
+                "start": 5,
+                "end": 20,
+                "sources": [
+                  {
+                    "id": "evidence-1",
+                    "revision": "revision-1"
+                  }
+                ],
+                "sourceCount": 100
+              }
+            }
+          ],
+          "sourceCount": 1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 10,
+      "reach": {
+        "searched": 1,
+        "ejected": 0,
+        "recordedOnly": 0
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.search",
+    "value": {
+      "hits": [
+        {
+          "conversationId": "cnv_selected",
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "rank": 0.5,
+          "snippet": "evidence",
+          "length": 20,
+          "supersededBy": null,
+          "handle": null,
+          "recordedAt": null,
+          "sources": [
+            {
+              "conversationId": "cnv_selected",
+              "ordinal": 1,
+              "turnOrdinal": 1,
+              "kind": "utterance",
+              "handle": null,
+              "recordedAt": null,
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "length": 20,
+              "supersededBy": null,
+              "inputProvenance": null
+            }
+          ],
+          "sourceCount": 1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 10,
+      "reach": {
+        "searched": 1,
+        "ejected": 0,
+        "recordedOnly": 0
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.search",
+    "value": {
+      "hits": [
+        {
+          "conversationId": "cnv_selected",
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "rank": 0.5,
+          "snippet": "evidence",
+          "length": 20,
+          "supersededBy": null,
+          "handle": null,
+          "recordedAt": null,
+          "sources": [
+            {
+              "conversationId": "cnv_selected",
+              "ordinal": 1,
+              "turnOrdinal": 1,
+              "kind": "utterance",
+              "handle": null,
+              "recordedAt": null,
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "length": 20,
+              "supersededBy": null,
+              "inputProvenance": {
+                "start": 5,
+                "end": 20,
+                "sources": [],
+                "sourceCount": 0
+              }
+            }
+          ],
+          "sourceCount": 1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 10,
+      "reach": {
+        "searched": 1,
+        "ejected": 0,
+        "recordedOnly": 0
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.search",
+    "value": {
+      "hits": [
+        {
+          "conversationId": "cnv_selected",
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "rank": 0.5,
+          "snippet": "evidence",
+          "length": 20,
+          "supersededBy": null,
+          "handle": null,
+          "recordedAt": null,
+          "sources": [
+            {
+              "conversationId": "cnv_selected",
+              "ordinal": 1,
+              "turnOrdinal": 1,
+              "kind": "utterance",
+              "handle": null,
+              "recordedAt": null,
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "length": 20,
+              "supersededBy": null,
+              "inputProvenance": {
+                "start": 5,
+                "end": 21,
+                "sources": [
+                  {
+                    "id": "evidence-1",
+                    "revision": "revision-1"
+                  }
+                ],
+                "sourceCount": 100
+              }
+            }
+          ],
+          "sourceCount": 1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 10,
+      "reach": {
+        "searched": 1,
+        "ejected": 0,
+        "recordedOnly": 0
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.search",
+    "value": {
+      "hits": [
+        {
+          "conversationId": "cnv_selected",
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "rank": 0.5,
+          "snippet": "evidence",
+          "length": 20,
+          "supersededBy": null,
+          "handle": null,
+          "recordedAt": null,
+          "sources": [
+            {
+              "conversationId": "cnv_selected",
+              "ordinal": 1,
+              "turnOrdinal": 1,
+              "kind": "utterance",
+              "handle": null,
+              "recordedAt": null,
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "length": 20,
+              "supersededBy": null,
+              "inputProvenance": {
+                "start": 5,
+                "end": 5,
+                "sources": [
+                  {
+                    "id": "evidence-1",
+                    "revision": "revision-1"
+                  }
+                ],
+                "sourceCount": 100
+              }
+            }
+          ],
+          "sourceCount": 1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 10,
+      "reach": {
+        "searched": 1,
+        "ejected": 0,
+        "recordedOnly": 0
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.search",
+    "value": {
+      "hits": [
+        {
+          "conversationId": "cnv_selected",
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "rank": 0.5,
+          "snippet": "evidence",
+          "length": 20,
+          "supersededBy": null,
+          "handle": null,
+          "recordedAt": null,
+          "sources": [
+            {
+              "conversationId": "cnv_selected",
+              "ordinal": 1,
+              "turnOrdinal": 1,
+              "kind": "utterance",
+              "handle": null,
+              "recordedAt": null,
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "length": 20,
+              "supersededBy": null,
+              "inputProvenance": {
+                "start": 5,
+                "end": 20,
+                "sources": [
+                  {
+                    "id": "evidence-1",
+                    "revision": "revision-1"
+                  }
+                ],
+                "sourceCount": 0
+              }
+            }
+          ],
+          "sourceCount": 1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 10,
+      "reach": {
+        "searched": 1,
+        "ejected": 0,
+        "recordedOnly": 0
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.search",
+    "value": {
+      "hits": [
+        {
+          "conversationId": "cnv_selected",
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "rank": 0.5,
+          "snippet": "evidence",
+          "length": 20,
+          "supersededBy": null,
+          "handle": null,
+          "recordedAt": null,
+          "sources": [
+            {
+              "conversationId": "cnv_selected",
+              "ordinal": 1,
+              "turnOrdinal": 1,
+              "kind": "utterance",
+              "handle": null,
+              "recordedAt": null,
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "length": 20,
+              "supersededBy": null,
+              "inputProvenance": {
+                "start": 5,
+                "end": 20,
+                "sources": [
+                  {
+                    "id": "evidence-1",
+                    "revision": "revision-1"
+                  },
+                  {
+                    "id": "evidence-1",
+                    "revision": "revision-1"
+                  }
+                ],
+                "sourceCount": 100
+              }
+            }
+          ],
+          "sourceCount": 1
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 10,
+      "reach": {
+        "searched": 1,
+        "ejected": 0,
+        "recordedOnly": 0
+      }
+    },
+    "valid": false
+  },
+  {
     "boundary": "input",
     "operation": "information.discovery.scopes",
     "value": {

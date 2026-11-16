@@ -8326,6 +8326,8 @@
           "DocumentSearchResponse",
           "Citation",
           "CitationsResponse",
+          "InputProvenance",
+          "InputReference",
           "SearchSource",
           "LogSearchHit",
           "SearchEvidence",

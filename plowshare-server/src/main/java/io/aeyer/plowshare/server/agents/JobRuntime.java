@@ -2296,7 +2296,9 @@ public final class JobRuntime {
       extras =
           new RunExtras.Extras(
               extras.tools(), end, extras.keepsTodos(), extras.requiresAToolCall(), extras.fence());
-    transcript.record(LoggedEntry.utterance(message, transcript.speaker()));
+    transcript.record(
+        LoggedEntry.utterance(message, transcript.speaker())
+            .withInputProvenance(transcript.inputProvenance()));
     Map<String, AgentTool> offered =
         offeredTo(
             definition,
@@ -2832,7 +2834,9 @@ public final class JobRuntime {
                 offered,
                 operation);
     if (bound != null && bound.refusal() != null) {
-      transcript.record(LoggedEntry.utterance(userPrompt, transcript.speaker()));
+      transcript.record(
+          LoggedEntry.utterance(userPrompt, transcript.speaker())
+              .withInputProvenance(transcript.inputProvenance()));
       transcript.record(LoggedEntry.notice(bound.refusal()));
       return stopped(
           Ending.UNAVAILABLE, bound.refusal(), List.of(), 0, 0, "command binding refused");
@@ -3124,7 +3128,8 @@ public final class JobRuntime {
     LoggedEntry openingEntry =
         approvalContinuation
             ? LoggedEntry.diagnostic(userPrompt)
-            : LoggedEntry.utterance(userPrompt, transcript.speaker());
+            : LoggedEntry.utterance(userPrompt, transcript.speaker())
+                .withInputProvenance(transcript.inputProvenance());
     if (retainsBudget) transcript.recordDurably(openingEntry);
     else transcript.record(openingEntry);
     if (bound != null && bound.notice() != null)
@@ -5063,6 +5068,16 @@ public final class JobRuntime {
     return schemas;
   }
 
+  /** Quoted supplied context is data, even when its enclosing turn was posted by the owner. */
+  static String authenticatedApprovalTask(
+      Speaker speaker, String owner, String task, InputProvenance provenance) {
+    if (task == null
+        || speaker == null
+        || speaker.kind() != Speaker.Kind.PERSON
+        || !Objects.equals(speaker.name(), owner)) return null;
+    return provenance == null ? task : provenance.evidenceText(task);
+  }
+
   /**
    * @param images what this run is being shown, which {@code agent_run} needs and no other tool
    *     does — a caller may hand a callee a picture it is itself looking at, so the tool is built
@@ -5095,11 +5110,7 @@ public final class JobRuntime {
     Speaker speaker = transcript.speaker();
     String policyOwner = operation == null ? callerHandle : operation.executor();
     String authenticatedTask =
-        speaker != null
-                && speaker.kind() == Speaker.Kind.PERSON
-                && Objects.equals(speaker.name(), policyOwner)
-            ? currentTask
-            : null;
+        authenticatedApprovalTask(speaker, policyOwner, currentTask, transcript.inputProvenance());
     var operationReview =
         approvalReviewSessions == null
             ? Optional.<OperationApprovalReview>empty()

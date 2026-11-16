@@ -22,6 +22,7 @@ import io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer;
 import java.time.Instant;
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -84,6 +85,132 @@ class ConversationRetrievalTest {
             768);
     search = new ConversationSearch(entries, index);
     entries.retrieving(() -> search);
+  }
+
+  @Test
+  void copiedResearchInputsCannotCrowdActualEvidenceOutOfAnySearchMode() {
+    String original = conversations.open(project, Budget.of(10)).id();
+    entries.append(
+        original,
+        1,
+        LoggedEntry.toolResult("read-1", "orchard read failed because capacity was busy"));
+    int copies = ConversationSearch.CANDIDATES + 5;
+    for (int i = 0; i < copies; i++) {
+      String instructions = "Assess the supplied research evidence for batch " + i + ".\n";
+      String copied =
+          "orchard capacity documentation for separate source "
+              + i
+              + " states that swarm jobs need a serving pool.";
+      String input = instructions + copied;
+      String id = conversations.open(project, Budget.of(10)).id();
+      entries.append(
+          id,
+          1,
+          LoggedEntry.utterance(input, Speaker.harness())
+              .withInputProvenance(
+                  new InputProvenance(
+                      instructions.length(),
+                      input.length(),
+                      List.of(new InputProvenance.Reference("source-" + i, "revision-1")))));
+    }
+    fill();
+    for (String mode : List.of("lexical", "semantic", "hybrid")) {
+      var result = search.search(project, "orchard", 0, 1, mode, null);
+      assertEquals(1, result.total(), mode);
+      assertEquals(original, result.hits().getFirst().conversationId(), mode);
+      assertFalse(result.retrieval().truncated(), mode);
+      assertEquals(1, result.hits().getFirst().sourceCount(), mode);
+      var full = search.search(project, "orchard", 0, 10, mode, null, null, null, true);
+      assertTrue(full.total() > 1, mode);
+      assertTrue(
+          full.hits().stream()
+              .flatMap(hit -> hit.sources().stream())
+              .anyMatch(source -> source.inputProvenance() != null),
+          mode);
+    }
+    assertEquals(
+        copies,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM entries WHERE input_provenance IS NOT NULL AND content LIKE '%orchard%'",
+            Integer.class));
+    // A real person's first message and unclassified legacy harness inputs remain searchable.
+    String legacy = add(project, "orchard legacy observation");
+    assertEquals(2, entries.search(project, "orchard", 0, 10).total());
+    assertTrue(
+        entries.search(project, "orchard", 0, 10).hits().stream()
+            .anyMatch(hit -> hit.conversationId().equals(legacy)));
+  }
+
+  @Test
+  void changingProvenanceInvalidatesSearchSnapshotsAndInFlightIndexPublication() {
+    String text = "Analyze orchard background";
+    String id = add(project, text);
+    var stale =
+        new JdbcPassageRepository(jdbc, transactions)
+            .pending("fixture:1").stream()
+                .filter(source -> source.id().equals(id + ":1"))
+                .findFirst()
+                .orElseThrow();
+    fill();
+    var first = search.search(project, "orchard", 0, 10, "semantic", null);
+    jdbc.update(
+        "UPDATE entries SET input_provenance=CAST(? AS jsonb) WHERE conversation_id=?",
+        InputProvenanceCodec.write(new InputProvenance(8, text.length(), List.of())),
+        id);
+    var replayed =
+        search.search(project, "orchard", 0, 10, "semantic", first.retrieval().snapshot());
+    assertEquals(0, replayed.total());
+    assertFalse(replayed.retrieval().complete());
+    assertFalse(index.publish(stale, List.of(text), List.of(vector(text))));
+    assertEquals(0, entries.search(project, "orchard", 0, 10).total());
+    assertEquals(1, entries.search(project, "orchard", 0, 10, null, true).total());
+  }
+
+  @Test
+  void searchMetadataIsBoundedWhileSkillHandoffRetainsCompleteTypedProvenance() {
+    String instructions = "orchard investigation task ";
+    String context = "copied background";
+    var references =
+        IntStream.range(0, 100)
+            .mapToObj(i -> new InputProvenance.Reference("source-" + i, "revision-1"))
+            .toList();
+    String id = conversations.open(project, Budget.of(10)).id();
+    entries.append(
+        id,
+        1,
+        LoggedEntry.utterance(instructions + context, Speaker.harness())
+            .withInputProvenance(
+                new InputProvenance(
+                    instructions.length(), instructions.length() + context.length(), references)));
+    var hit = entries.search(project, "orchard", 0, 10).hits().getFirst();
+    var provenance = hit.sources().getFirst().inputProvenance();
+    assertEquals(1, provenance.sources().size());
+    assertEquals(100, provenance.sourceCount());
+    var snapshot = entries.snapshotForSkill(id);
+    assertEquals(references, snapshot.entries().getFirst().inputProvenance().sources());
+  }
+
+  @Test
+  void provenanceRevisionCannotAliasUnclassifiedTextContainingTheSameMetadata() {
+    String id = conversations.open(project, Budget.of(10)).id();
+    String text = "Assess orchard background";
+    entries.append(
+        id,
+        1,
+        LoggedEntry.utterance(text, Speaker.harness())
+            .withInputProvenance(new InputProvenance(7, text.length(), List.of())));
+    var source =
+        entries
+            .search(project, "orchard", 0, 10, null, true)
+            .hits()
+            .getFirst()
+            .sources()
+            .getFirst();
+    // This is deliberately the exact concatenation used by the naive revision formula.
+    jdbc.update(
+        "UPDATE entries SET content=content || input_provenance::text,input_provenance=NULL WHERE conversation_id=?",
+        id);
+    assertTrue(entries.searchSources(project, List.of(source.reference())).isEmpty());
   }
 
   float[] vector(String text) {

@@ -1,7 +1,10 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import java.time.Duration;
 import java.util.List;
+import java.util.function.Supplier;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -62,6 +65,46 @@ final class ProjectIds {
    */
   static final long NONE = 0L;
 
+  // A read-operation selection, not a shared cache or an authorization decision. Writes never
+  // consult it. Both repositories use the same JdbcTemplate identity at composition time.
+  private record ReadSelection(JdbcTemplate jdbc, Home home, Long id) {}
+
+  private static final ThreadLocal<ReadSelection> READ_SELECTION = new ThreadLocal<>();
+
+  static <T> T withinReadSelection(JdbcTemplate jdbc, Home home, Supplier<T> work) {
+    ReadSelection previous = READ_SELECTION.get();
+    if (previous != null && previous.jdbc() == jdbc && previous.home().equals(home))
+      return work.get();
+    Long id = boundedRead(jdbc, home);
+    READ_SELECTION.set(new ReadSelection(jdbc, home, id));
+    try {
+      return work.get();
+    } finally {
+      if (previous == null) READ_SELECTION.remove();
+      else READ_SELECTION.set(previous);
+    }
+  }
+
+  private static Long boundedRead(JdbcTemplate jdbc, Home home) {
+    ReadDeadline.check();
+    if (home.isGlobal()) return null;
+    long deadline = ReadDeadline.deadlineNanos(Duration.ofSeconds(2));
+    ReadDeadline.jdbcTimeoutSeconds(deadline);
+    List<Long> found =
+        jdbc.query(
+            LOOK_UP,
+            statement -> {
+              int timeout = ReadDeadline.jdbcTimeoutSeconds(deadline);
+              int transactionTimeout = statement.getQueryTimeout();
+              statement.setQueryTimeout(
+                  transactionTimeout > 0 ? Math.min(timeout, transactionTimeout) : timeout);
+              statement.setString(1, home.project());
+            },
+            (row, position) -> row.getLong(1));
+    ReadDeadline.check();
+    return found.isEmpty() ? NONE : found.getFirst();
+  }
+
   private static final String LOOK_UP = "SELECT id FROM projects WHERE name = ?";
 
   /*
@@ -107,6 +150,9 @@ final class ProjectIds {
    * with names that were only ever asked about would make it a log of typos.
    */
   static Long toRead(JdbcTemplate jdbc, Home home) {
+    ReadSelection selection = READ_SELECTION.get();
+    if (selection != null && selection.jdbc() == jdbc && selection.home().equals(home))
+      return selection.id();
     if (home.isGlobal()) {
       return null;
     }

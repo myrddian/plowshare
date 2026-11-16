@@ -636,6 +636,43 @@ parameters:
       "type": "string",
       "description": "What that agent should do, in plain language, complete enough to act on without seeing this conversation."
     },
+    "context": {
+      "type": "object",
+      "description": "Optional supplied evidence and prior assessments. Retained verbatim, excluded from default conversation search; sources are declared provenance, not read grants.",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000000
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Evidence identity"
+              },
+              "revision": {
+                "type": "string",
+                "description": "Evidence revision"
+              }
+            },
+            "required": [
+              "id",
+              "revision"
+            ]
+          },
+          "maxItems": 1024
+        }
+      },
+      "required": [
+        "text",
+        "sources"
+      ],
+      "additionalProperties": false
+    },
     "recovery": {
       "type": "boolean",
       "description": "Optional. Restrict this delegation to a one-turn model-only output recovery worker."
@@ -732,6 +769,10 @@ parameters:
     "conversation": {
       "type": "string",
       "description": "Omit to search this home; current searches this conversation, or supply a conversation ID in this home"
+    },
+    "includeInputs": {
+      "type": "boolean",
+      "description": "Include explicitly supplied copied context for debugging; default false. Copies are not independent evidence."
     },
     "mode": {
       "type": "string",

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.server.agents.EntryKind;
+import io.aeyer.plowshare.server.agents.InputProvenance;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -171,6 +172,20 @@ public record LogSearch(List<Hit> hits, int total, Reach reach) {
     }
   }
 
+  /** Bounded navigation metadata; the full input retains all declared references. */
+  public record InputContext(
+      int start, int end, List<InputProvenance.Reference> sources, int sourceCount) {
+    public InputContext {
+      sources = List.copyOf(sources);
+      if (start < 0
+          || end <= start
+          || sources.size() > 1
+          || sourceCount < sources.size()
+          || sourceCount > 1024)
+        throw new IllegalArgumentException("Invalid search context provenance");
+    }
+  }
+
   /** Authorized occurrences of a matching passage; groups retain at most twenty references. */
   public record Source(
       String conversationId,
@@ -181,7 +196,31 @@ public record LogSearch(List<Hit> hits, int total, Reach reach) {
       Instant recordedAt,
       String sourceRevision,
       int length,
-      Integer supersededBy) {
+      Integer supersededBy,
+      InputContext inputProvenance) {
+    public Source(
+        String conversationId,
+        int ordinal,
+        int turnOrdinal,
+        String kind,
+        String handle,
+        Instant recordedAt,
+        String sourceRevision,
+        int length,
+        Integer supersededBy) {
+      this(
+          conversationId,
+          ordinal,
+          turnOrdinal,
+          kind,
+          handle,
+          recordedAt,
+          sourceRevision,
+          length,
+          supersededBy,
+          null);
+    }
+
     public String id() {
       return conversationId + ":" + ordinal;
     }

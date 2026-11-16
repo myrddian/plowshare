@@ -381,7 +381,19 @@ public interface ServerClient {
       String mode,
       String snapshot,
       Integer offset,
-      Integer limit) {
+      Integer limit,
+      Boolean includeInputs) {
+    public LogQuery(
+        String project,
+        String q,
+        String conversation,
+        String mode,
+        String snapshot,
+        Integer offset,
+        Integer limit) {
+      this(project, q, conversation, mode, snapshot, offset, limit, null);
+    }
+
     public LogQuery {
       if (project != null && !project.equals(project.strip()))
         throw new IllegalArgumentException("Invalid project");
@@ -612,8 +624,34 @@ public interface ServerClient {
       Instant recordedAt,
       String sourceRevision,
       int length,
-      Integer supersededBy) {
+      Integer supersededBy,
+      InputProvenance inputProvenance) {
+    public LogSource(
+        String conversationId,
+        int ordinal,
+        int turnOrdinal,
+        String kind,
+        String handle,
+        Instant recordedAt,
+        String sourceRevision,
+        int length,
+        Integer supersededBy) {
+      this(
+          conversationId,
+          ordinal,
+          turnOrdinal,
+          kind,
+          handle,
+          recordedAt,
+          sourceRevision,
+          length,
+          supersededBy,
+          null);
+    }
+
     public LogSource {
+      if (inputProvenance != null && inputProvenance.end() > length)
+        throw new IllegalArgumentException("Context exceeds its source");
       conversationId = ContractChecks.identity(conversationId, "conversationId");
       kind = ContractChecks.identity(kind, "kind");
       handle = ContractChecks.optionalIdentity(handle, "handle");
@@ -622,6 +660,22 @@ public interface ServerClient {
         throw new IllegalArgumentException("Invalid evidence coordinates");
       ContractChecks.nonnegative(length, "length");
       ContractChecks.nonnegative(supersededBy, "supersededBy");
+    }
+  }
+
+  record InputReference(String id, String revision) {
+    public InputReference {
+      id = ContractChecks.identity(id, "id");
+      revision = ContractChecks.identity(revision, "revision");
+    }
+  }
+
+  record InputProvenance(int start, int end, List<InputReference> sources, int sourceCount) {
+    public InputProvenance {
+      if (start < 0 || end <= start) throw new IllegalArgumentException("Invalid context span");
+      sources = List.copyOf(sources);
+      if (sources.size() > 1 || sourceCount < sources.size() || sourceCount > 1024)
+        throw new IllegalArgumentException("Invalid evidence reference count");
     }
   }
 

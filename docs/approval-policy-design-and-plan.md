@@ -415,7 +415,7 @@ installed application, deployment or live model validation is recorded.
 
 - `./gradlew check sdkContractCheck` passed, including 8,217 server tests, client
   checks, generated contracts for 294 operations and 761 canonical SDK DTO cases.
-- The four selected PostgreSQL tests passed for migration V270, typed file
+- The four selected PostgreSQL tests passed for migration V271, typed file
   questions and original tool retention, single-use execution claims, revocation
   during review, and exact owner human-history eligibility/expiry. The full
   database suite was not enabled.

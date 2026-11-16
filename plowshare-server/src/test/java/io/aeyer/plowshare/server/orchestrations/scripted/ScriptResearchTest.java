@@ -168,8 +168,7 @@ class ScriptResearchTest {
             && kind.equals("decompose")
             && mirrorDecompositionRepair
             && decompositionCalls == 2) {
-          String task = args.path("task").asText();
-          result = task.substring(task.lastIndexOf('\n') + 1);
+          result = args.path("context").path("text").asText();
         }
         if (tool.equals("agent_run")
             && (kind.equals("editor") && malformedEditor
@@ -368,12 +367,13 @@ class ScriptResearchTest {
       if (!tool.equals("agent_run")) throw new AssertionError("unexpected granted tool " + tool);
       assertEquals("research_analyst", args.path("agent").asText());
       String task = args.path("task").asText();
-      semanticTasks.add(task);
+      // Track the complete handed input for behavioral assertions while testing its two fields
+      // separately.
+      semanticTasks.add(task + "\n" + args.path("context").path("text").asText());
       modelCalls++;
-      assertTrue(task.contains("ORIGINAL QUESTION: " + ORIGINAL));
-      JsonNode data;
-      // Parse using the final newline before the JSON rather than depending on task prose.
-      data = parse(task.substring(task.lastIndexOf('\n') + 1));
+      JsonNode data = parse(args.path("context").path("text").asText());
+      assertEquals(ORIGINAL, data.path("original_question").asText());
+      assertFalse(task.contains("DATA ("));
       String evidence =
           state.path("sources").isEmpty()
               ? BLUE
@@ -1743,7 +1743,8 @@ class ScriptResearchTest {
     var output = ScriptProgram.step(SOURCE, input);
     String task = output.path("command").path("arguments").path("task").asText();
     assertFalse(task.isEmpty());
-    return Fixture.parse(task.substring(task.lastIndexOf('\n') + 1));
+    return Fixture.parse(
+        output.path("command").path("arguments").path("context").path("text").asText());
   }
 
   @Test
@@ -1773,8 +1774,9 @@ class ScriptResearchTest {
       var output = ScriptProgram.step(SOURCE, input);
       state = (ObjectNode) output.path("state");
       if (state.path("subphase").asText().equals("evidence_done")) break;
-      String task = output.path("command").path("arguments").path("task").asText();
-      var data = Fixture.parse(task.substring(task.lastIndexOf('\n') + 1));
+      var data =
+          Fixture.parse(
+              output.path("command").path("arguments").path("context").path("text").asText());
       assertTrue(data.path("evidence").size() <= 24);
       var ranking = JSON.createArrayNode();
       for (JsonNode passage : data.path("evidence"))

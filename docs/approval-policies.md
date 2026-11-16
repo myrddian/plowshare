@@ -129,7 +129,7 @@ matched rules and SECURITY/bot outcomes. Inference uses existing accounting
 journals. Reviewer-stage recovery is not a new durable workflow; uncertain tool
 execution retains the existing started/result fence and is never replayed.
 
-Migration V270 adds typed file questions, retained tool names and human history.
+Migration V271 adds typed file questions, retained tool names and human history.
 Deploy it through the normal server migration/backup process and update clients
 before relying on file approval controls. Repository checks and fixture tests do
 not update an installed Desktop application or validate a live model deployment.
