@@ -21,14 +21,19 @@ Provider scopes support tools unknown before connection, with `dynamic: true`
 agent opt-in, explicit application assignments and authenticated interactive
 connections. See [provider scopes](tool-scopes.md) for the shared SDK operations.
 
-## Typed PNG result profile
+## Typed image result profile
 
 The Node provider path supports negotiated `content/1` results through existing
 TEXT envelopes, admission receipts and invocation blob claims. See
-[typed PNG tool results](typed-png-tool-results.md) for configuration, ordered
+[typed image tool results](typed-png-tool-results.md) for configuration, ordered
 references, private journals and `tool.invocation.read`. Existing text providers
-retain their v1/v2 request and v1 result behavior. Hosted worker content support,
-native model observations and structured Trajectory entries remain separate work.
+retain their v1/v2 request and v1 result behavior. PNG, JPEG and WebP observations
+can reach the active model through the implemented
+[active-loop and Trajectory path](trajectory-image-observations.md). Hosted worker
+content support and other producer SDKs remain separate work. The proposed
+[computer-control design and phased plan](computer-control-design-and-plan.md)
+uses this path for browser and full desktop providers; those providers are not
+implemented yet.
 
 ## Application-owned dynamic tools
 
