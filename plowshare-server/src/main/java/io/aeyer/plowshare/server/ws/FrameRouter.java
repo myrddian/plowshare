@@ -275,8 +275,11 @@ public final class FrameRouter {
         var scope =
             io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(request.payload());
         for (String project : scope.clientProjects())
-          io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
-              project, asking.sessionId(), asking.handle());
+          if (personalAccess != null)
+            personalAccess.requireClientProject(project, asking.sessionId(), asking.handle());
+          else
+            io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
+                project, asking.sessionId(), asking.handle());
         for (String project : scope.projects())
           io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(project, asking.handle());
         if (personalAccess != null)

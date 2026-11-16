@@ -1,3 +1,8 @@
+import {
+  enableWorkspaceRecovery,
+  recoverableClaim,
+  releaseWorkspaceRecovery,
+} from 'plowshare-client-node/workspace-recovery';
 import { decodeMetadataValidation } from 'plowshare-client-ts/operations/information-content';
 import { HttpRuntimeConfiguration } from './runtime-configuration.ts';
 import type { RuntimeConfiguration } from './runtime-configuration.ts';
@@ -140,7 +145,14 @@ import type {
 import { demoState, demoAnswer } from './demo.ts';
 import { stepsOf, stepKey } from 'plowshare-client-ts/operations/trajectory';
 
-const RUNNING = new Set(['starting', 'running', 'cancelling']);
+const RUNNING = new Set([
+  'starting',
+  'running',
+  'pausing',
+  'paused',
+  'resuming',
+  'cancelling',
+]);
 class ServerRefusal extends Error {}
 export function validatedBase(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Enter a server URL.');
@@ -278,10 +290,13 @@ export const serverConnector: Connector = async (
     throw new Error(
       'Change the initial password through plowshare-cli login or the TUI before connecting.',
     );
-  const open: Parameters<typeof openSocket>[0]['open'] = (url) =>
+  const open: Parameters<typeof openSocket>[0]['open'] = (url, protocols) =>
     new Promise((resolve, reject) => {
       const events = new URL(url).pathname === '/v1/events';
-      const socket = new WebSocket(url, events ? [PACKET_PROTOCOL] : []);
+      const socket = new WebSocket(
+        url,
+        events ? [PACKET_PROTOCOL] : (protocols ?? []),
+      );
       const timer = setTimeout(() => {
         socket.close();
         reject(
@@ -326,6 +341,7 @@ export const serverConnector: Connector = async (
     gone: () => void,
   ): Promise<Connected> => {
     const session = randomUUID();
+    const recovery: { connection?: Connection } = {};
     const result = await serial(() =>
       openSocket(
         {
@@ -341,7 +357,15 @@ export const serverConnector: Connector = async (
           renew: (rejectedAccess?: string) => store.renew(door, rejectedAccess),
           session,
           onPush: incoming,
-          onClose: gone,
+          onClose: () => {
+            if (recovery.connection)
+              releaseWorkspaceRecovery(recovery.connection).catch(() =>
+                process.emitWarning(
+                  'Workspace recovery identity cleanup failed.',
+                ),
+              );
+            gone();
+          },
           open,
         },
         tokens,
@@ -359,6 +383,13 @@ export const serverConnector: Connector = async (
     const serverAdmin =
       authority.code === 'OK' &&
       fieldsOf(authority.payload)['serverAdmin'] === true;
+    recovery.connection = result.connection;
+    enableWorkspaceRecovery(
+      result.connection,
+      base,
+      (await store.session()).handle,
+      store.configurationRoot,
+    );
     const bearer = () =>
       serial(async () => {
         tokens = await store.renew(door);
@@ -383,7 +414,7 @@ export const serverConnector: Connector = async (
               open,
             },
             tokens,
-            claim,
+            await recoverableClaim(result.connection, claim),
             (rotated) => {
               tokens = rotated;
             },
@@ -2845,7 +2876,13 @@ export class DesktopClient {
       job.phase = 'thinking';
       job.tool = undefined;
     }
-    if (event['kind'] === 'ended') this.background(this.readJob(id));
+    if (
+      typeof event['kind'] === 'string' &&
+      ['ended', 'pausing', 'paused', 'resuming', 'resumed'].includes(
+        event['kind'],
+      )
+    )
+      this.background(this.readJob(id));
     this.emit();
   }
   private poll(id: string) {
@@ -2948,10 +2985,14 @@ export class DesktopClient {
       }
     } else if (
       tracked?.state === 'running' ||
+      tracked?.state === 'pausing' ||
+      tracked?.state === 'paused' ||
+      tracked?.state === 'resuming' ||
       tracked?.state === 'cancelling'
     ) {
       if (job.status === 'unknown') job.detail = undefined;
       job.status = tracked.state;
+      job.detail = tracked.pauseReason;
     }
     this.emit();
   }

@@ -8292,6 +8292,9 @@
           "name": {
             "$ref": "#/$defs/shape1"
           },
+          "recovery": {
+            "$ref": "#/$defs/shape1"
+          },
           "workspace": {
             "$ref": "#/$defs/shape1"
           }
@@ -18271,6 +18274,9 @@
           },
           "outcome": {
             "$ref": "#/$defs/shape931"
+          },
+          "pauseReason": {
+            "$ref": "#/$defs/shape43"
           },
           "state": {
             "$ref": "#/$defs/shape1"

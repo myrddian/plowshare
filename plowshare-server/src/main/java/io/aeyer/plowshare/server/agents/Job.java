@@ -23,31 +23,37 @@ public final class Job {
   /**
    * Lifecycle, as a caller sees it.
    *
-   * <p>Two-valued, and there is deliberately no {@code CANCELLING}: cancellation is a request the
-   * run honours at its next turn boundary, because an in-flight model call cannot be interrupted
-   * out of a synchronous HTTP call. A state saying "cancelling" would suggest to a caller that the
-   * run had stopped when it may be several seconds into generating a completion. {@link
-   * #cancelRequested()} says what is actually true — somebody asked — and {@code DONE} with {@link
-   * Outcome.Ending#CANCELLED} says it took.
+   * <p>Suspension states retain the same execution. There is deliberately no {@code CANCELLING}:
+   * cancellation is a request the run honours at its next turn boundary, because an in-flight model
+   * call cannot be interrupted out of a synchronous HTTP call. A state saying "cancelling" would
+   * suggest to a caller that the run had stopped when it may be several seconds into generating a
+   * completion. {@link #cancelRequested()} says what is actually true — somebody asked — and {@code
+   * DONE} with {@link Outcome.Ending#CANCELLED} says it took.
    */
   public enum State {
     RUNNING,
+    PAUSING,
+    PAUSED,
+    RESUMING,
     DONE
   }
 
   /**
    * The same lifecycle plus the cancellation request, in one word.
    *
-   * <p>Internal, so the public {@link State} keeps the two values the paragraph above argues for.
-   * It is three-valued here because the two facts have to move together: {@link #requestCancel}
-   * promises false for a run that has already finished, and a boolean flag beside a state field
-   * cannot keep that promise — the check and the set are two operations, and a job thread finishing
-   * between them makes the answer a lie. One compare-and-set on one reference makes it structural
-   * rather than something a test would have to catch in a nanosecond-wide window, which is the same
-   * reasoning {@code JobRuntime.stopped} rests on for a different invariant.
+   * <p>Internal, so cancellation remains atomic with every visible lifecycle state. The facts have
+   * to move together: {@link #requestCancel} promises false for a run that has already finished,
+   * and a boolean flag beside a state field cannot keep that promise — the check and the set are
+   * two operations, and a job thread finishing between them makes the answer a lie. One
+   * compare-and-set on one reference makes it structural rather than something a test would have to
+   * catch in a nanosecond-wide window, which is the same reasoning {@code JobRuntime.stopped} rests
+   * on for a different invariant.
    */
   private enum Phase {
     RUNNING(State.RUNNING),
+    PAUSING(State.PAUSING),
+    PAUSED(State.PAUSED),
+    RESUMING(State.RESUMING),
     CANCEL_REQUESTED(State.RUNNING),
     DONE(State.DONE);
 
@@ -157,6 +163,7 @@ public final class Job {
 
   private final AtomicReference<Phase> phase = new AtomicReference<>(Phase.RUNNING);
   private volatile Outcome outcome;
+  private volatile String pauseReason;
 
   Job(String id, String agent, RunLimits limits) {
     this(id, agent, limits, 0, null, null);
@@ -251,6 +258,26 @@ public final class Job {
     return phase.get().visible;
   }
 
+  /** A paused execution remains active and excludes concurrent turns in its conversation. */
+  public boolean active() {
+    return state() != State.DONE;
+  }
+
+  public String pauseReason() {
+    return pauseReason;
+  }
+
+  /** Called by the execution owner; cancellation and completion cannot be overwritten by resume. */
+  void transition(State state, String reason) {
+    if (state == State.DONE) throw new IllegalArgumentException("Use finish for terminal outcomes");
+    while (true) {
+      Phase observed = phase.get();
+      if (observed == Phase.DONE || observed == Phase.CANCEL_REQUESTED) return;
+      pauseReason = reason;
+      if (phase.compareAndSet(observed, Phase.valueOf(state.name()))) return;
+    }
+  }
+
   /**
    * What the run came to, once it has.
    *
@@ -287,7 +314,11 @@ public final class Job {
    *     would tell a caller it had stopped a run that had already answered.
    */
   boolean requestCancel() {
-    return phase.compareAndSet(Phase.RUNNING, Phase.CANCEL_REQUESTED);
+    while (true) {
+      Phase observed = phase.get();
+      if (observed == Phase.DONE || observed == Phase.CANCEL_REQUESTED) return false;
+      if (phase.compareAndSet(observed, Phase.CANCEL_REQUESTED)) return true;
+    }
   }
 
   /**

@@ -100,7 +100,7 @@ export type Fetching = (url: string, sent: Sent) => Promise<Answer>;
  * `src/real-socket.test.ts` so that task 7 copies something measured rather
  * than something suggested.
  */
-export type Opening = (url: string) => Promise<Socket>;
+export type Opening = (url: string, protocols?: string[]) => Promise<Socket>;
 
 /**
  * What a client holds, and the absence that matters.
@@ -696,6 +696,8 @@ function eventsUrl(socketBase: string, pass: string, session: string): string {
 
 /** What this client says it roots, on the upgrade — `FileChannelHandler`'s "all three or none". */
 export interface Claim {
+  /** Private attachment recovery capability. Never include in logs or displayed claims. */
+  readonly recovery?: string;
   readonly project: string;
   readonly machine: string;
   /** Absolute on this machine. The server never resolves it. */
@@ -726,11 +728,26 @@ export async function openFiles(
   renewed?: (tokens: Tokens) => void,
 ): Promise<FilesOpened> {
   const socketBase = schemed(door.base);
+  if (claim.recovery !== undefined && !/^[a-f0-9]{64}$/.test(claim.recovery))
+    throw new Error('Invalid workspace recovery capability.');
+  // A long-lived private capability must not enter URLs or access logs. The
+  // negotiated protocol also prevents silently downgrading a recoverable claim.
+  const protocol =
+    claim.recovery === undefined
+      ? undefined
+      : `plowshare-file-recovery-v1.${claim.recovery}`;
   const authorized = await connectionTicket(door, tokens, renewed);
   const pass = authorized.pass;
   const socket = await door.open(
     filesUrl(socketBase, pass, door.session, claim),
+    protocol === undefined ? undefined : [protocol],
   );
+  if (protocol !== undefined && socket.protocol !== protocol) {
+    socket.close();
+    throw new Error(
+      'The server or transport does not support workspace recovery.',
+    );
+  }
   return { socket, tokens: authorized.tokens };
 }
 

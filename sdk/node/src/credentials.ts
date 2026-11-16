@@ -148,6 +148,12 @@ export async function savedLoginServers(
  * no caller may renew a cached refresh token. Passwords never reach this store. */
 export class Credentials {
   readonly origin: string;
+
+  /** Local private configuration root shared with workspace recovery identities. */
+  get configurationRoot(): string {
+    return dirname(this.legacyDirectory);
+  }
+
   private readonly file: string;
   private readonly directory: string;
   constructor(

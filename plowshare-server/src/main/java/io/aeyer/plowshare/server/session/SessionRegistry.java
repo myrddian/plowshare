@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,46 +62,18 @@ import org.slf4j.LoggerFactory;
  * <p>What this class adds and that one does not need is that displacement is <em>per role</em>. A
  * listener reconnecting displaces a listener and leaves the file provider where it is.
  *
- * <h2>{@link ConcurrentHashMap} and no lock, which is a decision rather than an omission</h2>
+ * <h2>Logical workspace recovery and concurrency</h2>
  *
- * <p>Attaches arrive on Spring container threads; reads happen on the virtual threads running jobs.
- * There is no {@code synchronized} block or method here, because on Java 21 a virtual thread
- * blocking inside one pins its carrier — measured on this build's JVM during slice 4 rather than
- * recalled: a vthread blocking inside a monitor never yields its carrier, and {@code
- * jdk.tracePinnedThreads} reports {@code reason:MONITOR}.
+ * <p>Reads use concurrent maps. Compound mutations serialize under a short monitor: recovering
+ * transfers the listener and records its verified logical attachments atomically with attach and
+ * detach. This critical section performs only in-memory operations, with no I/O or callbacks.
+ * Session role operations retain their own lock and identity-checked displacement rules.
  *
- * <p><b>This paragraph used to add "and there is not one anywhere in this repository's {@code main}
- * sources", which was false when it was written.</b> {@code LmStudio.discover} holds one around a
- * blocking HTTP probe — the exact case the rule exists for. It is recorded in {@code implementation
- * rationale} and left alone here, because a claim about a whole repository made in one class's
- * javadoc is a claim nothing checks: the next file to break it will not be edited by anyone reading
- * this.
- *
- * <p><b>No lock of this class's own either, and the reason is that no compound action across
- * sessions needs one.</b> Every mutation here is a single already-atomic map operation, and the
- * composite each public method performs is correct under any interleaving. The one compound step is
- * inside a single {@link Session}: {@code Session.attach(role, attachment, handle)} checks the
- * session's account and puts into the role as one step, under that session's own {@link
- * java.util.concurrent.locks.ReentrantLock} — a {@code ReentrantLock}, not a monitor, for the
- * pinning reason above — so a claim and an attach of another account cannot interleave:
- *
- * <ul>
- *   <li>{@code computeIfAbsent} then {@code put} — two attaches racing on one id get the same
- *       {@link Session}, and one of the two {@code put}s is last. Each caller is told what its own
- *       {@code put} displaced, so <b>every attachment is either the survivor or is reported
- *       displaced exactly once</b>. That is the invariant that matters, because "told twice" is a
- *       handler closing a socket somebody else already closed and "told never" is a socket nobody
- *       closes;
- *   <li>{@code remove(role, attachment)} — the two-argument form, so a detach racing an attach that
- *       already replaced it removes nothing and says so.
- * </ul>
- *
- * <p>{@code FileChannelHandler}'s lock guards something this class does not have: serialising
- * writes to one Spring {@code WebSocketSession}, which is explicitly unsafe for concurrent sends
- * and which it measured — eight threads, seven {@code IllegalStateException}s. Nothing here writes
- * to anything. A lock added for the shape of it would be a lock with nothing under it, and {@code
- * many_threads_attaching_one_role_leave_one_survivor_and_name_the_rest} is what holds the lock-free
- * claim to its invariant rather than to an absence of exceptions.
+ * <p>A transport may prove several workspace attachments, but switching its current workspace never
+ * moves the previous file provider. A new event connection using an old transport ID starts with
+ * fresh proofs; the public ID alone cannot recover a workspace. Listener cleanup removes only that
+ * exact listener across its verified attachments. File cleanup remains specific to its logical
+ * workspace, so late closes cannot withdraw a replacement provider.
  *
  * <h2>Nothing reaps, and that is recorded rather than guessed at</h2>
  *
@@ -159,6 +132,8 @@ public final class SessionRegistry implements SessionOwners {
   private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
   private final Clock clock;
+  private final Map<String, Set<String>> recovered = new ConcurrentHashMap<>();
+  private final Object recovering = new Object();
 
   /** The production one. */
   public SessionRegistry() {
@@ -183,6 +158,48 @@ public final class SessionRegistry implements SessionOwners {
    */
   public Optional<Session> find(String id) {
     return id == null ? Optional.empty() : Optional.ofNullable(sessions.get(id));
+  }
+
+  /** Logical attachment identity after an authenticated workspace recovery. */
+  @Override
+  public String canonical(String id) {
+    return find(id).map(Session::id).orElse(id);
+  }
+
+  @Override
+  public Set<String> logicalSessions(String session) {
+    if (session == null) return Set.of();
+    Set<String> verified = recovered.get(session);
+    return verified == null ? Set.of(canonical(session)) : Set.copyOf(verified);
+  }
+
+  /**
+   * Join a fresh transport to a retained logical attachment after its recovery capability was
+   * verified. Ownership is checked on both sides. The event listener moves with the connection;
+   * late closes still use attachment identity checks and cannot detach the replacement.
+   */
+  public void recover(String incoming, String retained, String account) {
+    synchronized (recovering) {
+      Session fresh = sessions.get(named(incoming));
+      Set<String> verified =
+          recovered.computeIfAbsent(incoming, ignored -> ConcurrentHashMap.newKeySet());
+      if (!verified.contains(retained) && verified.size() >= 128)
+        throw new IllegalStateException("Use another connection to attach more workspaces");
+      Session original =
+          sessions.computeIfAbsent(named(retained), id -> new Session(id, clock.instant()));
+      if (!original.claim(account) || fresh != null && !fresh.claim(account))
+        throw new IllegalStateException(
+            "Workspace recovery cannot change the authenticated account");
+      if (fresh != null && fresh != original) {
+        // The viewer may follow several previously verified workspaces. Only its listener is
+        // shared; a file provider always remains attached to its original logical workspace.
+        fresh
+            .attached(Role.LISTENER, Object.class)
+            .ifPresent(listener -> original.attach(Role.LISTENER, listener, account));
+      }
+      verified.add(retained);
+      sessions.put(incoming, original);
+    }
   }
 
   /**
@@ -225,9 +242,11 @@ public final class SessionRegistry implements SessionOwners {
    * @return whether {@code id} is held by {@code handle} now
    */
   public boolean claim(String id, String handle) {
-    String named = named(id);
-    Instant now = clock.instant();
-    return sessions.computeIfAbsent(named, fresh -> new Session(fresh, now)).claim(handle);
+    synchronized (recovering) {
+      String named = named(id);
+      Instant now = clock.instant();
+      return sessions.computeIfAbsent(named, fresh -> new Session(fresh, now)).claim(handle);
+    }
   }
 
   /**
@@ -247,38 +266,51 @@ public final class SessionRegistry implements SessionOwners {
    * @param handle the account the socket signed in as, or null for nobody
    */
   public Attached attach(String id, Role role, Object attachment, String handle) {
-    Objects.requireNonNull(role, "role");
-    Objects.requireNonNull(attachment, "attachment");
-    String named = named(id);
-    Instant now = clock.instant();
-    Session session = sessions.computeIfAbsent(named, fresh -> new Session(fresh, now));
-    session.seen(now);
-    Object displaced = session.attach(role, attachment, handle);
-    if (displaced == Session.REFUSED) {
-      log.warn(
-          "Session '{}' is held by another account; a {} for a different account was"
-              + " refused and displaced nothing.",
-          named,
-          role);
-      return new Attached(true, Optional.empty());
+    synchronized (recovering) {
+      Objects.requireNonNull(role, "role");
+      Objects.requireNonNull(attachment, "attachment");
+      String named = named(id);
+      Instant now = clock.instant();
+      Session session = sessions.computeIfAbsent(named, fresh -> new Session(fresh, now));
+      if (role == Role.LISTENER
+          && !session.id().equals(named)
+          && session.attached(role, Object.class).orElse(null) != attachment) {
+        if (!session.claim(handle)) return new Attached(true, Optional.empty());
+        Object previous = session.attached(role, Object.class).orElse(null);
+        Session transport = new Session(named, now);
+        transport.attach(role, attachment, handle);
+        sessions.put(named, transport);
+        recovered.remove(named);
+        return new Attached(false, Optional.ofNullable(previous));
+      }
+      session.seen(now);
+      Object displaced = session.attach(role, attachment, handle);
+      if (displaced == Session.REFUSED) {
+        log.warn(
+            "Session '{}' is held by another account; a {} for a different account was"
+                + " refused and displaced nothing.",
+            named,
+            role);
+        return new Attached(true, Optional.empty());
+      }
+      if (displaced != null) {
+        // WARN and not INFO, and only on the displacement. A line on every
+        // attach is noise an operator filters out, and filtering it out
+        // filters out this one — a second connection arriving under a live
+        // id is either a reconnect the first socket has not noticed yet or
+        // two clients sharing an id, and the second is a wiring fault
+        // somebody has to see. Says only what this class did: whether the
+        // displaced connection is then closed belongs to the caller.
+        log.warn(
+            "Session '{}' attached a second {} while one was already attached; the"
+                + " newer one is the session's {} now, and the older one is returned to"
+                + " the caller that displaced it.",
+            named,
+            role,
+            role);
+      }
+      return new Attached(false, Optional.ofNullable(displaced));
     }
-    if (displaced != null) {
-      // WARN and not INFO, and only on the displacement. A line on every
-      // attach is noise an operator filters out, and filtering it out
-      // filters out this one — a second connection arriving under a live
-      // id is either a reconnect the first socket has not noticed yet or
-      // two clients sharing an id, and the second is a wiring fault
-      // somebody has to see. Says only what this class did: whether the
-      // displaced connection is then closed belongs to the caller.
-      log.warn(
-          "Session '{}' attached a second {} while one was already attached; the"
-              + " newer one is the session's {} now, and the older one is returned to"
-              + " the caller that displaced it.",
-          named,
-          role,
-          role);
-    }
-    return new Attached(false, Optional.ofNullable(displaced));
   }
 
   /**
@@ -291,17 +323,24 @@ public final class SessionRegistry implements SessionOwners {
    *     for an empty role, and for an attachment that has already been displaced by another
    */
   public boolean detach(String id, Role role, Object attachment) {
-    Objects.requireNonNull(role, "role");
-    Objects.requireNonNull(attachment, "attachment");
-    Session session = sessions.get(named(id));
-    if (session == null) {
-      return false;
+    synchronized (recovering) {
+      Objects.requireNonNull(role, "role");
+      Objects.requireNonNull(attachment, "attachment");
+      Session session = sessions.get(named(id));
+      if (session == null) {
+        return false;
+      }
+      boolean detached = session.detach(role, attachment);
+      if (role == Role.LISTENER) {
+        for (String alias : logicalSessions(id)) {
+          Session logical = sessions.get(alias);
+          if (logical != null) detached |= logical.detach(role, attachment);
+        }
+      }
+      if (!detached) return false;
+      session.seen(clock.instant());
+      return true;
     }
-    if (!session.detach(role, attachment)) {
-      return false;
-    }
-    session.seen(clock.instant());
-    return true;
   }
 
   /**

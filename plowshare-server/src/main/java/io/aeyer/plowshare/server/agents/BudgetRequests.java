@@ -9,7 +9,7 @@ import java.util.function.BooleanSupplier;
  * Durable requests for an execution's existing allowance. Implementations pin the original account,
  * allowance, stack and message owner; approval never creates another task or resets spending.
  */
-public interface BudgetRequests {
+public interface BudgetRequests extends ContinuationFrames {
   BudgetRequests NONE = new BudgetRequests() {};
 
   record Decision(String approval, boolean allowed, String text, boolean pending) {

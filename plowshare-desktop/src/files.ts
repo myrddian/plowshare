@@ -106,6 +106,16 @@ export class FilePresence {
     this.connection = connection;
     this.held = rooter({
       requireReadyProject: true,
+      reconnect: { attempts: 5, delayMs: 500 },
+      onRestored: (claim) => {
+        if (this.alive)
+          this.changed({
+            status: 'ready',
+            project: claim.project,
+            root: claim.root,
+            machine: claim.machine,
+          });
+      },
       open: async (claim) => {
         if (!this.alive)
           throw new Error('The connection changed while choosing files.');

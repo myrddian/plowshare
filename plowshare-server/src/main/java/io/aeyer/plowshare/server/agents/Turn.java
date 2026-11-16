@@ -95,6 +95,18 @@ import org.slf4j.LoggerFactory;
  * the thing it is guarding.
  */
 public final class Turn {
+  private ContinuationFrames workspaceContinuations = ContinuationFrames.NONE;
+
+  public void useWorkspaceContinuations(ContinuationFrames continuations) {
+    workspaceContinuations = Objects.requireNonNull(continuations);
+  }
+
+  private ContinuationFrames continuation(String conversation) {
+    return workspaceContinuations.restoring(conversation).isPresent()
+        ? workspaceContinuations
+        : budgetRequests;
+  }
+
   private volatile BudgetRequests budgetRequests = BudgetRequests.NONE;
 
   public void useBudgetRequests(BudgetRequests requests) {
@@ -671,6 +683,35 @@ public final class Turn {
         false,
         speaker,
         null);
+  }
+
+  /** Restore only an atomically claimed workspace checkpoint, retaining its original session. */
+  public String continueWorkspace(
+      String conversation, AgentDefinition definition, String session, String executor) {
+    if (workspaceContinuations.restoring(conversation).isEmpty())
+      throw new Refused("No claimed workspace continuation exists");
+    return speak(
+        conversation,
+        definition,
+        "The required workspace returned. Continue the retained task.",
+        session,
+        null,
+        null,
+        outcome -> {},
+        record -> {
+          if (!(record.origin() == Origin.TURN
+              || record.origin() == Origin.SUBMISSION
+              || record.origin() == Origin.EVENT))
+            throw new Refused("This execution requires its owning workflow to restore it");
+          if (!record.agent().equals(definition.name()) || record.parentId() != null)
+            throw new Refused("Workspace continuation cannot replace its execution owner");
+          requireActive(record, "continue");
+        },
+        false,
+        Speaker.harness(),
+        null,
+        null,
+        executor);
   }
 
   /**
@@ -1361,7 +1402,10 @@ public final class Turn {
     boolean started = false;
     try {
       admissible.accept(record);
-      if (budgetRequests.restoring(id).isEmpty() && budgetRequests.awaiting(id))
+      if (workspaceContinuations.restoring(id).isEmpty() && workspaceContinuations.awaiting(id))
+        throw new Refused(
+            "This execution is paused for its required workspace; reconnect it or cancel the original job.");
+      if (continuation(id).restoring(id).isEmpty() && budgetRequests.awaiting(id))
         throw new Refused(
             "This conversation is waiting on a budget decision; answer its approval before starting another task.");
       Budget budget =
@@ -1442,7 +1486,7 @@ public final class Turn {
           causation == null
               ? compaction.transcriptFor(id, definition, speaker)
               : compaction.transcriptFor(id, definition, speaker, causation);
-      var budgetContinuation = budgetRequests.restoring(id);
+      var budgetContinuation = continuation(id).restoring(id);
       if (budgetContinuation.isPresent()) {
         var frame = budgetContinuation.get();
         if (!frame.agent().equals(definition.name()))

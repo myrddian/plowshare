@@ -77,6 +77,8 @@ export interface Arrival {
  * time the real socket is driven.
  */
 export interface Socket {
+  /** Negotiated subprotocol, used to verify private workspace recovery support. */
+  readonly protocol?: string;
   /** One frame, as text. This client sends no binary. */
   send(frame: string): void;
   /** Optional queued writer. Settlement retains byte ownership even after caller detachment. */

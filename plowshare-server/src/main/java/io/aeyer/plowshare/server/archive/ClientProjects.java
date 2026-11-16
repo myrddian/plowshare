@@ -7,7 +7,11 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.HexFormat;
 
-/** A client workspace is scoped to its authenticated event session, never to the account alone. */
+/**
+ * A client workspace is scoped to its authenticated attachment, never to the account alone. A
+ * private recovery proof can restore the logical attachment across different event transport
+ * sessions.
+ */
 public final class ClientProjects {
   private ClientProjects() {}
 

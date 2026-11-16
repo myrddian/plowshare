@@ -91,6 +91,10 @@
     "./interchange": {
       "types": "./build/interchange.d.ts",
       "import": "./build/interchange.js"
+    },
+    "./workspace-recovery": {
+      "types": "./build/workspace-recovery.d.ts",
+      "import": "./build/workspace-recovery.js"
     }
   },
   "description": "Plowshare WebSocket SDK and optional Node platform adapters"

@@ -80,7 +80,7 @@ public final class Limits {
                             + " is not an agent run and has no limits this server holds. A"
                             + " curator pass carries its own budget across every ruling in it, and"
                             + " it is not on this handle to move. Nothing was changed."));
-    if (job.state() != Job.State.RUNNING) {
+    if (!job.active()) {
       throw new CallerFault(
           "job "
               + id

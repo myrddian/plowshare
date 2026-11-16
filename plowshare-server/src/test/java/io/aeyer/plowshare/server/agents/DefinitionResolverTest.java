@@ -210,6 +210,27 @@ class DefinitionResolverTest {
   }
 
   @Test
+  void recovered_transports_use_the_same_logical_source_identity_and_cache(@TempDir Path data)
+      throws Exception {
+    var sessions = new SessionRegistry();
+    sessions.attach("transport", Role.LISTENER, new Object(), "alice");
+    sessions.recover("transport", "workspace-logical", "alice");
+    FakeFiles files = clientOffering("clientbot");
+    SessionChannel channel =
+        (session, request) -> {
+          assertEquals("workspace-logical", session);
+          return files.ask(session, request);
+        };
+    var resolver = resolverOver(new DataLayout(data).initialise(), id -> true, channel);
+    resolver.useSessions(sessions);
+    var original = resolver.forCaller(new DefinitionResolver.Caller(7L, "transport"));
+    assertTrue(original.find("clientbot").orElseThrow().origin().contains("workspace-logical"));
+    sessions.attach("reopened", Role.LISTENER, new Object(), "alice");
+    sessions.recover("reopened", "workspace-logical", "alice");
+    assertSame(original, resolver.forCaller(new DefinitionResolver.Caller(7L, "reopened")));
+  }
+
+  @Test
   void a_same_name_reconnect_cannot_reuse_the_old_connections_cached_definitions(@TempDir Path data)
       throws Exception {
     var channel = new ReconnectingFiles();

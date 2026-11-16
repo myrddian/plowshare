@@ -652,6 +652,38 @@ describe('openFiles is openSocket for the other socket, with a claim on it', () 
     });
   }
 
+  it('negotiates recovery privately and refuses a transport that drops the proof', async () => {
+    const key = 'a'.repeat(64);
+    const protocol = `plowshare-file-recovery-v1.${key}`;
+    const { door } = ready();
+    const socket = Object.assign(new FakeSocket(), { protocol });
+    let offered: string[] | undefined;
+    await openFiles(
+      {
+        ...door,
+        session: LISTENING_AS,
+        open: async (url, protocols) => {
+          expect(url).not.toContain(key);
+          expect(url).not.toContain('recovery=');
+          offered = protocols;
+          return socket;
+        },
+      },
+      PAIR,
+      { ...CLAIM, recovery: key },
+    );
+    expect(offered).toEqual([protocol]);
+    const legacy = new FakeSocket();
+    await expect(
+      openFiles(
+        { ...ready().door, session: LISTENING_AS, open: async () => legacy },
+        PAIR,
+        { ...CLAIM, recovery: key },
+      ),
+    ).rejects.toThrow('does not support workspace recovery');
+    expect(legacy.closed).toBe(true);
+  });
+
   it('renews an expired access token and opens /v1/files with every part of the claim escaped', async () => {
     const { door, calls } = ready();
     const { open, urls } = openings();

@@ -12,6 +12,7 @@ import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRegistry;
+import io.aeyer.plowshare.server.files.ClientWork;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionCloseListener;
 import io.aeyer.plowshare.server.files.SessionGoneException;
@@ -23,6 +24,7 @@ import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.ProjectRoots;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.server.session.WorkspaceRecovery;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -42,6 +44,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -282,6 +285,20 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
    * anything above asks is {@code Session.has(Role.FILE_PROVIDER)}, which is why {@code files/} and
    * {@code agents/} still know nothing about a socket.
    */
+  private WorkspaceRecovery workspaceRecovery;
+
+  @Autowired(required = false)
+  public void useWorkspaceRecovery(WorkspaceRecovery recovery) {
+    workspaceRecovery = recovery;
+  }
+
+  private ClientWork clientWork = ClientWork.NONE;
+
+  @Autowired(required = false)
+  public void useClientWork(ClientWork work) {
+    clientWork = Objects.requireNonNull(work);
+  }
+
   private final SessionRegistry sessions;
 
   /**
@@ -424,7 +441,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   private WorkspaceChanges workspaceChanges;
 
   /** File serving remains usable without the optional code-tracking capability. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  @Autowired(required = false)
   public void useWorkspaceChanges(WorkspaceChanges changes) {
     this.workspaceChanges = Objects.requireNonNull(changes);
   }
@@ -445,7 +462,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
                         Home.of(rooted.project()), live.handle, named(socket))));
   }
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public void useSocketAuthorization(SocketAuthorization authorization) {
     this.socketAuthorization = authorization;
   }
@@ -454,7 +471,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   public void afterConnectionEstablished(WebSocketSession socket) throws IOException {
     if (socketAuthorization != null && !socketAuthorization.attach(socket)) return;
     String id = sessionId(socket.getUri());
-    if (id == null || id.isBlank()) {
+    if (id == null || id.isBlank() || id.startsWith(WorkspaceRecovery.LOGICAL_PREFIX)) {
       // Refused rather than given a generated id. A session nothing can
       // name is a session no job can be routed to, so it would sit there
       // holding a socket and answering nothing — and the client would
@@ -467,8 +484,32 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       socket.close(CloseStatus.BAD_DATA.withReason("open " + PATH + "?" + SESSION_PARAM + "=<id>"));
       return;
     }
-    socket.getAttributes().put(SESSION_PARAM, id);
     String handle = handleOn(socket);
+    String protocol = socket.getAcceptedProtocol();
+    String recoveryKey =
+        protocol != null && protocol.startsWith(WorkspaceRecovery.FILE_PROTOCOL_PREFIX)
+            ? protocol.substring(WorkspaceRecovery.FILE_PROTOCOL_PREFIX.length())
+            : null;
+    if (recoveryKey != null && workspaceRecovery == null) {
+      socket.close(CloseStatus.POLICY_VIOLATION.withReason("Workspace recovery unavailable"));
+      return;
+    }
+    try {
+      if (workspaceRecovery != null)
+        id =
+            workspaceRecovery.attach(
+                recoveryKey,
+                id,
+                handle,
+                parameter(socket.getUri(), "machine"),
+                parameter(socket.getUri(), "root"),
+                parameter(socket.getUri(), "project"));
+      else id = sessions.canonical(id);
+    } catch (RuntimeException invalid) {
+      socket.close(CloseStatus.POLICY_VIOLATION.withReason("Workspace recovery refused"));
+      return;
+    }
+    socket.getAttributes().put(SESSION_PARAM, id);
     if (!sessions.claim(id, handle)) {
       // ANOTHER ACCOUNT'S ID. Refused, never displacing: a session id is held
       // by the first account that claimed it, for as long as the registry
@@ -679,7 +720,10 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
     // then as a 1006 close one millisecond later, so the draining is
     // afterConnectionClosed's and this only records the cause — which is the
     // half that says whether the client went away or the network did.
-    log.info("The file channel for session '{}' failed: {}", named(socket), error.toString());
+    log.info(
+        "The file channel for session '{}' failed: {}",
+        named(socket),
+        error.getClass().getSimpleName());
   }
 
   @Override
@@ -756,6 +800,16 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   // --- the seam ------------------------------------------------------------
 
   @Override
+  public void beforeWork(String session) {
+    clientWork.beforeRequest(session);
+  }
+
+  @Override
+  public void interrupted(String session, FileRequest request) {
+    clientWork.interrupted(session, request);
+  }
+
+  @Override
   public FileReply ask(String session, FileRequest request) {
     return ask(session, request, deadline);
   }
@@ -763,6 +817,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   @Override
   public SessionChannel bound(String session) {
     Objects.requireNonNull(session, "session");
+    clientWork.requires(session);
     Live captured = live(session);
     return new SessionChannel() {
       @Override
@@ -775,7 +830,12 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       public void requireCurrent(String asked) {
         if (!session.equals(asked))
           throw new IllegalArgumentException("a bound file channel belongs to one session");
-        FileChannelHandler.this.requireCurrent(session, captured);
+        try {
+          FileChannelHandler.this.requireCurrent(session, captured);
+        } catch (SessionGoneException lost) {
+          clientWork.disconnected(session);
+          throw lost;
+        }
       }
 
       @Override
@@ -792,7 +852,8 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       @Override
       public FileReply ask(String asked, FileRequest request, Duration wait) {
         requireCurrent(asked);
-        return FileChannelHandler.this.ask(session, captured, request, wait);
+        return FileChannelHandler.this.ask(
+            session, captured, request, clientWork.requestBudget(wait));
       }
     };
   }
@@ -815,7 +876,24 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   @Override
   public FileReply ask(String session, FileRequest request, Duration deadline) {
     Objects.requireNonNull(session, "session");
-    return ask(session, live(session), request, deadline);
+    if (!FileRequest.CANCEL.equals(request.op())) clientWork.beforeRequest(session);
+    deadline = clientWork.requestBudget(deadline);
+    long started = System.nanoTime();
+    try {
+      return ask(session, live(session), request, deadline);
+    } catch (SessionGoneException gone) {
+      // A missing reply cannot certify a mutation. The execution owner parks uncertain effects.
+      Duration remaining = deadline.minusNanos(System.nanoTime() - started);
+      boolean recovered =
+          !FileRequest.CANCEL.equals(request.op()) && clientWork.interrupted(session, request);
+      if (!recovered
+          || !ClientWork.readOnly(request)
+          || remaining.isNegative()
+          || remaining.isZero()) throw gone;
+      // One pure request may be rebuilt on the returning attachment. Bound multi-read snapshots
+      // retain their generation fence and cannot publish a result assembled across connections.
+      return ask(session, live(session), request, remaining);
+    }
   }
 
   private FileReply ask(String session, Live live, FileRequest request, Duration deadline) {
@@ -1128,7 +1206,9 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
     boolean creating;
     try {
       String handle = handleOn(socket);
-      boolean visible = ClientProjects.visible(claim.project(), sessionId(socket.getUri()), handle);
+      boolean visible =
+          ClientProjects.visible(
+              claim.project(), sessions.canonical(sessionId(socket.getUri())), handle);
       // Membership first, so a member's reconnect asks nothing else. Only a name with no row at
       // all may be created, and only by a PROJECT_CREATOR holder; a registered project without
       // this account as a member is refused with the same sentence either way.

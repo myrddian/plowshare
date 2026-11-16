@@ -694,7 +694,10 @@ describe('continuing a run that stopped unattended', () => {
 describe('a state or an ending this build has never heard of', () => {
   it('renders a state as itself rather than failing over one', () => {
     expect(describeState('RUNNING')).toBe('running');
-    expect(describeState('PAUSED')).toBe('PAUSED');
+    expect(describeState('PAUSED')).toBe('paused');
+    expect(describeState('PAUSING')).toBe('pausing');
+    expect(describeState('RESUMING')).toBe('resuming');
+    expect(describeState('FUTURE_STATE')).toBe('FUTURE_STATE');
     expect(describeState('constructor')).toBe('constructor');
     expect(describeState(undefined)).toContain('did not name');
   });
