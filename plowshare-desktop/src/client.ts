@@ -1,3 +1,4 @@
+import type { RequestOptions } from 'plowshare-client-ts/binding/acting';
 import {
   enableWorkspaceRecovery,
   recoverableClaim,
@@ -755,6 +756,7 @@ export class DesktopClient {
   private options: {
     project?: string;
     accountActivity?: boolean;
+    approvalPolicyTimeoutMs?: number;
     nativeSessions?: NativeSessions;
   };
   constructor(
@@ -763,9 +765,19 @@ export class DesktopClient {
     privateOptions: {
       project?: string;
       accountActivity?: boolean;
+      approvalPolicyTimeoutMs?: number;
       nativeSessions?: NativeSessions;
     } = {},
   ) {
+    if (
+      privateOptions.approvalPolicyTimeoutMs !== undefined &&
+      (!Number.isFinite(privateOptions.approvalPolicyTimeoutMs) ||
+        privateOptions.approvalPolicyTimeoutMs <= 0 ||
+        privateOptions.approvalPolicyTimeoutMs > 30000)
+    )
+      throw new Error(
+        'Approval policy timeout must be positive and at most 30 seconds.',
+      );
     this.changed = changed;
     this.connector = connector;
     this.options = privateOptions;
@@ -894,43 +906,50 @@ export class DesktopClient {
   private ask<K extends Operation>(
     type: K,
     payload: Payloads[K],
+    options?: RequestOptions,
   ): Promise<Outcome> {
     if (!this.connection || !this.state.connected)
       throw new Error('Connect to the server first.');
     const connection = this.connection;
     const generation = this.generation;
     const request = decodeRequest(type, payload);
-    return connection.ask(request.type, request.payload).then((answer) => {
-      if (generation !== this.generation)
-        throw new Error(
-          'The connection changed while this request was running.',
-        );
-      if (
-        VALIDATED_OPERATIONS.includes(request.type) &&
-        resultOf(request, answer).kind === 'invalid-response'
-      )
-        throw new Error(
-          `The server returned unreadable ${type} information (incomplete response). The previous snapshot is retained; refresh before retrying.`,
-        );
-      return answer.code === 'OK' || answer.code === 'ACCEPTED'
-        ? {
-            code: answer.code,
-            payload: decodeReply(request.type, answer.payload),
-            ...(answer.said === undefined ? {} : { said: answer.said }),
-          }
-        : {
-            code: answer.code,
-            ...(answer.code === 'VALIDATION_FAILED' &&
-            request.type.startsWith('information.') &&
-            [
-              'INFORMATION_METADATA_INVALID',
-              'INFORMATION_VALIDATION_BUDGET_EXHAUSTED',
-            ].includes(answer.said ?? '')
-              ? { metadataValidation: decodeMetadataValidation(answer.payload) }
-              : {}),
-            ...(answer.said === undefined ? {} : { said: answer.said }),
-          };
-    });
+    return connection
+      .ask(request.type, request.payload, options)
+      .then((answer) => {
+        if (generation !== this.generation)
+          throw new Error(
+            'The connection changed while this request was running.',
+          );
+        if (
+          VALIDATED_OPERATIONS.includes(request.type) &&
+          resultOf(request, answer).kind === 'invalid-response'
+        )
+          throw new Error(
+            `The server returned unreadable ${type} information (incomplete response). The previous snapshot is retained; refresh before retrying.`,
+          );
+        return answer.code === 'OK' || answer.code === 'ACCEPTED'
+          ? {
+              code: answer.code,
+              payload: decodeReply(request.type, answer.payload),
+              ...(answer.said === undefined ? {} : { said: answer.said }),
+            }
+          : {
+              code: answer.code,
+              ...(answer.code === 'VALIDATION_FAILED' &&
+              request.type.startsWith('information.') &&
+              [
+                'INFORMATION_METADATA_INVALID',
+                'INFORMATION_VALIDATION_BUDGET_EXHAUSTED',
+              ].includes(answer.said ?? '')
+                ? {
+                    metadataValidation: decodeMetadataValidation(
+                      answer.payload,
+                    ),
+                  }
+                : {}),
+              ...(answer.said === undefined ? {} : { said: answer.said }),
+            };
+      });
   }
   private async readProjects() {
     const generation = this.generation;
@@ -972,8 +991,8 @@ export class DesktopClient {
       this.state.projectListError = `Server projects unavailable; using saved folders: ${errorMessage(error)}`;
     }
   }
-  private async send(request: WsRequest) {
-    return this.ask(request.type, request.payload);
+  private async send(request: WsRequest, options?: RequestOptions) {
+    return this.ask(request.type, request.payload, options);
   }
   private async sendActivity(request: WsRequest): Promise<Outcome> {
     const generation = this.generation;
@@ -2093,6 +2112,34 @@ export class DesktopClient {
         }
         break;
       }
+      case 'approval-policy': {
+        if (this.state.mode !== 'live' || !this.state.connected)
+          throw new Error('Connect to edit personal approval settings.');
+        const approvalPolicy =
+          request.operation === 'get'
+            ? decodeReply(
+                'approval.policy.get',
+                ok(
+                  await this.send(
+                    { type: 'approval.policy.get', payload: {} },
+                    { timeoutMs: this.options.approvalPolicyTimeoutMs ?? 2000 },
+                  ),
+                ).payload,
+              )
+            : decodeReply(
+                'approval.policy.save',
+                ok(
+                  await this.send(
+                    {
+                      type: 'approval.policy.save',
+                      payload: { policy: request.policy },
+                    },
+                    { timeoutMs: this.options.approvalPolicyTimeoutMs ?? 2000 },
+                  ),
+                ).payload,
+              );
+        return { approvalPolicy, state: structuredClone(this.state) };
+      }
       case 'approvals-refresh':
         await this.refresh();
         break;
@@ -2318,7 +2365,16 @@ export class DesktopClient {
     this.emit();
     try {
       const answer = answeredOf(
-        ok(await this.send(answeringApproval(id, decision))),
+        ok(
+          await this.send(
+            answeringApproval(
+              id,
+              decision,
+              undefined,
+              approval.file?.inputDigest,
+            ),
+          ),
+        ),
         id,
       );
       if (!answer)

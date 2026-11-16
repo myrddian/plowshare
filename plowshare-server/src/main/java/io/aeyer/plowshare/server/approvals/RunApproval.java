@@ -39,7 +39,53 @@ public record RunApproval(
     Instant createdAt,
     List<List<String>> commands,
     String judged,
-    BudgetExtension budget) {
+    BudgetExtension budget,
+    FileApproval file) {
+
+  public RunApproval(
+      String id,
+      long projectId,
+      String conversation,
+      String askedIn,
+      String handle,
+      String agent,
+      String side,
+      List<String> argv,
+      String cwd,
+      String reason,
+      String state,
+      String scope,
+      List<String> prefix,
+      String answeredBy,
+      Instant answeredAt,
+      Instant deliveredAt,
+      Instant createdAt,
+      List<List<String>> commands,
+      String judged,
+      BudgetExtension budget) {
+    this(
+        id,
+        projectId,
+        conversation,
+        askedIn,
+        handle,
+        agent,
+        side,
+        argv,
+        cwd,
+        reason,
+        state,
+        scope,
+        prefix,
+        answeredBy,
+        answeredAt,
+        deliveredAt,
+        createdAt,
+        commands,
+        judged,
+        budget,
+        null);
+  }
 
   /** Command approvals retain their existing construction and wire shape. */
   public RunApproval(
@@ -274,6 +320,13 @@ public record RunApproval(
   }
 
   public RunApproval {
+    if (file != null
+        && (budget != null
+            || !argv.isEmpty()
+            || commands != null
+            || prefix != null
+            || (scope != null && !ONCE.equals(scope))))
+      throw new IllegalArgumentException("File approvals are exact once-only decisions");
     if (budget != null
         && (handle == null
             || handle.isBlank()

@@ -91,6 +91,7 @@ let visible: Item[] = [];
 let runItems: Item[] = [];
 let busy = false;
 let detailStamp = '';
+let approvalStamp = '';
 const millis = (n: number) =>
   n < 1000
     ? `${n} ms`
@@ -183,9 +184,15 @@ function render() {
       (row.conversation === conversation || row.askedIn === conversation),
   );
   $('#trajectory-approvals').hidden = !approvals.length;
-  $('#trajectory-approvals').innerHTML = approvals
+  const approvalHtml = approvals
     .map((row) => approvalControls.prompt(row))
     .join('');
+  // Streaming work may repaint the trajectory during a press. Preserve approval
+  // buttons until their own state changes so the pending click still reaches them.
+  if (approvalHtml !== approvalStamp) {
+    $('#trajectory-approvals').innerHTML = approvalHtml;
+    approvalStamp = approvalHtml;
+  }
   const history = state.history[conversation];
   const steps = stageSteps(state, conversation, stageScope);
   const turns = turnsOf(steps);

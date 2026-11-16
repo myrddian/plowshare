@@ -1,13 +1,19 @@
 package io.aeyer.plowshare.server.agents;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.CommandRunner;
 import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.approvals.ApprovalReviews;
+import io.aeyer.plowshare.server.approvals.CommandApprovals;
+import io.aeyer.plowshare.server.approvals.OperationApprovalReview;
 import io.aeyer.plowshare.server.approvals.RunApproval;
-import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.files.FileProvider;
@@ -31,7 +37,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -58,7 +66,7 @@ import java.util.regex.Pattern;
  * <p>The gate judges admission; the selected provider enforces workspace grants and configured OS
  * isolation. With isolation {@code none}, an admitted command retains its OS user authority.
  */
-public final class RunTool implements AgentTool {
+public final class RunTool implements RetainedApprovalTool {
 
   public static final String NAME = "run";
 
@@ -66,6 +74,33 @@ public final class RunTool implements AgentTool {
   static final String GATE = "harness:run-gate";
 
   private io.aeyer.plowshare.server.files.WorkspaceCodeMap codeMap;
+  private OperationApprovalReview policyReview;
+  private String retainedApprovalId;
+
+  @Override
+  public void retainedApproval(String id) {
+    retainedApprovalId = Objects.requireNonNull(id);
+  }
+
+  private String reviewCall = UUID.randomUUID().toString();
+  private boolean securityRejected;
+
+  public boolean securityRejected() {
+    return securityRejected;
+  }
+
+  /**
+   * The runtime supplies this run's existing execution authority and authenticated task evidence.
+   */
+  public RunTool withApprovalReview(OperationApprovalReview review) {
+    policyReview = Objects.requireNonNull(review);
+    return this;
+  }
+
+  @Override
+  public void calledAs(String id) {
+    reviewCall = Objects.requireNonNull(id);
+  }
 
   public RunTool withCodeMap(io.aeyer.plowshare.server.files.WorkspaceCodeMap codeMap) {
     this.codeMap = codeMap;
@@ -75,7 +110,7 @@ public final class RunTool implements AgentTool {
   private final ProviderRouter router;
   private final Supplier<Environments> environments;
   private final BooleanSupplier cancelled;
-  private final Supplier<RunApprovalStore> approvals;
+  private final Supplier<? extends CommandApprovals> approvals;
   private final String conversation;
   private final String session;
   private final String agent;
@@ -101,7 +136,7 @@ public final class RunTool implements AgentTool {
       ProviderRouter router,
       Supplier<Environments> environments,
       BooleanSupplier cancelled,
-      Supplier<RunApprovalStore> approvals,
+      Supplier<? extends CommandApprovals> approvals,
       String conversation,
       String session,
       String agent,
@@ -123,7 +158,7 @@ public final class RunTool implements AgentTool {
       ProviderRouter router,
       Supplier<Environments> environments,
       BooleanSupplier cancelled,
-      Supplier<RunApprovalStore> approvals,
+      Supplier<? extends CommandApprovals> approvals,
       String conversation,
       String session,
       String agent,
@@ -137,7 +172,7 @@ public final class RunTool implements AgentTool {
       ProviderRouter router,
       Supplier<Environments> environments,
       BooleanSupplier cancelled,
-      Supplier<RunApprovalStore> approvals,
+      Supplier<? extends CommandApprovals> approvals,
       String conversation,
       String session,
       String agent,
@@ -166,7 +201,7 @@ public final class RunTool implements AgentTool {
       ProviderRouter router,
       Supplier<Environments> environments,
       BooleanSupplier cancelled,
-      Supplier<RunApprovalStore> approvals,
+      Supplier<? extends CommandApprovals> approvals,
       String conversation,
       String session,
       String agent,
@@ -262,12 +297,13 @@ public final class RunTool implements AgentTool {
    *
    * @param chain the hook chain, given the context this call's environment adds
    */
-  ToolPre gate(
+  public ToolPre gate(
       String argumentsJson,
       Home home,
       HookContext context,
-      java.util.function.BiFunction<HookContext, String, ToolPre> chain) {
+      BiFunction<HookContext, String, ToolPre> chain) {
     waitingApproval = null;
+    securityRejected = false;
     waitingPlan = null;
     Plan plan;
     try {
@@ -327,7 +363,7 @@ public final class RunTool implements AgentTool {
       String argumentsJson,
       Home home,
       HookContext context,
-      java.util.function.BiFunction<HookContext, String, ToolPre> chain) {
+      BiFunction<HookContext, String, ToolPre> chain) {
     ToolPre judged = chain.apply(context, argumentsJson);
     if (judged.isDenied()) {
       return judged;
@@ -375,18 +411,40 @@ public final class RunTool implements AgentTool {
       String lost) {
     // 2. An approval a person already gave.
     Long projectId = home.isGlobal() ? null : environments.get().projectId(home.project());
-    RunApprovalStore store = approvals.get();
+    CommandApprovals store = approvals.get();
     ApprovalTarget target = approvalTarget();
+    if (policyReview != null && !resuming)
+      return policyDecision(plan, judged, records, home, allowed, store, projectId, target);
     if (store != null && projectId != null && target != null) {
       Optional<RunApproval> approved =
-          store.consume(
-              projectId,
-              target.conversation(),
-              plan.side(),
-              plan.argv(),
-              plan.cwd().toString(),
-              plan.stdin());
+          resuming && retainedApprovalId != null
+              ? store
+                  .find(retainedApprovalId)
+                  .filter(
+                      approvedCall ->
+                          approvedCall.projectId() == projectId
+                              && approvedCall.argv().equals(plan.argv())
+                              && approvedCall.cwd().equals(plan.cwd().toString())
+                              && approvedCall.side().equals(plan.side())
+                              && RunApproval.givenSameInput(approvedCall.reason(), plan.stdin())
+                              && store.claim(approvedCall))
+              : store.consume(
+                  projectId,
+                  target.conversation(),
+                  plan.side(),
+                  plan.argv(),
+                  plan.cwd().toString(),
+                  plan.stdin());
       if (approved.isPresent()) {
+        if (policyReview != null) {
+          try {
+            policyReview.humanOverride(reviewRequest(plan, home), approved.orElseThrow().id());
+          } catch (WorkspaceRefusedException refused) {
+            securityRejected = true;
+            records.add(record(HookRecord.DENY, refused.getMessage()));
+            return new ToolPre(judged.arguments(), refused.getMessage(), records, false);
+          }
+        }
         records.add(
             record(
                 HookRecord.ALLOW,
@@ -420,6 +478,89 @@ public final class RunTool implements AgentTool {
     return new ToolPre(judged.arguments(), why, records, false);
   }
 
+  private ToolPre policyDecision(
+      Plan plan,
+      ToolPre judged,
+      List<HookRecord> records,
+      Home home,
+      boolean allowed,
+      CommandApprovals store,
+      Long project,
+      ApprovalTarget target) {
+    Optional<RunApproval> consent =
+        store != null && project != null && target != null && judged.asked() == null
+            ? store.inspect(
+                project,
+                target.conversation(),
+                plan.side(),
+                plan.argv(),
+                plan.cwd().toString(),
+                plan.stdin())
+            : Optional.empty();
+    boolean environmentAllows = allowed || EnvironmentFile.OPEN.equals(plan.allowed().mode());
+    if (!environmentAllows
+        && consent.isEmpty()
+        && judged.asked() == null
+        && !EnvironmentFile.ASK.equals(plan.allowed().mode())) {
+      String refusal =
+          "The environment is gated and no hook or standing human consent allows this command; nothing ran.";
+      records.add(record(HookRecord.DENY, refusal));
+      return new ToolPre(judged.arguments(), refusal, records, false);
+    }
+    ApprovalReviews.Decision decision =
+        policyReview.review(
+            reviewRequest(plan, home),
+            new ApprovalReviews.Consent(
+                environmentAllows || consent.isPresent(), judged.asked() != null, false));
+    records.add(
+        record(
+            HookRecord.NOTE,
+            "Approval policy revision "
+                + decision.policyRevision()
+                + ": "
+                + decision.action()
+                + ". "
+                + decision.reason()));
+    if (decision.action() == ApprovalReviews.Action.REJECT) {
+      securityRejected = true;
+      return new ToolPre(
+          judged.arguments(),
+          "SECURITY rejected the operation: " + decision.reason(),
+          records,
+          false);
+    }
+    if (decision.action() == ApprovalReviews.Action.ASK_HUMAN)
+      return ask(
+          plan,
+          judged,
+          records,
+          project,
+          store,
+          target,
+          (judged.asked() == null ? "" : judged.asked() + " ") + decision.reason());
+    if (consent.isPresent() && !store.claim(consent.orElseThrow()))
+      return ask(
+          plan,
+          judged,
+          records,
+          project,
+          store,
+          target,
+          "The consent inspected before review changed; a fresh human decision is required.");
+    records.add(record(HookRecord.ALLOW, decision.reason()));
+    return placed(plan, new ToolPre(judged.arguments(), null, records, true));
+  }
+
+  private OperationApprovalReview.Request reviewRequest(Plan plan, Home home) {
+    return new OperationApprovalReview.Request(
+        home.project(),
+        plan.provider().identity(),
+        plan.argv(),
+        plan.cwd().toString(),
+        plan.stdin(),
+        reviewCall);
+  }
+
   /** What {@link #run} refuses: the place a let-through command was judged for is gone. */
   static final String PLACE_CHANGED =
       "where this command would run changed after it was judged,"
@@ -450,17 +591,17 @@ public final class RunTool implements AgentTool {
   private Plan waitingPlan;
 
   /** The question this gate actually stored, never an identity parsed from a hook's prose. */
-  Optional<RunApproval> waitingApproval() {
+  public Optional<RunApproval> waitingApproval() {
     return Optional.ofNullable(waitingApproval);
   }
 
   /** A suspended call rechecks current fences, but may never open a second approval question. */
-  ToolPre gateRetained(
+  public ToolPre gateRetained(
       String arguments,
       String side,
       Home home,
       HookContext context,
-      java.util.function.BiFunction<HookContext, String, ToolPre> chain) {
+      BiFunction<HookContext, String, ToolPre> chain) {
     Plan retained = plan(arguments, home);
     JsonNode frozen = ToolArguments.parse(arguments, NAME, "retained run arguments");
     if (!frozen.path("cwd").isTextual()
@@ -491,29 +632,29 @@ public final class RunTool implements AgentTool {
       return checked;
     } finally {
       resuming = false;
+      retainedApprovalId = null;
     }
   }
 
   /** Freeze resolved defaults too: a later environment must not silently change cwd or timeout. */
-  String retainedArguments(String arguments, Home home) {
+  public String retainedArguments(String arguments, Home home) {
     Plan p = waitingPlan == null ? plan(arguments, home) : waitingPlan;
     try {
-      return new com.fasterxml.jackson.databind.ObjectMapper()
+      return new ObjectMapper()
           .writeValueAsString(
               new RetainedArguments(
                   p.argv(), p.cwd().toString(), p.stdin(), p.timeout().toSeconds()));
-    } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
+    } catch (JsonProcessingException failed) {
       throw new IllegalStateException("Could not retain the run call", failed);
     }
   }
 
-  @com.fasterxml.jackson.annotation.JsonInclude(
-      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private record RetainedArguments(
       List<String> command,
       String cwd,
       String stdin,
-      @com.fasterxml.jackson.annotation.JsonProperty("timeout_seconds") long timeoutSeconds) {}
+      @JsonProperty("timeout_seconds") long timeoutSeconds) {}
 
   private ToolPre placed(Plan plan, ToolPre through) {
     judgedPlaces.put(through.arguments(), Place.of(plan));
@@ -561,7 +702,7 @@ public final class RunTool implements AgentTool {
       ToolPre judged,
       List<HookRecord> records,
       Long projectId,
-      RunApprovalStore store,
+      CommandApprovals store,
       ApprovalTarget target,
       String reason) {
     if (resuming) {
@@ -913,6 +1054,7 @@ public final class RunTool implements AgentTool {
       if (refused != null) {
         return refused;
       }
+      if (policyReview != null) policyReview.requireCurrent(reviewRequest(plan, home));
       if (codeMap != null) codeMap.beforeMutation(home);
       try {
         CommandRunner.Outcome outcome =

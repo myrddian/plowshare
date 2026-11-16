@@ -12,6 +12,8 @@
 - [MCP client design and implementation plan](mcp-client-design.md)
 - [MCP client management and local-host workflows](mcp-client-workflows.md)
 - [Desktop](../plowshare-desktop/README.md)
+- [Personal approval policies](approval-policies.md) — Manual, Smart, Auto, SECURITY and user bots
+- [Approval policy design and implementation plan](approval-policy-design-and-plan.md) — current implementation and remaining coverage
 - [TypeScript client](../sdk/typescript/README.md)
 - [Node client](../sdk/node/README.md)
 - [Hooks](../plowshare-hooks/README.md)

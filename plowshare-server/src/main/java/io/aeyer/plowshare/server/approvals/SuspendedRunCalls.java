@@ -84,8 +84,13 @@ public interface SuspendedRunCalls {
       Objects.requireNonNull(approval);
       Objects.requireNonNull(conversation);
       Objects.requireNonNull(tool);
-      if (!"run".equals(tool.name())) throw new IllegalArgumentException("Only run is suspended");
+      if (!supported(tool.name()))
+        throw new IllegalArgumentException("Unsupported retained approval tool");
     }
+  }
+
+  static boolean supported(String name) {
+    return List.of("run", "file_read", "file_edit", "file_delete", "file_move").contains(name);
   }
 
   /** Retain before the requesting turn closes and before its approval notification is released. */

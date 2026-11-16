@@ -317,6 +317,8 @@ export function approvalsWaiting(
  * acceptance commands, each of which the lines that show a set whole name.
  */
 export function approvalAsks(approval: Approval): string {
+  if (approval.file)
+    return `${approval.file.kind} ${approval.file.paths.join(' → ')} on ${approval.file.provider}`;
   return approval.commands === undefined
     ? `run \`${approval.command.join(' ')}\` in ${approval.cwd} (${approval.side})`
     : `run ${countOf(approval.commands.length, 'acceptance command')} at its acceptance stage,` +
@@ -1459,6 +1461,8 @@ const ADMIN_USAGE =
 export function serverCommand(line: string, project?: string) {
   const text = line.trim();
   if (text === '/admin') return { kind: 'usage' as const, said: ADMIN_USAGE };
+  if (/^\/approval\s+policy\s+(get|save)(?:\s|$)/u.test(text))
+    return parseCommand(text.slice(1));
   if (
     !/^\/(?:provider\s+(?:connection\s+(?:list|status|receipt|save|change)|credential\s+(?:status|put|revoke|rekey|authorize|refresh))|tool\s+scope\s+(?:list|host\s+(?:list|status|receipt|save|change))|admin\s+(?:status|accounts|sessions|audit|pricing\s+(?:list|set)|account\s+(?:create|update|reset)|session\s+revoke|service\s+(?:accounts|tokens|account\s+(?:create|update)|token\s+(?:create|rotate|revoke)))|application\s+(?:files|read|save)|project\s+(?:create|list|define|lend|unlend|workspace|move|forget|access|member-role|member-add|member-remove))(?:\s|$)/u.test(
       text,
@@ -1499,6 +1503,16 @@ export function typed(
 ): Typed {
   const text = line.trim();
   if (text === '/admin') return { kind: 'retrieval-error', text: ADMIN_USAGE };
+  if (text === '/approval-mode')
+    return {
+      kind: 'retrieval-error',
+      text: 'Use /approval-mode manual, smart, or auto PERSONAL_BOT; saved rules are preserved.',
+    };
+  if (text === '/approval')
+    return {
+      kind: 'retrieval-error',
+      text: 'Use /approval policy get, or /approval policy save with the complete policy and current revision.',
+    };
   // Qualified server commands travel unchanged through the ordinary conversation transport.
   if (/^\/(skill|orchestration):[^\s]+(?:\s|$)/u.test(text))
     return { kind: 'utterance', text: line };

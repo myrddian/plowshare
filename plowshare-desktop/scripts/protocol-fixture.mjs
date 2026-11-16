@@ -36,7 +36,7 @@ export async function protocolFixture(options = {}) {
   const filePending = new Map();
   let fileNumber = 0;
   for (const detail of Object.values(board.details)) { detail.value.topic.account = "fixture"; for (const seat of detail.value.seats) seat.seat.conversation = "fixture-board-seat"; for (const message of detail.value.messages) message.conversation = "fixture-board-seat"; }
-  let dropAuthoringReply = false, dropRunReply = false;
+  let dropAuthoringReply = false, dropRunReply = false, dropPolicyReply = false;
   let pauseApplicationFiles = false;
   const applicationFileReleases = [];
   let context = contextWire(15240, {}, { model: 'fixture-model', contextLength: 131072 });
@@ -126,6 +126,7 @@ export async function protocolFixture(options = {}) {
     recordRows[61] = { ordinal: 62, at: at(62), run: 'fixture-old-root', actor: 'conductor', kind: 'question_asked', text: 'Review marker. Do these objectives match?', body: 'Review marker. Do these objectives match?', detail: null };
   }
   const unreadInbox = () => inbox.filter(item => !readInbox.has(item.id));
+  let approvalPolicy = { revision: 0, mode: 'MANUAL', bot: null, rules: [] };
   const approvals = options.emptyApprovals ? [] : [approvalWire({ id: 'fixture-approval', conversation: 'fixture-first', agent: 'fixture-bot', command: ['echo','fixture approval'] })];
   const conversationOnlyApprovals = new Set(options.foregroundApprovals ? ['fixture-approval'] : []);
   let socket;
@@ -603,6 +604,12 @@ export async function protocolFixture(options = {}) {
         }
         case 'orchestration.caps': result.payload={...administrative[frame.type].payload,project:payload.project}; break;
         case 'job.cancel': { const job = jobs.get(payload.job); finish(job, 'CANCELLED'); result.payload = { id: job.id, conversation: job.conversation, state: 'DONE', outcome: job.outcome }; break; }
+        case 'approval.policy.get': result.payload = { policy: approvalPolicy, capabilities: { operations: ['COMMAND', 'FILE_READ', 'FILE_WRITE', 'FILE_DELETE', 'FILE_MOVE'], humanHistory: true, additionalFileAccess: false } }; break;
+        case 'approval.policy.save': {
+          if (payload.policy.revision !== approvalPolicy.revision) { result.code = 'ERROR'; result.payload = { message: 'Policy revision changed; reload before saving.' }; break; }
+          approvalPolicy = { ...payload.policy, revision: approvalPolicy.revision + 1 };
+          result.payload = { policy: approvalPolicy, capabilities: { operations: ['COMMAND', 'FILE_READ', 'FILE_WRITE', 'FILE_DELETE', 'FILE_MOVE'], humanHistory: true, additionalFileAccess: false } }; break;
+        }
         case 'approval.list': result.payload = { approvals: payload.project ? standingApprovals : payload.conversation ? approvals.filter(row => row.conversation === payload.conversation) : approvals.filter(row => !conversationOnlyApprovals.has(row.id)) }; break;
         case 'approval.revoke': {
           const index=standingApprovals.findIndex(row=>row.id===payload.id);
@@ -611,6 +618,7 @@ export async function protocolFixture(options = {}) {
         case 'approval.answer': {
           const index = approvals.findIndex(row => row.id === payload.id);
           if (index < 0) { result = { code: 'BAD_REQUEST', said: 'Fixture approval already answered' }; break; }
+          if (approvals[index].file && payload.decision !== 'deny' && payload.fileDigest !== approvals[index].file.inputDigest) { result = { code: 'BAD_REQUEST', said: 'Read the typed file request before approving.' }; break; }
           const [approval] = approvals.splice(index, 1);
           if (payload.decision==='project') standingApprovals.push({...approval,state:'allowed',scope:'project',prefix:payload.prefix,answeredAt:new Date().toISOString()});
           const job = start({ conversation: approval.conversation, task: `Approval ${payload.decision}: ${approval.id}` }, true, sessionId);
@@ -741,11 +749,12 @@ export async function protocolFixture(options = {}) {
       }
       if (frame.type === 'application.files' && pauseApplicationFiles)
         await new Promise((resolve) => applicationFileReleases.push(resolve));
+      if (dropPolicyReply && frame.type === 'approval.policy.save') { dropPolicyReply = false; return; }
       connection.send(JSON.stringify({ id: frame.id, type: frame.type, protocol_version: frame.protocol_version, payload: result }));
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  return { eventSessions: () => eventSockets.size, loseRunReply() { dropRunReply = true; }, loseAuthoringReply() { dropAuthoringReply = true; }, setMalformedLibrary: value=>{malformedLibrary=value;}, fileClaims, loginCount: () => logins,
+  return { eventSessions: () => eventSockets.size, losePolicyReply() { dropPolicyReply = true; }, loseRunReply() { dropRunReply = true; }, loseAuthoringReply() { dropAuthoringReply = true; }, setMalformedLibrary: value=>{malformedLibrary=value;}, fileClaims, loginCount: () => logins,
     setManualChapters(value) { manualChapters = structuredClone(value); },
     setInformationExtraction(value) { informationExtraction=value; },
     setInformationTagVersions(value) { informationTagVersions=value; },
@@ -783,8 +792,8 @@ export async function protocolFixture(options = {}) {
       // No Inbox notification: the durable ending must trigger discovery itself.
       finish(job, 'AWAITING', `Approve running echo fixture in /fixture on the local side? [${id}]`);
     },
-    queueApproval(id, conversation = 'fixture-first', legacy = false, notifyInbox = true) {
-      const row = approvalWire({ id, conversation, agent: 'fixture-bot', command: ['echo', id], cwd: '/fixture', reason: 'Review this exact request.' });
+    queueApproval(id, conversation = 'fixture-first', legacy = false, notifyInbox = true, file) {
+      const row = approvalWire({ id, conversation, agent: 'fixture-bot', command: ['echo', id], cwd: '/fixture', reason: 'Review this exact request.', ...(file ? { command: [], file } : {}) });
       approvals.push(row);
       const answer = `Approve running echo ${id} in /fixture on the server side? [${id}]`;
       if (notifyInbox) inbox.unshift({ id: `inbox-${id}`, kind: 'approval', answer, ...(legacy ? {} : { about: `approval:${id}` }), arrivedAt: '2026-10-02T00:00:00Z' });

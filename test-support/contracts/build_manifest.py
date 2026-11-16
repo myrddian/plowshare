@@ -282,7 +282,7 @@ def inventory():
         builders[frame] = [{"source": usage_source, "function": "UsageClient / UsageWatch socket-owned view lifecycle"}]
     response_families = {}
     for family, name, expected_types, expected_operations in [
-        ("administrative", "AdministrativeReplies", 36, 39),
+        ("administrative", "AdministrativeReplies", 41, 41),
         ("conversation", "ConversationReplies", 42, 86),
         ("inspection", "InspectionReplies", 14, 8),
         ("information", "InformationReplies", 76, 73),
@@ -291,6 +291,8 @@ def inventory():
         source = f"sdk/typescript/src/operations/{family}-replies.ts" if family != "messaging" else "sdk/typescript/src/operations/messaging.ts"
         text = read(source)
         types = [value for value in re.findall(r"^export interface (\w+)\s*\{", text, re.M) if value != name]
+        if family == "administrative":
+            types.extend(re.findall(r"^export interface (\w+)\s*\{", read("sdk/typescript/src/operations/approval-policy.ts"), re.M))
         operations = re.findall(r"'([^']+)':", re.search(rf"export interface {name}(?:\s+extends NavigationReplies(?:, InterchangeReplies)?(?:, DiscoveryReplies)?)?\s+\{{(.*?)^\}}", text, re.S | re.M).group(1))
         if family == "information":
             types.extend(re.findall(r"^export interface (\w+)\s*\{", read("sdk/typescript/src/operations/information-views.ts"), re.M))

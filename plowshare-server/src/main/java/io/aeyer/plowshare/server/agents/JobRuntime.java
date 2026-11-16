@@ -18,7 +18,9 @@ import io.aeyer.plowshare.server.allowances.AllowanceSnapshot;
 import io.aeyer.plowshare.server.applications.ContainedPrincipals;
 import io.aeyer.plowshare.server.approvals.ActiveRunApprovals;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.approvals.ApprovalReviewSessions;
 import io.aeyer.plowshare.server.approvals.BudgetExtension;
+import io.aeyer.plowshare.server.approvals.OperationApprovalReview;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.approvals.RunCallResumption;
@@ -33,10 +35,12 @@ import io.aeyer.plowshare.server.files.ProviderRouter;
 import io.aeyer.plowshare.server.files.RunProviders;
 import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceCodeMap;
+import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.harness.HarnessRun;
 import io.aeyer.plowshare.server.hooks.Addition;
+import io.aeyer.plowshare.server.hooks.Approving;
 import io.aeyer.plowshare.server.hooks.HookContext;
 import io.aeyer.plowshare.server.hooks.HookRecord;
 import io.aeyer.plowshare.server.hooks.Hooks;
@@ -769,6 +773,12 @@ public final class JobRuntime {
    * Where run's gate stores the questions it asks and the approvals they become; null asks nobody.
    */
   private volatile RunApprovalStore approvals;
+
+  private volatile ApprovalReviewSessions approvalReviewSessions;
+
+  public void useApprovalReviewSessions(ApprovalReviewSessions sessions) {
+    approvalReviewSessions = Objects.requireNonNull(sessions);
+  }
 
   private volatile SuspendedRunCalls suspendedRunCalls;
   private volatile ActiveRunApprovals activeRunApprovals = new ActiveRunApprovals();
@@ -2408,7 +2418,8 @@ public final class JobRuntime {
             runHooks,
             home,
             operation,
-            watch);
+            watch,
+            message);
     offered.replaceAll(
         (name, tool) ->
             tool instanceof AgentRunTool delegate
@@ -2910,7 +2921,8 @@ public final class JobRuntime {
             runHooks,
             home,
             operation,
-            watch);
+            watch,
+            userPrompt);
     BoundCommands.Prepared bound =
         boundCommands == null
             ? null
@@ -3299,8 +3311,10 @@ public final class JobRuntime {
                         activity.called(
                             transcript.conversationId(),
                             definition.name(),
-                            RunTool.NAME,
-                            () -> ToolLines.salient(RunTool.NAME, retained.tool().arguments()));
+                            pending.tool().name(),
+                            () ->
+                                ToolLines.salient(
+                                    pending.tool().name(), retained.tool().arguments()));
                     String completed =
                         resumeRunCall(
                             retained,
@@ -3316,13 +3330,13 @@ public final class JobRuntime {
                             watch,
                             resumedActivity,
                             operation);
-                    resumedActivity.returned(ToolLines.outcome(RunTool.NAME, completed));
+                    resumedActivity.returned(ToolLines.outcome(pending.tool().name(), completed));
                     return completed;
                   },
                   result -> {
                     transcript.recordDurably(
                         LoggedEntry.toolResult(pending.tool().id(), result)
-                            .told(ToolLines.outcome(RunTool.NAME, result)));
+                            .told(ToolLines.outcome(pending.tool().name(), result)));
                     replaceRetainedResult(history, pending.tool(), result);
                   });
         } catch (RuntimeException interrupted) {
@@ -4400,10 +4414,11 @@ public final class JobRuntime {
               told = rulesDenied ? ToolLines.DENIED : ToolLines.REFUSED;
             } else {
               Hooks active = activeHooks(route, harnessRun, skillChecks);
+              tool.calledAs(wanted.id());
               // run's gate stands around the chain and is no hook's to leave out:
               // RunTool says why.
               ToolPre preTool =
-                  tool instanceof RunTool run
+                  tool instanceof RetainedApprovalTool run
                       ? runGate(
                           run,
                           wanted.arguments(),
@@ -4413,7 +4428,7 @@ public final class JobRuntime {
                               toolPre(active, context, wanted.name(), arguments))
                       : toolPre(active, hookContext, wanted.name(), wanted.arguments());
               toolRecords.addAll(preTool.records());
-              if (tool instanceof RunTool run
+              if (tool instanceof RetainedApprovalTool run
                   && run.waitingApproval().isPresent()
                   && suspendedRunCalls != null) {
                 var question = run.waitingApproval().orElseThrow();
@@ -4467,7 +4482,7 @@ public final class JobRuntime {
                           text -> {
                             transcript.recordDurably(
                                 LoggedEntry.toolResult(wanted.id(), text)
-                                    .told(ToolLines.outcome(RunTool.NAME, text))
+                                    .told(ToolLines.outcome(wanted.name(), text))
                                     .took(
                                         executedAt.get() == null
                                             ? Duration.ZERO
@@ -4514,9 +4529,12 @@ public final class JobRuntime {
                 // Refused before it ran, in words the model can act on. Not
                 // added to the trail: nothing ran.
                 // A question put to a person is not a refusal, and reads as what it is.
-                boolean awaiting = tool instanceof RunTool run && run.waitingApproval().isPresent();
+                boolean awaiting =
+                    tool instanceof RetainedApprovalTool run && run.waitingApproval().isPresent();
+                boolean securityRejected =
+                    tool instanceof RetainedApprovalTool run && run.securityRejected();
                 result =
-                    awaiting
+                    awaiting || securityRejected
                         ? preTool.denied()
                         : "the call was refused by a hook: " + preTool.denied();
                 told = awaiting ? ToolLines.ASKED : ToolLines.DENIED;
@@ -4971,13 +4989,16 @@ public final class JobRuntime {
       OperationAuthority.Admission operation) {
     if (cancelled.getAsBoolean())
       return "The retained command was cancelled before execution; nothing ran.";
-    AgentTool held = offered.get(RunTool.NAME);
-    if (!(held instanceof RunTool run)) return "The run tool is no longer granted; nothing ran.";
+    AgentTool held = offered.get(retained.tool().name());
+    if (!(held instanceof RetainedApprovalTool run))
+      return "The retained tool is no longer granted; nothing ran.";
     admittedAuthority.run();
     if (operation != null) operations.require(operation);
     if (confined)
       retainedResources.require(
-          home, RetainedToolAccess.resources(RunTool.NAME, retained.tool().arguments()));
+          home, RetainedToolAccess.resources(retained.tool().name(), retained.tool().arguments()));
+    run.calledAs(retained.tool().id());
+    run.retainedApproval(retained.approval());
     Instant started = clock.get();
     String result;
     try {
@@ -4989,7 +5010,10 @@ public final class JobRuntime {
               context,
               (at, arguments) ->
                   toolPre(
-                      activeHooks(route, harnessRun, skillChecks), at, RunTool.NAME, arguments));
+                      activeHooks(route, harnessRun, skillChecks),
+                      at,
+                      retained.tool().name(),
+                      arguments));
       checked.records().forEach(r -> transcript.record(LoggedEntry.hook(r)));
       if (checked.isDenied()) result = "The retained command was refused: " + checked.denied();
       else {
@@ -4997,25 +5021,25 @@ public final class JobRuntime {
         // An approval grants consent for this command, not fresh account authority. Recheck
         // the retained operation after the wait and after tool.pre has rewritten its input.
         if (operation != null) operations.require(operation);
-        requireOperationTool(operation, home, RunTool.NAME, checked.arguments());
+        requireOperationTool(operation, home, retained.tool().name(), checked.arguments());
         run.calledAs(retained.tool().id());
-        watch.toolCalled(definition.name(), RunTool.NAME);
+        watch.toolCalled(definition.name(), retained.tool().name());
         result =
             usable(
                 transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
                     ? run.run(checked.arguments(), home)
                     : run.run(checked.arguments(), home, usageFor(transcript, definition, 0)),
-                RunTool.NAME);
+                retained.tool().name());
         admittedAuthority.run();
         ToolPost after =
             toolPost(
                 activeHooks(route, harnessRun, skillChecks),
                 context,
-                RunTool.NAME,
+                retained.tool().name(),
                 checked.arguments(),
                 result);
         after.records().forEach(r -> transcript.record(LoggedEntry.hook(r)));
-        result = usable(after.result(), RunTool.NAME);
+        result = usable(after.result(), retained.tool().name());
       }
     } catch (RuntimeException failed) {
       // A lost bridge can mean a command ran but its response was lost. Do not manufacture a
@@ -5146,7 +5170,8 @@ public final class JobRuntime {
                 RunHooks.NONE,
                 home,
                 null,
-                JobWatch.UNWATCHED)
+                JobWatch.UNWATCHED,
+                null)
             .values()
             .stream()
             .map(AgentTool::schema)
@@ -5163,6 +5188,16 @@ public final class JobRuntime {
       return List.copyOf(priced);
     }
     return schemas;
+  }
+
+  /** Quoted supplied context is data, even when its enclosing turn was posted by the owner. */
+  static String authenticatedApprovalTask(
+      Speaker speaker, String owner, String task, InputProvenance provenance) {
+    if (task == null
+        || speaker == null
+        || speaker.kind() != Speaker.Kind.PERSON
+        || !Objects.equals(speaker.name(), owner)) return null;
+    return provenance == null ? task : provenance.evidenceText(task);
   }
 
   /**
@@ -5192,7 +5227,55 @@ public final class JobRuntime {
       RunHooks runHooks,
       Home toolHome,
       OperationAuthority.Admission operation,
-      JobWatch watch) {
+      JobWatch watch,
+      String currentTask) {
+    Speaker speaker = transcript.speaker();
+    String policyOwner = operation == null ? callerHandle : operation.executor();
+    String authenticatedTask =
+        authenticatedApprovalTask(speaker, policyOwner, currentTask, transcript.inputProvenance());
+    var operationReview =
+        approvalReviewSessions == null
+            ? Optional.<OperationApprovalReview>empty()
+            : approvalReviewSessions.operations(
+                new ApprovalReviewSessions.Context(
+                    policyOwner,
+                    transcript.conversationId(),
+                    authenticatedTask,
+                    operation,
+                    budget,
+                    transcript.usage(),
+                    cancelled,
+                    () -> {
+                      admittedAuthority.run();
+                      if (operation != null) operations.require(operation);
+                    },
+                    (intent, decision) ->
+                        transcript.recordDurably(
+                            LoggedEntry.diagnostic(
+                                "Approval review for call "
+                                    + intent.call()
+                                    + ": "
+                                    + decision.action()
+                                    + "; policy revision "
+                                    + decision.policyRevision()
+                                    + "; matched rules "
+                                    + decision.matchedRules()
+                                    + ". "
+                                    + decision.reason()
+                                    + (decision.security() == null
+                                        ? ""
+                                        : "; SECURITY "
+                                            + decision.security().outcome()
+                                            + ": "
+                                            + decision.security().reason())
+                                    + (decision.bot() == null
+                                        ? ""
+                                        : "; personal bot "
+                                            + (decision.bot().approved()
+                                                ? "approved"
+                                                : "asked human")
+                                            + ": "
+                                            + decision.bot().reason())))));
     var runInformation =
         informationAccess == null
             ? null
@@ -5338,15 +5421,72 @@ public final class JobRuntime {
         continue;
       }
       if (router != null && FileTools.NAMES.contains(name)) {
-        offered.put(name, FileTools.of(name, router, reads));
+        AgentTool fileTool = FileTools.of(name, router, reads);
+        if (operationReview.isPresent() && approvals != null && ReviewedFileTool.supports(name)) {
+          fileTool =
+              new ReviewedFileTool(
+                  fileTool,
+                  router,
+                  operationReview.orElseThrow(),
+                  approvals,
+                  question -> {
+                    String conversation = transcript.conversationId();
+                    if (conversation == null || extras.end() == null || suspendedRunCalls == null)
+                      throw new WorkspaceRefusedException(
+                          "This file operation needs human approval but has no retained conversation");
+                    var root = approvalRoots.apply(conversation);
+                    boolean attended = root.isEmpty() || root.orElseThrow().origin() == Origin.TURN;
+                    if (attended && sessionId == null || !attended && callerHandle == null)
+                      throw new WorkspaceRefusedException(
+                          "No person can be asked about this file operation");
+                    String destination = root.map(ConversationRecord::id).orElse(conversation);
+                    String reason =
+                        question.reason()
+                            + " Provider: "
+                            + question.file().provider()
+                            + "; "
+                            + question.file().kind()
+                            + " "
+                            + question.file().paths();
+                    var before =
+                        runHooks.approvalPre(
+                            null,
+                            null,
+                            new Approving(
+                                List.of(),
+                                question.file().paths().getFirst(),
+                                reason,
+                                attended,
+                                List.of(RunApproval.ONCE)));
+                    runHooks.record(before.records());
+                    if (before.isDenied()) throw new WorkspaceRefusedException(before.denied());
+                    Long project = environments.projectId(question.home().project());
+                    if (project == null)
+                      throw new WorkspaceRefusedException(
+                          "The project is unavailable for file approval");
+                    RunApproval asked =
+                        approvals.askFile(
+                            project,
+                            destination,
+                            conversation,
+                            attended ? null : callerHandle,
+                            definition.name(),
+                            question.side(),
+                            question.file().paths().getFirst(),
+                            before.applyTo(reason),
+                            question.file());
+                    extras.end().requestApproval(asked.id(), ApprovalDelivery.question(asked));
+                    return asked;
+                  });
+        }
+        offered.put(name, fileTool);
         continue;
       }
       if (router != null && RunTool.NAME.equals(name)) {
         // Per run for the router's reason, and holding the run's cancel so a
         // cancelled job kills the command it started. The environments are
         // read through the field at call time, so a later wiring is seen.
-        offered.put(
-            name,
+        RunTool run =
             new RunTool(
                     router,
                     () -> environments,
@@ -5359,7 +5499,9 @@ public final class JobRuntime {
                     approvalRoots,
                     callerHandle,
                     runHooks)
-                .withCodeMap(codeMap));
+                .withCodeMap(codeMap);
+        operationReview.ifPresent(run::withApprovalReview);
+        offered.put(name, run);
         continue;
       }
       if (ResultTools.READ_NAME.equals(name)) {
@@ -6884,7 +7026,7 @@ public final class JobRuntime {
 
   /** The gate, guarded as a hook is: a gate that throws refuses, it does not let through. */
   private static ToolPre runGate(
-      RunTool run,
+      RetainedApprovalTool run,
       String arguments,
       Home home,
       HookContext context,

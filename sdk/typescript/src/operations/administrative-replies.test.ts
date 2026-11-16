@@ -20,28 +20,32 @@ const fixtures = JSON.parse(
   ),
 ) as Record<AdministrativeOperation, Outcome>;
 const asked = (type: AdministrativeOperation): Request =>
-  type === 'orchestration.repair'
+  type === 'approval.policy.save'
     ? request(type, {
-        id: 'o',
-        requestId: '00000000-0000-4000-8000-000000000001',
-        checkpoint: {
-          sequence: 30,
-          sourceHash: 'sha256:' + 'a'.repeat(64),
-          replacementHash: 'sha256:' + 'b'.repeat(64),
-        },
+        policy: { revision: 0, mode: 'MANUAL', bot: null, rules: [] },
       })
-    : ({
-        type,
-        payload:
-          type === 'orchestration.status' ||
-          type === 'orchestration.answer' ||
-          type === 'orchestration.cancel' ||
-          type === 'orchestration.resume'
-            ? { id: 'o' }
-            : type === 'approval.answer' || type === 'approval.revoke'
-              ? { id: 'a', decision: 'once' }
-              : {},
-      } as Request);
+    : type === 'orchestration.repair'
+      ? request(type, {
+          id: 'o',
+          requestId: '00000000-0000-4000-8000-000000000001',
+          checkpoint: {
+            sequence: 30,
+            sourceHash: 'sha256:' + 'a'.repeat(64),
+            replacementHash: 'sha256:' + 'b'.repeat(64),
+          },
+        })
+      : ({
+          type,
+          payload:
+            type === 'orchestration.status' ||
+            type === 'orchestration.answer' ||
+            type === 'orchestration.cancel' ||
+            type === 'orchestration.resume'
+              ? { id: 'o' }
+              : type === 'approval.answer' || type === 'approval.revoke'
+                ? { id: 'a', decision: 'once' }
+                : {},
+        } as Request);
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !isList(value);
 
@@ -610,7 +614,8 @@ describe('complete administrative WS replies', () => {
           const field = member as ts.PropertySignature;
           if (
             (type === 'InboxItem' && field.name.getText(source) === 'about') ||
-            (type === 'ApprovalView' && field.name.getText(source) === 'budget')
+            (type === 'ApprovalView' &&
+              ['budget', 'file'].includes(field.name.getText(source)))
           )
             expect(field.questionToken, type).toBeDefined();
           else expect(field.questionToken, type).toBeUndefined();

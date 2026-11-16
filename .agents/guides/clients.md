@@ -58,6 +58,21 @@ present that snapshot or a context-eligible entry as an actual provider-request 
 - Preserve installed profile, saved connections and native application identity
   during packaging updates. A development build is not an updated installed app.
 
+## Personal approval controls
+
+Desktop's Approvals editor and TUI's `/approval-mode` / `/approval policy` commands
+use the same owner-scoped server policy. Save uses the loaded revision. Preserve
+an uncertain draft and require explicit reconciliation; never replay a mode/rule
+change automatically. Bot selection is in the owner's Personal context.
+
+File questions are typed once/deny operations, not empty commands. Render their
+kind, provider, paths, digest, available input preview and objection before an
+answer, and echo the exact `fileDigest` on approval. Command/budget questions keep
+their existing wire semantics. A client that cannot render a file question must
+not approve it. Preserve unchanged approval buttons across state refreshes so a
+pointer-down/up remains one click in Chat and Trajectory. See [personal approval
+policies](../../docs/approval-policies.md) for current coverage and limitations.
+
 ## Bounded work
 
 Apply the [bounded-work rule](../../docs/coding-standards.md#bound-active-work-in-every-subsystem):

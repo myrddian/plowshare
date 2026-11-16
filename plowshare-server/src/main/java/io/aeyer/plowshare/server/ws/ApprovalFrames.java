@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
 import io.aeyer.plowshare.server.approvals.BudgetExtension;
 import io.aeyer.plowshare.server.approvals.ConductorContinuation;
+import io.aeyer.plowshare.server.approvals.FileApproval;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ProjectStore;
@@ -161,7 +162,46 @@ public class ApprovalFrames implements FrameArea {
       Instant answeredAt,
       List<List<String>> commands,
       String judged,
-      @JsonInclude(JsonInclude.Include.NON_NULL) BudgetExtension budget) {
+      @JsonInclude(JsonInclude.Include.NON_NULL) BudgetExtension budget,
+      @JsonInclude(JsonInclude.Include.NON_NULL) FileApproval file) {
+    public View(
+        String id,
+        String conversation,
+        String askedIn,
+        String agent,
+        String side,
+        List<String> command,
+        String cwd,
+        String reason,
+        String state,
+        String scope,
+        List<String> prefix,
+        List<String> defaultPrefix,
+        Instant createdAt,
+        Instant answeredAt,
+        List<List<String>> commands,
+        String judged,
+        BudgetExtension budget) {
+      this(
+          id,
+          conversation,
+          askedIn,
+          agent,
+          side,
+          command,
+          cwd,
+          reason,
+          state,
+          scope,
+          prefix,
+          defaultPrefix,
+          createdAt,
+          answeredAt,
+          commands,
+          judged,
+          budget,
+          null);
+    }
 
     public View(
         String id,
@@ -218,7 +258,8 @@ public class ApprovalFrames implements FrameArea {
           a.answeredAt(),
           a.commands(),
           a.judged(),
-          a.budget());
+          a.budget(),
+          a.file());
     }
   }
 
@@ -237,7 +278,8 @@ public class ApprovalFrames implements FrameArea {
    */
   record ListBody(String conversation, String project, Boolean mine) {}
 
-  record AnswerBody(String id, String decision, List<String> prefix, String reason) {}
+  record AnswerBody(
+      String id, String decision, List<String> prefix, String reason, String fileDigest) {}
 
   record RevokeBody(String id) {}
 
@@ -291,6 +333,10 @@ public class ApprovalFrames implements FrameArea {
       throw new CallerFault(
           "An approval denial reason must be text, not null or another value type.");
     }
+    if (payload != null
+        && payload.containsKey("fileDigest")
+        && !(payload.get("fileDigest") instanceof String))
+      throw new CallerFault("A typed file input digest must be text");
     AnswerBody body = Payloads.as(payload, AnswerBody.class, FrameTypes.APPROVAL_ANSWER);
     if (body.id() == null || body.decision() == null || !DECISIONS.contains(body.decision())) {
       throw new CallerFault(
@@ -328,6 +374,14 @@ public class ApprovalFrames implements FrameArea {
       throw new CallerFault(
           "An approval reason must be nonblank text of at most 4000 characters, and is only valid for deny.");
     }
+    if (body.fileDigest() != null
+        && (approval.file() == null || !body.fileDigest().matches("[a-f0-9]{64}")))
+      throw new CallerFault("fileDigest is only valid for a typed file approval");
+    if (!deny
+        && approval.file() != null
+        && !approval.file().inputDigest().equals(body.fileDigest()))
+      throw new CallerFault(
+          "Read this typed file request in a current client before approving it; its exact input digest is required. Nothing was approved.");
     boolean answered;
     if (approval.budget() != null) {
       if (!deny && !RunApproval.ONCE.equals(body.decision()) || body.prefix() != null)
@@ -347,6 +401,10 @@ public class ApprovalFrames implements FrameArea {
       return Outcome.ok(
           new Answered(approval.id(), decision.state(), null, decision.live(), decision.note()));
     }
+    if (approval.file() != null
+        && ((!deny && !RunApproval.ONCE.equals(body.decision())) || body.prefix() != null))
+      throw new CallerFault(
+          "A file approval takes once or deny; it cannot create standing command permission.");
     if (deny) {
       answered =
           body.reason() == null
@@ -532,7 +590,8 @@ public class ApprovalFrames implements FrameArea {
         approval.createdAt(),
         approval.commands(),
         approval.judged(),
-        approval.budget());
+        approval.budget(),
+        approval.file());
   }
 
   /**

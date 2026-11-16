@@ -1702,7 +1702,7 @@ describe('/help, which is the first thing anybody types and was refused', () => 
     expect(COMMANDS).toContain('/commands');
     expect(COMMANDS).toContain('/skills');
     expect(COMMANDS).toContain('/proc');
-    expect(COMMANDS).toHaveLength(41);
+    expect(COMMANDS).toHaveLength(43);
   });
 
   it('says what a line that is not a command is', () => {
@@ -5370,4 +5370,32 @@ describe('provider owner management slash commands', () => {
     expect(refused.kind).toBe('usage');
     expect(JSON.stringify(refused)).not.toContain('private-material');
   });
+});
+
+it('keeps personal approval policy commands owner-scoped rather than injecting the current project', async () => {
+  const { serverCommand } = await import('./session.ts');
+  expect(serverCommand('/approval policy get', 'project')).toMatchObject({
+    kind: 'request',
+    request: { type: 'approval.policy.get', payload: {} },
+  });
+  expect(
+    serverCommand(
+      '/approval policy save {"policy":{"revision":0,"mode":"MANUAL","bot":null,"rules":[]}}',
+      'project',
+    ),
+  ).toMatchObject({
+    kind: 'request',
+    request: {
+      type: 'approval.policy.save',
+      payload: {
+        policy: { revision: 0, mode: 'MANUAL', bot: null, rules: [] },
+      },
+    },
+  });
+  expect(
+    serverCommand(
+      '/approval policy save {"policy":{"revision":"0","mode":"AUTO","bot":null,"rules":[]}}',
+      'project',
+    ).kind,
+  ).toBe('usage');
 });

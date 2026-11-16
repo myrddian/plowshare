@@ -813,6 +813,7 @@ describe("the frame types a conversation is made of are the server's own", () =>
       'defaultPrefix',
       'commands',
       'judged',
+      'file',
     ]) {
       expect(view).toContain(component);
     }
@@ -829,7 +830,7 @@ describe("the frame types a conversation is made of are the server's own", () =>
     // The four
     // decisions in the words the server reads.
     expect(source).toMatch(
-      /record AnswerBody\(String id, String decision, List<String> prefix, String reason\)/,
+      /record AnswerBody\(\s*String id, String decision, List<String> prefix, String reason, String fileDigest\)/,
     );
     // `mine` is what listingMyApprovals sends, for the questions no screen has open.
     expect(source).toMatch(

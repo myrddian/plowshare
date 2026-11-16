@@ -271,3 +271,33 @@ describe('a line read as keys, for a surface that has none', () => {
     expect(pressed(GRADLE, ...strokesOf('do it'))).toEqual(askingAbout(GRADLE));
   });
 });
+
+it('shows the typed file objection and echoes only its exact once consent digest', () => {
+  const file: Approval = {
+    ...GRADLE,
+    command: [],
+    defaultPrefix: [],
+    reason: 'The task asked only to inspect.',
+    file: {
+      kind: 'FILE_DELETE',
+      provider: 'remote:session',
+      paths: ['/repo/config'],
+      inputDigest: 'a'.repeat(64),
+      inputPreview: 'delete config',
+    },
+  };
+  const shown = describeQuestion(file).join('\n');
+  expect(shown).toContain('FILE_DELETE');
+  expect(shown).toContain('remote:session');
+  expect(shown).toContain(file.reason);
+  expect(pressed(file, text('c')).kind).toBe('choosing');
+  expect(pressed(file, text('p')).kind).toBe('choosing');
+  const once = pressed(file, text('o'));
+  expect(once.kind).toBe('answered');
+  if (once.kind === 'answered')
+    expect(once.ask.payload).toEqual({
+      id: file.id,
+      decision: 'once',
+      fileDigest: file.file?.inputDigest,
+    });
+});

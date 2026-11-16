@@ -495,6 +495,7 @@ class AgentsConfigTest {
             "schedule_reader",
             "scribe",
             "section_summariser",
+            "security_reviewer",
             "span_summariser",
             "spec_writer",
             "stuck_advisor",

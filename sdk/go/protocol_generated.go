@@ -51,6 +51,8 @@ var operationNames = []string{
 	"application.token.receipt",
 	"approval.answer",
 	"approval.list",
+	"approval.policy.get",
+	"approval.policy.save",
 	"approval.revoke",
 	"artifact.admission.status",
 	"board.close",

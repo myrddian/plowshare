@@ -559,6 +559,8 @@ export const CLI_OPERATIONS = {
   'project member-add': 'project.member.add',
   'project member-remove': 'project.member.remove',
   'approval list': 'approval.list',
+  'approval policy get': 'approval.policy.get',
+  'approval policy save': 'approval.policy.save',
   'approval answer': 'approval.answer',
   'approval revoke': 'approval.revoke',
   'message instances': 'message.instances',

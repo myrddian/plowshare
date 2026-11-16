@@ -1,3 +1,5 @@
+import { approvalModeCommand } from '../logic/approval-policy.ts';
+import { changeApprovalMode } from './approval-policy.ts';
 import {
   enableWorkspaceRecovery,
   recoverableClaim,
@@ -5301,6 +5303,23 @@ export async function converse(talking: Talking): Promise<void> {
         const answerable = waiting
           .filter((run) => run.kind !== 'stalled')
           .map((run) => run.id);
+        const modeChange = approvalModeCommand(text);
+        if (modeChange.kind === 'usage') {
+          show('client', modeChange.said);
+          continue;
+        }
+        if (modeChange.kind === 'change') {
+          try {
+            const value = await changeApprovalMode(connection, modeChange);
+            show(
+              'client',
+              `Personal approval mode: ${value.policy.mode}${value.policy.bot ? ` · bot ${value.policy.bot}` : ''}. Saved revision ${value.policy.revision}. SECURITY can reject an operation or ask you in every mode.`,
+            );
+          } catch (failure) {
+            show('trouble', errorMessage(failure));
+          }
+          continue;
+        }
         const management = serverCommand(text, now.project);
         const direct =
           management.kind !== 'unhandled'

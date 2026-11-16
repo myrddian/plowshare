@@ -132,6 +132,30 @@ WARN diagnostics; counts do not depend on job event delivery. JobStore also repo
 unexpected task/listener exceptions. These are boundary observations, not unique incident
 counts; see [server failure diagnostics](../../docs/server-administration.md#server-failure-diagnostics).
 
+## Personal intent review
+
+`ApprovalReviewSessions` binds personal policy to the retained execution owner,
+current authenticated user task, original allowance and usage owner. Ordinary
+`RunTool` and `ReviewedFileTool` bindings use the shared tri-state SECURITY flow;
+Auto adds a tool-free personal bot consult only after Smart clears. Deterministic
+Reject rules and current authority/provider fences cannot be overridden by a bot.
+Policy is private server data exposed by owner-only policy operations, not an
+agent-editable Personal file. A missing policy is Manual; an invalid policy never
+supplies stale automatic permission.
+
+Human questions retain the original tool name and exact arguments through
+`SuspendedRunCalls`; a started effect with no result is uncertain and never
+replayed. A retained `run` claims its own approval, not another matching standing
+grant. Typed file approval requires its displayed input digest and permits once
+or deny only. Review diagnostics are audit-only Trajectory entries, never model
+instructions or chain-of-thought storage. Inference remains in the existing
+journal and allowance; there is no independent durable reviewer-stage workflow.
+
+Coverage is direct `run`, `file_read`, `file_edit`, `file_delete`, `file_move`.
+Native acceptance/stage-check ports, discovery/code-map reads, provider-atomic
+base-file revisions and access extensions remain distinct gaps. Do not infer
+those capabilities from an enum or an LLM Clear. See [personal approval policies](../../docs/approval-policies.md).
+
 ## Agent budget consent
 
 Shipped agent defaults provide at least one model call per declared step; shared
