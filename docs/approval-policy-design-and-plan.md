@@ -410,12 +410,14 @@ The policy implementation and its subsequent verification are recorded below.
 
 ## Implementation verification
 
-Implementer: Codex. Independent review remains pending. No merge, packaging of an
-installed application, deployment or live model validation is recorded.
+Validation recorded before PR publication. Implementer: Codex. Independent review
+remains pending. No packaging of an installed application, deployment or live
+model validation is recorded.
 
-- `./gradlew check sdkContractCheck` passed, including 8,217 server tests, client
-  checks, generated contracts for 294 operations and 761 canonical SDK DTO cases.
-- The four selected PostgreSQL tests passed for migration V271, typed file
+- `./gradlew format formatCheck check sdkCheck` passed on the integrated source,
+  including 8,249 server tests, client checks, generated contracts for 294
+  operations and 768 canonical SDK DTO cases.
+- The four selected PostgreSQL tests passed for migration V273, typed file
   questions and original tool retention, single-use execution claims, revocation
   during review, and exact owner human-history eligibility/expiry. The full
   database suite was not enabled.
@@ -424,9 +426,13 @@ installed application, deployment or live model validation is recorded.
   file consent with digest echo, and Approve/Deny across Chat, Inbox and
   Trajectory. Pressing across an unrelated refresh retains the same button and
   sends one answer per click. Five focused renderer tests passed.
-- `sdkCheck` was attempted and stopped because the .NET toolchain is unavailable.
-  Generated contracts/DTO cases passed; complete native compilation and socket
-  conformance remain unverified. No toolchain was installed implicitly.
+- `sdkCheck` passed native Python/.NET/Go builds, contract and race checks,
+  cross-SDK authentication checks including Java, and real WebSocket conformance
+  for Node/Python/.NET/Go. Its initially missing dependencies were installed
+  explicitly into ignored repository-local build directories.
+- Main's supplied-context provenance is excluded from authenticated approval
+  intent. Regression tests cover quoted instructions, Unicode boundaries,
+  mismatched/non-person speakers and invalid provenance without an unsafe fallback.
 
 The SECURITY/bot decisions in these tests are controlled fixtures. They verify
 policy ordering, malformed-output refusal, authority/cancellation and lifecycle

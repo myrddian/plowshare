@@ -2,6 +2,40 @@ import { describe, expect, it } from 'vitest';
 import { JobLifecycle } from './lifecycle.ts';
 
 describe('shared job lifetime', () => {
+  it('keeps paused jobs active and carries their reason through resumption and cancellation', () => {
+    const jobs = new JobLifecycle();
+    const ticket = jobs.begin('conversation');
+    jobs.accept(ticket, 'job');
+    expect(
+      jobs.observe(ticket, {
+        code: 'OK',
+        payload: {
+          id: 'job',
+          state: 'PAUSED',
+          pauseReason: 'Waiting for required workspace',
+          outcome: null,
+        },
+      }),
+    ).toMatchObject({
+      state: 'paused',
+      needsReconcile: false,
+      pauseReason: 'Waiting for required workspace',
+    });
+    expect(
+      jobs.observe(ticket, {
+        code: 'OK',
+        payload: { id: 'job', state: 'RESUMING' },
+      })?.state,
+    ).toBe('resuming');
+    jobs.cancelling(ticket);
+    expect(
+      jobs.observe(ticket, {
+        code: 'OK',
+        payload: { id: 'job', state: 'PAUSED', cancelRequested: true },
+      })?.state,
+    ).toBe('cancelling');
+  });
+
   it('routes simultaneous submissions by server handles, including early events in reverse acceptance order', () => {
     const jobs = new JobLifecycle();
     const first = jobs.begin('first'),

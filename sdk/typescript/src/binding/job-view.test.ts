@@ -144,7 +144,10 @@ describe('checked job response boundary', () => {
             wireType! in types,
             `${record}.${name}: unmapped Java type`,
           ).toBe(true);
-          const nullableString = name === 'conversation' || name === 'detail';
+          const nullableString =
+            name === 'conversation' ||
+            name === 'detail' ||
+            name === 'pauseReason';
           return [name!, types[wireType!]! + (nullableString ? ' | null' : '')];
         })
         .sort(([a], [b]) => a!.localeCompare(b!));

@@ -314,6 +314,14 @@ export function describeProgress(seen: Progress): string | undefined {
         ? undefined
         : `${counted(seen.steps, 'step')}, ${counted(seen.modelCalls, 'model call')}`;
     case 'other':
+      if (seen.named === 'pausing')
+        return 'Pausing while the required client workspace is unavailable';
+      if (seen.named === 'paused')
+        return 'Paused · waiting for the required client workspace';
+      if (seen.named === 'resuming')
+        return 'Checking the returning workspace and execution authority';
+      if (seen.named === 'resumed')
+        return 'Workspace reconnected · continuing the original work';
       return `this run reported ${seen.named}`;
     case 'unreadable':
       return undefined;

@@ -4689,6 +4689,7 @@ type ObservedJobDto struct {
 	Id              string                 `json:"id"`
 	Limits          *ObservedJobDtoLimits  `json:"limits,omitempty"`
 	Outcome         *ObservedJobDtoOutcome `json:"outcome,omitempty"`
+	PauseReason     *TierDtoProject        `json:"pauseReason,omitempty"`
 	State           string                 `json:"state"`
 }
 
@@ -8501,9 +8502,10 @@ type ProjectAccessPayloadDto struct {
 
 // ProjectAttachPayloadDto is the explicit ProjectAttachPayloadDto protocol shape.
 type ProjectAttachPayloadDto struct {
-	Machine   string `json:"machine"`
-	Name      string `json:"name"`
-	Workspace string `json:"workspace"`
+	Machine   string  `json:"machine"`
+	Name      string  `json:"name"`
+	Recovery  *string `json:"recovery,omitempty"`
+	Workspace string  `json:"workspace"`
 }
 
 // ProjectCreatePayloadDto is the explicit ProjectCreatePayloadDto protocol shape.
@@ -12203,9 +12205,10 @@ func (c *Client) ProjectAccess(ctx context.Context, request ProjectAccessRequest
 
 // ProjectAttachRequest is the explicit ProjectAttachRequest protocol shape.
 type ProjectAttachRequest struct {
-	Machine   string `json:"machine"`
-	Name      string `json:"name"`
-	Workspace string `json:"workspace"`
+	Machine   string  `json:"machine"`
+	Name      string  `json:"name"`
+	Recovery  *string `json:"recovery,omitempty"`
+	Workspace string  `json:"workspace"`
 }
 
 // ProjectAttach validates before submission and returns the paired result DTO.

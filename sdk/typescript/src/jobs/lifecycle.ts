@@ -9,6 +9,9 @@ import type { Outcome } from '../binding/envelope.ts';
 export type JobState =
   | 'starting'
   | 'running'
+  | 'pausing'
+  | 'paused'
+  | 'resuming'
   | 'cancelling'
   | 'awaiting-outcome'
   | 'unknown'
@@ -23,6 +26,7 @@ export interface TrackedJob {
   readonly ticket: Ticket;
   readonly handle?: string;
   readonly state: JobState;
+  readonly pauseReason?: string;
   readonly needsReconcile: boolean;
   readonly outcome?: ObservedOutcome;
 }
@@ -30,6 +34,7 @@ interface RecordJob {
   ticket: Ticket;
   handle?: string;
   state: JobState;
+  pauseReason?: string;
   needsReconcile: boolean;
   cancelRequested: boolean;
   outcome?: ObservedOutcome;
@@ -121,6 +126,9 @@ export class JobLifecycle {
       ticket,
       state: record.state,
       needsReconcile: record.needsReconcile,
+      ...(record.pauseReason === undefined
+        ? {}
+        : { pauseReason: record.pauseReason }),
       ...(record.handle === undefined ? {} : { handle: record.handle }),
       ...(record.outcome === undefined
         ? {}
@@ -158,6 +166,21 @@ export class JobLifecycle {
     const record = this.handles.get(handle);
     if (record) {
       if (!active(record.state)) return undefined;
+      if (
+        'kind' in event &&
+        ['pausing', 'paused', 'resuming', 'resumed'].includes(event.kind)
+      ) {
+        record.needsReconcile = true;
+        if (!record.cancelRequested)
+          record.state =
+            event.kind === 'paused'
+              ? 'paused'
+              : event.kind === 'pausing'
+                ? 'pausing'
+                : event.kind === 'resuming'
+                  ? 'resuming'
+                  : 'running';
+      }
       if ('kind' in event && event.kind === 'ended') {
         record.state = 'awaiting-outcome';
         record.needsReconcile = true;
@@ -217,9 +240,22 @@ export class JobLifecycle {
       record.state = 'finished';
       record.outcome = { ...outcome };
       record.needsReconcile = false;
-    } else if (payload.state === 'RUNNING') {
+    } else if (
+      ['RUNNING', 'PAUSING', 'PAUSED', 'RESUMING'].includes(payload.state)
+    ) {
       record.cancelRequested ||= payload['cancelRequested'] === true;
-      record.state = record.cancelRequested ? 'cancelling' : 'running';
+      if (typeof payload.pauseReason === 'string')
+        record.pauseReason = payload.pauseReason;
+      else delete record.pauseReason;
+      record.state = record.cancelRequested
+        ? 'cancelling'
+        : payload.state === 'PAUSED'
+          ? 'paused'
+          : payload.state === 'PAUSING'
+            ? 'pausing'
+            : payload.state === 'RESUMING'
+              ? 'resuming'
+              : 'running';
       record.needsReconcile = false;
     } else record.needsReconcile = true;
     return this.snapshot(ticket);

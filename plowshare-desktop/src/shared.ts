@@ -158,6 +158,9 @@ export interface Job {
   status:
     | 'starting'
     | 'running'
+    | 'pausing'
+    | 'paused'
+    | 'resuming'
     | 'cancelling'
     | 'finished'
     | 'interrupted'
@@ -878,7 +881,15 @@ export const homeKey = (project?: string) => project ?? '';
 export const contextKey = (conversation: string, agent: string) =>
   JSON.stringify([conversation, agent]);
 export const activeJob = (job: Job) =>
-  ['starting', 'running', 'cancelling', 'unknown'].includes(job.status);
+  [
+    'starting',
+    'running',
+    'pausing',
+    'paused',
+    'resuming',
+    'cancelling',
+    'unknown',
+  ].includes(job.status);
 /** The server's answered bit decides success; ending names retain their wire spelling. */
 export const stoppedJob = (job: Job) =>
   job.status === 'interrupted' ||

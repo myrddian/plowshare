@@ -5,8 +5,10 @@ import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.archive.Projects;
 import io.aeyer.plowshare.server.auth.AuthProperties;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
+import io.aeyer.plowshare.server.session.SessionOwners;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -53,6 +55,13 @@ public class ProjectFrames implements FrameArea {
    * which live session roots which project — the arrangement {@code ProjectController} already has,
    * for the reason its own constructor javadoc gives.
    */
+  private SessionOwners sessions = SessionOwners.NONE;
+
+  @Autowired(required = false)
+  public void useSessions(SessionOwners sessions) {
+    this.sessions = Objects.requireNonNull(sessions);
+  }
+
   private final Projects rules;
 
   /**
@@ -103,7 +112,7 @@ public class ProjectFrames implements FrameArea {
             }),
         Map.entry(FrameTypes.PROJECT_MEMBER_ADD, new ProjectMemberHandler(members, auth, true)),
         Map.entry(FrameTypes.PROJECT_MEMBER_REMOVE, new ProjectMemberHandler(members, auth, false)),
-        Map.entry(FrameTypes.PROJECT_LIST, new ProjectListHandler(projects, members)),
+        Map.entry(FrameTypes.PROJECT_LIST, new ProjectListHandler(projects, members, sessions)),
         Map.entry(FrameTypes.PROJECT_DEFINE, new ProjectDefineHandler(projects)),
         Map.entry(FrameTypes.PROJECT_LEND, new ProjectLendHandler(projects)),
         Map.entry(FrameTypes.PROJECT_UNLEND, new ProjectUnlendHandler(projects)),

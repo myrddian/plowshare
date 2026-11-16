@@ -31,6 +31,7 @@ export interface JobView {
   readonly id: string;
   readonly agent: string;
   readonly state: string;
+  readonly pauseReason: string | null;
   readonly cancelRequested: boolean;
   readonly conversation: string | null;
   readonly outcome: JobOutcome | null;
@@ -147,7 +148,7 @@ export function jobView(
     (expected !== undefined && row['id'] !== expected) ||
     !named(row['state']) ||
     !optional(row, ['agent'], text) ||
-    !optional(row, ['conversation'], text, true) ||
+    !optional(row, ['conversation', 'pauseReason'], text, true) ||
     !optional(row, ['cancelRequested'], bool)
   )
     return undefined;
@@ -172,7 +173,7 @@ export function jobView(
   }
   return {
     ...Object.fromEntries(
-      ['id', 'state', 'agent', 'conversation', 'cancelRequested']
+      ['id', 'state', 'agent', 'conversation', 'cancelRequested', 'pauseReason']
         .filter((k) => Object.hasOwn(row, k))
         .map((k) => [k, row[k]]),
     ),

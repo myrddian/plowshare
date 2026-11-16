@@ -5,6 +5,8 @@ import io.aeyer.plowshare.server.api.ProjectView;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.session.SessionOwners;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -51,19 +53,29 @@ public final class ProjectListHandler implements FrameHandler {
 
   private final ProjectMembers members;
   private final ProjectStore projects;
+  private final SessionOwners sessions;
 
   /**
    * @param projects the same store the controller is injected with, which decides both the rows and
    *     each one's effective exclusions
    */
   public ProjectListHandler(ProjectStore projects, ProjectMembers members) {
+    this(projects, members, SessionOwners.NONE);
+  }
+
+  public ProjectListHandler(ProjectStore projects, ProjectMembers members, SessionOwners sessions) {
+    this.sessions = Objects.requireNonNull(sessions);
     this.members = members;
     this.projects = Objects.requireNonNull(projects, "projects");
   }
 
   @Override
   public Outcome handle(Map<String, Object> payload, Asking asking) {
-    var candidates = projects.allForSession(asking.handle(), asking.sessionId());
+    var logical = sessions.logicalSessions(asking.sessionId());
+    var candidates =
+        logical.size() <= 1
+            ? projects.allForSession(asking.handle(), sessions.canonical(asking.sessionId()))
+            : projects.allForSessions(asking.handle(), List.copyOf(logical));
     var roles =
         members.roles(candidates.stream().map(ProjectRecord::name).toList(), asking.handle());
     var details = projects.listingDetails(roles.keySet());

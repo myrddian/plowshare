@@ -367,6 +367,7 @@ public class FileChannelConfig implements WebSocketConfigurer {
     // of 2026-09-30, spec 2026-09-30-local-hooks-are-served).
     registry
         .addHandler(keepAlive.decorate(fileChannelHandler()), FileChannelHandler.PATH)
+        .setHandshakeHandler(new WorkspaceFileHandshake())
         .addInterceptors(new HandleInterceptor());
   }
 }

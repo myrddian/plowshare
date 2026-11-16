@@ -935,7 +935,7 @@ export const SHAPES: Record<
     ['text', 'location'],
   ],
   'project.list': [[], []],
-  'project.attach': [['name', 'workspace', 'machine'], []],
+  'project.attach': [['name', 'workspace', 'machine'], ['recovery']],
   'project.create': [['name'], ['workspace', 'type', 'writePaths']],
   'project.define': [
     ['name', 'workspace'],

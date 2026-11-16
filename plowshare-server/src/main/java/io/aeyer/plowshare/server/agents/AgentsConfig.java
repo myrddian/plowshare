@@ -168,7 +168,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  */
 @Configuration
 @EnableConfigurationProperties({
-  AgentsProperties.class, WorkspaceProperties.class,
+  AgentsProperties.class,
+  WorkspaceProperties.class,
   // Enabled here as well as in AuthConfig, and that is not a duplicate
   // registration: @EnableConfigurationProperties is idempotent by bean
   // definition name, and this configuration reads plowshare.auth
@@ -178,13 +179,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
   // plowshare.conversations, which PlowshareServerApplication enables for
   // the whole application and which this configuration reads for the
   // export-directory fence below.
-  AuthProperties.class, ConversationsProperties.class,
+  AuthProperties.class,
+  ConversationsProperties.class,
   // And plowshare.jobs, for the heartbeat interval jobStore is built with
   // below. Enabled for the whole application by
   // PlowshareServerApplication and again here on the same terms as the two
   // above: a context that imports this configuration and not that one --
   // AgentsConfigTest -- has to be able to start.
-  JobsProperties.class, CommandIsolationProperties.class
+  JobsProperties.class,
+  WorkspaceRunProperties.class,
+  CommandIsolationProperties.class
 })
 public class AgentsConfig {
 
@@ -424,7 +428,30 @@ public class AgentsConfig {
         images,
         unions,
         members,
-        CommandIsolation.UNAVAILABLE);
+        CommandIsolation.UNAVAILABLE,
+        workspaceRuns(presences, sessions, new WorkspaceRunProperties()));
+  }
+
+  /** Live workspace dependency fences, independent of the viewing connection. */
+  @Bean
+  public WorkspaceRuns workspaceRuns(
+      PresenceRegistry presences, SessionRegistry sessions, WorkspaceRunProperties properties) {
+    WorkspaceRuns runs =
+        new WorkspaceRuns(
+            session ->
+                presences
+                    .rootedBy(sessions.canonical(session))
+                    .filter(
+                        claim ->
+                            sessions
+                                .find(session)
+                                .filter(found -> found.has(Role.FILE_PROVIDER))
+                                .isPresent()),
+            properties.getCancellationCheck(),
+            properties.getSnapshotTimeout(),
+            properties.getOwnerLease());
+    runs.useSessions(sessions);
+    return runs;
   }
 
   /**
@@ -511,8 +538,9 @@ public class AgentsConfig {
    * every routing call, so this lambda runs per file operation rather than once per job. That is
    * what {@link io.aeyer.plowshare.server.files.FileProvider#roots()}'s "may change between two
    * calls" rule looks like one layer up, and it is why a session whose client disconnects mid-run
-   * simply has a smaller set for the rest of it — <b>a socket closing is not an ending.</b> {@code
-   * SESSION_GONE} is produced by a file request that cannot be served, and by nothing else.
+   * changes routing for subsequent work. Once execution has acquired a remote provider, {@link
+   * WorkspaceRuns} pins that dependency and pauses at a safe boundary until the same authorized
+   * workspace returns. Server-only work retains no such dependency.
    *
    * @param channel the one {@code FileChannelHandler}, injected under the seam's name. {@code
    *     files/} knows nothing about WebSockets and {@code ws/} already depends on {@code files/},
@@ -535,7 +563,8 @@ public class AgentsConfig {
       ImageStore images,
       UnionRouting unions,
       ProjectMembers members,
-      CommandIsolation isolation) {
+      CommandIsolation isolation,
+      WorkspaceRuns workspaceRuns) {
     return (home, grants, sessionId, owner) -> {
       if (!home.isGlobal() && owner != null)
         members.requireRole(home.project(), owner, ProjectRole.CONTRIBUTOR);
@@ -572,7 +601,7 @@ public class AgentsConfig {
         // serving the same folder. Primary routing must not hide that session's own file claim.
         rooting =
             presences
-                .rootedBy(sessionId)
+                .rootedBy(sessions.canonical(sessionId))
                 .filter(claim -> claim.project().equals(home.project()))
                 .map(Presence::session);
       }
@@ -584,12 +613,16 @@ public class AgentsConfig {
                 home.project(),
                 grants,
                 machine.map(Session::id),
-                session -> new RemoteProvider(channel, session, grants, home, images));
+                session -> {
+                  workspaceRuns.requires(session);
+                  return new RemoteProvider(channel, session, grants, home, images);
+                });
         if (union.isPresent()) {
           return union.get();
         }
       }
       if (machine.isPresent()) {
+        workspaceRuns.requires(machine.get().id());
         FileProvider remote = new RemoteProvider(channel, machine.get().id(), grants, home, images);
         if (separateCheckout)
           return List.of(remote); // Only this checkout's run uses its local files.
@@ -1336,9 +1369,10 @@ public class AgentsConfig {
             REQUIRED,
             channel,
             sessionLive(sessions),
-            sessionRoots(projects, presences),
+            sessionRoots(projects, presences, sessions),
             checks);
     resolver.usePersonalResources(personalIds(personal.getIfAvailable(), sessions));
+    resolver.useSessions(sessions);
     resolver.useScopedTools(runtime.scopedTools());
     resolver.useProjectConfiguration(
         id ->
@@ -1365,7 +1399,7 @@ public class AgentsConfig {
             channel,
             projects::exists,
             sessionLive(sessions),
-            sessionRoots(projects, presences));
+            sessionRoots(projects, presences, sessions));
     resolver.usePersonalResources(personalIds(personal.getIfAvailable(), sessions));
     resolver.useProjectConfiguration(
         id ->
@@ -1387,7 +1421,8 @@ public class AgentsConfig {
       ObjectProvider<PersonalSpaces> personal,
       ApplicationResources applicationResources) {
     AgentRules rules =
-        new AgentRules(data, channel, sessionLive(sessions), sessionRoots(projects, presences));
+        new AgentRules(
+            data, channel, sessionLive(sessions), sessionRoots(projects, presences, sessions));
     rules.useApplicationResources(applicationResources);
     rules.usePersonalResources(personalIds(personal.getIfAvailable(), sessions));
     runtime.useAgentRules(
@@ -1414,6 +1449,12 @@ public class AgentsConfig {
 
   static Predicate<String> sessionLive(SessionRegistry sessions) {
     return id -> sessions.find(id).filter(live -> live.has(Role.FILE_PROVIDER)).isPresent();
+  }
+
+  static BiPredicate<Long, String> sessionRoots(
+      ProjectStore projects, PresenceRegistry presences, SessionRegistry sessions) {
+    BiPredicate<Long, String> rooted = sessionRoots(projects, presences);
+    return (project, session) -> rooted.test(project, sessions.canonical(session));
   }
 
   static BiPredicate<Long, String> sessionRoots(ProjectStore projects, PresenceRegistry presences) {
@@ -1467,7 +1508,7 @@ public class AgentsConfig {
             runtime.knownTools(),
             channel,
             sessionLive(sessions),
-            sessionRoots(projects, presences),
+            sessionRoots(projects, presences, sessions),
             definitions::forCaller,
             checks);
     resolver.useScopedTools(runtime.scopedTools());
@@ -1837,7 +1878,8 @@ public class AgentsConfig {
       ObjectProvider<RunEnds> runEnds,
       ProjectAuthorization projectAccess,
       OperationAuthority operations,
-      ObjectProvider<JobTelemetry> telemetry) {
+      ObjectProvider<JobTelemetry> telemetry,
+      WorkspaceRuns workspaceRuns) {
     JobStore store =
         new JobStore(
             runtime,
@@ -1847,6 +1889,8 @@ public class AgentsConfig {
             properties.getHeartbeat(),
             operations,
             telemetry.getIfAvailable(() -> JobTelemetry.NONE));
+    store.useWorkspaceRuns(workspaceRuns);
+    runtime.useWorkspaceRuns(workspaceRuns);
     store.useProjectAccess(projectAccess);
     store.onRunEnded(runEnds.getIfAvailable(() -> RunEnds.NONE));
     return store;

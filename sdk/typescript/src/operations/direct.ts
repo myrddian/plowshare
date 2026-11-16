@@ -836,7 +836,7 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
     if (status === undefined) return { kind: 'invalid-response', outcome };
     if (status.outcome != null)
       return { kind: 'completed', outcome, job: asked.payload.job };
-    if (status.state !== 'RUNNING')
+    if (!['RUNNING', 'PAUSING', 'PAUSED', 'RESUMING'].includes(status.state))
       return { kind: 'invalid-response', outcome };
     return {
       kind: asked.type === 'job.cancel' ? 'cancelling' : 'running',

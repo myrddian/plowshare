@@ -1099,6 +1099,12 @@ public final class JobStore
     informationJobs = policies;
   }
 
+  private WorkspaceExecution workspaceRuns;
+
+  public void useWorkspaceRuns(WorkspaceExecution runs) {
+    workspaceRuns = Objects.requireNonNull(runs);
+  }
+
   private ProjectAuthorization projectAccess;
 
   public void useProjectAccess(ProjectAuthorization access) {
@@ -1163,6 +1169,7 @@ public final class JobStore
         null);
   }
 
+  @SuppressWarnings("try")
   private String start(
       String name,
       Home home,
@@ -1201,6 +1208,7 @@ public final class JobStore
         null);
   }
 
+  @SuppressWarnings("try")
   private String start(
       String name,
       Home home,
@@ -1233,8 +1241,18 @@ public final class JobStore
     // schemes in one server, and the fixtures' one would be the one nothing
     // ever tested.
     Instant at = Instant.now();
-    String id = JobLog.newId(at);
+    Optional<String> restoring =
+        workspaceRuns == null ? Optional.empty() : workspaceRuns.restoringJob(conversation);
+    String id = restoring.orElseGet(() -> JobLog.newId(at));
+    Job previous = byId.get(id);
+    if (previous != null && (workspaceRuns == null || workspaceRuns.live(id)))
+      throw new IllegalStateException("The original job still has a worker");
     Job job = new Job(id, name, limits, order.incrementAndGet(), conversation, conversationOrigin);
+    if (previous != null
+        && (previous.cancelRequested()
+            || previous.outcome().map(result -> result.ending() == Ending.CANCELLED).orElse(false)))
+      job.requestCancel();
+    else if (restoring.isPresent()) job.transition(Job.State.RESUMING, null);
     JobWatch watch = new JobWatch(id, sessionId, events);
     beforeStart.accept(id);
 
@@ -1243,7 +1261,7 @@ public final class JobStore
     // the case that motivated the table -- a twenty-six minute ingest whose
     // process died -- and a row that appeared halfway through would be a
     // window in which a job id resolved to nothing.
-    wroteDown(id, name, home, at, conversation, causation);
+    if (restoring.isEmpty()) wroteDown(id, name, home, at, conversation, causation);
     byId.put(id, job);
     try {
       // execute and not submit. Measured on Java 21.0.8: an exception
@@ -1268,8 +1286,23 @@ public final class JobStore
               // callbacks that have to agree.
               ScheduledFuture<?> beating = beat(job, watch, name);
               try {
-                finish(job, watch, name, work.apply(watch, job::cancelRequested), ended);
+                try (WorkspaceExecution.Scope suspended =
+                    workspaceRuns == null
+                        ? () -> {}
+                        : workspaceRuns.enter(
+                            job.id(),
+                            job::cancelRequested,
+                            (state, reason) -> {
+                              job.transition(state, reason);
+                              if (!job.cancelRequested() && job.active())
+                                watch.workspace(name, state);
+                            })) {
+                  Outcome outcome = work.apply(watch, job::cancelRequested);
+                  if (workspaceRuns == null || !workspaceRuns.draining(job.id()))
+                    finish(job, watch, name, outcome, ended);
+                }
               } catch (Throwable bug) {
+                if (workspaceRuns != null && workspaceRuns.draining(job.id())) return;
                 telemetry.failed(bug);
                 // The genuine last resort, and narrower than it used to be:
                 // JobRuntime.run now catches RuntimeException around the
@@ -1404,7 +1437,7 @@ public final class JobStore
       ScheduledFuture<?> scheduled =
           beats.scheduleWithFixedDelay(
               () -> {
-                if (job.state() == Job.State.RUNNING) {
+                if (job.active()) {
                   watch.alive(agent);
                   return;
                 }
@@ -1476,6 +1509,7 @@ public final class JobStore
    */
   private void finish(
       Job job, JobWatch watch, String agent, Outcome outcome, Consumer<Outcome> ended) {
+    if (workspaceRuns != null) outcome = workspaceRuns.finished(job.id(), outcome);
     try {
       ended.accept(outcome);
     } catch (RuntimeException notRecorded) {
@@ -1592,6 +1626,13 @@ public final class JobStore
               + " run was submitted. Nothing was read.");
     }
     Job job = byId.get(id);
+    if (job == null && workspaceRuns != null) {
+      Optional<Job> retained = workspaceRuns.retainedJob(id);
+      if (retained.isPresent()) {
+        Job concurrent = byId.putIfAbsent(id, retained.get());
+        job = concurrent == null ? retained.get() : concurrent;
+      }
+    }
     if (job == null) {
       throw new NotFoundFault("no job called '" + id + "'; this process knows " + ids());
     }
@@ -1624,7 +1665,40 @@ public final class JobStore
               + " run was submitted. Nothing was stopped.");
     }
     Job job = byId.get(id);
-    return job != null && job.requestCancel();
+    if (job == null && workspaceRuns != null) {
+      try {
+        job = get(id);
+      } catch (NotFoundFault missing) {
+        return false;
+      }
+    }
+    if (job == null) return false;
+    if (!job.requestCancel()) {
+      if (workspaceRuns == null || !job.active()) {
+        Optional<Outcome> blocked =
+            workspaceRuns == null || !workspaceRuns.retained(id)
+                ? Optional.empty()
+                : workspaceRuns.cancelRetained(id);
+        if (blocked.isEmpty()) return false;
+        filedOutcome(id, blocked.get());
+        job.finish(blocked.get());
+        return true;
+      }
+      return false;
+    }
+    Optional<Outcome> retainedCancellation =
+        workspaceRuns == null ? Optional.empty() : workspaceRuns.cancelRetained(id);
+    if (workspaceRuns != null && !workspaceRuns.live(id)) {
+      Outcome cancelled =
+          retainedCancellation.orElseGet(
+              () ->
+                  new Outcome(
+                      Ending.CANCELLED, "The retained paused run was cancelled.", 0, 0, ""));
+      cancelled = workspaceRuns.finished(id, cancelled);
+      filedOutcome(id, cancelled);
+      job.finish(cancelled);
+    }
+    return true;
   }
 
   /**
@@ -1646,7 +1720,7 @@ public final class JobStore
     // requestCancel is the compare-and-set Job documents, so two callers racing on one run produce
     // one true between them and a run that has already answered produces none.
     for (Job job : byId.values())
-      if (conversation.equals(job.conversation()) && job.requestCancel()) asked++;
+      if (conversation.equals(job.conversation()) && cancel(job.id())) asked++;
     return asked;
   }
 
@@ -1673,8 +1747,7 @@ public final class JobStore
   public boolean hasRunningJob(String conversation) {
     Objects.requireNonNull(conversation, "conversation");
     return byId.values().stream()
-        .anyMatch(
-            job -> conversation.equals(job.conversation()) && job.state() == Job.State.RUNNING);
+        .anyMatch(job -> conversation.equals(job.conversation()) && job.active());
   }
 
   private List<String> ids() {
@@ -1698,8 +1771,9 @@ public final class JobStore
    */
   @Override
   public void close() {
+    if (workspaceRuns != null) workspaceRuns.shutdown();
     for (Job job : byId.values()) {
-      job.requestCancel();
+      if (workspaceRuns == null || !workspaceRuns.draining(job.id())) job.requestCancel();
     }
     threads.shutdown();
     // shutdownNow and not shutdown, for the one reason the paragraph above

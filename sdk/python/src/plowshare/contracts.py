@@ -2645,6 +2645,7 @@ class ObservedJobDto:
     id: str
     limits: ObservedJobDtoLimits | Unset = UNSET
     outcome: ObservedJobDtoOutcome | Unset = UNSET
+    pause_reason: TierDtoProject | Unset = UNSET
     state: str
 
 ObservedJobDtoLimits: TypeAlias = "None | PartialDto"
@@ -5490,6 +5491,7 @@ class ProjectAttachPayloadDto:
     """Validated fields of the ProjectAttachPayloadDto protocol contract."""
     machine: str
     name: str
+    recovery: str | Unset = UNSET
     workspace: str
 
 @dataclass(frozen=True, kw_only=True)
@@ -8046,6 +8048,7 @@ class ProjectAttachRequest(Request[ProjectViewDto]):
     """Validated fields of the ProjectAttachRequest protocol contract."""
     machine: str
     name: str
+    recovery: str | Unset = UNSET
     workspace: str
     operation: ClassVar[str] = "project.attach"
 
@@ -10134,7 +10137,7 @@ _FIELDS = {
     PartialDto: {"maxModelCalls": "max_model_calls", "maxTurns": "max_turns", "modelCallsSpent": "model_calls_spent", "noBudget": "no_budget", "noTurnCap": "no_turn_cap"},
     PartialDto2: {"completionTokens": "completion_tokens", "firstTokenMillis": "first_token_millis", "reasoningEstimated": "reasoning_estimated", "reasoningTokens": "reasoning_tokens", "tokensPerSecond": "tokens_per_second", "toolCalls": "tool_calls"},
     ObservedOutcomeDto: {"answered": "answered", "detail": "detail", "ending": "ending", "modelCalls": "model_calls", "pace": "pace", "resumable": "resumable", "steps": "steps", "text": "text"},
-    ObservedJobDto: {"agent": "agent", "cancelRequested": "cancel_requested", "conversation": "conversation", "id": "id", "limits": "limits", "outcome": "outcome", "state": "state"},
+    ObservedJobDto: {"agent": "agent", "cancelRequested": "cancel_requested", "conversation": "conversation", "id": "id", "limits": "limits", "outcome": "outcome", "pauseReason": "pause_reason", "state": "state"},
     ObservedIndexDto: {"id": "id", "scope": "scope", "summary": "summary", "unsearchable": "unsearchable"},
     MemoryProvenanceDto: {"at": "at", "by": "by", "where": "where"},
     MemoryHomeDto: {"project": "project"},
@@ -10447,7 +10450,7 @@ _FIELDS = {
     OrchestrationStartPayloadDto: {"agent": "agent", "context": "context", "definition": "definition", "project": "project", "request": "request", "requestId": "request_id"},
     OrchestrationStartResultDto: {"id": "id", "requestId": "request_id", "state": "state"},
     ProjectAccessPayloadDto: {"project": "project"},
-    ProjectAttachPayloadDto: {"machine": "machine", "name": "name", "workspace": "workspace"},
+    ProjectAttachPayloadDto: {"machine": "machine", "name": "name", "recovery": "recovery", "workspace": "workspace"},
     ProjectCreatePayloadDto: {"name": "name", "type": "type_", "workspace": "workspace", "writePaths": "write_paths"},
     ProjectDefinePayloadDto: {"exclusions": "exclusions", "lent": "lent", "name": "name", "workspace": "workspace"},
     ProjectForgetPayloadDto: {"project": "project"},
@@ -10745,7 +10748,7 @@ _FIELDS = {
     ProcQueuesRequest: {"active": "active", "after": "after", "causation": "causation", "conversation": "conversation", "limit": "limit", "order": "order", "project": "project", "root": "root", "visibility": "visibility"},
     ProcToolsRequest: {"active": "active", "after": "after", "causation": "causation", "conversation": "conversation", "limit": "limit", "order": "order", "project": "project", "root": "root", "visibility": "visibility"},
     ProjectAccessRequest: {"project": "project"},
-    ProjectAttachRequest: {"machine": "machine", "name": "name", "workspace": "workspace"},
+    ProjectAttachRequest: {"machine": "machine", "name": "name", "recovery": "recovery", "workspace": "workspace"},
     ProjectCreateRequest: {"name": "name", "type": "type_", "workspace": "workspace", "writePaths": "write_paths"},
     ProjectDefineRequest: {"exclusions": "exclusions", "lent": "lent", "name": "name", "workspace": "workspace"},
     ProjectForgetRequest: {"project": "project"},

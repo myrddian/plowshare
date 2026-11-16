@@ -99,7 +99,7 @@ public final class OrchestrationCancel {
     Objects.requireNonNull(conversations, "conversations");
     return conversation ->
         jobs.jobs().stream()
-            .filter(job -> job.state() == Job.State.RUNNING)
+            .filter(job -> job.active())
             .filter(
                 job ->
                     conversation.equals(job.conversation())

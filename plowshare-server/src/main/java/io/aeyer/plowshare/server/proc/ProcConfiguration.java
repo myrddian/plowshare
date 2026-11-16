@@ -81,7 +81,7 @@ public class ProcConfiguration {
         return new ProcRepository.Live(
             Instant.now(),
             jobs.jobs().stream()
-                .filter(job -> job.state() == Job.State.RUNNING)
+                .filter(job -> job.active())
                 .map(Job::conversation)
                 .filter(Objects::nonNull)
                 .distinct()

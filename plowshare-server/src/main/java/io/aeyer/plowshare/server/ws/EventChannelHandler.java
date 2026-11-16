@@ -21,6 +21,7 @@ import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.pool.OperationStatements;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.server.session.WorkspaceRecovery;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -667,7 +668,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
   public void afterConnectionEstablished(WebSocketSession socket) throws IOException {
     if (socketAuthorization != null && !socketAuthorization.attach(socket)) return;
     String id = FileChannelHandler.sessionId(socket.getUri());
-    if (id == null || id.isBlank()) {
+    if (id == null || id.isBlank() || id.startsWith(WorkspaceRecovery.LOGICAL_PREFIX)) {
       // Refused rather than accepted and left to receive nothing. The
       // registry refuses a blank id one layer down, and it is right to;
       // but it can only throw, and the party that needs telling is the

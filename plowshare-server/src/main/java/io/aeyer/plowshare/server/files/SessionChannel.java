@@ -46,6 +46,12 @@ import io.aeyer.plowshare.protocol.FileRequest;
  */
 public interface SessionChannel {
 
+  /** Called on the execution thread before handing command transport work to another thread. */
+  default void beforeWork(String session) {}
+
+  /** Retain effect uncertainty on the execution thread when asynchronous transport fails. */
+  default void interrupted(String session, FileRequest request) {}
+
   /**
    * Capture the current file connection, including its absence. A transport-backed channel must
    * never route this view to a replacement connection with the same session name. Standalone

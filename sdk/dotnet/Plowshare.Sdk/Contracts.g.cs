@@ -3216,6 +3216,7 @@ public sealed record ObservedJobDto {
  [JsonPropertyName("id")] public required string Id { get; init; }
  [JsonPropertyName("limits")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<ObservedJobDtoLimits> Limits { get; init; }
  [JsonPropertyName("outcome")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<ObservedJobDtoOutcome> Outcome { get; init; }
+ [JsonPropertyName("pauseReason")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<TierDtoProject> PauseReason { get; init; }
  [JsonPropertyName("state")] public required string State { get; init; }
 }
 
@@ -6358,6 +6359,7 @@ public sealed record ProjectAccessPayloadDto {
 public sealed record ProjectAttachPayloadDto {
  [JsonPropertyName("machine")] public required string Machine { get; init; }
  [JsonPropertyName("name")] public required string Name { get; init; }
+ [JsonPropertyName("recovery")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Recovery { get; init; }
  [JsonPropertyName("workspace")] public required string Workspace { get; init; }
 }
 
@@ -8998,6 +9000,7 @@ public static partial class Operations { public static Task<Reply<ProjectAccessD
 public sealed record ProjectAttachRequest {
  [JsonPropertyName("machine")] public required string Machine { get; init; }
  [JsonPropertyName("name")] public required string Name { get; init; }
+ [JsonPropertyName("recovery")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public Optional<string> Recovery { get; init; }
  [JsonPropertyName("workspace")] public required string Workspace { get; init; }
 }
 public static partial class Operations { public static Task<Reply<ProjectViewDto>> ProjectAttachAsync(this Client client,ProjectAttachRequest request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<ProjectAttachRequest,ProjectViewDto>("project.attach",request,cancellationToken,options); }

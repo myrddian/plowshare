@@ -122,6 +122,25 @@ manifest can describe a client-only project rather than publish a server project
 Consult the detailed project guide before combining explicit `--project` with a
 discovered client-only manifest.
 
+## Disconnecting a workspace
+
+Jobs that need a client-served workspace pause when that provider disconnects.
+Closing a viewing client does not pause work whose files and execution remain
+available on the server. Personal follows the same rule: server-only Personal
+work continues; work explicitly using client files waits for that client.
+
+Reopen the authenticated TUI or GUI and attach the same workspace to resume its
+waiting work. The clients retain a private recovery identity in local account
+configuration, so reopening does not depend on reusing the old socket. The
+account, machine, project and root must still match, and current permissions and
+filesystem instructions are checked again. Keep that private configuration if
+you want attachment recovery; it is not stored in the project directory.
+
+An interrupted write or command can have an unknown outcome. Such work remains
+blocked for inspection and can be cancelled; reconnect never automatically
+repeats the action. Cancelling the conversation does not certify that a remote
+process stopped. See [recovery details and server-restart limits](../client-workspace-pause-resume-plan.md#implementation-and-current-limits).
+
 ## File tools and command policy
 
 File discovery and reads are bounded and path-scoped. Tools such as `file_roots`,

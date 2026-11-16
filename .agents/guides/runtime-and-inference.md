@@ -92,6 +92,15 @@ A durable job row records that work happened; it does not recreate a lost thread
 or grant a restarted worker permission to continue. Keep live handles, durable
 outcomes and persisted conversation entries distinct.
 
+`WorkspaceRuns` pauses work that actually depends on a client workspace. A viewer
+disconnect alone does not pause server work. Reopening the serving client uses
+`WorkspaceRecovery`'s private attachment capability, retains the logical session
+and rechecks source and execution authority. Paused jobs remain active for
+conversation exclusion and cancellation. Unknown file writes/commands are blocked,
+never replayed. Safely paused ordinary roots can recover after server restart;
+workflow-owned roots require their own recovery owner and remain blocked. See
+[workspace pause/resume](../../docs/client-workspace-pause-resume-plan.md#implementation-and-current-limits).
+
 Provider calls run outside database transactions. Dispatcher admission and final
 output checks remain necessary after queueing: a prior permission check or usage
 attribution is not a reusable execution permit. Read [AUTH](auth.md) when changing

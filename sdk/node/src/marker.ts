@@ -1,3 +1,4 @@
+import { workspaceRecoveryKey } from './workspace-recovery.ts';
 import { errorCode } from 'plowshare-client-ts/binding/values';
 import { isList } from 'plowshare-client-ts/binding/values';
 /** Shared project discovery: local markers take precedence; root manifests are private candidates. */
@@ -270,12 +271,18 @@ export async function resolveMarked(
         row.type !== 'DISJOINT'),
   );
   if (existing) return { root: found.root, project: existing.name };
+  const recovery = await workspaceRecoveryKey(connection, {
+    project: found.project,
+    root: found.root,
+    machine,
+  });
   const attached = conversationReply(
     'project.attach',
     await connection.ask('project.attach', {
       name: found.project,
       workspace: found.root,
       machine,
+      ...(recovery === undefined ? {} : { recovery }),
     }),
   );
   if (

@@ -19,6 +19,8 @@ import io.aeyer.plowshare.server.archive.Origin;
  * caller without a change to this record — which is why the number was the only thing that could go
  * stale.)
  *
+ * @param pauseReason a fixed explanation while workspace-dependent work is paused; null otherwise.
+ *     Workspace paths and recovery capabilities are not included.
  * @param cancelRequested whether somebody has asked this run to stop. Reported separately from
  *     {@code state}, because a cancelled run is still {@code RUNNING} until it reaches its next
  *     turn boundary and a caller that could not see the request would think its cancel had been
@@ -47,7 +49,8 @@ public record JobView(
     boolean cancelRequested,
     String conversation,
     OutcomeView outcome,
-    LimitsView limits) {
+    LimitsView limits,
+    String pauseReason) {
 
   /**
    * What a run is bounded by, as a caller reads it.
@@ -250,6 +253,7 @@ public record JobView(
         job.outcome()
             .map(outcome -> OutcomeView.of(outcome, limits, conversationOrigin))
             .orElse(null),
-        limits == null ? null : LimitsView.of(limits));
+        limits == null ? null : LimitsView.of(limits),
+        job.pauseReason());
   }
 }

@@ -6,6 +6,7 @@ import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.events.InboxStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
+import io.aeyer.plowshare.server.session.SessionOwners;
 import io.aeyer.plowshare.server.ws.Asking;
 import io.aeyer.plowshare.server.ws.FrameArea;
 import io.aeyer.plowshare.server.ws.FrameHandler;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +33,13 @@ import org.springframework.stereotype.Component;
 public class UnionFrames implements FrameArea {
 
   private static final Set<String> RESOLUTIONS = Set.of("mine", "theirs", "merged");
+
+  private SessionOwners sessions = SessionOwners.NONE;
+
+  @Autowired(required = false)
+  public void useSessions(SessionOwners sessions) {
+    this.sessions = Objects.requireNonNull(sessions);
+  }
 
   private final UnionStore unions;
   private final Hubs hubs;
@@ -117,7 +126,7 @@ public class UnionFrames implements FrameArea {
           }
           return null;
         });
-    gate.begin(project, asking.sessionId());
+    gate.begin(project, sessions.canonical(asking.sessionId()));
     return Outcome.ok(Map.of("url", url(project)));
   }
 
@@ -127,7 +136,7 @@ public class UnionFrames implements FrameArea {
       throw new CallerFault("project '" + project + "' is not a union; /sync on makes it one");
     }
     try {
-      gate.begin(project, asking.sessionId());
+      gate.begin(project, sessions.canonical(asking.sessionId()));
     } catch (IllegalStateException refused) {
       return Outcome.failed(Code.CONFLICT, refused.getMessage());
     }
@@ -137,7 +146,7 @@ public class UnionFrames implements FrameArea {
   /** A client whose sync failed after {@code union.begin} lets go of the claim. */
   private Outcome abort(Map<String, Object> payload, Asking asking) {
     String project = claimed(payload, asking, FrameTypes.UNION_ABORT);
-    gate.abort(project, asking.sessionId());
+    gate.abort(project, sessions.canonical(asking.sessionId()));
     return Outcome.ok(Map.of());
   }
 
@@ -151,7 +160,7 @@ public class UnionFrames implements FrameArea {
             "the commit this client just pushed to main.");
     UnionStore.Union union = union(project);
     try {
-      gate.ready(project, asking.sessionId(), commit);
+      gate.ready(project, sessions.canonical(asking.sessionId()), commit);
     } catch (IllegalStateException refused) {
       return Outcome.failed(Code.CONFLICT, refused.getMessage());
     }
@@ -168,7 +177,7 @@ public class UnionFrames implements FrameArea {
     union(project);
     // Only a LIVE machine has everything the hub holds; deleting the hub before it
     // has synced would destroy agent work committed on the server since.
-    if (!gate.live(project, asking.sessionId())) {
+    if (!gate.live(project, sessions.canonical(asking.sessionId()))) {
       return Outcome.failed(
           Code.CONFLICT,
           "project '"
@@ -319,7 +328,7 @@ public class UnionFrames implements FrameArea {
     String project = project(payload, type);
     boolean roots =
         presences
-            .rootedBy(asking.sessionId())
+            .rootedBy(sessions.canonical(asking.sessionId()))
             .filter(presence -> presence.project().equals(project))
             .isPresent();
     if (!roots) {

@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.sql.Array;
 import java.sql.PreparedStatement;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -1132,7 +1133,7 @@ public final class ProjectStore
             var batch = requested.subList(start, Math.min(start + 128, requested.size()));
             jdbc.query(
                 "SELECT p.name,p.machine,p.personal_owner,ARRAY(SELECT m.handle FROM project_members m WHERE m.project_id=p.id ORDER BY m.handle) AS members FROM projects p WHERE p.name IN ("
-                    + String.join(",", java.util.Collections.nCopies(batch.size(), "?"))
+                    + String.join(",", Collections.nCopies(batch.size(), "?"))
                     + ")",
                 (org.springframework.jdbc.core.RowCallbackHandler)
                     row -> {
@@ -1501,8 +1502,20 @@ public final class ProjectStore
   }
 
   public List<ProjectRecord> allForSession(String handle, String session) {
+    return allForSessions(handle, session == null ? List.of() : List.of(session));
+  }
+
+  /** A bounded set of attachments whose recovery proofs were verified by the transport owner. */
+  public List<ProjectRecord> allForSessions(String handle, List<String> sessions) {
+    if (sessions.size() > 128) throw new IllegalArgumentException("Too many recovered attachments");
     List<ProjectRecord> rows = new ArrayList<>(allFor(handle));
-    if (session != null && handle != null)
+    if (!sessions.isEmpty() && handle != null) {
+      List<String> prefixes =
+          sessions.stream()
+              .distinct()
+              .map(session -> ClientProjects.prefix(session, handle) + "%")
+              .toList();
+      String predicates = String.join(" OR ", Collections.nCopies(prefixes.size(), "name LIKE ?"));
       rows.addAll(
           ArchiveUnavailableException.translating(
               "list this client's projects",
@@ -1510,9 +1523,12 @@ public final class ProjectStore
                   jdbc.query(
                       "SELECT "
                           + COLUMNS
-                          + " FROM projects WHERE workspace IS NOT NULL AND name LIKE ? ORDER BY name",
+                          + " FROM projects WHERE workspace IS NOT NULL AND ("
+                          + predicates
+                          + ") ORDER BY name",
                       ROW_MAPPER,
-                      ClientProjects.prefix(session, handle) + "%")));
+                      prefixes.toArray())));
+    }
     return List.copyOf(rows);
   }
 

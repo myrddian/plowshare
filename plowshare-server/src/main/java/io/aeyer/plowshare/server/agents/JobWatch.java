@@ -184,6 +184,19 @@ public final class JobWatch {
     if (this != UNWATCHED) publish(JobEvent.ended(job, agent, ending.name(), steps, modelCalls));
   }
 
+  /** Fixed lifecycle hints contain no workspace identity, paths, recovery key or failure text. */
+  public void workspace(String agent, Job.State state) {
+    String kind =
+        switch (state) {
+          case PAUSING -> "pausing";
+          case PAUSED -> "paused";
+          case RESUMING -> "resuming";
+          case RUNNING -> "resumed";
+          case DONE -> throw new IllegalArgumentException("Use ended for terminal work");
+        };
+    if (this != UNWATCHED) publish(new JobEvent(job, kind, agent, null, null, steps, modelCalls));
+  }
+
   /**
    * Whether anybody asked to see this run's tokens.
    *
