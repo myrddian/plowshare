@@ -31,6 +31,13 @@ reuse fails. An absent read-only receipt cannot prove publication never happened
 and cannot authorize an automatic resend. Preserve request/event identity across
 explicit recovery instead of inventing a fresh mutation.
 
+Scheduled occurrences are independent roots and carry depth-zero causation. For
+retained occurrences written before that metadata was supplied, the scheduler's
+`ScheduledRelayOccurrences` recognizes only its typed, canonical, parentless
+occurrence on the matching scope-derived topic. SDK-derived publications consume
+one effect from that original root. This read-only compatibility rule never
+resets explicit unknown/exhausted ancestry or authorizes replay of unknown effects.
+
 Seen positions represent availability, not successful handling. Reads do not
 advance offsets. Advance and expired-gap acknowledgement are explicit operations;
 independent consumers must not share a group unless work sharing is intended.

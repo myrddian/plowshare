@@ -281,6 +281,37 @@ class WorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.port.published), 1)
         self.assertEqual(self.collector.count, 1)
 
+    async def test_refused_completion_recovers_original_scan_without_recollecting(
+        self,
+    ) -> None:
+        self.port.events["schedule.due"] = [event()]
+        with patch.object(
+            self.port,
+            "publish",
+            side_effect=Refusal(
+                "BAD_REQUEST", "Relay parent has no remaining effect budget"
+            ),
+        ) as publish:
+            with self.assertRaises(Refusal):
+                await self.worker.poll()
+            refused = self.receipts.all()[0]
+            self.assertEqual(refused.phase, "uploaded")
+            expected = self.worker.completion_request(refused)
+            publish.assert_awaited_once_with(expected)
+            # Reconnection checks receipts; it does not submit a refused or unknown effect.
+            await self.worker.reconcile()
+            publish.assert_awaited_once_with(expected)
+
+        await self.worker.poll()
+        completed = self.receipts.all()[0]
+        self.assertEqual(completed.phase, "done")
+        self.assertEqual(completed.scan_id, refused.scan_id)
+        self.assertEqual(completed.revision, refused.revision)
+        self.assertEqual(completed.evidence, refused.evidence)
+        self.assertEqual(self.port.published, [expected])
+        self.assertEqual(self.port.uploads, 1)
+        self.assertEqual(self.collector.count, 1)
+
     async def test_absence_cannot_settle_unknown_publication(self) -> None:
         async def lost(request: RelayPublishRequest) -> RelayPublishResultDto:
             raise TransportError(Delivery.UNKNOWN, "Fixture reply lost")

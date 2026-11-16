@@ -1,13 +1,10 @@
 package io.aeyer.plowshare.server.events;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 
@@ -51,9 +48,16 @@ public final class RelayScheduledPublication implements ScheduledPublication {
     boundary.requireOutsideTransaction();
     var payload =
         new RelayPayload.ScheduleDue(selected.name(), selected.emits(), selected.nextFireAt());
+    String eventId = ScheduledRelayOccurrences.identity(payload);
     var draft =
         new Relay.Draft(
-            identity(payload), selected.definedBy(), payload.fireAt(), null, null, payload);
+            eventId,
+            selected.definedBy(),
+            payload.fireAt(),
+            null,
+            null,
+            payload,
+            RelayCausation.root(eventId));
     var accepted =
         transactions.inTransaction(
             () -> {
@@ -83,18 +87,5 @@ public final class RelayScheduledPublication implements ScheduledPublication {
     boundary.requireOutsideTransaction();
     arrivals.dispatch(accepted.get());
     return true;
-  }
-
-  private static String identity(RelayPayload.ScheduleDue payload) {
-    try {
-      // Schedule identities cannot contain NUL, so this encoding separates the two fields
-      // unambiguously. Broker publication time and the next fire time do not change identity.
-      byte[] content =
-          (payload.schedule() + "\0" + payload.fireAt()).getBytes(StandardCharsets.UTF_8);
-      return "schedule:"
-          + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
-    } catch (NoSuchAlgorithmException unavailable) {
-      throw new IllegalStateException("SHA-256 is required by the Java runtime", unavailable);
-    }
   }
 }
