@@ -53,7 +53,14 @@ with tempfile.TemporaryDirectory(prefix='plowshare-computer-consumer-') as tempo
     run('node', '--input-type=module', '-e',
         "const provider = await import('plowshare-computer-control'); "
         "if (typeof provider.createComputerProvider !== 'function') "
-        "throw new Error('Missing reusable SDK provider');",
+        "throw new Error('Missing reusable SDK provider'); "
+        "if (typeof provider.createBrowserControlBackend !== 'function' || "
+        "typeof provider.decodeBrowserControlPolicy !== 'function') "
+        "throw new Error('Missing reusable browser control capability'); "
+        "if (provider.computerDeclarations().length !== 4 || "
+        "provider.computerDeclarations('computer_', "
+        "{controlBudgetMs:2000,observeBudgetMs:10000}, ['windows','type']).length !== 6) "
+        "throw new Error('Explicit browser catalogue selection failed');",
         cwd=consumer)
     run('node', 'scripts/test.mjs', cwd=consumer)
     print('Computer provider compiled and passed fixtures with installed public SDKs.')

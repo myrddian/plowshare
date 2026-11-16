@@ -37,6 +37,9 @@ import type { ComputerHostConfig } from './config.ts';
 import { computerDeclarations, createComputerProvider } from './provider.ts';
 import type { ComputerProvider } from './provider.ts';
 import { createBrowserBackend } from './backends/browser.ts';
+import { createBrowserControlBackend } from './backends/browser-control-backend.ts';
+import type { BrowserControlBackend } from './browser-control.ts';
+import { browserComposition } from './browser-composition.ts';
 import { createMacOSBackend } from './backends/macos.ts';
 import type { BackendHandle } from './backends/types.ts';
 
@@ -295,6 +298,7 @@ export interface ComputerHostOptions {
   readonly currentBearer: () => Promise<string>;
   readonly signal: AbortSignal;
   readonly backends?: readonly BackendHandle[];
+  readonly browserControls?: readonly BrowserControlBackend[];
   readonly journal?: ToolJournal;
   readonly intents?: CatalogueIntents;
   readonly clock?: Clock;
@@ -391,16 +395,48 @@ export async function runComputerHost(
   const config = decodeComputerHostConfig(options.config),
     clock = options.clock ?? systemClock;
   if (
+    options.browserControls !== undefined &&
+    (options.backends === undefined || config.browserControl === undefined)
+  )
+    throw new Error(
+      'Injected browser controls require matching explicit backend handles and controlled configuration',
+    );
+  if (
+    options.backends !== undefined &&
+    config.browserControl !== undefined &&
+    options.browserControls === undefined
+  )
+    throw new Error(
+      'Controlled host injection requires its exact browser control backend capabilities',
+    );
+  if (
     options.maxPasses !== undefined &&
     (!Number.isSafeInteger(options.maxPasses) ||
       options.maxPasses < 1 ||
       options.maxPasses > 1_000_000)
   )
     throw new Error('Invalid finite computer host pass count');
-  const declarations = computerDeclarations(config.prefix, {
-    controlBudgetMs: config.budgets.controlMs,
-    observeBudgetMs: config.budgets.observeMs,
-  });
+  const browserTools = config.browserControl?.control.tools ?? [];
+  const injectedHandles =
+    options.backends === undefined
+      ? undefined
+      : Object.freeze([...options.backends]);
+  const injectedControls =
+    injectedHandles === undefined
+      ? undefined
+      : browserComposition(
+          injectedHandles.map((handle) => handle.backend),
+          options.browserControls === undefined ? [] : options.browserControls,
+          browserTools,
+        ).controls;
+  const declarations = computerDeclarations(
+    config.prefix,
+    {
+      controlBudgetMs: config.budgets.controlMs,
+      observeBudgetMs: config.budgets.observeMs,
+    },
+    browserTools,
+  );
   const identity = createHash('sha256')
     .update(toolDeploymentConfig(config.binding, declarations))
     .digest('hex');
@@ -434,7 +470,8 @@ export async function runComputerHost(
         } finally {
           await markerParent.close();
         }
-        const handles: BackendHandle[] = [...(options.backends ?? [])];
+        const handles: BackendHandle[] = [...(injectedHandles ?? [])];
+        const controls: BrowserControlBackend[] = [...(injectedControls ?? [])];
         const passes = new ComputerPasses(
           options.connection,
           config.budgets.controlMs,
@@ -456,11 +493,19 @@ export async function runComputerHost(
           startupDeadline = startup;
           try {
             options.signal.throwIfAborted();
-            if (options.backends === undefined) {
+            if (injectedHandles === undefined) {
               if (config.browser !== undefined)
                 handles.push(
                   await createBrowserBackend(config.browser, startup),
                 );
+              if (config.browserControl !== undefined) {
+                const handle = await createBrowserControlBackend(
+                  config.browserControl,
+                  startup,
+                );
+                handles.push(handle);
+                controls.push(handle.backend);
+              }
               if (config.macos !== undefined)
                 handles.push(createMacOSBackend(config.macos));
             }
@@ -472,6 +517,8 @@ export async function runComputerHost(
               binding: config.binding,
               journal,
               backends: handles.map((handle) => handle.backend),
+              browserControls: controls,
+              browserTools,
               generation: randomUUID(),
               origin: config.origin,
               currentBearer: options.currentBearer,
@@ -479,6 +526,15 @@ export async function runComputerHost(
               prefix: config.prefix,
               controlBudgetMs: config.budgets.controlMs,
               observeBudgetMs: config.budgets.observeMs,
+              browserObservationReserveMs:
+                config.budgets.browserObservationReserveMs ?? 3000,
+              cleanupBudgetMs: config.budgets.cleanupMs,
+              ...(config.sessions === undefined
+                ? {}
+                : {
+                    frameFreshMs: config.sessions.frameFreshMs,
+                    idleMs: config.sessions.idleMs,
+                  }),
               parentDeadline: () => passes.currentDeadline(),
             });
             startup.requireActive();

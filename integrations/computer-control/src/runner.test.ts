@@ -23,6 +23,8 @@ import {
 } from './provider.test-support.ts';
 import { BackendError } from './contracts.ts';
 import { ConnectionFault } from 'plowshare-client-ts/binding/connection';
+import { FakeBrowserControlBackend } from './browser-provider.test-support.ts';
+import { call, metadata, record } from './provider.test-support.ts';
 
 await test('SDK pass expiry retains ownership until its original promise settles', async () => {
   const clock = new FakeClock(),
@@ -262,6 +264,175 @@ await test('foreground host uses the same SDK provider, retains catalogue intent
         (name) => name.endsWith('.active') || name.endsWith('.lock'),
       ),
     );
+  } finally {
+    connection.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test('controlled foreground composition publishes matching tools and drains its injected lease', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'computer-controlled-host-'));
+  const wire = new RelayWire(),
+    connection = client(wire),
+    clock = new FakeClock(),
+    backend = new FakeBrowserControlBackend(clock);
+  const old = configFor(directory);
+  const config = decodeComputerHostConfig({
+    ...old,
+    browser: undefined,
+    browserControl: {
+      ...old.browser,
+      ownershipDirectory: join(directory, 'ownership'),
+      control: {
+        enabled: true,
+        tools: backend.browserControl.allowedTools,
+        allowedOrigins: ['https://fixture.invalid'],
+      },
+    },
+    sessions: { idleMs: 90_000, frameFreshMs: 7000 },
+    budgets: { ...old.budgets, browserObservationReserveMs: 4000 },
+  });
+  const declarations = computerDeclarations(
+    config.prefix,
+    {
+      controlBudgetMs: config.budgets.controlMs,
+      observeBudgetMs: config.budgets.observeMs,
+    },
+    backend.browserControl.allowedTools,
+  );
+  const hash = createHash('sha256')
+    .update(toolDeploymentConfig(binding, declarations))
+    .digest('hex');
+  const journal = new MemoryJournal(hash);
+  let closed = 0;
+  try {
+    await runComputerHost({
+      config,
+      connection,
+      currentBearer: async () => 'fixture',
+      signal: new AbortController().signal,
+      backends: [
+        {
+          backend,
+          close: async () => {
+            closed++;
+          },
+        },
+      ],
+      browserControls: [backend],
+      journal,
+      clock,
+      maxPasses: 1,
+      onReady: () => {
+        wire.calls.push(call(clock, 'open', { targetId: backend.targetId }));
+      },
+    });
+    assert.equal(backend.acquireCalls, 1);
+    assert.equal(backend.releaseCalls, 1);
+    assert.equal(backend.hasLease, false);
+    assert.equal(closed, 1);
+    assert.equal(clock.pendingTimers(), 0);
+    const published = wire.publications.find(
+      (row) =>
+        typeof row['topic'] === 'string' && row['topic'].endsWith('.catalog'),
+    );
+    assert.ok(published);
+    const text = published['text'];
+    assert.ok(typeof text === 'string');
+    const catalog = record(JSON.parse(text)),
+      tools = catalog['tools'];
+    assert.ok(Array.isArray(tools));
+    assert.equal(tools.length, 11);
+    assert.equal(
+      (await new FileCatalogueIntents(directory, hash).load())?.kind,
+      'withdraw',
+    );
+    assert.equal(
+      (await readdir(directory)).some(
+        (name) => name.endsWith('.active') || name.endsWith('.lock'),
+      ),
+      false,
+    );
+    const receipt = [...journal.rows.values()][0];
+    assert.ok(receipt?.result);
+    assert.equal(metadata(receipt.result)['controlled'], true);
+  } finally {
+    connection.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test('mismatched controlled host injection fails before local state or catalogue effects', async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), 'computer-controlled-config-'),
+  );
+  const wire = new RelayWire(),
+    connection = client(wire),
+    clock = new FakeClock(),
+    backend = new FakeBrowserControlBackend(clock);
+  const old = configFor(directory);
+  const config = decodeComputerHostConfig({
+    ...old,
+    browser: undefined,
+    browserControl: {
+      ...old.browser,
+      ownershipDirectory: join(directory, 'ownership'),
+      control: {
+        enabled: true,
+        tools: backend.browserControl.allowedTools,
+        allowedOrigins: ['https://fixture.invalid'],
+      },
+    },
+  });
+  let closed = 0;
+  const options = {
+    config,
+    connection,
+    currentBearer: async () => 'fixture',
+    signal: new AbortController().signal,
+    backends: [
+      {
+        backend,
+        close: async () => {
+          closed++;
+        },
+      },
+    ],
+    clock,
+    maxPasses: 1,
+  };
+  try {
+    await assert.rejects(
+      runComputerHost(options),
+      /exact browser control backend/,
+    );
+    const other = new FakeBrowserControlBackend(clock);
+    await assert.rejects(
+      runComputerHost({ ...options, browserControls: [other] }),
+      /same selected backend instance/,
+    );
+    const controlled = config.browserControl;
+    assert.ok(controlled);
+    const limited = decodeComputerHostConfig({
+      ...config,
+      browserControl: {
+        ...controlled,
+        control: { ...controlled.control, tools: ['windows'] },
+      },
+    });
+    await assert.rejects(
+      runComputerHost({
+        ...options,
+        config: limited,
+        browserControls: [backend],
+      }),
+      /match the configured backend capabilities/,
+    );
+    assert.deepEqual(await readdir(directory), []);
+    assert.equal(wire.publications.length, 0);
+    assert.equal(backend.acquireCalls, 0);
+    assert.equal(other.acquireCalls, 0);
+    assert.equal(closed, 0);
   } finally {
     connection.close();
     await rm(directory, { recursive: true, force: true });

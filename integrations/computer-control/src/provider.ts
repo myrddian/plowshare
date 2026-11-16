@@ -9,7 +9,7 @@ import {
   nodeToolHost,
   toolDeploymentConfig,
 } from 'plowshare-client-node/tools';
-import { decodeToolCall, decodeToolResult } from 'plowshare-client-ts';
+import { decodeToolCall } from 'plowshare-client-ts';
 import type {
   Plowshare,
   RegisteredTool,
@@ -25,6 +25,7 @@ import type {
   ComputerOwner,
   ComputerTarget,
   CaptureLimits,
+  ObserveArguments,
 } from './contracts.ts';
 import {
   BackendError,
@@ -48,6 +49,24 @@ import {
 } from './deadline.ts';
 import { CapacityToolJournal } from './journal.ts';
 import { ComputerSessions, SessionError } from './sessions.ts';
+import {
+  computerTextResult as textResult,
+  validateComputerResult as validatedResult,
+} from './computer-results.ts';
+import type {
+  BrowserControlBackend,
+  BrowserToolName,
+} from './browser-control.ts';
+import {
+  checkedBrowserTools,
+  decodeBrowserObserveArguments,
+} from './browser-tool-arguments.ts';
+import {
+  browserObserveDeclaration,
+  browserToolDeclarations,
+} from './browser-tool-catalogue.ts';
+import { BrowserToolRuntime } from './browser-runtime.ts';
+import { browserComposition } from './browser-composition.ts';
 
 export interface ComputerProviderOptions {
   readonly connection: Pick<Plowshare, 'request'>;
@@ -64,6 +83,12 @@ export interface ComputerProviderOptions {
   readonly observeBudgetMs?: number;
   readonly captureLimits?: CaptureLimits;
   readonly maxImagesPerRun?: number;
+  readonly browserControls?: readonly BrowserControlBackend[];
+  readonly browserTools?: readonly BrowserToolName[];
+  readonly browserObservationReserveMs?: number;
+  readonly cleanupBudgetMs?: number;
+  readonly frameFreshMs?: number;
+  readonly idleMs?: number;
   /** Owning host pass shares its earlier monotonic cutoff with local capture and binary admission. */
   readonly parentDeadline?: () => OperationDeadline | undefined;
 }
@@ -95,6 +120,7 @@ function checkedPrefix(prefix: string): string {
 export function computerDeclarations(
   prefix = 'computer_',
   budgets: ProviderBudgets = { controlBudgetMs: 2000, observeBudgetMs: 10_000 },
+  browserTools: readonly BrowserToolName[] = [],
 ): readonly ToolDeclaration[] {
   checkedPrefix(prefix);
   positiveBudget(budgets.controlBudgetMs);
@@ -131,11 +157,19 @@ export function computerDeclarations(
       fields: ['sessionId', 'generation'],
     },
   ];
-  return Object.freeze(
-    specs.map((spec): ToolDeclaration =>
-      Object.freeze({
+  const enabled = checkedBrowserTools(browserTools);
+  return Object.freeze([
+    ...specs.map((spec): ToolDeclaration => {
+      if (enabled.length > 0 && spec.suffix === 'observe')
+        return browserObserveDeclaration(prefix, budgets.observeBudgetMs);
+      return Object.freeze({
         name: prefix + spec.suffix,
-        description: spec.description,
+        description:
+          enabled.length > 0 && spec.suffix === 'open'
+            ? 'Acquire an owner-bound session; controlled browser targets get a fresh isolated lease.'
+            : enabled.length > 0 && spec.suffix === 'close'
+              ? 'Stop this session and release it only after physical browser cleanup is established.'
+              : spec.description,
         parameters: Object.freeze(spec.fields.map(parameter)),
         resultProfile: 'content/1',
         timeoutSeconds: Math.ceil(
@@ -143,9 +177,10 @@ export function computerDeclarations(
             ? budgets.observeBudgetMs
             : budgets.controlBudgetMs) / 1000,
         ),
-      }),
-    ),
-  );
+      });
+    }),
+    ...browserToolDeclarations(prefix, budgets, enabled),
+  ]);
 }
 
 function checkedOrigin(origin: string): string {
@@ -169,38 +204,6 @@ function owner(call: ToolCall): ComputerOwner {
     run: call.run,
     provider: call.provider,
   };
-}
-
-function validatedResult(
-  call: ToolCall,
-  result: ToolResult,
-  producer: string,
-): ToolResult {
-  const checked = decodeToolResult(result, call, producer);
-  const wire = JSON.stringify({
-    schema: 'plowshare-tool/3',
-    invocationId: call.invocationId,
-    project: call.project,
-    provider: call.provider,
-    tool: call.tool,
-    state: checked.state,
-    content: checked.content,
-  });
-  if (wire.length > 32768)
-    throw new Error('Computer result exceeds the encoded envelope limit');
-  return checked;
-}
-
-function textResult(
-  call: ToolCall,
-  producer: string,
-  metadata: object,
-  state: ToolResult['state'] = 'COMPLETED',
-): ToolResult {
-  const text = JSON.stringify(metadata);
-  if (text.length > 12000)
-    throw new Error('Computer metadata exceeds its bound');
-  return validatedResult(call, { state, text }, producer);
 }
 
 async function abortable<T>(
@@ -239,8 +242,6 @@ export async function createComputerProvider(
     options.captureLimits ?? DEFAULT_CAPTURE_LIMITS,
   );
   computerId(options.generation);
-  if (options.backends.length < 1 || options.backends.length > 32)
-    throw new Error('Computer provider requires 1..32 configured backends');
   // The public image-admission API currently accepts ordinary projects only.
   if (computerId(options.binding.project).toLowerCase().startsWith('personal:'))
     throw new Error(
@@ -248,12 +249,40 @@ export async function createComputerProvider(
     );
   const binding = Object.freeze({ ...options.binding });
   const backends = Object.freeze([...options.backends]);
+  const { controls: browserControls, tools: browserTools } = browserComposition(
+    backends,
+    options.browserControls === undefined ? [] : options.browserControls,
+    options.browserTools === undefined ? [] : options.browserTools,
+  );
+  const observationReserveMs = positiveBudget(
+    options.browserObservationReserveMs === undefined
+      ? 3000
+      : options.browserObservationReserveMs,
+  );
+  const cleanupBudgetMs = positiveBudget(
+    options.cleanupBudgetMs === undefined ? 2000 : options.cleanupBudgetMs,
+  );
+  if (browserTools.length > 0 && observationReserveMs >= observeBudgetMs)
+    throw new Error(
+      'Browser actions require an input budget and reserved post-observation allowance',
+    );
   const clock = options.clock ?? systemClock;
   const http = options.http ?? fetch;
-  const declarations = computerDeclarations(prefix, {
-    controlBudgetMs,
-    observeBudgetMs,
-  });
+  const declarations = computerDeclarations(
+    prefix,
+    {
+      controlBudgetMs,
+      observeBudgetMs,
+    },
+    browserTools,
+  );
+  const actionTools = new Set(
+    browserTools
+      .filter((name) => name !== 'windows')
+      .map((name) => prefix + name),
+  );
+  const imageWork = (tool: string) =>
+    tool === prefix + 'observe' || actionTools.has(tool);
   const journalIdentity = await nodeToolHost.sha256(
     toolDeploymentConfig(binding, declarations),
   );
@@ -265,6 +294,12 @@ export async function createComputerProvider(
     id: randomUUID,
     clock,
     captureLimits,
+    ...(options.frameFreshMs === undefined
+      ? {}
+      : { frameFreshMs: positiveBudget(options.frameFreshMs) }),
+    ...(options.idleMs === undefined
+      ? {}
+      : { idleMs: positiveBudget(options.idleMs) }),
     ...(options.maxImagesPerRun === undefined
       ? {}
       : { maxImagesPerRun: options.maxImagesPerRun }),
@@ -281,7 +316,7 @@ export async function createComputerProvider(
       !declarations.some((declaration) => declaration.name === call.tool)
     )
       throw new Error('Foreign computer invocation history');
-    if (call.tool === prefix + 'observe') {
+    if (imageWork(call.tool)) {
       const invocationOwner = owner(call),
         key = JSON.stringify(invocationOwner);
       const previous = restored.get(key);
@@ -293,6 +328,28 @@ export async function createComputerProvider(
   }
   for (const row of restored.values())
     sessions.restoreImageCount(row.owner, row.count);
+  const browser =
+    browserControls.length === 0
+      ? undefined
+      : new BrowserToolRuntime({
+          binding,
+          sessions,
+          controls: browserControls,
+          tools: browserTools,
+          clock,
+          origin,
+          currentBearer: options.currentBearer,
+          http,
+          captureLimits,
+          observationReserveMs,
+          cleanupBudgetMs,
+          idleCheckMs: Math.min(
+            1000,
+            options.idleMs === undefined
+              ? 60_000
+              : positiveBudget(options.idleMs),
+          ),
+        });
   let active = true;
   const activeDeadlines = new Map<string, OperationDeadline>();
   const physical = new Set<Promise<ToolResult>>();
@@ -371,7 +428,7 @@ export async function createComputerProvider(
       inherited ??
       fromCallDeadline(
         call.deadline,
-        call.tool === prefix + 'observe' ? observeBudgetMs : controlBudgetMs,
+        imageWork(call.tool) ? observeBudgetMs : controlBudgetMs,
         clock,
         options.parentDeadline?.(),
       );
@@ -393,10 +450,20 @@ export async function createComputerProvider(
       )
         throw new Error('Foreign or unnegotiated computer invocation');
       const invocationOwner = owner(call);
+      browser?.reap();
       if (call.tool === prefix + 'targets') {
         decodeTargetsArguments(call.arguments);
         const discovery = await discover(deadline);
-        const targets = discovery.rows.map((row) => row.target);
+        const targets = discovery.rows.map((row) =>
+          browser?.controlsBackend(row.backend)
+            ? {
+                ...row.target,
+                browserTools: row.backend.browserControl.allowedTools.map(
+                  (name) => prefix + name,
+                ),
+              }
+            : row.target,
+        );
         let visible = targets.length;
         while (
           visible > 0 &&
@@ -423,6 +490,13 @@ export async function createComputerProvider(
           !target.target.capabilities.includes('capture')
         )
           throw new BackendError('TARGET_GONE');
+        if (browser?.controlsBackend(target.backend))
+          return await browser.open(
+            call,
+            args.targetId,
+            target.backend,
+            deadline,
+          );
         return textResult(call, binding.account, {
           version: 'computer-control/1',
           session: sessions.open(invocationOwner, args.targetId),
@@ -430,15 +504,46 @@ export async function createComputerProvider(
       }
       if (call.tool === prefix + 'close') {
         const args = decodeCloseArguments(call.arguments);
+        if (browser?.hasSession(args))
+          return await browser.close(call, args, deadline);
         sessions.close(invocationOwner, args);
         return textResult(call, binding.account, {
           version: 'computer-control/1',
           closed: true,
         });
       }
+      if (browser !== undefined) {
+        const name = browserTools.find((name) => call.tool === prefix + name);
+        if (name !== undefined)
+          return name === 'windows'
+            ? await browser.windows(call, deadline)
+            : await browser.action(call, name, deadline);
+      }
       if (call.tool !== prefix + 'observe')
         throw new Error('Unknown computer tool');
-      const args = decodeObserveArguments(call.arguments);
+      let args: ObserveArguments;
+      if (browser !== undefined) {
+        const controlledArgs = decodeBrowserObserveArguments(call.arguments);
+        if (browser.hasSession(controlledArgs))
+          return await browser.observe(call, controlledArgs, deadline);
+        if (
+          call.arguments['structured'] === true ||
+          controlledArgs.root !== undefined
+        )
+          return textResult(
+            call,
+            binding.account,
+            { version: 'computer-control/1', code: 'STRUCTURE_UNAVAILABLE' },
+            'REJECTED',
+          );
+        args = decodeObserveArguments({
+          sessionId: controlledArgs.sessionId,
+          generation: controlledArgs.generation,
+          surfaceId: controlledArgs.surfaceId,
+        });
+      } else {
+        args = decodeObserveArguments(call.arguments);
+      }
       return await sessions.withSession(
         invocationOwner,
         args,
@@ -571,7 +676,7 @@ export async function createComputerProvider(
       ).toISOString();
       const deadline = fromCallDeadline(
         earlier,
-        call.tool === prefix + 'observe' ? observeBudgetMs : controlBudgetMs,
+        imageWork(call.tool) ? observeBudgetMs : controlBudgetMs,
         clock,
         options.parentDeadline?.(),
       );
@@ -616,17 +721,21 @@ export async function createComputerProvider(
     stop() {
       active = false;
       for (const deadline of activeDeadlines.values()) deadline.cancel();
+      browser?.stop();
     },
     async drain(deadline: OperationDeadline) {
       await abortable(
-        Promise.all(
-          [...physical].map((work) =>
-            work.then(
-              () => undefined,
-              () => undefined,
+        Promise.all([
+          ...(browser === undefined ? [] : [browser.drain(deadline)]),
+          Promise.all(
+            [...physical].map((work) =>
+              work.then(
+                () => undefined,
+                () => undefined,
+              ),
             ),
           ),
-        ),
+        ]),
         deadline,
       );
     },
