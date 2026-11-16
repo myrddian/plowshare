@@ -215,7 +215,8 @@ Present only when a meter registry exists (it does, with actuator). Each `plowsh
 
 | Meter | Type | Tags | What it shows |
 | --- | --- | --- | --- |
-| `plowshare.jdbc.statements` | timer | `pool`, `method`, `outcome` | Every physical JDBC execute (a batch is one) and its duration. `pool` is `main`, `projection-versions` or `listen`; `method` is the JDBC execute method; `outcome` is `ok` or `failed`. |
+| `plowshare.jdbc.statements` | timer with percentile histogram | `pool`, `method`, `outcome` | Every physical JDBC execute (a batch is one) and its duration, including failures/cancellations. Explicit buckets at 500 ms and 1 s track the query target and ceiling. `pool` is `main`, `projection-versions` or `listen`; `method` is the JDBC execute method; `outcome` is `ok` or `failed`. |
+| `plowshare.jdbc.cancellations` | counter | `pool`, `method` | Executions failing with PostgreSQL SQLSTATE `57014` or JDBC `SQLTimeoutException`. Includes explicit cancellation; it does not prove deadline expiry. Registered on first cancellation. |
 | `plowshare.authority.admission.checks` | counter | `outcome` | How each operation admission recheck was answered: `verified_hit` (remembered, no walk), `walked` (walked and recorded), `transaction_walk` (caller's transaction may hold writes, never reused), `no_snapshot_walk` (no usable authority snapshot, never reused), `refused` (the walk threw; never recorded). |
 | `plowshare.authority.session.checks` | counter | `outcome` | How each socket session was decided: `snapshot` (accepted from memory), `sql` (accepted by the stored authority), `refused` (the final answer was not current). |
 | `plowshare.authority.grant.reads` | counter | `outcome` | Live-grant and lineage reads: `snapshot`, `confirmed`, `sql_dirty`, `sql_version`, `sql_isolation` or `sql_ineligible`. |
@@ -236,6 +237,34 @@ The SQL text, its hash, identities and project or topic names are never tags, so
 set is constant whatever the traffic; statement attribution stays in the opt-in JFR
 `plowshare.JdbcExecute` event. Comparing the `statements` count before and after a
 change measures round trips directly.
+
+Request-serving queries have a **500 ms target** and **1-second worst-case ceiling**;
+the **2-second operation budget** covers all statements and admission/connection waits
+together. The JDBC timer measures physical execute calls, including driver waits and
+cancellation response. It excludes connection acquisition, result iteration/mapping
+after execute returns, and transaction completion; it includes background statements
+using the same pools. These metrics expose slow execution but do not establish a
+universal completion/cancellation guarantee. See the
+[required SQL contract and current gaps](coding-standards.md#bound-sql-work-by-a-completion-deadline).
+Never infer that a cancelled/failed query was fast by looking only at `outcome="ok"`.
+
+Prometheus exports `plowshare_jdbc_statements_seconds_bucket` with exact `le="0.5"`
+and `le="1.0"` buckets. Executions **over** each threshold are `_count` minus that
+cumulative bucket; include every outcome. For example, the rate over 500 ms by pool is:
+
+```promql
+sum by (pool) (rate(plowshare_jdbc_statements_seconds_count[5m]))
+  - sum by (pool) (rate(plowshare_jdbc_statements_seconds_bucket{le="0.5"}[5m]))
+```
+
+Use `le="1.0"` for one-second breaches, and `increase(...[5m])` instead of `rate`
+in both terms for counts over five minutes. Track p95/p99 with
+`histogram_quantile(0.99, sum by (le, pool) (rate(plowshare_jdbc_statements_seconds_bucket[5m])))`,
+the windowed `_max`, and `rate(plowshare_jdbc_cancellations_total[5m])` together.
+Investigate repeated 500 ms breaches and every one-second request-serving breach;
+a good average or percentile does not excuse an outlier. The bundled Grafana
+dashboard includes these panels. The maximum is windowed, not a lifetime maximum;
+long-running queries enter the timer only when execute returns or throws.
 
 `plowshare.authority.confirm-in-transaction` (environment variable
 `PLOWSHARE_AUTHORITY_CONFIRM_IN_TRANSACTION`) defaults to `false`. When enabled,
@@ -1101,6 +1130,12 @@ bounds these SQL executions; connection acquisition and cancellation cleanup
 still have the owning datasource/driver limits described above. Query embeddings
 retain their separate provider/admission budget and run outside SQL transactions.
 V269 adds the stored lexical length used by BM25; no embedding rebuild is needed.
+Semantic-only searches read authorized reach counts without executing BM25.
+Exact passage ranking avoids a redundant global distance sort, and duplicate groups
+retain at most twenty references during aggregation rather than building unbounded
+arrays and slicing them afterward. PostgreSQL query cancellation remains unavailable
+and is described as cancellation rather than a failed connection; no results or
+automatic query replay follow it.
 V270 adds explicit input provenance, stored evidence-search projections and semantic
 passage provenance. It preserves complete transcript content and unclassified historical
 inputs. Sparse evidence projections reuse historical text and vectors instead of

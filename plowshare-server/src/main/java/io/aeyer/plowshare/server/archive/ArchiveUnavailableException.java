@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.archive;
 
+import java.sql.SQLException;
 import java.util.function.Supplier;
 import org.springframework.core.NestedRuntimeException;
 import org.springframework.dao.DataAccessException;
@@ -105,7 +106,8 @@ public class ArchiveUnavailableException extends RuntimeException {
   }
 
   /**
-   * Run one database call, translating a failure to reach the database and nothing else.
+   * Run one database call, translating resource unavailability or query cancellation. Cancellation
+   * retains the unavailable contract but is not reported as a lost connection.
    *
    * <p>Wraps the call rather than the whole of a store method, so the {@code what} names one
    * operation an operator can act on. Every JDBC call in {@link MemoryStore} and {@link
@@ -119,6 +121,17 @@ public class ArchiveUnavailableException extends RuntimeException {
     try {
       return call.get();
     } catch (DataAccessException | TransactionException failed) {
+      // PostgreSQL's query_canceled state includes driver deadline cancellation and explicit
+      // operator cancellation. The server answered; do not describe either as a lost connection.
+      // Preserve UNAVAILABLE rather than inviting a model to retry expensive/uncertain work.
+      if (failed.getMostSpecificCause() instanceof SQLException sql
+          && "57014".equals(sql.getSQLState())) {
+        throw new ArchiveUnavailableException(
+            "archive SQL was cancelled before a result was available while trying to "
+                + what
+                + "; a statement deadline or explicit cancellation can cause this (SQLSTATE 57014)",
+            failed);
+      }
       if (!unreachable(failed)) {
         throw failed;
       }

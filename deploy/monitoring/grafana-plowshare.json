@@ -2,7 +2,7 @@
   "title": "Plowshare database and operations",
   "uid": "plowshare-db-ops",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "time": {
     "from": "now-6h",
@@ -166,6 +166,170 @@
       ]
     },
     {
+      "id": 30,
+      "type": "timeseries",
+      "title": "JDBC execution latency, p95/p99",
+      "description": "Includes successful and failed executions. Yellow: 500 ms target; red: 1 s ceiling. Excludes acquisition and result iteration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, pool) (rate(plowshare_jdbc_statements_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{pool}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le, pool) (rate(plowshare_jdbc_statements_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{pool}}"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Maximum observed JDBC execution latency",
+      "description": "Windowed maximum across methods and outcomes, including cancelled executions. This is not a lifetime maximum or a complete query/operation timer.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (pool) (plowshare_jdbc_statements_seconds_max)",
+          "legendFormat": "{{pool}}"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "JDBC executions over 500 ms / 1 s",
+      "description": "Exact histogram threshold counts per second, including failed/cancelled executions. Investigate repeated 500 ms breaches; every execution over 1 s violates the request-serving query ceiling. Includes maintenance on these pools.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pool) (rate(plowshare_jdbc_statements_seconds_count[5m])) - sum by (pool) (rate(plowshare_jdbc_statements_seconds_bucket{le=\"0.5\"}[5m]))",
+          "legendFormat": ">500 ms {{pool}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (pool) (rate(plowshare_jdbc_statements_seconds_count[5m])) - sum by (pool) (rate(plowshare_jdbc_statements_seconds_bucket{le=\"1.0\"}[5m]))",
+          "legendFormat": ">1 s {{pool}}"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "JDBC query cancellations and timeouts",
+      "description": "PostgreSQL SQLSTATE 57014 and JDBC SQLTimeoutException. Includes explicit cancellation; this is not solely a deadline-expiry count. A never-seen combination is absent.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pool) (rate(plowshare_jdbc_cancellations_total[5m]))",
+          "legendFormat": "{{pool}}"
+        }
+      ]
+    },
+    {
       "id": 7,
       "type": "row",
       "title": "Authority check outcomes",
@@ -174,7 +338,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 18
+        "y": 35
       }
     },
     {
@@ -196,7 +360,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 19
+        "y": 36
       },
       "targets": [
         {
@@ -225,7 +389,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 19
+        "y": 36
       },
       "targets": [
         {
@@ -244,7 +408,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 44
       }
     },
     {
@@ -266,7 +430,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 28
+        "y": 45
       },
       "targets": [
         {
@@ -295,7 +459,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 28
+        "y": 45
       },
       "targets": [
         {
@@ -314,7 +478,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 53
       }
     },
     {
@@ -336,7 +500,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 37
+        "y": 54
       },
       "targets": [
         {
@@ -375,7 +539,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 37
+        "y": 54
       },
       "targets": [
         {
@@ -399,7 +563,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 62
       }
     },
     {
@@ -421,7 +585,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 46
+        "y": 63
       },
       "targets": [
         {
@@ -455,7 +619,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 46
+        "y": 63
       },
       "targets": [
         {
@@ -474,7 +638,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 71
       }
     },
     {
@@ -496,7 +660,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 55
+        "y": 72
       },
       "targets": [
         {
@@ -525,7 +689,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 55
+        "y": 72
       },
       "targets": [
         {
@@ -544,7 +708,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 80
       }
     },
     {
@@ -566,7 +730,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 64
+        "y": 81
       },
       "targets": [
         {
@@ -595,7 +759,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 64
+        "y": 81
       },
       "targets": [
         {
@@ -619,7 +783,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 72
+        "y": 89
       }
     },
     {
@@ -641,7 +805,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 73
+        "y": 90
       },
       "targets": [
         {
@@ -670,7 +834,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 73
+        "y": 90
       },
       "targets": [
         {
@@ -699,7 +863,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 81
+        "y": 98
       },
       "targets": [
         {
@@ -728,7 +892,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 81
+        "y": 98
       },
       "targets": [
         {

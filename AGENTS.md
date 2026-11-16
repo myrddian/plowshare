@@ -173,8 +173,15 @@ the relevant subsystem guide for requirements and current enforcement limits.
 
 **SQL must have a completion deadline.** Every request-serving database work unit
 must finish within one configurable budget, with a **2-second default ceiling**;
-normal operation should be substantially faster. Admission, connection/lock waits,
-all statements and result materialization share the remaining budget, not a fresh
+this is an outer failure boundary, not an acceptable query latency. **Individual
+request-serving queries must normally complete within 500 ms and must never exceed
+1 second**, including lock waits, execution and result materialization. Use the
+earlier of that per-query ceiling and the operation's remaining deadline; queries
+do not each receive a fresh second. Investigate repeated 500 ms breaches and treat
+any 1-second breach as a defect. Track duration distributions, threshold breaches
+and cancellations in Prometheus; averages alone hide slow queries. Admission,
+connection/lock waits, all statements and result materialization share the remaining
+budget, not a fresh
 timeout per query or retry. On expiry cancel database work, roll back its active
 transaction and surface failure without publishing late results or replaying a
 possibly committed mutation. Maintenance/migrations also need explicit bounded

@@ -63,8 +63,12 @@ source references. The home remains an authority ceiling; an optional conversati
 only narrows it. The agent tool resolves `conversation: "current"` from its run.
 `PassageIndex.inConversation` carries that selection into ranking and coverage SQL.
 Identical matching excerpts/passages (with whitespace normalized) group before
-pagination/source limits. Semantic entry ranking is exact to preserve that grouping;
-digest consumers retain their existing index policy. Each group exposes at most
+pagination/source limits. Semantic-only search reads reach counts without running
+BM25. Exact ranking omits the redundant global distance sort; grouping numbers
+occurrences once and aggregates only the representative and at most twenty
+references rather than building unbounded duplicate arrays. Semantic entry ranking
+is exact to preserve that grouping; digest consumers retain their existing index
+policy. Each group exposes at most
 twenty authorized source references. Snapshot refresh rechecks all retained revisions
 in a batch and suppresses changed/moved/hidden references without filling later slots.
 New delegated research inputs carry explicit supplied-context spans and declared

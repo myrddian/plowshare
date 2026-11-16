@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -51,6 +52,7 @@ class ConversationSearchTest {
         .thenReturn(new PassageIndex.Query(new float[768], null));
     when(index.coverage(HOME, "entry")).thenReturn(new PassageIndex.Coverage(2, 2, 2, 0, 0));
     when(index.generation()).thenReturn("fixture");
+    when(entries.searchReach(any(), any())).thenReturn(new LogSearch.Reach(2, 0, 0));
   }
 
   @Test
@@ -152,7 +154,9 @@ class ConversationSearchTest {
         .thenReturn(List.of());
     var result = search.search(HOME, "question", 0, 10, "semantic", null, "cnv_a");
     verify(index, times(2)).inConversation("cnv_a");
-    verify(entries).search(HOME, "question", 0, 1, "cnv_a");
+    verify(entries).searchReach(HOME, "cnv_a");
+    verify(entries, never()).search(any(), anyString(), anyInt(), anyInt(), anyString());
+    verify(entries, never()).search(any(), anyString(), anyInt(), anyInt());
     assertThrows(
         ValidationException.class,
         () ->

@@ -202,6 +202,7 @@ public final class ConversationSearch implements UsageAware {
     if (owner == null || owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED)
       owner = usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY);
     String mode = mode(requested);
+    Objects.requireNonNull(question, "question");
     EntryStore.validateConversation(conversation);
     if (skip < 0 || most < 1 || most > 200) throw new ValidationException("Invalid search window");
     if (mode.equals("lexical")) {
@@ -252,9 +253,12 @@ public final class ConversationSearch implements UsageAware {
           "Semantic/hybrid pages after offset 0 need the first page's snapshot");
     var scoped = index.inConversation(conversation);
     if (includeInputs) scoped = scoped.includingInputs(true);
+    // Semantic ranking needs the authorized reach, not BM25 statistics, snippets or groups.
+    // Keep that work for hybrid searches, which actually consume the lexical candidates.
     var lexical =
-        lexical(
-            home, question, 0, mode.equals("hybrid") ? CANDIDATES : 1, conversation, includeInputs);
+        mode.equals("hybrid")
+            ? lexical(home, question, 0, CANDIDATES, conversation, includeInputs)
+            : new LogSearch(List.of(), 0, entries.searchReach(home, conversation));
     List<PassageIndex.Match> semantic = List.of();
     String fallback = null;
     try (var query = scoped.capture(question, owner, home)) {

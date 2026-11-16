@@ -7,14 +7,28 @@ import com.fasterxml.jackson.databind.ObjectReader;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.InputProvenanceCodec;
-import io.aeyer.plowshare.server.archive.PassageIndex.*;
-import io.aeyer.plowshare.server.embedding.*;
+import io.aeyer.plowshare.server.archive.PassageIndex.Coverage;
+import io.aeyer.plowshare.server.archive.PassageIndex.Match;
+import io.aeyer.plowshare.server.archive.PassageIndex.Occurrence;
+import io.aeyer.plowshare.server.archive.PassageIndex.PassageText;
+import io.aeyer.plowshare.server.archive.PassageIndex.Source;
+import io.aeyer.plowshare.server.embedding.EmbeddingIndexPlan;
+import io.aeyer.plowshare.server.embedding.EmbeddingProfile;
+import io.aeyer.plowshare.server.embedding.EmbeddingQuery;
+import io.aeyer.plowshare.server.embedding.EmbeddingSearchPolicy;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import org.springframework.jdbc.core.ArgumentPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -257,12 +271,7 @@ public final class JdbcPassageRepository implements PassageRepository {
   public boolean publishText(
       Source expected, List<String> texts, boolean complete, String generation) {
     return publishBatch(
-        expected,
-        texts,
-        java.util.Collections.nCopies(texts.size(), null),
-        complete,
-        generation,
-        false);
+        expected, texts, Collections.nCopies(texts.size(), null), complete, generation, false);
   }
 
   @Override
@@ -538,8 +547,9 @@ public final class JdbcPassageRepository implements PassageRepository {
     args.add(generation);
     args.add(ProjectIds.toRead(jdbc, home));
     boolean exact = plan.exact() || type.equals("entry");
-    if (exact) inner += " ORDER BY distance";
-    else {
+    // Exact ranking orders by source/distance below. Sorting the entire passage corpus by
+    // distance first serves no limit and adds a second full sort of the passage text.
+    if (!exact) {
       inner += " ORDER BY " + plan.candidateDistance(column);
       args.add(query.vectorText());
     }
@@ -564,7 +574,11 @@ public final class JdbcPassageRepository implements PassageRepository {
         args.toArray());
   }
 
-  /** Duplicate passages collapse before the source limit, with bounded authorized references. */
+  /**
+   * Duplicate passages collapse before the source limit, with bounded authorized references. Number
+   * occurrences once so aggregates retain only the representative and twenty references, rather
+   * than constructing full arrays of every duplicate's text and metadata then slicing them.
+   */
   private static String groupMatches(String best, boolean group) {
     if (!group)
       return "SELECT best.*,1 AS source_count,jsonb_build_array(jsonb_build_object('id',source_id,'revision',source_hash))::text AS sources FROM ("
@@ -572,15 +586,18 @@ public final class JdbcPassageRepository implements PassageRepository {
           + ") best ORDER BY similarity DESC,source_id LIMIT ?";
     return "WITH best AS ("
         + best
-        + "), grouped AS (SELECT "
-        + "(array_agg(source_id ORDER BY similarity DESC,source_id,position))[1] AS source_id,"
-        + "(array_agg(position ORDER BY similarity DESC,source_id,position))[1] AS position,"
-        + "(array_agg(passage ORDER BY similarity DESC,source_id,position))[1] AS passage,"
-        + "(array_agg(source_hash ORDER BY similarity DESC,source_id,position))[1] AS source_hash,"
+        + "), ordered AS (SELECT best.*,"
+        + "regexp_replace(btrim(passage),'\\s+',' ','g') AS passage_key,"
+        + "row_number() OVER (PARTITION BY regexp_replace(btrim(passage),'\\s+',' ','g')"
+        + " ORDER BY similarity DESC,source_id,position) AS occurrence FROM best), grouped AS (SELECT "
+        + "max(source_id) FILTER(WHERE occurrence=1) AS source_id,"
+        + "max(position) FILTER(WHERE occurrence=1) AS position,"
+        + "max(passage) FILTER(WHERE occurrence=1) AS passage,"
+        + "max(source_hash) FILTER(WHERE occurrence=1) AS source_hash,"
         + "max(similarity) AS similarity,count(*)::integer AS source_count,"
-        + "to_jsonb((array_agg(jsonb_build_object('id',source_id,'revision',source_hash)"
-        + " ORDER BY similarity DESC,source_id,position))[1:20])::text AS sources"
-        + " FROM best GROUP BY regexp_replace(btrim(passage),'\\s+',' ','g'))"
+        + "(jsonb_agg(jsonb_build_object('id',source_id,'revision',source_hash)"
+        + " ORDER BY occurrence) FILTER(WHERE occurrence<=20))::text AS sources"
+        + " FROM ordered GROUP BY passage_key)"
         + " SELECT * FROM grouped ORDER BY similarity DESC,source_id LIMIT ?";
   }
 
@@ -606,7 +623,7 @@ public final class JdbcPassageRepository implements PassageRepository {
       String type,
       String generation,
       ReadScope scope,
-      java.util.Optional<EmbeddingProfile> profile) {
+      Optional<EmbeddingProfile> profile) {
     sourceType(type);
     String join =
         type.equals("entry")

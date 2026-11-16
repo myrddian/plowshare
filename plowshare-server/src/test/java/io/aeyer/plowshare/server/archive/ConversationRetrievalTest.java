@@ -26,6 +26,8 @@ import java.util.stream.IntStream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.datasource.*;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -587,6 +589,110 @@ class ConversationRetrievalTest {
       assertEquals(selected + ":1", matches.getFirst().id());
       assertEquals(1, matches.getFirst().sources().size());
     }
+  }
+
+  @Test
+  void typedAndLegacyGroupingRetainOnlyTwentyOrderedReferencesWithoutLosingGroups() {
+    for (int i = 0; i < 32; i++) add(project, "orchard repeated evidence");
+    String distinct = add(project, "orchard distinct evidence");
+    fill();
+    var space =
+        new JdbcEmbeddingSpaceRepository(jdbc)
+            .register(
+                new EmbeddingSpace.Definition(
+                    "grouping-fixture",
+                    "v1",
+                    768,
+                    "query: ",
+                    "document: ",
+                    "mean",
+                    EmbeddingSpace.Normalization.NONE,
+                    "none"));
+    jdbc.update(
+        "UPDATE retrieval_passages SET prose_space_id=?,prose_embedding=embedding,prose_source_revision=embedding_source_revision",
+        space.id());
+    var profile =
+        new EmbeddingProfile(
+            EmbeddingSlot.PROSE,
+            space,
+            new EmbeddingSearchPolicy(
+                EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE),
+            1);
+    var repository = new JdbcPassageRepository(jdbc, transactions);
+    var legacy =
+        repository.rank(
+            project,
+            "entry",
+            vector("orchard"),
+            2,
+            index.generation(),
+            PassageRepository.ReadScope.UNRESTRICTED);
+    var typed =
+        repository.rank(
+            project,
+            "entry",
+            new EmbeddingQuery(profile, vector("orchard")),
+            2,
+            index.generation(),
+            PassageRepository.ReadScope.UNRESTRICTED);
+    assertEquals(legacy, typed);
+    assertEquals(2, typed.size());
+    var repeated =
+        typed.stream().filter(match -> match.sourceCount() > 1).findFirst().orElseThrow();
+    assertEquals(32, repeated.sourceCount());
+    assertEquals(20, repeated.sources().size());
+    assertEquals(
+        repeated.sources().stream().map(PassageIndex.Occurrence::id).sorted().toList(),
+        repeated.sources().stream().map(PassageIndex.Occurrence::id).toList());
+    assertTrue(typed.stream().anyMatch(match -> match.id().equals(distinct + ":1")));
+  }
+
+  @Test
+  void passageDeadlineCancelsActualSqlAndRollsBackTheEnclosingTransaction() {
+    String id = add(project, "orchard evidence");
+    fill();
+    Long original = ProjectIds.toRead(jdbc, project);
+    Long other = ProjectIds.toWrite(jdbc, Home.of("rollback-destination"));
+    // Inject slow SQL at the JDBC boundary; the repository still binds the parameters and owns
+    // its real driver timeout. This tests physical cancellation, not a caller future timing out.
+    var slow =
+        new JdbcTemplate(jdbc.getDataSource()) {
+          @Override
+          public <T> List<T> query(
+              String sql, PreparedStatementSetter setter, RowMapper<T> mapper) {
+            return super.query(
+                "WITH delayed AS MATERIALIZED (SELECT pg_sleep(5)) SELECT ranked.* FROM ("
+                    + sql
+                    + ") ranked CROSS JOIN delayed",
+                setter,
+                mapper);
+          }
+        };
+    var repository = new JdbcPassageRepository(slow, transactions);
+    var failure =
+        assertThrows(
+            ArchiveUnavailableException.class,
+            () ->
+                ArchiveUnavailableException.translating(
+                    "rank conversation passages",
+                    () ->
+                        transactions.inTransaction(
+                            () -> {
+                              jdbc.update(
+                                  "UPDATE conversations SET project_id=? WHERE id=?", other, id);
+                              return repository.rank(
+                                  Home.of("rollback-destination"),
+                                  "entry",
+                                  vector("orchard"),
+                                  1,
+                                  index.generation(),
+                                  PassageRepository.ReadScope.UNRESTRICTED);
+                            })));
+    assertTrue(failure.getMessage().contains("SQL was cancelled"), failure.getMessage());
+    assertEquals(
+        original,
+        jdbc.queryForObject("SELECT project_id FROM conversations WHERE id=?", Long.class, id));
+    assertEquals(1, search.search(project, "orchard", 0, 10, "semantic", null).total());
   }
 
   @Test
