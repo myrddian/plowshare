@@ -18,6 +18,7 @@ import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -36,6 +37,12 @@ class ConversationSearchTest {
 
   @BeforeEach
   void setup() {
+    when(entries.withinSearchScope(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              Supplier<Object> operation = invocation.getArgument(1);
+              return operation.get();
+            });
     when(entries.search(any(), anyString(), anyInt(), anyInt())).thenReturn(LogSearch.NONE);
     when(entries.search(any(), anyString(), anyInt(), anyInt(), anyString()))
         .thenReturn(LogSearch.NONE);
@@ -44,6 +51,27 @@ class ConversationSearchTest {
         .thenReturn(new PassageIndex.Query(new float[768], null));
     when(index.coverage(HOME, "entry")).thenReturn(new PassageIndex.Coverage(2, 2, 2, 0, 0));
     when(index.generation()).thenReturn("fixture");
+  }
+
+  @Test
+  void snapshotsCannotSwitchBetweenEvidenceAndFullInputs() {
+    when(index.rank(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+        .thenReturn(List.of());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
+    var first = search.search(HOME, "question", 0, 10, "semantic", null);
+    assertThrows(
+        ValidationException.class,
+        () ->
+            search.search(
+                HOME,
+                "question",
+                0,
+                10,
+                "semantic",
+                first.retrieval().snapshot(),
+                null,
+                null,
+                true));
   }
 
   @Test

@@ -9,6 +9,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.CompletionOutcome;
 import io.aeyer.plowshare.server.agents.EntryKind;
+import io.aeyer.plowshare.server.agents.InputProvenanceCodec;
 import io.aeyer.plowshare.server.agents.Invocation;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Speaker;
@@ -138,9 +139,9 @@ public final class EntryStore implements ConversationSearchRepository {
                                  invocation, produced_by, dispatch, model_specifier, model_pool,
                                  wire_model, completion, finish_reason, prompt_tokens,
                                  completion_tokens, reasoning_tokens, sent_at, fallback_reason,
-                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id, tool_observation)
+                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id, tool_observation, input_provenance)
             SELECT ?, COALESCE(MAX(ordinal), 0) + 1, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, CAST(? AS JSONB)
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, CAST(? AS JSONB), CAST(? AS JSONB)
               FROM entries
              WHERE conversation_id = ?
             RETURNING %s"""
@@ -902,7 +903,7 @@ public final class EntryStore implements ConversationSearchRepository {
          WHERE c.project_id IS NOT DISTINCT FROM p.project
            AND (p.conversation IS NULL OR c.id=p.conversation) /*information*/
       ), eligible AS MATERIALIZED (
-        SELECT e.role,e.ejected_at,e.search_length,e.text_search
+        SELECT e.role,e.ejected_at,coalesce(e.evidence_search_length,e.search_length) AS search_length,coalesce(e.evidence_text_search,e.text_search) AS text_search
           FROM entries e JOIN owners o ON o.id=e.conversation_id
       ), reach AS (
         SELECT count(*) FILTER(WHERE role IS NOT NULL AND search_length IS NOT NULL)::integer AS searched,
@@ -917,19 +918,19 @@ public final class EntryStore implements ConversationSearchRepository {
         SELECT term, count(*) FILTER(WHERE e.text_search @@ plainto_tsquery('simple',term)) AS df
           FROM terms CROSS JOIN eligible e WHERE e.role IS NOT NULL GROUP BY term
       ), scored AS MATERIALIZED (
-        SELECT e.conversation_id,e.ordinal,e.turn_ordinal,e.kind,e.content,e.superseded_by,
-               e.handle,e.recorded_at,md5(e.content) AS source_revision,length(e.content) AS source_length,
+        SELECT e.conversation_id,e.ordinal,e.turn_ordinal,e.kind,coalesce(e.evidence_content,e.content) AS content,e.superseded_by,
+               e.handle,e.recorded_at,e.input_provenance,conversation_source_revision(e.content,e.input_provenance) AS source_revision,length(e.content) AS source_length,
                (SELECT sum(
           ln(1+(c.n-f.df+0.5)/(f.df+0.5)) *
           (greatest(cardinality(t.positions),1)*2.2) /
-          (greatest(cardinality(t.positions),1)+1.2*(0.25+0.75*e.search_length/c.avgdl)))
-          FROM unnest(e.text_search) t JOIN frequencies f ON f.term=t.lexeme CROSS JOIN corpus c) AS rank
+          (greatest(cardinality(t.positions),1)+1.2*(0.25+0.75*coalesce(e.evidence_search_length,e.search_length)/c.avgdl)))
+          FROM unnest(coalesce(e.evidence_text_search,e.text_search)) t JOIN frequencies f ON f.term=t.lexeme CROSS JOIN corpus c) AS rank
           FROM entries e JOIN owners o ON o.id=e.conversation_id CROSS JOIN params p
          WHERE e.role IS NOT NULL AND e.content IS NOT NULL
-           AND e.text_search @@ p.query AND ts_rank_cd(e.text_search,p.query)>0
+           AND coalesce(e.evidence_text_search,e.text_search) @@ p.query AND ts_rank_cd(coalesce(e.evidence_text_search,e.text_search),p.query)>0
       ), excerpts AS MATERIALIZED (
         SELECT s.conversation_id,s.ordinal,s.turn_ordinal,s.kind,s.superseded_by,s.handle,
-               s.recorded_at,s.source_revision,s.source_length,s.rank,
+               s.recorded_at,s.input_provenance,s.source_revision,s.source_length,s.rank,
                left(ts_headline('english',s.content,p.query,
           'StartSel="[", StopSel="]", MaxWords=60, MinWords=25, MaxFragments=2'),4000) AS snippet
           FROM scored s CROSS JOIN params p WHERE s.rank>0
@@ -941,7 +942,7 @@ public final class EntryStore implements ConversationSearchRepository {
           to_jsonb((array_agg(jsonb_build_object(
             'conversationId',conversation_id,'ordinal',ordinal,'turnOrdinal',turn_ordinal,
             'kind',kind,'handle',handle,'recordedAt',recorded_at,'sourceRevision',source_revision,
-            'length',source_length,'supersededBy',superseded_by)
+            'length',source_length,'supersededBy',superseded_by,'inputProvenance',conversation_input_provenance_view(input_provenance))
             ORDER BY rank DESC,conversation_id,ordinal))[1:20])::text AS sources
           FROM keyed GROUP BY passage_key
       ), page AS (
@@ -958,6 +959,12 @@ public final class EntryStore implements ConversationSearchRepository {
         LEFT JOIN keyed e ON e.conversation_id || ':' || e.ordinal=page.id
        ORDER BY page.score DESC,page.representative_conversation,page.representative_turn,page.representative_ordinal
       """;
+
+  private static final String FULL_INPUT_SEARCH_SQL =
+      SEARCH_SQL
+          .replace("coalesce(e.evidence_content,e.content) AS content", "e.content")
+          .replace("coalesce(e.evidence_text_search,e.text_search)", "e.text_search")
+          .replace("coalesce(e.evidence_search_length,e.search_length)", "e.search_length");
 
   /*
    * ordinal < ? excludes the summary entry itself, which carries the reach as
@@ -1071,6 +1078,16 @@ public final class EntryStore implements ConversationSearchRepository {
 
   private Duration searchBudget = Duration.ofSeconds(2);
 
+  @Override
+  public <T> T withinSearchScope(Home home, Supplier<T> operation) {
+    return ReadDeadline.within(
+        searchBudget,
+        () ->
+            ArchiveUnavailableException.translating(
+                "resolve conversation search project",
+                () -> ProjectIds.withinReadSelection(jdbc, home, operation)));
+  }
+
   /** One finite SQL search budget; nested projection waits share its earlier deadline. */
   public EntryStore useSearchBudget(Duration budget) {
     if (budget == null
@@ -1120,7 +1137,7 @@ public final class EntryStore implements ConversationSearchRepository {
                 long remaining = deadline - System.nanoTime();
                 if (remaining <= 0) throw new ReadUnavailableException();
                 // pgJDBC owns cancellation of the active statement; expiry never returns late data.
-                int timeout = (int) Math.max(1, (remaining + 999_999_999L) / 1_000_000_000L);
+                int timeout = ReadDeadline.jdbcTimeoutSeconds(deadline);
                 int transactionTimeout = statement.getQueryTimeout();
                 statement.setQueryTimeout(
                     transactionTimeout > 0 ? Math.min(transactionTimeout, timeout) : timeout);
@@ -1166,14 +1183,28 @@ public final class EntryStore implements ConversationSearchRepository {
       String snapshot,
       UsageAttribution owner,
       String conversation) {
+    return searchView(home, question, skip, most, mode, snapshot, owner, conversation, false);
+  }
+
+  public LogSearchView searchView(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String mode,
+      String snapshot,
+      UsageAttribution owner,
+      String conversation,
+      boolean includeInputs) {
     validateConversation(conversation);
     if (mode == null && snapshot == null)
-      return LogSearchView.of(search(home, question, skip, most, conversation), skip, most);
+      return LogSearchView.of(
+          search(home, question, skip, most, conversation, includeInputs), skip, most);
     ConversationSearch.mode(mode);
     if (retrieval == null) throw new ValidationException("Semantic retrieval is not configured");
-    return owner == null
-        ? retrieval.get().search(home, question, skip, most, mode, snapshot, conversation)
-        : retrieval.get().search(home, question, skip, most, mode, snapshot, owner, conversation);
+    return retrieval
+        .get()
+        .search(home, question, skip, most, mode, snapshot, owner, conversation, includeInputs);
   }
 
   private final JdbcTemplate jdbc;
@@ -1448,6 +1479,7 @@ public final class EntryStore implements ConversationSearchRepository {
                           salients,
                           job,
                           ToolObservationCodec.write(entry.observation()),
+                          InputProvenanceCodec.write(entry.inputProvenance()),
                           conversation);
                   if (entry.observation() != null) {
                     artifacts.retain(written, job);
@@ -1793,7 +1825,7 @@ public final class EntryStore implements ConversationSearchRepository {
     String conversation = ConversationStore.named(conversationId);
     return io.aeyer.plowshare.server.agents.SkillContextLogs.read(
         jdbc.queryForObject(
-            "SELECT COALESCE(jsonb_agg(to_jsonb(e)-'text_search' ORDER BY turn_ordinal, ordinal), '[]'::jsonb)::text "
+            "SELECT COALESCE(jsonb_agg(to_jsonb(e)-ARRAY['text_search','search_length','job_id','tool_observation','evidence_content','evidence_text_search','evidence_search_length'] ORDER BY turn_ordinal, ordinal), '[]'::jsonb)::text "
                 + "FROM entries e WHERE conversation_id = ?",
             String.class,
             conversation));
@@ -2536,6 +2568,24 @@ public final class EntryStore implements ConversationSearchRepository {
 
   /** A conversation narrows the home; a missing or foreign identity never widens the search. */
   public LogSearch search(Home home, String question, int skip, int most, String conversation) {
+    return search(home, question, skip, most, conversation, false);
+  }
+
+  @Override
+  public LogSearch search(
+      Home home, String question, int skip, int most, String conversation, boolean includeInputs) {
+    return ReadDeadline.within(
+        searchBudget,
+        () -> {
+          ReadDeadline.check();
+          return withinSearchScope(
+              home,
+              () -> searchWithinDeadline(home, question, skip, most, conversation, includeInputs));
+        });
+  }
+
+  private LogSearch searchWithinDeadline(
+      Home home, String question, int skip, int most, String conversation, boolean includeInputs) {
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(question, "question");
     if (skip < 0 || most < 1 || most > 200)
@@ -2545,7 +2595,7 @@ public final class EntryStore implements ConversationSearchRepository {
         "search conversation evidence",
         () ->
             searchQuery(
-                SEARCH_SQL,
+                includeInputs ? FULL_INPUT_SEARCH_SQL : SEARCH_SQL,
                 rs -> {
                   if (!rs.next()) return LogSearch.NONE;
                   var reach =
@@ -2593,6 +2643,15 @@ public final class EntryStore implements ConversationSearchRepository {
       throw new ValidationException("Invalid conversation identity");
   }
 
+  private static LogSearch.InputContext searchInputContext(String json) throws SQLException {
+    if (json == null) return null;
+    try {
+      return SEARCH_SOURCES_IN.forType(LogSearch.InputContext.class).readValue(json);
+    } catch (JsonProcessingException invalid) {
+      throw new SQLException("Invalid search context provenance", invalid);
+    }
+  }
+
   private static LogSearch.Hit searchHit(ResultSet rs) throws SQLException {
     try {
       List<LogSearch.Source> sources = SEARCH_SOURCES_IN.readValue(rs.getString("sources"));
@@ -2631,7 +2690,7 @@ public final class EntryStore implements ConversationSearchRepository {
     var rows =
         searchQuery(
             "SELECT e.conversation_id,e.ordinal,e.turn_ordinal,e.kind,e.handle,"
-                + "e.recorded_at,length(e.content) AS length,e.superseded_by,md5(e.content) AS source_revision FROM entries e JOIN conversations c ON c.id=e.conversation_id"
+                + "e.recorded_at,conversation_input_provenance_view(e.input_provenance)::text AS input_provenance,length(e.content) AS length,e.superseded_by,conversation_source_revision(e.content,e.input_provenance) AS source_revision FROM entries e JOIN conversations c ON c.id=e.conversation_id"
                 + " WHERE c.project_id IS NOT DISTINCT FROM CAST(? AS bigint) /*information*/"
                 + " AND e.content IS NOT NULL AND e.role IS NOT NULL AND e.conversation_id || ':' || e.ordinal IN ("
                 + places
@@ -2647,7 +2706,8 @@ public final class EntryStore implements ConversationSearchRepository {
                         instant(rs, "recorded_at"),
                         rs.getString("source_revision"),
                         rs.getInt("length"),
-                        rs.getObject("superseded_by", Integer.class))),
+                        rs.getObject("superseded_by", Integer.class),
+                        searchInputContext(rs.getString("input_provenance")))),
             args.toArray());
     var hashes = new HashMap<String, String>();
     expected.forEach(source -> hashes.put(source.id(), source.sourceRevision()));

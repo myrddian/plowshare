@@ -166,6 +166,37 @@ available tool-result handles. `total` counts groups. Lexical `sourceCount` coun
 matching occurrences; semantic snapshots report the retained references that were
 revalidated, and mark coverage incomplete when the reference list is capped.
 
+Delegated research now separates task instructions from explicitly supplied context.
+Default conversation search excludes that context from lexical statistics and
+matching, and removes its semantic passages before ranking and candidate limits.
+The complete input remains in the trajectory. This selection does not hide first
+messages, harness deliveries or generated answers as a class. Historical inputs
+without explicit provenance remain searchable and unclassified; text patterns are
+not sufficient evidence for an automatic backfill.
+
+Set `includeInputs: true` to search the full recorded inputs when debugging. Repeat
+that selection on every snapshot page; a snapshot cannot switch selections. Each
+source's optional `inputProvenance` identifies the supplied span using zero-based,
+end-exclusive Unicode code-point offsets. Its `sources` contains at most one declared
+evidence reference and `sourceCount` reports the full reference count retained with
+the input. These references are navigation hints, not access grants or independent
+corroboration. Read original sources through their authorized owning APIs.
+
+```json
+{"question":"capacity failure","mode":"hybrid","includeInputs":true}
+```
+
+Conversation search uses `plowshare.retrieval.search-budget` (default `2s`, positive
+and at most `1m`). The operation inherits an earlier cache/admission deadline; its
+lexical, passage, coverage and source-refresh SQL share the remaining budget rather
+than receiving a new allowance per query. Project selection is resolved once under that
+deadline and reused within the operation, independently of current authority checks.
+JDBC cancellation uses whole seconds,
+rounded down; a new statement is refused if less than one cancellable second remains.
+Expiry is unavailable, never an empty successful result or permission to replay work.
+Query embedding/provider work retains its own configured finite transport budgets;
+late results are withheld and cannot start another SQL stage after search expiry.
+
 Use `mode: "semantic"` for meaning-based retrieval or `mode: "hybrid"` (the agent
 tool's default) to combine BM25 and semantic rankings. Semantic/hybrid pagination
 requires the first page's snapshot and the same conversation selection. It never

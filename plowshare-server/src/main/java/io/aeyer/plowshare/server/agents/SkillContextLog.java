@@ -62,8 +62,14 @@ public record SkillContextLog(List<Entry> entries) {
       String speaker,
       @JsonProperty("speaker_name") String speakerName,
       String outcome,
-      java.util.Map<String, String> salients) {
+      java.util.Map<String, String> salients,
+      @JsonProperty("input_provenance") InputProvenance inputProvenance) {
     public Entry {
+      if (inputProvenance != null) {
+        if (!kind.equals("utterance"))
+          throw new IllegalArgumentException("Only inputs have context provenance");
+        if (content != null) inputProvenance.validate(content);
+      }
       InvocationValues.identity(conversationId);
       if (ordinal < 1 || turnOrdinal < 1)
         throw new IllegalArgumentException("invalid skill context ordinal");

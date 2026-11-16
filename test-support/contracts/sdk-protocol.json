@@ -1410,286 +1410,286 @@
         "$ref": "#/$defs/shape649"
       },
       "conversation.turns": {
-        "$ref": "#/$defs/shape722"
+        "$ref": "#/$defs/shape726"
       },
       "document.ask": {
         "$ref": "#/$defs/shape563"
       },
       "document.chunk": {
-        "$ref": "#/$defs/shape724"
+        "$ref": "#/$defs/shape728"
       },
       "document.citations": {
-        "$ref": "#/$defs/shape727"
+        "$ref": "#/$defs/shape731"
       },
       "document.detail": {
-        "$ref": "#/$defs/shape730"
-      },
-      "document.list": {
         "$ref": "#/$defs/shape734"
       },
+      "document.list": {
+        "$ref": "#/$defs/shape738"
+      },
       "document.rank": {
-        "$ref": "#/$defs/shape737"
+        "$ref": "#/$defs/shape741"
       },
       "document.retrieve": {
-        "$ref": "#/$defs/shape740"
+        "$ref": "#/$defs/shape744"
       },
       "document.search": {
-        "$ref": "#/$defs/shape743"
+        "$ref": "#/$defs/shape747"
       },
       "document.stance": {
-        "$ref": "#/$defs/shape746"
+        "$ref": "#/$defs/shape750"
       },
       "event.fire": {
-        "$ref": "#/$defs/shape747"
+        "$ref": "#/$defs/shape751"
       },
       "filestore.list": {
-        "$ref": "#/$defs/shape749"
+        "$ref": "#/$defs/shape753"
       },
       "firing.list": {
-        "$ref": "#/$defs/shape747"
+        "$ref": "#/$defs/shape751"
       },
       "inbox.list": {
-        "$ref": "#/$defs/shape752"
+        "$ref": "#/$defs/shape756"
       },
       "inbox.publish": {
         "$ref": "#/$defs/shape704"
       },
       "inbox.read": {
-        "$ref": "#/$defs/shape755"
+        "$ref": "#/$defs/shape759"
       },
       "inbox.receipt": {
-        "$ref": "#/$defs/shape756"
+        "$ref": "#/$defs/shape760"
       },
       "information.acquire": {
-        "$ref": "#/$defs/shape757"
+        "$ref": "#/$defs/shape761"
       },
       "information.acquisitions": {
-        "$ref": "#/$defs/shape769"
+        "$ref": "#/$defs/shape773"
       },
       "information.allowance": {
-        "$ref": "#/$defs/shape770"
+        "$ref": "#/$defs/shape774"
       },
       "information.ask": {
-        "$ref": "#/$defs/shape771"
-      },
-      "information.await": {
-        "$ref": "#/$defs/shape772"
-      },
-      "information.content.get": {
         "$ref": "#/$defs/shape775"
       },
+      "information.await": {
+        "$ref": "#/$defs/shape776"
+      },
+      "information.content.get": {
+        "$ref": "#/$defs/shape779"
+      },
       "information.content.revise": {
-        "$ref": "#/$defs/shape781"
+        "$ref": "#/$defs/shape785"
       },
       "information.delete": {
-        "$ref": "#/$defs/shape782"
+        "$ref": "#/$defs/shape786"
       },
       "information.discovery.facets": {
-        "$ref": "#/$defs/shape783"
+        "$ref": "#/$defs/shape787"
       },
       "information.discovery.list": {
-        "$ref": "#/$defs/shape786"
+        "$ref": "#/$defs/shape790"
       },
       "information.discovery.read": {
-        "$ref": "#/$defs/shape793"
+        "$ref": "#/$defs/shape797"
       },
       "information.discovery.scopes": {
-        "$ref": "#/$defs/shape795"
+        "$ref": "#/$defs/shape799"
       },
       "information.discovery.search": {
-        "$ref": "#/$defs/shape786"
+        "$ref": "#/$defs/shape790"
       },
       "information.documents.facets": {
-        "$ref": "#/$defs/shape798"
+        "$ref": "#/$defs/shape802"
       },
       "information.documents.get": {
-        "$ref": "#/$defs/shape806"
+        "$ref": "#/$defs/shape810"
       },
       "information.documents.list": {
-        "$ref": "#/$defs/shape816"
+        "$ref": "#/$defs/shape820"
       },
       "information.events": {
-        "$ref": "#/$defs/shape818"
-      },
-      "information.evidence.read": {
-        "$ref": "#/$defs/shape821"
-      },
-      "information.evidence.record": {
         "$ref": "#/$defs/shape822"
       },
+      "information.evidence.read": {
+        "$ref": "#/$defs/shape825"
+      },
+      "information.evidence.record": {
+        "$ref": "#/$defs/shape826"
+      },
       "information.exclude": {
-        "$ref": "#/$defs/shape782"
+        "$ref": "#/$defs/shape786"
       },
       "information.facets": {
-        "$ref": "#/$defs/shape798"
+        "$ref": "#/$defs/shape802"
       },
       "information.finalise": {
-        "$ref": "#/$defs/shape823"
+        "$ref": "#/$defs/shape827"
       },
       "information.interchange.capabilities": {
-        "$ref": "#/$defs/shape824"
+        "$ref": "#/$defs/shape828"
       },
       "information.interchange.export": {
         "$ref": "#/$defs/shape205"
       },
       "information.interchange.import": {
-        "$ref": "#/$defs/shape828"
-      },
-      "information.interchange.origin": {
-        "$ref": "#/$defs/shape831"
-      },
-      "information.interchange.readable": {
         "$ref": "#/$defs/shape832"
       },
-      "information.inventory": {
+      "information.interchange.origin": {
+        "$ref": "#/$defs/shape835"
+      },
+      "information.interchange.readable": {
         "$ref": "#/$defs/shape836"
+      },
+      "information.inventory": {
+        "$ref": "#/$defs/shape840"
       },
       "information.link": {
-        "$ref": "#/$defs/shape770"
+        "$ref": "#/$defs/shape774"
       },
       "information.list": {
-        "$ref": "#/$defs/shape836"
+        "$ref": "#/$defs/shape840"
       },
       "information.migration.adopt": {
-        "$ref": "#/$defs/shape861"
+        "$ref": "#/$defs/shape865"
       },
       "information.migration.inspect": {
-        "$ref": "#/$defs/shape862"
+        "$ref": "#/$defs/shape866"
       },
       "information.migration.list": {
-        "$ref": "#/$defs/shape872"
+        "$ref": "#/$defs/shape876"
       },
       "information.migration.release": {
-        "$ref": "#/$defs/shape877"
+        "$ref": "#/$defs/shape881"
       },
       "information.navigation.capabilities": {
-        "$ref": "#/$defs/shape878"
+        "$ref": "#/$defs/shape882"
       },
       "information.outline": {
-        "$ref": "#/$defs/shape880"
+        "$ref": "#/$defs/shape884"
       },
       "information.policy.get": {
-        "$ref": "#/$defs/shape890"
+        "$ref": "#/$defs/shape894"
       },
       "information.policy.set": {
-        "$ref": "#/$defs/shape890"
+        "$ref": "#/$defs/shape894"
       },
       "information.rank": {
-        "$ref": "#/$defs/shape737"
+        "$ref": "#/$defs/shape741"
       },
       "information.read": {
-        "$ref": "#/$defs/shape793"
+        "$ref": "#/$defs/shape797"
       },
       "information.rebuild": {
-        "$ref": "#/$defs/shape891"
+        "$ref": "#/$defs/shape895"
       },
       "information.record.report": {
-        "$ref": "#/$defs/shape781"
+        "$ref": "#/$defs/shape785"
       },
       "information.refresh": {
-        "$ref": "#/$defs/shape757"
+        "$ref": "#/$defs/shape761"
       },
       "information.relationships.create": {
-        "$ref": "#/$defs/shape892"
-      },
-      "information.relationships.list": {
-        "$ref": "#/$defs/shape893"
-      },
-      "information.relationships.remove": {
         "$ref": "#/$defs/shape896"
       },
-      "information.replace": {
-        "$ref": "#/$defs/shape781"
-      },
-      "information.restore": {
-        "$ref": "#/$defs/shape782"
-      },
-      "information.retry": {
-        "$ref": "#/$defs/shape891"
-      },
-      "information.revise": {
-        "$ref": "#/$defs/shape781"
-      },
-      "information.search": {
+      "information.relationships.list": {
         "$ref": "#/$defs/shape897"
       },
+      "information.relationships.remove": {
+        "$ref": "#/$defs/shape900"
+      },
+      "information.replace": {
+        "$ref": "#/$defs/shape785"
+      },
+      "information.restore": {
+        "$ref": "#/$defs/shape786"
+      },
+      "information.retry": {
+        "$ref": "#/$defs/shape895"
+      },
+      "information.revise": {
+        "$ref": "#/$defs/shape785"
+      },
+      "information.search": {
+        "$ref": "#/$defs/shape901"
+      },
       "information.share": {
-        "$ref": "#/$defs/shape770"
+        "$ref": "#/$defs/shape774"
       },
       "information.status": {
-        "$ref": "#/$defs/shape906"
+        "$ref": "#/$defs/shape910"
       },
       "information.symbols": {
-        "$ref": "#/$defs/shape907"
+        "$ref": "#/$defs/shape911"
       },
       "information.tags": {
-        "$ref": "#/$defs/shape770"
+        "$ref": "#/$defs/shape774"
       },
       "information.tags.groups": {
-        "$ref": "#/$defs/shape770"
+        "$ref": "#/$defs/shape774"
       },
       "information.tags.replace": {
-        "$ref": "#/$defs/shape770"
+        "$ref": "#/$defs/shape774"
       },
       "information.types.activate": {
-        "$ref": "#/$defs/shape911"
+        "$ref": "#/$defs/shape915"
       },
       "information.types.capabilities": {
-        "$ref": "#/$defs/shape914"
+        "$ref": "#/$defs/shape918"
       },
       "information.types.deprecate": {
-        "$ref": "#/$defs/shape911"
+        "$ref": "#/$defs/shape915"
       },
       "information.types.get": {
         "$ref": "#/$defs/shape210"
       },
       "information.types.list": {
-        "$ref": "#/$defs/shape916"
+        "$ref": "#/$defs/shape920"
       },
       "information.types.validate": {
-        "$ref": "#/$defs/shape918"
+        "$ref": "#/$defs/shape922"
       },
       "information.types.version.create": {
-        "$ref": "#/$defs/shape911"
+        "$ref": "#/$defs/shape915"
       },
       "information.unexclude": {
-        "$ref": "#/$defs/shape782"
+        "$ref": "#/$defs/shape786"
       },
       "information.unlink": {
-        "$ref": "#/$defs/shape770"
+        "$ref": "#/$defs/shape774"
       },
       "information.unshare": {
-        "$ref": "#/$defs/shape770"
+        "$ref": "#/$defs/shape774"
       },
       "information.upload": {
-        "$ref": "#/$defs/shape781"
+        "$ref": "#/$defs/shape785"
       },
       "information.views.delete": {
-        "$ref": "#/$defs/shape896"
+        "$ref": "#/$defs/shape900"
       },
       "information.views.get": {
-        "$ref": "#/$defs/shape925"
+        "$ref": "#/$defs/shape929"
       },
       "information.views.list": {
-        "$ref": "#/$defs/shape926"
+        "$ref": "#/$defs/shape930"
       },
       "information.views.save": {
-        "$ref": "#/$defs/shape925"
+        "$ref": "#/$defs/shape929"
       },
       "information.withdraw": {
-        "$ref": "#/$defs/shape782"
+        "$ref": "#/$defs/shape786"
       },
       "job.cancel": {
-        "$ref": "#/$defs/shape928"
+        "$ref": "#/$defs/shape932"
       },
       "job.limits": {
-        "$ref": "#/$defs/shape928"
+        "$ref": "#/$defs/shape932"
       },
       "job.list": {
-        "$ref": "#/$defs/shape935"
+        "$ref": "#/$defs/shape939"
       },
       "job.status": {
-        "$ref": "#/$defs/shape928"
+        "$ref": "#/$defs/shape932"
       },
       "job.stream": {
         "$ref": "#/$defs/shape704"
@@ -1698,103 +1698,103 @@
         "$ref": "#/$defs/shape563"
       },
       "memory.index": {
-        "$ref": "#/$defs/shape936"
+        "$ref": "#/$defs/shape940"
       },
       "memory.invalidate": {
-        "$ref": "#/$defs/shape938"
+        "$ref": "#/$defs/shape942"
       },
       "memory.navigate": {
-        "$ref": "#/$defs/shape943"
-      },
-      "memory.read": {
-        "$ref": "#/$defs/shape938"
-      },
-      "memory.recall": {
-        "$ref": "#/$defs/shape945"
-      },
-      "memory.reembed": {
         "$ref": "#/$defs/shape947"
       },
+      "memory.read": {
+        "$ref": "#/$defs/shape942"
+      },
+      "memory.recall": {
+        "$ref": "#/$defs/shape949"
+      },
+      "memory.reembed": {
+        "$ref": "#/$defs/shape951"
+      },
       "memory.write": {
-        "$ref": "#/$defs/shape948"
+        "$ref": "#/$defs/shape952"
       },
       "message.cancel": {
-        "$ref": "#/$defs/shape949"
+        "$ref": "#/$defs/shape953"
       },
       "message.deliveries": {
-        "$ref": "#/$defs/shape950"
+        "$ref": "#/$defs/shape954"
       },
       "message.delivery": {
-        "$ref": "#/$defs/shape949"
+        "$ref": "#/$defs/shape953"
       },
       "message.instance": {
-        "$ref": "#/$defs/shape952"
+        "$ref": "#/$defs/shape956"
       },
       "message.instance.archive": {
-        "$ref": "#/$defs/shape952"
+        "$ref": "#/$defs/shape956"
       },
       "message.instance.default": {
-        "$ref": "#/$defs/shape952"
+        "$ref": "#/$defs/shape956"
       },
       "message.instance.open": {
-        "$ref": "#/$defs/shape952"
+        "$ref": "#/$defs/shape956"
       },
       "message.instance.stop": {
-        "$ref": "#/$defs/shape952"
+        "$ref": "#/$defs/shape956"
       },
       "message.instances": {
-        "$ref": "#/$defs/shape957"
-      },
-      "orchestration.answer": {
-        "$ref": "#/$defs/shape959"
-      },
-      "orchestration.cancel": {
-        "$ref": "#/$defs/shape960"
-      },
-      "orchestration.caps": {
         "$ref": "#/$defs/shape961"
       },
-      "orchestration.definitions": {
+      "orchestration.answer": {
+        "$ref": "#/$defs/shape963"
+      },
+      "orchestration.cancel": {
         "$ref": "#/$defs/shape964"
       },
+      "orchestration.caps": {
+        "$ref": "#/$defs/shape965"
+      },
+      "orchestration.definitions": {
+        "$ref": "#/$defs/shape968"
+      },
       "orchestration.list": {
-        "$ref": "#/$defs/shape969"
-      },
-      "orchestration.receipt": {
-        "$ref": "#/$defs/shape972"
-      },
-      "orchestration.record": {
         "$ref": "#/$defs/shape973"
       },
-      "orchestration.repair": {
-        "$ref": "#/$defs/shape959"
-      },
-      "orchestration.resume": {
-        "$ref": "#/$defs/shape959"
-      },
-      "orchestration.start": {
+      "orchestration.receipt": {
         "$ref": "#/$defs/shape976"
       },
-      "orchestration.status": {
+      "orchestration.record": {
         "$ref": "#/$defs/shape977"
       },
+      "orchestration.repair": {
+        "$ref": "#/$defs/shape963"
+      },
+      "orchestration.resume": {
+        "$ref": "#/$defs/shape963"
+      },
+      "orchestration.start": {
+        "$ref": "#/$defs/shape980"
+      },
+      "orchestration.status": {
+        "$ref": "#/$defs/shape981"
+      },
       "proc.calls": {
-        "$ref": "#/$defs/shape991"
+        "$ref": "#/$defs/shape995"
       },
       "proc.inspect": {
-        "$ref": "#/$defs/shape997"
-      },
-      "proc.list": {
-        "$ref": "#/$defs/shape998"
-      },
-      "proc.queues": {
         "$ref": "#/$defs/shape1001"
       },
+      "proc.list": {
+        "$ref": "#/$defs/shape1002"
+      },
+      "proc.queues": {
+        "$ref": "#/$defs/shape1005"
+      },
       "proc.tools": {
-        "$ref": "#/$defs/shape1008"
+        "$ref": "#/$defs/shape1012"
       },
       "project.access": {
-        "$ref": "#/$defs/shape1009"
+        "$ref": "#/$defs/shape1013"
       },
       "project.attach": {
         "$ref": "#/$defs/shape588"
@@ -1812,16 +1812,16 @@
         "$ref": "#/$defs/shape588"
       },
       "project.list": {
-        "$ref": "#/$defs/shape1014"
+        "$ref": "#/$defs/shape1018"
       },
       "project.member.add": {
-        "$ref": "#/$defs/shape1015"
+        "$ref": "#/$defs/shape1019"
       },
       "project.member.remove": {
-        "$ref": "#/$defs/shape1015"
+        "$ref": "#/$defs/shape1019"
       },
       "project.member.role": {
-        "$ref": "#/$defs/shape1009"
+        "$ref": "#/$defs/shape1013"
       },
       "project.move": {
         "$ref": "#/$defs/shape44"
@@ -1833,175 +1833,175 @@
         "$ref": "#/$defs/shape588"
       },
       "proposal.list": {
-        "$ref": "#/$defs/shape1016"
+        "$ref": "#/$defs/shape1020"
       },
       "proposal.reconsider": {
-        "$ref": "#/$defs/shape1018"
+        "$ref": "#/$defs/shape1022"
       },
       "proposal.resolve": {
-        "$ref": "#/$defs/shape1019"
+        "$ref": "#/$defs/shape1023"
       },
       "provider.connection.change": {
-        "$ref": "#/$defs/shape1020"
+        "$ref": "#/$defs/shape1024"
       },
       "provider.connection.list": {
-        "$ref": "#/$defs/shape1038"
+        "$ref": "#/$defs/shape1042"
       },
       "provider.connection.receipt": {
-        "$ref": "#/$defs/shape1020"
+        "$ref": "#/$defs/shape1024"
       },
       "provider.connection.save": {
-        "$ref": "#/$defs/shape1020"
+        "$ref": "#/$defs/shape1024"
       },
       "provider.connection.status": {
-        "$ref": "#/$defs/shape1021"
+        "$ref": "#/$defs/shape1025"
       },
       "provider.credential.authorize": {
-        "$ref": "#/$defs/shape1039"
+        "$ref": "#/$defs/shape1043"
       },
       "provider.credential.put": {
-        "$ref": "#/$defs/shape1020"
+        "$ref": "#/$defs/shape1024"
       },
       "provider.credential.refresh": {
-        "$ref": "#/$defs/shape1020"
+        "$ref": "#/$defs/shape1024"
       },
       "provider.credential.rekey": {
-        "$ref": "#/$defs/shape1020"
+        "$ref": "#/$defs/shape1024"
       },
       "provider.credential.revoke": {
-        "$ref": "#/$defs/shape1020"
+        "$ref": "#/$defs/shape1024"
       },
       "provider.credential.status": {
-        "$ref": "#/$defs/shape1023"
+        "$ref": "#/$defs/shape1027"
       },
       "provider.deregister": {
         "$ref": "#/$defs/shape44"
       },
       "provider.list": {
-        "$ref": "#/$defs/shape1040"
-      },
-      "relay.ack": {
-        "$ref": "#/$defs/shape1043"
-      },
-      "relay.consume": {
         "$ref": "#/$defs/shape1044"
       },
+      "relay.ack": {
+        "$ref": "#/$defs/shape1047"
+      },
+      "relay.consume": {
+        "$ref": "#/$defs/shape1048"
+      },
       "relay.group.delete": {
-        "$ref": "#/$defs/shape1070"
+        "$ref": "#/$defs/shape1074"
       },
       "relay.group.inspect": {
-        "$ref": "#/$defs/shape1071"
+        "$ref": "#/$defs/shape1075"
       },
       "relay.log": {
-        "$ref": "#/$defs/shape1072"
+        "$ref": "#/$defs/shape1076"
       },
       "relay.operate": {
-        "$ref": "#/$defs/shape1088"
-      },
-      "relay.process": {
         "$ref": "#/$defs/shape1092"
       },
-      "relay.publish": {
-        "$ref": "#/$defs/shape1095"
-      },
-      "relay.topics": {
+      "relay.process": {
         "$ref": "#/$defs/shape1096"
       },
-      "retention.sweep": {
+      "relay.publish": {
         "$ref": "#/$defs/shape1099"
       },
-      "schedule.define": {
+      "relay.topics": {
         "$ref": "#/$defs/shape1100"
       },
+      "retention.sweep": {
+        "$ref": "#/$defs/shape1103"
+      },
+      "schedule.define": {
+        "$ref": "#/$defs/shape1104"
+      },
       "schedule.files": {
-        "$ref": "#/$defs/shape1101"
+        "$ref": "#/$defs/shape1105"
       },
       "schedule.forget": {
         "$ref": "#/$defs/shape44"
       },
       "schedule.list": {
-        "$ref": "#/$defs/shape1106"
+        "$ref": "#/$defs/shape1110"
       },
       "schedule.pause": {
         "$ref": "#/$defs/shape44"
       },
       "schedule.read": {
-        "$ref": "#/$defs/shape1107"
+        "$ref": "#/$defs/shape1111"
       },
       "schedule.save": {
-        "$ref": "#/$defs/shape1102"
+        "$ref": "#/$defs/shape1106"
       },
       "schedule.sync": {
-        "$ref": "#/$defs/shape1101"
+        "$ref": "#/$defs/shape1105"
       },
       "swarm.status": {
-        "$ref": "#/$defs/shape1109"
+        "$ref": "#/$defs/shape1113"
       },
       "swarm.types": {
-        "$ref": "#/$defs/shape1114"
-      },
-      "todos.read": {
-        "$ref": "#/$defs/shape989"
-      },
-      "tool.invocation.read": {
         "$ref": "#/$defs/shape1118"
       },
+      "todos.read": {
+        "$ref": "#/$defs/shape993"
+      },
+      "tool.invocation.read": {
+        "$ref": "#/$defs/shape1122"
+      },
       "tool.scope.connect": {
-        "$ref": "#/$defs/shape1133"
+        "$ref": "#/$defs/shape1137"
       },
       "tool.scope.disconnect": {
-        "$ref": "#/$defs/shape1134"
+        "$ref": "#/$defs/shape1138"
       },
       "tool.scope.host.change": {
-        "$ref": "#/$defs/shape1135"
+        "$ref": "#/$defs/shape1139"
       },
       "tool.scope.host.list": {
-        "$ref": "#/$defs/shape1140"
+        "$ref": "#/$defs/shape1144"
       },
       "tool.scope.host.receipt": {
-        "$ref": "#/$defs/shape1135"
+        "$ref": "#/$defs/shape1139"
       },
       "tool.scope.host.save": {
-        "$ref": "#/$defs/shape1135"
+        "$ref": "#/$defs/shape1139"
       },
       "tool.scope.host.status": {
-        "$ref": "#/$defs/shape1136"
+        "$ref": "#/$defs/shape1140"
       },
       "tool.scope.list": {
-        "$ref": "#/$defs/shape1141"
-      },
-      "tool.scope.worker.ack": {
-        "$ref": "#/$defs/shape1043"
-      },
-      "tool.scope.worker.consume": {
-        "$ref": "#/$defs/shape1044"
-      },
-      "tool.scope.worker.credential": {
-        "$ref": "#/$defs/shape1143"
-      },
-      "tool.scope.worker.publish": {
-        "$ref": "#/$defs/shape1095"
-      },
-      "tool.scope.worker.read": {
         "$ref": "#/$defs/shape1145"
       },
-      "tool.scope.worker.register": {
-        "$ref": "#/$defs/shape1146"
+      "tool.scope.worker.ack": {
+        "$ref": "#/$defs/shape1047"
       },
-      "tool.scope.worker.renew": {
-        "$ref": "#/$defs/shape1146"
+      "tool.scope.worker.consume": {
+        "$ref": "#/$defs/shape1048"
       },
-      "tool.scope.worker.status": {
+      "tool.scope.worker.credential": {
         "$ref": "#/$defs/shape1147"
       },
-      "trigger.define": {
+      "tool.scope.worker.publish": {
+        "$ref": "#/$defs/shape1099"
+      },
+      "tool.scope.worker.read": {
         "$ref": "#/$defs/shape1149"
+      },
+      "tool.scope.worker.register": {
+        "$ref": "#/$defs/shape1150"
+      },
+      "tool.scope.worker.renew": {
+        "$ref": "#/$defs/shape1150"
+      },
+      "tool.scope.worker.status": {
+        "$ref": "#/$defs/shape1151"
+      },
+      "trigger.define": {
+        "$ref": "#/$defs/shape1153"
       },
       "trigger.forget": {
         "$ref": "#/$defs/shape44"
       },
       "trigger.list": {
-        "$ref": "#/$defs/shape1150"
+        "$ref": "#/$defs/shape1154"
       },
       "trigger.pause": {
         "$ref": "#/$defs/shape44"
@@ -2010,13 +2010,13 @@
         "$ref": "#/$defs/shape526"
       },
       "union.begin": {
-        "$ref": "#/$defs/shape1151"
+        "$ref": "#/$defs/shape1155"
       },
       "union.conflict.list": {
-        "$ref": "#/$defs/shape1152"
+        "$ref": "#/$defs/shape1156"
       },
       "union.conflict.open": {
-        "$ref": "#/$defs/shape1155"
+        "$ref": "#/$defs/shape1159"
       },
       "union.conflict.resolve": {
         "$ref": "#/$defs/shape526"
@@ -2025,69 +2025,69 @@
         "$ref": "#/$defs/shape526"
       },
       "union.enable": {
-        "$ref": "#/$defs/shape1156"
+        "$ref": "#/$defs/shape1160"
       },
       "union.hidden": {
-        "$ref": "#/$defs/shape1157"
+        "$ref": "#/$defs/shape1161"
       },
       "union.ready": {
         "$ref": "#/$defs/shape526"
       },
       "union.status": {
-        "$ref": "#/$defs/shape1158"
+        "$ref": "#/$defs/shape1162"
       },
       "usage.agent": {
-        "$ref": "#/$defs/shape1161"
+        "$ref": "#/$defs/shape1165"
       },
       "usage.calls": {
-        "$ref": "#/$defs/shape1167"
+        "$ref": "#/$defs/shape1171"
       },
       "usage.conversation": {
-        "$ref": "#/$defs/shape1161"
+        "$ref": "#/$defs/shape1165"
       },
       "usage.models": {
-        "$ref": "#/$defs/shape1161"
+        "$ref": "#/$defs/shape1165"
       },
       "usage.orchestration": {
-        "$ref": "#/$defs/shape1161"
+        "$ref": "#/$defs/shape1165"
       },
       "usage.pools": {
-        "$ref": "#/$defs/shape1161"
+        "$ref": "#/$defs/shape1165"
       },
       "usage.project": {
-        "$ref": "#/$defs/shape1161"
+        "$ref": "#/$defs/shape1165"
       },
       "usage.run": {
-        "$ref": "#/$defs/shape1161"
+        "$ref": "#/$defs/shape1165"
       },
       "usage.subscribe": {
-        "$ref": "#/$defs/shape1177"
+        "$ref": "#/$defs/shape1181"
       },
       "usage.unsubscribe": {
         "$ref": "#/$defs/shape526"
       },
       "web.fetch": {
-        "$ref": "#/$defs/shape1178"
+        "$ref": "#/$defs/shape1182"
       },
       "web.search": {
-        "$ref": "#/$defs/shape1179"
+        "$ref": "#/$defs/shape1183"
       }
     },
     "pushes": {
-      "$ref": "#/$defs/shape1182"
+      "$ref": "#/$defs/shape1186"
     },
     "http": {
       "RelayBlobPublish": {
-        "$ref": "#/$defs/shape1214"
+        "$ref": "#/$defs/shape1218"
       },
       "RelayBlobRead": {
-        "$ref": "#/$defs/shape1215"
+        "$ref": "#/$defs/shape1219"
       },
       "RelayBlobPublished": {
-        "$ref": "#/$defs/shape1216"
+        "$ref": "#/$defs/shape1220"
       },
       "RelayBlobDescriptor": {
-        "$ref": "#/$defs/shape1051"
+        "$ref": "#/$defs/shape1055"
       }
     },
     "$defs": {
@@ -3671,6 +3671,9 @@
         "properties": {
           "conversation": {
             "$ref": "#/$defs/shape1"
+          },
+          "includeInputs": {
+            "$ref": "#/$defs/shape8"
           },
           "limit": {
             "$ref": "#/$defs/shape16"
@@ -14235,6 +14238,64 @@
         "additionalProperties": false,
         "title": "SearchEvidence"
       },
+      "shape721": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/shape1"
+          },
+          "revision": {
+            "$ref": "#/$defs/shape1"
+          }
+        },
+        "required": [
+          "id",
+          "revision"
+        ],
+        "additionalProperties": false,
+        "title": "InputReference"
+      },
+      "shape720": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/shape721"
+        }
+      },
+      "shape719": {
+        "type": "object",
+        "properties": {
+          "end": {
+            "$ref": "#/$defs/shape16"
+          },
+          "sourceCount": {
+            "$ref": "#/$defs/shape16"
+          },
+          "sources": {
+            "$ref": "#/$defs/shape720"
+          },
+          "start": {
+            "$ref": "#/$defs/shape16"
+          }
+        },
+        "required": [
+          "end",
+          "sourceCount",
+          "sources",
+          "start"
+        ],
+        "additionalProperties": false,
+        "title": "InputProvenance"
+      },
+      "shape718": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/shape44"
+          },
+          {
+            "$ref": "#/$defs/shape719"
+          }
+        ]
+      },
       "shape717": {
         "type": "object",
         "properties": {
@@ -14243,6 +14304,9 @@
           },
           "handle": {
             "$ref": "#/$defs/shape43"
+          },
+          "inputProvenance": {
+            "$ref": "#/$defs/shape718"
           },
           "kind": {
             "$ref": "#/$defs/shape1"
@@ -14350,7 +14414,7 @@
           "$ref": "#/$defs/shape714"
         }
       },
-      "shape718": {
+      "shape722": {
         "type": "object",
         "properties": {
           "ejected": {
@@ -14371,7 +14435,7 @@
         "additionalProperties": false,
         "title": "LogSearchReach"
       },
-      "shape721": {
+      "shape725": {
         "type": "object",
         "properties": {
           "eligible": {
@@ -14404,24 +14468,24 @@
         "additionalProperties": false,
         "title": "PassageCoverage"
       },
-      "shape720": {
+      "shape724": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape721"
+            "$ref": "#/$defs/shape725"
           }
         ]
       },
-      "shape719": {
+      "shape723": {
         "type": "object",
         "properties": {
           "complete": {
             "$ref": "#/$defs/shape8"
           },
           "coverage": {
-            "$ref": "#/$defs/shape720"
+            "$ref": "#/$defs/shape724"
           },
           "effectiveMode": {
             "$ref": "#/$defs/shape1"
@@ -14480,10 +14544,10 @@
             "$ref": "#/$defs/shape16"
           },
           "reach": {
-            "$ref": "#/$defs/shape718"
+            "$ref": "#/$defs/shape722"
           },
           "retrieval": {
-            "$ref": "#/$defs/shape719"
+            "$ref": "#/$defs/shape723"
           },
           "total": {
             "$ref": "#/$defs/shape16"
@@ -14499,7 +14563,7 @@
         "additionalProperties": false,
         "title": "LogSearchResponse"
       },
-      "shape723": {
+      "shape727": {
         "type": "object",
         "properties": {
           "answer": {
@@ -14528,13 +14592,13 @@
         "additionalProperties": false,
         "title": "TurnView"
       },
-      "shape722": {
+      "shape726": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape723"
+          "$ref": "#/$defs/shape727"
         }
       },
-      "shape726": {
+      "shape730": {
         "type": "object",
         "properties": {
           "id": {
@@ -14559,21 +14623,21 @@
         "additionalProperties": false,
         "title": "UnitView"
       },
-      "shape725": {
+      "shape729": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape726"
+            "$ref": "#/$defs/shape730"
           }
         ]
       },
-      "shape724": {
+      "shape728": {
         "type": "object",
         "properties": {
           "chapter": {
-            "$ref": "#/$defs/shape725"
+            "$ref": "#/$defs/shape729"
           },
           "chunkId": {
             "$ref": "#/$defs/shape1"
@@ -14594,7 +14658,7 @@
             "$ref": "#/$defs/shape43"
           },
           "section": {
-            "$ref": "#/$defs/shape725"
+            "$ref": "#/$defs/shape729"
           },
           "sourceName": {
             "$ref": "#/$defs/shape1"
@@ -14622,7 +14686,7 @@
         "additionalProperties": false,
         "title": "ChunkDetailResponse"
       },
-      "shape729": {
+      "shape733": {
         "type": "object",
         "properties": {
           "agent": {
@@ -14679,17 +14743,17 @@
         "additionalProperties": false,
         "title": "Citation"
       },
-      "shape728": {
+      "shape732": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape729"
+          "$ref": "#/$defs/shape733"
         }
       },
-      "shape727": {
+      "shape731": {
         "type": "object",
         "properties": {
           "citations": {
-            "$ref": "#/$defs/shape728"
+            "$ref": "#/$defs/shape732"
           },
           "limit": {
             "$ref": "#/$defs/shape16"
@@ -14706,20 +14770,20 @@
         "additionalProperties": false,
         "title": "CitationsResponse"
       },
-      "shape733": {
+      "shape737": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape726"
+          "$ref": "#/$defs/shape730"
         }
       },
-      "shape732": {
+      "shape736": {
         "type": "object",
         "properties": {
           "id": {
             "$ref": "#/$defs/shape1"
           },
           "sections": {
-            "$ref": "#/$defs/shape733"
+            "$ref": "#/$defs/shape737"
           },
           "summary": {
             "$ref": "#/$defs/shape43"
@@ -14741,20 +14805,20 @@
         "additionalProperties": false,
         "title": "DocumentChapter"
       },
-      "shape731": {
+      "shape735": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape732"
+          "$ref": "#/$defs/shape736"
         }
       },
-      "shape730": {
+      "shape734": {
         "type": "object",
         "properties": {
           "byteSize": {
             "$ref": "#/$defs/shape16"
           },
           "chapters": {
-            "$ref": "#/$defs/shape731"
+            "$ref": "#/$defs/shape735"
           },
           "documentId": {
             "$ref": "#/$defs/shape1"
@@ -14792,7 +14856,7 @@
         "additionalProperties": false,
         "title": "DocumentDetailResponse"
       },
-      "shape736": {
+      "shape740": {
         "type": "object",
         "properties": {
           "byteSize": {
@@ -14849,17 +14913,17 @@
         "additionalProperties": false,
         "title": "DocumentListEntry"
       },
-      "shape735": {
+      "shape739": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape736"
+          "$ref": "#/$defs/shape740"
         }
       },
-      "shape734": {
+      "shape738": {
         "type": "object",
         "properties": {
           "documents": {
-            "$ref": "#/$defs/shape735"
+            "$ref": "#/$defs/shape739"
           },
           "limit": {
             "$ref": "#/$defs/shape16"
@@ -14884,7 +14948,7 @@
         "additionalProperties": false,
         "title": "DocumentListResponse"
       },
-      "shape739": {
+      "shape743": {
         "type": "object",
         "properties": {
           "documentId": {
@@ -14917,17 +14981,17 @@
         "additionalProperties": false,
         "title": "RankedDocument"
       },
-      "shape738": {
+      "shape742": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape739"
+          "$ref": "#/$defs/shape743"
         }
       },
-      "shape737": {
+      "shape741": {
         "type": "object",
         "properties": {
           "documents": {
-            "$ref": "#/$defs/shape738"
+            "$ref": "#/$defs/shape742"
           },
           "limit": {
             "$ref": "#/$defs/shape16"
@@ -14952,11 +15016,11 @@
         "additionalProperties": false,
         "title": "DocumentRankingResponse"
       },
-      "shape742": {
+      "shape746": {
         "type": "object",
         "properties": {
           "chunk": {
-            "$ref": "#/$defs/shape724"
+            "$ref": "#/$defs/shape728"
           },
           "score": {
             "$ref": "#/$defs/shape16"
@@ -14969,20 +15033,20 @@
         "additionalProperties": false,
         "title": "RetrieveHit"
       },
-      "shape741": {
+      "shape745": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape742"
+          "$ref": "#/$defs/shape746"
         }
       },
-      "shape740": {
+      "shape744": {
         "type": "object",
         "properties": {
           "document": {
             "$ref": "#/$defs/shape43"
           },
           "hits": {
-            "$ref": "#/$defs/shape741"
+            "$ref": "#/$defs/shape745"
           },
           "limit": {
             "$ref": "#/$defs/shape16"
@@ -15000,7 +15064,7 @@
         "additionalProperties": false,
         "title": "RetrieveResponse"
       },
-      "shape745": {
+      "shape749": {
         "type": "object",
         "properties": {
           "chunkId": {
@@ -15045,17 +15109,17 @@
         "additionalProperties": false,
         "title": "DocumentSearchHit"
       },
-      "shape744": {
+      "shape748": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape745"
+          "$ref": "#/$defs/shape749"
         }
       },
-      "shape743": {
+      "shape747": {
         "type": "object",
         "properties": {
           "hits": {
-            "$ref": "#/$defs/shape744"
+            "$ref": "#/$defs/shape748"
           },
           "limit": {
             "$ref": "#/$defs/shape16"
@@ -15083,7 +15147,7 @@
         "additionalProperties": false,
         "title": "ObservedSearch"
       },
-      "shape746": {
+      "shape750": {
         "type": "object",
         "properties": {
           "basis": {
@@ -15112,7 +15176,7 @@
         "additionalProperties": false,
         "title": "DocumentStanceResponse"
       },
-      "shape748": {
+      "shape752": {
         "type": "object",
         "properties": {
           "arrivedAt": {
@@ -15181,13 +15245,13 @@
         "additionalProperties": false,
         "title": "FiringRecord"
       },
-      "shape747": {
+      "shape751": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape748"
+          "$ref": "#/$defs/shape752"
         }
       },
-      "shape751": {
+      "shape755": {
         "type": "object",
         "properties": {
           "alias": {
@@ -15204,17 +15268,17 @@
         "additionalProperties": false,
         "title": "FileStoreOption"
       },
-      "shape750": {
+      "shape754": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape751"
+          "$ref": "#/$defs/shape755"
         }
       },
-      "shape749": {
+      "shape753": {
         "type": "object",
         "properties": {
           "stores": {
-            "$ref": "#/$defs/shape750"
+            "$ref": "#/$defs/shape754"
           }
         },
         "required": [
@@ -15223,7 +15287,7 @@
         "additionalProperties": false,
         "title": "FileStoreCatalog"
       },
-      "shape754": {
+      "shape758": {
         "type": "object",
         "properties": {
           "about": {
@@ -15271,17 +15335,17 @@
         "additionalProperties": false,
         "title": "InboxItem"
       },
-      "shape753": {
+      "shape757": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape754"
+          "$ref": "#/$defs/shape758"
         }
       },
-      "shape752": {
+      "shape756": {
         "type": "object",
         "properties": {
           "items": {
-            "$ref": "#/$defs/shape753"
+            "$ref": "#/$defs/shape757"
           },
           "unread": {
             "$ref": "#/$defs/shape16"
@@ -15294,7 +15358,7 @@
         "additionalProperties": false,
         "title": "InboxPage"
       },
-      "shape755": {
+      "shape759": {
         "type": "object",
         "properties": {
           "marked": {
@@ -15311,7 +15375,7 @@
         "additionalProperties": false,
         "title": "InboxMarked"
       },
-      "shape756": {
+      "shape760": {
         "type": "object",
         "properties": {
           "found": {
@@ -15323,7 +15387,7 @@
         ],
         "additionalProperties": false
       },
-      "shape758": {
+      "shape762": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape145"
@@ -15333,7 +15397,7 @@
           }
         ]
       },
-      "shape762": {
+      "shape766": {
         "type": "object",
         "properties": {
           "added": {
@@ -15381,13 +15445,13 @@
         ],
         "additionalProperties": false
       },
-      "shape761": {
+      "shape765": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape762"
+          "$ref": "#/$defs/shape766"
         }
       },
-      "shape760": {
+      "shape764": {
         "type": "object",
         "properties": {
           "denied": {
@@ -15397,7 +15461,7 @@
             "$ref": "#/$defs/shape47"
           },
           "records": {
-            "$ref": "#/$defs/shape761"
+            "$ref": "#/$defs/shape765"
           }
         },
         "required": [
@@ -15408,51 +15472,51 @@
         "additionalProperties": false,
         "title": "InformationGate"
       },
-      "shape759": {
+      "shape763": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape760"
+            "$ref": "#/$defs/shape764"
           }
         ]
-      },
-      "shape764": {
-        "const": "queued"
-      },
-      "shape765": {
-        "const": "running"
-      },
-      "shape766": {
-        "const": "failed"
-      },
-      "shape767": {
-        "const": "blocked"
       },
       "shape768": {
+        "const": "queued"
+      },
+      "shape769": {
+        "const": "running"
+      },
+      "shape770": {
+        "const": "failed"
+      },
+      "shape771": {
+        "const": "blocked"
+      },
+      "shape772": {
         "const": "succeeded"
       },
-      "shape763": {
+      "shape767": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape764"
-          },
-          {
-            "$ref": "#/$defs/shape765"
-          },
-          {
-            "$ref": "#/$defs/shape766"
-          },
-          {
-            "$ref": "#/$defs/shape767"
-          },
-          {
             "$ref": "#/$defs/shape768"
+          },
+          {
+            "$ref": "#/$defs/shape769"
+          },
+          {
+            "$ref": "#/$defs/shape770"
+          },
+          {
+            "$ref": "#/$defs/shape771"
+          },
+          {
+            "$ref": "#/$defs/shape772"
           }
         ]
       },
-      "shape757": {
+      "shape761": {
         "type": "object",
         "properties": {
           "allowance_total": {
@@ -15462,7 +15526,7 @@
             "$ref": "#/$defs/shape16"
           },
           "corpus": {
-            "$ref": "#/$defs/shape758"
+            "$ref": "#/$defs/shape762"
           },
           "created_at": {
             "$ref": "#/$defs/shape1"
@@ -15474,10 +15538,10 @@
             "$ref": "#/$defs/shape1"
           },
           "post_gate": {
-            "$ref": "#/$defs/shape759"
+            "$ref": "#/$defs/shape763"
           },
           "pre_gate": {
-            "$ref": "#/$defs/shape759"
+            "$ref": "#/$defs/shape763"
           },
           "revision_id": {
             "$ref": "#/$defs/shape43"
@@ -15486,7 +15550,7 @@
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape763"
+            "$ref": "#/$defs/shape767"
           },
           "url": {
             "$ref": "#/$defs/shape1"
@@ -15499,13 +15563,13 @@
         "additionalProperties": false,
         "title": "InformationAcquisition"
       },
-      "shape769": {
+      "shape773": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape757"
+          "$ref": "#/$defs/shape761"
         }
       },
-      "shape770": {
+      "shape774": {
         "type": "object",
         "properties": {
           "changed": {
@@ -15518,7 +15582,7 @@
         "additionalProperties": false,
         "title": "ChangedInformation"
       },
-      "shape771": {
+      "shape775": {
         "type": "object",
         "properties": {
           "job": {
@@ -15535,7 +15599,7 @@
         "additionalProperties": false,
         "title": "InformationQuestion"
       },
-      "shape774": {
+      "shape778": {
         "type": "object",
         "properties": {
           "acquisition": {
@@ -15554,13 +15618,13 @@
         "additionalProperties": false,
         "title": "InformationAwaitOutcome"
       },
-      "shape773": {
+      "shape777": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape774"
+          "$ref": "#/$defs/shape778"
         }
       },
-      "shape772": {
+      "shape776": {
         "type": "object",
         "properties": {
           "complete": {
@@ -15570,7 +15634,7 @@
             "$ref": "#/$defs/shape16"
           },
           "outcomes": {
-            "$ref": "#/$defs/shape773"
+            "$ref": "#/$defs/shape777"
           },
           "pending": {
             "$ref": "#/$defs/shape16"
@@ -15593,23 +15657,23 @@
         "additionalProperties": false,
         "title": "InformationFence"
       },
-      "shape777": {
+      "shape781": {
         "const": "automatic"
       },
-      "shape778": {
+      "shape782": {
         "const": "explicit_only"
       },
-      "shape776": {
+      "shape780": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape777"
+            "$ref": "#/$defs/shape781"
           },
           {
-            "$ref": "#/$defs/shape778"
+            "$ref": "#/$defs/shape782"
           }
         ]
       },
-      "shape780": {
+      "shape784": {
         "type": "object",
         "properties": {
           "fingerprint": {
@@ -15634,13 +15698,13 @@
         "additionalProperties": false,
         "title": "InformationProjectionReuse"
       },
-      "shape779": {
+      "shape783": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape780"
+          "$ref": "#/$defs/shape784"
         }
       },
-      "shape775": {
+      "shape779": {
         "type": "object",
         "properties": {
           "authorisedStages": {
@@ -15650,10 +15714,10 @@
             "$ref": "#/$defs/shape209"
           },
           "processingPolicy": {
-            "$ref": "#/$defs/shape776"
+            "$ref": "#/$defs/shape780"
           },
           "reused": {
-            "$ref": "#/$defs/shape779"
+            "$ref": "#/$defs/shape783"
           },
           "revisedBy": {
             "$ref": "#/$defs/shape1"
@@ -15674,7 +15738,7 @@
         "additionalProperties": false,
         "title": "InformationContentView"
       },
-      "shape781": {
+      "shape785": {
         "type": "object",
         "properties": {
           "created": {
@@ -15695,7 +15759,7 @@
         "additionalProperties": false,
         "title": "InformationAdmission"
       },
-      "shape782": {
+      "shape786": {
         "type": "object",
         "properties": {
           "availability": {
@@ -15708,7 +15772,7 @@
         "additionalProperties": false,
         "title": "InformationAvailability"
       },
-      "shape785": {
+      "shape789": {
         "type": "object",
         "properties": {
           "count": {
@@ -15724,13 +15788,13 @@
         ],
         "additionalProperties": false
       },
-      "shape784": {
+      "shape788": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape785"
+          "$ref": "#/$defs/shape789"
         }
       },
-      "shape783": {
+      "shape787": {
         "type": "object",
         "properties": {
           "facet": {
@@ -15740,7 +15804,7 @@
             "$ref": "#/$defs/shape8"
           },
           "items": {
-            "$ref": "#/$defs/shape784"
+            "$ref": "#/$defs/shape788"
           },
           "nextCursor": {
             "$ref": "#/$defs/shape43"
@@ -15759,29 +15823,29 @@
         "additionalProperties": false,
         "title": "DiscoveryFacets"
       },
-      "shape790": {
+      "shape794": {
         "const": "draft"
       },
-      "shape791": {
+      "shape795": {
         "const": "final"
       },
-      "shape792": {
+      "shape796": {
         "const": "superseded"
       },
-      "shape789": {
+      "shape793": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape790"
+            "$ref": "#/$defs/shape794"
           },
           {
-            "$ref": "#/$defs/shape791"
+            "$ref": "#/$defs/shape795"
           },
           {
-            "$ref": "#/$defs/shape792"
+            "$ref": "#/$defs/shape796"
           }
         ]
       },
-      "shape788": {
+      "shape792": {
         "type": "object",
         "properties": {
           "autoTag": {
@@ -15803,7 +15867,7 @@
             "$ref": "#/$defs/shape1"
           },
           "reportStatus": {
-            "$ref": "#/$defs/shape789"
+            "$ref": "#/$defs/shape793"
           },
           "resource": {
             "$ref": "#/$defs/shape1"
@@ -15842,20 +15906,20 @@
         "additionalProperties": false,
         "title": "DiscoveryItem"
       },
-      "shape787": {
+      "shape791": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape788"
+          "$ref": "#/$defs/shape792"
         }
       },
-      "shape786": {
+      "shape790": {
         "type": "object",
         "properties": {
           "hasMore": {
             "$ref": "#/$defs/shape8"
           },
           "items": {
-            "$ref": "#/$defs/shape787"
+            "$ref": "#/$defs/shape791"
           },
           "nextCursor": {
             "$ref": "#/$defs/shape43"
@@ -15873,7 +15937,7 @@
         "additionalProperties": false,
         "title": "DiscoveryPage"
       },
-      "shape794": {
+      "shape798": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape146"
@@ -15883,14 +15947,14 @@
           }
         ]
       },
-      "shape793": {
+      "shape797": {
         "type": "object",
         "properties": {
           "document_subtype": {
             "$ref": "#/$defs/shape1"
           },
           "document_type": {
-            "$ref": "#/$defs/shape794"
+            "$ref": "#/$defs/shape798"
           },
           "end": {
             "$ref": "#/$defs/shape16"
@@ -15918,7 +15982,7 @@
         "additionalProperties": false,
         "title": "InformationWindow"
       },
-      "shape797": {
+      "shape801": {
         "type": "object",
         "properties": {
           "id": {
@@ -15943,20 +16007,20 @@
         "additionalProperties": false,
         "title": "DiscoveryScope"
       },
-      "shape796": {
+      "shape800": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape797"
+          "$ref": "#/$defs/shape801"
         }
       },
-      "shape795": {
+      "shape799": {
         "type": "object",
         "properties": {
           "hasMore": {
             "$ref": "#/$defs/shape8"
           },
           "items": {
-            "$ref": "#/$defs/shape796"
+            "$ref": "#/$defs/shape800"
           },
           "nextCursor": {
             "$ref": "#/$defs/shape43"
@@ -15970,7 +16034,7 @@
         "additionalProperties": false,
         "title": "DiscoveryScopes"
       },
-      "shape801": {
+      "shape805": {
         "type": "object",
         "properties": {
           "count": {
@@ -15987,44 +16051,44 @@
         "additionalProperties": false,
         "title": "InformationFacetValue"
       },
-      "shape800": {
+      "shape804": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape801"
+          "$ref": "#/$defs/shape805"
         }
       },
-      "shape799": {
+      "shape803": {
         "type": "object",
         "properties": {
           "author": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "autoTag": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "contentType": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "contentTypeVersion": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "documentAuthor": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "kind": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "subtype": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "tagGroup": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "tags": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           },
           "when": {
-            "$ref": "#/$defs/shape800"
+            "$ref": "#/$defs/shape804"
           }
         },
         "required": [
@@ -16040,7 +16104,7 @@
         "additionalProperties": false,
         "title": "InformationFacetValues"
       },
-      "shape802": {
+      "shape806": {
         "type": "object",
         "properties": {
           "author": {
@@ -16087,7 +16151,7 @@
         "additionalProperties": false,
         "title": "InformationFacetMore"
       },
-      "shape805": {
+      "shape809": {
         "type": "object",
         "properties": {
           "count": {
@@ -16108,17 +16172,17 @@
         "additionalProperties": false,
         "title": "InformationTagEdge"
       },
-      "shape804": {
+      "shape808": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape805"
+          "$ref": "#/$defs/shape809"
         }
       },
-      "shape803": {
+      "shape807": {
         "type": "object",
         "properties": {
           "edges": {
-            "$ref": "#/$defs/shape804"
+            "$ref": "#/$defs/shape808"
           },
           "hasMore": {
             "$ref": "#/$defs/shape8"
@@ -16131,17 +16195,17 @@
         "additionalProperties": false,
         "title": "InformationTagGraph"
       },
-      "shape798": {
+      "shape802": {
         "type": "object",
         "properties": {
           "facets": {
-            "$ref": "#/$defs/shape799"
+            "$ref": "#/$defs/shape803"
           },
           "hasMore": {
-            "$ref": "#/$defs/shape802"
+            "$ref": "#/$defs/shape806"
           },
           "tagGraph": {
-            "$ref": "#/$defs/shape803"
+            "$ref": "#/$defs/shape807"
           },
           "total": {
             "$ref": "#/$defs/shape16"
@@ -16156,7 +16220,7 @@
         "additionalProperties": false,
         "title": "InformationFacetCounts"
       },
-      "shape810": {
+      "shape814": {
         "type": "object",
         "properties": {
           "definitionHash": {
@@ -16189,7 +16253,7 @@
         "additionalProperties": false,
         "title": "InformationTypeIdentity"
       },
-      "shape809": {
+      "shape813": {
         "type": "object",
         "properties": {
           "metadata": {
@@ -16199,7 +16263,7 @@
             "$ref": "#/$defs/shape1"
           },
           "type": {
-            "$ref": "#/$defs/shape810"
+            "$ref": "#/$defs/shape814"
           }
         },
         "required": [
@@ -16210,11 +16274,11 @@
         "additionalProperties": false,
         "title": "InformationContentMetadata"
       },
-      "shape808": {
+      "shape812": {
         "type": "object",
         "properties": {
           "contentMetadata": {
-            "$ref": "#/$defs/shape809"
+            "$ref": "#/$defs/shape813"
           },
           "owner": {
             "$ref": "#/$defs/shape1"
@@ -16253,17 +16317,17 @@
         "additionalProperties": false,
         "title": "CurrentDocument"
       },
-      "shape811": {
+      "shape815": {
         "const": "readable"
       },
-      "shape807": {
+      "shape811": {
         "type": "object",
         "properties": {
           "document": {
-            "$ref": "#/$defs/shape808"
+            "$ref": "#/$defs/shape812"
           },
           "kind": {
-            "$ref": "#/$defs/shape811"
+            "$ref": "#/$defs/shape815"
           }
         },
         "required": [
@@ -16272,14 +16336,14 @@
         ],
         "additionalProperties": false
       },
-      "shape813": {
+      "shape817": {
         "const": "locked"
       },
-      "shape812": {
+      "shape816": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape813"
+            "$ref": "#/$defs/shape817"
           },
           "label": {
             "$ref": "#/$defs/shape1"
@@ -16295,14 +16359,14 @@
         ],
         "additionalProperties": false
       },
-      "shape815": {
+      "shape819": {
         "const": "unavailable"
       },
-      "shape814": {
+      "shape818": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape815"
+            "$ref": "#/$defs/shape819"
           }
         },
         "required": [
@@ -16310,30 +16374,30 @@
         ],
         "additionalProperties": false
       },
-      "shape806": {
+      "shape810": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape807"
+            "$ref": "#/$defs/shape811"
           },
           {
-            "$ref": "#/$defs/shape812"
+            "$ref": "#/$defs/shape816"
           },
           {
-            "$ref": "#/$defs/shape814"
+            "$ref": "#/$defs/shape818"
           }
         ]
       },
-      "shape817": {
+      "shape821": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape808"
+          "$ref": "#/$defs/shape812"
         }
       },
-      "shape816": {
+      "shape820": {
         "type": "object",
         "properties": {
           "documents": {
-            "$ref": "#/$defs/shape817"
+            "$ref": "#/$defs/shape821"
           },
           "limit": {
             "$ref": "#/$defs/shape16"
@@ -16352,7 +16416,7 @@
         ],
         "additionalProperties": false
       },
-      "shape820": {
+      "shape824": {
         "type": "object",
         "properties": {
           "action": {
@@ -16365,7 +16429,7 @@
             "$ref": "#/$defs/shape1"
           },
           "document_type": {
-            "$ref": "#/$defs/shape794"
+            "$ref": "#/$defs/shape798"
           },
           "generation": {
             "$ref": "#/$defs/shape16"
@@ -16391,20 +16455,20 @@
         "additionalProperties": false,
         "title": "InformationEvent"
       },
-      "shape819": {
+      "shape823": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape820"
+          "$ref": "#/$defs/shape824"
         }
       },
-      "shape818": {
+      "shape822": {
         "type": "object",
         "properties": {
           "cursor": {
             "$ref": "#/$defs/shape16"
           },
           "events": {
-            "$ref": "#/$defs/shape819"
+            "$ref": "#/$defs/shape823"
           }
         },
         "required": [
@@ -16414,7 +16478,7 @@
         "additionalProperties": false,
         "title": "InformationEvents"
       },
-      "shape821": {
+      "shape825": {
         "type": "object",
         "properties": {
           "created_at": {
@@ -16453,7 +16517,7 @@
         "additionalProperties": false,
         "title": "InformationEvidence"
       },
-      "shape822": {
+      "shape826": {
         "type": "object",
         "properties": {
           "evidence": {
@@ -16466,7 +16530,7 @@
         "additionalProperties": false,
         "title": "RecordedEvidence"
       },
-      "shape823": {
+      "shape827": {
         "type": "object",
         "properties": {
           "finalised": {
@@ -16479,29 +16543,29 @@
         "additionalProperties": false,
         "title": "FinalisedInformation"
       },
-      "shape825": {
+      "shape829": {
         "const": 2097152
       },
-      "shape826": {
+      "shape830": {
         "const": 16
       },
-      "shape827": {
+      "shape831": {
         "const": 8388608
       },
-      "shape824": {
+      "shape828": {
         "type": "object",
         "properties": {
           "format": {
             "$ref": "#/$defs/shape232"
           },
           "maxBytes": {
-            "$ref": "#/$defs/shape825"
+            "$ref": "#/$defs/shape829"
           },
           "maxDocuments": {
-            "$ref": "#/$defs/shape826"
+            "$ref": "#/$defs/shape830"
           },
           "maxJsonBytes": {
-            "$ref": "#/$defs/shape827"
+            "$ref": "#/$defs/shape831"
           }
         },
         "required": [
@@ -16513,7 +16577,7 @@
         "additionalProperties": false,
         "title": "PortableCapabilities"
       },
-      "shape830": {
+      "shape834": {
         "type": "object",
         "properties": {
           "foreignResource": {
@@ -16538,20 +16602,20 @@
         "additionalProperties": false,
         "title": "PortableMapping"
       },
-      "shape829": {
+      "shape833": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape830"
+          "$ref": "#/$defs/shape834"
         }
       },
-      "shape828": {
+      "shape832": {
         "type": "object",
         "properties": {
           "bundle": {
             "$ref": "#/$defs/shape1"
           },
           "mappings": {
-            "$ref": "#/$defs/shape829"
+            "$ref": "#/$defs/shape833"
           }
         },
         "required": [
@@ -16561,7 +16625,7 @@
         "additionalProperties": false,
         "title": "PortableImported"
       },
-      "shape831": {
+      "shape835": {
         "type": "object",
         "properties": {
           "bundle": {
@@ -16582,23 +16646,23 @@
         "additionalProperties": false,
         "title": "PortableOrigin"
       },
-      "shape834": {
+      "shape838": {
         "const": "original_markdown"
       },
-      "shape835": {
+      "shape839": {
         "const": "extraction"
       },
-      "shape833": {
+      "shape837": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape834"
+            "$ref": "#/$defs/shape838"
           },
           {
-            "$ref": "#/$defs/shape835"
+            "$ref": "#/$defs/shape839"
           }
         ]
       },
-      "shape832": {
+      "shape836": {
         "type": "object",
         "properties": {
           "format": {
@@ -16611,7 +16675,7 @@
             "$ref": "#/$defs/shape1"
           },
           "representation": {
-            "$ref": "#/$defs/shape833"
+            "$ref": "#/$defs/shape837"
           },
           "sidecar": {
             "$ref": "#/$defs/shape208"
@@ -16631,70 +16695,54 @@
         "additionalProperties": false,
         "title": "PortableReadable"
       },
-      "shape839": {
+      "shape843": {
         "const": "active"
       },
-      "shape840": {
+      "shape844": {
         "const": "excluded"
       },
-      "shape841": {
+      "shape845": {
         "const": "withdrawn"
       },
-      "shape842": {
+      "shape846": {
         "const": "deleted"
       },
-      "shape838": {
+      "shape842": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape839"
-          },
-          {
-            "$ref": "#/$defs/shape840"
-          },
-          {
-            "$ref": "#/$defs/shape841"
-          },
-          {
-            "$ref": "#/$defs/shape842"
-          }
-        ]
-      },
-      "shape844": {
-        "const": "person"
-      },
-      "shape845": {
-        "const": "organisation"
-      },
-      "shape843": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/shape125"
+            "$ref": "#/$defs/shape843"
           },
           {
             "$ref": "#/$defs/shape844"
           },
           {
             "$ref": "#/$defs/shape845"
+          },
+          {
+            "$ref": "#/$defs/shape846"
           }
         ]
       },
-      "shape847": {
-        "type": "object",
-        "properties": {
-          "completed": {
-            "$ref": "#/$defs/shape16"
-          },
-          "total": {
-            "$ref": "#/$defs/shape16"
-          }
-        },
-        "required": [
-          "completed",
-          "total"
-        ],
-        "additionalProperties": false
-      },
       "shape848": {
+        "const": "person"
+      },
+      "shape849": {
+        "const": "organisation"
+      },
+      "shape847": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/shape125"
+          },
+          {
+            "$ref": "#/$defs/shape848"
+          },
+          {
+            "$ref": "#/$defs/shape849"
+          }
+        ]
+      },
+      "shape851": {
         "type": "object",
         "properties": {
           "completed": {
@@ -16710,14 +16758,30 @@
         ],
         "additionalProperties": false
       },
-      "shape846": {
+      "shape852": {
+        "type": "object",
+        "properties": {
+          "completed": {
+            "$ref": "#/$defs/shape16"
+          },
+          "total": {
+            "$ref": "#/$defs/shape16"
+          }
+        },
+        "required": [
+          "completed",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "shape850": {
         "type": "object",
         "properties": {
           "passage_vectors": {
-            "$ref": "#/$defs/shape847"
+            "$ref": "#/$defs/shape851"
           },
           "stored_summary_entities": {
-            "$ref": "#/$defs/shape848"
+            "$ref": "#/$defs/shape852"
           }
         },
         "required": [
@@ -16727,7 +16791,7 @@
         "additionalProperties": false,
         "title": "InformationProgress"
       },
-      "shape850": {
+      "shape854": {
         "type": "object",
         "properties": {
           "findings": {
@@ -16751,14 +16815,14 @@
         ],
         "additionalProperties": false
       },
-      "shape849": {
+      "shape853": {
         "type": "object",
         "properties": {
           "definition_hash": {
             "$ref": "#/$defs/shape1"
           },
           "details": {
-            "$ref": "#/$defs/shape850"
+            "$ref": "#/$defs/shape854"
           },
           "feedback_revision": {
             "$ref": "#/$defs/shape1"
@@ -16770,7 +16834,7 @@
             "$ref": "#/$defs/shape1"
           },
           "status": {
-            "$ref": "#/$defs/shape789"
+            "$ref": "#/$defs/shape793"
           }
         },
         "required": [
@@ -16780,7 +16844,7 @@
         "additionalProperties": false,
         "title": "InformationReport"
       },
-      "shape853": {
+      "shape857": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape173"
@@ -16805,44 +16869,44 @@
           }
         ]
       },
-      "shape855": {
+      "shape859": {
         "const": "pending"
       },
-      "shape856": {
+      "shape860": {
         "const": "ready"
       },
-      "shape857": {
+      "shape861": {
         "const": "skipped"
       },
-      "shape858": {
+      "shape862": {
         "const": "cancelled"
       },
-      "shape854": {
+      "shape858": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape765"
+            "$ref": "#/$defs/shape769"
           },
           {
-            "$ref": "#/$defs/shape766"
+            "$ref": "#/$defs/shape770"
           },
           {
-            "$ref": "#/$defs/shape767"
+            "$ref": "#/$defs/shape771"
           },
           {
-            "$ref": "#/$defs/shape855"
+            "$ref": "#/$defs/shape859"
           },
           {
-            "$ref": "#/$defs/shape856"
+            "$ref": "#/$defs/shape860"
           },
           {
-            "$ref": "#/$defs/shape857"
+            "$ref": "#/$defs/shape861"
           },
           {
-            "$ref": "#/$defs/shape858"
+            "$ref": "#/$defs/shape862"
           }
         ]
       },
-      "shape852": {
+      "shape856": {
         "type": "object",
         "properties": {
           "attempt": {
@@ -16864,13 +16928,13 @@
             "$ref": "#/$defs/shape16"
           },
           "stage": {
-            "$ref": "#/$defs/shape853"
+            "$ref": "#/$defs/shape857"
           },
           "started_at": {
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape854"
+            "$ref": "#/$defs/shape858"
           }
         },
         "required": [
@@ -16882,26 +16946,26 @@
         "additionalProperties": false,
         "title": "InformationStep"
       },
-      "shape851": {
+      "shape855": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape852"
+          "$ref": "#/$defs/shape856"
         }
       },
-      "shape860": {
+      "shape864": {
         "const": "manual"
       },
-      "shape859": {
+      "shape863": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape777"
+            "$ref": "#/$defs/shape781"
           },
           {
-            "$ref": "#/$defs/shape860"
+            "$ref": "#/$defs/shape864"
           }
         ]
       },
-      "shape837": {
+      "shape841": {
         "type": "object",
         "properties": {
           "allowance_spent": {
@@ -16920,7 +16984,7 @@
             "$ref": "#/$defs/shape47"
           },
           "availability": {
-            "$ref": "#/$defs/shape838"
+            "$ref": "#/$defs/shape842"
           },
           "byte_size": {
             "$ref": "#/$defs/shape16"
@@ -16935,7 +16999,7 @@
             "$ref": "#/$defs/shape1"
           },
           "contentType": {
-            "$ref": "#/$defs/shape810"
+            "$ref": "#/$defs/shape814"
           },
           "converter": {
             "$ref": "#/$defs/shape1"
@@ -16947,16 +17011,16 @@
             "$ref": "#/$defs/shape1"
           },
           "document_type": {
-            "$ref": "#/$defs/shape794"
+            "$ref": "#/$defs/shape798"
           },
           "documentAuthor": {
             "$ref": "#/$defs/shape1"
           },
           "documentAuthorSource": {
-            "$ref": "#/$defs/shape843"
+            "$ref": "#/$defs/shape847"
           },
           "events": {
-            "$ref": "#/$defs/shape819"
+            "$ref": "#/$defs/shape823"
           },
           "excluded": {
             "$ref": "#/$defs/shape8"
@@ -16980,16 +17044,16 @@
             "$ref": "#/$defs/shape16"
           },
           "processingPolicy": {
-            "$ref": "#/$defs/shape776"
+            "$ref": "#/$defs/shape780"
           },
           "progress": {
-            "$ref": "#/$defs/shape846"
+            "$ref": "#/$defs/shape850"
           },
           "report": {
-            "$ref": "#/$defs/shape849"
+            "$ref": "#/$defs/shape853"
           },
           "report_status": {
-            "$ref": "#/$defs/shape789"
+            "$ref": "#/$defs/shape793"
           },
           "resource_id": {
             "$ref": "#/$defs/shape1"
@@ -17001,13 +17065,13 @@
             "$ref": "#/$defs/shape1"
           },
           "steps": {
-            "$ref": "#/$defs/shape851"
+            "$ref": "#/$defs/shape855"
           },
           "tagGroups": {
             "$ref": "#/$defs/shape303"
           },
           "tagGroupsSource": {
-            "$ref": "#/$defs/shape859"
+            "$ref": "#/$defs/shape863"
           },
           "tags": {
             "$ref": "#/$defs/shape47"
@@ -17028,13 +17092,13 @@
         "additionalProperties": false,
         "title": "InformationRevision"
       },
-      "shape836": {
+      "shape840": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape837"
+          "$ref": "#/$defs/shape841"
         }
       },
-      "shape861": {
+      "shape865": {
         "type": "object",
         "properties": {
           "adopted": {
@@ -17047,7 +17111,7 @@
         "additionalProperties": false,
         "title": "AdoptedInformation"
       },
-      "shape867": {
+      "shape871": {
         "type": "object",
         "properties": {
           "arguments": {
@@ -17067,23 +17131,23 @@
         ],
         "additionalProperties": false
       },
-      "shape866": {
+      "shape870": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape867"
+          "$ref": "#/$defs/shape871"
         }
       },
-      "shape865": {
+      "shape869": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape866"
+            "$ref": "#/$defs/shape870"
           }
         ]
       },
-      "shape864": {
+      "shape868": {
         "type": "object",
         "properties": {
           "content": {
@@ -17096,7 +17160,7 @@
             "$ref": "#/$defs/shape16"
           },
           "tool_calls": {
-            "$ref": "#/$defs/shape865"
+            "$ref": "#/$defs/shape869"
           }
         },
         "required": [
@@ -17108,13 +17172,13 @@
         "additionalProperties": false,
         "title": "MigrationEntry"
       },
-      "shape863": {
+      "shape867": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape864"
+          "$ref": "#/$defs/shape868"
         }
       },
-      "shape869": {
+      "shape873": {
         "type": "object",
         "properties": {
           "agent": {
@@ -17135,13 +17199,13 @@
         "additionalProperties": false,
         "title": "MigrationJob"
       },
-      "shape868": {
+      "shape872": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape869"
+          "$ref": "#/$defs/shape873"
         }
       },
-      "shape871": {
+      "shape875": {
         "type": "object",
         "properties": {
           "agent": {
@@ -17162,23 +17226,23 @@
         "additionalProperties": false,
         "title": "MigrationLog"
       },
-      "shape870": {
+      "shape874": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape871"
+          "$ref": "#/$defs/shape875"
         }
       },
-      "shape862": {
+      "shape866": {
         "type": "object",
         "properties": {
           "entries": {
-            "$ref": "#/$defs/shape863"
+            "$ref": "#/$defs/shape867"
           },
           "job": {
-            "$ref": "#/$defs/shape868"
+            "$ref": "#/$defs/shape872"
           },
           "log": {
-            "$ref": "#/$defs/shape870"
+            "$ref": "#/$defs/shape874"
           }
         },
         "required": [
@@ -17189,7 +17253,7 @@
         "additionalProperties": false,
         "title": "InformationMigrationInspection"
       },
-      "shape874": {
+      "shape878": {
         "type": "object",
         "properties": {
           "id": {
@@ -17214,13 +17278,13 @@
         "additionalProperties": false,
         "title": "MigrationDocument"
       },
-      "shape873": {
+      "shape877": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape874"
+          "$ref": "#/$defs/shape878"
         }
       },
-      "shape876": {
+      "shape880": {
         "type": "object",
         "properties": {
           "payload_id": {
@@ -17237,20 +17301,20 @@
         "additionalProperties": false,
         "title": "MigrationPayload"
       },
-      "shape875": {
+      "shape879": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape876"
+          "$ref": "#/$defs/shape880"
         }
       },
-      "shape872": {
+      "shape876": {
         "type": "object",
         "properties": {
           "documents": {
-            "$ref": "#/$defs/shape873"
+            "$ref": "#/$defs/shape877"
           },
           "payloads": {
-            "$ref": "#/$defs/shape875"
+            "$ref": "#/$defs/shape879"
           }
         },
         "required": [
@@ -17260,7 +17324,7 @@
         "additionalProperties": false,
         "title": "InformationMigrationInventory"
       },
-      "shape877": {
+      "shape881": {
         "type": "object",
         "properties": {
           "released": {
@@ -17273,14 +17337,14 @@
         "additionalProperties": false,
         "title": "ReleasedInformation"
       },
-      "shape879": {
+      "shape883": {
         "const": "document-navigation-v1"
       },
-      "shape878": {
+      "shape882": {
         "type": "object",
         "properties": {
           "capability": {
-            "$ref": "#/$defs/shape879"
+            "$ref": "#/$defs/shape883"
           },
           "maxClosure": {
             "$ref": "#/$defs/shape16"
@@ -17301,53 +17365,53 @@
         "additionalProperties": false,
         "title": "NavigationCapabilities"
       },
-      "shape881": {
+      "shape885": {
         "const": "extracted-text:utf16"
       },
-      "shape882": {
+      "shape886": {
         "const": "retained_revision"
       },
-      "shape884": {
+      "shape888": {
         "const": "partial"
       },
-      "shape885": {
+      "shape889": {
         "const": "unsupported"
       },
-      "shape886": {
+      "shape890": {
         "const": "limited"
       },
-      "shape887": {
+      "shape891": {
         "const": "stale"
       },
-      "shape883": {
+      "shape887": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape766"
+            "$ref": "#/$defs/shape770"
           },
           {
-            "$ref": "#/$defs/shape815"
+            "$ref": "#/$defs/shape819"
           },
           {
-            "$ref": "#/$defs/shape855"
+            "$ref": "#/$defs/shape859"
           },
           {
-            "$ref": "#/$defs/shape856"
+            "$ref": "#/$defs/shape860"
           },
           {
-            "$ref": "#/$defs/shape884"
+            "$ref": "#/$defs/shape888"
           },
           {
-            "$ref": "#/$defs/shape885"
+            "$ref": "#/$defs/shape889"
           },
           {
-            "$ref": "#/$defs/shape886"
+            "$ref": "#/$defs/shape890"
           },
           {
-            "$ref": "#/$defs/shape887"
+            "$ref": "#/$defs/shape891"
           }
         ]
       },
-      "shape889": {
+      "shape893": {
         "type": "object",
         "properties": {
           "end_line": {
@@ -17396,13 +17460,13 @@
         "additionalProperties": false,
         "title": "CodeSymbol"
       },
-      "shape888": {
+      "shape892": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape889"
+          "$ref": "#/$defs/shape893"
         }
       },
-      "shape880": {
+      "shape884": {
         "type": "object",
         "properties": {
           "has_more": {
@@ -17412,7 +17476,7 @@
             "$ref": "#/$defs/shape1"
           },
           "locator": {
-            "$ref": "#/$defs/shape881"
+            "$ref": "#/$defs/shape885"
           },
           "offset": {
             "$ref": "#/$defs/shape16"
@@ -17433,16 +17497,16 @@
             "$ref": "#/$defs/shape43"
           },
           "source_kind": {
-            "$ref": "#/$defs/shape882"
+            "$ref": "#/$defs/shape886"
           },
           "status": {
-            "$ref": "#/$defs/shape883"
+            "$ref": "#/$defs/shape887"
           },
           "symbol_count": {
             "$ref": "#/$defs/shape16"
           },
           "symbols": {
-            "$ref": "#/$defs/shape888"
+            "$ref": "#/$defs/shape892"
           }
         },
         "required": [
@@ -17463,7 +17527,7 @@
         "additionalProperties": false,
         "title": "CodeOutline"
       },
-      "shape890": {
+      "shape894": {
         "type": "object",
         "properties": {
           "canManage": {
@@ -17496,7 +17560,7 @@
         "additionalProperties": false,
         "title": "ReferencePolicyView"
       },
-      "shape891": {
+      "shape895": {
         "type": "object",
         "properties": {
           "queued": {
@@ -17509,7 +17573,7 @@
         "additionalProperties": false,
         "title": "QueuedInformation"
       },
-      "shape892": {
+      "shape896": {
         "type": "object",
         "properties": {
           "id": {
@@ -17545,14 +17609,14 @@
         "additionalProperties": false,
         "title": "DocumentRelationship"
       },
-      "shape895": {
+      "shape899": {
         "type": "object",
         "properties": {
           "relationship": {
-            "$ref": "#/$defs/shape892"
+            "$ref": "#/$defs/shape896"
           },
           "selection": {
-            "$ref": "#/$defs/shape806"
+            "$ref": "#/$defs/shape810"
           }
         },
         "required": [
@@ -17562,17 +17626,17 @@
         "additionalProperties": false,
         "title": "DocumentConnection"
       },
-      "shape894": {
+      "shape898": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape895"
+          "$ref": "#/$defs/shape899"
         }
       },
-      "shape893": {
+      "shape897": {
         "type": "object",
         "properties": {
           "connections": {
-            "$ref": "#/$defs/shape894"
+            "$ref": "#/$defs/shape898"
           },
           "limit": {
             "$ref": "#/$defs/shape16"
@@ -17588,7 +17652,7 @@
         ],
         "additionalProperties": false
       },
-      "shape896": {
+      "shape900": {
         "type": "object",
         "properties": {
           "id": {
@@ -17609,7 +17673,7 @@
         "additionalProperties": false,
         "title": "NavigationChanged"
       },
-      "shape903": {
+      "shape907": {
         "type": "object",
         "properties": {
           "synthetic": {
@@ -17624,7 +17688,7 @@
         ],
         "additionalProperties": false
       },
-      "shape904": {
+      "shape908": {
         "type": "object",
         "properties": {
           "synthetic": {
@@ -17640,17 +17704,17 @@
         ],
         "additionalProperties": false
       },
-      "shape902": {
+      "shape906": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape903"
+            "$ref": "#/$defs/shape907"
           },
           {
-            "$ref": "#/$defs/shape904"
+            "$ref": "#/$defs/shape908"
           }
         ]
       },
-      "shape901": {
+      "shape905": {
         "type": "object",
         "properties": {
           "chapterId": {
@@ -17660,7 +17724,7 @@
             "$ref": "#/$defs/shape43"
           },
           "chapterTitle": {
-            "$ref": "#/$defs/shape902"
+            "$ref": "#/$defs/shape906"
           },
           "sectionId": {
             "$ref": "#/$defs/shape1"
@@ -17669,7 +17733,7 @@
             "$ref": "#/$defs/shape43"
           },
           "sectionTitle": {
-            "$ref": "#/$defs/shape902"
+            "$ref": "#/$defs/shape906"
           }
         },
         "required": [
@@ -17683,7 +17747,7 @@
         "additionalProperties": false,
         "title": "InformationSearchPlacement"
       },
-      "shape905": {
+      "shape909": {
         "type": "object",
         "properties": {
           "chapterId": {
@@ -17708,17 +17772,17 @@
         "additionalProperties": false,
         "title": "InformationUnplaced"
       },
-      "shape900": {
+      "shape904": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape901"
+            "$ref": "#/$defs/shape905"
           },
           {
-            "$ref": "#/$defs/shape905"
+            "$ref": "#/$defs/shape909"
           }
         ]
       },
-      "shape899": {
+      "shape903": {
         "type": "object",
         "properties": {
           "chunkId": {
@@ -17746,7 +17810,7 @@
             "$ref": "#/$defs/shape43"
           },
           "placement": {
-            "$ref": "#/$defs/shape900"
+            "$ref": "#/$defs/shape904"
           },
           "sourceName": {
             "$ref": "#/$defs/shape1"
@@ -17767,11 +17831,11 @@
         "additionalProperties": false,
         "title": "InformationSearchChunk"
       },
-      "shape898": {
+      "shape902": {
         "type": "object",
         "properties": {
           "chunk": {
-            "$ref": "#/$defs/shape899"
+            "$ref": "#/$defs/shape903"
           },
           "distance": {
             "$ref": "#/$defs/shape16"
@@ -17784,36 +17848,36 @@
         "additionalProperties": false,
         "title": "InformationSearchHit"
       },
-      "shape897": {
+      "shape901": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape898"
+          "$ref": "#/$defs/shape902"
         }
-      },
-      "shape906": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/shape757"
-          },
-          {
-            "$ref": "#/$defs/shape837"
-          }
-        ]
       },
       "shape910": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape856"
+            "$ref": "#/$defs/shape761"
           },
           {
-            "$ref": "#/$defs/shape884"
-          },
-          {
-            "$ref": "#/$defs/shape886"
+            "$ref": "#/$defs/shape841"
           }
         ]
       },
-      "shape909": {
+      "shape914": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/shape860"
+          },
+          {
+            "$ref": "#/$defs/shape888"
+          },
+          {
+            "$ref": "#/$defs/shape890"
+          }
+        ]
+      },
+      "shape913": {
         "type": "object",
         "properties": {
           "end_line": {
@@ -17835,7 +17899,7 @@
             "$ref": "#/$defs/shape16"
           },
           "outline_status": {
-            "$ref": "#/$defs/shape910"
+            "$ref": "#/$defs/shape914"
           },
           "parent_ordinal": {
             "$ref": "#/$defs/shape61"
@@ -17886,20 +17950,20 @@
         "additionalProperties": false,
         "title": "CodeSymbolMatch"
       },
-      "shape908": {
+      "shape912": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape909"
+          "$ref": "#/$defs/shape913"
         }
       },
-      "shape907": {
+      "shape911": {
         "type": "object",
         "properties": {
           "has_more": {
             "$ref": "#/$defs/shape8"
           },
           "locator": {
-            "$ref": "#/$defs/shape881"
+            "$ref": "#/$defs/shape885"
           },
           "offset": {
             "$ref": "#/$defs/shape16"
@@ -17911,10 +17975,10 @@
             "$ref": "#/$defs/shape1"
           },
           "source_kind": {
-            "$ref": "#/$defs/shape882"
+            "$ref": "#/$defs/shape886"
           },
           "symbols": {
-            "$ref": "#/$defs/shape908"
+            "$ref": "#/$defs/shape912"
           }
         },
         "required": [
@@ -17929,23 +17993,23 @@
         "additionalProperties": false,
         "title": "CodeSymbolMatches"
       },
-      "shape913": {
+      "shape917": {
         "const": "deprecated"
       },
-      "shape912": {
+      "shape916": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape790"
+            "$ref": "#/$defs/shape794"
           },
           {
-            "$ref": "#/$defs/shape839"
+            "$ref": "#/$defs/shape843"
           },
           {
-            "$ref": "#/$defs/shape913"
+            "$ref": "#/$defs/shape917"
           }
         ]
       },
-      "shape911": {
+      "shape915": {
         "type": "object",
         "properties": {
           "contract": {
@@ -17958,7 +18022,7 @@
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape912"
+            "$ref": "#/$defs/shape916"
           }
         },
         "required": [
@@ -17970,14 +18034,14 @@
         "additionalProperties": false,
         "title": "InformationTypeVersion"
       },
-      "shape915": {
+      "shape919": {
         "const": "information.contentTypes.v1"
       },
-      "shape914": {
+      "shape918": {
         "type": "object",
         "properties": {
           "capability": {
-            "$ref": "#/$defs/shape915"
+            "$ref": "#/$defs/shape919"
           },
           "profile": {
             "$ref": "#/$defs/shape211"
@@ -17998,20 +18062,20 @@
         "additionalProperties": false,
         "title": "InformationContentCapabilities"
       },
-      "shape917": {
+      "shape921": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape911"
+          "$ref": "#/$defs/shape915"
         }
       },
-      "shape916": {
+      "shape920": {
         "type": "object",
         "properties": {
           "hasMore": {
             "$ref": "#/$defs/shape8"
           },
           "results": {
-            "$ref": "#/$defs/shape917"
+            "$ref": "#/$defs/shape921"
           }
         },
         "required": [
@@ -18021,7 +18085,7 @@
         "additionalProperties": false,
         "title": "InformationTypeVersions"
       },
-      "shape920": {
+      "shape924": {
         "type": "object",
         "properties": {
           "instancePointer": {
@@ -18046,42 +18110,42 @@
         "additionalProperties": false,
         "title": "MetadataValidationIssue"
       },
-      "shape919": {
+      "shape923": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape920"
+          "$ref": "#/$defs/shape924"
         }
       },
-      "shape922": {
+      "shape926": {
         "const": "VALID"
       },
-      "shape923": {
+      "shape927": {
         "const": "INVALID"
       },
-      "shape924": {
+      "shape928": {
         "const": "BUDGET_EXHAUSTED"
       },
-      "shape921": {
+      "shape925": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape922"
+            "$ref": "#/$defs/shape926"
           },
           {
-            "$ref": "#/$defs/shape923"
+            "$ref": "#/$defs/shape927"
           },
           {
-            "$ref": "#/$defs/shape924"
+            "$ref": "#/$defs/shape928"
           }
         ]
       },
-      "shape918": {
+      "shape922": {
         "type": "object",
         "properties": {
           "issues": {
-            "$ref": "#/$defs/shape919"
+            "$ref": "#/$defs/shape923"
           },
           "status": {
-            "$ref": "#/$defs/shape921"
+            "$ref": "#/$defs/shape925"
           },
           "truncated": {
             "$ref": "#/$defs/shape8"
@@ -18095,7 +18159,7 @@
         "additionalProperties": false,
         "title": "MetadataValidationResult"
       },
-      "shape925": {
+      "shape929": {
         "type": "object",
         "properties": {
           "deleted": {
@@ -18124,17 +18188,17 @@
         "additionalProperties": false,
         "title": "SavedNavigationView"
       },
-      "shape927": {
+      "shape931": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape925"
+          "$ref": "#/$defs/shape929"
         }
       },
-      "shape926": {
+      "shape930": {
         "type": "object",
         "properties": {
           "views": {
-            "$ref": "#/$defs/shape927"
+            "$ref": "#/$defs/shape931"
           }
         },
         "required": [
@@ -18142,7 +18206,7 @@
         ],
         "additionalProperties": false
       },
-      "shape930": {
+      "shape934": {
         "type": "object",
         "properties": {
           "maxModelCalls": {
@@ -18164,17 +18228,17 @@
         "additionalProperties": false,
         "title": "Partial"
       },
-      "shape929": {
+      "shape933": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape930"
+            "$ref": "#/$defs/shape934"
           }
         ]
       },
-      "shape934": {
+      "shape938": {
         "type": "object",
         "properties": {
           "completionTokens": {
@@ -18199,17 +18263,17 @@
         "additionalProperties": false,
         "title": "Partial"
       },
-      "shape933": {
+      "shape937": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape934"
+            "$ref": "#/$defs/shape938"
           }
         ]
       },
-      "shape932": {
+      "shape936": {
         "type": "object",
         "properties": {
           "answered": {
@@ -18225,7 +18289,7 @@
             "$ref": "#/$defs/shape16"
           },
           "pace": {
-            "$ref": "#/$defs/shape933"
+            "$ref": "#/$defs/shape937"
           },
           "resumable": {
             "$ref": "#/$defs/shape8"
@@ -18244,17 +18308,17 @@
         "additionalProperties": false,
         "title": "ObservedOutcome"
       },
-      "shape931": {
+      "shape935": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape932"
+            "$ref": "#/$defs/shape936"
           }
         ]
       },
-      "shape928": {
+      "shape932": {
         "type": "object",
         "properties": {
           "agent": {
@@ -18270,10 +18334,10 @@
             "$ref": "#/$defs/shape1"
           },
           "limits": {
-            "$ref": "#/$defs/shape929"
+            "$ref": "#/$defs/shape933"
           },
           "outcome": {
-            "$ref": "#/$defs/shape931"
+            "$ref": "#/$defs/shape935"
           },
           "pauseReason": {
             "$ref": "#/$defs/shape43"
@@ -18289,13 +18353,13 @@
         "additionalProperties": false,
         "title": "ObservedJob"
       },
-      "shape935": {
+      "shape939": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape928"
+          "$ref": "#/$defs/shape932"
         }
       },
-      "shape937": {
+      "shape941": {
         "type": "object",
         "properties": {
           "id": {
@@ -18319,13 +18383,13 @@
         "additionalProperties": false,
         "title": "ObservedIndex"
       },
-      "shape936": {
+      "shape940": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape937"
+          "$ref": "#/$defs/shape941"
         }
       },
-      "shape939": {
+      "shape943": {
         "type": "object",
         "properties": {
           "at": {
@@ -18346,7 +18410,7 @@
         "additionalProperties": false,
         "title": "MemoryProvenance"
       },
-      "shape940": {
+      "shape944": {
         "type": "object",
         "properties": {
           "project": {
@@ -18359,7 +18423,7 @@
         "additionalProperties": false,
         "title": "MemoryHome"
       },
-      "shape942": {
+      "shape946": {
         "type": "object",
         "properties": {
           "at": {
@@ -18380,33 +18444,33 @@
         "additionalProperties": false,
         "title": "MemoryInvalidation"
       },
-      "shape941": {
+      "shape945": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape942"
+            "$ref": "#/$defs/shape946"
           }
         ]
       },
-      "shape938": {
+      "shape942": {
         "type": "object",
         "properties": {
           "body": {
             "$ref": "#/$defs/shape1"
           },
           "formed": {
-            "$ref": "#/$defs/shape939"
+            "$ref": "#/$defs/shape943"
           },
           "home": {
-            "$ref": "#/$defs/shape940"
+            "$ref": "#/$defs/shape944"
           },
           "id": {
             "$ref": "#/$defs/shape1"
           },
           "invalidation": {
-            "$ref": "#/$defs/shape941"
+            "$ref": "#/$defs/shape945"
           },
           "lastUsed": {
             "$ref": "#/$defs/shape43"
@@ -18451,11 +18515,11 @@
         "additionalProperties": false,
         "title": "MemoryRecord"
       },
-      "shape944": {
+      "shape948": {
         "type": "object",
         "properties": {
           "coverage": {
-            "$ref": "#/$defs/shape720"
+            "$ref": "#/$defs/shape724"
           },
           "fallback": {
             "$ref": "#/$defs/shape43"
@@ -18488,7 +18552,7 @@
         "additionalProperties": false,
         "title": "NavigationRetrieval"
       },
-      "shape943": {
+      "shape947": {
         "type": "object",
         "properties": {
           "complete": {
@@ -18504,7 +18568,7 @@
             "$ref": "#/$defs/shape16"
           },
           "retrieval": {
-            "$ref": "#/$defs/shape944"
+            "$ref": "#/$defs/shape948"
           },
           "text": {
             "$ref": "#/$defs/shape1"
@@ -18520,20 +18584,20 @@
         "additionalProperties": false,
         "title": "MemoryNavigation"
       },
-      "shape946": {
+      "shape950": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape938"
+          "$ref": "#/$defs/shape942"
         }
       },
-      "shape945": {
+      "shape949": {
         "type": "object",
         "properties": {
           "limit": {
             "$ref": "#/$defs/shape16"
           },
           "memories": {
-            "$ref": "#/$defs/shape946"
+            "$ref": "#/$defs/shape950"
           },
           "question": {
             "$ref": "#/$defs/shape1"
@@ -18549,7 +18613,7 @@
         "additionalProperties": false,
         "title": "ObservedRecall"
       },
-      "shape947": {
+      "shape951": {
         "type": "object",
         "properties": {
           "failed": {
@@ -18566,7 +18630,7 @@
         "additionalProperties": false,
         "title": "MemoryRepair"
       },
-      "shape948": {
+      "shape952": {
         "type": "object",
         "properties": {
           "demoted": {
@@ -18595,7 +18659,7 @@
         "additionalProperties": false,
         "title": "MemoryWriteResponse"
       },
-      "shape949": {
+      "shape953": {
         "type": "object",
         "properties": {
           "body": {
@@ -18666,17 +18730,17 @@
         "additionalProperties": false,
         "title": "MessageDelivery"
       },
-      "shape951": {
+      "shape955": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape949"
+          "$ref": "#/$defs/shape953"
         }
       },
-      "shape950": {
+      "shape954": {
         "type": "object",
         "properties": {
           "deliveries": {
-            "$ref": "#/$defs/shape951"
+            "$ref": "#/$defs/shape955"
           },
           "more": {
             "$ref": "#/$defs/shape8"
@@ -18693,29 +18757,29 @@
         "additionalProperties": false,
         "title": "MessageDeliveries"
       },
-      "shape954": {
+      "shape958": {
         "const": "persistent"
       },
-      "shape955": {
+      "shape959": {
         "const": "task"
       },
-      "shape956": {
+      "shape960": {
         "const": "caller"
       },
-      "shape953": {
+      "shape957": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape954"
+            "$ref": "#/$defs/shape958"
           },
           {
-            "$ref": "#/$defs/shape955"
+            "$ref": "#/$defs/shape959"
           },
           {
-            "$ref": "#/$defs/shape956"
+            "$ref": "#/$defs/shape960"
           }
         ]
       },
-      "shape952": {
+      "shape956": {
         "type": "object",
         "properties": {
           "active": {
@@ -18743,7 +18807,7 @@
             "$ref": "#/$defs/shape43"
           },
           "lifetime": {
-            "$ref": "#/$defs/shape953"
+            "$ref": "#/$defs/shape957"
           },
           "pending": {
             "$ref": "#/$defs/shape16"
@@ -18772,17 +18836,17 @@
         "additionalProperties": false,
         "title": "MessageInstance"
       },
-      "shape958": {
+      "shape962": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape952"
+          "$ref": "#/$defs/shape956"
         }
       },
-      "shape957": {
+      "shape961": {
         "type": "object",
         "properties": {
           "instances": {
-            "$ref": "#/$defs/shape958"
+            "$ref": "#/$defs/shape962"
           },
           "more": {
             "$ref": "#/$defs/shape8"
@@ -18799,7 +18863,7 @@
         "additionalProperties": false,
         "title": "MessageInstances"
       },
-      "shape959": {
+      "shape963": {
         "type": "object",
         "properties": {
           "id": {
@@ -18816,7 +18880,7 @@
         "additionalProperties": false,
         "title": "OrchestrationAnswered"
       },
-      "shape960": {
+      "shape964": {
         "type": "object",
         "properties": {
           "id": {
@@ -18833,7 +18897,7 @@
         "additionalProperties": false,
         "title": "OrchestrationCancelled"
       },
-      "shape962": {
+      "shape966": {
         "type": "object",
         "properties": {
           "source": {
@@ -18850,7 +18914,7 @@
         "additionalProperties": false,
         "title": "SettingView"
       },
-      "shape963": {
+      "shape967": {
         "type": "object",
         "properties": {
           "source": {
@@ -18867,23 +18931,23 @@
         "additionalProperties": false,
         "title": "BooleanSettingView"
       },
-      "shape961": {
+      "shape965": {
         "type": "object",
         "properties": {
           "applied": {
             "$ref": "#/$defs/shape16"
           },
           "autoContinue": {
-            "$ref": "#/$defs/shape962"
+            "$ref": "#/$defs/shape966"
           },
           "autoIncrease": {
-            "$ref": "#/$defs/shape963"
+            "$ref": "#/$defs/shape967"
           },
           "budget": {
-            "$ref": "#/$defs/shape962"
+            "$ref": "#/$defs/shape966"
           },
           "failedChecks": {
-            "$ref": "#/$defs/shape962"
+            "$ref": "#/$defs/shape966"
           },
           "project": {
             "$ref": "#/$defs/shape1"
@@ -18892,10 +18956,10 @@
             "$ref": "#/$defs/shape43"
           },
           "steps": {
-            "$ref": "#/$defs/shape962"
+            "$ref": "#/$defs/shape966"
           },
           "time": {
-            "$ref": "#/$defs/shape962"
+            "$ref": "#/$defs/shape966"
           }
         },
         "required": [
@@ -18912,7 +18976,7 @@
         "additionalProperties": false,
         "title": "CapsView"
       },
-      "shape968": {
+      "shape972": {
         "type": "object",
         "properties": {
           "doneWhen": {
@@ -18933,13 +18997,13 @@
         "additionalProperties": false,
         "title": "StageView"
       },
-      "shape967": {
+      "shape971": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape968"
+          "$ref": "#/$defs/shape972"
         }
       },
-      "shape966": {
+      "shape970": {
         "type": "object",
         "properties": {
           "description": {
@@ -18952,7 +19016,7 @@
             "$ref": "#/$defs/shape8"
           },
           "stages": {
-            "$ref": "#/$defs/shape967"
+            "$ref": "#/$defs/shape971"
           },
           "tier": {
             "$ref": "#/$defs/shape43"
@@ -18976,17 +19040,17 @@
         "additionalProperties": false,
         "title": "DefinitionView"
       },
-      "shape965": {
+      "shape969": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape966"
+          "$ref": "#/$defs/shape970"
         }
       },
-      "shape964": {
+      "shape968": {
         "type": "object",
         "properties": {
           "definitions": {
-            "$ref": "#/$defs/shape965"
+            "$ref": "#/$defs/shape969"
           }
         },
         "required": [
@@ -18995,7 +19059,7 @@
         "additionalProperties": false,
         "title": "Definitions"
       },
-      "shape971": {
+      "shape975": {
         "type": "object",
         "properties": {
           "callerAgent": {
@@ -19088,17 +19152,17 @@
         "additionalProperties": false,
         "title": "RunView"
       },
-      "shape970": {
+      "shape974": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape971"
+          "$ref": "#/$defs/shape975"
         }
       },
-      "shape969": {
+      "shape973": {
         "type": "object",
         "properties": {
           "orchestrations": {
-            "$ref": "#/$defs/shape970"
+            "$ref": "#/$defs/shape974"
           }
         },
         "required": [
@@ -19107,7 +19171,7 @@
         "additionalProperties": false,
         "title": "OrchestrationListed"
       },
-      "shape972": {
+      "shape976": {
         "type": "object",
         "properties": {
           "id": {
@@ -19127,7 +19191,7 @@
         ],
         "additionalProperties": false
       },
-      "shape975": {
+      "shape979": {
         "type": "object",
         "properties": {
           "actor": {
@@ -19167,13 +19231,13 @@
         "additionalProperties": false,
         "title": "RecordView"
       },
-      "shape974": {
+      "shape978": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape975"
+          "$ref": "#/$defs/shape979"
         }
       },
-      "shape973": {
+      "shape977": {
         "type": "object",
         "properties": {
           "limit": {
@@ -19189,7 +19253,7 @@
             "$ref": "#/$defs/shape1"
           },
           "rows": {
-            "$ref": "#/$defs/shape974"
+            "$ref": "#/$defs/shape978"
           },
           "through": {
             "$ref": "#/$defs/shape16"
@@ -19210,7 +19274,7 @@
         "additionalProperties": false,
         "title": "RecordPageView"
       },
-      "shape976": {
+      "shape980": {
         "type": "object",
         "properties": {
           "id": {
@@ -19230,7 +19294,7 @@
         ],
         "additionalProperties": false
       },
-      "shape979": {
+      "shape983": {
         "type": "object",
         "properties": {
           "id": {
@@ -19247,13 +19311,13 @@
         "additionalProperties": false,
         "title": "ChildView"
       },
-      "shape978": {
+      "shape982": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape979"
+          "$ref": "#/$defs/shape983"
         }
       },
-      "shape987": {
+      "shape991": {
         "type": "object",
         "properties": {
           "description": {
@@ -19273,13 +19337,13 @@
         "additionalProperties": false,
         "title": "QuestionOption"
       },
-      "shape986": {
+      "shape990": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape987"
+          "$ref": "#/$defs/shape991"
         }
       },
-      "shape985": {
+      "shape989": {
         "type": "object",
         "properties": {
           "header": {
@@ -19289,7 +19353,7 @@
             "$ref": "#/$defs/shape8"
           },
           "options": {
-            "$ref": "#/$defs/shape986"
+            "$ref": "#/$defs/shape990"
           },
           "question": {
             "$ref": "#/$defs/shape1"
@@ -19304,13 +19368,13 @@
         "additionalProperties": false,
         "title": "Question"
       },
-      "shape984": {
+      "shape988": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape985"
+          "$ref": "#/$defs/shape989"
         }
       },
-      "shape983": {
+      "shape987": {
         "type": "object",
         "properties": {
           "choices": {
@@ -19326,7 +19390,7 @@
             "$ref": "#/$defs/shape1"
           },
           "questions": {
-            "$ref": "#/$defs/shape984"
+            "$ref": "#/$defs/shape988"
           },
           "sha256": {
             "$ref": "#/$defs/shape1"
@@ -19341,7 +19405,7 @@
         ],
         "additionalProperties": false
       },
-      "shape988": {
+      "shape992": {
         "type": "object",
         "properties": {
           "choices": {
@@ -19371,20 +19435,20 @@
         ],
         "additionalProperties": false
       },
-      "shape982": {
+      "shape986": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape983"
+            "$ref": "#/$defs/shape987"
           },
           {
-            "$ref": "#/$defs/shape988"
+            "$ref": "#/$defs/shape992"
           }
         ]
       },
-      "shape981": {
+      "shape985": {
         "type": "object",
         "properties": {
           "author": {
@@ -19406,7 +19470,7 @@
             "$ref": "#/$defs/shape1"
           },
           "structure": {
-            "$ref": "#/$defs/shape982"
+            "$ref": "#/$defs/shape986"
           },
           "text": {
             "$ref": "#/$defs/shape1"
@@ -19425,13 +19489,13 @@
         "additionalProperties": false,
         "title": "MessageView"
       },
-      "shape980": {
+      "shape984": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape981"
+          "$ref": "#/$defs/shape985"
         }
       },
-      "shape990": {
+      "shape994": {
         "type": "object",
         "properties": {
           "id": {
@@ -19476,26 +19540,26 @@
         "additionalProperties": false,
         "title": "TodoView"
       },
-      "shape989": {
+      "shape993": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape990"
+          "$ref": "#/$defs/shape994"
         }
       },
-      "shape977": {
+      "shape981": {
         "type": "object",
         "properties": {
           "children": {
-            "$ref": "#/$defs/shape978"
+            "$ref": "#/$defs/shape982"
           },
           "messages": {
-            "$ref": "#/$defs/shape980"
+            "$ref": "#/$defs/shape984"
           },
           "orchestration": {
-            "$ref": "#/$defs/shape971"
+            "$ref": "#/$defs/shape975"
           },
           "todos": {
-            "$ref": "#/$defs/shape989"
+            "$ref": "#/$defs/shape993"
           }
         },
         "required": [
@@ -19507,7 +19571,7 @@
         "additionalProperties": false,
         "title": "OrchestrationStatus"
       },
-      "shape995": {
+      "shape999": {
         "type": "object",
         "properties": {
           "costAmount": {
@@ -19564,13 +19628,13 @@
         "additionalProperties": false,
         "title": "ProcAttempt"
       },
-      "shape994": {
+      "shape998": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape995"
+          "$ref": "#/$defs/shape999"
         }
       },
-      "shape993": {
+      "shape997": {
         "type": "object",
         "properties": {
           "agent": {
@@ -19598,7 +19662,7 @@
             "$ref": "#/$defs/shape1"
           },
           "observations": {
-            "$ref": "#/$defs/shape994"
+            "$ref": "#/$defs/shape998"
           },
           "operation": {
             "$ref": "#/$defs/shape1"
@@ -19655,13 +19719,13 @@
         "additionalProperties": false,
         "title": "ProcCall"
       },
-      "shape992": {
+      "shape996": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape993"
+          "$ref": "#/$defs/shape997"
         }
       },
-      "shape996": {
+      "shape1000": {
         "type": "object",
         "properties": {
           "active": {
@@ -19705,11 +19769,11 @@
         "additionalProperties": false,
         "title": "ProcSelection"
       },
-      "shape991": {
+      "shape995": {
         "type": "object",
         "properties": {
           "calls": {
-            "$ref": "#/$defs/shape992"
+            "$ref": "#/$defs/shape996"
           },
           "coverage": {
             "$ref": "#/$defs/shape47"
@@ -19718,7 +19782,7 @@
             "$ref": "#/$defs/shape43"
           },
           "selection": {
-            "$ref": "#/$defs/shape996"
+            "$ref": "#/$defs/shape1000"
           },
           "snapshotAt": {
             "$ref": "#/$defs/shape1"
@@ -19734,7 +19798,7 @@
         "additionalProperties": false,
         "title": "ProcCalls"
       },
-      "shape1000": {
+      "shape1004": {
         "type": "object",
         "properties": {
           "actingSubject": {
@@ -19859,17 +19923,17 @@
         "additionalProperties": false,
         "title": "ProcConversation"
       },
-      "shape999": {
+      "shape1003": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1000"
+          "$ref": "#/$defs/shape1004"
         }
       },
-      "shape998": {
+      "shape1002": {
         "type": "object",
         "properties": {
           "conversations": {
-            "$ref": "#/$defs/shape999"
+            "$ref": "#/$defs/shape1003"
           },
           "coverage": {
             "$ref": "#/$defs/shape47"
@@ -19878,7 +19942,7 @@
             "$ref": "#/$defs/shape43"
           },
           "selection": {
-            "$ref": "#/$defs/shape996"
+            "$ref": "#/$defs/shape1000"
           },
           "snapshotAt": {
             "$ref": "#/$defs/shape1"
@@ -19898,7 +19962,7 @@
         "additionalProperties": false,
         "title": "ProcConversations"
       },
-      "shape1003": {
+      "shape1007": {
         "type": "object",
         "properties": {
           "capacity": {
@@ -19926,13 +19990,13 @@
         ],
         "additionalProperties": false
       },
-      "shape1002": {
+      "shape1006": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1003"
+          "$ref": "#/$defs/shape1007"
         }
       },
-      "shape1005": {
+      "shape1009": {
         "type": "object",
         "properties": {
           "blocked": {
@@ -20013,13 +20077,13 @@
         "additionalProperties": false,
         "title": "ProcQueue"
       },
-      "shape1004": {
+      "shape1008": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1005"
+          "$ref": "#/$defs/shape1009"
         }
       },
-      "shape1001": {
+      "shape1005": {
         "type": "object",
         "properties": {
           "coverage": {
@@ -20029,19 +20093,19 @@
             "$ref": "#/$defs/shape43"
           },
           "pools": {
-            "$ref": "#/$defs/shape1002"
+            "$ref": "#/$defs/shape1006"
           },
           "queues": {
-            "$ref": "#/$defs/shape1004"
+            "$ref": "#/$defs/shape1008"
           },
           "selection": {
-            "$ref": "#/$defs/shape996"
+            "$ref": "#/$defs/shape1000"
           },
           "snapshotAt": {
             "$ref": "#/$defs/shape1"
           },
           "summaries": {
-            "$ref": "#/$defs/shape1004"
+            "$ref": "#/$defs/shape1008"
           }
         },
         "required": [
@@ -20056,7 +20120,7 @@
         "additionalProperties": false,
         "title": "ProcQueues"
       },
-      "shape1007": {
+      "shape1011": {
         "type": "object",
         "properties": {
           "conversation": {
@@ -20089,29 +20153,29 @@
         "additionalProperties": false,
         "title": "ProcTool"
       },
-      "shape1006": {
+      "shape1010": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1007"
+          "$ref": "#/$defs/shape1011"
         }
       },
-      "shape997": {
+      "shape1001": {
         "type": "object",
         "properties": {
           "calls": {
-            "$ref": "#/$defs/shape991"
+            "$ref": "#/$defs/shape995"
           },
           "conversations": {
-            "$ref": "#/$defs/shape998"
+            "$ref": "#/$defs/shape1002"
           },
           "queues": {
-            "$ref": "#/$defs/shape1001"
+            "$ref": "#/$defs/shape1005"
           },
           "signals": {
             "$ref": "#/$defs/shape47"
           },
           "tools": {
-            "$ref": "#/$defs/shape1006"
+            "$ref": "#/$defs/shape1010"
           },
           "toolsTruncated": {
             "$ref": "#/$defs/shape8"
@@ -20128,7 +20192,7 @@
         "additionalProperties": false,
         "title": "ProcInspection"
       },
-      "shape1008": {
+      "shape1012": {
         "type": "object",
         "properties": {
           "coverage": {
@@ -20138,13 +20202,13 @@
             "$ref": "#/$defs/shape43"
           },
           "selection": {
-            "$ref": "#/$defs/shape996"
+            "$ref": "#/$defs/shape1000"
           },
           "snapshotAt": {
             "$ref": "#/$defs/shape1"
           },
           "tools": {
-            "$ref": "#/$defs/shape1006"
+            "$ref": "#/$defs/shape1010"
           }
         },
         "required": [
@@ -20157,7 +20221,7 @@
         "additionalProperties": false,
         "title": "ProcTools"
       },
-      "shape1011": {
+      "shape1015": {
         "type": "object",
         "properties": {
           "action": {
@@ -20190,13 +20254,13 @@
         "additionalProperties": false,
         "title": "ProjectGrantChange"
       },
-      "shape1010": {
+      "shape1014": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1011"
+          "$ref": "#/$defs/shape1015"
         }
       },
-      "shape1013": {
+      "shape1017": {
         "type": "object",
         "properties": {
           "handle": {
@@ -20213,20 +20277,20 @@
         "additionalProperties": false,
         "title": "ProjectGrant"
       },
-      "shape1012": {
+      "shape1016": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1013"
+          "$ref": "#/$defs/shape1017"
         }
       },
-      "shape1009": {
+      "shape1013": {
         "type": "object",
         "properties": {
           "history": {
-            "$ref": "#/$defs/shape1010"
+            "$ref": "#/$defs/shape1014"
           },
           "members": {
-            "$ref": "#/$defs/shape1012"
+            "$ref": "#/$defs/shape1016"
           },
           "permissions": {
             "$ref": "#/$defs/shape47"
@@ -20248,13 +20312,13 @@
         "additionalProperties": false,
         "title": "ProjectAccess"
       },
-      "shape1014": {
+      "shape1018": {
         "type": "array",
         "items": {
           "$ref": "#/$defs/shape588"
         }
       },
-      "shape1015": {
+      "shape1019": {
         "type": "object",
         "properties": {
           "members": {
@@ -20271,7 +20335,7 @@
         "additionalProperties": false,
         "title": "ProjectMembers"
       },
-      "shape1017": {
+      "shape1021": {
         "type": "object",
         "properties": {
           "action": {
@@ -20324,13 +20388,13 @@
         "additionalProperties": false,
         "title": "ProposalView"
       },
-      "shape1016": {
+      "shape1020": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1017"
+          "$ref": "#/$defs/shape1021"
         }
       },
-      "shape1018": {
+      "shape1022": {
         "type": "object",
         "properties": {
           "refused": {
@@ -20347,7 +20411,7 @@
         "additionalProperties": false,
         "title": "Reconsidered"
       },
-      "shape1019": {
+      "shape1023": {
         "type": "object",
         "properties": {
           "demoted": {
@@ -20357,7 +20421,7 @@
             "$ref": "#/$defs/shape43"
           },
           "proposal": {
-            "$ref": "#/$defs/shape1017"
+            "$ref": "#/$defs/shape1021"
           }
         },
         "required": [
@@ -20368,7 +20432,7 @@
         "additionalProperties": false,
         "title": "ResolvedProposal"
       },
-      "shape1021": {
+      "shape1025": {
         "type": "object",
         "properties": {
           "connection": {
@@ -20401,44 +20465,44 @@
         "additionalProperties": false,
         "title": "ProviderConnection"
       },
-      "shape1025": {
+      "shape1029": {
         "const": "NONE"
       },
-      "shape1026": {
+      "shape1030": {
         "const": "PENDING"
       },
-      "shape1027": {
+      "shape1031": {
         "const": "READY"
       },
-      "shape1028": {
+      "shape1032": {
         "const": "REFRESHING"
       },
-      "shape1029": {
+      "shape1033": {
         "const": "REVOKED"
       },
-      "shape1024": {
+      "shape1028": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape533"
           },
           {
-            "$ref": "#/$defs/shape1025"
-          },
-          {
-            "$ref": "#/$defs/shape1026"
-          },
-          {
-            "$ref": "#/$defs/shape1027"
-          },
-          {
-            "$ref": "#/$defs/shape1028"
-          },
-          {
             "$ref": "#/$defs/shape1029"
+          },
+          {
+            "$ref": "#/$defs/shape1030"
+          },
+          {
+            "$ref": "#/$defs/shape1031"
+          },
+          {
+            "$ref": "#/$defs/shape1032"
+          },
+          {
+            "$ref": "#/$defs/shape1033"
           }
         ]
       },
-      "shape1023": {
+      "shape1027": {
         "type": "object",
         "properties": {
           "connection": {
@@ -20460,7 +20524,7 @@
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape1024"
+            "$ref": "#/$defs/shape1028"
           },
           "subject": {
             "$ref": "#/$defs/shape1"
@@ -20479,51 +20543,39 @@
         "additionalProperties": false,
         "title": "ProviderCredentialStatus"
       },
-      "shape1022": {
+      "shape1026": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape1023"
+            "$ref": "#/$defs/shape1027"
           }
         ]
       },
-      "shape1031": {
+      "shape1035": {
         "const": "provider.connection.save"
       },
-      "shape1032": {
+      "shape1036": {
         "const": "provider.connection.change"
       },
-      "shape1033": {
+      "shape1037": {
         "const": "provider.credential.put"
       },
-      "shape1034": {
+      "shape1038": {
         "const": "provider.credential.revoke"
       },
-      "shape1035": {
+      "shape1039": {
         "const": "provider.credential.rekey"
       },
-      "shape1036": {
+      "shape1040": {
         "const": "provider.credential.authorize"
       },
-      "shape1037": {
+      "shape1041": {
         "const": "provider.credential.refresh"
       },
-      "shape1030": {
+      "shape1034": {
         "anyOf": [
-          {
-            "$ref": "#/$defs/shape1031"
-          },
-          {
-            "$ref": "#/$defs/shape1032"
-          },
-          {
-            "$ref": "#/$defs/shape1033"
-          },
-          {
-            "$ref": "#/$defs/shape1034"
-          },
           {
             "$ref": "#/$defs/shape1035"
           },
@@ -20532,20 +20584,32 @@
           },
           {
             "$ref": "#/$defs/shape1037"
+          },
+          {
+            "$ref": "#/$defs/shape1038"
+          },
+          {
+            "$ref": "#/$defs/shape1039"
+          },
+          {
+            "$ref": "#/$defs/shape1040"
+          },
+          {
+            "$ref": "#/$defs/shape1041"
           }
         ]
       },
-      "shape1020": {
+      "shape1024": {
         "type": "object",
         "properties": {
           "connection": {
-            "$ref": "#/$defs/shape1021"
+            "$ref": "#/$defs/shape1025"
           },
           "credential": {
-            "$ref": "#/$defs/shape1022"
+            "$ref": "#/$defs/shape1026"
           },
           "operation": {
-            "$ref": "#/$defs/shape1030"
+            "$ref": "#/$defs/shape1034"
           },
           "requestId": {
             "$ref": "#/$defs/shape1"
@@ -20560,13 +20624,13 @@
         "additionalProperties": false,
         "title": "ProviderMutationReceipt"
       },
-      "shape1038": {
+      "shape1042": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1021"
+          "$ref": "#/$defs/shape1025"
         }
       },
-      "shape1039": {
+      "shape1043": {
         "type": "object",
         "properties": {
           "authorizationUrl": {
@@ -20576,7 +20640,7 @@
             "$ref": "#/$defs/shape1"
           },
           "receipt": {
-            "$ref": "#/$defs/shape1020"
+            "$ref": "#/$defs/shape1024"
           }
         },
         "required": [
@@ -20587,7 +20651,7 @@
         "additionalProperties": false,
         "title": "ProviderAuthorization"
       },
-      "shape1042": {
+      "shape1046": {
         "type": "object",
         "properties": {
           "costClass": {
@@ -20636,7 +20700,7 @@
         "additionalProperties": false,
         "title": "ProviderFacts"
       },
-      "shape1041": {
+      "shape1045": {
         "type": "object",
         "properties": {
           "baseUrl": {
@@ -20646,7 +20710,7 @@
             "$ref": "#/$defs/shape16"
           },
           "facts": {
-            "$ref": "#/$defs/shape1042"
+            "$ref": "#/$defs/shape1046"
           },
           "lastHealthAt": {
             "$ref": "#/$defs/shape43"
@@ -20669,13 +20733,13 @@
         "additionalProperties": false,
         "title": "ProviderRegistration"
       },
-      "shape1040": {
+      "shape1044": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1041"
+          "$ref": "#/$defs/shape1045"
         }
       },
-      "shape1043": {
+      "shape1047": {
         "type": "object",
         "properties": {
           "batchId": {
@@ -20707,7 +20771,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1048": {
+      "shape1052": {
         "type": "object",
         "properties": {
           "depth": {
@@ -20728,17 +20792,17 @@
         "additionalProperties": false,
         "title": "RelayCausation"
       },
-      "shape1047": {
+      "shape1051": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape1048"
+            "$ref": "#/$defs/shape1052"
           }
         ]
       },
-      "shape1051": {
+      "shape1055": {
         "type": "object",
         "properties": {
           "byteLength": {
@@ -20759,57 +20823,57 @@
         "additionalProperties": false,
         "title": "RelayBlobDescriptor"
       },
-      "shape1050": {
+      "shape1054": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape1051"
+            "$ref": "#/$defs/shape1055"
           }
         ]
       },
-      "shape1053": {
+      "shape1057": {
         "const": "EMPTY"
       },
-      "shape1054": {
+      "shape1058": {
         "const": "TEXT"
       },
-      "shape1055": {
+      "shape1059": {
         "const": "BLOB"
       },
-      "shape1056": {
+      "shape1060": {
         "const": "SCHEDULE_DUE"
       },
-      "shape1057": {
+      "shape1061": {
         "const": "LIFECYCLE"
       },
-      "shape1058": {
+      "shape1062": {
         "const": "WAKE_REQUESTED"
       },
-      "shape1052": {
+      "shape1056": {
         "anyOf": [
-          {
-            "$ref": "#/$defs/shape1053"
-          },
-          {
-            "$ref": "#/$defs/shape1054"
-          },
-          {
-            "$ref": "#/$defs/shape1055"
-          },
-          {
-            "$ref": "#/$defs/shape1056"
-          },
           {
             "$ref": "#/$defs/shape1057"
           },
           {
             "$ref": "#/$defs/shape1058"
+          },
+          {
+            "$ref": "#/$defs/shape1059"
+          },
+          {
+            "$ref": "#/$defs/shape1060"
+          },
+          {
+            "$ref": "#/$defs/shape1061"
+          },
+          {
+            "$ref": "#/$defs/shape1062"
           }
         ]
       },
-      "shape1060": {
+      "shape1064": {
         "type": "object",
         "properties": {
           "context": {
@@ -20837,33 +20901,33 @@
         ],
         "additionalProperties": false
       },
-      "shape1059": {
+      "shape1063": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape1060"
+            "$ref": "#/$defs/shape1064"
           }
         ]
       },
-      "shape1064": {
+      "shape1068": {
         "const": "MESSAGE"
       },
-      "shape1065": {
+      "shape1069": {
         "const": "BOARD"
       },
-      "shape1063": {
+      "shape1067": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape1064"
+            "$ref": "#/$defs/shape1068"
           },
           {
-            "$ref": "#/$defs/shape1065"
+            "$ref": "#/$defs/shape1069"
           }
         ]
       },
-      "shape1062": {
+      "shape1066": {
         "type": "object",
         "properties": {
           "firing": {
@@ -20873,7 +20937,7 @@
             "$ref": "#/$defs/shape1"
           },
           "type": {
-            "$ref": "#/$defs/shape1063"
+            "$ref": "#/$defs/shape1067"
           }
         },
         "required": [
@@ -20883,21 +20947,21 @@
         ],
         "additionalProperties": false
       },
-      "shape1061": {
+      "shape1065": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape1062"
+            "$ref": "#/$defs/shape1066"
           }
         ]
       },
-      "shape1049": {
+      "shape1053": {
         "type": "object",
         "properties": {
           "blob": {
-            "$ref": "#/$defs/shape1050"
+            "$ref": "#/$defs/shape1054"
           },
           "emits": {
             "$ref": "#/$defs/shape43"
@@ -20906,10 +20970,10 @@
             "$ref": "#/$defs/shape43"
           },
           "kind": {
-            "$ref": "#/$defs/shape1052"
+            "$ref": "#/$defs/shape1056"
           },
           "lifecycle": {
-            "$ref": "#/$defs/shape1059"
+            "$ref": "#/$defs/shape1063"
           },
           "schedule": {
             "$ref": "#/$defs/shape43"
@@ -20918,7 +20982,7 @@
             "$ref": "#/$defs/shape43"
           },
           "wake": {
-            "$ref": "#/$defs/shape1061"
+            "$ref": "#/$defs/shape1065"
           }
         },
         "required": [
@@ -20930,11 +20994,11 @@
         ],
         "additionalProperties": false
       },
-      "shape1046": {
+      "shape1050": {
         "type": "object",
         "properties": {
           "causation": {
-            "$ref": "#/$defs/shape1047"
+            "$ref": "#/$defs/shape1051"
           },
           "causationId": {
             "$ref": "#/$defs/shape43"
@@ -20949,7 +21013,7 @@
             "$ref": "#/$defs/shape1"
           },
           "payload": {
-            "$ref": "#/$defs/shape1049"
+            "$ref": "#/$defs/shape1053"
           },
           "position": {
             "$ref": "#/$defs/shape1"
@@ -20974,38 +21038,38 @@
         "additionalProperties": false,
         "title": "RelayEvent"
       },
-      "shape1045": {
+      "shape1049": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1046"
+          "$ref": "#/$defs/shape1050"
         }
       },
-      "shape1067": {
+      "shape1071": {
         "const": "DATA"
       },
-      "shape1068": {
+      "shape1072": {
         "const": "GAP"
       },
-      "shape1069": {
+      "shape1073": {
         "const": "BUSY"
       },
-      "shape1066": {
+      "shape1070": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape1053"
+            "$ref": "#/$defs/shape1057"
           },
           {
-            "$ref": "#/$defs/shape1067"
+            "$ref": "#/$defs/shape1071"
           },
           {
-            "$ref": "#/$defs/shape1068"
+            "$ref": "#/$defs/shape1072"
           },
           {
-            "$ref": "#/$defs/shape1069"
+            "$ref": "#/$defs/shape1073"
           }
         ]
       },
-      "shape1044": {
+      "shape1048": {
         "type": "object",
         "properties": {
           "batchId": {
@@ -21015,7 +21079,7 @@
             "$ref": "#/$defs/shape1"
           },
           "events": {
-            "$ref": "#/$defs/shape1045"
+            "$ref": "#/$defs/shape1049"
           },
           "expiredThrough": {
             "$ref": "#/$defs/shape43"
@@ -21036,7 +21100,7 @@
             "$ref": "#/$defs/shape1"
           },
           "status": {
-            "$ref": "#/$defs/shape1066"
+            "$ref": "#/$defs/shape1070"
           },
           "through": {
             "$ref": "#/$defs/shape1"
@@ -21061,7 +21125,7 @@
         "additionalProperties": false,
         "title": "RelayBatch"
       },
-      "shape1070": {
+      "shape1074": {
         "type": "object",
         "properties": {
           "generation": {
@@ -21090,7 +21154,7 @@
         "additionalProperties": false,
         "title": "RelayGroupDeleted"
       },
-      "shape1071": {
+      "shape1075": {
         "type": "object",
         "properties": {
           "exists": {
@@ -21119,53 +21183,53 @@
         "additionalProperties": false,
         "title": "RelayGroupState"
       },
-      "shape1076": {
+      "shape1080": {
         "const": "CLAIMED"
       },
-      "shape1077": {
+      "shape1081": {
         "const": "DISPATCHING"
       },
-      "shape1078": {
+      "shape1082": {
         "const": "ACCEPTED"
       },
-      "shape1079": {
+      "shape1083": {
         "const": "FAILED"
       },
-      "shape1080": {
+      "shape1084": {
         "const": "ABANDONED"
       },
-      "shape1081": {
+      "shape1085": {
         "const": "ABANDONED_UNCERTAIN"
       },
-      "shape1075": {
+      "shape1079": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape533"
           },
           {
-            "$ref": "#/$defs/shape1027"
-          },
-          {
-            "$ref": "#/$defs/shape1076"
-          },
-          {
-            "$ref": "#/$defs/shape1077"
-          },
-          {
-            "$ref": "#/$defs/shape1078"
-          },
-          {
-            "$ref": "#/$defs/shape1079"
+            "$ref": "#/$defs/shape1031"
           },
           {
             "$ref": "#/$defs/shape1080"
           },
           {
             "$ref": "#/$defs/shape1081"
+          },
+          {
+            "$ref": "#/$defs/shape1082"
+          },
+          {
+            "$ref": "#/$defs/shape1083"
+          },
+          {
+            "$ref": "#/$defs/shape1084"
+          },
+          {
+            "$ref": "#/$defs/shape1085"
           }
         ]
       },
-      "shape1074": {
+      "shape1078": {
         "type": "object",
         "properties": {
           "conversation": {
@@ -21205,7 +21269,7 @@
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape1075"
+            "$ref": "#/$defs/shape1079"
           },
           "subscriber": {
             "$ref": "#/$defs/shape1"
@@ -21234,13 +21298,13 @@
         "additionalProperties": false,
         "title": "RelayBranch"
       },
-      "shape1073": {
+      "shape1077": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1074"
+          "$ref": "#/$defs/shape1078"
         }
       },
-      "shape1083": {
+      "shape1087": {
         "type": "object",
         "properties": {
           "expiredThrough": {
@@ -21264,13 +21328,13 @@
         ],
         "additionalProperties": false
       },
-      "shape1082": {
+      "shape1086": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1083"
+          "$ref": "#/$defs/shape1087"
         }
       },
-      "shape1084": {
+      "shape1088": {
         "type": "object",
         "properties": {
           "project": {
@@ -21286,7 +21350,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1086": {
+      "shape1090": {
         "type": "object",
         "properties": {
           "gapThrough": {
@@ -21313,13 +21377,13 @@
         ],
         "additionalProperties": false
       },
-      "shape1085": {
+      "shape1089": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1086"
+          "$ref": "#/$defs/shape1090"
         }
       },
-      "shape1087": {
+      "shape1091": {
         "type": "object",
         "properties": {
           "expiredThrough": {
@@ -21329,7 +21393,7 @@
             "$ref": "#/$defs/shape43"
           },
           "kind": {
-            "$ref": "#/$defs/shape1052"
+            "$ref": "#/$defs/shape1056"
           },
           "maxRecords": {
             "$ref": "#/$defs/shape43"
@@ -21355,17 +21419,17 @@
         "additionalProperties": false,
         "title": "RelayTopic"
       },
-      "shape1072": {
+      "shape1076": {
         "type": "object",
         "properties": {
           "after": {
             "$ref": "#/$defs/shape1"
           },
           "branches": {
-            "$ref": "#/$defs/shape1073"
+            "$ref": "#/$defs/shape1077"
           },
           "events": {
-            "$ref": "#/$defs/shape1045"
+            "$ref": "#/$defs/shape1049"
           },
           "gapThrough": {
             "$ref": "#/$defs/shape43"
@@ -21374,16 +21438,16 @@
             "$ref": "#/$defs/shape1"
           },
           "recoveries": {
-            "$ref": "#/$defs/shape1082"
+            "$ref": "#/$defs/shape1086"
           },
           "scope": {
-            "$ref": "#/$defs/shape1084"
+            "$ref": "#/$defs/shape1088"
           },
           "subscribers": {
-            "$ref": "#/$defs/shape1085"
+            "$ref": "#/$defs/shape1089"
           },
           "topic": {
-            "$ref": "#/$defs/shape1087"
+            "$ref": "#/$defs/shape1091"
           }
         },
         "required": [
@@ -21398,38 +21462,38 @@
         ],
         "additionalProperties": false
       },
-      "shape1090": {
+      "shape1094": {
         "const": "GAP_ACKNOWLEDGED"
       },
-      "shape1091": {
+      "shape1095": {
         "const": "REMOVED"
       },
-      "shape1089": {
+      "shape1093": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape533"
           },
           {
-            "$ref": "#/$defs/shape1078"
+            "$ref": "#/$defs/shape1082"
           },
           {
-            "$ref": "#/$defs/shape1079"
+            "$ref": "#/$defs/shape1083"
           },
           {
-            "$ref": "#/$defs/shape1080"
+            "$ref": "#/$defs/shape1084"
           },
           {
-            "$ref": "#/$defs/shape1081"
+            "$ref": "#/$defs/shape1085"
           },
           {
-            "$ref": "#/$defs/shape1090"
+            "$ref": "#/$defs/shape1094"
           },
           {
-            "$ref": "#/$defs/shape1091"
+            "$ref": "#/$defs/shape1095"
           }
         ]
       },
-      "shape1088": {
+      "shape1092": {
         "type": "object",
         "properties": {
           "action": {
@@ -21451,7 +21515,7 @@
             "$ref": "#/$defs/shape43"
           },
           "status": {
-            "$ref": "#/$defs/shape1089"
+            "$ref": "#/$defs/shape1093"
           },
           "subscriber": {
             "$ref": "#/$defs/shape43"
@@ -21474,7 +21538,7 @@
         "additionalProperties": false,
         "title": "RelayControlResult"
       },
-      "shape1094": {
+      "shape1098": {
         "type": "object",
         "properties": {
           "expiredThrough": {
@@ -21494,13 +21558,13 @@
         ],
         "additionalProperties": false
       },
-      "shape1093": {
+      "shape1097": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1094"
+          "$ref": "#/$defs/shape1098"
         }
       },
-      "shape1092": {
+      "shape1096": {
         "type": "object",
         "properties": {
           "admitted": {
@@ -21510,7 +21574,7 @@
             "$ref": "#/$defs/shape16"
           },
           "gaps": {
-            "$ref": "#/$defs/shape1093"
+            "$ref": "#/$defs/shape1097"
           },
           "project": {
             "$ref": "#/$defs/shape1"
@@ -21524,7 +21588,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1095": {
+      "shape1099": {
         "type": "object",
         "properties": {
           "position": {
@@ -21552,7 +21616,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1097": {
+      "shape1101": {
         "type": "object",
         "properties": {
           "project": {
@@ -21568,20 +21632,20 @@
         ],
         "additionalProperties": false
       },
-      "shape1098": {
+      "shape1102": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1087"
+          "$ref": "#/$defs/shape1091"
         }
       },
-      "shape1096": {
+      "shape1100": {
         "type": "object",
         "properties": {
           "scope": {
-            "$ref": "#/$defs/shape1097"
+            "$ref": "#/$defs/shape1101"
           },
           "topics": {
-            "$ref": "#/$defs/shape1098"
+            "$ref": "#/$defs/shape1102"
           }
         },
         "required": [
@@ -21590,7 +21654,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1099": {
+      "shape1103": {
         "type": "object",
         "properties": {
           "characters": {
@@ -21619,7 +21683,7 @@
         "additionalProperties": false,
         "title": "SweepReport"
       },
-      "shape1100": {
+      "shape1104": {
         "type": "object",
         "properties": {
           "cron": {
@@ -21656,7 +21720,7 @@
         "additionalProperties": false,
         "title": "ScheduleRecord"
       },
-      "shape1103": {
+      "shape1107": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
@@ -21666,24 +21730,24 @@
           }
         ]
       },
-      "shape1105": {
+      "shape1109": {
         "const": "refused"
       },
-      "shape1104": {
+      "shape1108": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape839"
+            "$ref": "#/$defs/shape843"
           },
           {
-            "$ref": "#/$defs/shape1105"
+            "$ref": "#/$defs/shape1109"
           }
         ]
       },
-      "shape1102": {
+      "shape1106": {
         "type": "object",
         "properties": {
           "definition": {
-            "$ref": "#/$defs/shape1103"
+            "$ref": "#/$defs/shape1107"
           },
           "error": {
             "$ref": "#/$defs/shape43"
@@ -21704,7 +21768,7 @@
             "$ref": "#/$defs/shape452"
           },
           "status": {
-            "$ref": "#/$defs/shape1104"
+            "$ref": "#/$defs/shape1108"
           }
         },
         "required": [
@@ -21720,19 +21784,19 @@
         "additionalProperties": false,
         "title": "ScheduleFile"
       },
-      "shape1101": {
+      "shape1105": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1102"
+          "$ref": "#/$defs/shape1106"
         }
       },
-      "shape1106": {
+      "shape1110": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1100"
+          "$ref": "#/$defs/shape1104"
         }
       },
-      "shape1108": {
+      "shape1112": {
         "type": "object",
         "properties": {
           "event": {
@@ -21753,7 +21817,7 @@
         "additionalProperties": false,
         "title": "ScheduleNames"
       },
-      "shape1107": {
+      "shape1111": {
         "type": "object",
         "properties": {
           "agent": {
@@ -21769,7 +21833,7 @@
             "$ref": "#/$defs/shape8"
           },
           "names": {
-            "$ref": "#/$defs/shape1108"
+            "$ref": "#/$defs/shape1112"
           },
           "nextFires": {
             "$ref": "#/$defs/shape47"
@@ -21802,7 +21866,7 @@
         "additionalProperties": false,
         "title": "ScheduleProposal"
       },
-      "shape1111": {
+      "shape1115": {
         "type": "object",
         "properties": {
           "pool": {
@@ -21823,13 +21887,13 @@
         "additionalProperties": false,
         "title": "PoolUse"
       },
-      "shape1110": {
+      "shape1114": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1111"
+          "$ref": "#/$defs/shape1115"
         }
       },
-      "shape1113": {
+      "shape1117": {
         "type": "object",
         "properties": {
           "member": {
@@ -21862,23 +21926,23 @@
         "additionalProperties": false,
         "title": "Ready"
       },
-      "shape1112": {
+      "shape1116": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1113"
+          "$ref": "#/$defs/shape1117"
         }
       },
-      "shape1109": {
+      "shape1113": {
         "type": "object",
         "properties": {
           "more": {
             "$ref": "#/$defs/shape8"
           },
           "pools": {
-            "$ref": "#/$defs/shape1110"
+            "$ref": "#/$defs/shape1114"
           },
           "ready": {
-            "$ref": "#/$defs/shape1112"
+            "$ref": "#/$defs/shape1116"
           },
           "seats": {
             "$ref": "#/$defs/shape639"
@@ -21897,7 +21961,7 @@
         "additionalProperties": false,
         "title": "Swarm"
       },
-      "shape1117": {
+      "shape1121": {
         "type": "object",
         "properties": {},
         "additionalProperties": {
@@ -21905,7 +21969,7 @@
         },
         "title": "Readonly"
       },
-      "shape1116": {
+      "shape1120": {
         "type": "object",
         "properties": {
           "budget": {
@@ -21921,7 +21985,7 @@
             "$ref": "#/$defs/shape1"
           },
           "refused": {
-            "$ref": "#/$defs/shape1117"
+            "$ref": "#/$defs/shape1121"
           },
           "selection": {
             "$ref": "#/$defs/shape632"
@@ -21938,20 +22002,20 @@
         "additionalProperties": false,
         "title": "SwarmType"
       },
-      "shape1115": {
+      "shape1119": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1116"
+          "$ref": "#/$defs/shape1120"
         }
       },
-      "shape1114": {
+      "shape1118": {
         "type": "object",
         "properties": {
           "project": {
             "$ref": "#/$defs/shape1"
           },
           "types": {
-            "$ref": "#/$defs/shape1115"
+            "$ref": "#/$defs/shape1119"
           }
         },
         "required": [
@@ -21961,52 +22025,52 @@
         "additionalProperties": false,
         "title": "SwarmTypes"
       },
-      "shape1124": {
+      "shape1128": {
         "const": "IMAGE"
       },
-      "shape1123": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/shape1054"
-          },
-          {
-            "$ref": "#/$defs/shape1124"
-          }
-        ]
-      },
-      "shape1126": {
-        "const": "OBSERVATION"
-      },
       "shape1127": {
-        "const": "OUTPUT"
-      },
-      "shape1128": {
-        "const": "BOTH"
-      },
-      "shape1125": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape44"
-          },
-          {
-            "$ref": "#/$defs/shape1126"
-          },
-          {
-            "$ref": "#/$defs/shape1127"
+            "$ref": "#/$defs/shape1058"
           },
           {
             "$ref": "#/$defs/shape1128"
           }
         ]
       },
-      "shape1122": {
+      "shape1130": {
+        "const": "OBSERVATION"
+      },
+      "shape1131": {
+        "const": "OUTPUT"
+      },
+      "shape1132": {
+        "const": "BOTH"
+      },
+      "shape1129": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/shape44"
+          },
+          {
+            "$ref": "#/$defs/shape1130"
+          },
+          {
+            "$ref": "#/$defs/shape1131"
+          },
+          {
+            "$ref": "#/$defs/shape1132"
+          }
+        ]
+      },
+      "shape1126": {
         "type": "object",
         "properties": {
           "imageId": {
             "$ref": "#/$defs/shape43"
           },
           "kind": {
-            "$ref": "#/$defs/shape1123"
+            "$ref": "#/$defs/shape1127"
           },
           "ordinal": {
             "$ref": "#/$defs/shape61"
@@ -22015,7 +22079,7 @@
             "$ref": "#/$defs/shape43"
           },
           "use": {
-            "$ref": "#/$defs/shape1125"
+            "$ref": "#/$defs/shape1129"
           }
         },
         "required": [
@@ -22028,23 +22092,23 @@
         "additionalProperties": false,
         "title": "ToolContentPart"
       },
-      "shape1121": {
+      "shape1125": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1122"
+          "$ref": "#/$defs/shape1126"
         }
       },
-      "shape1129": {
+      "shape1133": {
         "const": "content/1"
       },
-      "shape1120": {
+      "shape1124": {
         "type": "object",
         "properties": {
           "parts": {
-            "$ref": "#/$defs/shape1121"
+            "$ref": "#/$defs/shape1125"
           },
           "version": {
-            "$ref": "#/$defs/shape1129"
+            "$ref": "#/$defs/shape1133"
           }
         },
         "required": [
@@ -22054,46 +22118,46 @@
         "additionalProperties": false,
         "title": "ToolContentBody"
       },
-      "shape1119": {
+      "shape1123": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape1120"
+            "$ref": "#/$defs/shape1124"
           }
         ]
       },
-      "shape1131": {
+      "shape1135": {
         "const": "COMPLETED"
       },
-      "shape1132": {
+      "shape1136": {
         "const": "REJECTED"
       },
-      "shape1130": {
+      "shape1134": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape676"
           },
           {
-            "$ref": "#/$defs/shape1131"
+            "$ref": "#/$defs/shape1135"
           },
           {
-            "$ref": "#/$defs/shape1132"
+            "$ref": "#/$defs/shape1136"
           }
         ]
       },
-      "shape1118": {
+      "shape1122": {
         "type": "object",
         "properties": {
           "content": {
-            "$ref": "#/$defs/shape1119"
+            "$ref": "#/$defs/shape1123"
           },
           "id": {
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape1130"
+            "$ref": "#/$defs/shape1134"
           },
           "text": {
             "$ref": "#/$defs/shape1"
@@ -22107,7 +22171,7 @@
         "additionalProperties": false,
         "title": "ToolInvocationResult"
       },
-      "shape1133": {
+      "shape1137": {
         "type": "object",
         "properties": {
           "account": {
@@ -22152,7 +22216,7 @@
         "additionalProperties": false,
         "title": "ToolScopeConnection"
       },
-      "shape1134": {
+      "shape1138": {
         "type": "object",
         "properties": {
           "disconnected": {
@@ -22172,7 +22236,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1136": {
+      "shape1140": {
         "type": "object",
         "properties": {
           "application": {
@@ -22203,7 +22267,7 @@
             "$ref": "#/$defs/shape1"
           },
           "route": {
-            "$ref": "#/$defs/shape1133"
+            "$ref": "#/$defs/shape1137"
           }
         },
         "required": [
@@ -22221,30 +22285,30 @@
         "additionalProperties": false,
         "title": "HostedToolBinding"
       },
-      "shape1138": {
+      "shape1142": {
         "const": "tool.scope.host.change"
       },
-      "shape1139": {
+      "shape1143": {
         "const": "tool.scope.host.save"
       },
-      "shape1137": {
+      "shape1141": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape1138"
+            "$ref": "#/$defs/shape1142"
           },
           {
-            "$ref": "#/$defs/shape1139"
+            "$ref": "#/$defs/shape1143"
           }
         ]
       },
-      "shape1135": {
+      "shape1139": {
         "type": "object",
         "properties": {
           "binding": {
-            "$ref": "#/$defs/shape1136"
+            "$ref": "#/$defs/shape1140"
           },
           "operation": {
-            "$ref": "#/$defs/shape1137"
+            "$ref": "#/$defs/shape1141"
           },
           "requestId": {
             "$ref": "#/$defs/shape1"
@@ -22258,23 +22322,23 @@
         "additionalProperties": false,
         "title": "HostedToolReceipt"
       },
-      "shape1140": {
+      "shape1144": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1136"
+          "$ref": "#/$defs/shape1140"
         }
       },
-      "shape1142": {
+      "shape1146": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1133"
+          "$ref": "#/$defs/shape1137"
         }
       },
-      "shape1141": {
+      "shape1145": {
         "type": "object",
         "properties": {
           "connections": {
-            "$ref": "#/$defs/shape1142"
+            "$ref": "#/$defs/shape1146"
           }
         },
         "required": [
@@ -22282,7 +22346,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1144": {
+      "shape1148": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape392"
@@ -22295,14 +22359,14 @@
           }
         ]
       },
-      "shape1143": {
+      "shape1147": {
         "type": "object",
         "properties": {
           "binding": {
             "$ref": "#/$defs/shape1"
           },
           "connection": {
-            "$ref": "#/$defs/shape1021"
+            "$ref": "#/$defs/shape1025"
           },
           "credentialGeneration": {
             "$ref": "#/$defs/shape1"
@@ -22311,7 +22375,7 @@
             "$ref": "#/$defs/shape16"
           },
           "header": {
-            "$ref": "#/$defs/shape1144"
+            "$ref": "#/$defs/shape1148"
           },
           "invocation": {
             "$ref": "#/$defs/shape43"
@@ -22344,7 +22408,7 @@
         "additionalProperties": false,
         "title": "HostedToolCredential"
       },
-      "shape1145": {
+      "shape1149": {
         "type": "object",
         "properties": {
           "binding": {
@@ -22357,7 +22421,7 @@
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape1130"
+            "$ref": "#/$defs/shape1134"
           },
           "text": {
             "$ref": "#/$defs/shape1"
@@ -22377,11 +22441,11 @@
         "additionalProperties": false,
         "title": "HostedToolReconciliation"
       },
-      "shape1146": {
+      "shape1150": {
         "type": "object",
         "properties": {
           "binding": {
-            "$ref": "#/$defs/shape1136"
+            "$ref": "#/$defs/shape1140"
           },
           "expiresAt": {
             "$ref": "#/$defs/shape1"
@@ -22402,24 +22466,24 @@
         "additionalProperties": false,
         "title": "HostedToolRegistration"
       },
-      "shape1148": {
+      "shape1152": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
           },
           {
-            "$ref": "#/$defs/shape1146"
+            "$ref": "#/$defs/shape1150"
           }
         ]
       },
-      "shape1147": {
+      "shape1151": {
         "type": "object",
         "properties": {
           "binding": {
             "$ref": "#/$defs/shape1"
           },
           "registration": {
-            "$ref": "#/$defs/shape1148"
+            "$ref": "#/$defs/shape1152"
           }
         },
         "required": [
@@ -22429,7 +22493,7 @@
         "additionalProperties": false,
         "title": "HostedToolWorkerStatus"
       },
-      "shape1149": {
+      "shape1153": {
         "type": "object",
         "properties": {
           "agent": {
@@ -22482,13 +22546,13 @@
         "additionalProperties": false,
         "title": "TriggerRecord"
       },
-      "shape1150": {
+      "shape1154": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1149"
+          "$ref": "#/$defs/shape1153"
         }
       },
-      "shape1151": {
+      "shape1155": {
         "type": "object",
         "properties": {
           "url": {
@@ -22500,7 +22564,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1154": {
+      "shape1158": {
         "type": "object",
         "properties": {
           "baseBlob": {
@@ -22541,17 +22605,17 @@
         "additionalProperties": false,
         "title": "UnionConflict"
       },
-      "shape1153": {
+      "shape1157": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1154"
+          "$ref": "#/$defs/shape1158"
         }
       },
-      "shape1152": {
+      "shape1156": {
         "type": "object",
         "properties": {
           "conflicts": {
-            "$ref": "#/$defs/shape1153"
+            "$ref": "#/$defs/shape1157"
           }
         },
         "required": [
@@ -22560,7 +22624,7 @@
         "additionalProperties": false,
         "title": "UnionConflicts"
       },
-      "shape1155": {
+      "shape1159": {
         "type": "object",
         "properties": {
           "n": {
@@ -22572,7 +22636,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1156": {
+      "shape1160": {
         "type": "object",
         "properties": {
           "url": {
@@ -22584,7 +22648,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1157": {
+      "shape1161": {
         "type": "object",
         "properties": {
           "replaced": {
@@ -22600,7 +22664,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1159": {
+      "shape1163": {
         "type": "object",
         "properties": {
           "eligible": {
@@ -22617,7 +22681,7 @@
         "additionalProperties": false,
         "title": "IneligibleUnion"
       },
-      "shape1160": {
+      "shape1164": {
         "type": "object",
         "properties": {
           "eligible": {
@@ -22654,17 +22718,17 @@
         "additionalProperties": false,
         "title": "EligibleUnion"
       },
-      "shape1158": {
+      "shape1162": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape1159"
+            "$ref": "#/$defs/shape1163"
           },
           {
-            "$ref": "#/$defs/shape1160"
+            "$ref": "#/$defs/shape1164"
           }
         ]
       },
-      "shape1162": {
+      "shape1166": {
         "type": "object",
         "properties": {
           "filter": {
@@ -22680,7 +22744,7 @@
         ],
         "additionalProperties": false
       },
-      "shape1165": {
+      "shape1169": {
         "type": "object",
         "properties": {},
         "additionalProperties": {
@@ -22688,7 +22752,7 @@
         },
         "title": "Record"
       },
-      "shape1164": {
+      "shape1168": {
         "type": "object",
         "properties": {
           "active_calls": {
@@ -22725,7 +22789,7 @@
             "$ref": "#/$defs/shape8"
           },
           "costs": {
-            "$ref": "#/$defs/shape1165"
+            "$ref": "#/$defs/shape1169"
           },
           "day": {
             "$ref": "#/$defs/shape1"
@@ -22809,13 +22873,13 @@
         "additionalProperties": false,
         "title": "UsageTotals"
       },
-      "shape1163": {
+      "shape1167": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1164"
+          "$ref": "#/$defs/shape1168"
         }
       },
-      "shape1166": {
+      "shape1170": {
         "type": "object",
         "properties": {
           "as_of": {
@@ -22876,23 +22940,23 @@
         "additionalProperties": false,
         "title": "UsageHealth"
       },
-      "shape1161": {
+      "shape1165": {
         "type": "object",
         "properties": {
           "cursor": {
             "$ref": "#/$defs/shape43"
           },
           "filters": {
-            "$ref": "#/$defs/shape1162"
-          },
-          "groups": {
-            "$ref": "#/$defs/shape1163"
-          },
-          "health": {
             "$ref": "#/$defs/shape1166"
           },
+          "groups": {
+            "$ref": "#/$defs/shape1167"
+          },
+          "health": {
+            "$ref": "#/$defs/shape1170"
+          },
           "totals": {
-            "$ref": "#/$defs/shape1164"
+            "$ref": "#/$defs/shape1168"
           }
         },
         "required": [
@@ -22905,7 +22969,7 @@
         "additionalProperties": false,
         "title": "UsageReport"
       },
-      "shape1172": {
+      "shape1176": {
         "type": "object",
         "properties": {
           "attempt_id": {
@@ -22998,13 +23062,13 @@
         "additionalProperties": false,
         "title": "UsageAttempt"
       },
-      "shape1171": {
+      "shape1175": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1172"
+          "$ref": "#/$defs/shape1176"
         }
       },
-      "shape1173": {
+      "shape1177": {
         "anyOf": [
           {
             "$ref": "#/$defs/shape44"
@@ -23014,7 +23078,7 @@
           }
         ]
       },
-      "shape1170": {
+      "shape1174": {
         "type": "object",
         "properties": {
           "admission_accounting_millis": {
@@ -23030,7 +23094,7 @@
             "$ref": "#/$defs/shape43"
           },
           "attempts": {
-            "$ref": "#/$defs/shape1171"
+            "$ref": "#/$defs/shape1175"
           },
           "attempts_truncated": {
             "$ref": "#/$defs/shape8"
@@ -23066,7 +23130,7 @@
             "$ref": "#/$defs/shape1"
           },
           "preflight_observation": {
-            "$ref": "#/$defs/shape1173"
+            "$ref": "#/$defs/shape1177"
           },
           "price_version": {
             "$ref": "#/$defs/shape43"
@@ -23123,23 +23187,23 @@
         "additionalProperties": false,
         "title": "UsageCall"
       },
-      "shape1169": {
+      "shape1173": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1170"
+          "$ref": "#/$defs/shape1174"
         }
       },
-      "shape1175": {
+      "shape1179": {
         "const": "usage.calls"
       },
-      "shape1174": {
+      "shape1178": {
         "type": "object",
         "properties": {
           "filter": {
             "$ref": "#/$defs/shape510"
           },
           "type": {
-            "$ref": "#/$defs/shape1175"
+            "$ref": "#/$defs/shape1179"
           }
         },
         "required": [
@@ -23148,20 +23212,20 @@
         ],
         "additionalProperties": false
       },
-      "shape1168": {
+      "shape1172": {
         "type": "object",
         "properties": {
           "calls": {
-            "$ref": "#/$defs/shape1169"
+            "$ref": "#/$defs/shape1173"
           },
           "cursor": {
             "$ref": "#/$defs/shape43"
           },
           "filters": {
-            "$ref": "#/$defs/shape1174"
+            "$ref": "#/$defs/shape1178"
           },
           "health": {
-            "$ref": "#/$defs/shape1166"
+            "$ref": "#/$defs/shape1170"
           }
         },
         "required": [
@@ -23173,11 +23237,11 @@
         "additionalProperties": false,
         "title": "UsageAudit"
       },
-      "shape1176": {
+      "shape1180": {
         "type": "object",
         "properties": {
           "attempts": {
-            "$ref": "#/$defs/shape1171"
+            "$ref": "#/$defs/shape1175"
           },
           "call": {
             "$ref": "#/$defs/shape1"
@@ -23186,10 +23250,10 @@
             "$ref": "#/$defs/shape43"
           },
           "filters": {
-            "$ref": "#/$defs/shape1174"
+            "$ref": "#/$defs/shape1178"
           },
           "health": {
-            "$ref": "#/$defs/shape1166"
+            "$ref": "#/$defs/shape1170"
           }
         },
         "required": [
@@ -23202,24 +23266,24 @@
         "additionalProperties": false,
         "title": "UsageAttempts"
       },
-      "shape1167": {
+      "shape1171": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape1168"
+            "$ref": "#/$defs/shape1172"
           },
           {
-            "$ref": "#/$defs/shape1176"
+            "$ref": "#/$defs/shape1180"
           }
         ]
       },
-      "shape1177": {
+      "shape1181": {
         "type": "object",
         "properties": {
           "filters": {
-            "$ref": "#/$defs/shape1162"
+            "$ref": "#/$defs/shape1166"
           },
           "report": {
-            "$ref": "#/$defs/shape1161"
+            "$ref": "#/$defs/shape1165"
           },
           "revision": {
             "$ref": "#/$defs/shape16"
@@ -23237,7 +23301,7 @@
         "additionalProperties": false,
         "title": "UsageInitial"
       },
-      "shape1178": {
+      "shape1182": {
         "type": "object",
         "properties": {
           "hasMore": {
@@ -23278,7 +23342,7 @@
         "additionalProperties": false,
         "title": "WebFetchResponse"
       },
-      "shape1181": {
+      "shape1185": {
         "type": "object",
         "properties": {
           "snippet": {
@@ -23299,20 +23363,20 @@
         "additionalProperties": false,
         "title": "WebSearchHit"
       },
-      "shape1180": {
+      "shape1184": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/shape1181"
+          "$ref": "#/$defs/shape1185"
         }
       },
-      "shape1179": {
+      "shape1183": {
         "type": "object",
         "properties": {
           "hasMore": {
             "$ref": "#/$defs/shape8"
           },
           "hits": {
-            "$ref": "#/$defs/shape1180"
+            "$ref": "#/$defs/shape1184"
           },
           "page": {
             "$ref": "#/$defs/shape16"
@@ -23338,7 +23402,7 @@
         "additionalProperties": false,
         "title": "WebSearchResponse"
       },
-      "shape1183": {
+      "shape1187": {
         "type": "object",
         "properties": {
           "agent": {
@@ -23376,23 +23440,23 @@
         "additionalProperties": false,
         "title": "JobEvent"
       },
-      "shape1186": {
+      "shape1190": {
         "const": "THINKING"
       },
-      "shape1187": {
+      "shape1191": {
         "const": "ANSWER"
       },
-      "shape1185": {
+      "shape1189": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape1186"
+            "$ref": "#/$defs/shape1190"
           },
           {
-            "$ref": "#/$defs/shape1187"
+            "$ref": "#/$defs/shape1191"
           }
         ]
       },
-      "shape1184": {
+      "shape1188": {
         "type": "object",
         "properties": {
           "job": {
@@ -23402,7 +23466,7 @@
             "$ref": "#/$defs/shape14"
           },
           "part": {
-            "$ref": "#/$defs/shape1185"
+            "$ref": "#/$defs/shape1189"
           },
           "text": {
             "$ref": "#/$defs/shape1"
@@ -23416,14 +23480,14 @@
         "additionalProperties": false,
         "title": "JobDelta"
       },
-      "shape1189": {
+      "shape1193": {
         "const": "inbox.changed"
       },
-      "shape1188": {
+      "shape1192": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape1189"
+            "$ref": "#/$defs/shape1193"
           },
           "unread": {
             "$ref": "#/$defs/shape16"
@@ -23435,14 +23499,14 @@
         ],
         "additionalProperties": false
       },
-      "shape1191": {
+      "shape1195": {
         "const": "information.invalidated"
       },
-      "shape1190": {
+      "shape1194": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape1191"
+            "$ref": "#/$defs/shape1195"
           },
           "progressOnly": {
             "$ref": "#/$defs/shape8"
@@ -23456,17 +23520,17 @@
         ],
         "additionalProperties": false
       },
-      "shape1193": {
+      "shape1197": {
         "const": "information.changed"
       },
-      "shape1192": {
+      "shape1196": {
         "type": "object",
         "properties": {
           "generation": {
             "$ref": "#/$defs/shape16"
           },
           "kind": {
-            "$ref": "#/$defs/shape1193"
+            "$ref": "#/$defs/shape1197"
           },
           "revision": {
             "$ref": "#/$defs/shape1"
@@ -23483,57 +23547,57 @@
         ],
         "additionalProperties": false
       },
-      "shape1195": {
+      "shape1199": {
         "const": "orchestration.changed"
       },
-      "shape1197": {
+      "shape1201": {
         "const": "asking"
       },
-      "shape1198": {
+      "shape1202": {
         "const": "waiting"
       },
-      "shape1199": {
+      "shape1203": {
         "const": "finished"
       },
-      "shape1200": {
+      "shape1204": {
         "const": "capped"
       },
-      "shape1196": {
+      "shape1200": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape765"
+            "$ref": "#/$defs/shape769"
           },
           {
-            "$ref": "#/$defs/shape766"
+            "$ref": "#/$defs/shape770"
           },
           {
-            "$ref": "#/$defs/shape858"
+            "$ref": "#/$defs/shape862"
           },
           {
-            "$ref": "#/$defs/shape1197"
+            "$ref": "#/$defs/shape1201"
           },
           {
-            "$ref": "#/$defs/shape1198"
+            "$ref": "#/$defs/shape1202"
           },
           {
-            "$ref": "#/$defs/shape1199"
+            "$ref": "#/$defs/shape1203"
           },
           {
-            "$ref": "#/$defs/shape1200"
+            "$ref": "#/$defs/shape1204"
           }
         ]
       },
-      "shape1194": {
+      "shape1198": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape1195"
+            "$ref": "#/$defs/shape1199"
           },
           "orchestration": {
             "$ref": "#/$defs/shape1"
           },
           "state": {
-            "$ref": "#/$defs/shape1196"
+            "$ref": "#/$defs/shape1200"
           }
         },
         "required": [
@@ -23543,14 +23607,14 @@
         ],
         "additionalProperties": false
       },
-      "shape1202": {
+      "shape1206": {
         "const": "orchestration.resumed"
       },
-      "shape1201": {
+      "shape1205": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape1202"
+            "$ref": "#/$defs/shape1206"
           },
           "orchestration": {
             "$ref": "#/$defs/shape1"
@@ -23566,14 +23630,14 @@
         ],
         "additionalProperties": false
       },
-      "shape1204": {
+      "shape1208": {
         "const": "orchestration.recorded"
       },
-      "shape1203": {
+      "shape1207": {
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/$defs/shape1204"
+            "$ref": "#/$defs/shape1208"
           },
           "root": {
             "$ref": "#/$defs/shape1"
@@ -23592,17 +23656,17 @@
         ],
         "additionalProperties": false
       },
-      "shape1206": {
+      "shape1210": {
         "const": "todos.changed"
       },
-      "shape1205": {
+      "shape1209": {
         "type": "object",
         "properties": {
           "conversation": {
             "$ref": "#/$defs/shape1"
           },
           "kind": {
-            "$ref": "#/$defs/shape1206"
+            "$ref": "#/$defs/shape1210"
           }
         },
         "required": [
@@ -23611,17 +23675,17 @@
         ],
         "additionalProperties": false
       },
-      "shape1208": {
+      "shape1212": {
         "const": "conversation.appended"
       },
-      "shape1207": {
+      "shape1211": {
         "type": "object",
         "properties": {
           "conversation": {
             "$ref": "#/$defs/shape1"
           },
           "kind": {
-            "$ref": "#/$defs/shape1208"
+            "$ref": "#/$defs/shape1212"
           },
           "through": {
             "$ref": "#/$defs/shape16"
@@ -23634,14 +23698,14 @@
         ],
         "additionalProperties": false
       },
-      "shape1210": {
+      "shape1214": {
         "const": "usage.updated"
       },
-      "shape1209": {
+      "shape1213": {
         "type": "object",
         "properties": {
           "report": {
-            "$ref": "#/$defs/shape1161"
+            "$ref": "#/$defs/shape1165"
           },
           "revision": {
             "$ref": "#/$defs/shape16"
@@ -23650,7 +23714,7 @@
             "$ref": "#/$defs/shape1"
           },
           "type": {
-            "$ref": "#/$defs/shape1210"
+            "$ref": "#/$defs/shape1214"
           }
         },
         "required": [
@@ -23661,23 +23725,23 @@
         ],
         "additionalProperties": false
       },
-      "shape1212": {
+      "shape1216": {
         "const": "BAD_REQUEST"
       },
-      "shape1213": {
+      "shape1217": {
         "const": "usage.closed"
       },
-      "shape1211": {
+      "shape1215": {
         "type": "object",
         "properties": {
           "code": {
-            "$ref": "#/$defs/shape1212"
+            "$ref": "#/$defs/shape1216"
           },
           "subscription": {
             "$ref": "#/$defs/shape1"
           },
           "type": {
-            "$ref": "#/$defs/shape1213"
+            "$ref": "#/$defs/shape1217"
           }
         },
         "required": [
@@ -23687,19 +23751,13 @@
         ],
         "additionalProperties": false
       },
-      "shape1182": {
+      "shape1186": {
         "anyOf": [
           {
-            "$ref": "#/$defs/shape1183"
-          },
-          {
-            "$ref": "#/$defs/shape1184"
+            "$ref": "#/$defs/shape1187"
           },
           {
             "$ref": "#/$defs/shape1188"
-          },
-          {
-            "$ref": "#/$defs/shape1190"
           },
           {
             "$ref": "#/$defs/shape1192"
@@ -23708,10 +23766,10 @@
             "$ref": "#/$defs/shape1194"
           },
           {
-            "$ref": "#/$defs/shape1201"
+            "$ref": "#/$defs/shape1196"
           },
           {
-            "$ref": "#/$defs/shape1203"
+            "$ref": "#/$defs/shape1198"
           },
           {
             "$ref": "#/$defs/shape1205"
@@ -23724,10 +23782,16 @@
           },
           {
             "$ref": "#/$defs/shape1211"
+          },
+          {
+            "$ref": "#/$defs/shape1213"
+          },
+          {
+            "$ref": "#/$defs/shape1215"
           }
         ]
       },
-      "shape1214": {
+      "shape1218": {
         "type": "object",
         "properties": {
           "correlationId": {
@@ -23765,7 +23829,7 @@
         "additionalProperties": false,
         "title": "RelayBlobPublish"
       },
-      "shape1215": {
+      "shape1219": {
         "type": "object",
         "properties": {
           "eventId": {
@@ -23790,7 +23854,7 @@
         "additionalProperties": false,
         "title": "RelayBlobRead"
       },
-      "shape1217": {
+      "shape1221": {
         "type": "object",
         "properties": {
           "position": {
@@ -23818,14 +23882,14 @@
         ],
         "additionalProperties": false
       },
-      "shape1216": {
+      "shape1220": {
         "type": "object",
         "properties": {
           "blob": {
-            "$ref": "#/$defs/shape1051"
+            "$ref": "#/$defs/shape1055"
           },
           "publication": {
-            "$ref": "#/$defs/shape1217"
+            "$ref": "#/$defs/shape1221"
           }
         },
         "required": [

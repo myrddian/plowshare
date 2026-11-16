@@ -840,6 +840,17 @@ public class ConversationController {
    *     unset field arrives as, and a search that read it as "no filter" would answer with a page
    *     of the whole tier under a question nobody asked
    */
+  public ResponseEntity<LogSearchView> searchEntries(
+      String q,
+      String project,
+      Integer offset,
+      Integer limit,
+      String mode,
+      String snapshot,
+      String conversation) {
+    return searchEntries(q, project, offset, limit, mode, snapshot, conversation, false);
+  }
+
   @GetMapping("/v1/entries/search")
   public ResponseEntity<LogSearchView> searchEntries(
       @RequestParam(required = false) String q,
@@ -848,9 +859,12 @@ public class ConversationController {
       @RequestParam(required = false) Integer limit,
       @RequestParam(required = false) String mode,
       @RequestParam(required = false) String snapshot,
-      @RequestParam(required = false) String conversation) {
-    if (mode == null && snapshot == null && conversation == null)
-      return searchEntries(q, project, offset, limit);
+      @RequestParam(required = false) String conversation,
+      @RequestParam(required = false) Boolean includeInputs) {
+    if (mode == null
+        && snapshot == null
+        && conversation == null
+        && !Boolean.TRUE.equals(includeInputs)) return searchEntries(q, project, offset, limit);
     String question = RequestedLogQuestion.in(q);
     RequestedWindow window = RequestedWindow.in(offset, limit);
     return ResponseEntity.ok(
@@ -863,7 +877,8 @@ public class ConversationController {
                 mode,
                 snapshot,
                 null,
-                conversation));
+                conversation,
+                Boolean.TRUE.equals(includeInputs)));
   }
 
   public ResponseEntity<LogSearchView> searchEntries(
