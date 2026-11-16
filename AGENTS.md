@@ -151,6 +151,16 @@ and the [query and cache strategy](docs/query-efficiency-and-cache-design.md).
 Shared caches must remain bounded and preserve current authorization and
 documented consistency; adding a cache is not a substitute for fixing wasteful SQL.
 
+**Model prose uses word targets with tolerance.** Do not make completed model work
+fail because a title, summary or note crosses an exact character cutoff. Models
+are not reliable counters. Declare word targets and a documented overrun tolerance,
+accept modest overruns, and use the shared bounded output-recovery policy to
+shorten only overlong fields from retained results. Preserve evidence, qualifiers
+and completed tool work; never repeat research to fix presentation. If recovery
+cannot safely finish, retain the work for review instead of losing it or claiming
+success. Raw response/byte, context, identifier and URL bounds remain separate
+resource and protocol constraints. See [model prose](docs/coding-standards.md#model-prose-budgets-and-recovery).
+
 **All active work must be bounded.** Short interactive reads, controls and async
 acceptance replies use a configurable **2-second default ceiling**, aiming much
 lower normally. Model/provider calls, transfers and background stages need their

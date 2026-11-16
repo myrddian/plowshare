@@ -167,6 +167,36 @@ class ProductResearchTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ResearchReferenceAdoptionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_research_title_survives_result_adoption_and_journal_reload_in_words(
+        self,
+    ) -> None:
+        title = "\u00a0\u0085\ufeff".join(["research"] * 250)
+        source = ProductSource(URL, title, "privacy", REVISION)
+        answer = ProductAnswer(REPORT, "Reviewed research.", (source,))
+        self.assertEqual(
+            answer, ProductAnswer.decode(json.loads(json.dumps(answer.encoded())))
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            port = AsyncMock()
+            port.revision.return_value = InformationRevisionDto(
+                id=REVISION,
+                kind="source",
+                source_uri=URL,
+                source_name="Product research / retained-identity",
+                tags_version=1,
+            )
+            library = ReferenceLibrary(ReferenceJournal(root), port)
+            receipt = await library.adopt_research(
+                "lg-tv", title, URL, "privacy", REVISION
+            )
+            self.assertEqual(title, receipt.title)
+            reloaded = ReferenceJournal(root).read().receipts[0]
+            self.assertEqual(receipt, reloaded)
+            port.acquire.assert_not_awaited()
+        with self.assertRaisesRegex(ValueError, "word"):
+            ProductSource(URL, "research " * 251, "privacy", REVISION)
+
     async def test_adoption_checks_source_identity_and_reuses_without_acquiring(
         self,
     ) -> None:

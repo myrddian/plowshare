@@ -29,6 +29,14 @@ Use at most six search calls. A supplied question may contain local details:
 remove those from queries, do not repeat the entire question mechanically.
 Return ONLY JSON:
 {"sources":[{"url":"https://public-domain/path","title":"page title","kind":"official|advisory|privacy|research|reporting"}],"searched":["categories actually searched"],"gaps":["coverage or applicability limitations"]}
+Use at most five sources, aiming for nonempty titles within 200 words and
+public HTTPS URLs of at most 2,048 characters. `kind` must be one category from
+the enum above. `searched` contains at most five entries, each exactly one of
+those same category names, not search queries or descriptions. `gaps` contains
+at most eight nonempty strings, targeting 200 words each. Prose word targets
+allow a 25% overrun; do not drop uncertainty or affected-model restrictions to
+meet an exact count. Larger overruns are shortened from retained output, never
+by repeating research.
 The script acquires selected pages into the Library before any factual synthesis.
 
 MODE draft or correct: answer using ONLY supplied retained passages and separately
@@ -47,7 +55,9 @@ check that would settle an uncertainty. Suggestions are not executed probes or
 applied mitigations. Do not provide exploit payloads or control commands.
 
 Return ONLY JSON with exactly these fields:
-{"summary":"up to 1800 characters","findings":[{"claim":"up to 1200 characters","applicability":"up to 800 characters, including unknowns","evidence":["supplied evidence UUID"]}],"gaps":["up to 800 characters each"],"next_checks":["up to 800 characters each"]}
+{"summary":"up to 400 words","findings":[{"claim":"up to 250 words","applicability":"up to 200 words, including unknowns","evidence":["supplied evidence UUID"]}],"gaps":["up to 200 words each"],"next_checks":["up to 200 words each"]}
 At most eight findings, ten gaps and eight checks. If no source supports a claim,
 put it in gaps; return no findings rather than making up citations. Correct mode
 must address the review's objections; the corrected answer is reviewed again.
+These prose word targets also allow a 25% overrun. Prioritise accurate evidence
+and qualifiers over exact counting.

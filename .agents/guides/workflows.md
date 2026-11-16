@@ -47,6 +47,11 @@ ordinary returned delegation command. Review exhaustion must not complete an
 unvalidated stage. Domain-specific semantic checks remain mandatory. Existing
 script JSON parsing and contract decisions are recorded as diagnostics hidden
 from model context; installing this policy never resumes source-pinned old runs.
+Model prose uses word targets with documented tolerance (25% by default), not exact
+character cutoffs. For nested outputs, recover only selected prose through the
+shared string-field policy while retaining domain-owned citations, URLs and
+verdicts. Keep completed research on review exhaustion; do not rerun it to shorten
+a response. See [model prose budgets](../../docs/coding-standards.md#model-prose-budgets-and-recovery).
 
 Application inbox routing and human attention ownership are distinct. Root
 applications retain background output in the project inbox without manifest opt-in.

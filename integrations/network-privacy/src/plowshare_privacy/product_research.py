@@ -26,6 +26,7 @@ from .product_probe import ProbeObservation
 from .reference_library import ReferenceLibrary
 from .reference_requests import ReferenceRequest, ReferenceRequests
 from .reference_seed import product_slug, reference_url
+from .research_text import research_title
 from .worker import ReconciliationRequired
 
 KINDS = ("official", "advisory", "privacy", "research", "reporting")
@@ -99,7 +100,7 @@ class ProductSource:
 
     def __post_init__(self) -> None:
         reference_url(self.url)
-        field(self.title, 200, required=True)
+        research_title(self.title)
         if self.kind not in KINDS:
             raise ValueError("Unsupported product source kind")
         uuid(self.revision)
@@ -109,7 +110,7 @@ class ProductSource:
         row = object_fields(value, {"url", "title", "kind", "revision"})
         return cls(
             reference_url(row["url"]),
-            field(row["title"], 200, required=True),
+            research_title(row["title"]),
             field(row["kind"], 32, required=True),
             uuid(row["revision"]),
         )

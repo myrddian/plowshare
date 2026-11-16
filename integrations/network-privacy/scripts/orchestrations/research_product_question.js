@@ -7,7 +7,11 @@ export const manifest = {
     'Researches one product security or privacy question and retains a source-backed, independently reviewed answer.',
   model: 'reasoning',
   tools: ['information_read', 'information_write'],
-  calls: ['privacy_product_researcher', 'privacy_product_reviewer'],
+  calls: [
+    'privacy_product_researcher',
+    'privacy_product_reviewer',
+    'privacy_output_recovery',
+  ],
   scopes: [],
   'max-turns': 160,
   'max-model-calls': 32,
@@ -22,17 +26,44 @@ export const manifest = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KINDS = ['official', 'advisory', 'privacy', 'research', 'reporting'];
+// Match the shared recovery policy's Unicode whitespace word boundaries. These
+// are prose budgets; raw replies, URLs and exact source windows have size bounds.
+const WORD = /[^\s\p{Z}\u0085\ufeff]+/gu;
+const WORDS = {
+  title: 200,
+  summary: 400,
+  claim: 250,
+  applicability: 200,
+  gap: 200,
+  check: 200,
+  notes: 600,
+};
+const WORD_TOLERANCE = 1.25;
+// The collector's answer envelope has an independent delivery-size contract.
+// Check it before writing a report, so even a huge single word retains a draft
+// for review instead of failing after a report was committed.
+const MAX_ANSWER_CHARACTERS = 65536;
 function fail(message) {
   throw new Error(message);
 }
-function text(value, limit) {
-  if (
-    typeof value !== 'string' ||
-    !value.trim() ||
-    value.length > limit ||
-    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)
-  )
-    fail('Invalid research text');
+function text(value, field, limit) {
+  // Name only code-owned fields and sizes. A validation failure must identify
+  // the broken contract without copying private questions or source/model text.
+  if (typeof value !== 'string')
+    fail('Invalid ' + field + ': expected a string');
+  if (!value.trim()) fail('Invalid ' + field + ': expected nonempty text');
+  if (value.length > limit)
+    fail(
+      'Invalid ' +
+        field +
+        ': expected at most ' +
+        limit +
+        ' characters; got ' +
+        value.length +
+        '. Inspect the retained command result.',
+    );
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value))
+    fail('Invalid ' + field + ': forbidden control characters');
   return value;
 }
 function id(value) {
@@ -56,18 +87,54 @@ function list(value, max) {
     fail('Invalid research list');
   return value;
 }
-function strings(value, max, limit) {
-  return list(value, max).map((item) => text(item, limit));
+function words(value) {
+  return (value.match(WORD) || []).length;
 }
-function json(raw, model = false) {
-  text(raw, 196608);
-  if (!model) return JSON.parse(raw);
+function prose(value, field) {
+  if (typeof value !== 'string' || words(value) === 0)
+    fail('Invalid ' + field + ': expected nonempty text');
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value))
+    fail('Invalid ' + field + ': forbidden control characters');
+  return value;
+}
+function discovery(value) {
+  record(value, ['sources', 'searched', 'gaps']);
+  const sources = list(value.sources, 5);
+  sources.forEach((item, index) => {
+    record(item, ['url', 'title', 'kind']);
+    publicUrl(item.url, 'discover.sources[' + index + '].url');
+    prose(item.title, 'discover.sources[' + index + '].title');
+    if (!KINDS.includes(item.kind)) fail('Unknown source kind');
+  });
+  if (new Set(sources.map((item) => item.url)).size !== sources.length)
+    fail('Duplicate research source');
+  list(value.searched, 5).forEach((kind) => {
+    if (!KINDS.includes(kind)) fail('Unknown search category');
+  });
+  list(value.gaps, 8).forEach((gap, index) =>
+    prose(gap, 'discover.gaps[' + index + ']'),
+  );
+  return value;
+}
+function json(raw, field, model = false) {
+  text(raw, field, 196608);
+  if (!model) {
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      fail(
+        'Invalid ' +
+          field +
+          ': expected JSON; inspect the retained command result.',
+      );
+    }
+  }
   const parsed = llmJson.parse(raw);
-  if (!parsed.pass) fail('Invalid researcher JSON');
+  if (!parsed.pass) fail('Invalid ' + field + ': invalid model JSON');
   return parsed.value;
 }
-function publicUrl(value) {
-  text(value, 2048);
+function publicUrl(value, field) {
+  text(value, field, 2048);
   // DNS resolution, redirects and network SSRF policy remain with the server's
   // acquisition boundary. Reject literal/local destinations before submitting.
   const match =
@@ -120,13 +187,16 @@ function agent(state, mode, reviewer = false) {
     task: task(state, mode),
   });
 }
-function draft(value, state) {
+function draft(value, state, field) {
   record(value, ['summary', 'findings', 'gaps', 'next_checks']);
-  text(value.summary, 1800);
-  list(value.findings, 8).forEach((finding) => {
+  prose(value.summary, field + '.summary');
+  list(value.findings, 8).forEach((finding, index) => {
     record(finding, ['claim', 'applicability', 'evidence']);
-    text(finding.claim, 1200);
-    text(finding.applicability, 800);
+    prose(finding.claim, field + '.findings[' + index + '].claim');
+    prose(
+      finding.applicability,
+      field + '.findings[' + index + '].applicability',
+    );
     const cited = list(finding.evidence, 8);
     if (
       !cited.length ||
@@ -137,9 +207,109 @@ function draft(value, state) {
     )
       fail('Finding has no retained supporting evidence');
   });
-  strings(value.gaps, 10, 800);
-  strings(value.next_checks, 8, 800);
+  list(value.gaps, 10).forEach((item, index) =>
+    prose(item, field + '.gaps[' + index + ']'),
+  );
+  list(value.next_checks, 8).forEach((item, index) =>
+    prose(item, field + '.next_checks[' + index + ']'),
+  );
   return value;
+}
+function review(value) {
+  record(value, ['verdict', 'notes']);
+  prose(value.notes, 'review.notes');
+  if (!['accepted', 'needs_corrections'].includes(value.verdict))
+    fail('Research was not reviewed');
+  return value;
+}
+function proseFields(value, mode, state) {
+  // Only prose can be shortened. URLs, categories, evidence IDs, coordinates,
+  // verdicts and array membership stay in the retained domain object.
+  const fields = [];
+  const add = (object, property, words) =>
+    fields.push({ object, property, words });
+  if (mode === 'discover') {
+    discovery(value);
+    value.sources.forEach((source) => add(source, 'title', WORDS.title));
+    value.gaps.forEach((_, index) => add(value.gaps, index, WORDS.gap));
+  } else if (mode === 'review') {
+    review(value);
+    add(value, 'notes', WORDS.notes);
+  } else {
+    draft(value, state, mode);
+    add(value, 'summary', WORDS.summary);
+    value.findings.forEach((finding) => {
+      add(finding, 'claim', WORDS.claim);
+      add(finding, 'applicability', WORDS.applicability);
+    });
+    value.gaps.forEach((_, index) => add(value.gaps, index, WORDS.gap));
+    value.next_checks.forEach((_, index) =>
+      add(value.next_checks, index, WORDS.check),
+    );
+  }
+  return fields;
+}
+function needsReview(state, reason) {
+  state.outputReview = reason;
+  return emit(state, 'output_review', 'orchestration_ask', {
+    question:
+      reason +
+      ' The completed research and original response remain retained. Review or stop this run; no accepted report has been written and no research will be repeated automatically.',
+  });
+}
+function recoverProse(state, value, mode) {
+  const fields = proseFields(value, mode, state);
+  const targets = fields
+    .map((field, index) => ({ ...field, key: 'field_' + index }))
+    .filter(
+      (field) =>
+        words(field.object[field.property]) >
+        Math.floor(field.words * WORD_TOLERANCE),
+    );
+  if (!targets.length) return null;
+  // The shared policy supports up to 32 string fields. An unusually broad
+  // violation needs review, not multiple repair calls with fresh allowances.
+  if (targets.length > 32)
+    return needsReview(
+      state,
+      'Too many prose fields exceed their word budgets.',
+    );
+  const contract = {
+    name: 'product-research-' + mode,
+    worker: 'privacy_output_recovery',
+    fields: Object.fromEntries(
+      targets.map((field) => [
+        field.key,
+        { words: Math.floor(field.words * WORD_TOLERANCE), required: true },
+      ]),
+    ),
+  };
+  const selected = Object.fromEntries(
+    targets.map((field) => [field.key, field.object[field.property]]),
+  );
+  const plan = modelOutput.recover(JSON.stringify(selected), contract, null);
+  if (plan.action !== 'SUMMARISE')
+    return needsReview(state, plan.reason || 'Research prose requires review.');
+  state.recovering = {
+    mode,
+    value,
+    contract,
+    checkpoint: plan.checkpoint,
+    keys: targets.map((field) => field.key),
+  };
+  // Recovery has the same tolerance as the original response. Ask the worker
+  // to aim lower, without making a small overrun of its target another cliff.
+  plan.command.arguments.task +=
+    '\nAim for these word targets; the contract includes 25% tolerance:\n' +
+    JSON.stringify(
+      Object.fromEntries(targets.map((field) => [field.key, field.words])),
+    );
+  return emit(
+    state,
+    'recover_output',
+    plan.command.tool,
+    plan.command.arguments,
+  );
 }
 function plain(value) {
   // The script owns Markdown structure; source/model strings cannot add HTML,
@@ -221,10 +391,43 @@ function consume(state, raw) {
   const pending = state.pending;
   state.pending = null;
   if (pending === 'entered' || pending === 'exit') return;
+  if (pending === 'output_review')
+    return needsReview(state, state.outputReview);
+  if (pending === 'recover_output') {
+    const retained = state.recovering;
+    const plan = modelOutput.recover(
+      raw,
+      retained.contract,
+      retained.checkpoint,
+    );
+    if (plan.action !== 'ACCEPT')
+      return needsReview(
+        state,
+        plan.reason || 'The shortened research text requires review.',
+      );
+    const fields = proseFields(retained.value, retained.mode, state);
+    for (const key of retained.keys) {
+      const field = fields[Number(key.slice(6))];
+      field.object[field.property] = plan.value[key];
+    }
+    // Revalidate domain meaning after merging; recovery cannot change citation
+    // membership, source destinations or the independent review verdict.
+    proseFields(retained.value, retained.mode, state);
+    state.recovering = null;
+    return consumeValue(state, retained.value, retained.mode);
+  }
   const value = json(
     raw,
+    pending + ' response',
     ['discover', 'draft', 'correct', 'review'].includes(pending),
   );
+  if (['discover', 'draft', 'correct', 'review'].includes(pending)) {
+    const recovery = recoverProse(state, value, pending);
+    if (recovery) return recovery;
+  }
+  return consumeValue(state, value, pending);
+}
+function consumeValue(state, value, pending) {
   const source = state.sources[state.cursor];
   if (pending === 'dossier_await') {
     const outcomes = list(value.outcomes, 1);
@@ -236,22 +439,8 @@ function consume(state, raw) {
     } else if (outcomes[0].state !== 'pending' || ++state.waits >= 8)
       fail('Dossier extraction is not ready; inspect the existing source');
   } else if (pending === 'discover') {
-    record(value, ['sources', 'searched', 'gaps']);
-    const sources = list(value.sources, 5);
-    sources.forEach((item) => {
-      record(item, ['url', 'title', 'kind']);
-      publicUrl(item.url);
-      text(item.title, 200);
-      if (!KINDS.includes(item.kind)) fail('Unknown source kind');
-    });
-    if (new Set(sources.map((item) => item.url)).size !== sources.length)
-      fail('Duplicate research source');
-    strings(value.searched, 5, 32).forEach((kind) => {
-      if (!KINDS.includes(kind)) fail('Unknown search category');
-    });
-    strings(value.gaps, 8, 800);
-    state.discovery = value;
-    state.sources = sources.map((source) => {
+    state.discovery = discovery(value);
+    state.sources = value.sources.map((source) => {
       const known = state.request.known_sources.find(
         (item) => item.url === source.url,
       );
@@ -266,7 +455,7 @@ function consume(state, raw) {
       value.text.length > 32768
     )
       fail('Incomplete or foreign device dossier');
-    state.dossier = text(value.text, 32768);
+    state.dossier = text(value.text, 'dossier.text', 32768);
     state.phase = 'discover';
   } else if (pending === 'acquire') {
     source.ticket = id(value.id);
@@ -306,13 +495,14 @@ function consume(state, raw) {
     state.windows = list(value, 10)
       .filter((item) => item.matched)
       .slice(0, 3);
-    for (const window of state.windows) {
+    for (const [index, window] of state.windows.entries()) {
       if (
         window.revision !== source.revision ||
         !Number.isInteger(window.start) ||
         window.start < 0 ||
         !Number.isInteger(window.end) ||
-        window.end - window.start !== text(window.text, 32768).length
+        window.end - window.start !==
+          text(window.text, 'search.windows[' + index + '].text', 32768).length
       )
         fail('Invalid retained source coordinates');
       // Keep model context bounded while preserving an exact retained-source
@@ -354,15 +544,11 @@ function consume(state, raw) {
     });
     if (!state.windows.length) state.cursor++;
   } else if (pending === 'draft' || pending === 'correct') {
-    state.draft = draft(value, state);
+    state.draft = draft(value, state, pending);
     state.review = null;
     state.phase = 'review';
   } else if (pending === 'review') {
-    record(value, ['verdict', 'notes']);
-    text(value.notes, 2400);
-    if (!['accepted', 'needs_corrections'].includes(value.verdict))
-      fail('Research was not reviewed');
-    state.review = value;
+    state.review = review(value);
     if (value.verdict === 'accepted') state.phase = 'report';
     else if (state.corrected)
       fail(
@@ -383,24 +569,33 @@ export function step(input) {
   if (!todo) fail('Missing research stage');
   let state = input.state;
   if (!state) {
-    const request = record(json(json(input.message).request), [
-      'version',
-      'product',
-      'question',
-      'dossier',
-      'probes',
-      'known_sources',
-    ]);
+    if (
+      typeof modelOutput !== 'object' ||
+      typeof modelOutput.recover !== 'function'
+    )
+      fail(
+        'Product research requires server model-output recovery support; update the server before this Application.',
+      );
+    const request = record(
+      json(json(input.message, 'start envelope').request, 'research request'),
+      ['version', 'product', 'question', 'dossier', 'probes', 'known_sources'],
+    );
     if (
       request.version !== 1 ||
       !/^[a-z0-9][a-z0-9-]{0,47}$/.test(request.product)
     )
       fail('Invalid product request');
-    text(request.question, 2048);
-    list(request.known_sources, 5).forEach((source) => {
+    text(request.question, 'request.question', 2048);
+    list(request.known_sources, 5).forEach((source, index) => {
       record(source, ['url', 'title', 'kind', 'revision']);
-      publicUrl(source.url);
-      text(source.title, 200);
+      publicUrl(source.url, 'request.known_sources[' + index + '].url');
+      prose(source.title, 'request.known_sources[' + index + '].title');
+      if (words(source.title) > WORDS.title * WORD_TOLERANCE)
+        fail(
+          'Invalid source title: exceeds the ' +
+            WORDS.title +
+            '-word target and 25% tolerance',
+        );
       id(source.revision);
       if (!KINDS.includes(source.kind)) fail('Unknown source kind');
     });
@@ -447,7 +642,10 @@ export function step(input) {
       ops: [{ op: 'update', id: todo.id, status: 'in_progress' }],
     });
   }
-  if (state.pending) consume(state, input.result);
+  if (state.pending) {
+    const recovery = consume(state, input.result);
+    if (recovery) return recovery;
+  }
   if (state.phase === 'dossier_await')
     return emit(state, 'dossier_await', 'information_read', {
       operation: 'await',
@@ -473,11 +671,8 @@ export function step(input) {
       return emit(state, 'acquire', 'information_write', {
         operation: 'acquire',
         url: source.url,
-        name:
-          'Product research: ' +
-          source.title +
-          ' / ' +
-          input.requestId.slice(0, 8),
+        // Resource names are identifiers, separate from the full retained title.
+        name: 'Product research / ' + input.requestId,
         requestId: input.requestId,
       });
     }
@@ -533,13 +728,19 @@ export function step(input) {
   if (state.phase === 'draft' || state.phase === 'correct')
     return agent(state, state.phase);
   if (state.phase === 'review') return agent(state, 'review', true);
-  if (state.phase === 'report')
+  if (state.phase === 'report') {
+    const answer = render(state);
+    if (answer.length > MAX_ANSWER_CHARACTERS)
+      return needsReview(
+        state,
+        'The rendered answer exceeds the delivery-size budget.',
+      );
     return emit(state, 'report', 'information_write', {
       operation: 'report',
       requestId: input.requestId,
       name:
         'Product research / ' + state.request.product + ' / ' + input.requestId,
-      text: render(state),
+      text: answer,
       inputs: [
         ...new Set(
           [
@@ -558,6 +759,7 @@ export function step(input) {
         },
       ],
     });
+  }
   if (state.phase !== 'done') fail('Invalid product research phase');
   if (String(todo.status).toLowerCase() !== 'done')
     return emit(state, 'exit', 'todo_write', {
