@@ -1,6 +1,7 @@
 import { _electron as electron, expect } from 'playwright/test';
 import executablePath from 'electron';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -40,7 +41,9 @@ try {
   await usage.screenshot({ path: 'build/smoke/quit-with-inspectors.png' });
   let expired;
   try {
-    await Promise.race([app.close(), new Promise((_, reject) => {
+    const exiting = once(app.process(), 'exit');
+    app.process().kill('SIGINT');
+    await Promise.race([exiting, new Promise((_, reject) => {
       expired = setTimeout(() => reject(new Error('Desktop quit did not drain within ten seconds')), 10_000);
     })]);
   } finally { clearTimeout(expired); }

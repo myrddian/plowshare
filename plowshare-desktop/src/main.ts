@@ -1474,13 +1474,24 @@ background(
   }),
 );
 app.on('window-all-closed', () => app.quit());
+// The development launcher forwards terminal signals. Route them through the
+// same drain as Quit, rather than exiting inside a credential/workspace write.
+for (const signal of ['SIGINT', 'SIGTERM'] as const)
+  process.on(signal, () => app.quit());
 let quitting = false;
+let quitReady = false;
 app.on('before-quit', (event) => {
-  if (quitting) return;
+  if (quitReady) return;
   event.preventDefault();
+  if (quitting) return;
   quitting = true;
   // Stop local commands and withdraw presence before ending the process.
-  background(client.shutdown().finally(() => app.quit()));
+  background(
+    client.shutdown().finally(() => {
+      quitReady = true;
+      app.quit();
+    }),
+  );
 });
 
 /** Report failures without opening a modal that can block process shutdown. */

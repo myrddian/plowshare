@@ -157,6 +157,13 @@ that specific stale lock directory; do not remove a lock held by a live client.
 If a refresh was interrupted, sign in again. Automatic stale-lock reclamation is
 not implemented because it could race a client still rotating credentials.
 
+Desktop shutdown also drains workspace recovery writes, including cleanup already
+started by a socket close. Normal quit releases the local workspace locks before
+Electron exits, including Ctrl-C and termination from the development launcher.
+A forcibly killed process can still leave an interrupted lock;
+inspect its owner before removing it. Connection startup retains view edits locally
+until the selected connection is ready, then saves them under that same identity.
+
 ```sh
 bin/plowshare-cli --server https://plowshare.example.com logout
 ```

@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } fr
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { protocolFixture } from './protocol-fixture.mjs';
 import { SyncFixture, git } from './sync-fixture.mjs';
 import { connectionDirectory } from '../../sdk/node/build/connections.js';
@@ -194,7 +195,24 @@ try {
   assert.equal(await readFile(join(backup, 'unclaimed.txt'), 'utf8'), 'Unclaimed scoped files');
   await assert.rejects(readFile(join(personal, 'unsynced.txt')), {code:'ENOENT'});
   assert.equal(await readFile(join(personal,'Planning','plan.md'),'utf8'), 'A useful personal plan.');
-  await app.close(); app = undefined;
+  const exiting = once(app.process(), 'exit');
+  app.process().kill('SIGTERM');
+  app.process().kill('SIGINT');
+  let quitDeadline;
+  try {
+    await Promise.race([exiting, new Promise((_, reject) => {
+      quitDeadline = setTimeout(() => reject(new Error('SIGTERM did not drain Personal within ten seconds')), 10_000);
+    })]);
+  } finally { clearTimeout(quitDeadline); }
+  app = undefined;
+  const recoveryDirectory = join(scopeDirectory, 'workspaces');
+  assert.equal((await readdir(recoveryDirectory)).some(name => name.endsWith('.lock')), false,
+    'Repeated termination requests must drain workspace recovery writes before Electron exits');
+  for (const name of await readdir(recoveryDirectory)) {
+    const slots = JSON.parse(await readFile(join(recoveryDirectory, name), 'utf8'));
+    assert.ok(slots.every(slot => slot.owner === undefined && slot.pid === undefined),
+      'Every Personal recovery claim must be released before Electron exits');
+  }
   app = await electron.launch({executablePath,args:[resolve('.')],env});
   const restarted = await app.firstWindow();
   await expect(restarted.locator('#personal-recovery-warning')).toHaveText(warning);

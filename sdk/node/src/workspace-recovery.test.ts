@@ -126,3 +126,55 @@ await test('an exited client process leaves a recoverable identity for the reope
     await rm(configuration, { recursive: true, force: true });
   }
 });
+
+await test('explicit cleanup after socket close drains every workspace lock before process exit', async () => {
+  const configuration = await mkdtemp(
+    join(tmpdir(), 'plowshare-workspace-quit-'),
+  );
+  try {
+    const module = new URL('../build/workspace-recovery.js', import.meta.url)
+      .href;
+    await promisify(execFile)(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `import { enableWorkspaceRecovery, workspaceRecoveryKey, releaseWorkspaceRecovery } from ${JSON.stringify(module)};
+         const connection = { ask: async () => ({ code: 'OK' }), close() {} };
+         enableWorkspaceRecovery(connection, 'https://fixture.example', 'alice', process.argv[1]);
+         for (const root of ['/fixture/one', '/fixture/two', '/fixture/three'])
+           await workspaceRecoveryKey(connection, { machine: 'fixture-machine', root, project: 'project' });
+         connection.close();
+         await releaseWorkspaceRecovery(connection);
+         process.exit(0);`,
+        configuration,
+      ],
+      { timeout: 5000 },
+    );
+    const directory = join(
+      connectionDirectory('https://fixture.example', 'alice', configuration),
+      'workspaces',
+    );
+    assert.equal(
+      (await readdir(directory)).some((name) => name.endsWith('.lock')),
+      false,
+    );
+    for (const name of await readdir(directory)) {
+      const slots: unknown = JSON.parse(
+        await readFile(join(directory, name), 'utf8'),
+      );
+      assert.ok(Array.isArray(slots));
+      assert.ok(
+        slots.every(
+          (slot: unknown) =>
+            typeof slot === 'object' &&
+            slot !== null &&
+            !('owner' in slot) &&
+            !('pid' in slot),
+        ),
+      );
+    }
+  } finally {
+    await rm(configuration, { recursive: true, force: true });
+  }
+});

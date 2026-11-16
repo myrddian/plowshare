@@ -17,7 +17,12 @@ import {
   approvalWire,
 } from './wire-fixtures.ts';
 import { test } from 'node:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { connectionDirectory } from 'plowshare-client-node/connections';
+import {
+  enableWorkspaceRecovery,
+  workspaceRecoveryKey,
+} from 'plowshare-client-node/workspace-recovery';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -227,6 +232,7 @@ function fixture(
   );
   return {
     client,
+    connector,
     calls,
     conversations: (value: typeof onConversations) => {
       onConversations = value;
@@ -313,6 +319,57 @@ const connect = (client: DesktopClient) =>
     handle: 'tester',
     password: 'fixture-password',
   });
+
+await test('disconnect followed by shutdown drains local workspace recovery writes', async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), 'plowshare-desktop-recovery-'),
+  );
+  const f = fixture();
+  const client = new DesktopClient(
+    () => {},
+    async (...args) => {
+      const opened = await f.connector(...args);
+      enableWorkspaceRecovery(opened.connection, args[0], args[1], directory);
+      await workspaceRecoveryKey(opened.connection, {
+        machine: 'fixture-machine',
+        root: '/fixture/workspace',
+        project: 'Research',
+      });
+      return opened;
+    },
+  );
+  try {
+    await connect(client);
+    await client.dispatch({ action: 'disconnect' });
+    await client.shutdown();
+    const workspaces = join(
+      connectionDirectory(client.state.base, 'tester', directory),
+      'workspaces',
+    );
+    const files = await readdir(workspaces);
+    assert.equal(
+      files.some((name) => name.endsWith('.lock')),
+      false,
+    );
+    assert.equal(files.length, 1);
+    const slots: unknown = JSON.parse(
+      await readFile(join(workspaces, present(files[0])), 'utf8'),
+    );
+    assert.ok(Array.isArray(slots));
+    assert.ok(
+      slots.every(
+        (slot: unknown) =>
+          typeof slot === 'object' &&
+          slot !== null &&
+          !('owner' in slot) &&
+          !('pid' in slot),
+      ),
+    );
+  } finally {
+    await client.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 await test('Activity retries a busy status read after Resume and sends each decision once', async (t) => {
   const f = fixture();
