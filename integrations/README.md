@@ -44,3 +44,10 @@ separate platform authorization and build enforcement.
 [Named Relay tools](../docs/relay-tools.md) are a separately authorized general
 platform capability, described in [ADR 0002](../docs/decisions/0002-relay-tool-facade.md).
 External adapters use its public SDK façades; they retain their own deployment lifecycle.
+
+The proposed [computer-control design and phased implementation plan](../docs/computer-control-design-and-plan.md)
+covers browser and full desktop control through an external Node Relay provider,
+including model image delivery, native backends, recovery and platform gaps.
+The proposed provider is reusable by SDK applications, with TUI and Desktop GUI
+as first-party local hosts rather than exclusive owners of the capability.
+`integrations/computer-control/` is a proposed location, not an implemented module.
