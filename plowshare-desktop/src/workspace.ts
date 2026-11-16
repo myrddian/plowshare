@@ -463,12 +463,16 @@ export class DesktopWorkspace {
       ...this.openings.values(),
       ...this.attachments.values(),
     ];
-    await Promise.allSettled(
+    const children = await Promise.allSettled(
       [...this.children.values()].map((child) => child.shutdown()),
     );
-    await this.control.shutdown();
+    const control = await Promise.allSettled([this.control.shutdown()]);
     // Authentication must finish releasing its credential lock before Electron exits.
     await Promise.allSettled(pending);
+    const failed = [...children, ...control].find(
+      (result) => result.status === 'rejected',
+    );
+    if (failed?.status === 'rejected') throw failed.reason;
   }
   rootDirectory(
     directory: string,

@@ -10,7 +10,11 @@ import { protocolFixture } from './protocol-fixture.mjs';
 const directory = await mkdtemp(join(tmpdir(), 'plowshare-connections-ui-'));
 const env = { ...process.env, PLOWSHARE_CONFIG_DIR: directory, PLOWSHARE_DESKTOP_PROFILE: join(directory, 'profile') };
 for (const key of ['ELECTRON_RUN_AS_NODE', 'PLOWSHARE_DESKTOP_CONFIG', 'PLOWSHARE_CONNECTION', 'PLOWSHARE_HANDLE', 'PLOWSHARE_PASSWORD', 'PLOWSHARE_TOKEN', 'PLOWSHARE_URL']) delete env[key];
-const one = await protocolFixture({ loginHandles: ['fixture', 'second'] }), two = await protocolFixture();
+let rosterGate = Promise.resolve(), rosterReached = () => {};
+const one = await protocolFixture({ loginHandles: ['fixture', 'second'], agentRoster: async () => {
+  rosterReached(); await rosterGate;
+  return [{ name: 'fixture-bot', bot: true, served: true, preferred: true, model: 'fixture-model', tools: [], description: 'Fixture bot', withheld: [] }];
+} }), two = await protocolFixture();
 let app;
 const launch = async () => {
   app = await electron.launch({ executablePath, args: [resolve('.')], env });
@@ -38,6 +42,8 @@ const connect = async (page, name, server, account = 'fixture') => {
 };
 try {
   let page = await launch();
+  const diagnostics = [];
+  app.process().stderr.on('data', bytes => diagnostics.push(bytes.toString()));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await connect(page, 'Server A', one.base);
   const conversation = (await state(page)).conversations[0]?.id; assert.ok(conversation);
@@ -51,6 +57,23 @@ try {
   assert.equal((await state(page)).base, one.base);
   assert.deepEqual((await state(page)).localPreferences, preference);
   await expect(page.locator('#draft')).toHaveValue('Draft belonging to A');
+  // View edits and navigation during a slow initial roster read stay local.
+  // They must not race the main process's connection transition fence.
+  let releaseRoster;
+  rosterGate = new Promise(resolve => { releaseRoster = resolve; });
+  const rosterStarted = new Promise(resolve => { rosterReached = resolve; });
+  const reconnecting = page.evaluate(name => window.plowshare.request({ action: 'connection-select', name }), 'Server A');
+  await rosterStarted;
+  await page.locator('#draft').fill('Draft edited while opening projects');
+  await page.locator('[data-conversation]').first().click();
+  releaseRoster();
+  await reconnecting;
+  await expect.poll(async () => (await state(page)).localPreferences?.drafts[conversation]).toBe('Draft edited while opening projects');
+  assert.ok(!diagnostics.join('').includes('Wait for the selected connection'));
+  assert.ok(!diagnostics.join('').includes('Wait for the connection switch'));
+  rosterGate = Promise.resolve(); rosterReached = () => {};
+  await page.locator('#draft').fill('Draft belonging to A');
+  await expect.poll(async () => (await state(page)).localPreferences?.drafts[conversation]).toBe('Draft belonging to A');
   await connect(page, 'Second account', one.base, 'second');
   assert.equal((await state(page)).handle, 'second');
   assert.ok(!(JSON.stringify((await state(page)).localPreferences) ?? '').includes('Draft belonging to A'));

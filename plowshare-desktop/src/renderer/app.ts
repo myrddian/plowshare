@@ -189,6 +189,7 @@ let personalBotReadKey = '';
 let projectExpansion: Record<string, boolean> = {};
 let filterExpansion: Record<string, boolean> = {};
 let identity = '';
+const pendingPreferences = new Set<string>();
 let signature = '';
 let docked = false;
 let expanded = false;
@@ -230,6 +231,13 @@ function persist(save = true) {
   };
   if (!save) return;
   if (state?.mode === 'live' && state.handle) {
+    // Keep edits in this identity's draft while connection setup owns the view.
+    // The first ready state flushes them, without sending requests mid-switch.
+    if (!state.connected) {
+      pendingPreferences.add(identity);
+      return;
+    }
+    pendingPreferences.delete(identity);
     const owner = identity;
     const preference = preferences[identity];
     if (preference)
@@ -283,7 +291,9 @@ function update(next: DesktopState) {
     persist(false);
     identity = nextIdentity;
     delete draft.dataset.conversation;
-    const saved = next.localPreferences ?? preferences[identity];
+    const saved = pendingPreferences.has(identity)
+      ? preferences[identity]
+      : (next.localPreferences ?? preferences[identity]);
     drafts = saved?.drafts ?? {};
     selected = saved?.selected ?? '';
     scope = saved?.scope ?? (next.mode === 'demo' ? 'Research' : '');
@@ -339,7 +349,10 @@ function update(next: DesktopState) {
     signature = '';
   }
   render();
-  persist(state.mode === 'demo');
+  persist(
+    state.mode === 'demo' ||
+      (state.connected && pendingPreferences.has(identity)),
+  );
   followSelection();
 }
 function followSelection() {
@@ -391,6 +404,7 @@ async function loadHistory(id = selected, before?: number) {
   }
 }
 async function choose(id: string, options: { keepApplication?: boolean } = {}) {
+  if (state.mode === 'live' && !state.connected) return;
   if (!options.keepApplication) {
     application.close();
     personalVisible = false;
@@ -428,6 +442,7 @@ async function choose(id: string, options: { keepApplication?: boolean } = {}) {
  * any other project on its chat. Breadcrumbs use the same entry point.
  */
 async function openScope(project: string) {
+  if (state.mode === 'live' && !state.connected) return;
   await chooseScope(project);
   if (
     state.projects.find((row) => row.name === project)?.kind === 'application'
@@ -437,6 +452,7 @@ async function openScope(project: string) {
   }
 }
 async function chooseScope(nextScope: string) {
+  if (state.mode === 'live' && !state.connected) return;
   application.close();
   personalVisible = false;
   await request({ action: 'workspace-chat' });
@@ -1279,7 +1295,7 @@ async function refreshPersonalBots() {
 }
 async function openPersonalBot(bot: string, create = false) {
   const personal = state.personal;
-  if (!personal || busy) return;
+  if (!personal || busy || (state.mode === 'live' && !state.connected)) return;
   const existing =
     personal.botLatest?.[bot] ?? personalBotConversations(bot).at(-1);
   if (!create && existing) {
@@ -1430,6 +1446,7 @@ function renderPersonal() {
   );
 }
 $('#personal-sections').addEventListener('click', (event) => {
+  if (state.mode === 'live' && !state.connected) return;
   const section = (event.target as HTMLElement).closest<HTMLElement>(
     '[data-personal-section]',
   )?.dataset.personalSection as NonNullable<
@@ -1874,6 +1891,7 @@ transcript.addEventListener('click', (event) => {
 $('#refresh').addEventListener(
   'click',
   ownedEvent(async () => {
+    if (state.mode === 'live' && !state.connected) return;
     if (workspaceRoute.kind === 'manage') {
       $('#workspace-manage [data-read]').click();
       return;
