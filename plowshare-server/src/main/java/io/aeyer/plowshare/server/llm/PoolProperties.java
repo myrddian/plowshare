@@ -25,11 +25,11 @@ import org.springframework.boot.convert.DurationUnit;
  * frame at all.
  *
  * <p><b>{@link #provider} is the one exception to that paragraph, and it is a binder-level one
- * rather than a setter that throws.</b> It is an enum, so a value outside {@code openai | lmstudio}
- * is refused by Spring before this class is involved, in a message naming the full property path.
- * That is a worse message than {@code LlmConfig} would write and it is still the right trade: a
- * {@code String} would let {@code provder: lmstudio} — or any other typo — bind to the default and
- * leave a pool silently unable to discover anything, which is an absence nothing downstream can
+ * rather than a setter that throws.</b> It is an enum, so a value outside {@code openai | lmstudio
+ * | vllm} is refused by Spring before this class is involved, in a message naming the full property
+ * path. That is a worse message than {@code LlmConfig} would write and it is still the right trade:
+ * a {@code String} would let {@code provder: lmstudio} — or any other typo — bind to the default
+ * and leave a pool silently unable to discover anything, which is an absence nothing downstream can
  * distinguish from a node that has no vendor API.
  */
 public class PoolProperties {
@@ -859,6 +859,9 @@ public class PoolProperties {
      * {@code /v1} for every call, plus LM Studio's own {@code /api/v0} for the facts {@code /v1}
      * has no field for.
      */
-    LMSTUDIO
+    LMSTUDIO,
+
+    /** OpenAI-compatible HTTP with explicit vLLM reasoning-budget support. */
+    VLLM
   }
 }

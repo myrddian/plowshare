@@ -9,7 +9,9 @@ import io.aeyer.plowshare.server.llm.dispatch.ModelResponseGuards;
 import io.aeyer.plowshare.server.llm.dispatch.TokenLedger;
 import io.aeyer.plowshare.server.llm.dispatch.UnknownSpecifierException;
 import io.aeyer.plowshare.server.llm.lmstudio.LmStudio;
+import io.aeyer.plowshare.server.llm.lmstudio.LmStudioSocket;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
+import io.aeyer.plowshare.server.llm.vllm.Vllm;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -459,16 +461,14 @@ public class LlmConfig implements EnvironmentAware {
    * which is not at boot.
    */
   private static LlmProvider provider(PoolProperties pool, ObjectMapper mapper) {
-    OpenAiCompatible base = new OpenAiCompatible(pool, mapper);
     return switch (pool.getProvider()) {
-      case OPENAI -> base;
-      case LMSTUDIO ->
-          new LmStudio(
-              base,
-              pool.isPrefillProgress()
-                  ? new io.aeyer.plowshare.server.llm.lmstudio.LmStudioSocket(
-                      pool, mapper, base, base)
-                  : null);
+      case OPENAI -> new OpenAiCompatible(pool, mapper);
+      case VLLM -> new Vllm(pool, mapper);
+      case LMSTUDIO -> {
+        OpenAiCompatible base = new OpenAiCompatible(pool, mapper);
+        yield new LmStudio(
+            base, pool.isPrefillProgress() ? new LmStudioSocket(pool, mapper, base, base) : null);
+      }
     };
   }
 

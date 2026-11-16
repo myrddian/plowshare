@@ -71,6 +71,20 @@ Trace [Transcript](../../plowshare-server/src/main/java/io/aeyer/plowshare/serve
 [Projection](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Projection.java)/[Compaction](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java) and [ContextCountFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java).
 See the [conversation manual](../../docs/manual/03-architecture.md#log-trajectory-and-model-projection) for the user-facing comparison.
 
+## Reasoning limits and recovery
+
+Local `provider: vllm` selects the shared OpenAI transport's explicit vLLM dialect.
+Profile `reasoning` limits carry a thinking-token budget, a reasoning-only time/repetition
+monitor and an optional lower-effort recovery. `ReasoningPolicy` owns validated limits and
+an admission-time deadline; `ReasoningMonitor` holds only a bounded suffix per stream.
+`JobRuntime` owns the one recovery per activation through ordinary budget/authority admission.
+The transport never retries a generated reasoning failure. Completed tool results survive;
+partial output remains diagnostic, and any answer/tool fragment disables reasoning-only recovery.
+The same completion deadline covers scheduling, provider queueing and both generations.
+Unconfigured providers/profiles keep their behavior; unsupported reasoning limits fail clearly.
+See [model profiles](../../docs/model-profiles.md#vllm-thinking-budgets-and-reasoning-recovery)
+and [ADR 0075](../../docs/decisions/0075-bounded-reasoning-recovery.md).
+
 ## Model-output recovery
 
 `ModelOutputRecovery` and its sandbox `modelOutput.recover` bridge implement the

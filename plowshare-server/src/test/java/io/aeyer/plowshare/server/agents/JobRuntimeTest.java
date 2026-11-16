@@ -49,6 +49,8 @@ import io.aeyer.plowshare.server.llm.dispatch.LlmTransportException;
 import io.aeyer.plowshare.server.llm.dispatch.ModelResponseGuards;
 import io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger;
 import io.aeyer.plowshare.server.llm.dispatch.PromptImages;
+import io.aeyer.plowshare.server.llm.dispatch.ReasoningPolicy;
+import io.aeyer.plowshare.server.llm.dispatch.ReasoningStoppedException;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
@@ -63,6 +65,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -127,6 +130,16 @@ class JobRuntimeTest {
 
     private final List<Supplier<Completion>> steps = new ArrayList<>();
     private final List<Call> calls = Collections.synchronizedList(new ArrayList<>());
+    private final List<Sampling> samples = Collections.synchronizedList(new ArrayList<>());
+    private boolean reasoningCapable;
+
+    @Override
+    public Set<Sampling.Parameter> carries() {
+      return reasoningCapable
+          ? EnumSet.allOf(Sampling.Parameter.class)
+          : LlmTransport.super.carries();
+    }
+
     private final AtomicInteger index = new AtomicInteger();
 
     /**
@@ -225,6 +238,7 @@ class JobRuntimeTest {
         String wireModel, List<ChatMessage> messages, Sampling sampling, List<ToolSchema> tools) {
       int at = index.getAndIncrement();
       calls.add(new Call(messages, tools));
+      samples.add(sampling);
       if (at == 0 && releaseFirstCall != null) {
         firstCallEntered.countDown();
         try {
@@ -1543,6 +1557,182 @@ class JobRuntimeTest {
     assertEquals(2, outcome.modelCalls());
     assertEquals(1, observed.size());
     assertTrue(observed.getFirst() instanceof LlmTransportException);
+  }
+
+  private static Sampling reasoningSampling() {
+    return Sampling.NONE
+        .withMaxTokens(8192)
+        .withReasoningEffort(Sampling.Effort.MEDIUM)
+        .withReasoning(
+            new ReasoningPolicy(
+                4096,
+                Duration.ofSeconds(10),
+                Duration.ofSeconds(30),
+                128,
+                3,
+                Optional.of(Sampling.Effort.LOW),
+                0));
+  }
+
+  @Test
+  void reasoningRecoveryPreservesCompletedToolsAndChargesASeparateCall() throws Exception {
+    Scripted transport = new Scripted();
+    transport.reasoningCapable = true;
+    transport
+        .then(() -> asking("looking", call("read", "probe_read", "{}")))
+        .then(
+            () -> {
+              throw new ReasoningStoppedException(
+                  transport.samples.getLast().reasoning().orElseThrow(), "repetition");
+            })
+        .then(() -> answer("review completed"));
+    Probe probe = Probe.returning("probe_read", "retained evidence");
+    Recorded transcript = new Recorded(List.of());
+    Outcome outcome =
+        runtimeOver(transport, probe)
+            .run(
+                agent("reader").sampling(reasoningSampling()),
+                "review",
+                Home.global(),
+                generous(),
+                () -> false,
+                null,
+                JobWatch.UNWATCHED,
+                transcript);
+    assertEquals(Ending.ANSWERED, outcome.ending());
+    assertEquals(3, outcome.modelCalls());
+    assertEquals(1, probe.seen().size());
+    assertEquals(Sampling.Effort.LOW, transport.samples.get(2).reasoningEffort().orElseThrow());
+    assertEquals(
+        transport.samples.get(1).reasoning().orElseThrow().deadlineNanos(),
+        transport.samples.get(2).reasoning().orElseThrow().deadlineNanos());
+    assertTrue(
+        transport.conversation(2).stream()
+            .anyMatch(message -> message.content().contains("retained evidence")));
+    assertTrue(
+        transport.conversation(2).stream()
+            .anyMatch(message -> message.content().contains("Harness reasoning recovery")));
+    assertTrue(
+        transcript.entries().stream()
+            .anyMatch(
+                entry ->
+                    entry.kind() == EntryKind.DIAGNOSTIC
+                        && entry.content().startsWith("Reasoning recovery:")));
+  }
+
+  @Test
+  void reasoningRecoveryRechecksRetainedAuthorityBeforeAnotherCall() throws Exception {
+    Scripted transport = new Scripted();
+    transport.reasoningCapable = true;
+    AtomicBoolean revoked = new AtomicBoolean();
+    Runnable authority =
+        () -> {
+          if (revoked.get()) throw new CallerFault("admission revoked");
+        };
+    transport.thenAlways(
+        () -> {
+          revoked.set(true);
+          throw new ReasoningStoppedException(
+              transport.samples.getLast().reasoning().orElseThrow(), "repetition");
+        });
+    JobRuntime runtime =
+        runtimeOver(transport)
+            .forAdmittedTurn(
+                new RunAdmission(
+                    authority,
+                    job -> {},
+                    () -> {},
+                    "fixture",
+                    (home, resources) -> authority.run()));
+    CallerFault denied =
+        assertThrows(
+            CallerFault.class,
+            () ->
+                runtime.run(
+                    agent("echo").sampling(reasoningSampling()),
+                    "review",
+                    Home.of("fixture"),
+                    generous(),
+                    () -> false,
+                    null,
+                    JobWatch.UNWATCHED,
+                    new Recorded(List.of()),
+                    TurnCap.of(100),
+                    List.of(),
+                    "fixture",
+                    false));
+    assertEquals("admission revoked", denied.getMessage());
+    assertEquals(1, transport.calls().size());
+  }
+
+  @Test
+  void expiredReasoningDeadlineDoesNotClaimAnotherModelCall() throws Exception {
+    Scripted transport = new Scripted();
+    transport.reasoningCapable = true;
+    Sampling expired =
+        reasoningSampling()
+            .withReasoning(
+                reasoningSampling()
+                    .reasoning()
+                    .orElseThrow()
+                    .admitted(System.nanoTime() - Duration.ofSeconds(31).toNanos()));
+    Outcome outcome =
+        runtimeOver(transport)
+            .run(agent("reader").sampling(expired), "review", Home.global(), generous(), null);
+    assertEquals(Ending.UNAVAILABLE, outcome.ending());
+    assertEquals(0, outcome.modelCalls());
+    assertEquals(0, transport.calls().size());
+  }
+
+  @Test
+  void aSecondReasoningFailureDoesNotRecoverAgain() throws Exception {
+    Scripted transport = new Scripted();
+    transport.reasoningCapable = true;
+    transport.thenAlways(
+        () -> {
+          throw new ReasoningStoppedException(
+              transport.samples.getLast().reasoning().orElseThrow(), "repetition");
+        });
+    Outcome outcome =
+        runtimeOver(transport)
+            .run(
+                agent("reader").sampling(reasoningSampling()),
+                "review",
+                Home.global(),
+                generous(),
+                null);
+    assertEquals(Ending.UNAVAILABLE, outcome.ending());
+    assertEquals(2, outcome.modelCalls());
+    assertEquals(2, transport.calls().size());
+  }
+
+  @Test
+  void reasoningRecoveryCannotExceedSharedAllowanceOrResumeAfterCancellation() throws Exception {
+    for (boolean cancellation : List.of(false, true)) {
+      Scripted transport = new Scripted();
+      transport.reasoningCapable = true;
+      AtomicBoolean cancelled = new AtomicBoolean();
+      transport.thenAlways(
+          () -> {
+            cancelled.set(cancellation);
+            throw new ReasoningStoppedException(
+                transport.samples.getLast().reasoning().orElseThrow(), "repetition");
+          });
+      Outcome outcome =
+          runtimeOver(transport)
+              .run(
+                  agent("reader").sampling(reasoningSampling()),
+                  "review",
+                  Home.global(),
+                  cancellation ? generous() : Budget.of(1),
+                  cancelled::get,
+                  null,
+                  JobWatch.UNWATCHED,
+                  new Recorded(List.of()));
+      assertEquals(cancellation ? Ending.CANCELLED : Ending.UNAVAILABLE, outcome.ending());
+      assertEquals(1, outcome.modelCalls());
+      assertEquals(1, transport.calls().size());
+    }
   }
 
   @Test
@@ -3545,6 +3735,34 @@ class JobRuntimeTest {
             recorded.entries().stream()
                 .anyMatch(e -> e.kind() == EntryKind.ANSWER && e.content().contains(malformed)));
       }
+    }
+  }
+
+  @Test
+  void reasoningRecoveryDoesNotExtendTheSingleToolFreeResponseRegeneration() {
+    String malformed = "<|channel|>analysis";
+    Scripted transport = new Scripted();
+    transport.reasoningCapable = true;
+    transport
+        .then(() -> answer(malformed))
+        .then(
+            () -> {
+              throw new ReasoningStoppedException(
+                  transport.samples.getLast().reasoning().orElseThrow(), "repetition");
+            });
+    try (var dispatcher = guardedDispatcher(transport, malformed)) {
+      Outcome result =
+          new JobRuntime(dispatcher, List.of())
+              .run(
+                  patient("probe_write").sampling(reasoningSampling()),
+                  "Assess it",
+                  Home.global(),
+                  Budget.of(8),
+                  null);
+      assertEquals(Ending.UNAVAILABLE, result.ending());
+      assertEquals(2, result.modelCalls());
+      assertEquals(2, transport.calls().size());
+      assertTrue(transport.calls().get(1).tools().isEmpty());
     }
   }
 

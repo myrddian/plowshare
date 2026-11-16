@@ -50,8 +50,13 @@ public class OpenAiCompatible implements LlmProvider, WebSocketOpener {
    * close it.
    */
   public OpenAiCompatible(PoolProperties props, ObjectMapper mapper) {
+    this(props, mapper, OpenAiTransport.Dialect.STANDARD);
+  }
+
+  protected OpenAiCompatible(
+      PoolProperties props, ObjectMapper mapper, OpenAiTransport.Dialect dialect) {
     this.props = props;
-    this.transport = new OpenAiTransport(props, mapper);
+    this.transport = new OpenAiTransport(props, mapper, dialect);
   }
 
   @Override
