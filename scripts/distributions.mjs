@@ -116,7 +116,7 @@ if (kind === 'clients') {
         name: 'production-ink',
         setup(builder) {
           builder.onResolve({ filter: /^\.\/devtools\.js$/ }, (args) =>
-            args.importer.includes('/ink/build/')
+            args.importer.replaceAll('\\', '/').includes('/ink/build/')
               ? { path: 'disabled', namespace: 'ink-devtools' }
               : undefined,
           );

@@ -15,7 +15,9 @@ export async function distributionRuntime(root) {
   if (process.platform !== pin.platform || process.arch !== pin.arch)
     throw new Error('Native clients require macOS/arm64 or Windows/x64.');
   const directory = join(root, 'build/runtime');
-  const name = `node-v${pin.version}-${pin.platform}-${pin.arch}`;
+  // Node's archive naming uses "win", while process.platform uses "win32".
+  const archivePlatform = pin.platform === 'win32' ? 'win' : pin.platform;
+  const name = `node-v${pin.version}-${archivePlatform}-${pin.arch}`;
   const extension = process.platform === 'win32' ? '.zip' : '.tar.gz';
   const archive = join(directory, name + extension);
   await mkdir(directory, { recursive: true });
