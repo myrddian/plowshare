@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -75,34 +76,65 @@ class UnionGateTest {
     gate.pushEnded("ledger");
   }
 
+  /**
+   * The clock is observed inside the gate's lock. Once the contender reads it, taking that same
+   * lock proves that the contender has either parked on the condition or returned. Check its
+   * effect/state before ending the push, rather than guessing that a sleep stays below a timeout.
+   * These coordination tests get a five-second budget; timeout/refusal cases keep the short
+   * fixture.
+   */
+  private UnionGate observingContender(AtomicReference<Thread> contender, CountDownLatch entered) {
+    return new UnionGate(
+        hubs,
+        advanced::add,
+        () -> {
+          if (Thread.currentThread() == contender.get()) entered.countDown();
+          return now.get();
+        },
+        Duration.ofSeconds(5),
+        Duration.ofMinutes(2));
+  }
+
   @Test
   void a_mirror_write_waits_for_an_admitted_push_even_if_the_claim_is_gone() throws Exception {
+    AtomicReference<Thread> contender = new AtomicReference<>();
+    CountDownLatch entered = new CountDownLatch(1);
+    gate = observingContender(contender, entered);
     gate.begin("ledger", "s1");
     assertTrue(gate.admitPush("ledger"));
     gate.sessionClosed("s1");
-    assertEquals(
-        UnionGate.State.OFFLINE,
-        gate.state("ledger"),
-        "the claim is gone, but the receive in flight must still hold writes off");
-
+    assertEquals(UnionGate.State.OFFLINE, gate.state("ledger"));
+    AtomicBoolean wrote = new AtomicBoolean();
     CompletableFuture<Void> writing =
         CompletableFuture.runAsync(
-            () -> gate.write("ledger", () -> write("a.txt", "pushed-over\n")));
-
-    for (int i = 0; i < 20; i++) {
-      assertFalse(writing.isDone(), "the write must wait for the admitted push to end");
-      Thread.sleep(10);
-    }
-
-    gate.pushEnded("ledger");
+            () -> {
+              contender.set(Thread.currentThread());
+              gate.write(
+                  "ledger",
+                  () -> {
+                    wrote.set(true);
+                    write("a.txt", "pushed-over\n");
+                  });
+            });
+    assertTrue(entered.await(2, TimeUnit.SECONDS), "the writer did not enter the gate");
+    gate.locked(
+        "ledger",
+        () -> {
+          assertFalse(writing.isDone(), "the admitted push must still hold the writer off");
+          assertFalse(wrote.get(), "the mirror must not change before the receive settles");
+          gate.pushEnded("ledger");
+          return null;
+        });
     writing.get(2, TimeUnit.SECONDS);
     assertEquals("pushed-over\n", Files.readString(hub.tree().resolve("a.txt")));
+  }
 
-    gate.begin("ledger", "s2");
+  @Test
+  void a_mirror_write_is_refused_if_an_admitted_push_does_not_end() {
+    gate.begin("ledger", "s1");
     assertTrue(gate.admitPush("ledger"));
-    gate.sessionClosed("s2");
+    gate.sessionClosed("s1");
     assertEquals(UnionGate.State.OFFLINE, gate.state("ledger"));
-
     WorkspaceRefusedException refused =
         assertThrows(
             WorkspaceRefusedException.class,
@@ -113,17 +145,27 @@ class UnionGateTest {
 
   @Test
   void begin_waits_for_an_admitted_push_to_end() throws Exception {
+    AtomicReference<Thread> contender = new AtomicReference<>();
+    CountDownLatch entered = new CountDownLatch(1);
+    gate = observingContender(contender, entered);
     gate.begin("ledger", "s1");
     assertTrue(gate.admitPush("ledger"));
     gate.sessionClosed("s1");
-
     CompletableFuture<Void> beginning =
-        CompletableFuture.runAsync(() -> gate.begin("ledger", "s2"));
-    for (int i = 0; i < 20; i++) {
-      assertFalse(beginning.isDone(), "begin must wait for the receive in flight to end");
-      Thread.sleep(10);
-    }
-    gate.pushEnded("ledger");
+        CompletableFuture.runAsync(
+            () -> {
+              contender.set(Thread.currentThread());
+              gate.begin("ledger", "s2");
+            });
+    assertTrue(entered.await(2, TimeUnit.SECONDS), "the new owner did not enter the gate");
+    gate.locked(
+        "ledger",
+        () -> {
+          assertFalse(beginning.isDone(), "the admitted push must still hold the next claim off");
+          assertEquals(UnionGate.State.OFFLINE, gate.state("ledger"));
+          gate.pushEnded("ledger");
+          return null;
+        });
     beginning.get(2, TimeUnit.SECONDS);
     assertEquals(UnionGate.State.SYNCING, gate.state("ledger"));
   }

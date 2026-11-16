@@ -95,6 +95,79 @@ Adding `media` requires integer `version: 2`; quoting the version is invalid.
 Use a profile-aware server: older binaries may ignore these new fields rather
 than enforce them. No shipped model's media support is assumed from its name.
 
+## vLLM thinking budgets and reasoning recovery
+
+Select `provider: vllm` on a local pool to enable vLLM's `thinking_token_budget`
+extension. It shares the OpenAI HTTP transport, counting configuration,
+accounting and cancellation; it does not discover model capabilities or create
+a separate HTTP client. Existing `provider: openai` and `lmstudio` configurations
+keep their behavior. A profile requesting these limits on an unsupported provider
+is refused rather than silently losing its limits.
+
+An operator-owned profile can opt in per intent. For example, this complete
+unversioned profile and a `models.yaml` mapping selecting its `thinking` mode
+enable a bounded experiment on a compatible Qwen model:
+
+```yaml
+modes:
+  thinking:
+    precise: &thinking
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 20
+      max_tokens: 8192
+      reasoning_effort: medium
+      reasoning:
+        thinking_token_budget: 4096
+        reasoning_seconds: 120
+        completion_seconds: 240
+        repetition_window_characters: 256
+        repetition_repeats: 4
+        recovery_effort: low
+    balanced: *thinking
+    exploratory: *thinking
+```
+
+These are example budgets, not measured optimal settings. `max_tokens` must exceed
+`thinking_token_budget` to reserve output capacity after thinking. vLLM forces
+the configured end-of-reasoning marker at the token budget, allowing the same
+generation to proceed into an answer; setting `max_tokens` alone can instead
+truncate the response before an answer. This requires compatible engine/parser
+configuration; selecting the driver is an operator declaration, not a live probe.
+See [vLLM thinking budget control](https://docs.vllm.ai/en/latest/features/reasoning_outputs/#thinking-budget-control).
+
+`reasoning_seconds` starts at the first reasoning delta and also bounds a stream
+that goes quiet after reasoning starts. It applies only while neither answer text
+nor a tool-call fragment has been observed. The repetition detector compares a
+bounded suffix for repeated text periods of 32 through the configured window size,
+across delta boundaries. The window is 32..512 characters and repeats is 3..8;
+defaults are 256 and 4. It detects verbatim repetition, not whether novel reasoning
+is useful. Legitimate repeated material can trigger it; both controls are opt-in.
+
+`completion_seconds` is one finite budget for the original generation and its
+optional recovery, admitted before scheduling/queueing. It must exceed
+`reasoning_seconds` and cannot exceed one day. Existing shorter provider limits
+still apply. Expiry prevents another call, rather than refreshing the deadline.
+The host deadline and detector settings are never sent in the request body.
+
+Omit `recovery_effort` to stop without recovery. When present, it must be `low` or
+`medium`, strictly below the initial explicit effort. A reasoning-only limit failure
+may consume one new model call in the same agent activation, at the lower effort.
+It follows normal authority, cancellation, step-cap and shared-allowance admission,
+preserves completed tool results and adds a harness convergence notice. It neither
+restarts the child task nor executes partial tool fragments. A partial answer/tool
+fragment, generic connection failure, cancellation or expired allowance/deadline
+does not authorize recovery. A second reasoning failure stops the run. This policy
+does not extend the existing one-call, tool-free response regeneration; input
+filters cannot remove the limits.
+
+The failed call remains accounted and its bounded output remains nonprojected
+diagnostic evidence. The recovery decision records the effort and remaining budget
+without logging reasoning text. Transport cancellation closes the local stream;
+it is not proof that remote GPU work stopped instantaneously. No serving restart,
+live configuration change, or continuation of an already-failed job follows from
+installing this capability. See [Decision 0075](decisions/0075-bounded-reasoning-recovery.md).
+
 ## Model response guards
 
 A version 2 profile can select a JavaScript response guard with

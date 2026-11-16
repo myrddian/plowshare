@@ -51,7 +51,18 @@ public record Sampling(
     OptionalInt topK,
     OptionalInt maxTokens,
     Optional<Effort> reasoningEffort,
-    Optional<JsonSchema> responseFormat) {
+    Optional<JsonSchema> responseFormat,
+    Optional<ReasoningPolicy> reasoning) {
+
+  public Sampling(
+      OptionalDouble temperature,
+      OptionalDouble topP,
+      OptionalInt topK,
+      OptionalInt maxTokens,
+      Optional<Effort> reasoningEffort,
+      Optional<JsonSchema> responseFormat) {
+    this(temperature, topP, topK, maxTokens, reasoningEffort, responseFormat, Optional.empty());
+  }
 
   /**
    * What an agent declares, resolved per model rather than per file.
@@ -129,7 +140,8 @@ public record Sampling(
     TOP_K,
     MAX_TOKENS,
     REASONING_EFFORT,
-    RESPONSE_FORMAT;
+    RESPONSE_FORMAT,
+    REASONING;
 
     /** The wire spelling, which is also the profile file's key. */
     public String declared() {
@@ -185,6 +197,19 @@ public record Sampling(
     Objects.requireNonNull(maxTokens, "maxTokens");
     Objects.requireNonNull(reasoningEffort, "reasoningEffort");
     Objects.requireNonNull(responseFormat, "responseFormat");
+    Objects.requireNonNull(reasoning, "reasoning");
+    reasoning.ifPresent(
+        policy -> {
+          if (maxTokens.isEmpty() || maxTokens.getAsInt() <= policy.thinkingTokenBudget())
+            throw new IllegalArgumentException(
+                "reasoning requires max_tokens greater than thinking_token_budget");
+          if (policy.recoveryEffort().isPresent()
+              && (reasoningEffort.isEmpty()
+                  || policy.recoveryEffort().orElseThrow().ordinal()
+                      >= reasoningEffort.orElseThrow().ordinal()))
+            throw new IllegalArgumentException(
+                "Recovery effort must be lower than the initial reasoning_effort");
+        });
     requireFinite("temperature", temperature);
     requireFinite("top_p", topP);
     requirePositive("top_k", topK);
@@ -201,22 +226,40 @@ public record Sampling(
    */
   public Sampling withTemperature(double value) {
     return new Sampling(
-        OptionalDouble.of(value), topP, topK, maxTokens, reasoningEffort, responseFormat);
+        OptionalDouble.of(value),
+        topP,
+        topK,
+        maxTokens,
+        reasoningEffort,
+        responseFormat,
+        reasoning);
   }
 
   public Sampling withTopP(double value) {
     return new Sampling(
-        temperature, OptionalDouble.of(value), topK, maxTokens, reasoningEffort, responseFormat);
+        temperature,
+        OptionalDouble.of(value),
+        topK,
+        maxTokens,
+        reasoningEffort,
+        responseFormat,
+        reasoning);
   }
 
   public Sampling withTopK(int value) {
     return new Sampling(
-        temperature, topP, OptionalInt.of(value), maxTokens, reasoningEffort, responseFormat);
+        temperature,
+        topP,
+        OptionalInt.of(value),
+        maxTokens,
+        reasoningEffort,
+        responseFormat,
+        reasoning);
   }
 
   public Sampling withMaxTokens(int value) {
     return new Sampling(
-        temperature, topP, topK, OptionalInt.of(value), reasoningEffort, responseFormat);
+        temperature, topP, topK, OptionalInt.of(value), reasoningEffort, responseFormat, reasoning);
   }
 
   public Sampling withReasoningEffort(Effort value) {
@@ -226,7 +269,8 @@ public record Sampling(
         topK,
         maxTokens,
         Optional.of(Objects.requireNonNull(value, "reasoningEffort")),
-        responseFormat);
+        responseFormat,
+        reasoning);
   }
 
   /**
@@ -243,7 +287,26 @@ public record Sampling(
         topK,
         maxTokens,
         reasoningEffort,
-        Optional.of(Objects.requireNonNull(value, "responseFormat")));
+        Optional.of(Objects.requireNonNull(value, "responseFormat")),
+        reasoning);
+  }
+
+  /** Host limits and the vLLM thinking-token extension, explicitly enabled by a profile. */
+  public Sampling withReasoning(ReasoningPolicy policy) {
+    return new Sampling(
+        temperature, topP, topK, maxTokens, reasoningEffort, responseFormat, Optional.of(policy));
+  }
+
+  /** Change recovery effort atomically so the initial-policy lower-effort invariant still holds. */
+  public Sampling recovering(ReasoningPolicy policy, Effort effort) {
+    return new Sampling(
+        temperature,
+        topP,
+        topK,
+        maxTokens,
+        Optional.of(effort),
+        responseFormat,
+        Optional.of(policy.withoutRecovery()));
   }
 
   /** Nothing to send: the request omits every sampling key. */
@@ -269,6 +332,7 @@ public record Sampling(
     if (reasoningEffort.isPresent()) {
       set.add(Parameter.REASONING_EFFORT);
     }
+    if (reasoning.isPresent()) set.add(Parameter.REASONING);
     if (responseFormat.isPresent()) {
       set.add(Parameter.RESPONSE_FORMAT);
     }
@@ -288,7 +352,8 @@ public record Sampling(
         later.topK.isPresent() ? later.topK : topK,
         later.maxTokens.isPresent() ? later.maxTokens : maxTokens,
         later.reasoningEffort.isPresent() ? later.reasoningEffort : reasoningEffort,
-        later.responseFormat.isPresent() ? later.responseFormat : responseFormat);
+        later.responseFormat.isPresent() ? later.responseFormat : responseFormat,
+        later.reasoning.isPresent() ? later.reasoning : reasoning);
   }
 
   /** This, with everything {@code carries} does not name removed. */
@@ -299,9 +364,8 @@ public record Sampling(
         carries.contains(Parameter.TOP_K) ? topK : OptionalInt.empty(),
         carries.contains(Parameter.MAX_TOKENS) ? maxTokens : OptionalInt.empty(),
         carries.contains(Parameter.REASONING_EFFORT) ? reasoningEffort : Optional.<Effort>empty(),
-        carries.contains(Parameter.RESPONSE_FORMAT)
-            ? responseFormat
-            : Optional.<JsonSchema>empty());
+        carries.contains(Parameter.RESPONSE_FORMAT) ? responseFormat : Optional.<JsonSchema>empty(),
+        carries.contains(Parameter.REASONING) ? reasoning : Optional.empty());
   }
 
   /**
@@ -332,6 +396,9 @@ public record Sampling(
     maxTokens.ifPresent(value -> text.append("max_tokens=").append(value).append(' '));
     reasoningEffort.ifPresent(
         value -> text.append("reasoning_effort=").append(value.wire()).append(' '));
+    reasoning.ifPresent(
+        value ->
+            text.append("thinking_token_budget=").append(value.thinkingTokenBudget()).append(' '));
     // The NAME and not the schema. A schema is a nested document and this is
     // one line; a log that printed the whole of it would be a log nobody
     // reads, which is how the line that matters gets buried.

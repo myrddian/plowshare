@@ -17,6 +17,7 @@ import io.aeyer.plowshare.server.llm.dispatch.Embeddings;
 import io.aeyer.plowshare.server.llm.dispatch.InferenceObserver;
 import io.aeyer.plowshare.server.llm.dispatch.LlmTransport;
 import io.aeyer.plowshare.server.llm.dispatch.LlmTransportException;
+import io.aeyer.plowshare.server.llm.dispatch.ReasoningPolicy;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
@@ -184,6 +185,14 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
    */
   private final OkHttpClient socketHttp;
 
+  /** Explicit backend dialect; standard OpenAI endpoints never receive vLLM-only fields. */
+  public enum Dialect {
+    STANDARD,
+    VLLM
+  }
+
+  private final Dialect dialect;
+
   /**
    * Three clients because a read timeout is immutable on an OkHttp client and the three calls do
    * not deserve the same wait — a batch of a hundred summaries and a single question are the same
@@ -195,6 +204,11 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
    * rather than once per process, so that multiplies by however many hosts are declared.
    */
   public OpenAiTransport(PoolProperties props, ObjectMapper mapper) {
+    this(props, mapper, Dialect.STANDARD);
+  }
+
+  public OpenAiTransport(PoolProperties props, ObjectMapper mapper, Dialect dialect) {
+    this.dialect = dialect;
     this.props = props;
     this.mapper = mapper;
     this.promptCounter = new io.aeyer.plowshare.server.llm.counting.VllmPromptCounter(mapper);
@@ -533,6 +547,11 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       ToolChoice toolChoice,
       InferenceObserver observer,
       Duration timeout) {
+    ReasoningPolicy policy =
+        dialect == Dialect.VLLM
+            ? sampling.reasoning().map(value -> value.admitted(System.nanoTime())).orElse(null)
+            : null;
+    if (policy != null) sampling = sampling.withReasoning(policy);
     // One read of the key for the whole call, for the reason spelled out on
     // embed below.
     String apiKey = apiKeySnapshot();
@@ -541,6 +560,8 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
             url("/chat/completions"),
             chatBody(wireModel, messages, sampling, false, tools, toolChoice),
             apiKey);
+    // Serialization consumes the original budget too; do not open a request after it expires.
+    if (policy != null) timeout = reasoningTimeout(policy, timeout);
     return executeWithRetry(
         withTimeout(chatHttp, timeout),
         request,
@@ -710,6 +731,14 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       ToolChoice toolChoice,
       InferenceObserver observer,
       Duration timeout) {
+    ReasoningPolicy policy =
+        dialect == Dialect.VLLM
+            ? sampling.reasoning().map(value -> value.admitted(System.nanoTime())).orElse(null)
+            : null;
+    if (policy != null) {
+      sampling = sampling.withReasoning(policy);
+      timeout = reasoningTimeout(policy, timeout);
+    }
     String apiKey = apiKeySnapshot();
     Request request =
         request(
@@ -727,7 +756,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
     if (abandoned.getAsBoolean()) {
       throw new CallerAbandonedException(props.getName());
     }
-    return recoverStreamConnection(request, sink, abandoned, apiKey, observer, timeout);
+    return recoverStreamConnection(request, sink, abandoned, apiKey, observer, timeout, policy);
   }
 
   /**
@@ -741,10 +770,12 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       BooleanSupplier abandoned,
       String apiKey,
       InferenceObserver observer,
-      Duration timeout) {
+      Duration timeout,
+      ReasoningPolicy policy) {
     Duration budget = timeout == null ? props.getMaxStreamDuration() : timeout;
     String budgetKey = timeout == null ? "max-stream-duration" : "prompt-timeout/fold-timeout";
     long deadline = System.nanoTime() + budget.toNanos();
+    if (policy != null && policy.deadlineNanos() - deadline < 0) deadline = policy.deadlineNanos();
     LlmTransportException first = null;
     for (int number = 1; number <= 2; number++) {
       if (abandoned.getAsBoolean()) throw new CallerAbandonedException(props.getName());
@@ -776,7 +807,8 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
                 attempt,
                 budget,
                 budgetKey,
-                deadline);
+                deadline,
+                policy);
         attempt.succeeded(completion.usage(), completion.finishReason());
         return completion;
       } catch (LlmTransportException failure) {
@@ -837,7 +869,10 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       InferenceObserver.Attempt attempt,
       Duration budget,
       String budgetKey,
-      long deadline) {
+      long deadline,
+      ReasoningPolicy policy) {
+    ReasoningMonitor reasoningMonitor =
+        policy == null ? null : new ReasoningMonitor(policy, System::nanoTime);
     // Wall clock, fixed before the call starts, and the only total bound a
     // stream has. nanoTime and not currentTimeMillis, so a clock step cannot
     // extend or collapse it.
@@ -1095,6 +1130,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
         if (abandoned.getAsBoolean()) {
           throw new CallerAbandonedException(props.getName());
         }
+        if (reasoningMonitor != null) reasoningMonitor.check();
         Object event =
             remaining <= 0
                 ? null
@@ -1112,9 +1148,12 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
           // and a `Completion` that carried it would make the outcome
           // disagree with itself.
           sink.thought(reasoning.text());
+          if (reasoningMonitor != null) reasoningMonitor.thought(reasoning.text());
         } else if (event instanceof ToolFragment fragment) {
+          if (reasoningMonitor != null) reasoningMonitor.progress();
           sink.toolCall(fragment.index(), fragment.name(), fragment.arguments());
         } else if (event instanceof String delta) {
+          if (reasoningMonitor != null) reasoningMonitor.progress();
           content.append(delta);
           // Anything this throws leaves through the caller's frame
           // unwrapped, which is what LlmTransport.stream promises: a
@@ -1200,6 +1239,16 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       // argument, not on a surviving mutant.
       source.cancel();
     }
+  }
+
+  /** A recovery's queueing and execution spend the original admitted completion deadline. */
+  private Duration reasoningTimeout(ReasoningPolicy policy, Duration timeout) {
+    Duration remaining = policy.remaining(System.nanoTime());
+    if (remaining.isZero())
+      throw LlmTransportException.timedOut(
+          "Reasoning completion budget exhausted before dispatch", null);
+    Duration ceiling = timeout == null ? props.getMaxStreamDuration() : timeout;
+    return remaining.compareTo(ceiling) < 0 ? remaining : ceiling;
   }
 
   /**
@@ -1603,6 +1652,8 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       boolean stream,
       List<ToolSchema> tools,
       ToolChoice toolChoice) {
+    if (sampling.reasoning().isPresent() && dialect != Dialect.VLLM)
+      throw new IllegalArgumentException("Reasoning limits require the vllm transport dialect");
     boolean cloud = props.getRequestStyle() == PoolProperties.RequestStyle.CLOUD;
     var capabilities = props.capabilitiesFor(wireModel);
     if (cloud) capabilities.require(sampling, !tools.isEmpty());
@@ -1655,6 +1706,10 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
     // tolerance `top_k` above relies on and the same reason `carries()`
     // exists rather than trusting it.
     sampling.reasoningEffort().ifPresent(effort -> body.put("reasoning_effort", effort.wire()));
+    if (dialect == Dialect.VLLM)
+      sampling
+          .reasoning()
+          .ifPresent(policy -> body.put("thinking_token_budget", policy.thinkingTokenBudget()));
     // MEASURED ON BOTH NODES, 2026-09-07, which is the condition
     // `reasoning_effort` above was held to and eventually met. LM Studio
     // serving mlx-community/gemma-4-e4b-it and llama.cpp b10835 serving
@@ -2027,24 +2082,27 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
   public Set<Sampling.Parameter> carries() {
     if (props.getRequestStyle() == PoolProperties.RequestStyle.CLOUD)
       return props.getDefaultCapabilities().carries(Sampling.NONE);
-    return EnumSet.of(
-        Sampling.Parameter.TEMPERATURE,
-        Sampling.Parameter.TOP_P,
-        Sampling.Parameter.TOP_K,
-        Sampling.Parameter.MAX_TOKENS,
-        // Added 2026-09-07, on the condition the old test named: "the
-        // day somebody confirms the spelling against a live endpoint".
-        // Confirmed against llama.cpp b10835 serving GLM-4.7-Flash --
-        // `reasoning_effort: none` returned in 1.3s with no reasoning
-        // where every other value ran 17s and truncated. A field the
-        // endpoint ignored could not have produced that difference.
-        Sampling.Parameter.REASONING_EFFORT,
-        // Confirmed the same day against BOTH nodes, which is a stronger
-        // basis than the one above had: LM Studio and llama.cpp each
-        // returned a document matching a schema they were given, and
-        // each escaped a backslash inside a string correctly. An
-        // endpoint ignoring the field could not have done either.
-        Sampling.Parameter.RESPONSE_FORMAT);
+    Set<Sampling.Parameter> parameters =
+        EnumSet.of(
+            Sampling.Parameter.TEMPERATURE,
+            Sampling.Parameter.TOP_P,
+            Sampling.Parameter.TOP_K,
+            Sampling.Parameter.MAX_TOKENS,
+            // Added 2026-09-07, on the condition the old test named: "the
+            // day somebody confirms the spelling against a live endpoint".
+            // Confirmed against llama.cpp b10835 serving GLM-4.7-Flash --
+            // `reasoning_effort: none` returned in 1.3s with no reasoning
+            // where every other value ran 17s and truncated. A field the
+            // endpoint ignored could not have produced that difference.
+            Sampling.Parameter.REASONING_EFFORT,
+            // Confirmed the same day against BOTH nodes, which is a stronger
+            // basis than the one above had: LM Studio and llama.cpp each
+            // returned a document matching a schema they were given, and
+            // each escaped a backslash inside a string correctly. An
+            // endpoint ignoring the field could not have done either.
+            Sampling.Parameter.RESPONSE_FORMAT);
+    if (dialect == Dialect.VLLM) parameters.add(Sampling.Parameter.REASONING);
+    return parameters;
   }
 
   @Override

@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.llm;
 
+import io.aeyer.plowshare.server.llm.dispatch.ReasoningPolicy;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import java.io.IOException;
 import java.io.InputStream;
@@ -7,6 +8,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -551,6 +553,7 @@ public final class SamplingProfiles implements ModelMediaProfiles {
 
   private static Sampling sampling(String where, String at, Map<?, ?> fields) {
     Sampling sampling = Sampling.NONE;
+    ReasoningPolicy reasoning = null;
     for (Map.Entry<?, ?> field : fields.entrySet()) {
       String key = String.valueOf(field.getKey());
       Object value = field.getValue();
@@ -562,6 +565,7 @@ public final class SamplingProfiles implements ModelMediaProfiles {
         case "max_tokens" -> sampling = sampling.withMaxTokens(whole(where, at, key, value));
         case "reasoning_effort" ->
             sampling = sampling.withReasoningEffort(effort(where, at, value));
+        case "reasoning" -> reasoning = reasoning(where, at, value);
         // A CLOSED SET, for AgentRegistry.KNOWN_KEYS' reason: an unknown
         // key in an open set is a misspelling that reads as a decision
         // nobody can see was never applied.
@@ -574,10 +578,44 @@ public final class SamplingProfiles implements ModelMediaProfiles {
                     + key
                     + "', which is not a sampling"
                     + " parameter this server can send. It knows temperature,"
-                    + " top_p, top_k, max_tokens and reasoning_effort");
+                    + " top_p, top_k, max_tokens, reasoning_effort and reasoning");
       }
     }
-    return sampling;
+    return reasoning == null ? sampling : sampling.withReasoning(reasoning);
+  }
+
+  private static ReasoningPolicy reasoning(String where, String at, Object value) {
+    if (!(value instanceof Map<?, ?> fields))
+      throw new IllegalStateException(where + " reasoning must be an object");
+    knownFields(
+        where + " reasoning",
+        fields,
+        Set.of(
+            "thinking_token_budget",
+            "reasoning_seconds",
+            "completion_seconds",
+            "recovery_effort",
+            "repetition_window_characters",
+            "repetition_repeats"));
+    return new ReasoningPolicy(
+        whole(where, at, "thinking_token_budget", fields.get("thinking_token_budget")),
+        Duration.ofSeconds(whole(where, at, "reasoning_seconds", fields.get("reasoning_seconds"))),
+        Duration.ofSeconds(
+            whole(where, at, "completion_seconds", fields.get("completion_seconds"))),
+        fields.containsKey("repetition_window_characters")
+            ? whole(
+                where,
+                at,
+                "repetition_window_characters",
+                fields.get("repetition_window_characters"))
+            : 256,
+        fields.containsKey("repetition_repeats")
+            ? whole(where, at, "repetition_repeats", fields.get("repetition_repeats"))
+            : 4,
+        fields.containsKey("recovery_effort")
+            ? Optional.of(effort(where, at, fields.get("recovery_effort")))
+            : Optional.empty(),
+        0);
   }
 
   private static Number number(String where, String at, String key, Object value) {
@@ -627,9 +665,7 @@ public final class SamplingProfiles implements ModelMediaProfiles {
             + at
             + "' has 'reasoning_effort: "
             + value
-            + "', which is not one"
-            + " of low, medium, high. The vendor names three and a fourth is a"
-            + " value the endpoint would refuse or ignore");
+            + "', which is not one of none, minimal, low, medium, high, xhigh or max");
   }
 
   // --- resolution -------------------------------------------------------------

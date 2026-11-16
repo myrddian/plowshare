@@ -1,12 +1,21 @@
 package io.aeyer.plowshare.server.llm.dispatch;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.server.security.*;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.security.ChatFiltering;
+import io.aeyer.plowshare.server.security.FilteredChat;
+import io.aeyer.plowshare.server.security.FilteringProperties;
+import io.aeyer.plowshare.server.security.LocalTextFilter;
+import io.aeyer.plowshare.server.security.MessageReview;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
 
 /** Exercises the transport boundary, including explicit pool routing and fold streams. */
@@ -22,6 +31,41 @@ class FilteredDispatcherTest {
         null,
         null,
         filter);
+  }
+
+  @Test
+  void filtersCannotRemoveReasoningLimitsOrTheirAdmittedDeadline() {
+    var transport = FakeTransport.free("one");
+    ChatFiltering filter =
+        new ChatFiltering() {
+          public ChatRequest input(ChatRequest request, BooleanSupplier abandoned) {
+            return request.withSampling(Sampling.NONE);
+          }
+
+          public Completion output(Completion completion) {
+            return completion;
+          }
+
+          public boolean bufferOutput() {
+            return false;
+          }
+        };
+    var policy =
+        new ReasoningPolicy(
+                2048, Duration.ofSeconds(1), Duration.ofSeconds(2), 128, 3, Optional.empty(), 0)
+            .admitted(System.nanoTime());
+    var request =
+        ChatRequest.of("model", null, "review")
+            .withSampling(Sampling.NONE.withMaxTokens(4096).withReasoning(policy));
+    try (var dispatcher = dispatcher(transport, filter, new NoOpTokenLedger())) {
+      assertThrows(LlmException.class, () -> dispatcher.complete(request));
+      assertThrows(LlmException.class, () -> dispatcher.stream(request, Deltas.DISCARDING));
+      assertThrows(
+          LlmException.class,
+          () -> dispatcher.streamOn("one", request, Deltas.DISCARDING, () -> false));
+      assertThrows(LlmException.class, () -> dispatcher.streamFold(request, Deltas.DISCARDING));
+      assertEquals(0, transport.calls.get());
+    }
   }
 
   @Test
@@ -58,9 +102,7 @@ class FilteredDispatcherTest {
       assertThrows(LlmException.class, () -> dispatcher.stream(request, Deltas.DISCARDING));
       var labelled =
           request.withAttribution(
-              io.aeyer.plowshare.server.llm.accounting.UsageAttribution.global(
-                  "alice",
-                  io.aeyer.plowshare.server.llm.accounting.UsageAttribution.Operation.FOLD));
+              UsageAttribution.global("alice", UsageAttribution.Operation.FOLD));
       assertThrows(LlmException.class, () -> dispatcher.stream(labelled, Deltas.DISCARDING));
       var withTools = request.withTools(List.of(ToolSchema.from("search", "Search", Map.of())));
       assertThrows(
@@ -77,8 +119,7 @@ class FilteredDispatcherTest {
     var delivered = new ArrayList<String>();
     ChatFiltering filter =
         new ChatFiltering() {
-          public ChatRequest input(
-              ChatRequest request, java.util.function.BooleanSupplier abandoned) {
+          public ChatRequest input(ChatRequest request, BooleanSupplier abandoned) {
             return request;
           }
 
@@ -109,8 +150,7 @@ class FilteredDispatcherTest {
     var delivered = new ArrayList<String>();
     ChatFiltering filter =
         new ChatFiltering() {
-          public ChatRequest input(
-              ChatRequest request, java.util.function.BooleanSupplier abandoned) {
+          public ChatRequest input(ChatRequest request, BooleanSupplier abandoned) {
             return request.withMessages(List.of(ChatMessage.user("approved input")));
           }
 

@@ -375,7 +375,7 @@ public final class LlmDispatcher implements AutoCloseable {
     boundary.submitted(request.authorization());
     ChatRequest input = filtering.input(request, () -> false);
     boundary.require(input.authorization());
-    requireSameMediaContract(request, input);
+    requireSameInputContracts(request, input);
     boolean retainedImages = PromptImages.hasStored(input);
     ChatRequest filtered = promptImages.resolve(input);
     Routing routing = routeChat(filtered);
@@ -491,7 +491,7 @@ public final class LlmDispatcher implements AutoCloseable {
     ChatRequest input =
         fold ? filtering.historyInput(request, abandoned) : filtering.input(request, abandoned);
     boundary.require(input.authorization());
-    requireSameMediaContract(request, input);
+    requireSameInputContracts(request, input);
     boolean retainedImages = PromptImages.hasStored(input);
     ChatRequest filtered = promptImages.resolve(input);
     Routing routing = routeChat(filtered);
@@ -566,6 +566,9 @@ public final class LlmDispatcher implements AutoCloseable {
    */
   private Sampling carried(Routing routing, Sampling requested) {
     Set<Sampling.Parameter> carries = routing.pool().carries(routing.wireModel(), requested);
+    if (requested.reasoning().isPresent() && !carries.contains(Sampling.Parameter.REASONING))
+      throw new LlmException(
+          "Profile reasoning limits require a vllm provider; they cannot be silently dropped");
     Set<Sampling.Parameter> dropped = requested.notCarriedBy(carries);
     for (Sampling.Parameter parameter : dropped) {
       String key = routing.pool().name() + '/' + routing.wireModel() + '/' + parameter;
@@ -1059,7 +1062,7 @@ public final class LlmDispatcher implements AutoCloseable {
     boundary.submitted(request.authorization());
     ChatRequest input = filtering.input(request, abandoned);
     boundary.require(input.authorization());
-    requireSameMediaContract(request, input);
+    requireSameInputContracts(request, input);
     boolean retainedImages = PromptImages.hasStored(input);
     ChatRequest filtered = promptImages.resolve(input);
     LlmPool named =
@@ -1121,7 +1124,9 @@ public final class LlmDispatcher implements AutoCloseable {
 
   private record Candidate(Routing route, Optional<ModelMediaCapabilities> profile) {}
 
-  private static void requireSameMediaContract(ChatRequest original, ChatRequest filtered) {
+  private static void requireSameInputContracts(ChatRequest original, ChatRequest filtered) {
+    if (!original.sampling().reasoning().equals(filtered.sampling().reasoning()))
+      throw new LlmException("Input filtering changed reasoning limits or their admitted deadline");
     if (!Objects.equals(original.mediaRequirements(), filtered.mediaRequirements())) {
       throw new LlmException("Input filtering changed the native output/input format contract");
     }

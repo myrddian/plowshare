@@ -96,19 +96,8 @@ class SwarmSchedulerTest {
     public int slots(String pool) {
       if (armed.get() && fired.compareAndSet(false, true)) {
         target.interrupt();
-        // The interrupted waiter and this thread's later signalAll() race to claim the
-        // waiter's condition node with the same lock-free CAS; left alone, this thread
-        // (already running, holding the lock) reaches signalAll() well before the
-        // parked virtual thread is rescheduled, so the interrupt is silently absorbed
-        // as a reinterrupt instead of surfacing as the race under test. Sleeping here —
-        // still holding the scheduler's lock, so dispatch() cannot reach signalAll()
-        // until this returns — gives the waiter's continuation time to run first and
-        // claim the node itself, forcing the InterruptedException path deterministically.
-        try {
-          Thread.sleep(200);
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-        }
+        // Interruption may surface as InterruptedException or as a restored flag when the
+        // condition signal wins. Both paths must return no grant; no sleep selects a winner.
       }
       return delegate.slots(pool);
     }
@@ -396,11 +385,14 @@ class SwarmSchedulerTest {
     Grant holder = scheduler.enter(share("a", "t", "m1")).await("m", NEVER);
     Turns turns = scheduler.enter(share("a", "t", "m2"));
     AtomicReference<Thread> waiter = new AtomicReference<>();
+    AtomicBoolean interruptedOnReturn = new AtomicBoolean();
     CompletableFuture<Grant> second =
         CompletableFuture.supplyAsync(
             () -> {
               waiter.set(Thread.currentThread());
-              return turns.await("m", NEVER);
+              Grant granted = turns.await("m", NEVER);
+              interruptedOnReturn.set(Thread.currentThread().isInterrupted());
+              return granted;
             },
             threads);
     untilWaiting(scheduler, 1);
@@ -412,11 +404,39 @@ class SwarmSchedulerTest {
     holder.release();
 
     assertNull(second.get(5, TimeUnit.SECONDS), "an interrupted wait must hold nothing");
+    assertTrue(interruptedOnReturn.get(), "withdrawal must preserve the interrupt");
     assertEquals(0, used(scheduler, "spark"), "the slot leaked after an interrupt raced the grant");
     assertEquals(0, scheduler.snapshot().ready().size());
 
     Grant third = scheduler.enter(share("a", "t", "m3")).await("m", NEVER);
     assertEquals("spark", third.pool(), "the slot the interrupt gave back must still be usable");
+  }
+
+  @Test
+  void an_interrupt_before_or_during_immediate_dispatch_returns_the_grant() throws Exception {
+    for (boolean duringDispatch : List.of(false, true)) {
+      InterruptingPools pools = new InterruptingPools(pools("spark", 1));
+      SwarmScheduler scheduler = scheduler(pools, 4);
+      Turns turns = scheduler.enter(share("a", "t", "m1"));
+      AtomicBoolean interruptedOnReturn = new AtomicBoolean();
+      CompletableFuture<Grant> waiting =
+          CompletableFuture.supplyAsync(
+              () -> {
+                if (duringDispatch) pools.arm(Thread.currentThread());
+                else Thread.currentThread().interrupt();
+                Grant granted = turns.await("m", NEVER);
+                interruptedOnReturn.set(Thread.currentThread().isInterrupted());
+                return granted;
+              },
+              threads);
+      assertNull(waiting.get(5, TimeUnit.SECONDS));
+      assertTrue(interruptedOnReturn.get());
+      assertEquals(0, used(scheduler, "spark"));
+      assertEquals(0, scheduler.snapshot().ready().size());
+      Grant next = scheduler.enter(share("a", "t", "m2")).await("m", NEVER);
+      assertEquals("spark", next.pool());
+      next.release();
+    }
   }
 
   /**

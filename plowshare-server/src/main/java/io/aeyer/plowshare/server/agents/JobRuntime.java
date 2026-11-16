@@ -75,6 +75,9 @@ import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmPool;
 import io.aeyer.plowshare.server.llm.dispatch.LlmTransportException;
 import io.aeyer.plowshare.server.llm.dispatch.ModelResponseRejected;
+import io.aeyer.plowshare.server.llm.dispatch.ReasoningPolicy;
+import io.aeyer.plowshare.server.llm.dispatch.ReasoningStoppedException;
+import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
@@ -3459,6 +3462,9 @@ public final class JobRuntime {
     boolean answerReviewed = false;
     boolean regenerateResponse = false;
     boolean responseRetryUsed = false;
+    boolean reasoningRecoveryUsed = false;
+    ReasoningPolicy pendingReasoningRecovery = null;
+    Sampling.Effort pendingReasoningEffort = null;
     // CALL FAILURES, per turn (spec 2026-09-28-call-failures §3-§4): a reply that writes a
     // call as text is held and warned about, each one in a row takes a warning from this
     // allowance, and a real tool call restores it. `mustCallNext` is one request's worth and
@@ -3540,7 +3546,35 @@ public final class JobRuntime {
         // says so. The specifier is the route's, so a run rerouted to its fallback waits for
         // the fallback's pools. The slot is held only across the call below and given back in
         // its finally, so it is never held while tools run.
-        Scheduling.Slot slot = turn.await(route.specifier(), cancelled);
+        // Admit before queueing. Recovery retains this deadline and every completed tool result.
+        ReasoningPolicy activeReasoning =
+            pendingReasoningRecovery != null
+                ? pendingReasoningRecovery
+                : route
+                    .requestFor(history)
+                    .sampling()
+                    .reasoning()
+                    .map(policy -> policy.admitted(System.nanoTime()))
+                    .orElse(null);
+        Sampling.Effort recoveryEffort = pendingReasoningEffort;
+        BooleanSupplier inferenceCancelled =
+            () ->
+                cancelled.getAsBoolean()
+                    || (activeReasoning != null
+                        && activeReasoning.remaining(System.nanoTime()).isZero());
+        Scheduling.Slot slot = turn.await(route.specifier(), inferenceCancelled);
+        if (!cancelled.getAsBoolean()
+            && activeReasoning != null
+            && activeReasoning.remaining(System.nanoTime()).isZero()) {
+          if (slot != null) slot.release();
+          return stopped(
+              Ending.UNAVAILABLE,
+              "Reasoning completion budget exhausted while waiting for capacity.",
+              trail,
+              steps,
+              modelCalls,
+              "");
+        }
         if (slot == null) {
           return stopped(
               Ending.CANCELLED,
@@ -3578,6 +3612,11 @@ public final class JobRuntime {
             continue;
           return pendingBudget(budgetSpent(budget, trail, steps, modelCalls));
         }
+        // A concurrent sibling may spend the allowance while we wait. Keep the pending recovery
+        // and its original deadline across any consent/admission continuation until a call is
+        // claimed.
+        pendingReasoningRecovery = null;
+        pendingReasoningEffort = null;
         modelCalls++;
         if (workspaceRuns != null) workspaceRuns.modelCalls(modelCalls);
         // Published where the budget was claimed and not where the answer
@@ -3663,13 +3702,25 @@ public final class JobRuntime {
           // history is the same list either way.
           // The forced request alone carries the way out; see
           // WrittenCalls.REPLY_AS_WRITTEN for why REQUIRED needs one.
+          ChatRequest inferenceRequest =
+              route.requestFor(regenerating ? regenerationHistory(history) : history);
+          if (activeReasoning != null) {
+            Sampling sampling = inferenceRequest.sampling();
+            sampling =
+                recoveryEffort == null
+                    ? sampling.withReasoning(activeReasoning)
+                    : sampling.recovering(activeReasoning, recoveryEffort);
+            inferenceRequest =
+                inferenceRequest
+                    .withSampling(sampling)
+                    .withBudget(activeReasoning.remaining(System.nanoTime()));
+          }
           completion =
               streamed(
                   slot,
                   systemRequest(
                       requiring(
-                          route
-                              .requestFor(regenerating ? regenerationHistory(history) : history)
+                          inferenceRequest
                               .withAttribution(usageFor(transcript, definition, steps + 1))
                               .withAuthorization(
                                   operation == null
@@ -3755,6 +3806,47 @@ public final class JobRuntime {
               steps,
               modelCalls,
               "");
+        } catch (ReasoningStoppedException stalled) {
+          failures.report(FailureReporter.Source.RUNTIME, stalled);
+          recordFailedModelOutput(transcript, timed, owner, "reasoning limit exceeded");
+          ReasoningPolicy policy = stalled.policy();
+          if (regenerating
+              || reasoningRecoveryUsed
+              || policy.recoveryEffort().isEmpty()
+              || policy.remaining(System.nanoTime()).isZero()
+              || budget.exhausted()
+              || cap.stops(steps + 1)
+              || cancelled.getAsBoolean()) {
+            return stopped(
+                cancelled.getAsBoolean() ? Ending.CANCELLED : Ending.UNAVAILABLE,
+                "The model exceeded its reasoning limits without reaching an answer.",
+                trail,
+                steps,
+                modelCalls,
+                describe(stalled));
+          }
+          // Re-enter ordinary admission: a separate model call consumes the shared allowance.
+          // Failed reasoning and partial tool fragments are never projected or executed.
+          reasoningRecoveryUsed = true;
+          steps++;
+          pendingReasoningRecovery = policy.withoutRecovery();
+          pendingReasoningEffort = policy.recoveryEffort().orElseThrow();
+          String recoveryNotice =
+              "[Harness reasoning recovery: the previous generation was terminated after"
+                  + " excessive reasoning without an answer or completed tool call. Continue from the"
+                  + " existing evidence and completed tool results. Prioritize a concise conclusion or"
+                  + " a targeted tool call; state remaining uncertainty. Do not repeat completed effects.]";
+          transcript.record(
+              LoggedEntry.diagnostic(
+                  "Reasoning recovery: "
+                      + stalled.getMessage()
+                      + "; next_effort="
+                      + pendingReasoningEffort.wire()
+                      + "; remaining_ms="
+                      + policy.remaining(System.nanoTime()).toMillis()));
+          transcript.record(LoggedEntry.notice(recoveryNotice));
+          history.add(ChatMessage.user(recoveryNotice));
+          continue;
         } catch (LlmException failed) {
           failures.report(FailureReporter.Source.RUNTIME, failed);
           boolean timedOut =
@@ -6937,7 +7029,15 @@ public final class JobRuntime {
         slot.pool() == null
             ? dispatcher.stream(request, observed, cancelled)
             : dispatcher.streamOn(
-                slot.pool(), request.withBudget(LlmPool.NO_DEADLINE), observed, cancelled);
+                slot.pool(),
+                request.withBudget(
+                    request
+                        .sampling()
+                        .reasoning()
+                        .map(policy -> policy.remaining(System.nanoTime()))
+                        .orElse(LlmPool.NO_DEADLINE)),
+                observed,
+                cancelled);
     // Revocation during inference prevents publishing its final result or starting another effect.
     admittedAuthority.run();
     originalAuthorization.require();

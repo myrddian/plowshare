@@ -42,6 +42,20 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 class LlmConfigTest {
 
   @Test
+  void vllmProviderBindsAndBootsWithoutContactingAnEndpoint() {
+    runner
+        .withPropertyValues(onePoolPlus("plowshare.llm.pools[0].provider=vllm"))
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              assertNotNull(context.getBean(LlmDispatcher.class));
+              assertEquals(
+                  PoolProperties.Provider.VLLM,
+                  context.getBean(LlmProperties.class).getPools().getFirst().getProvider());
+            });
+  }
+
+  @Test
   void configured_profiles_filter_real_provider_declarations_and_keep_socket_refusal(
       @TempDir Path directory) throws IOException {
     Files.writeString(
