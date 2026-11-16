@@ -568,6 +568,17 @@ another investigation or resume an existing run. Catalogue leases may be publish
 with new metadata identities after recovery; old invocation and mutation identities
 are never replayed.
 
+If a retained scheduled scan stopped with `Relay parent has no remaining effect
+budget`, the server needs the scheduler-root compatibility fix described in
+[ADR 0076](../../docs/decisions/0076-scheduled-relay-occurrence-causation.md).
+Changing service grants cannot supply missing ancestry. After installing that
+fix, use **Check retained work**. An explicitly refused completion stays
+`uploaded` and can complete with its original scan, evidence revision and
+completion request ID; it does not collect or upload again. A `publishing`
+receipt still means an unknown outcome and requires a matching retained receipt,
+never a resend based on absence. Preserve the journals and existing schedule
+cursor throughout recovery.
+
 For an uncertain schedule deployment, open **Settings** and expand **Change
 schedule frequency**. Enter the deployment administrator password and choose
 **Check retained deployment**. A positive receipt

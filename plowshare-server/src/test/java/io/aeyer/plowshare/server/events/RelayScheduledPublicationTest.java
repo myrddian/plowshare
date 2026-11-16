@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.events;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
@@ -90,6 +91,7 @@ class RelayScheduledPublicationTest {
     assertEquals("operator", draft.getValue().publisher());
     assertEquals(new RelayPayload.ScheduleDue("morning", "daily", AT), draft.getValue().payload());
     assertTrue(draft.getValue().eventId().matches("schedule:[a-f0-9]{64}"));
+    assertEquals(RelayCausation.root(draft.getValue().eventId()), draft.getValue().causation());
     order.verify(arrivals).record("daily", "morning", AT, AT);
     order.verify(relay).advanceSeen(subscriber, 1);
     order.verify(guard).requireOutsideTransaction();

@@ -284,6 +284,15 @@ another effect fails with `receiver.causation-unavailable`. Retained legacy
 publication-forwarding ancestry can still be resolved from its admissions; missing
 links refuse work. Unknown history is never treated as a fresh root.
 
+Scheduled occurrences are independent roots with depth-zero causation. Retained
+occurrences from older scheduler versions omitted that metadata. SDK ports can
+recognize those roots only when the typed schedule payload, canonical event ID,
+occurrence time, parentless shape and scope-derived scheduler topic agree. The
+original occurrence remains the root and each derived publication consumes one
+effect. Explicit unknown or exhausted metadata is never reset. This compatibility
+read does not rewrite events, advance cursors or permit replay of an uncertain
+publication; recovery still reconciles the original receipt first.
+
 Read-only receipt reconciliation bypasses the effect limit and never resubmits
 `UNCERTAIN` work. Old SDK peers may omit `causation`; new decoders preserve absence
 and validate known metadata. Routing may inspect causation but cannot supply or

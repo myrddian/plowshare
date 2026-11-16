@@ -4,6 +4,7 @@ import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
+import io.aeyer.plowshare.server.events.ScheduledRelayOccurrences;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.tools.RelayToolAuthority;
 import io.aeyer.plowshare.server.relay.tools.RelayToolProperties;
@@ -13,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -217,8 +219,11 @@ public final class ProjectRelayPorts implements RelayPorts {
                 require(account, project, parentTopic, RelayPortProperties.Direction.EGRESS, null),
                 parentEventId)
             .orElseThrow(() -> new CallerFault("Relay parent is unavailable"));
-    var ancestry = parent.event().causation();
-    if (ancestry == null || ancestry.depth() < 0 || ancestry.depth() >= maxDepth)
+    var ancestry =
+        Optional.ofNullable(parent.event().causation())
+            .or(() -> ScheduledRelayOccurrences.legacyRoot(parent))
+            .orElseThrow(() -> new CallerFault("Relay parent has no remaining effect budget"));
+    if (ancestry.depth() < 0 || ancestry.depth() >= maxDepth)
       throw new CallerFault("Relay parent has no remaining effect budget");
     return new RelayCausation(ancestry.rootId(), parent.event().eventId(), ancestry.depth() + 1);
   }
