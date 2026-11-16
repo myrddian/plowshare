@@ -288,10 +288,16 @@ tasks.named("check") { dependsOn(formatCheck, typescriptLint, typescriptPolicyCh
 // Installable artifacts are opt-in; ordinary check does not open Electron windows.
 val clientDistributions by tasks.registering(Exec::class) {
     group = "distribution"
-    description = "Bundles CLI/MCP/TUI and the macOS Apple Silicon desktop."
-    dependsOn(":plowshare-desktop:desktopBuild", ":plowshare-cli:cliBuild", ":plowshare-mcp:mcpBuild", ":plowshare-tui:pnpmTypecheck")
+    description = "Bundles native CLI/MCP/TUI and desktop for macOS/arm64 or Windows/x64."
+    // Windows uses the portable client-only owner: Gradle Exec cannot invoke
+    // pnpm.cmd as a native executable. macOS retains its existing task graph.
+    if (!System.getProperty("os.name").startsWith("Windows")) {
+        dependsOn(":plowshare-desktop:desktopBuild", ":plowshare-cli:cliBuild", ":plowshare-mcp:mcpBuild", ":plowshare-tui:pnpmTypecheck")
+    }
     workingDir = rootDir
     inputs.files("scripts/distributions.mjs", "scripts/distribution-archive.py", "scripts/distribution-talk.mjs", "scripts/distribution-native.mjs", "scripts/distribution-runtime.mjs", "scripts/distribution-runtime.json", "scripts/distribution-entitlements.plist", "plowshare-desktop/scripts/macos-identity.mjs", "docs/distributions.md")
+    inputs.file("scripts/distribution-runtime.windows.json")
+    inputs.files("scripts/build-client-distributions.mjs", "scripts/client-distribution-smoke.mjs")
     inputs.dir("plowshare-desktop/assets").withPathSensitivity(PathSensitivity.RELATIVE)
     for (module in listOf("plowshare-cli", "plowshare-mcp", "plowshare-tui", "plowshare-desktop", "plowshare-client-ts", "plowshare-client-node", "plowshare-mcp-integration")) {
         inputs.dir(project(":$module").file("src"))
@@ -299,8 +305,12 @@ val clientDistributions by tasks.registering(Exec::class) {
     }
     // Build provenance changes even when the compiled payload does not.
     outputs.upToDateWhen { false }
-    outputs.files("build/distributions/plowshare-clients-0.1.0-darwin-arm64.tar.gz", "build/distributions/plowshare-0.1.0-darwin-arm64", "build/distributions/plowshare-desktop-0.1.0-darwin-arm64.tar.gz")
-    commandLine("node", "scripts/distributions.mjs", "clients")
+    val windows = System.getProperty("os.name").startsWith("Windows")
+    val target = if (windows) "win32-x64" else "darwin-arm64"
+    val archive = if (windows) "zip" else "tar.gz"
+    outputs.files("build/distributions/plowshare-clients-0.1.0-$target.$archive", "build/distributions/plowshare-0.1.0-$target${if (windows) ".exe" else ""}", "build/distributions/plowshare-desktop-0.1.0-$target.$archive")
+    if (windows) commandLine("node", "scripts/build-client-distributions.mjs")
+    else commandLine("node", "scripts/distributions.mjs", "clients")
 }
 tasks.register<Exec>("nativeMcpDistributionCheck") {
     group = "verification"
