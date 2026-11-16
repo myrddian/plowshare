@@ -173,6 +173,22 @@ async function fixture(
   return { ownership, handle, control, lease, deadline };
 }
 
+await test('controlled browser physical-domain declaration follows its actual headless mode', async () => {
+  for (const headless of [true, false]) {
+    const f = await fixture({}, { ...config, headless });
+    try {
+      assert.equal(
+        f.handle.backend.desktopIsolation,
+        headless ? 'isolated' : 'physical',
+      );
+      await f.control.release(f.lease, f.deadline);
+      await f.handle.close(f.deadline);
+    } finally {
+      f.deadline.dispose();
+    }
+  }
+});
+
 await test('controlled config requires explicit policy and stable ownership storage', () => {
   for (const delta of [
     { control: { ...config.control, enabled: false } },

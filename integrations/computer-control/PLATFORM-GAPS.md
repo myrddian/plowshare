@@ -77,6 +77,24 @@ repair logins, upgrade either server or switch the acceptance test to PROD.
 
 ## Other explicit limits
 
+P3 native source work does not close the following native operating gaps:
+
+- There is no verified supported positive unlocked-state proof in the current
+  macOS backend. Console/login flags and old application focus do not establish
+  it. Native readiness remains unknown and production input is refused. Do not
+  call P3 a complete usable desktop loop until a reviewed readiness mechanism
+  and the native acceptance matrix pass.
+- Screen capture, Accessibility, event posting and event listening require
+  separate permission evidence under the actual packaged helper identity. The
+  no-prompt preflight is a diagnostic, not consent or successful native input.
+- Compiled input paths and simulated ready-state SDK tests cannot prove Unicode
+  insertion into a native app, menu/dialog behavior, lock or permission revocation,
+  multi-display capture, local interference detection or held-input cleanup after
+  helper death. The [P3 graph](P3-IMPLEMENTATION.md) records these open gates.
+- Headful browser backends do not yet join the native broker. Mixed native hosts
+  refuse them rather than create independent controllers for the same desktop.
+  Isolated headless browser sessions can coexist through the shared SDK provider.
+
 - Personal/Global invocation images are refused by the current admission API.
 - Native live capture requires OS screen-capture consent. The current helper's
   no-prompt preflight reported no screen-capture or accessibility permission;

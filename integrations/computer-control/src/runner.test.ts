@@ -24,6 +24,7 @@ import {
 import { BackendError } from './contracts.ts';
 import { ConnectionFault } from 'plowshare-client-ts/binding/connection';
 import { FakeBrowserControlBackend } from './browser-provider.test-support.ts';
+import { FakeNativeControlBackend } from './native-provider.test-support.ts';
 import { call, metadata, record } from './provider.test-support.ts';
 
 await test('SDK pass expiry retains ownership until its original promise settles', async () => {
@@ -356,6 +357,191 @@ await test('controlled foreground composition publishes matching tools and drain
     const receipt = [...journal.rows.values()][0];
     assert.ok(receipt?.result);
     assert.equal(metadata(receipt.result)['controlled'], true);
+  } finally {
+    connection.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test('native foreground composition serves the shared SDK provider and drains its exact lease', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'computer-native-host-'));
+  const wire = new RelayWire();
+  const connection = client(wire);
+  const clock = new FakeClock();
+  const backend = new FakeNativeControlBackend(clock);
+  const old = configFor(directory);
+  const config = decodeComputerHostConfig({
+    ...old,
+    browser: undefined,
+    macosControl: {
+      helperExecutable: join(directory, 'helper'),
+      ownershipDirectory: join(directory, 'ownership'),
+      targets: [
+        {
+          targetId: backend.targetId,
+          label: 'Synthetic native',
+          surfaceId: backend.surfaceId,
+        },
+      ],
+      control: {
+        enabled: true,
+        tools: backend.allowedTools,
+        allowedBundleIds: ['org.example.NativeFixture'],
+      },
+    },
+  });
+  const identity = createHash('sha256')
+    .update(
+      toolDeploymentConfig(
+        binding,
+        computerDeclarations(
+          config.prefix,
+          {
+            controlBudgetMs: config.budgets.controlMs,
+            observeBudgetMs: config.budgets.observeMs,
+          },
+          [],
+          backend.allowedTools,
+        ),
+      ),
+    )
+    .digest('hex');
+  const journal = new MemoryJournal(identity);
+  let closed = 0;
+  try {
+    await runComputerHost({
+      config,
+      connection,
+      currentBearer: async () => 'fixture',
+      signal: new AbortController().signal,
+      backends: [
+        {
+          backend,
+          close: async () => {
+            closed++;
+          },
+        },
+      ],
+      nativeControls: [backend],
+      journal,
+      clock,
+      maxPasses: 1,
+      onReady: () =>
+        wire.calls.push(call(clock, 'open', { targetId: backend.targetId })),
+    });
+    assert.equal(backend.acquireCalls, 1);
+    assert.equal(backend.releaseCalls, 1);
+    assert.equal(backend.hasLease, false);
+    assert.equal(closed, 1);
+    assert.equal(clock.pendingTimers(), 0);
+    assert.equal(wire.publications.length, 3);
+    assert.equal(
+      (await new FileCatalogueIntents(directory, identity).load())?.kind,
+      'withdraw',
+    );
+    assert.equal(
+      (await readdir(directory)).some(
+        (name) => name.endsWith('.active') || name.endsWith('.lock'),
+      ),
+      false,
+    );
+  } finally {
+    connection.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test('dual-port native host injection refuses before filesystem, transport or ownership transfer', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'computer-native-dual-port-'));
+  const wire = new RelayWire();
+  const connection = client(wire);
+  const clock = new FakeClock();
+  const browser = new FakeBrowserControlBackend(clock);
+  const native = new FakeNativeControlBackend(clock);
+  let transport = 0;
+  const send = wire.send.bind(wire);
+  wire.send = (source) => {
+    transport++;
+    send(source);
+  };
+  let backendCalls = 0;
+  let closed = 0;
+  let credentialCalls = 0;
+  const dual = {
+    desktopIsolation: 'native-broker' as const,
+    targets: async () => {
+      backendCalls++;
+      return [];
+    },
+    capture: async () => {
+      backendCalls++;
+      throw new Error('Unexpected capture');
+    },
+    browserControl: browser.browserControl,
+    nativeControl: native.nativeControl,
+  };
+  const old = configFor(directory);
+  const config = decodeComputerHostConfig({
+    ...old,
+    browser: undefined,
+    browserControl: {
+      ...old.browser,
+      ownershipDirectory: join(directory, 'browser-ownership'),
+      control: {
+        enabled: true,
+        tools: browser.browserControl.allowedTools,
+        allowedOrigins: ['https://fixture.invalid'],
+      },
+    },
+    macosControl: {
+      helperExecutable: join(directory, 'helper'),
+      ownershipDirectory: join(directory, 'native-ownership'),
+      targets: [
+        {
+          targetId: native.targetId,
+          label: 'Native',
+          surfaceId: native.surfaceId,
+        },
+      ],
+      control: {
+        enabled: true,
+        tools: native.allowedTools,
+        allowedBundleIds: ['org.example.NativeFixture'],
+      },
+    },
+  });
+  try {
+    await assert.rejects(
+      runComputerHost({
+        config,
+        connection,
+        currentBearer: async () => {
+          credentialCalls++;
+          return 'fixture';
+        },
+        signal: new AbortController().signal,
+        backends: [
+          {
+            backend: dual,
+            close: async () => {
+              closed++;
+            },
+          },
+        ],
+        browserControls: [dual],
+        nativeControls: [dual],
+        clock,
+        maxPasses: 1,
+      }),
+      /both native and browser/,
+    );
+    assert.deepEqual(await readdir(directory), []);
+    assert.equal(transport, 0);
+    assert.equal(credentialCalls, 0);
+    assert.equal(backendCalls, 0);
+    assert.equal(closed, 0);
+    assert.equal(native.acquireCalls, 0);
+    assert.equal(browser.acquireCalls, 0);
   } finally {
     connection.close();
     await rm(directory, { recursive: true, force: true });

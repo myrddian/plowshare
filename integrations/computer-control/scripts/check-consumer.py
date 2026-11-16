@@ -57,10 +57,19 @@ with tempfile.TemporaryDirectory(prefix='plowshare-computer-consumer-') as tempo
         "if (typeof provider.createBrowserControlBackend !== 'function' || "
         "typeof provider.decodeBrowserControlPolicy !== 'function') "
         "throw new Error('Missing reusable browser control capability'); "
+        "if (typeof provider.createMacOSControlBackend !== 'function' || "
+        "typeof provider.createCoordinatedMacOSBackend !== 'function' || "
+        "typeof provider.decodeNativeControlPolicy !== 'function') "
+        "throw new Error('Missing reusable native control capability'); "
         "if (provider.computerDeclarations().length !== 4 || "
         "provider.computerDeclarations('computer_', "
         "{controlBudgetMs:2000,observeBudgetMs:10000}, ['windows','type']).length !== 6) "
-        "throw new Error('Explicit browser catalogue selection failed');",
+        "throw new Error('Explicit browser catalogue selection failed'); "
+        "if (provider.computerDeclarations('computer_', "
+        "{controlBudgetMs:2000,observeBudgetMs:10000}, [], ['windows','type']).length !== 6 || "
+        "provider.computerDeclarations('computer_', "
+        "{controlBudgetMs:2000,observeBudgetMs:10000}, ['navigate','type'], ['windows','type']).length !== 7) "
+        "throw new Error('Explicit native/mixed catalogue selection failed');",
         cwd=consumer)
     run('node', 'scripts/test.mjs', cwd=consumer)
     print('Computer provider compiled and passed fixtures with installed public SDKs.')

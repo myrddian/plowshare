@@ -93,6 +93,7 @@ const allTools: readonly BrowserToolName[] = [
  * optional acknowledgement gate, captureCalls counts returned image captures.
  */
 export class FakeBrowserControlBackend implements BrowserControlBackend {
+  readonly desktopIsolation = 'isolated';
   readonly browserControl: BrowserControl;
   readonly targetId: string;
   readonly surfaceId: string;

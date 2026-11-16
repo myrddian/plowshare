@@ -111,6 +111,111 @@ const controlled = {
   },
 };
 
+const nativeControlled = {
+  helperExecutable: '/fixture/native-helper',
+  ownershipDirectory: '/fixture/native-ownership',
+  targets: [
+    {
+      targetId: 'desktop',
+      label: 'Controlled desktop',
+      surfaceId: 'display:1',
+    },
+  ],
+  control: {
+    enabled: true,
+    tools: ['windows', 'focus', 'pointer', 'type', 'key', 'scroll'],
+    allowedBundleIds: ['org.example.ControlledFixture'],
+  },
+};
+
+await test('native host control is explicit, bounded and shares one canonical catalogue with browser tools', () => {
+  const config = decodeComputerHostConfig({
+    ...source,
+    browser: undefined,
+    macosControl: nativeControlled,
+    budgets: { nativeObservationReserveMs: 2500 },
+  });
+  assert.equal(config.macos, undefined);
+  assert.equal(config.browserControl, undefined);
+  assert.equal(config.macosControl?.control.enabled, true);
+  assert.equal(config.budgets.nativeObservationReserveMs, 2500);
+  assert.deepEqual(decodeComputerHostConfig(config), config);
+  const mixed = decodeComputerHostConfig({
+    ...source,
+    browser: undefined,
+    browserControl: controlled,
+    macosControl: nativeControlled,
+  });
+  const declarations = computerDeclarations(
+    mixed.prefix,
+    {
+      controlBudgetMs: mixed.budgets.controlMs,
+      observeBudgetMs: mixed.budgets.observeMs,
+    },
+    mixed.browserControl?.control.tools,
+    mixed.macosControl?.control.tools,
+  );
+  assert.equal(declarations.length, 11);
+  assert.equal(new Set(declarations.map((row) => row.name)).size, 11);
+});
+
+await test('native policy, paths, capture surfaces, budgets and duplicate targets reject before startup', () => {
+  const base = {
+    ...source,
+    browser: undefined,
+    macosControl: nativeControlled,
+  };
+  for (const invalid of [
+    {
+      ...base,
+      macosControl: { ...nativeControlled, helperExecutable: 'helper' },
+    },
+    {
+      ...base,
+      macosControl: {
+        ...nativeControlled,
+        control: { ...nativeControlled.control, enabled: false },
+      },
+    },
+    {
+      ...base,
+      macosControl: {
+        ...nativeControlled,
+        control: { ...nativeControlled.control, tools: ['navigate'] },
+      },
+    },
+    {
+      ...base,
+      macosControl: {
+        ...nativeControlled,
+        control: { ...nativeControlled.control, allowedBundleIds: [] },
+      },
+    },
+    {
+      ...base,
+      macosControl: {
+        ...nativeControlled,
+        targets: [
+          { targetId: 'desktop', label: 'Desktop', surfaceId: 'window:1' },
+        ],
+      },
+    },
+    { ...base, budgets: { nativeObservationReserveMs: 10_000 } },
+    { ...base, budgets: { nativeObservationReserveMs: 0 } },
+    { ...base, browser: { ...source.browser, headless: false } },
+    { ...base, browserControl: { ...controlled, headless: false } },
+    {
+      ...base,
+      macos: {
+        helperExecutable: '/fixture/helper',
+        ownershipDirectory: '/fixture/other',
+        targets: nativeControlled.targets,
+      },
+    },
+  ])
+    assert.throws(() => decodeComputerHostConfig(invalid));
+});
+
 await test('controlled host configuration is explicit and round-trips without changing P1 defaults', () => {
   const config = decodeComputerHostConfig({
     ...source,

@@ -10,6 +10,8 @@ import { decodeBrowserControlBackendConfig } from './backends/browser-control-ba
 import type { BrowserControlBackendConfig } from './backends/browser-control-backend.ts';
 import { decodeMacOSBackendConfig } from './backends/macos.ts';
 import type { MacOSBackendConfig } from './backends/macos.ts';
+import { decodeMacOSControlBackendConfig } from './backends/macos-control.ts';
+import type { MacOSControlBackendConfig } from './backends/macos-control.ts';
 
 export type ComputerCredential =
   | { readonly kind: 'saved'; readonly directory: string }
@@ -21,6 +23,7 @@ export interface HostBudgets {
   readonly passMs: number;
   readonly cleanupMs: number;
   readonly browserObservationReserveMs?: number;
+  readonly nativeObservationReserveMs?: number;
 }
 export interface ComputerHostConfig {
   readonly version: 1;
@@ -38,6 +41,7 @@ export interface ComputerHostConfig {
   readonly browser?: BrowserBackendConfig;
   readonly browserControl?: BrowserControlBackendConfig;
   readonly macos?: MacOSBackendConfig;
+  readonly macosControl?: MacOSControlBackendConfig;
   readonly sessions?: {
     readonly frameFreshMs: number;
     readonly idleMs: number;
@@ -91,6 +95,7 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     'browser',
     'browserControl',
     'macos',
+    'macosControl',
     'sessions',
   ]);
   if (
@@ -164,6 +169,7 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
           'passMs',
           'cleanupMs',
           'browserObservationReserveMs',
+          'nativeObservationReserveMs',
         ]);
   const budgets = Object.freeze({
     startupMs: budget(rawBudgets, 'startupMs', 30_000),
@@ -177,6 +183,15 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
           browserObservationReserveMs: budget(
             rawBudgets,
             'browserObservationReserveMs',
+            3000,
+          ),
+        }),
+    ...(rawBudgets['nativeObservationReserveMs'] === undefined
+      ? {}
+      : {
+          nativeObservationReserveMs: budget(
+            rawBudgets,
+            'nativeObservationReserveMs',
             3000,
           ),
         }),
@@ -225,10 +240,22 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     row['macos'] === undefined
       ? undefined
       : decodeMacOSBackendConfig(row['macos']);
+  const macosControl =
+    row['macosControl'] === undefined
+      ? undefined
+      : decodeMacOSControlBackendConfig(row['macosControl']);
+  if (
+    macosControl !== undefined &&
+    (browser?.headless === false || browserControl?.headless === false)
+  )
+    throw new Error(
+      'Headful browsers cannot share native control without joining the native desktop broker',
+    );
   if (
     browser === undefined &&
     browserControl === undefined &&
-    macos === undefined
+    macos === undefined &&
+    macosControl === undefined
   )
     throw new Error('Configure at least one computer backend');
   computerDeclarations(
@@ -238,6 +265,7 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
       observeBudgetMs: budgets.observeMs,
     },
     browserControl?.control.tools ?? [],
+    macosControl?.control.tools ?? [],
   );
   if (
     browserControl !== undefined &&
@@ -245,6 +273,13 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
   )
     throw new Error(
       'Browser input and post-observation must fit inside the shared action budget',
+    );
+  if (
+    macosControl !== undefined &&
+    (budgets.nativeObservationReserveMs ?? 3000) >= budgets.observeMs
+  )
+    throw new Error(
+      'Native input and post-observation must fit inside the shared action budget',
     );
   const rawSessions =
     row['sessions'] === undefined
@@ -261,6 +296,7 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     ...(browser?.targets ?? []),
     ...(browserControl?.targets ?? []),
     ...(macos?.targets ?? []),
+    ...(macosControl?.targets ?? []),
   ];
   if (
     targets.length > 32 ||
@@ -282,6 +318,7 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     ...(browser === undefined ? {} : { browser }),
     ...(browserControl === undefined ? {} : { browserControl }),
     ...(macos === undefined ? {} : { macos }),
+    ...(macosControl === undefined ? {} : { macosControl }),
     ...(sessions === undefined ? {} : { sessions }),
   });
 }

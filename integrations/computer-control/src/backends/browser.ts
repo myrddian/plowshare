@@ -180,6 +180,7 @@ function failure(error: unknown, deadline: OperationDeadline): BackendError {
 }
 
 class BrowserBackend implements ComputerBackend {
+  readonly desktopIsolation: 'isolated' | 'physical';
   private closed = false;
   private readonly busy = new Set<string>();
   private readonly targetList: readonly ComputerTarget[];
@@ -188,6 +189,7 @@ class BrowserBackend implements ComputerBackend {
     private readonly config: BrowserBackendConfig,
     private readonly driver: BrowserCaptureDriver,
   ) {
+    this.desktopIsolation = config.headless ? 'isolated' : 'physical';
     this.targetList = decodeTargets(
       config.targets.map((target) => ({
         targetId: target.targetId,

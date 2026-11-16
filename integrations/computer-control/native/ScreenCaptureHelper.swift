@@ -33,7 +33,10 @@ private func rejectDuplicateFields(_ input: Data) throws {
   var index = 0
   var names = Set<String>()
   while index < bytes.count {
-    guard bytes[index] == 34 else { index += 1; continue }
+    guard bytes[index] == 34 else {
+      index += 1
+      continue
+    }
     let start = index
     index += 1
     while index < bytes.count, bytes[index] != 34 {
@@ -57,9 +60,10 @@ private struct Request: Decodable {
   let surfaceId: String?
   let maxEdge: Int?
   let maxBytes: Int?
+  let coordination: String?
 
   private enum CodingKeys: String, CodingKey {
-    case version, operation, timeoutMs, surfaceId, maxEdge, maxBytes
+    case version, operation, timeoutMs, surfaceId, maxEdge, maxBytes, coordination
   }
 
   init(from decoder: Decoder) throws {
@@ -68,18 +72,24 @@ private struct Request: Decodable {
     let version = try fields.decode(String.self, forKey: .version)
     operation = try fields.decode(String.self, forKey: .operation)
     timeoutMs = try fields.decode(Int.self, forKey: .timeoutMs)
+    coordination = try fields.decodeIfPresent(String.self, forKey: .coordination)
+    if let coordination, coordination != NativeGlobalFence.coordinationVersion {
+      throw HelperFailure.invalidRequest
+    }
     guard version == protocolVersion, (1...300_000).contains(timeoutMs) else {
       throw HelperFailure.invalidRequest
     }
     let allowed: Set<String>
     switch operation {
     case "status":
-      allowed = ["version", "operation", "timeoutMs"]
+      allowed = ["version", "operation", "timeoutMs", "coordination"]
       surfaceId = nil
       maxEdge = nil
       maxBytes = nil
     case "capture":
-      allowed = ["version", "operation", "timeoutMs", "surfaceId", "maxEdge", "maxBytes"]
+      allowed = [
+        "version", "operation", "timeoutMs", "surfaceId", "maxEdge", "maxBytes", "coordination",
+      ]
       let surface = try fields.decode(String.self, forKey: .surfaceId)
       let edge = try fields.decode(Int.self, forKey: .maxEdge)
       let bytes = try fields.decode(Int.self, forKey: .maxBytes)
@@ -114,6 +124,7 @@ private struct StatusReply: Encodable {
   let operation = "status"
   let screenCaptureAllowed: Bool
   let accessibilityAllowed: Bool
+  let coordination: String?
 }
 
 private struct CaptureReply: Encodable {
@@ -126,6 +137,7 @@ private struct CaptureReply: Encodable {
   let transform: Transform
   let capturedAt: String
   let layoutGeneration: String
+  let coordination: String?
 }
 
 private struct FailureReply: Encodable {
@@ -200,8 +212,9 @@ private func capture(_ request: Request) async throws {
     throw HelperFailure.captureTooLarge
   }
   let data = NSMutableData()
-  guard let destination = CGImageDestinationCreateWithData(
-    data, UTType.png.identifier as CFString, 1, nil)
+  guard
+    let destination = CGImageDestinationCreateWithData(
+      data, UTType.png.identifier as CFString, 1, nil)
   else { throw HelperFailure.captureFailed }
   CGImageDestinationAddImage(destination, image, nil)
   guard CGImageDestinationFinalize(destination) else { throw HelperFailure.captureFailed }
@@ -214,13 +227,23 @@ private func capture(_ request: Request) async throws {
     transform: Transform(
       a: frame.width / Double(image.width), d: frame.height / Double(image.height),
       e: frame.origin.x, f: frame.origin.y),
-    capturedAt: formatter.string(from: capturedAt), layoutGeneration: geometry)
+    capturedAt: formatter.string(from: capturedAt), layoutGeneration: geometry,
+    coordination: request.coordination)
   try writeReply(reply, bytes: data as Data)
 }
 
 @main
 private enum Main {
   static func main() async {
+    if CommandLine.arguments == [CommandLine.arguments[0], "--check-input-memory"] {
+      do { try await runNativeInputMemoryCheck() } catch { exit(1) }
+      return
+    }
+    if CommandLine.arguments == [CommandLine.arguments[0], "--control"] {
+      await NativeBroker().run()
+      return
+    }
+    guard CommandLine.arguments.count == 1 else { exit(1) }
     // This upper bound starts before stdin. The caller closes the bounded stdin
     // request immediately, then the request's earlier deadline replaces it.
     let watchdog = DispatchSource.makeTimerSource(queue: .global())
@@ -244,12 +267,19 @@ private enum Main {
       watchdog.schedule(deadline: .now() + .milliseconds(request.timeoutMs))
       switch request.operation {
       case "status":
-        try writeReply(StatusReply(
-          screenCaptureAllowed: CGPreflightScreenCaptureAccess(),
-          accessibilityAllowed: AXIsProcessTrusted()))
+        try writeReply(
+          StatusReply(
+            screenCaptureAllowed: CGPreflightScreenCaptureAccess(),
+            accessibilityAllowed: AXIsProcessTrusted(), coordination: request.coordination))
       case "capture":
         guard #available(macOS 14.2, *) else { throw HelperFailure.unsupportedPlatform }
-        try await capture(request)
+        // Legacy-shaped accepted requests also join the host-wide fence. Only
+        // explicit coordinated requests add feature metadata to old wire replies.
+        let fence = try NativeGlobalFence()
+        var captureError: Error?
+        do { try await capture(request) } catch { captureError = error }
+        try fence.releaseAfterQuiescence()
+        if let captureError { throw captureError }
       default:
         throw HelperFailure.invalidRequest
       }

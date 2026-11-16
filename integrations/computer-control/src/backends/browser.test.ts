@@ -46,6 +46,26 @@ function driver(
   return { capture, close: async () => {} };
 }
 
+await test('browser desktop isolation is derived from the validated headless configuration', async () => {
+  for (const headless of [true, false]) {
+    const deadline = new OperationDeadline(1000);
+    try {
+      const handle = await createBrowserBackend(
+        { ...config, headless },
+        deadline,
+        async () => driver(),
+      );
+      assert.equal(
+        handle.backend.desktopIsolation,
+        headless ? 'isolated' : 'physical',
+      );
+      await handle.close(deadline);
+    } finally {
+      deadline.dispose();
+    }
+  }
+});
+
 await test('browser configuration rejects unknown values before launch', async () => {
   let launches = 0;
   const deadline = new OperationDeadline(1000);

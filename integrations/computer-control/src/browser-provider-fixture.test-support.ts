@@ -33,6 +33,7 @@ const allTools: readonly BrowserToolName[] = [
 export async function browserProviderFixture(
   options: {
     readonly http?: typeof fetch;
+    readonly currentBearer?: () => Promise<string>;
     readonly maxImagesPerRun?: number;
     readonly backend?: FakeBrowserControlBackend;
     readonly clock?: FakeClock;
@@ -69,7 +70,7 @@ export async function browserProviderFixture(
     browserTools: tools,
     generation: 'controlled-generation',
     origin: 'https://fixture.invalid',
-    currentBearer: async () => 'fixture-bearer',
+    currentBearer: options.currentBearer ?? (async () => 'fixture-bearer'),
     http: options.http ?? admissions(),
     clock,
     ...(options.idleMs === undefined ? {} : { idleMs: options.idleMs }),

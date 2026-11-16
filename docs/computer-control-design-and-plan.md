@@ -9,7 +9,11 @@ or platform extensions are supplied by the initial P0/P1 slice. P2 browser
 implementation is tracked in the
 [P2 delivery graph](../integrations/computer-control/P2-IMPLEMENTATION.md), including
 explicit control opt-in, independent reviews and the continuing live-validation
-deferral. Browser and full desktop
+deferral. Native macOS work is tracked in the
+[P3 delivery graph](../integrations/computer-control/P3-IMPLEMENTATION.md).
+Its source review does not establish usable native input: unknown desktop
+readiness refuses actions, and native permission/lock/interference acceptance
+remains a separate open gate. Browser and full desktop
 control remain intended deliverables; browser-first delivery is a sequence,
 not the final scope.
 
@@ -180,7 +184,7 @@ For example, a point click request has this adapter-owned shape (illustrative ID
 ```json
 {
   "sessionId": "session-example",
-  "generation": 1,
+  "generation": "generation-example",
   "action": "click",
   "target": {
     "kind": "point",

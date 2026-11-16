@@ -40,7 +40,16 @@ import { createBrowserBackend } from './backends/browser.ts';
 import { createBrowserControlBackend } from './backends/browser-control-backend.ts';
 import type { BrowserControlBackend } from './browser-control.ts';
 import { browserComposition } from './browser-composition.ts';
-import { createMacOSBackend } from './backends/macos.ts';
+import {
+  createMacOSBackend,
+  createCoordinatedMacOSBackend,
+} from './backends/macos.ts';
+import { createMacOSControlBackend } from './backends/macos-control.ts';
+import type { NativeControlBackend } from './native-control.ts';
+import {
+  nativeComposition,
+  requireDistinctControlPorts,
+} from './native-composition.ts';
 import type { BackendHandle } from './backends/types.ts';
 
 export interface CatalogueIntent {
@@ -299,6 +308,7 @@ export interface ComputerHostOptions {
   readonly signal: AbortSignal;
   readonly backends?: readonly BackendHandle[];
   readonly browserControls?: readonly BrowserControlBackend[];
+  readonly nativeControls?: readonly NativeControlBackend[];
   readonly journal?: ToolJournal;
   readonly intents?: CatalogueIntents;
   readonly clock?: Clock;
@@ -410,6 +420,21 @@ export async function runComputerHost(
       'Controlled host injection requires its exact browser control backend capabilities',
     );
   if (
+    options.nativeControls !== undefined &&
+    (options.backends === undefined || config.macosControl === undefined)
+  )
+    throw new Error(
+      'Injected native controls require matching explicit backend handles and controlled configuration',
+    );
+  if (
+    options.backends !== undefined &&
+    config.macosControl !== undefined &&
+    options.nativeControls === undefined
+  )
+    throw new Error(
+      'Controlled host injection requires its exact native control backend capabilities',
+    );
+  if (
     options.maxPasses !== undefined &&
     (!Number.isSafeInteger(options.maxPasses) ||
       options.maxPasses < 1 ||
@@ -417,6 +442,7 @@ export async function runComputerHost(
   )
     throw new Error('Invalid finite computer host pass count');
   const browserTools = config.browserControl?.control.tools ?? [];
+  const nativeTools = config.macosControl?.control.tools ?? [];
   const injectedHandles =
     options.backends === undefined
       ? undefined
@@ -429,6 +455,18 @@ export async function runComputerHost(
           options.browserControls === undefined ? [] : options.browserControls,
           browserTools,
         ).controls;
+  const injectedNativeControls =
+    injectedHandles === undefined
+      ? undefined
+      : nativeComposition(
+          injectedHandles.map((handle) => handle.backend),
+          options.nativeControls === undefined ? [] : options.nativeControls,
+          nativeTools,
+        ).controls;
+  requireDistinctControlPorts(
+    injectedControls ?? [],
+    injectedNativeControls ?? [],
+  );
   const declarations = computerDeclarations(
     config.prefix,
     {
@@ -436,6 +474,7 @@ export async function runComputerHost(
       observeBudgetMs: config.budgets.observeMs,
     },
     browserTools,
+    nativeTools,
   );
   const identity = createHash('sha256')
     .update(toolDeploymentConfig(config.binding, declarations))
@@ -472,6 +511,9 @@ export async function runComputerHost(
         }
         const handles: BackendHandle[] = [...(injectedHandles ?? [])];
         const controls: BrowserControlBackend[] = [...(injectedControls ?? [])];
+        const nativeControls: NativeControlBackend[] = [
+          ...(injectedNativeControls ?? []),
+        ];
         const passes = new ComputerPasses(
           options.connection,
           config.budgets.controlMs,
@@ -506,8 +548,23 @@ export async function runComputerHost(
                 handles.push(handle);
                 controls.push(handle.backend);
               }
+              if (config.macosControl !== undefined) {
+                const handle = await createMacOSControlBackend(
+                  config.macosControl,
+                  startup,
+                );
+                handles.push(handle);
+                nativeControls.push(handle.backend);
+              }
               if (config.macos !== undefined)
-                handles.push(createMacOSBackend(config.macos));
+                handles.push(
+                  config.macosControl === undefined
+                    ? createMacOSBackend(config.macos)
+                    : await createCoordinatedMacOSBackend(
+                        config.macos,
+                        startup,
+                      ),
+                );
             }
             const journal =
               options.journal ??
@@ -519,6 +576,8 @@ export async function runComputerHost(
               backends: handles.map((handle) => handle.backend),
               browserControls: controls,
               browserTools,
+              nativeControls,
+              nativeTools,
               generation: randomUUID(),
               origin: config.origin,
               currentBearer: options.currentBearer,
@@ -528,6 +587,8 @@ export async function runComputerHost(
               observeBudgetMs: config.budgets.observeMs,
               browserObservationReserveMs:
                 config.budgets.browserObservationReserveMs ?? 3000,
+              nativeObservationReserveMs:
+                config.budgets.nativeObservationReserveMs ?? 3000,
               cleanupBudgetMs: config.budgets.cleanupMs,
               ...(config.sessions === undefined
                 ? {}
