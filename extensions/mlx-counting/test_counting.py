@@ -3,6 +3,7 @@
 import base64
 import http.client
 import json
+import socket
 import tempfile
 import threading
 import unittest
@@ -241,11 +242,15 @@ class HttpTest(unittest.TestCase):
         self.server.slots.acquire()
         self.server.slots.acquire()
         try:
-            client = http.client.HTTPConnection(*self.server.server_address, timeout=2)
-            client.request("POST", "/v1/chat/completions/input_tokens", self.body)
-            self.assertEqual(503, client.getresponse().status)
-            client.close()
+            # Saturation rejects at accept time, before reading a request. Reading that
+            # response directly avoids racing a body write against the deliberate close.
+            with socket.create_connection(self.server.server_address, timeout=2) as client:
+                with http.client.HTTPResponse(client) as response:
+                    response.begin()
+                    self.assertEqual(503, response.status)
             self.assertEqual([], self.counter.requests)
+            with self.server.thread_lock:
+                self.assertEqual(set(), self.server.threads)
         finally:
             self.server.slots.release()
             self.server.slots.release()

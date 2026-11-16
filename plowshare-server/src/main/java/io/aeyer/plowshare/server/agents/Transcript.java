@@ -269,6 +269,16 @@ public interface Transcript {
    * door says who it is: {@code Turn}'s person path, its harness paths, and every {@code
    * Compaction.logFor} run the harness opens.
    */
+  /** Classifies this run's opening only; it does not alter the input sent to the model. */
+  default void prepareInput(InputProvenance provenance) {
+    if (provenance != null)
+      throw new UnsupportedOperationException("Input provenance requires a durable transcript");
+  }
+
+  default InputProvenance inputProvenance() {
+    return null;
+  }
+
   default Speaker speaker() {
     return null;
   }

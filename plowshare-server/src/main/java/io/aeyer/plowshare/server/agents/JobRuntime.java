@@ -2289,7 +2289,9 @@ public final class JobRuntime {
       extras =
           new RunExtras.Extras(
               extras.tools(), end, extras.keepsTodos(), extras.requiresAToolCall(), extras.fence());
-    transcript.record(LoggedEntry.utterance(message, transcript.speaker()));
+    transcript.record(
+        LoggedEntry.utterance(message, transcript.speaker())
+            .withInputProvenance(transcript.inputProvenance()));
     Map<String, AgentTool> offered =
         offeredTo(
             definition,
@@ -2823,7 +2825,9 @@ public final class JobRuntime {
                 offered,
                 operation);
     if (bound != null && bound.refusal() != null) {
-      transcript.record(LoggedEntry.utterance(userPrompt, transcript.speaker()));
+      transcript.record(
+          LoggedEntry.utterance(userPrompt, transcript.speaker())
+              .withInputProvenance(transcript.inputProvenance()));
       transcript.record(LoggedEntry.notice(bound.refusal()));
       return stopped(
           Ending.UNAVAILABLE, bound.refusal(), List.of(), 0, 0, "command binding refused");
@@ -3115,7 +3119,8 @@ public final class JobRuntime {
     LoggedEntry openingEntry =
         approvalContinuation
             ? LoggedEntry.diagnostic(userPrompt)
-            : LoggedEntry.utterance(userPrompt, transcript.speaker());
+            : LoggedEntry.utterance(userPrompt, transcript.speaker())
+                .withInputProvenance(transcript.inputProvenance());
     if (retainsBudget) transcript.recordDurably(openingEntry);
     else transcript.record(openingEntry);
     if (bound != null && bound.notice() != null)

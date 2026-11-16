@@ -198,7 +198,8 @@ class CapabilityReadToolsTest {
             8,
             new LogSearch.Reach(50, 2, 3));
     var view = LogSearchView.of(rows, 3, 20);
-    when(entries.searchView(HOME, "claim", 3, 20, "lexical", null)).thenReturn(view);
+    when(entries.searchView(HOME, "claim", 3, 20, "lexical", null, null, null, false))
+        .thenReturn(view);
     var result =
         json.readTree(
             new ConversationSearchTool(entries)
@@ -206,7 +207,7 @@ class CapabilityReadToolsTest {
                     "{\"question\":\" claim \",\"mode\":\"lexical\",\"offset\":3,\"limit\":999}",
                     HOME));
     assertEquals(tree(view), result);
-    verify(entries).searchView(HOME, "claim", 3, 20, "lexical", null);
+    verify(entries).searchView(HOME, "claim", 3, 20, "lexical", null, null, null, false);
   }
 
   @Test
@@ -214,7 +215,7 @@ class CapabilityReadToolsTest {
     var scoped = mock(EntryStore.class);
     when(entries.forAccount("reader")).thenReturn(scoped);
     var view = LogSearchView.of(LogSearch.NONE, 0, 10);
-    when(scoped.searchView(HOME, "claim", 0, 10, "semantic", null, null, "cnv_current"))
+    when(scoped.searchView(HOME, "claim", 0, 10, "semantic", null, null, "cnv_current", false))
         .thenReturn(view);
     var tool = new ConversationSearchTool(entries).forRun("cnv_current", "reader");
     assertEquals(
@@ -223,7 +224,7 @@ class CapabilityReadToolsTest {
             tool.run(
                 "{\"question\":\"claim\",\"mode\":\"semantic\",\"conversation\":\"current\"}",
                 HOME)));
-    verify(scoped).searchView(HOME, "claim", 0, 10, "semantic", null, null, "cnv_current");
+    verify(scoped).searchView(HOME, "claim", 0, 10, "semantic", null, null, "cnv_current", false);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -232,12 +233,28 @@ class CapabilityReadToolsTest {
   }
 
   @Test
+  void fullInputSearchIsExplicitAndMalformedFlagsNeverReachTheRepository() throws Exception {
+    var view = LogSearchView.of(LogSearch.NONE, 0, 10);
+    when(entries.searchView(HOME, "claim", 0, 10, "hybrid", null, null, null, true))
+        .thenReturn(view);
+    var tool = new ConversationSearchTool(entries);
+    assertEquals(
+        tree(view),
+        json.readTree(tool.run("{\"question\":\"claim\",\"includeInputs\":true}", HOME)));
+    verify(entries).searchView(HOME, "claim", 0, 10, "hybrid", null, null, null, true);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> tool.run("{\"question\":\"claim\",\"includeInputs\":\"true\"}", HOME));
+  }
+
+  @Test
   void search_defaults_are_shared_and_service_failure_is_not_zero_hits() throws Exception {
     var view = LogSearchView.of(LogSearch.NONE, 0, 10);
-    when(entries.searchView(Home.global(), "claim", 0, 10, "hybrid", null)).thenReturn(view);
+    when(entries.searchView(Home.global(), "claim", 0, 10, "hybrid", null, null, null, false))
+        .thenReturn(view);
     var tool = new ConversationSearchTool(entries);
     assertEquals(tree(view), json.readTree(tool.run("{\"question\":\"claim\"}", Home.global())));
-    when(entries.searchView(Home.global(), "claim", 0, 10, "hybrid", null))
+    when(entries.searchView(Home.global(), "claim", 0, 10, "hybrid", null, null, null, false))
         .thenThrow(new IllegalStateException("archive unavailable"));
     assertThrows(
         IllegalStateException.class, () -> tool.run("{\"question\":\"claim\"}", Home.global()));

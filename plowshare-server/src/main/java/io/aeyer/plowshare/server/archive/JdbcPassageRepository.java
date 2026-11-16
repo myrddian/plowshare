@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.EntryKind;
+import io.aeyer.plowshare.server.agents.InputProvenanceCodec;
 import io.aeyer.plowshare.server.archive.PassageIndex.*;
 import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
@@ -45,6 +46,10 @@ public final class JdbcPassageRepository implements PassageRepository {
   private static void sourceType(String type) {
     if (!Set.of("entry", "digest").contains(type))
       throw new IllegalArgumentException("unknown retrieval source type");
+  }
+
+  private static String passageFence(String type, ReadScope scope) {
+    return type.equals("entry") && !scope.includeInputs() ? " AND NOT p.supplied_context " : "";
   }
 
   private static void validVector(float[] vector) {
@@ -100,7 +105,7 @@ public final class JdbcPassageRepository implements PassageRepository {
               ORDER BY retry_at,source_type,source_id LIMIT 8
             )
             SELECT s.source_type,s.source_id,s.source_hash,CASE WHEN s.generation=? THEN s.next_position ELSE 0 END AS next_position,
-                   CASE WHEN s.source_type='entry' THEN e.content ELSE d.summary END AS text
+                   CASE WHEN s.source_type='entry' THEN e.content ELSE d.summary END AS text,e.input_provenance
             FROM due JOIN retrieval_sources s USING (source_type,source_id)
             LEFT JOIN entries e ON s.source_type='entry' AND e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal
             LEFT JOIN digests d ON s.source_type='digest' AND d.id=s.source_id
@@ -112,7 +117,8 @@ public final class JdbcPassageRepository implements PassageRepository {
                 r.getString(2),
                 r.getString(3),
                 r.getString("text"),
-                r.getInt("next_position")),
+                r.getInt("next_position"),
+                InputProvenanceCodec.read(r.getString("input_provenance"))),
         "RepairInFlight:" + generation,
         generation,
         generation,
@@ -187,6 +193,12 @@ public final class JdbcPassageRepository implements PassageRepository {
   private <T> List<T> informationRows(
       ReadScope scope, String sql, RowMapper<T> mapper, Object... args) {
     String marker = "/*information*/";
+    sql =
+        sql.replace(
+                "AND /*passage-selection*/ ",
+                scope.includeInputs() ? "AND " : "AND NOT p.supplied_context AND ")
+            .replace(
+                "/*passage-selection*/", scope.includeInputs() ? "" : "AND NOT p.supplied_context");
     int at = sql.indexOf(marker);
     List<Object> bound = new ArrayList<>(Arrays.asList(args));
     if (scope.conversation() != null && at >= 0) {
@@ -217,7 +229,7 @@ public final class JdbcPassageRepository implements PassageRepository {
                     statement -> {
                       long remaining = deadline - System.nanoTime();
                       if (remaining <= 0) throw new ReadUnavailableException();
-                      int timeout = (int) Math.max(1, (remaining + 999_999_999L) / 1_000_000_000L);
+                      int timeout = ReadDeadline.jdbcTimeoutSeconds(deadline);
                       int transactionTimeout = statement.getQueryTimeout();
                       statement.setQueryTimeout(
                           transactionTimeout > 0 ? Math.min(transactionTimeout, timeout) : timeout);
@@ -327,9 +339,55 @@ public final class JdbcPassageRepository implements PassageRepository {
         });
   }
 
+  @Override
+  public boolean publishProjected(
+      Source expected,
+      List<PassageText> texts,
+      List<float[]> vectors,
+      boolean complete,
+      String generation,
+      Runnable fence) {
+    return transactions.inTransaction(
+        () -> {
+          fence.run();
+          return publishProjectedBatch(
+              expected,
+              texts,
+              vectors,
+              complete,
+              generation,
+              vectors.stream().anyMatch(Objects::nonNull));
+        });
+  }
+
+  @Override
+  public boolean publishProjectedText(
+      Source expected, List<PassageText> texts, boolean complete, String generation) {
+    return publishProjectedBatch(
+        expected, texts, Collections.nCopies(texts.size(), null), complete, generation, false);
+  }
+
   private boolean publishBatch(
       Source expected,
       List<String> texts,
+      List<float[]> vectors,
+      boolean complete,
+      String generation,
+      boolean legacy) {
+    if (expected.inputProvenance() != null)
+      throw new IllegalArgumentException("Classified inputs require projected passage publication");
+    return publishProjectedBatch(
+        expected,
+        texts.stream().map(text -> new PassageText(text, false)).toList(),
+        vectors,
+        complete,
+        generation,
+        legacy);
+  }
+
+  private boolean publishProjectedBatch(
+      Source expected,
+      List<PassageText> texts,
       List<float[]> vectors,
       boolean complete,
       String generation,
@@ -374,15 +432,16 @@ public final class JdbcPassageRepository implements PassageRepository {
               arguments.add(expected.type());
               arguments.add(expected.id());
               arguments.add(expected.next() + i);
-              arguments.add(texts.get(i));
+              arguments.add(texts.get(i).text());
+              arguments.add(texts.get(i).suppliedContext());
               arguments.add(vectors.get(i) == null ? null : Arrays.toString(vectors.get(i)));
             }
             // The existing sixteen-passage limit bounds this statement. Owner/queue locks and
             // all publication predicates remain held; no partial per-passage publication escapes.
             jdbc.update(
-                "INSERT INTO retrieval_passages(source_type,source_id,position,passage,embedding) VALUES "
+                "INSERT INTO retrieval_passages(source_type,source_id,position,passage,supplied_context,embedding) VALUES "
                     + String.join(
-                        ",", Collections.nCopies(texts.size(), "(?,?,?,?,CAST(? AS vector))")),
+                        ",", Collections.nCopies(texts.size(), "(?,?,?,?,?,CAST(? AS vector))")),
                 arguments.toArray());
           }
           jdbc.update(
@@ -397,7 +456,7 @@ public final class JdbcPassageRepository implements PassageRepository {
               && expected.type().equals("digest")
               && expected.next() == 0
               && texts.size() == 1
-              && texts.get(0).equals(expected.text()))
+              && texts.get(0).text().equals(expected.text()))
             jdbc.update(
                 "UPDATE digests SET embedding=CAST(? AS vector),embedding_generation=? WHERE id=?",
                 Arrays.toString(vectors.get(0)),
@@ -428,6 +487,7 @@ public final class JdbcPassageRepository implements PassageRepository {
             + " WHERE s.source_type=? AND s.status='ready' AND s.generation=?"
             + " AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
             + eligible
+            + passageFence(type, scope)
             + digestFence(type, scope)
             + (type.equals("entry") ? " /*information*/" : "")
             + " AND 1-(p.embedding <=> CAST(? AS vector))>=0.35 ORDER BY s.source_id,similarity DESC,p.position";
@@ -467,6 +527,7 @@ public final class JdbcPassageRepository implements PassageRepository {
             + join
             + " WHERE s.source_type=? AND s.status='ready' AND s.generation=? AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
             + eligible
+            + passageFence(type, scope)
             + digestFence(type, scope)
             + (type.equals("entry") ? " /*information*/" : "")
             + " AND "
@@ -553,8 +614,8 @@ public final class JdbcPassageRepository implements PassageRepository {
             : " JOIN digests owner ON owner.id=s.source_id ";
     String present = profile.map(p -> new EmbeddingIndexPlan(p).present("p")).orElse("false");
     String complete =
-        "s.status='ready' AND s.generation=? AND EXISTS(SELECT 1 FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id)"
-            + " AND NOT EXISTS(SELECT 1 FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id AND NOT ("
+        "s.status='ready' AND s.generation=? AND EXISTS(SELECT 1 FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id /*passage-selection*/)"
+            + " AND NOT EXISTS(SELECT 1 FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id AND /*passage-selection*/ NOT ("
             + present
             + "))"
             + (type.equals("digest") ? " AND owner.stale_at IS NULL" : "");
@@ -563,7 +624,7 @@ public final class JdbcPassageRepository implements PassageRepository {
             "SELECT count(*) AS eligible,count(*) FILTER(WHERE "
                 + complete
                 + ") AS indexed,"
-                + " COALESCE(sum((SELECT count(*) FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id AND "
+                + " COALESCE(sum((SELECT count(*) FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id AND /*passage-selection*/ "
                 + present
                 + ")),0) AS passages,"
                 + " count(*) FILTER(WHERE s.status='failed') AS failed,"
@@ -611,7 +672,7 @@ public final class JdbcPassageRepository implements PassageRepository {
                 + " count(*) FILTER(WHERE s.status='ready' AND s.generation=?"
                 + fresh
                 + ") AS indexed,"
-                + " COALESCE(sum((SELECT count(*) FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id AND s.generation=?)),0) AS passages,"
+                + " COALESCE(sum((SELECT count(*) FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id AND /*passage-selection*/ s.generation=?)),0) AS passages,"
                 + " count(*) FILTER(WHERE s.status='failed'"
                 + fresh
                 + ") AS failed,"

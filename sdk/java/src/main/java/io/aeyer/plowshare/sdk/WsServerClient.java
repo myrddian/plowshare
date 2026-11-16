@@ -464,6 +464,7 @@ public class WsServerClient implements ServerClient, AsyncServerClient, AutoClos
     if (query.conversation() != null) selected.put("conversation", query.conversation());
     if (query.mode() != null) selected.put("mode", query.mode());
     if (query.snapshot() != null) selected.put("snapshot", query.snapshot());
+    if (query.includeInputs() != null) selected.put("includeInputs", query.includeInputs());
     if (query.offset() != null) selected.put("offset", query.offset());
     if (query.limit() != null) selected.put("limit", query.limit());
     return askAsync("conversation.search", selected, LogHits.class, options);
