@@ -399,8 +399,7 @@ public class OrchestrationsConfig {
   static Function<String, Optional<RunLimits>> liveLimits(JobStore jobs) {
     return conversation ->
         jobs.jobs().stream()
-            .filter(
-                job -> conversation.equals(job.conversation()) && job.state() == Job.State.RUNNING)
+            .filter(job -> conversation.equals(job.conversation()) && job.active())
             .findFirst()
             .flatMap(Job::limits);
   }

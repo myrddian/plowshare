@@ -220,6 +220,9 @@ public final class JdbcJobLog implements JobLog {
    * ended_at}, so a policy written on that column would keep every lost run for ever — the opposite
    * of what an operator enabling a prune is asking for.
    *
+   * <p>Active workspace checkpoints are excluded: an offline client is not an expired job.
+   * Completed or cancelled checkpoints follow the job retention policy.
+   *
    * <p><b>Safe to call twice</b>, which is what lets it live inside a sweep: a second call finds
    * nothing older than the cutoff still there and reports nothing done.
    */
@@ -227,7 +230,15 @@ public final class JdbcJobLog implements JobLog {
     Objects.requireNonNull(cutoff, "cutoff");
     return ArchiveUnavailableException.translating(
         "prune old job records",
-        () -> jdbc.update("DELETE FROM jobs WHERE started_at < ?", utc(cutoff)));
+        () ->
+            jdbc.update(
+                """
+            DELETE FROM jobs j WHERE j.started_at < ?
+              AND NOT EXISTS (
+                SELECT 1 FROM workspace_pauses p
+                WHERE p.job_id=j.id AND p.state NOT IN ('done','cancelled'))
+            """,
+                utc(cutoff)));
   }
 
   private static final RowMapper<JobRecord> ROW_MAPPER =

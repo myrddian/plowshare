@@ -1,6 +1,9 @@
 package io.aeyer.plowshare.server.personal;
 
+import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.session.SessionRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -9,6 +12,19 @@ import org.springframework.stereotype.Component;
 @Component
 public final class PersonalAccess {
   private final ConversationStore conversations;
+  private SessionRegistry sessions;
+
+  @Autowired(required = false)
+  public void useSessions(SessionRegistry sessions) {
+    this.sessions = sessions;
+  }
+
+  public void requireClientProject(String project, String session, String handle) {
+    if (sessions != null
+        && sessions.logicalSessions(session).stream()
+            .anyMatch(logical -> ClientProjects.visible(project, logical, handle))) return;
+    ClientProjects.requireOwn(project, session, handle);
+  }
 
   public PersonalAccess(ConversationStore conversations) {
     this.conversations = conversations;
@@ -32,11 +48,10 @@ public final class PersonalAccess {
   }
 
   public void check(PersonalScope scope, String handle, String session) {
-    for (String project : scope.clientProjects())
-      io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(project, session, handle);
+    for (String project : scope.clientProjects()) requireClientProject(project, session, handle);
     for (String project : scope.projects()) {
       PersonalSpaces.requireOwn(project, handle);
-      io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(project, session, handle);
+      requireClientProject(project, session, handle);
     }
     for (String id : scope.conversations())
       conversations
@@ -44,8 +59,7 @@ public final class PersonalAccess {
           .ifPresent(
               row -> {
                 PersonalSpaces.requireOwn(row.home().project(), handle);
-                io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
-                    row.home().project(), session, handle);
+                requireClientProject(row.home().project(), session, handle);
               });
   }
 

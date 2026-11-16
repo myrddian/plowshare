@@ -576,6 +576,20 @@ public final class Runs {
         : null;
   }
 
+  /** Internal workspace recovery; the Turn owner requires a claimed original checkpoint. */
+  public Started continueWorkspace(BudgetCheckpoint checkpoint) {
+    var root = checkpoint.frames().getFirst();
+    callers.requireSession(checkpoint.session(), checkpoint.executor());
+    callers.requireConversationWork(root.conversation(), checkpoint.executor());
+    var caller = callers.callerForConversation(root.conversation(), checkpoint.session());
+    var definition = callers.requirePinnedAgent(root.agent(), caller);
+    return new Started(
+        turns.continueWorkspace(
+            root.conversation(), definition, checkpoint.session(), checkpoint.executor()),
+        definition.name(),
+        root.conversation());
+  }
+
   /**
    * Continue a machine-owned root after its pinned account answered an approval, as the plain
    * harness.

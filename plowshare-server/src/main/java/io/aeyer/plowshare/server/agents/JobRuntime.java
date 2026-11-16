@@ -194,6 +194,26 @@ import org.slf4j.LoggerFactory;
  */
 public final class JobRuntime {
   private volatile BudgetRequests budgetRequests = BudgetRequests.NONE;
+  private WorkspaceExecution workspaceRuns;
+
+  public void useWorkspaceRuns(WorkspaceExecution runs) {
+    workspaceRuns = Objects.requireNonNull(runs);
+  }
+
+  private void workspaceBoundary() {
+    if (workspaceRuns != null) workspaceRuns.boundary();
+  }
+
+  private <T> T workspaceRead(Supplier<T> read) {
+    return workspaceRuns == null ? read.get() : workspaceRuns.read(read);
+  }
+
+  private ContinuationFrames continuation(String conversation) {
+    return workspaceRuns != null && workspaceRuns.restoring(conversation).isPresent()
+        ? workspaceRuns
+        : budgetRequests;
+  }
+
   private BudgetExecutionStack budgetStack = new BudgetExecutionStack();
 
   public void useBudgetRequests(BudgetRequests requests) {
@@ -429,6 +449,7 @@ public final class JobRuntime {
     retained.rulePrompts = rulePrompts;
     retained.todos = todos;
     retained.activity = activity;
+    retained.workspaceRuns = workspaceRuns;
     retained.budgetRequests = budgetRequests;
     retained.budgetStack = budgetStack;
     return retained;
@@ -563,7 +584,10 @@ public final class JobRuntime {
       (definition, home, session, account, tool, json) -> List.of();
 
   public void useFileRules(FileRules rules) {
-    this.fileRules = Objects.requireNonNull(rules);
+    Objects.requireNonNull(rules);
+    this.fileRules =
+        (definition, home, session, account, tool, json) ->
+            workspaceRead(() -> rules.forTool(definition, home, session, account, tool, json));
   }
 
   private volatile Function<ProviderRouter, Hooks> fileChecks = router -> Hooks.NONE;
@@ -608,7 +632,8 @@ public final class JobRuntime {
     if (definition.nativeOnly() && !ScriptProgram.isScript(definition.prompt()))
       throw new CallerFault("Native-only execution requires a script manifest");
     if (ScriptProgram.isScript(definition.prompt())) return definition;
-    definition = rulePrompts.apply(definition, home, session, owner);
+    AgentDefinition source = definition;
+    definition = workspaceRead(() -> rulePrompts.apply(source, home, session, owner));
     if (skills != null) {
       String discovery = skills.discovery(definition, home, session, conversation, owner);
       if (discovery != null)
@@ -2021,13 +2046,14 @@ public final class JobRuntime {
     else operations.requireTargets(operation, home, targets.resources());
   }
 
+  @SuppressWarnings("try")
   private Outcome execute(
       AgentDefinition definition,
       String userPrompt,
       Home home,
       Budget budget,
       BooleanSupplier cancelled,
-      String sessionId,
+      String requestedSession,
       JobWatch watch,
       Transcript transcript,
       TurnCap cap,
@@ -2035,6 +2061,8 @@ public final class JobRuntime {
       String callerHandle,
       boolean incoming,
       OperationAuthority.Admission operation) {
+    String sessionId =
+        workspaceRuns == null ? requestedSession : workspaceRuns.logicalSession(requestedSession);
     // A local approval belongs to its original bridge session. Never redirect its command to the
     // machine/session of the person who happened to click Approve.
     if (suspendedRunCalls != null && transcript.conversationId() != null) {
@@ -2072,7 +2100,8 @@ public final class JobRuntime {
     Objects.requireNonNull(budget, "budget");
     Objects.requireNonNull(cancelled, "cancelled");
 
-    var restoredBudgetFrame = budgetRequests.restoring(transcript.conversationId());
+    var restoredBudgetFrame =
+        continuation(transcript.conversationId()).restoring(transcript.conversationId());
     if (restoredBudgetFrame.isPresent()) {
       var frame = restoredBudgetFrame.get();
       if (!frame.agent().equals(definition.name()))
@@ -2098,14 +2127,41 @@ public final class JobRuntime {
         tracking == RunUsage.NONE
             ? transcript
             : tracking.start(home, transcript, definition.name(), owner);
+    if (cancelled.getAsBoolean())
+      return stopped(
+          Ending.CANCELLED, "The run was cancelled before execution.", List.of(), 0, 0, "");
+    boolean clientDefinition =
+        definition.origin() != null && definition.origin().startsWith("session ");
+    // Resolve the admitted workspace before inference, independently of the viewing client.
+    // Providers register the actual remote dependency; server-only runs register none.
+    if (workspaceRuns != null
+        && files != null
+        && (!definition.scopes().isEmpty() || clientDefinition))
+      files.forRun(home, definition.scopes(), sessionId, owner);
+    workspaceBoundary();
+    // Admission and execution run on different threads. Reconfirm a client-dependent source at
+    // this handoff; the resolver's generation-fenced cache avoids reloading unchanged inputs.
+    AgentDefinition admittedSource = definition;
+    if (workspaceRuns != null && workspaceRuns.dependent() && agents != null) {
+      AgentDefinition currentSource =
+          workspaceRead(
+              () ->
+                  delegates
+                      .find(home, sessionId, owner, admittedSource.name())
+                      .orElseThrow(() -> new CallerFault("The original agent is unavailable")));
+      if (!definition.equals(currentSource))
+        throw new CallerFault("The agent source changed before workspace execution began");
+    }
     // Rules attach to the current executor, never by copying a parent's role prefix.
     // A refused rules file ends the run before it can make model calls or mutate files.
+    AgentDefinition sourceDefinition = definition;
     if (systemWork == null)
       definition = withAgentRules(definition, home, sessionId, transcript.conversationId(), owner);
     requireSystemModelCapabilities(definition, ownedTranscript);
     Rerouting route = new Rerouting(definition, ownedTranscript);
     Pacing pacing = new Pacing(ticker);
     HarnessRun harnessRun = harness.begin();
+    AgentDefinition retainedDefinition = definition;
     Outcome outcome;
     // A body exception in flight when the finally block runs, or null for an
     // ordinary return. Tracked explicitly because the finally block below must
@@ -2113,40 +2169,90 @@ public final class JobRuntime {
     // whatever this try block was already unwinding with.
     RuntimeException inFlight = null;
     try (var budgetFrame = budgetStack.enter(definition, ownedTranscript, cap)) {
-      budgetFrame.progress(0, List.of());
-      outcome =
-          ScriptProgram.isScript(definition.prompt())
-              ? runScript(
+      budgetFrame.progress(
+          restoredBudgetFrame.map(BudgetCheckpoint.Frame::steps).orElse(0),
+          restoredBudgetFrame.map(BudgetCheckpoint.Frame::pending).orElse(List.of()));
+      if (workspaceRuns != null)
+        workspaceRuns.checkpoint(
+            sessionId, owner, budget.identity().toString(), budgetStack::snapshot);
+      try (var workspaceDefinition =
+          workspaceRuns == null
+              ? (WorkspaceExecution.Scope) () -> {}
+              : workspaceRuns.definition(
                   definition,
-                  userPrompt,
-                  home,
-                  budget,
-                  cancelled,
-                  sessionId,
-                  ownedTranscript,
-                  cap,
-                  owner,
-                  route,
-                  harnessRun,
-                  watch,
-                  operation)
-              : converse(
-                  definition,
-                  userPrompt,
-                  home,
-                  budget,
-                  cancelled,
-                  sessionId,
-                  watch,
-                  ownedTranscript,
-                  cap,
-                  images,
-                  owner,
-                  incoming,
-                  route,
-                  pacing,
-                  harnessRun,
-                  operation);
+                  () -> {
+                    admittedAuthority.run();
+                    if (operation != null) operations.require(operation);
+                    AgentDefinition fresh =
+                        agents == null
+                            ? sourceDefinition
+                            : delegates
+                                .find(home, sessionId, owner, sourceDefinition.name())
+                                .orElseThrow(
+                                    () -> new CallerFault("The original agent is unavailable"));
+                    AgentDefinition checked =
+                        systemWork == null
+                            ? withAgentRules(
+                                fresh, home, sessionId, transcript.conversationId(), owner)
+                            : fresh;
+                    if (!retainedDefinition.equals(checked))
+                      throw new CallerFault(
+                          "Execution definitions or filesystem instructions changed");
+                  })) {
+        Optional<Outcome> retainedCompletion =
+            workspaceRuns == null
+                ? Optional.empty()
+                : workspaceRuns.completedOutcome(transcript.conversationId());
+        if (retainedCompletion.isPresent()) {
+          workspaceRuns.recoveryStarted(transcript.conversationId());
+          admittedAuthority.run();
+          if (operation != null) operations.require(operation);
+          outcome = retainedCompletion.get();
+        } else
+          outcome =
+              ScriptProgram.isScript(definition.prompt())
+                  ? runScript(
+                      definition,
+                      userPrompt,
+                      home,
+                      budget,
+                      cancelled,
+                      sessionId,
+                      ownedTranscript,
+                      cap,
+                      owner,
+                      route,
+                      harnessRun,
+                      watch,
+                      operation)
+                  : converse(
+                      definition,
+                      userPrompt,
+                      home,
+                      budget,
+                      cancelled,
+                      sessionId,
+                      watch,
+                      ownedTranscript,
+                      cap,
+                      images,
+                      owner,
+                      incoming,
+                      route,
+                      pacing,
+                      harnessRun,
+                      operation);
+        if (workspaceRuns != null) workspaceRuns.completing(transcript.conversationId(), outcome);
+        if (cancelled.getAsBoolean() && outcome.ending() == Ending.ANSWERED)
+          outcome =
+              stopped(
+                  Ending.CANCELLED,
+                  "The paused run was cancelled.",
+                  List.of(),
+                  outcome.steps(),
+                  outcome.modelCalls(),
+                  "");
+      }
     } catch (RuntimeException broken) {
       inFlight = broken;
       throw broken;
@@ -2848,10 +2954,12 @@ public final class JobRuntime {
     // -- a conductor's, an orchestration's -- is. The stuck trap judges a run by it: a
     // reviewer that can only read is never told it has only read (measured 2026-09-30).
     HookContext hookContext = declared.holding(offered.keySet());
-    var restoringBudget = budgetRequests.restoring(transcript.conversationId());
-    int restoredModelCalls = 0;
+    var restoringBudget =
+        continuation(transcript.conversationId()).restoring(transcript.conversationId());
+    int restoredModelCalls =
+        continuation(transcript.conversationId()).modelCalls(transcript.conversationId());
     if (restoringBudget.isPresent()) {
-      budgetRequests.recoveryStarted(transcript.conversationId());
+      continuation(transcript.conversationId()).recoveryStarted(transcript.conversationId());
       RunExtras.Extras recoveryExtras = extras;
       int beforeRestoration = budget.spent();
       try {
@@ -2910,12 +3018,12 @@ public final class JobRuntime {
             budget.spent() - beforeRestoration,
             describe(failed));
       }
-      restoredModelCalls = budget.spent() - beforeRestoration;
+      restoredModelCalls += budget.spent() - beforeRestoration;
       // A restored child may itself be waiting on command consent. Propagate that wait
       // before another parent inference, exactly as the ordinary delegation path does.
       var requested = extras.end().requested();
       if (requested.isPresent()) {
-        budgetRequests.restored(transcript.conversationId());
+        continuation(transcript.conversationId()).restored(transcript.conversationId());
         return new Outcome(
             requested.get().ending(),
             requested.get().text(),
@@ -3351,11 +3459,13 @@ public final class JobRuntime {
     // turn may run at (spec 2026-09-30-fold-at-60-and-80 §1).
     boolean aStepEnded = false;
     Set<AgentRules.Rule> deliveredFileRules = new HashSet<>();
-    if (restoringBudget.isPresent()) budgetRequests.restored(transcript.conversationId());
+    if (restoringBudget.isPresent())
+      continuation(transcript.conversationId()).restored(transcript.conversationId());
 
     while (true) {
       try (var ignored = OperationStatements.open(OperationStatements.Kind.JOB_STEP)) {
         budgetStack.current().progress(steps, List.of());
+        workspaceBoundary();
         admittedAuthority.run();
         if (operation != null) operations.require(operation);
         Set<AgentRules.Rule> fileRulesForThisStep = Set.copyOf(deliveredFileRules);
@@ -3455,6 +3565,7 @@ public final class JobRuntime {
           return pendingBudget(budgetSpent(budget, trail, steps, modelCalls));
         }
         modelCalls++;
+        if (workspaceRuns != null) workspaceRuns.modelCalls(modelCalls);
         // Published where the budget was claimed and not where the answer
         // arrives, so this stream counts what Outcome counts: a call that
         // dies mid-flight has been spent, and the ending that follows will
@@ -4165,6 +4276,17 @@ public final class JobRuntime {
         int pendingIndex = 0;
         for (ToolCall wanted : asked) {
           budgetStack.current().progress(steps, asked.subList(pendingIndex++, asked.size()));
+          workspaceBoundary();
+          if (cancelled.getAsBoolean())
+            return stopped(
+                Ending.CANCELLED,
+                "The paused run was cancelled.",
+                trail,
+                steps - 1,
+                modelCalls,
+                "");
+          admittedAuthority.run();
+          if (operation != null) operations.require(operation);
           try (var ignoredCall = OperationStatements.open(OperationStatements.Kind.TOOL_CALL)) {
             admittedAuthority.run();
             if (operation != null) operations.require(operation);
@@ -4567,7 +4689,7 @@ public final class JobRuntime {
                     withParked(toolRecords, runHooks)
                         .forEach(record -> transcript.record(LoggedEntry.hook(record)));
                     return stopped(
-                        Ending.SESSION_GONE,
+                        cancelled.getAsBoolean() ? Ending.CANCELLED : Ending.SESSION_GONE,
                         "This run could not go on: the client session whose files"
                             + " it was working in went away.",
                         trail,
@@ -5691,7 +5813,8 @@ public final class JobRuntime {
       BiFunction<ToolCall, String, String> afterDelegation,
       BooleanSupplier awaiting) {
     budgetStack.current().progress(frame.steps(), frame.pending());
-    Optional<BudgetCheckpoint.Frame> child = budgetRequests.restoringChild(frame.conversation());
+    Optional<BudgetCheckpoint.Frame> child =
+        continuation(frame.conversation()).restoringChild(frame.conversation());
     if (child.isPresent() && frame.pending().isEmpty()) {
       // Harness-mandated review currently has no durable parent tool slot. Refuse this unsupported
       // restoration instead of silently dropping its saved child and spending another parent call.
@@ -5702,7 +5825,8 @@ public final class JobRuntime {
       transcript.recordDurably(LoggedEntry.diagnostic("ERROR: " + refusal));
       throw new CallerFault(refusal);
     }
-    String decision = budgetRequests.restorationDecision(frame.conversation()).orElseThrow();
+    String decision =
+        continuation(frame.conversation()).restorationDecision(frame.conversation()).orElseThrow();
     for (int index = 0; index < frame.pending().size(); index++) {
       ToolCall pending = frame.pending().get(index);
       String result;

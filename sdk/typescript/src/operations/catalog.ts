@@ -303,6 +303,7 @@ export interface ExtendedPayloads
   };
   'project.list': Record<string, never>;
   'project.attach': {
+    readonly recovery?: string;
     readonly name: string;
     readonly workspace: string;
     readonly machine: string;

@@ -46,6 +46,13 @@ fallback. Direct filesystem grants are separate from runtime tool admission.
 Preserve canonical containment, symlink/exclusion policy, writable-area fences,
 session/provider availability and command cancellation on both server and client.
 
+Authenticated workspace recovery can bind a new transport session to its original
+logical attachment using a private capability scoped to account, machine, root
+and project. Matching public names alone cannot recover it. Bound file/source
+channels retain their generation fences; reconnect does not retarget an in-flight
+snapshot or replay a possible mutation. See the
+[pause/resume implementation](../../docs/client-workspace-pause-resume-plan.md#implementation-and-current-limits).
+
 ## Bounded work
 
 Required contract: active deploy/edit/provider/command units need configured

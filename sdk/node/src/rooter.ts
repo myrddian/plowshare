@@ -72,6 +72,9 @@ export interface RooterOptions {
   /** Headless clients require explicit acknowledgement; a timeout is a refusal. */
   readonly requireReady?: boolean;
   readonly requireReadyProject?: boolean;
+  /** Re-establish presence only; file operations are never replayed. Each attempt is bounded. */
+  readonly reconnect?: { readonly attempts: number; readonly delayMs: number };
+  readonly onRestored?: (claim: Claim) => void;
 }
 
 export interface Rooter {
@@ -105,6 +108,20 @@ export function rooter(options: RooterOptions): Rooter {
   const patience = options.patience ?? 2_000;
   const readiness = options.readiness ?? 5_000;
   let held: Held | undefined;
+  let epoch = 0;
+  const retry = options.reconnect;
+  if (
+    retry &&
+    (!Number.isSafeInteger(retry.attempts) ||
+      retry.attempts < 1 ||
+      retry.attempts > 100 ||
+      !Number.isSafeInteger(retry.delayMs) ||
+      retry.delayMs < 1 ||
+      retry.delayMs > 30_000)
+  )
+    throw new Error(
+      'File reconnect attempts and delay must be positive and bounded.',
+    );
 
   const release = async (): Promise<void> => {
     const leaving = held;
@@ -123,116 +140,162 @@ export function rooter(options: RooterOptions): Rooter {
     ]);
   };
 
+  const reconnect = async (claim: Claim, version: number): Promise<void> => {
+    if (!retry) return;
+    for (
+      let attempt = 0;
+      attempt < retry.attempts && epoch === version;
+      attempt++
+    ) {
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, Math.min(retry.delayMs * 2 ** attempt, 30_000)),
+      );
+      if (epoch !== version) return;
+      try {
+        await connect(claim, version);
+        if (epoch === version) options.onRestored?.(claim);
+        return;
+      } catch (failure) {
+        if (
+          failure instanceof RootRefused &&
+          [1003, 1008].includes(failure.code ?? 0)
+        )
+          return;
+      }
+    }
+  };
+
+  const connect = async (claim: Claim, version: number): Promise<void> => {
+    await release();
+    const socket = await options.open(claim);
+    if (epoch !== version) {
+      socket.close();
+      throw new RootRefused('File attachment was superseded.', undefined);
+    }
+    let closed: () => void = () => undefined;
+    let watcher: WorkspaceWatch | undefined;
+    const entry: Held = {
+      claim,
+      leaving: false,
+      closed: new Promise<void>((done) => {
+        closed = done;
+      }),
+      stop: () => {
+        watcher?.close();
+        answer.close?.();
+      },
+    };
+    const answer = options.answering(claim.root) as Answering & {
+      close?: () => void;
+    };
+    held = entry;
+    // Settled by whichever comes first: the claim landing, the socket
+    // closing, or the wait running out. Only the first one counts.
+    let landed: (outcome: Closing | undefined) => void = () => undefined;
+    let settled = false;
+    const landing = new Promise<Closing | undefined>((done) => {
+      landed = (outcome) => {
+        if (!settled) {
+          settled = true;
+          done(outcome);
+        }
+      };
+    });
+    entry.serving = serve({
+      socket,
+      answer: async (request) => {
+        const reply = await answer(request);
+        watcher?.observed(request, reply);
+        return reply;
+      },
+      onReady: (project, fileChanges) => {
+        if (
+          project === claim.project &&
+          fileChanges === true &&
+          held === entry &&
+          !entry.leaving
+        )
+          watcher = watchWorkspace(claim.root, answer, () => {
+            if (held === entry && !entry.leaving)
+              try {
+                socket.send(JSON.stringify({ type: WORKSPACE_CHANGED }));
+              } catch {
+                // A lost hint never replays work; server reconciliation recovers it.
+                watcher?.close();
+              }
+          });
+        landed(
+          project === claim.project
+            ? undefined
+            : {
+                code: 1003,
+                reason:
+                  'the server did not acknowledge the requested project; nothing was rooted',
+              },
+        );
+      },
+      onClose: (closing) => {
+        entry.stop();
+        closed();
+        if (held === entry) {
+          held = undefined;
+        }
+        if (!settled) {
+          // BEFORE THE CLAIM LANDED: a refusal, said once, by
+          // whoever awaited this root — not a second time as a
+          // loss of something that was never held.
+          landed(closing);
+          return;
+        }
+        if (!entry.leaving) {
+          options.onLost(claim, closing);
+          if (retry && ![1003, 1008].includes(closing.code ?? 0)) {
+            // This owner consumes every rejection; reconnect creates presence, never effects.
+            reconnect(claim, version).catch((failure: unknown) =>
+              options.onLost(claim, {
+                reason:
+                  failure instanceof Error
+                    ? failure.message
+                    : 'File reconnect failed.',
+              }),
+            );
+          }
+        }
+      },
+    });
+    const timer = setTimeout(
+      () =>
+        landed(
+          options.requireReady || options.requireReadyProject
+            ? {
+                code: 1006,
+                reason:
+                  'the server did not acknowledge file presence; nothing was rooted',
+              }
+            : undefined,
+        ),
+      readiness,
+    );
+    timer.unref?.();
+    const refused = await landing;
+    clearTimeout(timer);
+    if (refused !== undefined && !entry.leaving) {
+      await release();
+      throw new RootRefused(
+        refused.reason ??
+          `the file channel closed before the server took the claim (${refused.code ?? 'no code'})`,
+        refused.code,
+      );
+    }
+  };
   return {
     current: () => held?.claim,
-    async root(claim: Claim): Promise<void> {
-      await release();
-      const socket = await options.open(claim);
-      let closed: () => void = () => undefined;
-      let watcher: WorkspaceWatch | undefined;
-      const entry: Held = {
-        claim,
-        leaving: false,
-        closed: new Promise<void>((done) => {
-          closed = done;
-        }),
-        stop: () => {
-          watcher?.close();
-          answer.close?.();
-        },
-      };
-      const answer = options.answering(claim.root) as Answering & {
-        close?: () => void;
-      };
-      held = entry;
-      // Settled by whichever comes first: the claim landing, the socket
-      // closing, or the wait running out. Only the first one counts.
-      let landed: (outcome: Closing | undefined) => void = () => undefined;
-      let settled = false;
-      const landing = new Promise<Closing | undefined>((done) => {
-        landed = (outcome) => {
-          if (!settled) {
-            settled = true;
-            done(outcome);
-          }
-        };
-      });
-      entry.serving = serve({
-        socket,
-        answer: async (request) => {
-          const reply = await answer(request);
-          watcher?.observed(request, reply);
-          return reply;
-        },
-        onReady: (project, fileChanges) => {
-          if (
-            project === claim.project &&
-            fileChanges === true &&
-            held === entry &&
-            !entry.leaving
-          )
-            watcher = watchWorkspace(claim.root, answer, () => {
-              if (held === entry && !entry.leaving)
-                try {
-                  socket.send(JSON.stringify({ type: WORKSPACE_CHANGED }));
-                } catch {
-                  // A lost hint never replays work; server reconciliation recovers it.
-                  watcher?.close();
-                }
-            });
-          landed(
-            project === claim.project
-              ? undefined
-              : {
-                  code: 1003,
-                  reason:
-                    'the server did not acknowledge the requested project; nothing was rooted',
-                },
-          );
-        },
-        onClose: (closing) => {
-          entry.stop();
-          closed();
-          if (held === entry) {
-            held = undefined;
-          }
-          if (!settled) {
-            // BEFORE THE CLAIM LANDED: a refusal, said once, by
-            // whoever awaited this root — not a second time as a
-            // loss of something that was never held.
-            landed(closing);
-            return;
-          }
-          if (!entry.leaving) {
-            options.onLost(claim, closing);
-          }
-        },
-      });
-      const timer = setTimeout(
-        () =>
-          landed(
-            options.requireReady || options.requireReadyProject
-              ? {
-                  code: 1006,
-                  reason:
-                    'the server did not acknowledge file presence; nothing was rooted',
-                }
-              : undefined,
-          ),
-        readiness,
-      );
-      timer.unref?.();
-      const refused = await landing;
-      clearTimeout(timer);
-      if (refused !== undefined && !entry.leaving) {
-        await release();
-        throw new RootRefused(
-          refused.reason ??
-            `the file channel closed before the server took the claim (${refused.code ?? 'no code'})`,
-          refused.code,
-        );
-      }
+    root(claim) {
+      return connect(claim, ++epoch);
     },
-    release,
+    release() {
+      epoch++;
+      return release();
+    },
   };
 }

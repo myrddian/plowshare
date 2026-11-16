@@ -164,6 +164,9 @@ function parsePositiveWholeNumber(raw: string): number | null {
  */
 const STATES: Readonly<Record<string, string>> = Object.freeze({
   RUNNING: 'running',
+  PAUSING: 'pausing',
+  PAUSED: 'paused',
+  RESUMING: 'resuming',
   DONE: 'done',
 });
 
@@ -470,7 +473,11 @@ export function createJobs(options: JobsOptions): Screen {
     id: string,
     card: HTMLElement,
   ): HTMLElement | null {
-    if (job.state !== 'RUNNING' || bounds === null || bounds === undefined) {
+    if (
+      !['RUNNING', 'PAUSING', 'PAUSED', 'RESUMING'].includes(job.state) ||
+      bounds === null ||
+      bounds === undefined
+    ) {
       return null;
     }
     const raisesTurns =

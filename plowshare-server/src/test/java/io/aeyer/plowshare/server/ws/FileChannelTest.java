@@ -59,6 +59,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import org.junit.jupiter.api.AfterAll;
@@ -341,6 +342,35 @@ class FileChannelTest {
   }
 
   // --- the two bounds ------------------------------------------------------
+
+  @Test
+  @Timeout(10)
+  void recovery_proof_is_negotiated_in_a_header_without_entering_the_url() throws Exception {
+    String protocol = "plowshare-file-recovery-v1." + "a".repeat(64);
+    var negotiated = new CompletableFuture<String>();
+    WebSocket socket =
+        http.newWebSocket(
+            new Request.Builder()
+                .url("ws://localhost:" + port + FileChannelHandler.PATH + "?session=proof-header")
+                .header("Sec-WebSocket-Protocol", protocol)
+                .build(),
+            new WebSocketListener() {
+              @Override
+              public void onOpen(WebSocket socket, Response response) {
+                negotiated.complete(response.header("Sec-WebSocket-Protocol"));
+              }
+
+              @Override
+              public void onFailure(WebSocket socket, Throwable failure, Response response) {
+                negotiated.completeExceptionally(failure);
+              }
+            });
+    try {
+      assertEquals(protocol, negotiated.get(2, TimeUnit.SECONDS));
+    } finally {
+      socket.cancel();
+    }
+  }
 
   @Test
   void a_closed_socket_fails_every_outstanding_request_at_once() throws Exception {

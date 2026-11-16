@@ -1,3 +1,8 @@
+import {
+  enableWorkspaceRecovery,
+  recoverableClaim,
+} from 'plowshare-client-node/workspace-recovery';
+import { projectLabel } from 'plowshare-client-ts/operations/project-label';
 import { schedulePages, SCHEDULE_PAGE_LIMIT } from '../logic/schedule-pages.ts';
 import { mcpControls } from './mcp-controls.ts';
 import {
@@ -517,6 +522,8 @@ export interface Talking {
   readonly handle: string;
   readonly password: string;
   readonly credentials?: Credentials;
+  /** Private local state enabled by the executable composition, including ephemeral logins. */
+  readonly workspaceRecoveryDirectory?: string;
 
   /**
    * Who answers, when a person said.
@@ -664,15 +671,27 @@ export function terminalZone(): string {
  * as clean a demonstration as this module will get of why the plan says the
  * type check is not optional and not `--noEmit`.
  */
-export function openingSocket(url: string): Promise<Socket> {
+export function openingSocket(
+  url: string,
+  protocols?: string[],
+): Promise<Socket> {
   return new Promise((open, fail) => {
-    const socket = new WebSocket(url);
-    socket.addEventListener('open', () => open(socket));
+    const socket = new WebSocket(url, protocols);
+    const openingDeadline = setTimeout(() => {
+      socket.close();
+      fail(new Error('The server WebSocket did not open within 15 seconds.'));
+    }, 15_000);
+    socket.addEventListener('open', () => {
+      clearTimeout(openingDeadline);
+      open(socket);
+    });
     // THE ADDRESS WITHOUT ITS QUERY. The query carries a ticket and, for the
     // file channel, a root — and this message is put on a person's screen.
-    socket.addEventListener('error', () =>
-      fail(new Error(`could not open ${url.split('?')[0] ?? url}`)),
-    );
+    socket.addEventListener('error', () => {
+      clearTimeout(openingDeadline);
+      socket.close();
+      fail(new Error(`could not open ${url.split('?')[0] ?? url}`));
+    });
   });
 }
 
@@ -851,6 +870,7 @@ export async function converse(talking: Talking): Promise<void> {
   const silence = talking.silence ?? 60_000;
   /** Whether a heartbeat has ever arrived, which is what makes the clock honest. */
   let beaten = false;
+  let workspacePaused = false;
   /** The watchdog, or nothing between turns. */
   let watching: ReturnType<typeof setTimeout> | undefined;
   /** Whether the silence has already been reported for this turn. */
@@ -971,7 +991,22 @@ export async function converse(talking: Talking): Promise<void> {
       beaten = true;
     }
     watch();
-    const line = describeProgress(seen);
+    if (
+      seen.kind === 'other' &&
+      ['pausing', 'paused', 'resuming'].includes(seen.named)
+    )
+      workspacePaused = true;
+    if (
+      (seen.kind === 'other' && seen.named === 'resumed') ||
+      seen.kind === 'step' ||
+      seen.kind === 'tool' ||
+      seen.kind === 'ended'
+    )
+      workspacePaused = false;
+    const line =
+      workspacePaused && seen.kind === 'alive'
+        ? undefined
+        : describeProgress(seen);
     if (line !== undefined) {
       // KEPT, SO A BEAT WITH NOTHING TO COUNT DOES NOT ERASE IT. The
       // region is replaced rather than appended to, so an event carrying
@@ -1344,6 +1379,17 @@ export async function converse(talking: Talking): Promise<void> {
       wire.close();
     },
   };
+  if (
+    talking.credentials !== undefined ||
+    talking.workspaceRecoveryDirectory !== undefined
+  )
+    enableWorkspaceRecovery(
+      connection,
+      talking.door.base,
+      loginHandle,
+      talking.workspaceRecoveryDirectory ??
+        talking.credentials?.configurationRoot,
+    );
   let tokens = openedSocket.tokens;
   const providerManagement = new ProviderManagementClient(
     checkedTransport(connection),
@@ -1379,6 +1425,14 @@ export async function converse(talking: Talking): Promise<void> {
   /** `⚠ 2 sync conflicts` for the status line, or nothing. */
   let syncNotice: string | undefined;
   const rooting = rooter({
+    ...(talking.reconnect === undefined
+      ? {}
+      : { reconnect: talking.reconnect }),
+    onRestored: (claim) =>
+      show(
+        'client',
+        `Files reconnected for ${projectLabel(claim.project)}; paused work can continue.`,
+      ),
     open: (claim) =>
       renewing(async () => {
         // KEPT THE MOMENT IT ROTATES, not when the open succeeds: a ticket or
@@ -1387,7 +1441,7 @@ export async function converse(talking: Talking): Promise<void> {
         const opened = await openFiles(
           talking.door,
           tokens,
-          claim,
+          await recoverableClaim(connection, claim),
           (renewed) => {
             tokens = renewed;
           },
@@ -1845,6 +1899,7 @@ export async function converse(talking: Talking): Promise<void> {
     live = undefined;
     reported = undefined;
     phase = undefined;
+    workspacePaused = false;
     // Each turn watches for its own silence. `mourned` resets so a second
     // quiet run is reported too, and `beaten` does NOT -- a server that
     // beat once beats always, and forgetting it would make the first event
@@ -4878,7 +4933,11 @@ export async function converse(talking: Talking): Promise<void> {
         'trouble',
         'Connection lost. Reconnecting; submitted work will not be sent again.',
       );
-      const claim = rooting.current();
+      const claim =
+        rooting.current() ??
+        (directory === undefined || place?.project === undefined
+          ? undefined
+          : { project: place.project, root: directory, machine });
       await unsyncing();
       await rooting.release();
       for (
@@ -6219,6 +6278,7 @@ export async function run(args: readonly string[] = []): Promise<void> {
           );
     const agent = agentNamed(process.env);
     await converse({
+      workspaceRecoveryDirectory: userConfigDirectory(),
       // The id this client listens under. Generated here because
       // this is the only layer that may read a platform: the
       // binding takes it, and builds none of its own.

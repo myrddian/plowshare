@@ -1,3 +1,7 @@
+import {
+  enableWorkspaceRecovery,
+  recoverableClaim,
+} from './workspace-recovery.ts';
 import { mark, markedName, discover, resolveMarked } from './marker.js';
 import { projectLabel } from 'plowshare-client-ts/operations/project-label';
 import {
@@ -66,12 +70,21 @@ export async function canonicalRoot(path: string): Promise<string> {
   }
 }
 
-export function socketAt(url: string, signal: AbortSignal): Promise<Socket> {
+export function socketAt(
+  url: string,
+  signal: AbortSignal,
+  protocols?: string[],
+): Promise<Socket> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const events = new URL(url).pathname === '/v1/events';
-    const socket = new WebSocket(url, events ? [PACKET_PROTOCOL] : []);
+    const socket = new WebSocket(
+      url,
+      events ? [PACKET_PROTOCOL] : (protocols ?? []),
+    );
+    const openingDeadline = setTimeout(() => failed(), 15_000);
     const cleanup = (): void => {
+      clearTimeout(openingDeadline);
       signal.removeEventListener('abort', aborted);
       socket.removeEventListener('open', opened);
       socket.removeEventListener('error', failed);
@@ -127,7 +140,8 @@ export async function authenticate(
     session: randomUUID(),
     fetch: (url: string, sent: Parameters<typeof authenticationFetch>[1]) =>
       authenticationFetch(url, sent, signal),
-    open: (url: string) => socketAt(url, signal),
+    open: (url: string, protocols?: string[]) =>
+      socketAt(url, signal, protocols),
     ...(options.onPush === undefined ? {} : { onPush: options.onPush }),
     onClose: () => {
       eventsLost = true;
@@ -151,6 +165,13 @@ export async function authenticate(
   const resolvedHandle =
     store === undefined ? handle : (await store.session()).handle;
   const opened = await openSocket(authDoor, signed.tokens);
+  if (store !== undefined)
+    enableWorkspaceRecovery(
+      opened.connection,
+      base,
+      resolvedHandle,
+      store.configurationRoot,
+    );
   let tokens: Tokens = opened.tokens;
   let renewing: Promise<unknown> = Promise.resolve();
   const renewed = <T>(work: () => Promise<T>): Promise<T> => {
@@ -161,14 +182,23 @@ export async function authenticate(
   const presence = rooter({
     open: (claim) =>
       renewed(async () => {
-        const opened = await openFiles(authDoor, tokens, claim, (renewed) => {
-          tokens = renewed;
-        });
-        return opened.socket;
+        const filesOpened = await openFiles(
+          authDoor,
+          tokens,
+          await recoverableClaim(opened.connection, claim),
+          (renewed) => {
+            tokens = renewed;
+          },
+        );
+        return filesOpened.socket;
       }),
     answering: (root) =>
       noticingWrites(enforcing(root, false), () => options.onWrite?.()),
     requireReady: true,
+    reconnect: { attempts: 5, delayMs: 500 },
+    onRestored: () => {
+      presenceLost = false;
+    },
     onLost: () => {
       presenceLost = true;
       diagnostic(
@@ -319,7 +349,7 @@ export async function authenticateService(
         },
       },
       fetch: (url, sent) => fetch(url, { ...sent, signal, redirect: 'error' }),
-      open: (url) => socketAt(url, signal),
+      open: (url, protocols) => socketAt(url, signal, protocols),
       ...(options.onPush === undefined ? {} : { onPush: options.onPush }),
       onClose: () => {
         lost = true;

@@ -463,6 +463,7 @@ public final class RemoteProvider implements FileProvider {
             side.shells(),
             stdin,
             side.isolation());
+    channel.beforeWork(session);
     CompletableFuture<FileReply> answer =
         CompletableFuture.supplyAsync(
             () -> channel.ask(session, request, timeout.plus(RUN_MARGIN)),
@@ -499,6 +500,8 @@ public final class RemoteProvider implements FileProvider {
         throw new WorkspaceUnavailableException(
             "waiting for the command on session '" + session + "' was interrupted", stopped);
       } catch (ExecutionException failed) {
+        if (failed.getCause() instanceof SessionGoneException)
+          channel.interrupted(session, request);
         if (failed.getCause() instanceof RuntimeException thrown) {
           throw thrown;
         }

@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.agents;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionCloseListener;
+import io.aeyer.plowshare.server.session.SessionOwners;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -279,6 +280,13 @@ public final class DefinitionResolver implements SessionCloseListener {
   private static final String TIER = "(the project tier)";
 
   private static final Logger log = LoggerFactory.getLogger(DefinitionResolver.class);
+
+  private SessionOwners sessions = SessionOwners.NONE;
+
+  /** Keep source identities and generation-fenced caches stable across transport replacement. */
+  public void useSessions(SessionOwners sessions) {
+    this.sessions = Objects.requireNonNull(sessions);
+  }
 
   private java.util.function.Function<Caller, Long> personalIds = caller -> null;
 
@@ -804,7 +812,7 @@ public final class DefinitionResolver implements SessionCloseListener {
   }
 
   private CacheKey keyFor(Caller caller, ApplicationResources resources) {
-    String sessionId = caller.sessionId();
+    String sessionId = sessions.canonical(caller.sessionId());
     if (resources.root(caller.projectId()).isPresent()
         || sessionId == null
         || !sessionLive.test(sessionId)
