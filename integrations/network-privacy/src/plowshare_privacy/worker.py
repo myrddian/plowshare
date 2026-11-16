@@ -16,6 +16,7 @@ from .attention import AttentionOutbox
 from .collection import Collector, scope_fingerprint
 from .contracts import (
     Configuration,
+    Evidence,
     ScanRequest,
     parse_json,
     same_instant,
@@ -101,7 +102,10 @@ class Worker:
             if not self.config.collection.enabled:
                 # Scope changes hold the same lock; disabled intake cannot race an edit.
                 return
-            await self._drain()
+            if await self._drain():
+                # One retained scan per pass: provider dispatch, settings and
+                # presence get a turn before another queued scan starts.
+                return
             self.operation = "relay.topics"
             available = await self.port.available_topics()
             for topic in (*sorted(available.schedules), self.config.request_topic):
@@ -175,7 +179,8 @@ class Worker:
                 else "Waiting for scheduled or requested collection."
             )
 
-    async def _drain(self) -> None:
+    async def _drain(self) -> bool:
+        """Finish at most one retained scan without admitting another identity."""
         for receipt in self.receipts.all():
             if receipt.phase in {"uploading", "publishing"}:
                 raise ReconciliationRequired(
@@ -185,6 +190,7 @@ class Worker:
                 continue
             if receipt.phase == "queued":
                 self.state = "collecting"
+                self.detail = "Collecting a queued scan."
                 self.operation = "network collection"
                 previous = next(
                     (
@@ -194,7 +200,7 @@ class Worker:
                     ),
                     None,
                 )
-                evidence = await self.collector.collect(
+                evidence = await self._collect_with_presence(
                     receipt.scan_id,
                     receipt.source_event,
                     previous.evidence if previous else None,
@@ -247,7 +253,53 @@ class Worker:
                         self.receipts.save(receipt)
                     raise
                 self.receipts.save(replace(receipt, phase="done"))
+                self.state = "ready"
+                self.detail = "Retained scan completed; waiting for scheduled or queued collection."
+                return True
         self.state = "ready"
+        return False
+
+    async def _collect_with_presence(
+        self,
+        scan_id: str,
+        source_event: str,
+        previous: Evidence | None,
+        previous_revision: str | None,
+    ) -> Evidence:
+        """Sample during slow read-only collection under the same scope fence.
+
+        The caller owns ``lock`` until both reads settle. No second full scan or
+        quick sample overlaps its own kind, and settings cannot replace the plan
+        mid-sample. Quick checks retain their existing sample/DNS deadlines and
+        randomized cadence. The child performs no upload or publication; on any
+        failure/cancellation it is cancelled and joined before releasing ownership.
+        """
+        plan = self.config.collection
+        if (
+            self.presence is None
+            or not plan.quick_scan
+            or plan.mode != "tcp"
+            or not isinstance(self.collector, PresenceCollector)
+        ):
+            return await self.collector.collect(
+                scan_id, source_event, previous, previous_revision
+            )
+        collection = asyncio.create_task(
+            self.collector.collect(scan_id, source_event, previous, previous_revision)
+        )
+        try:
+            while not collection.done():
+                await self._poll_presence_locked()
+                if not collection.done():
+                    await asyncio.wait(
+                        (collection,), timeout=self.presence.wait_seconds()
+                    )
+            return await collection
+        finally:
+            if not collection.done():
+                collection.cancel()
+            # Keep physical ownership through connector cancellation/cleanup.
+            await asyncio.gather(collection, return_exceptions=True)
 
     def completion_request(self, receipt: Receipt) -> RelayPublishRequest:
         if receipt.evidence is None or receipt.revision is None:
@@ -455,13 +507,19 @@ class Worker:
             return
         # The same fence serializes settings activation and ordinary collections.
         async with self.lock:
-            plan = self.config.collection
-            if not plan.enabled or not plan.quick_scan:
-                self.presence.reset()
-                return
-            if isinstance(self.collector, PresenceCollector):
-                await self.presence.poll(plan, scope_fingerprint(plan), self.collector)
+            await self._poll_presence_locked()
         self._start_facts()
+
+    async def _poll_presence_locked(self) -> None:
+        """The worker lock fences ordinary samples and samples during collection."""
+        if self.presence is None:
+            return
+        plan = self.config.collection
+        if not plan.enabled or not plan.quick_scan:
+            self.presence.reset()
+            return
+        if isinstance(self.collector, PresenceCollector):
+            await self.presence.poll(plan, scope_fingerprint(plan), self.collector)
 
     def _start_facts(self) -> None:
         """Start the device facts step for a newly recorded quick check.

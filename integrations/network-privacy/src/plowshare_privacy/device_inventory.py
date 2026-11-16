@@ -208,6 +208,17 @@ def device_inventory(
             count = PresenceCount(
                 0, presence.checks, None, key.startswith("ip:"), presence.checked_at
             )
+        # Observation timestamps, source and labels can change without changing the
+        # device. Attribute retained windows to the current confirmed MAC, never
+        # to an address alone or to an older association after the address is reused.
+        confirmed = (
+            history.identity is not None
+            and history.identity.mac is not None
+            and quick is not None
+            and quick.identity is not None
+            and quick.identity.mac == history.identity.mac
+            and quick.identity.device_id == history.identity.device_id
+        )
         devices.append(
             DeviceCard(
                 address=address,
@@ -234,11 +245,11 @@ def device_inventory(
                 detection=detect_device(history.identity, history.services),
                 presence=count,
                 dns_activity=presence.dns.get(quick.key)
-                if quick and quick.identity and history.identity == quick.identity
+                if quick and confirmed
                 else None,
                 # Same attribution rule as DNS: only the confirmed current MAC.
                 traffic=presence.traffic.get(quick.key)
-                if quick and quick.identity and history.identity == quick.identity
+                if quick and confirmed
                 else None,
                 addressing=_addressing_view(history, history.identity),
             )
