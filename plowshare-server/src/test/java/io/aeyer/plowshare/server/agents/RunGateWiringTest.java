@@ -14,6 +14,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.CommandRunner;
 import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.Found;
@@ -23,6 +24,9 @@ import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.approvals.ApprovalReviewSessions;
+import io.aeyer.plowshare.server.approvals.ApprovalReviews;
+import io.aeyer.plowshare.server.approvals.OperationApprovalReview;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
@@ -261,6 +265,7 @@ class RunGateWiringTest {
   }
 
   private RunApprovalStore approvals = mock(RunApprovalStore.class);
+  private ApprovalReviewSessions policySessions;
   private ApprovalDelivery delivery = mock(ApprovalDelivery.class);
   private Outcome last;
   private io.aeyer.plowshare.server.approvals.SuspendedRunCalls suspendedCalls;
@@ -329,6 +334,7 @@ class RunGateWiringTest {
               calls);
     }
     runtime.useEnvironments(new Environments(name -> 7L, id -> environment, null));
+    if (policySessions != null) runtime.useApprovalReviewSessions(policySessions);
     runtime.useApprovals(approvals);
     if (suspendedCalls != null) runtime.useSuspendedRunCalls(suspendedCalls);
     runtime.useApprovalRoots(approvalRoots);
@@ -379,6 +385,33 @@ class RunGateWiringTest {
     }
     List<ChatMessage> second = model.sent.get(1);
     return second.get(second.size() - 1).content();
+  }
+
+  @Test
+  void policy_rejection_is_a_tool_result_and_never_a_human_question() throws Exception {
+    Files.writeString(environment, "server:\n  mode: open\n");
+    OperationApprovalReview review = mock(OperationApprovalReview.class);
+    when(review.review(any(), any()))
+        .thenReturn(
+            new ApprovalReviews.Decision(
+                ApprovalReviews.Action.REJECT,
+                "Changing Git identity is outside the inspection task; use the current configuration.",
+                3,
+                List.of(),
+                null,
+                null));
+    policySessions = context -> Optional.of(review);
+    runCall =
+        "{\"command\":[\"git\",\"config\",\"--local\",\"user.email\",\"person@example.invalid\"]}";
+    String result = runAs(new Hooks() {});
+    assertTrue(result.contains("SECURITY rejected"), result);
+    assertTrue(result.contains("Changing Git identity"), result);
+    assertTrue(ran.isEmpty());
+    assertEquals(Outcome.Ending.ANSWERED, last.ending());
+    assertEquals(2, activeModel.sent.size(), "The model receives the objection and can continue");
+    verify(approvals, never()).ask(anyLong(), any(), any(), any(), any(), any(), any(), any());
+    verify(approvals, never())
+        .ask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any());
   }
 
   private static RunApproval question(String id) {
@@ -573,7 +606,37 @@ class RunGateWiringTest {
                           null));
             });
     when(suspendedCalls.claim(any())).thenReturn(true);
-    when(approvals.find("apr_1")).thenReturn(Optional.of(question("apr_1")));
+    when(approvals.find("apr_1"))
+        .thenAnswer(
+            invocation -> {
+              var call = retained.get();
+              if (call == null) return Optional.empty();
+              var args = new ObjectMapper().readTree(call.tool().arguments());
+              List<String> argv = new ArrayList<>();
+              args.path("command").forEach(word -> argv.add(word.textValue()));
+              return Optional.of(
+                  new RunApproval(
+                      "apr_1",
+                      7L,
+                      call.conversation(),
+                      call.conversation(),
+                      null,
+                      "coder",
+                      call.side(),
+                      argv,
+                      args.path("cwd").textValue(),
+                      RunApproval.withInput(null, args.path("stdin").textValue()),
+                      RunApproval.ALLOWED,
+                      RunApproval.ONCE,
+                      null,
+                      "reviewer",
+                      Instant.now(),
+                      null,
+                      Instant.now(),
+                      null,
+                      null));
+            });
+    when(approvals.claim(any())).thenReturn(true);
     when(approvals.consume(anyLong(), any(), any(), any(), any(), any()))
         .thenReturn(Optional.empty())
         .thenReturn(Optional.of(question("apr_1")));

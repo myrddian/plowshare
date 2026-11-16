@@ -30,6 +30,10 @@ import type {
   ApplicationFileDocument,
 } from 'plowshare-client-ts/operations/conversation-replies';
 import type { Preference } from './renderer/preferences.ts';
+import type {
+  ApprovalPolicy,
+  ApprovalPolicyView,
+} from 'plowshare-client-ts/operations/approval-policy';
 import type { JobNotification } from 'plowshare-client-ts/operations/push';
 import type { ServerAdminCall } from './admin-input.ts';
 import type { InformationCall } from 'plowshare-client-ts/operations/information';
@@ -778,12 +782,15 @@ export type Request =
   | { action: 'conversation-retry'; job: string }
   | { action: 'cancel'; job: string }
   | { action: 'answer'; id: string; decision: 'once' | 'deny' }
+  | { action: 'approval-policy'; operation: 'get' }
+  | { action: 'approval-policy'; operation: 'save'; policy: ApprovalPolicy }
   | { action: 'native-mcp'; command: string }
   | ProviderManagementCall
   | { action: 'provider-management-pending' }
   | { action: 'provider-management-recover'; intent: ManagementIntent }
   | { action: 'information-import-recovery-save'; recovery: ImportRecovery };
 export interface Reply {
+  approvalPolicy?: ApprovalPolicyView;
   runtimeSettings?: readonly RuntimeSetting[];
   runtimeSetting?: RuntimeSetting;
   nativeMcp?: NativeCommandResult;

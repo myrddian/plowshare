@@ -4,10 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -74,6 +79,127 @@ class RunApprovalStoreTest {
 
   private RunApproval asked(String conversation, String side, List<String> argv) {
     return store.ask(project, conversation, conversation, "coder", side, argv, "/repo", null);
+  }
+
+  @Test
+  void history_uses_only_the_owners_exact_human_answer_and_expires() {
+    jdbc.update(
+        "INSERT INTO admins(handle, password_hash, must_change_password) VALUES ('history-owner', 'fixture-hash', false) ON CONFLICT (handle) DO NOTHING");
+    String conversation = new ConversationStore(jdbc).open(Home.of("payments"), Budget.of(20)).id();
+    RunApproval asked = asked(conversation, "local", TEST);
+    SuspendedRunCalls calls = new JdbcSuspendedRunCalls(jdbc);
+    calls.retain(
+        asked.id(),
+        conversation,
+        "session",
+        "local",
+        "history-owner",
+        new ToolCall("history-call", "run", "retained arguments"));
+    ApprovalIntent intent =
+        new ApprovalIntent(
+            "history-owner",
+            conversation,
+            "history-call",
+            "payments",
+            "remote:session",
+            ApprovalPolicy.Kind.COMMAND,
+            TEST,
+            List.of(),
+            "/repo",
+            null,
+            "Inspect state",
+            null);
+    Instant now = Instant.parse("2026-09-16T00:00:00Z");
+    HumanApprovalHistory history =
+        new JdbcHumanApprovalHistory(jdbc, () -> now, Duration.ofDays(30));
+    assertFalse(history.eligible(intent));
+    history.remember(intent, asked.id());
+    assertFalse(history.eligible(intent));
+    assertTrue(store.allow(asked.id(), RunApproval.ONCE, null, "history-owner"));
+    history.remember(intent, asked.id());
+    assertTrue(history.eligible(intent));
+    ApprovalIntent anotherProvider =
+        new ApprovalIntent(
+            intent.owner(),
+            intent.conversation(),
+            intent.call(),
+            intent.project(),
+            "remote:another-session",
+            intent.kind(),
+            intent.argv(),
+            intent.paths(),
+            intent.cwd(),
+            null,
+            intent.userIntent(),
+            null);
+    assertFalse(history.eligible(anotherProvider));
+    HumanApprovalHistory expired =
+        new JdbcHumanApprovalHistory(
+            jdbc, () -> now.plus(Duration.ofDays(90)), Duration.ofDays(30));
+    assertFalse(expired.eligible(intent));
+  }
+
+  @Test
+  void typed_file_consent_is_once_only_and_retains_the_original_tool() {
+    String conversation = new ConversationStore(jdbc).open(Home.of("payments"), Budget.of(20)).id();
+    FileApproval file =
+        new FileApproval(
+            ApprovalPolicy.Kind.FILE_DELETE,
+            "remote:session",
+            List.of("/repo/config"),
+            "a".repeat(64),
+            "delete config");
+    RunApproval asked =
+        store.askFile(
+            project,
+            conversation,
+            conversation,
+            null,
+            "coder",
+            "local",
+            "/repo",
+            "SECURITY asks about deletion",
+            file);
+    SuspendedRunCalls calls = new JdbcSuspendedRunCalls(jdbc);
+    calls.retain(
+        asked.id(),
+        conversation,
+        "session",
+        "local",
+        "alice",
+        new ToolCall("file-call", "file_delete", "exact retained arguments"));
+    assertEquals(file, store.find(asked.id()).orElseThrow().file());
+    assertFalse(store.allow(asked.id(), RunApproval.CONVERSATION, null, "alice"));
+    assertTrue(store.allow(asked.id(), RunApproval.ONCE, null, "alice"));
+    assertEquals("file_delete", calls.find(asked.id()).orElseThrow().tool().name());
+    assertTrue(store.consume(project, conversation, "local", List.of(), "/repo").isEmpty());
+    calls.release(asked.id());
+    assertTrue(calls.claim(asked.id()));
+    assertFalse(calls.claim(asked.id()));
+    assertTrue(store.consumeFile(asked.id(), file));
+    assertFalse(store.consumeFile(asked.id(), file));
+  }
+
+  @Test
+  void review_inspection_does_not_spend_once_consent_and_only_one_claim_wins() {
+    RunApproval question = asked("review-once", "server", TEST);
+    assertTrue(store.allow(question.id(), RunApproval.ONCE, null, "alice"));
+    RunApproval inspected =
+        store.inspect(project, "review-once", "server", TEST, "/repo", null).orElseThrow();
+    assertEquals(RunApproval.ALLOWED, store.find(question.id()).orElseThrow().state());
+    assertTrue(store.claim(inspected));
+    assertFalse(store.claim(inspected));
+    assertEquals(RunApproval.USED, store.find(question.id()).orElseThrow().state());
+  }
+
+  @Test
+  void standing_consent_revoked_during_review_cannot_be_claimed() {
+    RunApproval question = asked("review-project", "server", TEST);
+    assertTrue(store.allow(question.id(), RunApproval.PROJECT, List.of("./gradlew"), "alice"));
+    RunApproval inspected =
+        store.inspect(project, "another-chat", "server", TEST, "/repo", null).orElseThrow();
+    assertTrue(store.revoke(question.id()));
+    assertFalse(store.claim(inspected));
   }
 
   @Test

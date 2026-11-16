@@ -359,6 +359,13 @@ public class ProjectAuthorization {
       return;
     }
     boolean service = ServiceCredentials.principal(account);
+    if (operation.equals("approval.policy.get") || operation.equals("approval.policy.save")) {
+      // The policy service verifies the exact permanent USER owner; a project grant is not
+      // authority to manage another account's consent or to let a service approve itself.
+      if (service || !accounts.isEnabled(account))
+        throw new CallerFault("Approval policy needs an active personal user account");
+      return;
+    }
     if (Set.of("proc.list", "proc.inspect", "proc.calls", "proc.tools", "proc.queues")
         .contains(operation)) {
       // These are metadata inventory filters, not content/execution targets. The specialist

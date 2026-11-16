@@ -19,8 +19,10 @@ import io.aeyer.plowshare.server.agents.Runs;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
+import io.aeyer.plowshare.server.approvals.ApprovalPolicy;
 import io.aeyer.plowshare.server.approvals.BudgetExtension;
 import io.aeyer.plowshare.server.approvals.ConductorContinuation;
+import io.aeyer.plowshare.server.approvals.FileApproval;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.archive.ProjectStore;
@@ -102,6 +104,66 @@ class ApprovalFramesTest {
     frames.useLogStages(told);
     router = new FrameRoutingConfig().frameRouter(List.of(frames));
     when(store.find("apr_1")).thenReturn(Optional.of(ASKED));
+  }
+
+  @Test
+  void typed_file_approval_requires_the_displayed_digest_and_never_grants_standing_consent() {
+    FileApproval file =
+        new FileApproval(
+            ApprovalPolicy.Kind.FILE_WRITE,
+            "remote:session",
+            List.of("/repo/config"),
+            "a".repeat(64),
+            "reviewed change");
+    RunApproval asked =
+        new RunApproval(
+            ASKED.id(),
+            ASKED.projectId(),
+            ASKED.conversation(),
+            ASKED.askedIn(),
+            null,
+            ASKED.agent(),
+            ASKED.side(),
+            List.of(),
+            ASKED.cwd(),
+            "SECURITY asks about a write during inspection",
+            RunApproval.ASKED,
+            null,
+            null,
+            null,
+            null,
+            null,
+            ASKED.createdAt(),
+            null,
+            null,
+            null,
+            file);
+    when(store.find("apr_1")).thenReturn(Optional.of(asked));
+    for (String extra :
+        List.of("", ",\"fileDigest\":\"" + "b".repeat(64) + "\"", ",\"fileDigest\":42")) {
+      Outcome refused =
+          route(
+              FrameTypes.APPROVAL_ANSWER, "{\"id\":\"apr_1\",\"decision\":\"once\"" + extra + "}");
+      assertEquals(Code.BAD_REQUEST, refused.code());
+    }
+    Outcome standing =
+        route(
+            FrameTypes.APPROVAL_ANSWER,
+            "{\"id\":\"apr_1\",\"decision\":\"conversation\",\"fileDigest\":\""
+                + file.inputDigest()
+                + "\"}");
+    assertEquals(Code.BAD_REQUEST, standing.code());
+    verify(store, never()).allow(anyString(), anyString(), any(), anyString());
+    when(store.allow("apr_1", RunApproval.ONCE, null, "enzo")).thenReturn(true);
+    useRetainedContinuation();
+    Outcome once =
+        route(
+            FrameTypes.APPROVAL_ANSWER,
+            "{\"id\":\"apr_1\",\"decision\":\"once\",\"fileDigest\":\""
+                + file.inputDigest()
+                + "\"}");
+    assertEquals(Code.OK, once.code());
+    verify(store).allow("apr_1", RunApproval.ONCE, null, "enzo");
   }
 
   private void useRetainedContinuation() {

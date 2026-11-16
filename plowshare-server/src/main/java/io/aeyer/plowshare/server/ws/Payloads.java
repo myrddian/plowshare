@@ -1,7 +1,12 @@
 package io.aeyer.plowshare.server.ws;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.type.LogicalType;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
@@ -62,7 +67,40 @@ public final class Payloads {
           .findAndRegisterModules()
           .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
+  /** Permission-changing contracts require complete DTOs and reject ignored or coerced fields. */
+  private static final ObjectMapper EXACT = exactMapper();
+
+  private static ObjectMapper exactMapper() {
+    ObjectMapper mapper =
+        JsonMapper.builder()
+            .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+            .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            .enable(
+                DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
+                DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES,
+                DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES,
+                DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+            .build();
+    mapper
+        .coercionConfigFor(LogicalType.Textual)
+        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail);
+    return mapper;
+  }
+
   private Payloads() {}
+
+  /** Exact, non-coercing boundary conversion for new permission-changing request contracts. */
+  public static <T> T exact(Map<String, Object> payload, Class<T> shape, String type) {
+    try {
+      T result = EXACT.convertValue(payload, shape);
+      if (result == null) throw new IllegalArgumentException("Missing request");
+      return result;
+    } catch (IllegalArgumentException invalid) {
+      throw new CallerFault("Supply the complete valid request for " + type);
+    }
+  }
 
   /**
    * {@code payload}, read as the request record {@code shape} — the same record the endpoint binds

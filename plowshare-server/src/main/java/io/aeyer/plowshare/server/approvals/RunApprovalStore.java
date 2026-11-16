@@ -27,7 +27,8 @@ import org.springframework.jdbc.core.RowMapper;
  * allowed} and nothing else, and a revoke moves a {@code project} approval from {@code allowed}. A
  * {@code false} is the other party having got there first.
  */
-public class RunApprovalStore implements ApprovalNotificationStore {
+public class RunApprovalStore
+    implements ApprovalNotificationStore, CommandApprovals, FileApprovalConsent {
 
   public static final String PREFIX = "apr_";
 
@@ -38,7 +39,7 @@ public class RunApprovalStore implements ApprovalNotificationStore {
   private static final String COLUMNS =
       "id, project_id, conversation, asked_in, handle, agent, side,"
           + " argv::text AS argv, cwd, reason, state, scope, prefix::text AS prefix, answered_by,"
-          + " answered_at, delivered_at, created_at, commands::text AS commands, judged, budget_calls, budget_steps";
+          + " answered_at, delivered_at, created_at, commands::text AS commands, judged, budget_calls, budget_steps, file_operation::text AS file_operation";
   private static final String SELECT = "SELECT " + COLUMNS + " FROM run_approvals";
 
   private static final Logger log = LoggerFactory.getLogger(RunApprovalStore.class);
@@ -126,6 +127,63 @@ public class RunApprovalStore implements ApprovalNotificationStore {
             Timestamp.from(clock.get()));
     tell("approval " + id, () -> events.asked(asked));
     return asked;
+  }
+
+  /** File consent has typed evidence and can only be granted once. */
+  public RunApproval askFile(
+      long project,
+      String conversation,
+      String askedIn,
+      String handle,
+      String agent,
+      String side,
+      String cwd,
+      String reason,
+      FileApproval file) {
+    Objects.requireNonNull(file);
+    String encoded;
+    try {
+      encoded = JSON.writeValueAsString(file);
+    } catch (JsonProcessingException invalid) {
+      throw new IllegalArgumentException("Invalid file approval", invalid);
+    }
+    RunApproval asked =
+        jdbc.queryForObject(
+            "INSERT INTO run_approvals (id, project_id, conversation, asked_in, handle, agent, side, argv, cwd, reason, state, created_at, file_operation) VALUES (?, ?, ?, ?, ?, ?, ?, '[]'::jsonb, ?, ?, ?, ?, ?::jsonb) RETURNING "
+                + COLUMNS,
+            ROW,
+            newId(),
+            project,
+            conversation,
+            askedIn,
+            handle,
+            agent,
+            side,
+            cwd,
+            reason,
+            RunApproval.ASKED,
+            Timestamp.from(clock.get()),
+            encoded);
+    tell("approval " + asked.id(), () -> events.asked(asked));
+    return asked;
+  }
+
+  /** Claim the exact file question after the retained-call fence has been won. */
+  public boolean consumeFile(String id, FileApproval expected) {
+    String encoded;
+    try {
+      encoded = JSON.writeValueAsString(expected);
+    } catch (JsonProcessingException invalid) {
+      throw new IllegalArgumentException("Invalid file approval", invalid);
+    }
+    return jdbc.update(
+            "UPDATE run_approvals SET state = ? WHERE id = ? AND state = ? AND scope = ? AND file_operation = ?::jsonb",
+            RunApproval.USED,
+            id,
+            RunApproval.ALLOWED,
+            RunApproval.ONCE,
+            encoded)
+        == 1;
   }
 
   /**
@@ -315,7 +373,7 @@ public class RunApprovalStore implements ApprovalNotificationStore {
     var answered =
         jdbc.query(
             "UPDATE run_approvals SET state = ?, scope = ?, prefix = ?::jsonb,"
-                + " answered_by = ?, answered_at = ? WHERE id = ? AND state = ? AND budget_calls IS NULL RETURNING "
+                + " answered_by = ?, answered_at = ? WHERE id = ? AND state = ? AND budget_calls IS NULL AND (file_operation IS NULL OR ? = 'once') RETURNING "
                 + COLUMNS,
             ROW,
             RunApproval.ALLOWED,
@@ -324,7 +382,8 @@ public class RunApprovalStore implements ApprovalNotificationStore {
             by,
             Timestamp.from(clock.get()),
             id,
-            RunApproval.ASKED);
+            RunApproval.ASKED,
+            scope);
     boolean won = !answered.isEmpty();
     if (won) {
       tell("approval " + id, () -> events.answered(answered.getFirst()));
@@ -389,6 +448,69 @@ public class RunApprovalStore implements ApprovalNotificationStore {
   }
 
   /**
+   * Bounded candidates: a match beyond the window requires fresh human consent, never a stale
+   * allow.
+   */
+  @Override
+  public Optional<RunApproval> inspect(
+      long project, String conversation, String side, List<String> argv, String cwd, String stdin) {
+    List<RunApproval> exact =
+        jdbc.query(
+            SELECT
+                + " WHERE project_id = ? AND conversation = ? AND budget_calls IS NULL AND file_operation IS NULL"
+                + " AND side = ? AND argv = ?::jsonb AND cwd = ? AND state = ? AND scope IN (?, ?)"
+                + " ORDER BY CASE scope WHEN 'conversation' THEN 0 ELSE 1 END, answered_at, id LIMIT 128",
+            ROW,
+            project,
+            conversation,
+            side,
+            json(argv),
+            cwd,
+            RunApproval.ALLOWED,
+            RunApproval.CONVERSATION,
+            RunApproval.ONCE);
+    for (RunApproval candidate : exact)
+      if (RunApproval.givenSameInput(candidate.reason(), stdin)) return Optional.of(candidate);
+    return jdbc
+        .query(
+            SELECT
+                + " WHERE project_id = ? AND side = ? AND scope = ?"
+                + " AND state = ? ORDER BY answered_at, id LIMIT 128",
+            ROW,
+            project,
+            side,
+            RunApproval.PROJECT,
+            RunApproval.ALLOWED)
+        .stream()
+        .filter(candidate -> covers(candidate.prefix(), argv))
+        .findFirst();
+  }
+
+  @Override
+  public boolean claim(RunApproval inspected) {
+    Objects.requireNonNull(inspected);
+    if (inspected.budget() != null || !RunApproval.ALLOWED.equals(inspected.state()))
+      throw new IllegalArgumentException("Only inspected command consent may be claimed");
+    if (RunApproval.ONCE.equals(inspected.scope()))
+      return jdbc.update(
+              "UPDATE run_approvals SET state = ? WHERE id = ? AND state = ? AND scope = ? AND budget_calls IS NULL AND file_operation IS NULL",
+              RunApproval.USED,
+              inspected.id(),
+              RunApproval.ALLOWED,
+              RunApproval.ONCE)
+          == 1;
+    // A second read has a concurrency purpose: confirmation after potentially slow model review.
+    // It rechecks only the selected grant, rather than fetching and discarding its full projection.
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM run_approvals WHERE id = ? AND state = ? AND scope = ? AND budget_calls IS NULL AND file_operation IS NULL)",
+            Boolean.class,
+            inspected.id(),
+            RunApproval.ALLOWED,
+            inspected.scope()));
+  }
+
+  /**
    * {@link #consume(long, String, String, List, String)} for a call given {@code stdin}: a {@code
    * once} or {@code conversation} approval covers only the input its question showed ({@link
    * RunApproval#givenSameInput}); a {@code project} approval covers its prefix whatever the input,
@@ -408,7 +530,7 @@ public class RunApprovalStore implements ApprovalNotificationStore {
         jdbc.query(
             SELECT
                 + " WHERE project_id = ? AND conversation = ?"
-                + " AND budget_calls IS NULL AND side = ? AND argv = ?::jsonb AND cwd = ? AND state = ? AND scope IN (?, ?)"
+                + " AND budget_calls IS NULL AND file_operation IS NULL AND side = ? AND argv = ?::jsonb AND cwd = ? AND state = ? AND scope IN (?, ?)"
                 + " ORDER BY CASE scope WHEN 'conversation' THEN 0 ELSE 1 END, answered_at, id",
             ROW,
             projectId,
@@ -507,6 +629,15 @@ public class RunApprovalStore implements ApprovalNotificationStore {
     return at == null ? null : at.toInstant();
   }
 
+  private static FileApproval file(String encoded) {
+    if (encoded == null) return null;
+    try {
+      return JSON.readValue(encoded, FileApproval.class);
+    } catch (JsonProcessingException invalid) {
+      throw new IllegalStateException("Invalid stored file approval", invalid);
+    }
+  }
+
   private static final RowMapper<RunApproval> ROW =
       (row, n) ->
           new RunApproval(
@@ -531,5 +662,6 @@ public class RunApprovalStore implements ApprovalNotificationStore {
               row.getString("judged"),
               row.getObject("budget_calls", Integer.class) == null
                   ? null
-                  : new BudgetExtension(row.getInt("budget_calls"), row.getInt("budget_steps")));
+                  : new BudgetExtension(row.getInt("budget_calls"), row.getInt("budget_steps")),
+              file(row.getString("file_operation")));
 }

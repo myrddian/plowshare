@@ -1,3 +1,4 @@
+import { isFileApproval, type FileApproval } from './approval-policy.ts';
 import {
   fileStoreReference,
   type FileStoreReference,
@@ -539,6 +540,7 @@ export interface Approval {
   /** Where a project prefix starts: the program and its first argument, as the server chose. */
   readonly defaultPrefix: readonly string[];
   readonly budget?: BudgetExtension;
+  readonly file?: FileApproval;
 }
 
 /** A list of strings, or nothing for anything that is not exactly that. */
@@ -590,6 +592,18 @@ function approvalIn(fields: Record<string, unknown>): Approval | undefined {
   const id = textAt(fields, 'id');
   const command = wordsAt(fields, 'command');
   const commands = commandsAt(fields);
+  const rawFile = fields['file'];
+  if (rawFile !== undefined && !isFileApproval(rawFile)) return undefined;
+  const file = isFileApproval(rawFile) ? rawFile : undefined;
+  if (
+    file &&
+    (fields['budget'] != null ||
+      commands !== undefined ||
+      command?.length !== 0 ||
+      (fields['scope'] != null && fields['scope'] !== 'once') ||
+      fields['prefix'] != null)
+  )
+    return undefined;
   const rawBudget = fields['budget'];
   let budget: BudgetExtension | undefined;
   if (rawBudget !== undefined) {
@@ -614,7 +628,10 @@ function approvalIn(fields: Record<string, unknown>): Approval | undefined {
   if (
     id === undefined ||
     command === undefined ||
-    (command.length === 0 && commands === undefined && budget === undefined)
+    (command.length === 0 &&
+      commands === undefined &&
+      budget === undefined &&
+      file === undefined)
   ) {
     return undefined;
   }
@@ -639,6 +656,7 @@ function approvalIn(fields: Record<string, unknown>): Approval | undefined {
     ...(prefix === undefined ? {} : { prefix }),
     defaultPrefix: wordsAt(fields, 'defaultPrefix') ?? [],
     ...(budget === undefined ? {} : { budget }),
+    ...(file === undefined ? {} : { file }),
   };
 }
 

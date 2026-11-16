@@ -875,5 +875,41 @@
     "payload": {
       "found": false
     }
+  },
+  "approval.policy.get": {
+    "code": "OK",
+    "payload": {
+      "policy": {
+        "revision": 0,
+        "mode": "MANUAL",
+        "bot": null,
+        "rules": []
+      },
+      "capabilities": {
+        "operations": [
+          "COMMAND"
+        ],
+        "humanHistory": false,
+        "additionalFileAccess": false
+      }
+    }
+  },
+  "approval.policy.save": {
+    "code": "OK",
+    "payload": {
+      "policy": {
+        "revision": 1,
+        "mode": "SMART",
+        "bot": null,
+        "rules": []
+      },
+      "capabilities": {
+        "operations": [
+          "COMMAND"
+        ],
+        "humanHistory": false,
+        "additionalFileAccess": false
+      }
+    }
   }
 }

@@ -743,6 +743,8 @@ export const JOB_COMMAND = '/job';
 export const COMMANDS: readonly string[] = [
   '/proc',
   '/admin',
+  '/approval-mode',
+  '/approval',
   '/message',
   MEMORY_COMMAND,
   SEARCH_COMMAND,
@@ -816,6 +818,10 @@ export function describeHelp(): string[] {
  */
 export function describeArguments(command: string): string {
   switch (command) {
+    case '/approval-mode':
+      return ' manual|smart|auto PERSONAL_BOT';
+    case '/approval':
+      return ' policy get|save [JSON]';
     case '/proc':
       return '[list|inspect|calls|tools|queues JSON]';
     case '/admin':
@@ -881,6 +887,10 @@ export function describeArguments(command: string): string {
  */
 export function describeCommand(command: string): string {
   switch (command) {
+    case '/approval-mode':
+      return 'set your personal approval mode, preserving saved rules';
+    case '/approval':
+      return 'inspect or edit your server-owned personal approval policy';
     case '/proc':
       return 'Audit all non-archived conversations, calls and processing queues';
     case '/admin':
@@ -2233,6 +2243,19 @@ export function describeFired(
  * never used.
  */
 export function describeQuestion(approval: Approval): string[] {
+  if (approval.file)
+    return [
+      `a run asks to ${approval.file.kind} on ${approval.file.provider}:`,
+      ...approval.file.paths.map((path) => `  ${path}`),
+      `  input SHA-256 ${approval.file.inputDigest}`,
+      ...(approval.file.inputPreview === null
+        ? [
+            '  Input is too large to preview; inspect the original call in Trajectory.',
+          ]
+        : approval.file.inputPreview.split('\n').map((line) => `  ${line}`)),
+      ...(approval.reason ? [`  because ${approval.reason}`] : []),
+      '  approve this exact operation once, or deny',
+    ];
   if (approval.budget !== undefined) {
     return [
       `a run asks for ${approval.budget.calls} additional model calls and ${approval.budget.steps} additional steps:`,
@@ -2278,6 +2301,8 @@ export function describeQuestion(approval: Approval): string[] {
 export function describeKeys(state: Asking): string[] {
   switch (state.kind) {
     case 'choosing':
+      if (state.approval.file)
+        return ['o approve operation once · d deny · esc leave it for later'];
       if (state.approval.budget !== undefined)
         return ['o approve extension once · d deny · esc leave it for later'];
       // A set takes no project prefix (V67), so it is not offered one.

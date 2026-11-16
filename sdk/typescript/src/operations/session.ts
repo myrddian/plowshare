@@ -226,13 +226,18 @@ export function answeringApproval(
   id: string,
   decision: Decision,
   prefix?: readonly string[],
+  fileDigest?: string,
 ): Ask<typeof APPROVAL_ANSWER> {
   return {
     type: APPROVAL_ANSWER,
-    payload:
-      decision === 'project' && prefix !== undefined
-        ? { id, decision, prefix: [...prefix] }
-        : { id, decision },
+    payload: {
+      id,
+      decision,
+      ...(decision === 'project' && prefix !== undefined
+        ? { prefix: [...prefix] }
+        : {}),
+      ...(fileDigest === undefined ? {} : { fileDigest }),
+    },
   };
 }
 

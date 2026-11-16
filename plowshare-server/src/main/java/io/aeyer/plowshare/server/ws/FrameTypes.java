@@ -755,6 +755,12 @@ public final class FrameTypes {
   /** Revoke a standing project approval. {@link ApprovalFrames}. */
   public static final String APPROVAL_REVOKE = "approval.revoke";
 
+  /** Read the authenticated owner's personal approval policy. */
+  public static final String APPROVAL_POLICY_GET = "approval.policy.get";
+
+  /** Replace the authenticated owner's policy against an expected revision. */
+  public static final String APPROVAL_POLICY_SAVE = "approval.policy.save";
+
   /** Union projects — spec 2026-09-14-a-project-can-be-a-union. */
   public static final String UNION_STATUS = "union.status";
 

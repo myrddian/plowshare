@@ -27,3 +27,7 @@ dialog{border:1px solid #645232;border-radius:10px;padding:27px;background:var(-
 #application-deployment-dialog button:disabled { opacity: .5; }
 #application-deployment-dialog .dialog-actions { flex-wrap: wrap; }
 #application-deployment-dialog [data-error] { color: #f2c69a; }
+
+/* Large reviewed inputs remain inspectable without displacing the decision controls. */
+.command-approval pre { max-height: 18rem; overflow: auto; }
+.operator-dialog [name="rules"] { width: 100%; min-height: 14rem; font-family: var(--font-mono, monospace); }

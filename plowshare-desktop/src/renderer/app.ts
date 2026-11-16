@@ -1,3 +1,4 @@
+import { installApprovalPolicy } from './approval-policy.ts';
 import { installApplicationDeployment } from './application-deployment.ts';
 import { fileStorePlacement } from './server-filestores.ts';
 import { installFileStores } from './filestores.ts';
@@ -75,6 +76,10 @@ const stage = $('#stage');
 const chat = $('#chat');
 const agentSelect = $<HTMLSelectElement>('#agent');
 let state: DesktopState;
+const approvalPolicy = installApprovalPolicy(window.plowshare, () => state);
+$('#approval-policy-open').addEventListener('click', () =>
+  approvalPolicy.open(),
+);
 const commandPicker = installCommandPicker(
   $('#slash-commands'),
   draft,
@@ -291,6 +296,7 @@ function update(next: DesktopState) {
     measurements.clear();
   }
   state = next;
+  approvalPolicy.update();
   const botReadKey =
     state.personal && state.connected
       ? JSON.stringify([
@@ -1576,16 +1582,20 @@ function renderApprovals() {
   // An approval-colored surface means there is an actual pending decision.
   // Refresh failures are also reported through the normal background-error banner.
   bar.hidden = !approvals.length;
-  bar.innerHTML =
+  // Keep unchanged buttons attached across state pushes, including a push between
+  // pointer-down and pointer-up. Replacing them there prevents Chromium's click.
+  setHTML(
+    bar,
     `<button id="retry-command-approvals" ${!state.connected ? 'disabled' : ''}>Check command approvals</button>${state.approvalError ? `<p role="alert">${esc(state.approvalError)}</p>` : ''}` +
-    approvals
-      .map((row) =>
-        approvalControls.prompt(
-          row,
-          row.conversation === selected ? '' : title(row.conversation),
-        ),
-      )
-      .join('');
+      approvals
+        .map((row) =>
+          approvalControls.prompt(
+            row,
+            row.conversation === selected ? '' : title(row.conversation),
+          ),
+        )
+        .join(''),
+  );
 }
 
 $('#approval-bar').addEventListener('click', (event) => {

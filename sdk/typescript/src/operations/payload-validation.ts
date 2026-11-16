@@ -1,4 +1,5 @@
 import { isOneOf } from '../binding/values.ts';
+import { exactApprovalPolicy } from './approval-policy.ts';
 import { interchangeProblem } from './interchange-validation.ts';
 import { decodeImageAdmissionRequest } from './image-admissions.ts';
 import { procProblem } from './proc.ts';
@@ -27,6 +28,11 @@ export function problem(
   type: Operation,
   payload: Record<string, unknown>,
 ): string | undefined {
+  if (
+    type === 'approval.policy.save' &&
+    !exactApprovalPolicy(payload['policy'])
+  )
+    return 'Supply a complete valid approval policy and its expected revision';
   if (type === 'tool.invocation.read') {
     if (
       Object.keys(payload).length !== 2 ||
@@ -944,10 +950,12 @@ export const SHAPES: Record<
   'project.member.role': [['project', 'handle', 'role'], []],
   'project.member.add': [['project', 'handle'], ['role']],
   'project.member.remove': [['project', 'handle'], []],
+  'approval.policy.get': [[], []],
+  'approval.policy.save': [['policy'], []],
   'approval.list': [[], ['conversation', 'project', 'mine']],
   'approval.answer': [
     ['id', 'decision'],
-    ['prefix', 'reason'],
+    ['prefix', 'reason', 'fileDigest'],
   ],
   'approval.revoke': [['id'], []],
   'message.instances': [['project'], ['archived', 'offset', 'limit']],
@@ -1125,6 +1133,8 @@ export function commandProblem(
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
+  if (type === 'approval.policy.get' || type === 'approval.policy.save')
+    return problem(type, body);
   if (type.startsWith('proc.')) return procProblem(type, body);
   if (type === 'artifact.admission.status' || type === 'tool.invocation.read')
     return problem(type, body);
@@ -1634,6 +1644,12 @@ export function commandProblem(
   )
     return 'approval.list needs exactly one of conversation, project, mine:true';
   if (type === 'approval.answer') {
+    if (
+      body['fileDigest'] !== undefined &&
+      (typeof body['fileDigest'] !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(body['fileDigest']))
+    )
+      return 'fileDigest must be the exact SHA-256 from a typed file approval';
     if (
       body['reason'] !== undefined &&
       (body['decision'] !== 'deny' ||

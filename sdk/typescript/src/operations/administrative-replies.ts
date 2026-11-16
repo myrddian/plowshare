@@ -1,4 +1,11 @@
 import { swarmSelectionCheck, type SwarmSelection } from './swarm-types.ts';
+import {
+  isApprovalPolicy,
+  isFileApproval,
+  type FileApproval,
+  isApprovalCapabilities,
+  type ApprovalPolicyView,
+} from './approval-policy.ts';
 import type { ScheduleFile } from './schedule-files.ts';
 import type { Outcome } from '../binding/envelope.ts';
 import type { OrchestrationChoice } from './administration.ts';
@@ -57,6 +64,7 @@ export interface ApprovalView {
   readonly commands: readonly (readonly string[])[] | null;
   readonly judged: string | null;
   readonly budget?: BudgetExtension;
+  readonly file?: FileApproval;
 }
 /** A one-time additive grant for the same retained execution. */
 export interface BudgetExtension {
@@ -328,6 +336,8 @@ export interface BoardClosed {
   readonly message: BoardMessage;
 }
 export interface AdministrativeReplies {
+  'approval.policy.get': ApprovalPolicyView;
+  'approval.policy.save': ApprovalPolicyView;
   'approval.list': ApprovalListed;
   'approval.answer': ApprovalAnswered;
   'approval.revoke': ApprovalRevoked;
@@ -388,6 +398,7 @@ const approval = record({
   commands: nullable(list(strings)),
   judged: nullable(text),
   budget: (value) => value === undefined || budgetExtensionCheck(value),
+  file: (value) => value === undefined || isFileApproval(value),
 });
 const budgetExtensionCheck = record(
   { calls: count, steps: count },
@@ -611,6 +622,14 @@ const firing = record({
   topic: nullable(named),
 });
 const readers = {
+  'approval.policy.get': record({
+    policy: isApprovalPolicy,
+    capabilities: isApprovalCapabilities,
+  }),
+  'approval.policy.save': record({
+    policy: isApprovalPolicy,
+    capabilities: isApprovalCapabilities,
+  }),
   'approval.list': record({ approvals: list(approval) }),
   'approval.answer': record({
     id: named,

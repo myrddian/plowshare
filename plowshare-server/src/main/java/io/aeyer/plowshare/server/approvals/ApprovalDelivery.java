@@ -111,6 +111,18 @@ public final class ApprovalDelivery implements ApprovalNotifications {
    * of them in the reason — where it runs, and why.
    */
   public static String question(RunApproval approval) {
+    if (approval.file() != null)
+      return "Approve "
+          + approval.file().kind()
+          + " "
+          + approval.file().paths()
+          + " on "
+          + approval.file().provider()
+          + " once? "
+          + Objects.requireNonNullElse(approval.reason(), "")
+          + " ["
+          + approval.id()
+          + "]";
     if (approval.budget() != null) {
       return "Approve "
           + approval.budget().calls()

@@ -1,4 +1,5 @@
 import type { UsagePayloads } from './usage.ts';
+import type { ApprovalPolicy } from './approval-policy.ts';
 import type { ScheduleDefinition } from './schedule-files.ts';
 /** JSON choices/data are owned and interpreted by the server. */
 export type JsonValue =
@@ -12,6 +13,8 @@ type Tier = { readonly project?: string | null };
 type Id = { readonly id: string };
 type Page = { readonly offset?: number; readonly limit?: number };
 export interface AdministrativePayloads {
+  'approval.policy.get': Record<string, never>;
+  'approval.policy.save': { readonly policy: ApprovalPolicy };
   'approval.list': Tier & {
     readonly conversation?: string | null;
     readonly mine?: boolean;
@@ -20,6 +23,7 @@ export interface AdministrativePayloads {
     readonly decision: 'once' | 'conversation' | 'project' | 'deny';
     readonly prefix?: readonly string[];
     readonly reason?: string;
+    readonly fileDigest?: string;
   };
   'approval.revoke': Id;
   'board.topup': { readonly topic: string; readonly maxModelCalls: number };

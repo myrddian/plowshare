@@ -105,3 +105,32 @@ await test('a settled or absent approval never acquires decision buttons from an
     undefined,
   );
 });
+
+await test('typed file prompts escape the request and explain its exact once-only scope', () => {
+  const host = { addEventListener() {} } as unknown as Document;
+  const controls = installApprovalControls(
+    host,
+    () => state,
+    async () => {
+      throw new Error('No click expected');
+    },
+    () => {},
+  );
+  const html = controls.prompt({
+    ...approvals[0]!,
+    command: [],
+    file: {
+      kind: 'FILE_WRITE',
+      provider: 'remote:session',
+      paths: ['/repo/<config>'],
+      inputDigest: 'a'.repeat(64),
+      inputPreview: '<script>untrusted</script>',
+    },
+    reason: 'Inspection does not request a write.',
+  });
+  assert.match(html, /File operation approval/);
+  assert.match(html, /FILE_WRITE/);
+  assert.match(html, /&lt;script&gt;untrusted&lt;\/script&gt;/);
+  assert.match(html, /Inspection does not request a write/);
+  assert.doesNotMatch(html, /data-decision="(?:conversation|project)"/);
+});

@@ -22,17 +22,19 @@ public final class JdbcSuspendedRunCalls implements SuspendedRunCalls {
       String side,
       String owner,
       ToolCall tool) {
-    if (!"run".equals(tool.name())) throw new IllegalArgumentException("Only run is suspended");
+    if (!SuspendedRunCalls.supported(tool.name()))
+      throw new IllegalArgumentException("Unsupported retained approval tool");
     int inserted =
         jdbc.update(
-            "INSERT INTO suspended_run_calls (approval, conversation, session_id, side, owner_handle, call_id, arguments)"
-                + " SELECT id, ?, ?, ?, ?, ?, ? FROM run_approvals WHERE id = ? AND asked_in = ? AND side = ?",
+            "INSERT INTO suspended_run_calls (approval, conversation, session_id, side, owner_handle, call_id, arguments, tool_name)"
+                + " SELECT id, ?, ?, ?, ?, ?, ?, ? FROM run_approvals WHERE id = ? AND asked_in = ? AND side = ?",
             conversation,
             session,
             side,
             owner,
             tool.id(),
             tool.arguments(),
+            tool.name(),
             approval,
             conversation,
             side);
@@ -68,7 +70,10 @@ public final class JdbcSuspendedRunCalls implements SuspendedRunCalls {
                 row.getString("conversation"),
                 row.getString("session_id"),
                 row.getString("side"),
-                new ToolCall(row.getString("call_id"), "run", row.getString("arguments")),
+                new ToolCall(
+                    row.getString("call_id"),
+                    row.getString("tool_name"),
+                    row.getString("arguments")),
                 row.getString("state"),
                 row.getString("decision"),
                 row.getString("answered_by"),

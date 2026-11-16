@@ -118,10 +118,16 @@ export function pressingOn(state: Asking, stroke: Stroke): Asking {
         return {
           kind: 'answered',
           approval,
-          ask: answeringApproval(approval.id, 'once'),
+          ask: answeringApproval(
+            approval.id,
+            'once',
+            undefined,
+            approval.file?.inputDigest,
+          ),
         };
       case 'c':
-        if (approval.budget !== undefined) return state;
+        if (approval.budget !== undefined || approval.file !== undefined)
+          return state;
         return {
           kind: 'answered',
           approval,
@@ -136,7 +142,9 @@ export function pressingOn(state: Asking, stroke: Stroke): Asking {
       case 'p':
         // A SET IS SEVERAL COMMANDS, and a project prefix covers one: it takes once,
         // conversation or deny (V67), and the server refuses a project answer to it.
-        return isSet(approval) || approval.budget !== undefined
+        return isSet(approval) ||
+          approval.budget !== undefined ||
+          approval.file !== undefined
           ? state
           : { kind: 'prefixing', approval, length: startingLength(approval) };
       default:
