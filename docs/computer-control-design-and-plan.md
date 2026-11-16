@@ -66,6 +66,15 @@ binding or another separately supported sharing lifecycle. Do not invent a new
 public sharing API or imply that a GUI-owned interactive provider is usable by
 every SDK caller. See [provider scopes](tool-scopes.md).
 
+The initial TUI/GUI composition embeds `ToolProvider` on the host client's
+existing authenticated connection and supervises native helpers separately.
+A standalone provider process with its own login/socket does not share that
+interactive scope, even for the same account. Supervising such a process requires
+an explicit supported Application binding, or a separately designed transport
+composition preserving the original session. Do not solve this by passing an
+interactive routing name to a different socket. P7 must verify the chosen
+composition against the real session-bound server checks.
+
 All SDKs expose the general Relay facade, but image-producing parity is narrower:
 the initial reusable implementation uses the non-hosted Node `content/1` producer
 path. Other SDK consumers can participate through their supported public agent
@@ -122,8 +131,8 @@ Proposed source layout: `src/contracts`, `src/provider`, `src/sessions`,
 embedding and a separate foreground executable; both use the same provider,
 backends and journal lifecycle. Client-specific code supplies configuration,
 credentials and UI, not duplicated capture/input handlers. Choose package/build
-identities during implementation;
-no Gradle task or distribution is claimed to exist yet.
+identities during implementation; no Gradle task or distribution is claimed to
+exist yet.
 
 ## Model-facing tools
 
@@ -177,18 +186,27 @@ For example, a point click request has this adapter-owned shape (illustrative ID
 
 An element target instead contains `kind: element`, `snapshotId` and `elementId`.
 The validator rejects mixed target fields and coordinates outside the named frame.
-Identity, raw native handles, transforms and deadlines are not model-selectable
-fields. Define and test the exact shared-schema representation in P0; do not
-assume unsupported JSON Schema union keywords are available.
+Authenticated account/project/run identity, raw native handles, transforms and
+deadlines are not model-selectable fields. Define and test the exact shared-schema
+representation in P0; do not assume unsupported JSON Schema union keywords are
+available.
 
 ### Observation and action result contract
 
 Serialize a validated provider-owned `computer-control/1` metadata DTO into a
 TEXT part, followed by admitted image parts. This is an adapter result format
 inside `content/1`, not a new Relay protocol or shared platform DTO. Bound metadata
-to 12,000 UTF-16 units, leaving room within existing result limits; bound trees by
-both node count and serialized size. Mark truncation and expose explicit bounded
-subtree reads rather than silently treating an incomplete tree as complete.
+to 12,000 UTF-16 units and separately enforce the complete encoded envelope's
+32,768-unit ceiling. The metadata is JSON text inside another JSON envelope, so
+measure escaping and envelope overhead rather than counting text fields alone.
+Reserve that overhead and bound variable-length fields; trim optional tree data
+at DTO boundaries before final serialization, explicitly
+marking truncation. Validate the final SDK result before returning it. Never cut
+serialized JSON or discover an avoidable size violation only after input: the
+SDK maps invalid handler results to UNKNOWN. Keep a prevalidated minimal outcome
+that fits the pinned invocation fields if optional observation data will not fit.
+Expose explicit bounded subtree reads rather than treating an incomplete tree
+as complete.
 
 Metadata includes:
 
@@ -215,6 +233,11 @@ an entirely successful interaction. If input may have happened but delivery is
 unresolved, return `UNKNOWN`, which currently cannot carry images. A later
 `computer_observe` is a new read; it does not repeat or settle the original action.
 `REJECTED` is reserved for a known refusal before input, not a partial type/drag.
+If the helper proves exactly which input was delivered before it stopped, use
+`COMPLETED` with action outcome `PARTIAL`, the bounded delivered extent and an
+explicit incomplete-operation explanation. If that extent or physical settlement
+is not established, use `UNKNOWN`/`UNCERTAIN` and keep the target fenced. Neither
+case authorizes replay of the original action.
 
 ### Coordinates and stale observations
 
@@ -387,12 +410,20 @@ Raw images belong in admitted blob storage, not logs, exception messages or a
 second screenshot archive. Do not put typed text or credentials in diagnostic
 logs. Tool arguments, including typed text, still enter the existing private SDK
 journal and server invocation/history retention; this design does not provide a
-secret-input channel. If OS/browser
-capture filtering is configured, apply it before upload and report exclusions;
-masking pixels alone does not remove matching accessibility text. The existing
-SDK file journal is bounded to 1000 receipts / 2 MB and has no automatic safe
-pruning. Stop before exhaustion and retain uncertain receipts; continuous service
-needs a reviewed archival strategy preserving deduplication.
+secret-input channel. If OS/browser capture filtering is configured, apply it
+before upload and report exclusions; masking pixels alone does not remove
+matching accessibility text. The existing
+SDK file journal caps receipts at 1000 and enforces 2,000,000 serialized UTF-8
+bytes through its shared atomic writer and on reopen. Those per-save checks do
+not reserve space for a larger READY/result checkpoint after an action. The
+provider's `ToolJournal` composition must reserve serialized UTF-8 capacity for
+the full receipt lifecycle before admitting input, including executing, READY,
+publication and UNKNOWN checkpoints, and refuse admission when that reserve will
+not fit.
+Preflight count and byte capacity before SDK saves, preserving its original
+receipt identities and recovery semantics. There is no automatic safe pruning;
+retain uncertain receipts and use a reviewed archival strategy preserving
+deduplication before claiming continuous service.
 
 ## Platform gaps and disposition
 
@@ -409,7 +440,7 @@ rollback and tests under ADR 0001.
 | UNKNOWN image/result recovery | UNKNOWN/REJECTED are text-only; invocation reads and `result_read` do not redeem pixels into model input. | Use a separate authorized observation. Do not retrofit images into settled UNKNOWN results or automatically replay the effect. Typed redemption would be separate platform work. |
 | Hosted typed results and other producer SDKs | Non-hosted Node has the required image producer path; hosted worker catalogues refuse it and other producers remain text-only. | Ship the direct Node provider first. General hosted/content parity is optional separately scoped platform work. |
 | Native client management | No computer-target/session picker, local permission setup, takeover or stop UI is implemented by existing MCP controls. | Foreground provider CLI/local stop first. Dedicated Desktop/TUI hosting controls are a later client deliverable; reuse public scopes without claiming existing MCP screens manage this provider. |
-| Universal completion deadlines and journal archival | SDK timers do not prove remote abort; the supplied journal eventually fills. | Adapter-owned remaining budgets, abortable helpers, physical fencing and a bounded operating envelope first. Report any required public lifecycle/archival capability as a separate gap. |
+| Universal completion deadlines and journal archival | SDK timers do not prove remote abort; the supplied journal eventually fills and per-save size checks do not reserve future result capacity. | Adapter-owned remaining budgets, abortable helpers, physical fencing and reserved journal capacity before input first. Report any required public lifecycle/archival capability as a separate gap; do not rely on post-effect save failure as admission control. |
 
 Backend-specific permission, compositor, accessibility and packaging limitations
 are adapter work, not reasons to change core. Exact browser/OS support and model
@@ -444,8 +475,12 @@ Windows/Linux support requires P6 and cannot be inferred from shared interfaces.
 Default tests use fake SDK connections, capture/input backends, clocks and private
 temporary journals. Cover malformed/extra fields, foreign account/project/run
 references, expired sessions, revoked availability, oversize trees/text/images,
-coordinate boundaries and races. Test that timers stop new work, a late helper
-still owns its target and cleanup cannot silently un-fence uncertain execution.
+coordinate boundaries and races. Include worst-case nested JSON escaping and
+UTF-8 journal size, full receipt transitions near the journal ceiling, refusal
+before input when capacity cannot be reserved, and exact partial-input reporting.
+Test that timers stop new work, a late helper still owns its target and cleanup
+cannot silently un-fence uncertain execution. Test embedded and subprocess hosts
+against session ownership; matching accounts alone must not adopt a foreign scope.
 
 Use controlled browser/native fixture applications with counters so duplicate
 clicks, partial typing and input ordering are observable. Fault-inject around
