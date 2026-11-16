@@ -289,10 +289,11 @@ public final class SwarmScheduler {
           return null;
         }
       }
-      // The cancel is checked only before each sleep, so one set during the sleep can meet
-      // a grant made before the waiter woke. The grant loses: a run cancelled while waiting
-      // must end having spent no model call, and the slot is the next waiter's.
-      if (cancelled.getAsBoolean()) {
+      // A condition signal can win its race with interruption: await then returns normally
+      // with the interrupt flag restored instead of throwing InterruptedException. Check that
+      // flag as well as cancellation before handing over an immediately available or just-woken
+      // grant. In either case the slot goes back without spending a model call or quantum.
+      if (Thread.currentThread().isInterrupted() || cancelled.getAsBoolean()) {
         withdraw(mine);
         return null;
       }
