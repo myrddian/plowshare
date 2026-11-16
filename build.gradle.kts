@@ -199,7 +199,7 @@ subprojects {
 // TypeScript tools live in a private root package so client runtime dependencies
 // and independent package installs remain separate from repository verification.
 val typescriptModules = listOf("plowshare-client-ts", "plowshare-client-node", "plowshare-cli",
-    "plowshare-mcp", "plowshare-tui", "plowshare-console", "plowshare-desktop", "plowshare-mcp-integration", "plowshare-discord-integration")
+    "plowshare-mcp", "plowshare-tui", "plowshare-console", "plowshare-desktop", "plowshare-mcp-integration", "plowshare-discord-integration", "plowshare-computer-control")
 val typescriptTools by tasks.registering(Exec::class) {
     workingDir = rootDir
     inputs.files("package.json", "pnpm-lock.yaml")

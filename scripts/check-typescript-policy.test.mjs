@@ -47,6 +47,15 @@ await test('a module cannot override a safety flag', () =>
     });
     assert.throws(() => verifyPolicy(root), /noUncheckedIndexedAccess/);
   }));
+await test('computer-control cannot weaken the shared compiler policy', () =>
+  fixture((root, write) => {
+    write('integrations/computer-control/tsconfig.json', {
+      extends: '../../tsconfig.strict.json',
+      compilerOptions: { strict: false },
+      include: ['main.ts'],
+    });
+    assert.throws(() => verifyPolicy(root), /strict=true/);
+  }));
 await test('an extra test project cannot weaken optional checks', () =>
   fixture((root, write) => {
     write('plowshare-tui/tsconfig.test.json', {

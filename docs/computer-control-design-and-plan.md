@@ -1,9 +1,13 @@
 # Computer control and vision through Relay
 
-Status: proposed design and phased implementation plan, 2026-11-16. No computer
-provider, native helper, client controls or platform extensions are implemented
-by this document. Browser and full desktop control are both intended deliverables;
-browser-first delivery is an implementation sequence, not the final scope.
+Status: design and phased implementation plan, 2026-11-16. The initial P0/P1
+observation-only provider and capture backends are being delivered under
+[`integrations/computer-control/`](../integrations/computer-control/README.md).
+Its [review graph](../integrations/computer-control/IMPLEMENTATION.md) separates
+implemented/reviewed nodes from live acceptance. No input tools, client controls
+or platform extensions are supplied by this slice. Browser and full desktop
+control remain intended deliverables; browser-first delivery is a sequence,
+not the final scope.
 
 ## Goal and architecture
 

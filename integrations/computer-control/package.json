@@ -1,0 +1,30 @@
+{
+  "name": "plowshare-computer-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "exports": {
+    ".": {
+      "types": "./build/computer/index.d.ts",
+      "import": "./build/computer/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node scripts/test.mjs",
+    "start": "node build/computer/main.js"
+  },
+  "dependencies": {
+    "playwright": "1.63.0",
+    "plowshare-client-node": "link:../../sdk/node",
+    "plowshare-client-ts": "link:../../sdk/typescript"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "typescript": "5.9.3"
+  }
+}
