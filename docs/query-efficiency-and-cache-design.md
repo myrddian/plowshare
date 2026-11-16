@@ -87,6 +87,14 @@ not an acceptable steady-state target.
 
 ## SQL and PostgreSQL capabilities
 
+Request-serving queries must normally finish within 500 ms and never exceed one
+second; the shared two-second operation ceiling covers all statements and waits.
+Track duration distributions and 500 ms/1 s breaches in Prometheus, including failed
+and cancelled executions. Compare representative cold/warm and concurrent workloads;
+an average or percentile below the target does not excuse slow outliers. See the
+[completion deadline rule](coding-standards.md#bound-sql-work-by-a-completion-deadline)
+for enforcement, measurement boundaries and explicit maintenance exceptions.
+
 Remove duplicate queries before concealing their cost behind a cache. Prefer
 bounded projections, batch reads, joins, set-based permission evaluation and
 `RETURNING` when a write can provide the result the caller needs. Keep exact

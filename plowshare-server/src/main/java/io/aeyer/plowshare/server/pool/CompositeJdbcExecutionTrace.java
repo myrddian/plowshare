@@ -46,6 +46,17 @@ public final class CompositeJdbcExecutionTrace implements JdbcExecutionTrace {
       }
 
       @Override
+      public void failed(Throwable failure) {
+        for (int i = 0; i < count; i++) {
+          try {
+            spans[i].failed(failure);
+          } catch (RuntimeException observabilityFailure) {
+            // Intentionally discarded; see the class contract.
+          }
+        }
+      }
+
+      @Override
       public void close() {
         for (int i = count - 1; i >= 0; i--) {
           try {

@@ -88,7 +88,7 @@ public final class TracedDataSource extends AbstractDataSource {
                 try {
                   return invoke(proxy, statement, method, args);
                 } catch (Throwable failure) {
-                  span.failed();
+                  span.failed(failure);
                   throw failure;
                 }
               }

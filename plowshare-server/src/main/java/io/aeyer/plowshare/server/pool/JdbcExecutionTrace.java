@@ -7,6 +7,11 @@ public interface JdbcExecutionTrace {
   interface Span extends AutoCloseable {
     void failed();
 
+    /** Observes failure classification synchronously; implementations must not retain it. */
+    default void failed(Throwable failure) {
+      failed();
+    }
+
     @Override
     void close();
   }

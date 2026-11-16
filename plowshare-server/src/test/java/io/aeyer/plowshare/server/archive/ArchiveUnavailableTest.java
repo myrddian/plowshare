@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
 import java.nio.file.Path;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -78,6 +79,27 @@ import org.springframework.transaction.support.TransactionTemplate;
  * {@code propose}'s inline comment had it right all along.
  */
 class ArchiveUnavailableTest {
+  @Test
+  void postgresCancellationIsUnavailableWithoutClaimingTheConnectionWasLost() {
+    var cancelled =
+        new DataAccessResourceFailureException(
+            "PreparedStatementCallback; SQL [private query]",
+            new SQLException("canceling statement due to user request", "57014"));
+    var failure =
+        assertThrows(
+            ArchiveUnavailableException.class,
+            () ->
+                ArchiveUnavailableException.translating(
+                    "rank conversation passages",
+                    () -> {
+                      throw cancelled;
+                    }));
+    assertSame(cancelled, failure.getCause());
+    assertTrue(failure.getMessage().contains("SQL was cancelled"));
+    assertTrue(failure.getMessage().contains("rank conversation passages"));
+    assertFalse(failure.getMessage().contains("could not be reached"));
+    assertFalse(failure.getMessage().contains("private query"));
+  }
 
   private static final Provenance FORMED = new Provenance(Instant.EPOCH, "probe", "test");
 

@@ -69,6 +69,9 @@ class ComposeTelemetryTests(unittest.TestCase):
         text = json.dumps(dashboard)
         for meter in (
             "plowshare_jdbc_statements_seconds_count",
+            "plowshare_jdbc_statements_seconds_bucket",
+            "plowshare_jdbc_statements_seconds_max",
+            "plowshare_jdbc_cancellations_total",
             "plowshare_authority_admission_checks_total",
             "plowshare_operation_statements_bucket",
         ):

@@ -1,7 +1,11 @@
 package io.aeyer.plowshare.server.pool;
 
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.sql.SQLException;
+import java.sql.SQLTimeoutException;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -16,6 +20,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>The count is the exact number of round trips, which is what a query-efficiency change must
  * reduce. A batch is one execute, as in {@link JdbcExecutionTrace}.
+ *
+ * <p>The histogram includes exact 500 ms and 1 s buckets for query latency tracking. Failed and
+ * cancelled executions retain their durations; cancellations also increment a separate bounded
+ * counter. Timing ends at execute return/throw, excluding acquisition and later result iteration.
  */
 public final class MicrometerJdbcExecutionTrace implements JdbcExecutionTrace {
   public static final String METER = "plowshare.jdbc.statements";
@@ -28,6 +36,8 @@ public final class MicrometerJdbcExecutionTrace implements JdbcExecutionTrace {
    * key set is bounded by the JDBC execute method names times two outcomes.
    */
   private final ConcurrentHashMap<TimerKey, Timer> timers = new ConcurrentHashMap<>();
+
+  private final ConcurrentHashMap<String, Counter> cancellations = new ConcurrentHashMap<>();
 
   private record TimerKey(String method, boolean failed) {}
 
@@ -46,6 +56,10 @@ public final class MicrometerJdbcExecutionTrace implements JdbcExecutionTrace {
                 .tag("pool", pool)
                 .tag("method", method)
                 .tag("outcome", failed ? "failed" : "ok")
+                .serviceLevelObjectives(Duration.ofMillis(500), Duration.ofSeconds(1))
+                .publishPercentileHistogram()
+                .minimumExpectedValue(Duration.ofMillis(1))
+                .maximumExpectedValue(Duration.ofSeconds(2))
                 .register(registry));
   }
 
@@ -55,6 +69,7 @@ public final class MicrometerJdbcExecutionTrace implements JdbcExecutionTrace {
     var sample = Timer.start(registry);
     return new Span() {
       private boolean failed;
+      private boolean cancelled;
 
       @Override
       public void failed() {
@@ -62,8 +77,33 @@ public final class MicrometerJdbcExecutionTrace implements JdbcExecutionTrace {
       }
 
       @Override
+      public void failed(Throwable failure) {
+        failed();
+        // Query cancellation is not proof of a timeout: PostgreSQL uses the same SQLSTATE for
+        // explicit cancellation. Retain only this fixed classification, never the exception.
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+          if (cause instanceof SQLTimeoutException
+              || cause instanceof SQLException sql && "57014".equals(sql.getSQLState())) {
+            cancelled = true;
+            break;
+          }
+        }
+      }
+
+      @Override
       public void close() {
         sample.stop(timer(method, failed));
+        if (cancelled)
+          cancellations
+              .computeIfAbsent(
+                  method,
+                  key ->
+                      Counter.builder("plowshare.jdbc.cancellations")
+                          .description("JDBC executions ending in query cancellation or timeout")
+                          .tag("pool", pool)
+                          .tag("method", key)
+                          .register(registry))
+              .increment();
       }
     };
   }

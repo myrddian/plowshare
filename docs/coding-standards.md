@@ -361,11 +361,22 @@ defines the proposed implementation and its acceptance criteria.
 
 ### Bound SQL work by a completion deadline
 
+Individual request-serving queries must normally complete within **500 ms** and
+must never exceed **1 second**, including lock waits, execution and result
+materialization. These are per-query performance and completion requirements,
+not p95 allowances: a percentile or average below the limit does not excuse slow
+outliers. Investigate repeated 500 ms breaches; treat every 1-second breach as a
+defect requiring query, projection, index or contention work. Validate representative
+cardinality, cold and warm reads and concurrent load. Do not raise limits to hide
+regressions. Background maintenance and migrations may use separately configured,
+justified finite budgets as described below.
+
 Every request-serving database work unit must resolve within one configurable
 completion budget, with a **2-second default ceiling**. This is a generous failure
-boundary, not a latency target: ordinary queries, especially cache-backed paths,
-should finish substantially sooner. Fix duplicated work, query shape, projections
-and indexes rather than raising the limit to conceal slow SQL.
+boundary for the entire unit, not a per-query allowance: ordinary queries,
+especially cache-backed paths, should finish substantially sooner. Fix duplicated
+work, query shape, projections and indexes rather than raising the limit to conceal
+slow SQL.
 
 A work unit is the database phase that produces one repository operation's result
 or atomic effect, not an entire agent job spanning provider calls. Its monotonic
@@ -374,6 +385,16 @@ lock waits, every statement, result materialization and transaction completion.
 Nested database work inherits the earlier enclosing deadline. Multiple statements,
 cache misses, fallback SQL and permitted retries consume the remaining budget;
 none starts a new two-second allowance. Keep provider work outside this unit.
+Each statement uses the earlier of its one-second ceiling and the remaining
+operation deadline; a new query or retry never resets the shared budget.
+
+Track query duration distributions, maximum observed duration, counts exceeding
+500 ms and 1 second, failures and cancellations in Prometheus with bounded labels.
+Include failed/cancelled executions so a success-only latency graph cannot conceal
+timeouts. SQL text, parameters, query hashes and account/resource identities must
+not become metric labels. Separate database execution from admission/connection
+waits and result materialization; an execute-only timer does not prove the whole
+query or operation completed within its budget.
 
 Enforce the remaining budget at database/JDBC execution as well as caller waits.
 A future, socket or cache-wait timeout alone does not cancel SQL. At expiry stop
@@ -398,7 +419,8 @@ Use mocks for deadline propagation; select PostgreSQL tests only for behavior
 that requires actual cancellation, locks or transactional effects.
 
 **Current enforcement gap:** this is the required contract, not a claim that
-every existing SQL path already enforces it. `plowshare.projection-cache.timeout`
+every existing SQL path already enforces the 500 ms target, one-second query ceiling
+or shared two-second completion budget. `plowshare.projection-cache.timeout`
 defaults to two seconds and bounds read waits; an elected cache loader may outlive
 that caller budget. Some paths set their own SQL/transaction timeouts. Connection
 admission remains wait-only, and no universal two-second SQL cancellation default

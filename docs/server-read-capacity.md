@@ -1,7 +1,8 @@
 # Server read work and capacity
 
 The [SQL completion deadline rule](coding-standards.md#bound-sql-work-by-a-completion-deadline)
-requires a configurable two-second default database-work ceiling. The mechanisms
+requires a 500 ms query target, a one-second per-query worst-case ceiling and a
+configurable two-second default ceiling shared by the whole database work unit. The mechanisms
 below describe current implementation, including narrower wait budgets and some
 longer path-specific SQL limits; they do not establish universal two-second SQL
 cancellation. See the rule's enforcement-gap note before relying on that guarantee.

@@ -52,7 +52,7 @@ class JdbcExecutionTraceTest {
     verify(statement).executeBatch();
     verify(statement).close();
     verify(connection).close();
-    verify(span).failed();
+    verify(span).failed(failed);
     verify(span, times(2)).close();
     verify(trace).begin("SELECT ?", "executeQuery");
     verify(trace).begin("SELECT ?", "executeBatch");

@@ -33,6 +33,13 @@ connection acquisition, while the pool separately bounds physical database work.
 
 ## Rules
 
+- Individual request-serving queries must normally finish within **500 ms**, with
+  a **1-second worst-case ceiling** including locks, execution and materialization.
+  Use the earlier of that ceiling and the enclosing operation deadline. Repeated
+  500 ms breaches require investigation; any 1-second breach is a defect, not a
+  reason to increase the budget. Track distributions, threshold breaches and
+  cancellations in Prometheus with bounded labels; execute-only timing does not
+  cover result materialization or connection/admission waits.
 - Every request-serving database work unit has one configurable **2-second default
   completion ceiling**, covering admission, acquisition, locks, SQL and returned
   result/transaction completion. Nested queries, cache misses and retries share
