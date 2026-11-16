@@ -12,7 +12,7 @@ Application documents and durable work remain on the Plowshare server.
 | [home-assistant](home-assistant/README.md) | Home Assistant binding | `:plowshare-integration-home-assistant` |
 | [MCP](mcp/README.md) | Reusable outbound HTTP MCP ToolProvider with separate connections and credential contexts | `:plowshare-mcp-integration` |
 | [Discord](discord/README.md) | One service-authenticated Discord bot with fixed channel routing and optional Relay notifications | `:plowshare-discord-integration` |
-| [Computer control](computer-control/README.md) | Reusable SDK/Relay observation provider with isolated browser and permission-bound macOS capture; P0/P1 only | `:plowshare-computer-control` |
+| [Computer control](computer-control/README.md) | Reusable SDK/Relay observation provider, explicitly enabled P2 browser control and permission-bound macOS capture | `:plowshare-computer-control` |
 | [Network Privacy Watch](network-privacy/README.md) | Network privacy Application with a Python collector and web interface | `:plowshare-network-privacy` (definition tests); explicit `pythonCheck` |
 | [Excalibur](agile/README.md) | Separate lightweight agile Application with a Python CLI, web board, agent skill and Docker packaging | Explicit Python/Node checks; no core or Gradle module |
 
@@ -51,6 +51,8 @@ covers browser and full desktop control through an external Node Relay provider,
 including model image delivery, native backends, recovery and platform gaps.
 The proposed provider is reusable by SDK applications, with TUI and Desktop GUI
 as first-party local hosts rather than exclusive owners of the capability.
-The initial observation-only implementation is in
+The default observation and explicitly enabled browser-control implementation is in
 [`integrations/computer-control/`](computer-control/README.md); its
-[review graph](computer-control/IMPLEMENTATION.md) records live acceptance limits.
+[P0/P1](computer-control/IMPLEMENTATION.md) and
+[P2](computer-control/P2-IMPLEMENTATION.md) review graphs record independent
+approvals and live acceptance limits.

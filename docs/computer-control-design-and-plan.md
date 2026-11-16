@@ -1,11 +1,15 @@
 # Computer control and vision through Relay
 
 Status: design and phased implementation plan, 2026-11-16. The initial P0/P1
-observation-only provider and capture backends are being delivered under
+observation provider and capture backends are being delivered under
 [`integrations/computer-control/`](../integrations/computer-control/README.md).
 Its [review graph](../integrations/computer-control/IMPLEMENTATION.md) separates
 implemented/reviewed nodes from live acceptance. No input tools, client controls
-or platform extensions are supplied by this slice. Browser and full desktop
+or platform extensions are supplied by the initial P0/P1 slice. P2 browser
+implementation is tracked in the
+[P2 delivery graph](../integrations/computer-control/P2-IMPLEMENTATION.md), including
+explicit control opt-in, independent reviews and the continuing live-validation
+deferral. Browser and full desktop
 control remain intended deliverables; browser-first delivery is a sequence,
 not the final scope.
 

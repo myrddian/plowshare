@@ -5,11 +5,11 @@ agent through the public SDK and Relay `content/1` path. It is a reusable librar
 TUI, Desktop GUI and standalone hosts use the same provider and backends. It does
 not add a client-side agent runtime or require a core/server dependency.
 
-This P0/P1 slice exposes only `computer_targets`, `computer_open`,
-`computer_observe` and `computer_close`. It does not advertise pointer, keyboard,
-navigation or general computer-input tools. See the
+The default observation mode exposes `computer_targets`, `computer_open`,
+`computer_observe` and `computer_close`. P2 adds explicitly enabled browser
+control using the same SDK provider. See the
 [design](../../docs/computer-control-design-and-plan.md) and
-[review graph](IMPLEMENTATION.md) for the dependencies, independent approvals and
+[P0/P1](IMPLEMENTATION.md) and [P2](P2-IMPLEMENTATION.md) review graphs for dependencies, independent approvals and
 the distinction between code approval and live acceptance.
 Current live bootstrap/permission findings are in [platform gaps](PLATFORM-GAPS.md).
 
@@ -65,6 +65,116 @@ configure an authorized non-hosted Application provider binding and matching
 agent scope/grants through the supported owning workflow. Publishing a catalogue
 does not create that authority. For an interactive TUI/GUI scope use the original
 socket embedding API above instead of opening this executable's new connection.
+
+### Explicit browser control
+
+Use `createBrowserControlBackend` for control. The original `createBrowserBackend`
+remains observation-only. An embedded host supplies the controlled backend in
+both `backends` and `browserControls`, and its exact configured tool list in
+`browserTools`. Derive the journal identity from
+`computerDeclarations(prefix, budgets, browserTools)` before opening the journal;
+the provider rejects mismatched declarations or backend instances. TUI, GUI and
+standalone SDK hosts use this same composition and original authenticated socket.
+
+For the foreground host, replace the `browser` section in the configuration
+template below with an explicit `browserControl` section:
+
+```json
+{
+  "browserControl": {
+    "executablePath": "REPLACE_WITH_ABSOLUTE_BROWSER_EXECUTABLE",
+    "headless": true,
+    "ownershipDirectory": "REPLACE_WITH_PRIVATE_ABSOLUTE_OWNERSHIP_DIRECTORY",
+    "control": {
+      "enabled": true,
+      "tools": ["windows", "focus", "navigate", "pointer", "type", "key", "scroll"],
+      "allowedOrigins": ["REPLACE_WITH_ALLOWED_HTTP_OR_HTTPS_ORIGIN"]
+    },
+    "targets": [{
+      "targetId": "controlled_browser",
+      "label": "Controlled browser",
+      "url": "REPLACE_WITH_HTTP_OR_HTTPS_URL_IN_ALLOWED_ORIGIN",
+      "viewport": { "width": 1280, "height": 720 }
+    }]
+  },
+  "sessions": { "frameFreshMs": 5000, "idleMs": 60000 },
+  "budgets": { "browserObservationReserveMs": 3000 }
+}
+```
+
+This fragment is replace-before-use configuration. Retain the template's server,
+binding, credential, journal and catalogue fields. The ownership directory needs
+an existing real parent. Its target markers are independent of provider routing
+names and survive a crash; all cooperating hosts for the same configured browser
+domain must use the same directory. A fresh lease creates fresh isolated browser
+storage. A controlled backend refuses bare observation-only capture, preventing
+another injected provider from bypassing its lease.
+
+Give eligible agents exact grants for the selected full tool names, such as
+`computer_pointer`. Observation grants alone do not grant control. The local
+policy narrows server authority; it does not create a server approval workflow.
+`computer_targets` reports each controlled target's exact `browserTools` as well
+as its coarse capabilities. A wildcard includes future tools and is not read-only.
+
+| Tool | Reference and behavior |
+| --- | --- |
+| `computer_observe` | Session/generation/surface, optional `structured` (default true for controlled browsers) and an exact element `root` for a bounded subtree. Capture-only targets accept omitted structure or `structured:false`. |
+| `computer_windows` | Session/generation; bounded tabs with a fresh `windowsId`, readiness and quarantine state. |
+| `computer_focus` | Fresh `windowsId` plus returned `surfaceId`. A quarantined tab can be focused without claiming pixels. |
+| `computer_navigate` | URL plus `observation:{kind:"frame",frameId}` or `{kind:"window",windowsId,surfaceId}`. The window lane permits a new explicit navigation of a quarantined tab. |
+| `computer_pointer` | `action` is move/click/double_click with a point/element `target`, or drag with a `frameId` and timed points. Buttons default to left; modifiers default to none. |
+| `computer_type` | Exact element target, explicit insert/replace mode and bounded text. Both modes require that exact editable element to hold focus. |
+| `computer_key` | Fresh `frameId`, explicit `expectedFocus` element or observed body/null, one allowlisted key and modifiers. No exposed held keys or clipboard/file/browser-chrome shortcuts. |
+| `computer_scroll` | Fresh point/element target, nonzero deltas and explicit pixels/lines. Pixel deltas are bounded to 32768; line deltas to 128; actual CSS-pixel conversion is reported. |
+
+Every tool also requires `sessionId` and `generation`. A point target is
+`{kind:"point",frameId,x,y}` in integer image pixels; an element target is
+`{kind:"element",snapshotId,elementId}`. Copy returned references; owner identity,
+leases, state guards, transforms and deadlines are never model arguments. DOM
+replacement, document/focus/layout changes and stale snapshots cause refusal.
+There are no arbitrary selectors or JavaScript execution tools.
+
+Structured output is explicitly an approximate semantic DOM snapshot, bounded to
+200 nodes and the encoded metadata limit. It omits sensitive values and marks
+truncation; a subtree request uses a previously observed exact element. It is not
+a complete accessibility tree. Missing or omitted elements cannot be targeted.
+
+Pointer/type/key/scroll/navigation may carry a one-use `dialogDecision` with
+expected type, accept/dismiss decision and optional exact message. Prompt text is
+allowed only for an explicitly accepted prompt with the local type capability.
+This dialog action belongs to the invoking tool's authority; it does not invoke
+a separate server `computer_type` grant or approval. There is no permanent
+accept-all policy. Unexpected, mismatched or second dialogs fail-stop the owned
+context. Arbitrary interactive modal recovery is outside this initial envelope.
+
+Document navigation is checked before dispatch, including redirect destinations.
+An unambiguous initial popup request is aborted and the owned tab quarantined;
+a new explicit navigation is required after its guard is installed. Ambiguous
+multiple unbound popup requests fail-stop the context instead of guessing a tab.
+Child-frame navigation and
+targeting, file selection/downloads, clipboard, personal profiles and native or
+browser-chrome input are unsupported. Subresource networking is not a sandbox.
+
+Actions reserve image allowance, journal/result space and post-observation time
+before input. `DISPATCHED` means established input delivery; it does not prove a
+form was saved. `PARTIAL` reports a known delivered extent. Failed capture/upload
+after known input is a `COMPLETED` text-only result with a failed observation and
+retained dialog evidence. Unresolved delivery is `UNKNOWN`, text-only and fenced.
+Inspect original receipts and use a separate authorized observation when safe;
+do not repeat the input to recover a reply.
+
+Default action time is 10 seconds, including a 3-second reserved observation
+allowance and binary admission. Session controls default to 2 seconds. Configure
+larger finite budgets explicitly when justified; freshness is still checked
+against live document/layout/focus state. Idle expiry blocks effects exactly at
+the configured boundary; local cleanup maintenance is scheduled within one
+second plus event-loop delay and retains ownership until physical settlement.
+Local stop cancels intake and requests cleanup. Uncertain physical cleanup or a
+crash retains the durable target marker; never clear it based on age, a reconnect
+or a PID guess. After proven quiescence, marker removal can succeed before its
+parent-directory fsync fails. That instance stays fenced even if the path is
+already absent; another process may then safely acquire the quiet resource.
+This does not resolve the original action's outcome or authorize replay.
 
 This is a replace-before-use template, not runtime defaults. Every `REPLACE_`
 value must be replaced; the template intentionally fails validation as written.
@@ -147,8 +257,9 @@ Default control and observation budgets are 2 and 10 seconds, with a separate
 longest edge, constrained further by the server's actual limits. Captured geometry
 must match the server admission receipt before the frame can be used. Session and
 frame references bind account/project/run/provider/generation; stale or foreign
-references are refused. Capture intent consumes the provider's eight-images-per-run
-allowance even after uncertainty; reopening a session does not reset it.
+references are refused. Image-bearing observation/action intent consumes the
+provider's eight-images-per-run allowance even after uncertainty; reopening a
+session does not reset it. Recovery conservatively counts receipted attempts.
 
 ## Plowshare/model prerequisites
 

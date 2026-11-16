@@ -6,6 +6,8 @@ import { positiveBudget } from './deadline.ts';
 import { computerDeclarations } from './provider.ts';
 import { decodeBrowserBackendConfig } from './backends/browser.ts';
 import type { BrowserBackendConfig } from './backends/browser.ts';
+import { decodeBrowserControlBackendConfig } from './backends/browser-control-backend.ts';
+import type { BrowserControlBackendConfig } from './backends/browser-control-backend.ts';
 import { decodeMacOSBackendConfig } from './backends/macos.ts';
 import type { MacOSBackendConfig } from './backends/macos.ts';
 
@@ -18,6 +20,7 @@ export interface HostBudgets {
   readonly observeMs: number;
   readonly passMs: number;
   readonly cleanupMs: number;
+  readonly browserObservationReserveMs?: number;
 }
 export interface ComputerHostConfig {
   readonly version: 1;
@@ -33,7 +36,12 @@ export interface ComputerHostConfig {
     readonly renewalMs: number;
   };
   readonly browser?: BrowserBackendConfig;
+  readonly browserControl?: BrowserControlBackendConfig;
   readonly macos?: MacOSBackendConfig;
+  readonly sessions?: {
+    readonly frameFreshMs: number;
+    readonly idleMs: number;
+  };
 }
 
 function object(
@@ -81,7 +89,9 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     'pollIntervalMs',
     'catalogue',
     'browser',
+    'browserControl',
     'macos',
+    'sessions',
   ]);
   if (
     row['version'] !== 1 ||
@@ -153,6 +163,7 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
           'observeMs',
           'passMs',
           'cleanupMs',
+          'browserObservationReserveMs',
         ]);
   const budgets = Object.freeze({
     startupMs: budget(rawBudgets, 'startupMs', 30_000),
@@ -160,13 +171,18 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     observeMs: budget(rawBudgets, 'observeMs', 10_000),
     passMs: budget(rawBudgets, 'passMs', 30_000),
     cleanupMs: budget(rawBudgets, 'cleanupMs', 2000),
+    ...(rawBudgets['browserObservationReserveMs'] === undefined
+      ? {}
+      : {
+          browserObservationReserveMs: budget(
+            rawBudgets,
+            'browserObservationReserveMs',
+            3000,
+          ),
+        }),
   });
   const prefix =
     row['prefix'] === undefined ? 'computer_' : computerId(row['prefix']);
-  computerDeclarations(prefix, {
-    controlBudgetMs: budgets.controlMs,
-    observeBudgetMs: budgets.observeMs,
-  });
   const pollIntervalMs = row['pollIntervalMs'] ?? 250;
   if (
     typeof pollIntervalMs !== 'number' ||
@@ -201,13 +217,51 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     row['browser'] === undefined
       ? undefined
       : decodeBrowserBackendConfig(row['browser']);
+  const browserControl =
+    row['browserControl'] === undefined
+      ? undefined
+      : decodeBrowserControlBackendConfig(row['browserControl']);
   const macos =
     row['macos'] === undefined
       ? undefined
       : decodeMacOSBackendConfig(row['macos']);
-  if (browser === undefined && macos === undefined)
+  if (
+    browser === undefined &&
+    browserControl === undefined &&
+    macos === undefined
+  )
     throw new Error('Configure at least one computer backend');
-  const targets = [...(browser?.targets ?? []), ...(macos?.targets ?? [])];
+  computerDeclarations(
+    prefix,
+    {
+      controlBudgetMs: budgets.controlMs,
+      observeBudgetMs: budgets.observeMs,
+    },
+    browserControl?.control.tools ?? [],
+  );
+  if (
+    browserControl !== undefined &&
+    (budgets.browserObservationReserveMs ?? 3000) >= budgets.observeMs
+  )
+    throw new Error(
+      'Browser input and post-observation must fit inside the shared action budget',
+    );
+  const rawSessions =
+    row['sessions'] === undefined
+      ? undefined
+      : object(row['sessions'], ['frameFreshMs', 'idleMs']);
+  const sessions =
+    rawSessions === undefined
+      ? undefined
+      : Object.freeze({
+          frameFreshMs: budget(rawSessions, 'frameFreshMs', 5000),
+          idleMs: budget(rawSessions, 'idleMs', 60_000),
+        });
+  const targets = [
+    ...(browser?.targets ?? []),
+    ...(browserControl?.targets ?? []),
+    ...(macos?.targets ?? []),
+  ];
   if (
     targets.length > 32 ||
     new Set(targets.map((target) => target.targetId)).size !== targets.length
@@ -226,6 +280,8 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     pollIntervalMs,
     catalogue: Object.freeze({ leaseSeconds, renewalMs }),
     ...(browser === undefined ? {} : { browser }),
+    ...(browserControl === undefined ? {} : { browserControl }),
     ...(macos === undefined ? {} : { macos }),
+    ...(sessions === undefined ? {} : { sessions }),
   });
 }

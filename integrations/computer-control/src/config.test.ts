@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { decodeComputerHostConfig } from './config.ts';
+import { computerDeclarations } from './provider.ts';
 
 const source = {
   version: 1,
@@ -98,4 +99,95 @@ await test('project identity follows protocol scope rather than display names', 
     }).credential.kind,
     'saved',
   );
+});
+
+const controlled = {
+  ...source.browser,
+  ownershipDirectory: '/fixture/browser-ownership',
+  control: {
+    enabled: true,
+    tools: ['windows', 'focus', 'navigate', 'pointer', 'type', 'key', 'scroll'],
+    allowedOrigins: ['https://canvas.invalid'],
+  },
+};
+
+await test('controlled host configuration is explicit and round-trips without changing P1 defaults', () => {
+  const config = decodeComputerHostConfig({
+    ...source,
+    browser: undefined,
+    browserControl: controlled,
+    sessions: { frameFreshMs: 7000, idleMs: 90_000 },
+    budgets: { browserObservationReserveMs: 4000 },
+  });
+  assert.equal(config.browser, undefined);
+  assert.equal(config.browserControl?.control.enabled, true);
+  assert.equal(
+    config.browserControl?.ownershipDirectory,
+    '/fixture/browser-ownership',
+  );
+  assert.equal(config.sessions?.frameFreshMs, 7000);
+  assert.equal(config.budgets.browserObservationReserveMs, 4000);
+  assert.deepEqual(decodeComputerHostConfig(config), config);
+  assert.equal(
+    computerDeclarations(
+      config.prefix,
+      {
+        controlBudgetMs: config.budgets.controlMs,
+        observeBudgetMs: config.budgets.observeMs,
+      },
+      config.browserControl?.control.tools,
+    ).length,
+    11,
+  );
+  const old = decodeComputerHostConfig(source);
+  assert.equal(old.browserControl, undefined);
+  assert.equal(old.sessions, undefined);
+  assert.equal(computerDeclarations(old.prefix).length, 4);
+});
+
+await test('control policy, shared budgets and session bounds refuse unsafe config before startup', () => {
+  const valid = { ...source, browser: undefined, browserControl: controlled };
+  for (const delta of [
+    {
+      browserControl: {
+        ...controlled,
+        control: { ...controlled.control, enabled: false },
+      },
+    },
+    {
+      browserControl: {
+        ...controlled,
+        control: { ...controlled.control, tools: [] },
+      },
+    },
+    {
+      browserControl: {
+        ...controlled,
+        control: { ...controlled.control, tools: ['*'] },
+      },
+    },
+    {
+      browserControl: {
+        ...controlled,
+        control: {
+          ...controlled.control,
+          allowedOrigins: ['https://other.invalid'],
+        },
+      },
+    },
+    { browserControl: { ...controlled, ownershipDirectory: 'relative' } },
+    {
+      browserControl: {
+        ...controlled,
+        endpoint: 'https://unrequested.invalid',
+      },
+    },
+    { budgets: { browserObservationReserveMs: 10_000 } },
+    { budgets: { browserObservationReserveMs: null } },
+    { sessions: { frameFreshMs: 0 } },
+    { sessions: { idleMs: Infinity } },
+    { sessions: { trustModel: true } },
+    { browser: source.browser },
+  ])
+    assert.throws(() => decodeComputerHostConfig({ ...valid, ...delta }));
 });
