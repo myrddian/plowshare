@@ -1,0 +1,105 @@
+{
+  "kind": "publication_verification",
+  "created_at": "2026-11-17T10:37:39.840297+00:00",
+  "source_snapshot": "docs/reviews/home-assistant-publication-source.json",
+  "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23",
+  "source_files": 206,
+  "upstream_main": "abef4b119f7780d28e61cddd690e1e58dcff353a",
+  "command": "./gradlew check sdkCheck sdkPackageCheck",
+  "result": "PASS",
+  "duration": "5m21s",
+  "tasks": 153,
+  "log_sha256": "1232e483e40510518f777608751da7d6e7810f482fd2b71fa1951224bc252372",
+  "fresh_consumer": "build/sdk-consumer-sofo87rm",
+  "coverage": [
+    "repository non-database checks, formatting and integration boundary",
+    "source SDK compilers, lint, canonical DTO and real WebSocket conformance",
+    "fresh npm/wheel/NuGet/Go consumers and Java binary consumer",
+    "installed Node/Python/.NET/Go Ex WebSocket conformance",
+    "five-language authentication lifecycle conformance"
+  ],
+  "additional_checks": [
+    {
+      "command": "Assist scripts/check.py",
+      "result": "PASS",
+      "tests": 25,
+      "log_sha256": "b5a7db86387ad6f1787c976793d8edd85133958c09669f62bcc2cbe9b6867dbc"
+    },
+    {
+      "kind": "main integration focused checks",
+      "result": "PASS",
+      "tests": 127,
+      "log_sha256": "76fa79f6b71c1be837f45355ddb4e180b972f5d64fcbf2f6ce8a1ccaf3bc93cd"
+    },
+    {
+      "kind": "binary evidence policy and format checks",
+      "result": "PASS",
+      "tests": 4,
+      "log_sha256": "db2eca7f9d8c9135194bbfddca4e1dc5064180998547e0cdf4340df8ad49c3ed"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "build/distributions/Plowshare.Sdk.0.1.0.nupkg",
+      "bytes": 791362,
+      "sha256": "6140e4f18a24675196d90834aba4784095ad16401446ce194ef7865e5a501c47"
+    },
+    {
+      "path": "build/distributions/plowshare-client-node-0.1.0.tgz",
+      "bytes": 92966,
+      "sha256": "112fc500ea79b095cd2e6969a1279b43bc8bf75e9ebdb97191204258a371b285"
+    },
+    {
+      "path": "build/distributions/plowshare-client-ts-0.1.0.tgz",
+      "bytes": 356069,
+      "sha256": "adc7b61efe3c8877a29306c5081c5b8a0774ee48fbdd82932ce1c20d5b708e3f"
+    },
+    {
+      "path": "build/distributions/plowshare-sdk-go-0.1.0.tar.gz",
+      "bytes": 151151,
+      "sha256": "980599bab73209ccbf86a387afaf21262c85de10f2afe5e74b778acecc6197be"
+    },
+    {
+      "path": "build/distributions/plowshare_sdk-0.1.0-py3-none-any.whl",
+      "bytes": 172495,
+      "sha256": "7c40f8bfdcc3e9147e2e9c3ed54a717c077c762e8db569079b7e8913f3acbe92"
+    },
+    {
+      "path": "plowshare-protocol/build/libs/plowshare-protocol-0.1.0-SNAPSHOT-javadoc.jar",
+      "bytes": 2287194,
+      "sha256": "2b55cbe2910b7281b92f56471cedb984bac38da70b35b34271a16b38628717b0"
+    },
+    {
+      "path": "plowshare-protocol/build/libs/plowshare-protocol-0.1.0-SNAPSHOT-sources.jar",
+      "bytes": 231378,
+      "sha256": "511a46be7f17872a8be696cde9af9c0e731d5d8154c82dae9afd8df2bce56f52"
+    },
+    {
+      "path": "plowshare-protocol/build/libs/plowshare-protocol-0.1.0-SNAPSHOT.jar",
+      "bytes": 812338,
+      "sha256": "4872ca948e7b24f1e4a9a53e2c8a6b0e0ce3e689fecbac2cc06280aea65d80f4"
+    },
+    {
+      "path": "sdk/java/build/libs/plowshare-sdk-0.1.0-SNAPSHOT-javadoc.jar",
+      "bytes": 712739,
+      "sha256": "5964c675d4ce626ce2ad83904a80cea1aca766e3051d029a0d002016cfea1679"
+    },
+    {
+      "path": "sdk/java/build/libs/plowshare-sdk-0.1.0-SNAPSHOT-sources.jar",
+      "bytes": 103021,
+      "sha256": "f0a9a201474690e56e2a4d6786cfde8da8e624902ce94333ef2f3a1f9e572046"
+    },
+    {
+      "path": "sdk/java/build/libs/plowshare-sdk-0.1.0-SNAPSHOT.jar",
+      "bytes": 398158,
+      "sha256": "2f05ed142a5fda6d304f3a1a18ced76f89adf14ff67b3ad71318ceb6c79b6582"
+    }
+  ],
+  "publication_scan": {
+    "result": "PASS",
+    "files": 355,
+    "gzip_contents_included": true,
+    "synthetic_token_fixtures": 3
+  },
+  "limits": "Local artifacts and fixture tests only. No real database rerun, live HA/model/device validation, target-branch merge or deployment. Earlier selected PostgreSQL evidence remains scoped to its frozen candidates. All prompt-dependent gates remain unsatisfied."
+}

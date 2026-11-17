@@ -18,6 +18,7 @@ import { validateDeploymentReply } from './application-deployments.ts';
 import { validateSwarmReply } from './swarm-types.ts';
 import { validateRelayReply } from './relay.ts';
 import {
+  conversationReply,
   validateEntryMetadata,
   validateFileStoreReplies,
 } from './conversation-replies.ts';
@@ -260,6 +261,28 @@ export function decodeReply<K extends keyof Replies>(
     false,
     type,
   ) as unknown as Replies[K];
+  if (
+    type === 'agent.run.ex' &&
+    (typeof decoded !== 'object' ||
+      decoded === null ||
+      !('id' in decoded) ||
+      typeof decoded.id !== 'string' ||
+      decoded.id.trim() === '' ||
+      !('conversation' in decoded) ||
+      typeof decoded.conversation !== 'string' ||
+      !decoded.conversation.startsWith('cnv_'))
+  )
+    throw new Error(
+      'External run reply needs a job identity and resolved internal conversation',
+    );
+  if (
+    type === 'conversation.open.ex' &&
+    conversationReply('conversation.open.ex', {
+      code: 'OK',
+      payload: decoded,
+    }) === undefined
+  )
+    throw new Error('Invalid external conversation view');
   if (type === 'filestore.list' && !fileStoreCatalogCheck(decoded))
     throw new Error('Invalid FileStore catalogue');
   if (

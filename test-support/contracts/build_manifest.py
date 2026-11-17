@@ -283,7 +283,7 @@ def inventory():
     response_families = {}
     for family, name, expected_types, expected_operations in [
         ("administrative", "AdministrativeReplies", 41, 41),
-        ("conversation", "ConversationReplies", 42, 86),
+        ("conversation", "ConversationReplies", 42, 87),
         ("inspection", "InspectionReplies", 14, 8),
         ("information", "InformationReplies", 76, 73),
         ("messaging", "MessagingReplies", 5, 9),

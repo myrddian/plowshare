@@ -1,15 +1,27 @@
 package io.aeyer.plowshare.integrations;
 
-import io.aeyer.plowshare.integrations.IntegrationContracts.*;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Edge;
+import io.aeyer.plowshare.integrations.IntegrationContracts.EventEnvelope;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Gap;
+import io.aeyer.plowshare.integrations.IntegrationContracts.Hold;
+import io.aeyer.plowshare.integrations.IntegrationContracts.RouteState;
+import io.aeyer.plowshare.integrations.IntegrationContracts.StateChanged;
 import io.aeyer.plowshare.protocol.IntegrationPayload.Reading;
-import java.util.*;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
-/** Pure route policy. Held intervals belong to one runtime session and adapter epoch. */
+/**
+ * Pure selected-state route policy. The retained {@code high} bit means that either the numeric or
+ * exact-state predicate matches. Held intervals belong to one runtime session and adapter epoch.
+ */
 final class ThresholdPolicy {
   private ThresholdPolicy() {}
 
   static boolean high(Configuration.Route route, Reading reading) {
     if (reading == null || reading.state() == null) return false;
+    if (route.whenState() != null) return route.whenState().equals(reading.state());
     try {
       double value = Double.parseDouble(reading.state());
       return Double.isFinite(value)

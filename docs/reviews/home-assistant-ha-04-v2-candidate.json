@@ -1,0 +1,62 @@
+{
+  "node": "HA-04",
+  "candidate_id": "ha-ha-04-v2",
+  "created_at": "2026-11-17T02:16:09.434990+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_events_implementer",
+  "reviewer_agent_id": "/root/ha_action_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-ha-04-observation-safety-implementation.md": "b583c9af2fda9394525be35e67e131da2d5a70d3d7edc0a893b26776216e6879",
+    "docs/reviews/home-assistant-ha-04-v2-state.json": "bffbd6a1ca2ced4231cceb3d05891b98841ce64963a226fef837e4f6031b8240",
+    "integrations/home-assistant/ACTION-PROVIDER.md": "b8bc91245c793865fe3d11ac235d9702675d130cc0d16b0c6ae58fd020901569",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionPolicy.java": "c1a3da9d5d6408848993bbbd082f1ca901f74ef92d12c56122ad15ac223e505b",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantControlServices.java": "37171d5e34242e48f1cd13a939bbd249d23d54c6972a55f2aecb3e8250071df4",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantControlServicesTest.java": "a39bd9c433c6c048a4c43a7ef1a9a015937b94237f871965581f20075683b804"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-ha-04-v2-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-04-v2.diff.gz",
+    "sha256": "d78391ae81cb75b2af0cb8c2b2c10ce9bd8c3207534003136f8706d0d69f1f89",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "HA-03": {
+      "id": "ha-ha-03-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-03-v2-candidate.json",
+      "manifest_sha256": "8d29b5b267b8fb298b1a24d9e66e2c262b2f822981c0a3eb1838d5837bf99424"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Current90 tests/13classes incl24 new action cases and selected HA01/02/03 regressions PASS14s; format and separate formatCheck PASS. Exact17 paths frozen. Affected3 HA02 seams undergoing independent v3 reapproval; HA04 closure requires that approval too. No legacy full suite/live effects/physical result claim."
+    },
+    {
+      "kind": "supplemental_regression_check",
+      "at": "2026-11-17T01:56:33.722162+00:00",
+      "result": "PASS",
+      "tests": 12,
+      "classes": [
+        "HomeAssistantAdapterTest",
+        "PipelineTest"
+      ],
+      "duration": "15s",
+      "log": "/private/tmp/ha04-legacy-regression-check.log",
+      "note": "10 manual-adapter fake native cases and 2 parameterized fake protocol/JS pipeline cases, exact frozen HA source unchanged. No real database, live model or device calls."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_action_reviewer",
+      "verdict": "APPROVE",
+      "candidate_id": "ha-ha-04-v1",
+      "manifest_sha256": "6e5eda89cd4b86fe566662981fc4328a9828e0d95cd2c97c2fc76addfc074f0a",
+      "report_path": "docs/reviews/home-assistant-ha-04-review.md",
+      "report_sha256": "8d1262239b3ac8fb963b96877cc96f91edff306abd49f0b8df010dce45f1c948"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "HA09 narrow named-control inference-service refusal, no override; current125 scoped runtime+HA cases PASS49s; globalformat4s and separateformatCheck4s. Only ActionPolicy/new pureguard/test/actionguide/newaffectednote. Manual/readdiscovery unchanged, no live calls. Independent reapproval pending."
+    }
+  ]
+}

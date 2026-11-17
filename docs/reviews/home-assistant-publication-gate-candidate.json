@@ -1,0 +1,23 @@
+{
+  "kind": "publication_gate_correction",
+  "implementers": [
+    "/root/ha_publication_gate_implementer",
+    "/root"
+  ],
+  "files": {
+    "integrations/home-assistant/assist/custom_components/plowshare/availability.py": "9ff0dd3d8b44d56e82382381b84713ed6ad6afa3b4dba5d2e0c3105f353dd398",
+    "integrations/home-assistant/assist/custom_components/plowshare/__init__.py": "239eeb59e80b945104496ef0cc629565ba4ad74f72077b5e58e8ca17a6255bf7",
+    "integrations/home-assistant/assist/custom_components/plowshare/config_flow.py": "f3b46ad300b8b28a323b52c8df139c3e83032dd3e4f5266a29e9e174c2e041a9",
+    "integrations/home-assistant/assist/custom_components/plowshare/strings.json": "7a62c843f41a69c6f5ccca1b4e49638bdc3aa381f386d394ff5bb2ed85d8f658",
+    "integrations/home-assistant/assist/custom_components/plowshare/translations/en.json": "7a62c843f41a69c6f5ccca1b4e49638bdc3aa381f386d394ff5bb2ed85d8f658",
+    "integrations/home-assistant/assist/scripts/package.py": "9e44e4128ba7188fa568bfa61cf04ac8573dd7f9af4147342f7c65d5476db355",
+    "integrations/home-assistant/assist/tests/support.py": "f8a7292ed424dab20b80df3b873df71af5f7e7115faf82da0c8d43ccb5cb7152",
+    "integrations/home-assistant/assist/tests/test_home_assistant.py": "470b7abb999b06511f70fb1af845b4513dcadf42665cd41ab2b293743e46afff",
+    "integrations/home-assistant/assist/README.md": "1a7dfeff4c56ea662d510353b0987c7ad8e0bbddf471a27c4dafded48e92d295",
+    "integrations/home-assistant/README.md": "ca3a64d2b1ce958328a61b4d39f5312dd42617d8e73bcb1fd9126bb6ee4c9778",
+    ".agents/guides/integrations.md": "fea9e9a9dd2397892f0d60f4af1abbb013501b163d67a3a92cbe1d556b59720d"
+  },
+  "implementation_report": "docs/reviews/home-assistant-publication-gate-implementation.md",
+  "implementation_report_sha256": "8ebb78e809e6921e93e9d16ab058c476c16a0a7c7841399006a0c42028788e81",
+  "prompt_gate_satisfied": false
+}

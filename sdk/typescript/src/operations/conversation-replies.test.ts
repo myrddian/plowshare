@@ -156,6 +156,12 @@ const asked = (type: ConversationOperation): Request => {
       text: '{}',
       revision: 'a'.repeat(64),
     });
+  if (type === 'conversation.open.ex')
+    return request(type, {
+      project: 'repo',
+      source: 'client',
+      externalConversation: 'opaque',
+    });
   if (type === 'conversation.open' || type === 'conversation.list')
     return request(type, { project: 'repo' });
   if (type === 'conversation.latest')

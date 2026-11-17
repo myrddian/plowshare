@@ -1,0 +1,49 @@
+{
+  "node": "PLAN-00",
+  "candidate_id": "ha-plan-00-v2",
+  "created_at": "2026-11-16T23:11:29.042703+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_sql_budget_implementer",
+  "reviewer_agent_id": "/root/ha_plan_reviewer",
+  "files": {
+    "docs/home-assistant-delivery-plan.md": "5fc474f2d9f24ce9e7b0dc4919fe7a41ab99bcf53155682be345dbf8a32bea91",
+    "docs/reviews/home-assistant-ex-sql-budget-design.md": "da6a8e49bd3f92b5cb71d0a2bd9b96bfa20b3ce26732c6ee0cba57f21d257d18",
+    "docs/reviews/home-assistant-plan-00-v2-state.json": "fc2b50acc53578174fc746edd15916387d0b63d309bf5c91ce20afabdd1b3bc5"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-plan-00-v2-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-plan-00-v2.diff.gz",
+    "sha256": "d61c026ab409d7e5564a4c707f36c03f214f5f20d350ac886c3630742611cca3",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {},
+  "evidence": [
+    {
+      "kind": "coordinator_structural_validation",
+      "checks": [
+        "23 nodes and 40 dependency edges",
+        "acyclic dependencies",
+        "distinct implementer/reviewer roles",
+        "valid gate references",
+        "all feature nodes planned with no claimed completion",
+        "local links/fences/whitespace",
+        "git diff --check"
+      ],
+      "result": "PASS"
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_plan_reviewer",
+      "verdict": "APPROVE",
+      "candidate_id": "ha-plan-00-v1",
+      "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
+      "report_path": "docs/reviews/home-assistant-delivery-plan-review.md",
+      "report_sha256": "5542608b92a045d06a9f4c61836e239f69e7ab498d2a53c4c124a56afe445673"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "Amended graph 24nodes/41edges acyclic; new CORE03A before CORE03 for necessary scopedSQL admission bounds. Plan-only no budgetruntime code yet. Warm authorizedcachehits/sharedexistingfills preserved, requestownedmiss cancellation, no unscopedbehavior or publicAPI/prompt changes. Rootledger matches graph; exact independent review before dispatch."
+    }
+  ]
+}

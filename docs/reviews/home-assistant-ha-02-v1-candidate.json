@@ -1,0 +1,39 @@
+{
+  "node": "HA-02",
+  "candidate_id": "ha-ha-02-v1",
+  "created_at": "2026-11-16T22:26:21.077776+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_reads_implementer",
+  "reviewer_agent_id": "/root/ha_reads_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-ha-02-implementation.md": "b2cd526d7f8981f55da956bda71a9fc9175c383ebb1394b322fd233d6a1ea992",
+    "docs/reviews/home-assistant-ha-02-v1-state.json": "2b662820f2c40f6d0a5b0ae58679b7861eb6f8ea6a66e62572961d421b9cd83a",
+    "integrations/home-assistant/RESOURCE-CONTRACTS.md": "9a71ac880e353d1856cbdc5a770372ae311c853ed8360a4a688b2aeae0b5af91",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapter.java": "4254a76094ea29374a0832fe29960e6e9717f16b873d6f1f5158797327101fb9",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantDiscoveryPolicy.java": "05828ef6f9dd4e4168fa03ff4852117a5d0111d7057f32ef6809a529f7f769be",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCatalog.java": "8349e14cdfa47752ab438fe8d1c7ece491365faa1aa1bc204e48386223f8b452",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceSource.java": "17940d584e64aaa0fd2940bcf8a6be5c0e22f1bfec28edf3163faa9ce0f36623",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantWire.java": "2bf3d3d5c19c4e9da7ca2cd911b8b30538c0845c89d246e85b6ab1084ebcd34e",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantNativeResourcesTest.java": "15ed225e175e9b64c9afce076d26c4bcd7db1b7654ab43a8c61f92f07f18491e",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCatalogTest.java": "465be766d24dbb571054c4eb1da859cc79daac238383fd44443823d37352c23c"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-ha-02-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-02-v1.diff",
+    "sha256": "dec0e414b8efdea7e93f05c70e78b419bd9ca2c5a9f8f1b35197e59e12145698",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "HA-01": {
+      "id": "ha-ha-01-v3",
+      "manifest_path": "docs/reviews/home-assistant-ha-01-v3-candidate.json",
+      "manifest_sha256": "30815681201017bc26558e2d2eb3888357b8a23185e74d4c61c2173fdcd8a6ac"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "37 focused HA cases passed (10 contracts,8 catalogue,9 native,10 legacy adapter), zero skipped/errors/failures; global format and formatCheck passed. HA01v3 accessor independently accepted. Full non-DB check running on stable source. No live model/device/deployment claim."
+    }
+  ]
+}

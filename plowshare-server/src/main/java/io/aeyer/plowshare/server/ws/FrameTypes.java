@@ -247,6 +247,9 @@ public final class FrameTypes {
    */
   public static final String CONVERSATION_OPEN = "conversation.open";
 
+  /** Account-local get-or-open alias, preserving ordinary conversation lifecycle. */
+  public static final String CONVERSATION_OPEN_EX = "conversation.open.ex";
+
   /**
    * What is open in one tier — {@code GET /v1/conversations}, which is what a console opens on.
    * {@link ConversationListHandler} is what claims it.
@@ -421,6 +424,9 @@ public final class FrameTypes {
    * handed an {@link Asking} and never a {@code DefinitionResolver.Caller}.
    */
   public static final String AGENT_RUN = "agent.run";
+
+  /** Resolve an existing account-local alias and use ordinary run admission. */
+  public static final String AGENT_RUN_EX = "agent.run.ex";
 
   /**
    * Start a curator pass over one project — {@code POST /v1/curate}, the second of this area's two

@@ -14,6 +14,8 @@ public final class ProjectionCacheStatistics {
     VERSIONED_HIT,
     LOADED_RETURN,
     LOAD,
+    /** Request-owned cold read which does not create/cancel a shared cache fill. */
+    SQL_PRIVATE_MISS,
     BYPASS_NOT_READY,
     BYPASS_NOT_CACHEABLE,
     BYPASS_INELIGIBLE,

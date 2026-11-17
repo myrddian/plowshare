@@ -1803,5 +1803,21 @@
       "through": "1",
       "gap": false
     }
+  },
+  "conversation.open.ex": {
+    "code": "OK",
+    "payload": {
+      "id": "c",
+      "project": null,
+      "maxModelCalls": null,
+      "modelCallsSpent": 4,
+      "maxTurns": null,
+      "noTurnCap": true,
+      "noBudget": true,
+      "title": null,
+      "future": {
+        "preserved": true
+      }
+    }
   }
 }

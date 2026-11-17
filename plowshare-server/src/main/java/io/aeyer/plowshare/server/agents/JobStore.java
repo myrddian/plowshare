@@ -873,6 +873,10 @@ public final class JobStore
     Objects.requireNonNull(ended, "ended");
     Objects.requireNonNull(userPrompt, "userPrompt");
     Objects.requireNonNull(home, "home");
+    // Ex-only linearization of caller admission, before causal reservation, operation admission or
+    // durable start linkage. An admitted job keeps the ordinary asynchronous lifecycle even when
+    // its worker starts after the caller deadline. Never add a post-metadata timeout rejection.
+    ExternalConversationAdmission.requireAdmission();
     RelayCausation transcriptSource = transcript.causation();
     if (transcriptSource != null && causation != null && !transcriptSource.equals(causation))
       throw new IllegalArgumentException("Job source differs from its reserved transcript");

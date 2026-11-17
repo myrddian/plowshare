@@ -1,0 +1,30 @@
+{
+  "candidate_id": "ha-pr-main-integration-v1",
+  "created_at": "2026-11-17T10:26:05.344086+00:00",
+  "base_commit": "f75d870fca6b680b536d704e9a0814f1dcadc863",
+  "upstream_main": "abef4b11",
+  "implementer_agent_id": "/root/ha_pr_integration_implementer",
+  "reviewer_agent_id": "/root/ha_pr_integration_reviewer",
+  "files": {
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/reads/JdbcReadDeadline.java": "0d0bea8a6ac7b4787aa0f64e34a19c251de2cff27841b5f94a05d16a4e7ee70f",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/ScopedSqlDataSource.java": "da13c0575de81369e0381087e217e3fe8604c5d2a2f700252d974d0cda496648",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudget.java": "8fc178c773633577da15e096548f8542403371a2019d5d39fb74b3ea45ed2c81",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java": "8dc517897404e8f4af544e925d11c347b64e99d39e3596fb82fd9befdeb209c8",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/agents/ExternalConversationServiceTest.java": "070113cc930a4ec4d1248b547f641b405fc42be0d616c0c7629474dc8f7f1458",
+    "docs/reviews/home-assistant-pr-main-integration-implementation.md": "21945aef33a80b0d675561b53ec09b0114fc4bf4aad134bf0a7d748ba0e75848"
+  },
+  "evidence": [
+    {
+      "kind": "focused_non_database_verification",
+      "result": "PASS",
+      "duration": "19s",
+      "classes": 12,
+      "tests": 127,
+      "failures": 0,
+      "command": "JAVA_HOME=<Java 21 installation> ./gradlew format formatCheck :plowshare-server:test --tests 'io.aeyer.plowshare.server.reads.JdbcReadDeadlineTest' --tests 'io.aeyer.plowshare.server.pool.ScopedSqlWorkBudgetTest' --tests 'io.aeyer.plowshare.server.pool.SqlWorkBudgetCompositionTest' --tests 'io.aeyer.plowshare.server.archive.ArchiveUnavailableTest' --tests 'io.aeyer.plowshare.server.archive.ConversationSearchDeadlineTest' --tests 'io.aeyer.plowshare.server.archive.ConversationSearchTest' --tests 'io.aeyer.plowshare.server.archive.PassageRankingTest' --tests 'io.aeyer.plowshare.server.agents.ExternalConversationServiceTest' --tests 'io.aeyer.plowshare.server.access.ExternalConversationProjectAdmissionTest' --tests 'io.aeyer.plowshare.server.ws.ExternalConversationRoutingBudgetTest' --tests 'io.aeyer.plowshare.server.ws.ExternalConversationCompletionChannelTest' --tests 'io.aeyer.plowshare.server.ws.ExternalConversationTargetDisclosureTest'",
+      "local_log": "/private/tmp/ha-pr-integration-focused-check.log",
+      "local_log_sha256": "76fa79f6b71c1be837f45355ddb4e180b972f5d64fcbf2f6ce8a1ccaf3bc93cd"
+    }
+  ],
+  "scope": "Owned JDBC timeout composition after main merge; no SDK/schema changes; all HA prompt-dependent gates retained. Full repository/SDK publication checks owned by coordinator."
+}

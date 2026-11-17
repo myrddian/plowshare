@@ -1,0 +1,45 @@
+{
+  "title": "Plowshare",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect your house agent",
+        "description": "Use a project-scoped Plowshare service token. Everyone using this assistant exercises that service account’s configured house permissions. Device actions use your existing Home Assistant adapter.",
+        "data": {
+          "url": "Plowshare server origin",
+          "api_key": "Plowshare project-scoped service token",
+          "project": "House Application name",
+          "agent": "House agent name",
+          "allow_anonymous": "Allow voice satellites without a Home Assistant user",
+          "request_timeout": "Request deadline (seconds)",
+          "response_timeout": "Voice response wait (seconds)",
+          "request_topic": "House adapter request topic"
+        }
+      },
+      "reconfigure": {
+        "title": "Update house assistant connection",
+        "description": "Rotate the service token or adjust timeouts. For a different server, Application or agent, create another integration.",
+        "data": {
+          "url": "Plowshare server origin",
+          "api_key": "Plowshare project-scoped service token",
+          "project": "House Application name",
+          "agent": "House agent name",
+          "allow_anonymous": "Allow voice satellites without a Home Assistant user",
+          "request_timeout": "Request deadline (seconds)",
+          "response_timeout": "Voice response wait (seconds)",
+          "request_topic": "House adapter request topic"
+        }
+      }
+    },
+    "error": {
+      "invalid_config": "Check the server origin, Application, agent and timeout values. The agent must be available to this credential.",
+      "invalid_auth": "Plowshare refused access. Check the service credential and project grants.",
+      "cannot_connect": "Unable to connect to Plowshare within the configured deadline."
+    },
+    "abort": {
+      "prompt_fidelity_unavailable": "Plowshare Assist is unavailable until the public SDK can preserve Home Assistant’s rendered system prompt and context in the required system role.",
+      "already_configured": "This house agent is already configured.",
+      "reconfigure_successful": "House assistant configuration updated."
+    }
+  }
+}

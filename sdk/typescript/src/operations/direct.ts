@@ -216,6 +216,7 @@ export const JOB_SUBMISSIONS: readonly Operation[] = [
   'memory.digest',
   'agent.curate',
   'agent.run',
+  'agent.run.ex',
   'conversation.resume',
   'document.ask',
 ];
@@ -305,7 +306,9 @@ export async function dispatch(
   // selection here too, before delegating lifetime and I/O to their transport.
   const checked = [
     'agent.run',
+    'agent.run.ex',
     'conversation.open',
+    'conversation.open.ex',
     'conversation.list',
     'conversation.latest',
     'orchestration.start',
@@ -322,6 +325,13 @@ export async function dispatch(
 
 /** The same checked boundary for frontends that already own request lifetime and WS I/O. */
 export function resultOf(asked: Request, outcome: Outcome): Result {
+  if (asked.type === 'conversation.open.ex' && outcome.code !== 'OK')
+    return {
+      kind: ['CREATED', 'ACCEPTED', 'NO_CONTENT'].includes(outcome.code)
+        ? 'invalid-response'
+        : 'refused',
+      outcome,
+    };
   if (
     asked.type === 'acting.context.open' ||
     asked.type === 'acting.context.close' ||
@@ -641,6 +651,11 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
       return { kind: 'invalid-response', outcome };
     const job = acceptedJobOf(outcome)?.id;
     const conversation = body?.['conversation'];
+    if (
+      asked.type === 'agent.run.ex' &&
+      (typeof conversation !== 'string' || !conversation.startsWith('cnv_'))
+    )
+      return { kind: 'invalid-response', outcome, ...(job ? { job } : {}) };
     if (
       asked.type === 'agent.run' &&
       ((asked.payload.newConversation === true &&

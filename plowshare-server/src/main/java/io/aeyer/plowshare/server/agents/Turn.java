@@ -404,6 +404,42 @@ public final class Turn {
   }
 
   /**
+   * Resolved Ex turns authorize the current row after this owner reloads and claims it, before any
+   * allowance access or change. The ordinary speakable/lifecycle guard cannot be replaced by the
+   * caller's additional work check. A refusal follows the same claim cleanup as every other turn.
+   */
+  String speakResolved(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      Speaker speaker,
+      Consumer<Outcome> alsoEnded,
+      Consumer<ConversationRecord> currentWork) {
+    Objects.requireNonNull(definition, "definition");
+    Objects.requireNonNull(speaker, "speaker");
+    Objects.requireNonNull(alsoEnded, "alsoEnded");
+    Objects.requireNonNull(currentWork, "currentWork");
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        maxModelCalls,
+        alsoEnded,
+        record -> {
+          requireSpeakable(record);
+          currentWork.accept(record);
+        },
+        true,
+        speaker,
+        null);
+  }
+
+  /**
    * The first turn of a run inside a confined child Application (ADR 0042): the contained door.
    *
    * <h2>Why a second door and not {@link #requireSpeakable} widened</h2>

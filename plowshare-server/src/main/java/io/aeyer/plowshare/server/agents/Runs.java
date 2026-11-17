@@ -1,16 +1,20 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.api.ConversationsProperties;
 import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.embedding.SpendingPolicy;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.requests.RequestedAllowanceRaise;
 import io.aeyer.plowshare.server.requests.RequestedHome;
 import io.aeyer.plowshare.server.requests.RequestedSession;
 import io.aeyer.plowshare.server.requests.RequestedTask;
 import io.aeyer.plowshare.server.requests.RequestedTurnCap;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,12 +58,12 @@ import org.springframework.stereotype.Service;
  * implements {@link Shown} but a test recorder, which is the other thing the seam is for.
  */
 @Service
-public final class Runs {
+public final class Runs implements ConversationRuns {
 
-  private io.aeyer.plowshare.server.personal.PersonalSpaces personal;
+  private PersonalSpaces personal;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  public void usePersonalSpaces(io.aeyer.plowshare.server.personal.PersonalSpaces personal) {
+  @Autowired
+  public void usePersonalSpaces(PersonalSpaces personal) {
     this.personal = personal;
   }
 
@@ -224,12 +228,10 @@ public final class Runs {
      *     of widening the predicate
      */
     public record Contained(
-        io.aeyer.plowshare.server.access.OperationAuthority.Admission admission,
-        Budget budget,
-        String workProject) {
+        OperationAuthority.Admission admission, Budget budget, String workProject) {
       public Contained {
-        java.util.Objects.requireNonNull(admission, "admission");
-        java.util.Objects.requireNonNull(budget, "budget");
+        Objects.requireNonNull(admission, "admission");
+        Objects.requireNonNull(budget, "budget");
         if (workProject == null || workProject.isBlank())
           throw new IllegalArgumentException(
               "A contained run names the project its work authority is proved against");
@@ -416,6 +418,22 @@ public final class Runs {
    *     existing conversation or is not positive
    */
   public Started start(Ask ask, Shown shown) {
+    return start(ask, shown, null);
+  }
+
+  @Override
+  public Started startResolved(Ask ask, Shown shown, ConversationRuns.Resolved resolved) {
+    Objects.requireNonNull(resolved);
+    if (!resolved.owner().equals(ask.callerHandle())
+        || !resolved.conversation().id().equals(ask.conversation())
+        || ask.project() != null
+        || Boolean.TRUE.equals(ask.newConversation())
+        || ask.contained() != null)
+      throw new CallerFault("Resolved conversation routing is incompatible with this request");
+    return start(ask, shown, resolved);
+  }
+
+  private Started start(Ask ask, Shown shown, ConversationRuns.Resolved resolved) {
     // Named first, ahead of every other reading of the body: the resolved
     // set an unknown-agent refusal lists, and the run itself once one is
     // found, both have to agree with what this session and this project
@@ -437,7 +455,10 @@ public final class Runs {
             : ask.project();
     if (personal != null
         && ask.conversation() != null
-        && callers.homeOfConversation(ask.conversation()).isGlobal()) {
+        && (resolved == null
+                ? callers.homeOfConversation(ask.conversation())
+                : resolved.conversation().home())
+            .isGlobal()) {
       throw new CallerFault(
           "Global holds shared setup and resources; conversations run in Personal or a project");
     }
@@ -446,7 +467,9 @@ public final class Runs {
     DefinitionResolver.Caller caller =
         ask.conversation() == null
             ? callers.callerFor(runProject, session, ask.callerHandle())
-            : callers.callerForConversation(ask.conversation(), session);
+            : resolved == null
+                ? callers.callerForConversation(ask.conversation(), session)
+                : new DefinitionResolver.Caller(resolved.projectId(), session, resolved.owner());
     AgentDefinition definition = callers.requireAgent(ask.agent(), caller);
     String task = RequestedTask.in(ask.task(), definition.name());
     // The narrowest of the three levels a turn cap is decided at. Null for a
@@ -473,8 +496,7 @@ public final class Runs {
             ask.contained() == null
                 ? conversations.open(
                     home,
-                    io.aeyer.plowshare.server.embedding.SpendingPolicy.budget(
-                        conversationProperties.defaultBudgetLimit()),
+                    SpendingPolicy.budget(conversationProperties.defaultBudgetLimit()),
                     turnCap,
                     ask.callerHandle())
                 : conversations.openContained(
@@ -546,8 +568,31 @@ public final class Runs {
     }
     // Work authority over this conversation before anything is spoken or raised: the raise rides
     // on the utterance and is admitted by exactly the check that admits speaking (ADR 0069).
-    callers.requireConversationWork(ask.conversation(), ask.callerHandle());
+    if (resolved == null) {
+      callers.requireConversationWork(ask.conversation(), ask.callerHandle());
+    }
     Speaker speaker = ask.speaker() == null ? Speaker.person(null) : ask.speaker();
+    if (resolved != null) {
+      // V274's alias-root constraint fixes this conversation's durable project identity. Reuse
+      // Turn's current row, not the pre-definition Home name, to authorize that same target after
+      // definition loading and before its allowance can change. Project names may have been reused.
+      String id =
+          turns.speakResolved(
+              ask.conversation(),
+              definition,
+              task,
+              session,
+              turnCap,
+              maxModelCalls,
+              speaker,
+              outcome -> {},
+              current -> {
+                if (current.home().isGlobal())
+                  throw new CallerFault("The external conversation target is unavailable");
+                callers.requireWork(current.home().project(), ask.callerHandle());
+              });
+      return new Started(id, definition.name(), ask.conversation());
+    }
     // An utterance naming no total takes exactly the door it always took; only a raise reaches the
     // overload that applies one.
     String id =

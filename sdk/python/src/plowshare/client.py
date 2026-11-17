@@ -306,6 +306,21 @@ class Client:
             timeout=timeout,
             wait_for_capacity=wait_for_capacity,
         )
+        # Ex replies distinguish a resolved conversation from accepted durable work.
+        # A different success code is uncertain completion, never permission to replay.
+        expected_ex_code = {
+            "conversation.open.ex": "OK",
+            "agent.run.ex": "ACCEPTED",
+        }.get(operation)
+        if (
+            expected_ex_code is not None
+            and outcome.code in {"OK", "CREATED", "ACCEPTED", "NO_CONTENT"}
+            and outcome.code != expected_ex_code
+        ):
+            raise TransportError(
+                Delivery.INVALID_RESPONSE,
+                "Unexpected external conversation outcome; completion is unknown",
+            )
         if outcome.code in {
             "OK",
             "CREATED",

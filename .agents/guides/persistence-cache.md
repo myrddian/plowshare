@@ -76,6 +76,53 @@ connection acquisition, while the pool separately bounds physical database work.
   history requires an explicitly reviewed, rehearsed reconciliation; never blindly
   relabel/repair rows or falsify the record of what ran.
 
+## Explicit Ex-operation SQL scope
+
+The Ex conversation facade's internal `SqlWorkBudget` is an explicit opt-in
+completion scope, not a transaction, grant or arbitrary SQL executor. Its pool
+infrastructure decorates repository and independent authoritative-version leases;
+the raw primary Hikari source, Flyway and LISTEN lifecycle stay intact. A shared
+JdbcTemplate and transaction manager must retain the same decorated source
+identity, including when ordinary pool admission is disabled.
+
+An active scope shares the earlier operation deadline with nested ReadDeadline
+work and bounds acquisition, statement execution/materialization and owned
+cleanup. Logical timeout is unavailable/possibly uncertain, never the outer
+CAPACITY_EXHAUSTED proof for mutation replay. Abort/close retains physical lease
+and throttle occupancy until it settles; late alarms cannot target a recycled
+lease or worker. Supported driver assumptions and exact test evidence belong in
+the implementation report, not a claim of universal JDBC termination.
+
+Projection-cache owners preserve authorized resident/trusted hits and join an
+existing compatible shared load with caller-local cancellation. An active SQL
+scope never elects a new shared fill: an actual miss uses its existing private
+uncached loader path. This ownership boundary prevents cancellation of another
+caller's fill and records the private-miss/query-count cost. Existing unscoped
+inline loaders keep their original completion/coalescing contract. Reuse typed
+facts and stored freshness tokens; do not bypass warm valid entries or refresh
+unconditionally merely because this scope is active.
+
+Scoped PostgreSQL leases additionally clamp server statement/lock limits before
+commands, preserving earlier settings. Transaction-local limits follow Spring's
+transaction; touched autocommit settings must be restored before pool return.
+Control queries consume the same remaining budget (normally one per command,
+plus restoration), and ordinary unscoped SQL gains no control queries. Commit and
+possible autocommit commits refresh the server limit. Rollback cannot prepend
+configuration SQL inside an aborted PostgreSQL transaction; it retains the live
+network/watchdog deadline and owned physical abort/close path. Failed
+reset discards the exact still-owned pool lease before close can recycle it.
+Client expiry/socket closure alone does not prove backend cancellation; selected
+PostgreSQL tests must check remote activity/row-lock release and clean reuse.
+Cancellation uses a separate bounded interrupt owner because Thread.interrupt
+can itself block inside a channel interruptor. Such physical work stays owned;
+watchdogs and scope bookkeeping must remain free to cancel other scopes.
+
+These contracts do not establish universal SQL cancellation for unscoped callers,
+and SQL-only deadlines do not bound arbitrary hook/file loading or user callbacks.
+See the [scoped design](../../docs/reviews/home-assistant-ex-sql-budget-design.md)
+and independent delivery evidence before asserting that an entry point is wired
+or verified.
+
 ## Legacy traps
 
 Do not copy direct JDBC from an old service, treat a proposed operation-pipeline

@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.access;
 
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.HostedToolScopes;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
@@ -7,7 +8,9 @@ import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
 import io.aeyer.plowshare.server.requests.RequestProjects;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -20,6 +23,79 @@ import org.springframework.stereotype.Component;
 /** Resolves resource IDs to their durable scope before granting project operations. */
 @Component
 public class ProjectAuthorization {
+  /**
+   * Single-use evidence for the immediately following synchronous Ex handler. Only this owner can
+   * mint it after full common policy. It expires with its request scope, deadline or first use and
+   * is never a continuing grant, shared cache entry or value supplied over the wire.
+   */
+  public static final class ExternalAdmission implements AutoCloseable {
+    private final String project;
+    private final String account;
+    private final String session;
+    private final String operation;
+    private final Thread owner = Thread.currentThread();
+    private final long end;
+    private boolean active = true;
+
+    private ExternalAdmission(String project, String account, String session, String operation) {
+      this.project = project;
+      this.account = account;
+      this.session = session;
+      this.operation = operation;
+      // Ex routing already installed the configured deadline. Direct internal calls have a finite
+      // fallback, never a reusable permit outside this short synchronous owner scope.
+      this.end = ReadDeadline.deadlineNanos(Duration.ofSeconds(2));
+    }
+
+    public boolean consume(String project, String account, String session, String operation) {
+      if (!active
+          || Thread.currentThread() != owner
+          || !ReadDeadline.isCurrent(end)
+          || !Objects.equals(this.project, project)
+          || !Objects.equals(this.account, account)
+          || !Objects.equals(this.session, session)
+          || !Objects.equals(this.operation, operation)) return false;
+      active = false;
+      return true;
+    }
+
+    @Override
+    public void close() {
+      active = false;
+    }
+  }
+
+  /** Run unchanged common policy once, then retain exactly its immediate Ex namespace work fact. */
+  public ExternalAdmission requireExternalConversation(
+      String operation, AccessRequest payload, String account, String session) {
+    if (!Set.of("conversation.open.ex", "agent.run.ex").contains(operation))
+      throw new CallerFault("External admission needs an Ex operation");
+    require(operation, payload, account);
+    if (payload.projects().size() != 1 || !payload.resources().isEmpty())
+      throw new CallerFault("External conversations require one explicit project");
+    return new ExternalAdmission(payload.projects().iterator().next(), account, session, operation);
+  }
+
+  /**
+   * Fresh disclosure scope of a server-resolved Ex conversation. Resolve its current project once
+   * through the owning resource projection, not a full conversation/allowance hydration or the
+   * request's possibly reused project name. The returned Home is metadata, never a retained allow.
+   */
+  public Home requireExternalConversationTarget(
+      String operation, String conversation, String account) {
+    if (!Set.of("conversation.open.ex", "agent.run.ex").contains(operation))
+      throw new CallerFault("External target scope needs an Ex operation");
+    if (account == null) throw new CallerFault("This operation needs an authenticated account");
+    var resource =
+        new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, conversation);
+    var current = resources.projects(resource);
+    if (current.size() != 1 || current.getFirst() == null)
+      throw new CallerFault("The external conversation target is unavailable");
+    Home home = Home.of(current.getFirst());
+    require(operation, AccessRequest.project(home.project()), account);
+    return home;
+  }
+
   private final ResourceScopeRepository resources;
   private final ProjectMembers members;
   private final AdminStore accounts;

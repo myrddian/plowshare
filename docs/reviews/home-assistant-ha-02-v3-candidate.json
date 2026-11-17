@@ -1,0 +1,69 @@
+{
+  "node": "HA-02",
+  "candidate_id": "ha-ha-02-v3",
+  "created_at": "2026-11-17T01:51:19.806284+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_action_implementer",
+  "reviewer_agent_id": "/root/ha_reads_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-ha-02-action-seams-implementation.md": "019a905f8a6cc807f7591f8617a1013670f14593727b6cb65cebd4e362392371",
+    "docs/reviews/home-assistant-ha-02-v3-state.json": "4ffa9bb9b4978fd7107c8e752871952efccd238ab0f91e0c92cd9410c8112c74",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapter.java": "24baa8a0c5116b71f989ff16903ba5ba134c312409d2f48b8a1bae7b1a1f21ce",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCatalog.java": "186f5dddbb62622a3e57f192882a2acd3ca4f93cda66f5cd93abd7c6b1c46acb",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantWire.java": "34477a58ce99edc6677c61e9079ae7468c88f85350bb38519a7d9e0c608504cb"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-ha-02-v3-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-02-v3.diff.gz",
+    "sha256": "3c4f922643b71458eb05dea686f5867780d586dcd68a84ed59064a879eb69e6c",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "HA-01": {
+      "id": "ha-ha-01-v5",
+      "manifest_path": "docs/reviews/home-assistant-ha-01-v5-candidate.json",
+      "manifest_sha256": "d8babe9febaae69e1d9b630d3de86b16e7c300e95cc122c5f9b9585cf927ada8"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "37 focused HA cases passed (10 contracts,8 catalogue,9 native,10 legacy adapter), zero skipped/errors/failures; global format and formatCheck passed. HA01v3 accessor independently accepted. Full non-DB check running on stable source. No live model/device/deployment claim."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_reads_reviewer",
+      "verdict": "CHANGES_REQUIRED",
+      "candidate_id": "ha-ha-02-v1",
+      "manifest_sha256": "6a1e6a67f6c3a03952216df960d24365c4827fa064c3750a0cc89e6ffa3dff45",
+      "report_path": "docs/reviews/home-assistant-ha-02-review.md",
+      "report_sha256": "77f9be53b3a13807f423de849e787cd926a40f0741d38dcc3bccf509e2f59159"
+    },
+    {
+      "kind": "repository_check",
+      "candidate": "ha-ha-02-v1",
+      "result": "PASS",
+      "duration": "3m31s",
+      "tasks": 141,
+      "note": "Does not waive observer/callback race findings"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "R1 bounded FIFO observer/physicalslot cleanup and R2 captured+retiredgeneration fences corrected. Current46focusedHA tests and globalformatCheckPASS12s. Exactcurrentv2report preserveshistoricalv1report; noJavaeditsafterchecks."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_reads_reviewer",
+      "verdict": "APPROVE",
+      "candidate_id": "ha-ha-02-v2",
+      "manifest_sha256": "0cf20cf8f129e6f10fda75fb25c284d11575b33bca78abdf5a75add287cb3c01",
+      "report_path": "docs/reviews/home-assistant-ha-02-v2-review.md",
+      "report_sha256": "d74192011d94db82d768c04f1e28650444c40777b40ca4da8f7f92a2232104de"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "HA04 adds only Adapter/Wire/Catalog action transport and cached-offer seams. Current90 tests/13classes incl24 action cases pass; current formatCheck pass. Legacy Adapter/Pipeline/Harness not selected in this focused run; no live claim. Previous HA02 contracts retained, affected additive review pending."
+    }
+  ]
+}

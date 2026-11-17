@@ -10,9 +10,11 @@ import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.CA
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.DEADLINE_REJECTED;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOAD;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOADED_RETURN;
+import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.SQL_PRIVATE_MISS;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.TRUSTED_HIT;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
 
+import io.aeyer.plowshare.server.pool.SqlWorkBudget;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.sql.Connection;
@@ -533,24 +535,39 @@ public final class VersionedProjectionCache<T>
     }
     var token = captured.orElseThrow();
     boolean[] loaded = {false};
-    try (var read =
-        cache.readInline(
-            request(key, null, token),
-            () -> {
-              loaded[0] = true;
-              statistics.record(LOAD);
-              T value = Objects.requireNonNull(boundedLoader.get());
-              long charged = weight.applyAsLong(value);
-              // No counter comparison here: the caller confirms every token it read in one
-              // statement. A value loaded after a later write stays stored under the older
-              // counters and so can never be confirmed.
-              if (charged < 1 || charged > maxWeight || !itemVersions.canShare())
-                throw new Bypass();
-              return new SnapshotCache.Loaded<>(
-                  token.sourceVersion(),
-                  new Versioned<>(null, token, value),
-                  charged + 2048L + 512L * token.counters().size());
-            })) {
+    SnapshotCache.Request requested = request(key, null, token);
+    SnapshotCache.Read<Versioned<T>> selected;
+    if (SqlWorkBudget.privateCacheMisses()) {
+      var existing = cache.readExisting(requested);
+      if (existing.isEmpty()) {
+        statistics.record(SQL_PRIVATE_MISS);
+        T value = Objects.requireNonNull(boundedLoader.get());
+        long charged = weight.applyAsLong(value);
+        if (charged < 1 || charged > maxWeight || !itemVersions.canShare()) return Optional.empty();
+        return Optional.of(new Unconfirmed<>(value, token));
+      }
+      selected = existing.orElseThrow();
+    } else {
+      selected =
+          cache.readInline(
+              requested,
+              () -> {
+                loaded[0] = true;
+                statistics.record(LOAD);
+                T value = Objects.requireNonNull(boundedLoader.get());
+                long charged = weight.applyAsLong(value);
+                // No counter comparison here: the caller confirms every token it read in one
+                // statement. A value loaded after a later write stays stored under the older
+                // counters and so can never be confirmed.
+                if (charged < 1 || charged > maxWeight || !itemVersions.canShare())
+                  throw new Bypass();
+                return new SnapshotCache.Loaded<>(
+                    token.sourceVersion(),
+                    new Versioned<>(null, token, value),
+                    charged + 2048L + 512L * token.counters().size());
+              });
+    }
+    try (var read = selected) {
       var value = await(read, loaded[0]).value();
       if (!ready()) {
         statistics.record(BYPASS_STALE);
@@ -592,6 +609,15 @@ public final class VersionedProjectionCache<T>
 
   /** The value stored under exactly this request, or null; never starts a load. */
   private Versioned<T> storedValue(SnapshotCache.Request request) {
+    if (SqlWorkBudget.privateCacheMisses()) {
+      var existing = cache.readExisting(request);
+      if (existing.isEmpty()) return null;
+      try (var read = existing.orElseThrow()) {
+        return await(read, false).value();
+      } catch (CompletionException | SnapshotCache.CacheException refused) {
+        return null;
+      }
+    }
     try (var read =
         cache.readInline(
             request,
@@ -636,14 +662,22 @@ public final class VersionedProjectionCache<T>
     // flag, so a successful coalesced return counts as reuse, not another physical load.
     boolean[] loaded = {false};
     var fallback = BYPASS_STALE;
-    try (var read =
-        cache.readInline(
-            request,
-            () -> {
-              loaded[0] = true;
-              statistics.record(LOAD);
-              return loader.load();
-            })) {
+    SnapshotCache.Read<Versioned<T>> selected;
+    if (SqlWorkBudget.privateCacheMisses()) {
+      var existing = cache.readExisting(request);
+      if (existing.isEmpty()) return bypass(SQL_PRIVATE_MISS, uncachedLoader);
+      selected = existing.orElseThrow();
+    } else {
+      selected =
+          cache.readInline(
+              request,
+              () -> {
+                loaded[0] = true;
+                statistics.record(LOAD);
+                return loader.load();
+              });
+    }
+    try (var read = selected) {
       var stored = await(read, loaded[0]).value();
       if (ready() && current.test(stored)) {
         if (stored.token() != null

@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 
 /** Refusals at the front doors, before machine routing silently omits inaccessible sessions. */
 @Component
-public class CallerAccess {
+public class CallerAccess implements WorkAccess {
   private final SessionRegistry sessions;
   private final ProjectMembers members;
 
@@ -17,6 +17,7 @@ public class CallerAccess {
     this.members = members;
   }
 
+  @Override
   public void requireSession(String session, String handle) {
     if (sessions
         .accountOf(session)
@@ -26,6 +27,7 @@ public class CallerAccess {
     }
   }
 
+  @Override
   public void requireWork(String project, String handle) {
     if (project != null && !members.mayWork(project, handle))
       throw new CallerFault("This account needs CONTRIBUTOR access to project '" + project + "'");

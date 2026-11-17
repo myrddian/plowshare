@@ -25,6 +25,11 @@ capabilities rather than internal services or database access.
   [Excalibur](../../integrations/agile) are separate SDK-consuming Applications.
 - [Integration boundary decision](../../docs/decisions/0001-integration-boundary.md)
   defines the platform boundary and the process for a missing capability.
+- The [HA Assist prototype](../../integrations/home-assistant/assist/README.md)
+  remains unavailable until a faithful HA system-prompt/context handoff is verified.
+  Setup, configuration and packaging fail closed; test-fixture SDK staging does
+  not enable it. Preserve its retained correlation and uncertainty fences. The
+  outbound device adapter remains supported independently.
 
 ## Rules
 

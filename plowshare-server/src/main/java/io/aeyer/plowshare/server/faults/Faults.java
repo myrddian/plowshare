@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.faults;
 
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.server.agents.DefinitionAlreadyExistsException;
+import io.aeyer.plowshare.server.agents.ExternalConversationUnavailableException;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.api.ConflictException;
 import io.aeyer.plowshare.server.api.NotFoundException;
@@ -15,6 +16,7 @@ import io.aeyer.plowshare.server.events.ModelUnavailableException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.images.UnstorableImageException;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
+import io.aeyer.plowshare.server.pool.SqlWorkUnavailableException;
 import io.aeyer.plowshare.server.session.PresenceConflictException;
 import java.util.HashMap;
 import java.util.Map;
@@ -266,7 +268,21 @@ public final class Faults {
           return new Fault(Code.VALIDATION_FAILED, safeMessage(e));
         });
 
+    // Scoped work can have committed before a later SQL deadline. Keep the deployed unavailable
+    // code without inheriting the archive mapper's misleading "nothing was written" assurance.
+    m.put(
+        SqlWorkUnavailableException.class,
+        e -> {
+          log.debug("scoped database work ended without a publishable result");
+          return new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e));
+        });
+
     // Row 12: the archive could not be reached at all.
+    // Ex may already have committed an alias or admitted durable work before a later phase fails.
+    m.put(
+        ExternalConversationUnavailableException.class,
+        e -> new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e)));
+
     m.put(
         ArchiveUnavailableException.class,
         e -> {
