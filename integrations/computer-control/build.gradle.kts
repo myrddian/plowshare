@@ -32,9 +32,33 @@ val computerControlTest by tasks.registering(Exec::class) {
 tasks.named("assemble") { dependsOn(computerControlBuild) }
 tasks.named("check") { dependsOn(computerControlTest) }
 
+val computerControlDistributionTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Tests offline package bounds, verification, process cleanup and exclusive installation."
+    workingDir = projectDir
+    inputs.files("scripts/distribution.py", "scripts/build-distribution.py", "scripts/distribution-test.py")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    commandLine("python3", "scripts/distribution-test.py")
+}
+tasks.named("check") { dependsOn(computerControlDistributionTest) }
+
+tasks.register<Exec>("computerControlDistribution") {
+    group = "distribution"
+    description = "Builds an offline package at an explicit unused destination; requires -PcomputerDistributionOutput and -PcomputerDistributionNode."
+    workingDir = projectDir
+    dependsOn(computerControlBuild)
+    doFirst {
+        val output = providers.gradleProperty("computerDistributionOutput").orNull
+            ?: throw GradleException("Set computerDistributionOutput to an explicit unused absolute directory.")
+        val node = providers.gradleProperty("computerDistributionNode").orNull
+            ?: throw GradleException("Set computerDistributionNode to an explicit absolute Node executable.")
+        commandLine("python3", "scripts/build-distribution.py", "--output", output, "--node", node)
+    }
+}
+
 tasks.register<Exec>("computerControlConsumerCheck") {
     group = "verification"
-    description = "Compiles the reusable provider against packed public SDKs in a fresh consumer."
+    description = "Verifies offline provider/public SDK installation, runtime import, CLI and typed consumer."
     workingDir = rootProject.projectDir
     dependsOn(computerControlBuild)
     commandLine("python3", "integrations/computer-control/scripts/check-consumer.py")

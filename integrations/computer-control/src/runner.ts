@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, rm } from 'node:fs/promises';
+import { mkdir, open, rmdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { setTimeout as pause } from 'node:timers/promises';
 import { requirePayload } from 'plowshare-client-ts';
 import type {
   Payloads,
@@ -54,6 +53,13 @@ import {
   requireDistinctControlPorts,
 } from './native-composition.ts';
 import type { BackendHandle } from './backends/types.ts';
+import type { HostDiagnostic, HostDiagnostics } from './host-diagnostics.ts';
+import {
+  CatalogueLeaseExpired,
+  HostCatalogueLease,
+  waitForHostPoll,
+  withHostAdmission,
+} from './host-lifecycle.ts';
 
 export interface CatalogueIntent {
   readonly version: 1;
@@ -304,6 +310,47 @@ export class ComputerPasses {
   }
 }
 
+/** Cleanup timeout never releases ownership of an unsettled original promise. */
+export class ComputerCleanup {
+  private readonly physical = new Set<Promise<void>>();
+
+  pending(): number {
+    return this.physical.size;
+  }
+
+  async run(
+    deadline: OperationDeadline,
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    deadline.requireActive();
+    const work = Promise.resolve().then(async () => {
+      deadline.requireActive();
+      await operation();
+      deadline.requireActive();
+    });
+    this.physical.add(work);
+    const settled = work.then(
+      () => {
+        this.physical.delete(work);
+      },
+      (error: unknown) => {
+        this.physical.delete(work);
+        throw error;
+      },
+    );
+    await wait(settled, deadline, () => {});
+  }
+}
+
+export class CatalogueRecoveryRequired extends Error {
+  constructor() {
+    super(
+      'Original catalogue or tool-result evidence requires reconciliation; no publication was replayed',
+    );
+    this.name = 'CatalogueRecoveryRequired';
+  }
+}
+
 export interface ComputerHostOptions {
   readonly config: ComputerHostConfig;
   readonly connection: Pick<Plowshare, 'request'>;
@@ -320,6 +367,16 @@ export interface ComputerHostOptions {
   readonly startupDeadline?: OperationDeadline;
   readonly maxPasses?: number;
   readonly onReady?: () => void;
+  readonly diagnostics?: HostDiagnostics;
+}
+
+function position(value: string): bigint {
+  if (!/^(?:0|[1-9][0-9]{0,18})$/u.test(value))
+    throw new CatalogueRecoveryRequired();
+  const parsed = BigInt(value);
+  if (parsed > 9_223_372_036_854_775_807n)
+    throw new CatalogueRecoveryRequired();
+  return parsed;
 }
 
 async function reconcileCatalogue(
@@ -328,6 +385,7 @@ async function reconcileCatalogue(
   config: ComputerHostConfig,
   declarations: readonly ToolDeclaration[],
   store: CatalogueIntents,
+  deadline: OperationDeadline,
 ): Promise<void> {
   const expected = JSON.stringify(
     intent.kind === 'publish'
@@ -337,7 +395,10 @@ async function reconcileCatalogue(
   const publisher =
     'sdk:' + createHash('sha256').update(config.binding.account).digest('hex');
   let after = '0';
+  let generation: string | null = null;
+  const seenEvents = new Set<string>();
   for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+    deadline.requireActive();
     const page = requirePayload(
       await connection.request('relay.log', {
         project: config.binding.project,
@@ -347,6 +408,33 @@ async function reconcileCatalogue(
         limit: 100,
       }),
     );
+    deadline.requireActive();
+    const topic = `tool.${config.binding.provider}.catalog`;
+    const currentGeneration = page.topic.generation ?? null;
+    if (
+      page.events.length > 100 ||
+      page.scope.project !== config.binding.project ||
+      page.scope.system ||
+      page.topic.name !== topic ||
+      page.after !== after ||
+      (pageNumber > 0 && currentGeneration !== generation)
+    )
+      throw new CatalogueRecoveryRequired();
+    generation = currentGeneration;
+    let previous = position(after);
+    for (const event of page.events) {
+      if (seenEvents.has(event.eventId)) throw new CatalogueRecoveryRequired();
+      seenEvents.add(event.eventId);
+      const current = position(event.position);
+      if (current <= previous || current > position(page.topic.through))
+        throw new CatalogueRecoveryRequired();
+      previous = current;
+    }
+    const last = page.events.at(-1);
+    if (last !== undefined && page.next !== last.position)
+      throw new CatalogueRecoveryRequired();
+    if (position(page.next) < position(after))
+      throw new CatalogueRecoveryRequired();
     const event = page.events.find(
       (event) => event.eventId === intent.requestId,
     );
@@ -354,21 +442,22 @@ async function reconcileCatalogue(
       if (
         event.publisher !== publisher ||
         event.payload.kind !== 'TEXT' ||
-        event.payload.text !== expected
+        event.payload.text !== expected ||
+        event.correlationId !== null ||
+        event.causationId !== null
       )
-        throw new Error(
-          'Retained catalogue evidence conflicts with its original intent',
-        );
+        throw new CatalogueRecoveryRequired();
+      deadline.requireActive();
       await store.save({ ...intent, state: 'confirmed' });
+      deadline.requireActive();
       return;
     }
-    const last = page.events.at(-1);
-    if (last === undefined || last.position === after) break;
+    // A visible exact UUID is positive evidence even if older unrelated records
+    // expired. Missing/gapped history is never non-submission or resend authority.
+    if (last === undefined) break;
     after = last.position;
   }
-  throw new Error(
-    'Catalogue publication is uncertain; inspect its original request before restarting',
-  );
+  throw new CatalogueRecoveryRequired();
 }
 
 async function catalogue(
@@ -401,13 +490,21 @@ async function catalogue(
 
 /**
  * Reusable foreground/embedded host lifecycle over the caller's existing SDK connection.
- * It takes ownership of supplied backend handles. A private active marker survives uncertain cleanup.
+ * Supplied handles remain caller-owned if admission or a foreign marker refuses
+ * startup. Ownership transfers after acquiring this host's marker while the
+ * original startup deadline is active. Uncertain cleanup retains its fence.
  */
 export async function runComputerHost(
   options: ComputerHostOptions,
 ): Promise<void> {
   const config = decodeComputerHostConfig(options.config),
     clock = options.clock ?? systemClock;
+  if (
+    options.diagnostics !== undefined &&
+    (typeof options.diagnostics.emit !== 'function' ||
+      typeof options.diagnostics.unavailable !== 'boolean')
+  )
+    throw new Error('Invalid computer host diagnostics capability');
   if (
     options.browserControls !== undefined &&
     (options.backends === undefined || config.browserControl === undefined)
@@ -504,279 +601,468 @@ export async function runComputerHost(
     new OperationDeadline(config.budgets.startupMs, clock);
   const admission = initialStartup.child(config.budgets.controlMs);
   try {
-    await privateDirectory(config.journalDirectory);
-    await localLock(
-      config.journalDirectory,
-      identity,
-      async () => {
-        admission.requireActive();
-        admission.dispose();
-        const activeMarker = join(
-          config.journalDirectory,
-          identity + '.active',
-        );
-        try {
-          await mkdir(activeMarker, { mode: 0o700 });
-        } catch (cause) {
-          throw new Error(
-            'A prior computer host remains active or fenced; inspect it before recovery',
-            { cause },
+    await withHostAdmission(admission, options.signal, async (admitted) => {
+      await privateDirectory(config.journalDirectory);
+      admission.requireActive();
+      await localLock(
+        config.journalDirectory,
+        identity,
+        async () => {
+          admission.requireActive();
+          options.signal.throwIfAborted();
+          admitted();
+          const activeMarker = join(
+            config.journalDirectory,
+            identity + '.active',
           );
-        }
-        const markerParent = await open(config.journalDirectory, 'r');
-        try {
-          await markerParent.sync();
-        } finally {
-          await markerParent.close();
-        }
-        const handles: BackendHandle[] = [...(injectedHandles ?? [])];
-        const controls: BrowserControlBackend[] = [...(injectedControls ?? [])];
-        const nativeControls: NativeControlBackend[] = [
-          ...(injectedNativeControls ?? []),
-        ];
-        const armingControls: NativeArmingBackend[] = [...injectedArming];
-        const passes = new ComputerPasses(
-          options.connection,
-          config.budgets.controlMs,
-        );
-        let provider: ComputerProvider | undefined,
-          published = false,
-          clean = false;
-        let originalFailure: Error | undefined;
-        let cleanupFailure: AggregateError | undefined;
-        let startupDeadline: OperationDeadline | undefined;
-        const stop = () => {
-          provider?.stop();
-          startupDeadline?.cancel();
-          passes.cancel();
-        };
-        options.signal.addEventListener('abort', stop, { once: true });
-        try {
-          const startup = initialStartup;
-          startupDeadline = startup;
-          try {
-            options.signal.throwIfAborted();
-            if (injectedHandles === undefined) {
-              if (config.browser !== undefined)
-                handles.push(
-                  await createBrowserBackend(config.browser, startup),
-                );
-              if (config.browserControl !== undefined) {
-                const handle = await createBrowserControlBackend(
-                  config.browserControl,
-                  startup,
-                );
-                handles.push(handle);
-                controls.push(handle.backend);
-              }
-              if (config.macosControl !== undefined) {
-                const handle = await createMacOSControlBackend(
-                  config.macosControl,
-                  startup,
-                );
-                handles.push(handle);
-                nativeControls.push(handle.backend);
-                armingControls.push(handle.backend);
-              }
-              if (config.macos !== undefined)
-                handles.push(
-                  config.macosControl === undefined
-                    ? createMacOSBackend(config.macos)
-                    : await createCoordinatedMacOSBackend(
-                        config.macos,
-                        startup,
-                      ),
-                );
-            }
-            const journal =
-              options.journal ??
-              (await FileToolJournal.open(config.journalDirectory, identity));
-            provider = await createComputerProvider({
-              connection: passes.connection,
-              binding: config.binding,
-              journal,
-              backends: handles.map((handle) => handle.backend),
-              browserControls: controls,
-              browserTools,
-              nativeControls,
-              nativeArmingControls: armingControls,
-              nativeTools,
-              generation: randomUUID(),
-              origin: config.origin,
-              currentBearer: options.currentBearer,
-              clock,
-              prefix: config.prefix,
-              controlBudgetMs: config.budgets.controlMs,
-              observeBudgetMs: config.budgets.observeMs,
-              browserObservationReserveMs:
-                config.budgets.browserObservationReserveMs ?? 3000,
-              nativeObservationReserveMs:
-                config.budgets.nativeObservationReserveMs ?? 3000,
-              cleanupBudgetMs: config.budgets.cleanupMs,
-              ...(config.sessions === undefined
-                ? {}
-                : {
-                    frameFreshMs: config.sessions.frameFreshMs,
-                    idleMs: config.sessions.idleMs,
-                  }),
-              parentDeadline: () => passes.currentDeadline(),
-            });
-            startup.requireActive();
-          } finally {
-            startupDeadline = undefined;
-          }
-          const running = provider;
-          const intents =
-            options.intents ??
-            new FileCatalogueIntents(config.journalDirectory, identity);
-          const perform = <T>(
-            work: (deadline: OperationDeadline) => Promise<T>,
-            budgetMs = config.budgets.passMs,
+          const handles: BackendHandle[] = [...(injectedHandles ?? [])];
+          const controls: BrowserControlBackend[] = [
+            ...(injectedControls ?? []),
+          ];
+          const nativeControls: NativeControlBackend[] = [
+            ...(injectedNativeControls ?? []),
+          ];
+          const armingControls: NativeArmingBackend[] = [...injectedArming];
+          const passes = new ComputerPasses(
+            options.connection,
+            config.budgets.controlMs,
+          );
+          const resources = new ComputerCleanup();
+          type CloseOutcome =
+            | { readonly kind: 'QUIET' }
+            | { readonly kind: 'FAILED'; readonly error: unknown };
+          const closing = new Map<BackendHandle, Promise<CloseOutcome>>();
+          const closeOwned = (
+            handle: BackendHandle,
+            deadline: OperationDeadline,
+          ): Promise<CloseOutcome> => {
+            const existing = closing.get(handle);
+            if (existing !== undefined) return existing;
+            const result = resources
+              .run(deadline, () => handle.close(deadline))
+              .then(
+                (): CloseOutcome => ({ kind: 'QUIET' }),
+                (error: unknown): CloseOutcome => ({ kind: 'FAILED', error }),
+              );
+            closing.set(handle, result);
+            return result;
+          };
+          let cleanupDeadline: OperationDeadline | undefined;
+          let markerOwned = false;
+          let handlesOwned = false;
+          const retainHandle = async (
+            handle: BackendHandle,
+            deadline: OperationDeadline,
           ) => {
-            const deadline = new OperationDeadline(budgetMs, clock);
-            return passes.run(
-              deadline,
-              () => work(deadline),
+            handles.push(handle);
+            if (cleanupDeadline !== undefined) {
+              const result = await closeOwned(handle, cleanupDeadline);
+              if (result.kind === 'FAILED') throw result.error;
+            }
+            deadline.requireActive();
+          };
+          let provider: ComputerProvider | undefined,
+            published = false;
+          let originalFailure: Error | undefined;
+          let cleanupFailure: AggregateError | undefined;
+          let startupDeadline: OperationDeadline | undefined;
+          let lease: HostCatalogueLease | undefined;
+          let leaseFailure: CatalogueLeaseExpired | undefined;
+          let diagnosticFailure: Error | undefined;
+          const lifetime = new AbortController();
+          const stop = () => {
+            lifetime.abort();
+            lease?.stop();
+            provider?.stop();
+            startupDeadline?.cancel();
+            passes.cancel();
+          };
+          const report = (event: HostDiagnostic) => {
+            try {
+              options.diagnostics?.emit(event);
+            } catch (cause) {
+              // A custom sink violating its nonthrowing contract may stop intake,
+              // but must never escape a timer or bypass physical cleanup.
+              if (diagnosticFailure === undefined) {
+                diagnosticFailure = new Error(
+                  'Computer host diagnostic sink failed',
+                  { cause },
+                );
+                stop();
+              }
+            }
+          };
+          options.signal.addEventListener('abort', stop, { once: true });
+          try {
+            report({ stage: 'startup', code: 'STARTING' });
+            const startup = initialStartup.child(config.budgets.startupMs);
+            startupDeadline = startup;
+            try {
+              await passes.run(
+                startup,
+                async () => {
+                  options.signal.throwIfAborted();
+                  lifetime.signal.throwIfAborted();
+                  startup.requireActive();
+                  try {
+                    await mkdir(activeMarker, { mode: 0o700 });
+                    markerOwned = true;
+                  } catch (cause) {
+                    throw new Error(
+                      'A prior computer host remains active or fenced; inspect it before recovery',
+                      { cause },
+                    );
+                  }
+                  startup.requireActive();
+                  handlesOwned = true;
+                  const markerParent = await open(config.journalDirectory, 'r');
+                  try {
+                    startup.requireActive();
+                    await markerParent.sync();
+                  } finally {
+                    await markerParent.close();
+                  }
+                  startup.requireActive();
+                  if (injectedHandles === undefined) {
+                    if (config.browser !== undefined)
+                      await retainHandle(
+                        await createBrowserBackend(config.browser, startup),
+                        startup,
+                      );
+                    if (config.browserControl !== undefined) {
+                      const handle = await createBrowserControlBackend(
+                        config.browserControl,
+                        startup,
+                      );
+                      await retainHandle(handle, startup);
+                      controls.push(handle.backend);
+                    }
+                    if (config.macosControl !== undefined) {
+                      const handle = await createMacOSControlBackend(
+                        config.macosControl,
+                        startup,
+                      );
+                      await retainHandle(handle, startup);
+                      nativeControls.push(handle.backend);
+                      armingControls.push(handle.backend);
+                    }
+                    if (config.macos !== undefined)
+                      await retainHandle(
+                        config.macosControl === undefined
+                          ? createMacOSBackend(config.macos)
+                          : await createCoordinatedMacOSBackend(
+                              config.macos,
+                              startup,
+                            ),
+                        startup,
+                      );
+                  }
+                  startup.requireActive();
+                  const journal =
+                    options.journal ??
+                    (await FileToolJournal.open(
+                      config.journalDirectory,
+                      identity,
+                    ));
+                  startup.requireActive();
+                  const created = await createComputerProvider({
+                    connection: passes.connection,
+                    binding: config.binding,
+                    journal,
+                    backends: handles.map((handle) => handle.backend),
+                    browserControls: controls,
+                    browserTools,
+                    nativeControls,
+                    nativeArmingControls: armingControls,
+                    nativeTools,
+                    generation: randomUUID(),
+                    origin: config.origin,
+                    currentBearer: options.currentBearer,
+                    clock,
+                    prefix: config.prefix,
+                    controlBudgetMs: config.budgets.controlMs,
+                    observeBudgetMs: config.budgets.observeMs,
+                    browserObservationReserveMs:
+                      config.budgets.browserObservationReserveMs ?? 3000,
+                    nativeObservationReserveMs:
+                      config.budgets.nativeObservationReserveMs ?? 3000,
+                    cleanupBudgetMs: config.budgets.cleanupMs,
+                    ...(config.sessions === undefined
+                      ? {}
+                      : {
+                          frameFreshMs: config.sessions.frameFreshMs,
+                          idleMs: config.sessions.idleMs,
+                        }),
+                    parentDeadline: () => passes.currentDeadline(),
+                  });
+                  provider = created;
+                  if (lifetime.signal.aborted || startup.remainingMs() <= 0) {
+                    created.stop();
+                    const cleanup = cleanupDeadline;
+                    if (cleanup !== undefined && cleanup.remainingMs() > 0)
+                      await resources.run(cleanup, () =>
+                        created.drain(cleanup),
+                      );
+                  }
+                  startup.requireActive();
+                },
+                stop,
+              );
+            } finally {
+              startupDeadline = undefined;
+            }
+            if (provider === undefined)
+              throw new Error('Computer provider setup did not complete');
+            const running = provider;
+            const intents =
+              options.intents ??
+              new FileCatalogueIntents(config.journalDirectory, identity);
+            lease = new HostCatalogueLease(
+              config.catalogue.leaseSeconds * 1000,
+              config.catalogue.renewalMs,
+              clock,
+              () => {
+                leaseFailure = new CatalogueLeaseExpired();
+                stop();
+                report({ stage: 'catalogue', code: 'CATALOGUE_EXPIRED' });
+              },
+            );
+            const availability = lease;
+            const publish = async (deadline: OperationDeadline) => {
+              const publication = availability.begin();
+              await catalogue(running, intents, 'publish', deadline);
+              deadline.requireActive();
+              availability.confirm(publication);
+            };
+            const perform = <T>(
+              work: (deadline: OperationDeadline) => Promise<T>,
+            ) => {
+              // The earlier confirmed catalogue lease, not a delayed timer, caps
+              // each admitted pass. Successful renewal cannot extend this pass.
+              const deadline = availability.pass(config.budgets.passMs);
+              return passes.run(
+                deadline,
+                () => work(deadline),
+                () => running.stop(),
+              );
+            };
+            const initialMetadata = initialStartup.child(config.budgets.passMs);
+            await passes.run(
+              initialMetadata,
+              async () => {
+                const pending = await intents.load();
+                initialMetadata.requireActive();
+                if (pending?.state === 'pending')
+                  await reconcileCatalogue(
+                    passes.connection,
+                    pending,
+                    config,
+                    declarations,
+                    intents,
+                    initialMetadata,
+                  );
+                if (pending?.state === 'pending')
+                  report({ stage: 'catalogue', code: 'CATALOGUE_RECONCILED' });
+                await running.provider.reconcile();
+                initialMetadata.requireActive();
+                if (
+                  (await running.journal.all()).some(
+                    (row) => row.phase === 'publishing',
+                  )
+                )
+                  throw new CatalogueRecoveryRequired();
+                initialMetadata.requireActive();
+                await publish(initialMetadata);
+              },
               () => running.stop(),
             );
-          };
-          const initialMetadata = initialStartup.child(config.budgets.passMs);
-          await passes.run(
-            initialMetadata,
-            async () => {
-              const pending = await intents.load();
-              initialMetadata.requireActive();
-              if (pending?.state === 'pending')
-                await reconcileCatalogue(
-                  passes.connection,
-                  pending,
-                  config,
-                  declarations,
-                  intents,
-                );
-              await running.provider.reconcile();
-              initialMetadata.requireActive();
-              await catalogue(running, intents, 'publish', initialMetadata);
-            },
-            () => running.stop(),
-          );
-          initialStartup.requireActive();
-          published = true;
-          options.onReady?.();
-          initialStartup.dispose();
-          let renewedAt = clock.monotonicNow(),
-            completed = 0;
-          const armingRequests =
-            config.nativeArming === undefined
-              ? undefined
-              : new NativeArmingRequests(config.nativeArming.durationMs);
-          while (
-            !options.signal.aborted &&
-            (options.maxPasses === undefined || completed < options.maxPasses)
-          ) {
-            await perform(async (deadline) => {
-              if (
-                clock.monotonicNow() - renewedAt >=
-                config.catalogue.renewalMs
-              ) {
-                await catalogue(running, intents, 'publish', deadline);
-                renewedAt = clock.monotonicNow();
-              }
-              await running.provider.poll();
-              if (
-                armingRequests !== undefined &&
-                running.nativeArming !== undefined
-              ) {
-                const armingDeadline = deadline.child(config.budgets.controlMs);
-                try {
-                  await armingRequests.present(
-                    running.nativeArming,
-                    armingDeadline,
-                  );
-                } finally {
-                  armingDeadline.dispose();
-                }
-              }
-            });
-            completed++;
-            if (
-              options.maxPasses === undefined ||
-              completed < options.maxPasses
+            initialStartup.requireActive();
+            options.signal.throwIfAborted();
+            lifetime.signal.throwIfAborted();
+            published = true;
+            report({ stage: 'serving', code: 'READY' });
+            lifetime.signal.throwIfAborted();
+            options.onReady?.();
+            initialStartup.dispose();
+            let completed = 0;
+            const armingRequests =
+              config.nativeArming === undefined
+                ? undefined
+                : new NativeArmingRequests(config.nativeArming.durationMs);
+            while (
+              !lifetime.signal.aborted &&
+              (options.maxPasses === undefined || completed < options.maxPasses)
             ) {
-              try {
-                await pause(config.pollIntervalMs, undefined, {
-                  signal: options.signal,
-                });
-              } catch (error) {
-                if (!options.signal.aborted) throw error;
+              await perform(async (deadline) => {
+                if (availability.renewalDue()) {
+                  await publish(deadline);
+                  report({ stage: 'catalogue', code: 'CATALOGUE_RENEWED' });
+                }
+                availability.requireActive();
+                await running.provider.poll();
+                if (
+                  armingRequests !== undefined &&
+                  running.nativeArming !== undefined
+                ) {
+                  const armingDeadline = deadline.child(
+                    config.budgets.controlMs,
+                  );
+                  try {
+                    await armingRequests.present(
+                      running.nativeArming,
+                      armingDeadline,
+                    );
+                  } finally {
+                    armingDeadline.dispose();
+                  }
+                }
+              });
+              completed++;
+              if (
+                options.maxPasses === undefined ||
+                completed < options.maxPasses
+              ) {
+                if (!lifetime.signal.aborted)
+                  await waitForHostPoll(
+                    clock,
+                    availability.idleDelay(config.pollIntervalMs),
+                    lifetime.signal,
+                  );
               }
             }
-          }
-        } catch (error) {
-          if (!options.signal.aborted)
-            originalFailure =
-              error instanceof Error
-                ? error
-                : new Error('Computer host operation failed', { cause: error });
-        } finally {
-          options.signal.removeEventListener('abort', stop);
-          stop();
-          const cleanup = new OperationDeadline(
-            config.budgets.cleanupMs,
-            clock,
-          );
-          const errors: unknown[] = [];
-          try {
-            try {
-              await passes.drain(cleanup);
-              await provider?.drain(cleanup);
-            } catch (error) {
-              errors.push(error);
+            if (leaseFailure !== undefined) throw leaseFailure;
+            if (diagnosticFailure !== undefined) throw diagnosticFailure;
+          } catch (error) {
+            if (!options.signal.aborted) {
+              originalFailure =
+                leaseFailure ??
+                diagnosticFailure ??
+                (error instanceof Error
+                  ? error
+                  : new Error('Computer host operation failed', {
+                      cause: error,
+                    }));
+              report(
+                originalFailure instanceof CatalogueLeaseExpired
+                  ? { stage: 'catalogue', code: 'CATALOGUE_EXPIRED' }
+                  : originalFailure instanceof CatalogueRecoveryRequired
+                    ? { stage: 'catalogue', code: 'CATALOGUE_UNCERTAIN' }
+                    : originalFailure instanceof ConnectionFault
+                      ? { stage: 'serving', code: 'TRANSPORT_LOST' }
+                      : published
+                        ? { stage: 'serving', code: 'HOST_FAILED' }
+                        : { stage: 'startup', code: 'STARTUP_FAILED' },
+              );
             }
-            // Provider drain settles JS handlers, not native quiescence. Backend close/fences are separate.
-            for (const handle of handles.reverse()) {
+          } finally {
+            options.signal.removeEventListener('abort', stop);
+            stop();
+            const cleanup = new OperationDeadline(
+              config.budgets.cleanupMs,
+              clock,
+            );
+            cleanupDeadline = cleanup;
+            // Start cancellation/close while the original setup/handler is still
+            // owned. No backend can starve behind an uncooperative SDK drain.
+            const closeWork = new Set<Promise<CloseOutcome>>();
+            if (handlesOwned)
+              for (const handle of [...handles].reverse())
+                closeWork.add(closeOwned(handle, cleanup));
+            const errors: unknown[] = [];
+            let metadataFailure: unknown;
+            report({ stage: 'cleanup', code: 'STOPPING' });
+            try {
               try {
-                await handle.close(cleanup);
+                await resources.run(cleanup, () => passes.drain(cleanup));
+                if (provider !== undefined) {
+                  const running = provider;
+                  await resources.run(cleanup, () => running.drain(cleanup));
+                }
               } catch (error) {
                 errors.push(error);
               }
-            }
-            if (errors.length === 0 && provider !== undefined && published) {
-              const running = provider,
-                intents =
+              // Results are immutable and already observed. A late settlement
+              // never retries close or removes a previously retained marker.
+              for (const pending of closing.values()) closeWork.add(pending);
+              for (const result of await Promise.all(closeWork))
+                if (result.kind === 'FAILED') errors.push(result.error);
+              if (errors.length === 0 && provider !== undefined && published) {
+                const running = provider;
+                const intents =
                   options.intents ??
                   new FileCatalogueIntents(config.journalDirectory, identity);
-              try {
-                const withdrawal = cleanup.child(
-                  Math.max(1, Math.floor(cleanup.remainingMs())),
-                );
-                await passes.run(
-                  withdrawal,
-                  () => catalogue(running, intents, 'withdraw', withdrawal),
-                  () => running.stop(),
-                );
-              } catch (error) {
-                errors.push(error);
+                try {
+                  const withdrawal = cleanup.child(
+                    Math.max(1, Math.floor(cleanup.remainingMs())),
+                  );
+                  await passes.run(
+                    withdrawal,
+                    () => catalogue(running, intents, 'withdraw', withdrawal),
+                    () => running.stop(),
+                  );
+                } catch (error) {
+                  metadataFailure = error;
+                  // A timed-out metadata pass can still own a late journal write.
+                  // Do not release the lock/marker until that original pass settles.
+                  try {
+                    await resources.run(cleanup, () => passes.drain(cleanup));
+                  } catch (drainError) {
+                    errors.push(drainError);
+                  }
+                }
               }
+              if (errors.length === 0 && markerOwned) {
+                try {
+                  await resources.run(cleanup, async () => {
+                    cleanup.requireActive();
+                    await rmdir(activeMarker);
+                    cleanup.requireActive();
+                    const parent = await open(config.journalDirectory, 'r');
+                    try {
+                      cleanup.requireActive();
+                      await parent.sync();
+                    } finally {
+                      await parent.close();
+                    }
+                  });
+                } catch (error) {
+                  errors.push(error);
+                }
+              }
+              if (errors.length > 0) {
+                report({ stage: 'cleanup', code: 'CLEANUP_UNCERTAIN' });
+                cleanupFailure = new AggregateError(
+                  [
+                    ...(originalFailure === undefined ? [] : [originalFailure]),
+                    ...errors,
+                  ],
+                  // rmdir may have succeeded before a parent fsync failed; never
+                  // promise that a marker still exists after durability failure.
+                  'Computer host cleanup is uncertain; inspect ownership and retained receipts',
+                );
+              } else if (metadataFailure !== undefined) {
+                report({ stage: 'cleanup', code: 'RECOVERY_REQUIRED' });
+                cleanupFailure = new AggregateError(
+                  [
+                    ...(originalFailure === undefined ? [] : [originalFailure]),
+                    metadataFailure,
+                  ],
+                  'Computer host metadata requires reconciliation; original identities retained',
+                );
+              } else {
+                report({ stage: 'cleanup', code: 'STOPPED' });
+              }
+            } finally {
+              cleanup.dispose();
             }
-            if (errors.length)
-              cleanupFailure = new AggregateError(
-                originalFailure === undefined
-                  ? errors
-                  : [originalFailure, ...errors],
-                'Computer host cleanup is uncertain; ownership marker retained',
-              );
-            else clean = true;
-          } finally {
-            cleanup.dispose();
-            if (clean) await rm(activeMarker, { recursive: true });
           }
-        }
-        if (cleanupFailure !== undefined) throw cleanupFailure;
-        if (originalFailure !== undefined) throw originalFailure;
-      },
-      admission.signal,
-    );
+          if (cleanupFailure !== undefined) throw cleanupFailure;
+          if (originalFailure !== undefined) throw originalFailure;
+          if (diagnosticFailure !== undefined) throw diagnosticFailure;
+        },
+        admission.signal,
+      );
+    });
   } finally {
     admission.dispose();
     initialStartup.dispose();

@@ -11,12 +11,17 @@
     ".": {
       "types": "./build/computer/index.d.ts",
       "import": "./build/computer/index.js"
+    },
+    "./main": {
+      "types": "./build/computer/main.d.ts",
+      "import": "./build/computer/main.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node scripts/test.mjs",
-    "start": "node build/computer/main.js"
+    "start": "node build/computer/main.js",
+    "pack:offline": "python3 scripts/build-distribution.py"
   },
   "dependencies": {
     "playwright": "1.63.0",
@@ -26,5 +31,8 @@
   "devDependencies": {
     "@types/node": "^22.20.2",
     "typescript": "5.9.3"
+  },
+  "bin": {
+    "plowshare-computer-control": "./build/computer/main.js"
   }
 }
