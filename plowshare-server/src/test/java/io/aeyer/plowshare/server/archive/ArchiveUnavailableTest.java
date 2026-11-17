@@ -87,7 +87,7 @@ class ArchiveUnavailableTest {
             new SQLException("canceling statement due to user request", "57014"));
     var failure =
         assertThrows(
-            ArchiveUnavailableException.class,
+            ArchiveQueryCancelledException.class,
             () ->
                 ArchiveUnavailableException.translating(
                     "rank conversation passages",

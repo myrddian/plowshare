@@ -66,11 +66,22 @@ Identical matching excerpts/passages (with whitespace normalized) group before
 pagination/source limits. Semantic-only search reads reach counts without running
 BM25. Exact ranking omits the redundant global distance sort; grouping numbers
 occurrences once and aggregates only the representative and at most twenty
-references rather than building unbounded duplicate arrays. Semantic entry ranking
-is exact to preserve that grouping; digest consumers retain their existing index
-policy. Each group exposes at most
-twenty authorized source references. Snapshot refresh rechecks all retained revisions
+references rather than building unbounded duplicate arrays. Semantic entries honor
+the active embedding profile's index policy. ANN reads
+select a bounded authorized passage-key window in one query, then batch text
+loading and full-precision scoring in a second query under the same deadline.
+Retained source revisions fence intervening edits or delete/reinsert; bounded in-memory stages choose one passage per source,
+group excerpts and apply the result limit. Iterative scans retain scope/visibility
+filters before the SQL candidate limit. Approximate recall is explicit and never
+claims completeness; a filled passage window is truncated even when duplicates
+leave an under-full result. Exact profiles retain exact ranking. ANN reads scope
+iterative scans, `enable_sort=off` (revision-column equality is underestimated) and
+`jit=off` to the short transaction, restoring caller settings on success and rolling
+back on failure. Each group exposes at most twenty authorized source references. Snapshot refresh rechecks all retained revisions
 in a batch and suppresses changed/moved/hidden references without filling later slots.
+Offsets retain original slots; `total` extends through the last currently visible
+slot (zero if none remain). Clients advance by `offset + limit` through sparse pages,
+not by the number of returned hits.
 New delegated research inputs carry explicit supplied-context spans and declared
 source references. Default lexical statistics/snippets use the stored evidence
 projection; semantic passage provenance is filtered before ranking and limits.
@@ -81,14 +92,32 @@ never grants access to the original source. Metadata changes invalidate revision
 and the derived passage queue atomically. Skill handoffs retain typed provenance
 and exclude derived search columns.
 
+Passage SQL consumes the same injected `InformationLogVisibility` capability as
+lexical/reach/source-refresh reads. Reuse its complete version-fenced denied-log
+snapshot before candidate limits and coverage counts; do not recompute the graph
+inside each passage query or create a second cache. Dirty/historical/oversized
+snapshots retain the authoritative SQL predicate. A failed post-read visibility
+fence refuses the result without replay, including while a caller transaction
+holds embedding/disclosure locks.
+
 All search SQL stages share `plowshare.retrieval.search-budget` (default 2s), including
 an earlier cache/admission deadline. Resolve the project name once under that
 deadline and reuse the operation-local selection across lexical, passage, coverage
 and source-refresh reads; writes never reuse this selection. Do not reset the budget per query or reread
-initial coverage during the same operation. Whole-second JDBC cancellation rounds
-down; less than one remaining second refuses a new statement. Provider embedding
+initial coverage during the same operation. Conversation project selection, lexical,
+source-refresh and passage SQL use pgJDBC millisecond
+cancellation with the earlier of one second, the remaining shared budget and any
+shorter configured statement/transaction timeout. A sub-second remainder remains
+usable; expiry and late results still fail. Provider embedding
 IO keeps its own finite transport budget; late results cannot initiate another SQL
 stage or be disclosed as success.
+
+Search catches typed archive query cancellation only after the owning transaction
+unwinds and maps it to a recoverable read failure. This preserves PostgreSQL rollback,
+deadline cancellation, telemetry and earlier completed tool work without ending the
+agent run over that cancelled search. It returns no partial window and does not
+retry SQL, embeddings or previous tools. Genuine archive outages and uncertain
+archive writes retain their existing failure contracts.
 
 Lexical totals count groups; semantic totals describe a bounded snapshot. Inspect
 coverage, fallback and capped references before claiming completeness.

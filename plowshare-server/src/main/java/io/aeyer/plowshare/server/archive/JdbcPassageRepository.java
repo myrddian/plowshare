@@ -11,11 +11,15 @@ import io.aeyer.plowshare.server.archive.PassageIndex.Coverage;
 import io.aeyer.plowshare.server.archive.PassageIndex.Match;
 import io.aeyer.plowshare.server.archive.PassageIndex.Occurrence;
 import io.aeyer.plowshare.server.archive.PassageIndex.PassageText;
+import io.aeyer.plowshare.server.archive.PassageIndex.Ranking;
 import io.aeyer.plowshare.server.archive.PassageIndex.Source;
 import io.aeyer.plowshare.server.embedding.EmbeddingIndexPlan;
 import io.aeyer.plowshare.server.embedding.EmbeddingProfile;
 import io.aeyer.plowshare.server.embedding.EmbeddingQuery;
 import io.aeyer.plowshare.server.embedding.EmbeddingSearchPolicy;
+import io.aeyer.plowshare.server.information.InformationLogSql;
+import io.aeyer.plowshare.server.information.InformationLogVisibility;
+import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.sql.ResultSet;
@@ -32,6 +36,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.ArgumentPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.SqlArrayValue;
 
 /** Owns retrieval SQL and lock ordering. External embedding calls never run in this repository. */
 public final class JdbcPassageRepository implements PassageRepository {
@@ -40,12 +45,27 @@ public final class JdbcPassageRepository implements PassageRepository {
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
   private final Duration readBudget;
+  private final InformationLogVisibility visibility;
+
+  private record IndexSettings(String scan, String sort, String jit) {}
+
+  private record SelectedPassage(String id, int position, String hash, long revision) {}
+
+  private record CandidateWindow(List<PassageRanking.Candidate> passages, boolean full) {}
 
   public JdbcPassageRepository(JdbcTemplate jdbc, UnitOfWork transactions) {
     this(jdbc, transactions, Duration.ofSeconds(2));
   }
 
   public JdbcPassageRepository(JdbcTemplate jdbc, UnitOfWork transactions, Duration readBudget) {
+    this(jdbc, transactions, readBudget, InformationLogVisibility.direct());
+  }
+
+  public JdbcPassageRepository(
+      JdbcTemplate jdbc,
+      UnitOfWork transactions,
+      Duration readBudget,
+      InformationLogVisibility visibility) {
     if (readBudget == null
         || readBudget.isZero()
         || readBudget.isNegative()
@@ -55,6 +75,7 @@ public final class JdbcPassageRepository implements PassageRepository {
     this.jdbc = jdbc;
     this.transactions = transactions;
     this.readBudget = readBudget;
+    this.visibility = Objects.requireNonNull(visibility);
   }
 
   private static void sourceType(String type) {
@@ -206,6 +227,23 @@ public final class JdbcPassageRepository implements PassageRepository {
 
   private <T> List<T> informationRows(
       ReadScope scope, String sql, RowMapper<T> mapper, Object... args) {
+    return ReadDeadline.within(
+        readBudget,
+        () -> {
+          if (scope.constrained() && sql.contains("/*information*/"))
+            return visibility.read(
+                scope.account(), facts -> informationRows(scope, sql, mapper, facts, args));
+          return informationRows(
+              scope, sql, mapper, InformationLogVisibility.Facts.authoritative(), args);
+        });
+  }
+
+  private <T> List<T> informationRows(
+      ReadScope scope,
+      String sql,
+      RowMapper<T> mapper,
+      InformationLogVisibility.Facts facts,
+      Object... args) {
     String marker = "/*information*/";
     sql =
         sql.replace(
@@ -221,33 +259,27 @@ public final class JdbcPassageRepository implements PassageRepository {
       sql = sql.replace(marker, " AND s.conversation_id=? " + marker);
       at = sql.indexOf(marker);
     }
+    String predicate = "";
     if (scope.constrained() && at >= 0) {
       int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
-      bound.add(before, scope.account());
+      var filter = InformationLogSql.visible("s.conversation_id", scope.account(), facts);
+      bound.addAll(before, filter.arguments());
+      predicate = " AND " + filter.sql();
     }
-    String selected =
-        sql.replace(
-            marker,
-            scope.constrained()
-                ? " AND s.conversation_id NOT IN (SELECT log FROM information_unreadable_logs(?))"
-                : "");
+    String selected = sql.replace(marker, predicate);
     return ReadDeadline.within(
         readBudget,
         () -> {
-          long deadline = ReadDeadline.deadlineNanos(readBudget);
+          long deadline =
+              JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(readBudget));
           var setter = new ArgumentPreparedStatementSetter(bound.toArray());
           try {
             var rows =
                 jdbc.query(
                     selected,
                     statement -> {
-                      long remaining = deadline - System.nanoTime();
-                      if (remaining <= 0) throw new ReadUnavailableException();
-                      int timeout = ReadDeadline.jdbcTimeoutSeconds(deadline);
-                      int transactionTimeout = statement.getQueryTimeout();
-                      statement.setQueryTimeout(
-                          transactionTimeout > 0 ? Math.min(transactionTimeout, timeout) : timeout);
                       setter.setValues(statement);
+                      JdbcReadDeadline.apply(statement, deadline);
                     },
                     mapper);
             if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
@@ -515,10 +547,24 @@ public final class JdbcPassageRepository implements PassageRepository {
   @Override
   public List<Match> rank(
       Home home, String type, EmbeddingQuery query, int most, String generation, ReadScope scope) {
+    return rankWindow(home, type, query, most, generation, scope).matches();
+  }
+
+  @Override
+  public Ranking rankWindow(
+      Home home, String type, EmbeddingQuery query, int most, String generation, ReadScope scope) {
+    return ReadDeadline.within(
+        readBudget, () -> rankWithinDeadline(home, type, query, most, generation, scope));
+  }
+
+  private Ranking rankWithinDeadline(
+      Home home, String type, EmbeddingQuery query, int most, String generation, ReadScope scope) {
+    ReadDeadline.check();
     sourceType(type);
     if (most < 1 || most > 2000)
       throw new IllegalArgumentException("passage result limit must be 1..2000");
     var plan = new EmbeddingIndexPlan(query.profile());
+    if (!plan.exact()) return indexedRank(home, type, query, most, generation, scope, plan);
     String join =
         type.equals("entry")
             ? " JOIN entries e ON e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal JOIN conversations owner ON owner.id=e.conversation_id "
@@ -546,19 +592,6 @@ public final class JdbcPassageRepository implements PassageRepository {
     args.add(type);
     args.add(generation);
     args.add(ProjectIds.toRead(jdbc, home));
-    boolean exact = plan.exact() || type.equals("entry");
-    // Exact ranking orders by source/distance below. Sorting the entire passage corpus by
-    // distance first serves no limit and adds a second full sort of the passage text.
-    if (!exact) {
-      inner += " ORDER BY " + plan.candidateDistance(column);
-      args.add(query.vectorText());
-    }
-    // More passages than sources are considered before deduplication. This is an explicit
-    // candidate bound; repeated passages never contribute additional fusion votes.
-    if (!exact) {
-      inner += " LIMIT ?";
-      args.add(plan.candidates(most));
-    }
     String best =
         "SELECT source_id,position,passage,source_hash,1-distance AS similarity FROM (SELECT DISTINCT ON(source_id) * FROM ("
             + inner
@@ -567,11 +600,154 @@ public final class JdbcPassageRepository implements PassageRepository {
                 ? " WHERE distance<=0.65"
                 : "");
     args.add(most);
-    return informationRows(
-        scope,
-        groupMatches(best, type.equals("entry")),
-        JdbcPassageRepository::match,
-        args.toArray());
+    return new Ranking(
+        informationRows(
+            scope,
+            groupMatches(best, type.equals("entry")),
+            JdbcPassageRepository::match,
+            args.toArray()),
+        false,
+        false);
+  }
+
+  /**
+   * Only the nearest authorized passage keys enter the first window. A second batched read fetches
+   * text and scores original vectors for that bounded window, then deduplicates in memory: neither
+   * large text sorts nor source/excerpt grouping can turn the ANN scan back into a full-corpus
+   * exact ranking.
+   *
+   * <p>Iterative scans continue past rejected/private/stale rows up to pgvector's configured scan
+   * bounds and the shared statement deadline. They still cannot promise exhaustive recall. LOCAL
+   * settings are restored on success even when joining a caller transaction; failure rolls back the
+   * owning transaction without issuing more SQL into an aborted transaction.
+   */
+  private Ranking indexedRank(
+      Home home,
+      String type,
+      EmbeddingQuery query,
+      int most,
+      String generation,
+      ReadScope scope,
+      EmbeddingIndexPlan plan) {
+    int candidateLimit = plan.candidates(most);
+    String join =
+        type.equals("entry")
+            ? " JOIN entries e ON e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal JOIN conversations owner ON owner.id=e.conversation_id "
+            : " JOIN digests owner ON owner.id=s.source_id ";
+    String eligible =
+        type.equals("entry")
+            ? " AND e.content IS NOT NULL AND e.role IS NOT NULL AND e.ejected_at IS NULL "
+            : " AND owner.stale_at IS NULL ";
+    String column = "p." + plan.column();
+    String sql =
+        "SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision"
+            + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
+            + join
+            + " WHERE s.source_type=? AND s.status='ready' AND s.generation=?"
+            + " AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
+            + eligible
+            + passageFence(type, scope)
+            + digestFence(type, scope)
+            + (type.equals("entry") ? " /*information*/" : "")
+            + " AND "
+            + plan.present("p")
+            + " ORDER BY "
+            + plan.candidateDistance(column)
+            + " LIMIT ?";
+    CandidateWindow window =
+        transactions.inTransaction(
+            () -> {
+              boolean hnsw =
+                  query.profile().search().mode().configurationName().startsWith("hnsw_");
+              String setting = hnsw ? "hnsw.iterative_scan" : "ivfflat.iterative_scan";
+              // Equality between the two revision columns is badly underestimated by PostgreSQL
+              // (0.5% even when all published vectors are current). It can otherwise choose a
+              // full vector scan/sort for this explicitly indexed policy. Discourage that sort
+              // only in this short transaction; the outer, bounded rerank happens in memory.
+              // High estimated ANN costs also trigger JIT compilation whose startup consumes a
+              // short interactive budget; no compilation is needed for this bounded read.
+              IndexSettings previous =
+                  informationRows(
+                          scope,
+                          "WITH previous AS MATERIALIZED (SELECT coalesce(current_setting(?,true),'off') AS scan,"
+                              + "current_setting('enable_sort') AS sorting,current_setting('jit') AS jit)"
+                              + " SELECT scan,sorting,jit,set_config(?,?,true),set_config('enable_sort','off',true),set_config('jit','off',true) FROM previous",
+                          (row, n) ->
+                              new IndexSettings(
+                                  row.getString("scan"),
+                                  row.getString("sorting"),
+                                  row.getString("jit")),
+                          setting,
+                          setting,
+                          hnsw ? "strict_order" : "relaxed_order")
+                      .getFirst();
+              List<SelectedPassage> keys =
+                  informationRows(
+                      scope,
+                      sql,
+                      (row, n) ->
+                          new SelectedPassage(
+                              row.getString("source_id"),
+                              row.getInt("position"),
+                              row.getString("source_hash"),
+                              row.getLong("embedding_source_revision")),
+                      type,
+                      generation,
+                      ProjectIds.toRead(jdbc, home),
+                      query.vectorText(),
+                      candidateLimit);
+              // This is a different projection of exactly the keys just admitted, not a rerun of
+              // ANN selection or permission discovery. Parallel typed arrays keep one batch and
+              // one stable SQL shape. The source revision prevents a delete/reinsert or edit
+              // between stages from attaching new text/vectors to an old authorized identity.
+              List<PassageRanking.Candidate> selected =
+                  keys.isEmpty()
+                      ? List.of()
+                      : informationRows(
+                          scope,
+                          "SELECT selected.source_id,selected.position,p.passage,selected.source_hash,"
+                              + plan.denseDistance(column)
+                              + " AS distance FROM unnest(CAST(? AS text[]),CAST(? AS integer[]),CAST(? AS text[]),CAST(? AS bigint[]))"
+                              + " AS selected(source_id,position,source_hash,source_revision)"
+                              + " JOIN retrieval_passages p ON p.source_type=? AND p.source_id=selected.source_id AND p.position=selected.position"
+                              + " WHERE p.embedding_source_revision=selected.source_revision AND "
+                              + plan.present("p"),
+                          (row, n) ->
+                              new PassageRanking.Candidate(
+                                  row.getString("source_id"),
+                                  row.getInt("position"),
+                                  row.getString("passage"),
+                                  row.getString("source_hash"),
+                                  row.getDouble("distance")),
+                          query.vectorText(),
+                          new SqlArrayValue(
+                              "text", keys.stream().map(SelectedPassage::id).toArray()),
+                          new SqlArrayValue(
+                              "integer", keys.stream().map(SelectedPassage::position).toArray()),
+                          new SqlArrayValue(
+                              "text", keys.stream().map(SelectedPassage::hash).toArray()),
+                          new SqlArrayValue(
+                              "bigint", keys.stream().map(SelectedPassage::revision).toArray()),
+                          type);
+              informationRows(
+                  scope,
+                  "SELECT set_config(?,?,true),set_config('enable_sort',?,true),set_config('jit',?,true)",
+                  (row, n) -> row.getString(1),
+                  setting,
+                  previous.scan(),
+                  previous.sort(),
+                  previous.jit());
+              return new CandidateWindow(selected, keys.size() == candidateLimit);
+            });
+    ReadDeadline.check();
+    var matches =
+        PassageRanking.group(
+            window.passages(),
+            most,
+            type.equals("entry"),
+            query.profile().search().distance() == EmbeddingSearchPolicy.Distance.COSINE);
+    ReadDeadline.check();
+    return new Ranking(matches, true, window.full());
   }
 
   /**

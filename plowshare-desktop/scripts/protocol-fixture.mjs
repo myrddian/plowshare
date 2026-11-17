@@ -712,7 +712,21 @@ export async function protocolFixture(options = {}) {
         case 'proposal.list': result.payload=payload.project?[]:library[frame.type];break;
         case 'proposal.resolve': {const proposal=library['proposal.list'].find(row=>row.id===payload.proposal);Object.assign(proposal,{state:payload.accept?'accepted':'rejected',resolvedAt:'2026-10-02T10:00:00Z',resolvedBy:payload.by,resolution:payload.reason});result.payload={proposal,promotedId:payload.accept?'global_memory':null,demoted:[]};break;}
         case 'memory.reembed': case 'proposal.reconsider': result.payload=library[frame.type];break;
-        case 'conversation.search': result.payload={hits:searchHits.slice(payload.offset??0,(payload.offset??0)+(payload.limit??20)),total:searchHits.length,offset:payload.offset??0,limit:payload.limit??20,reach:{searched:1,ejected:2,recordedOnly:3},retrieval:{requestedMode:payload.mode,effectiveMode:'lexical',totalMeaning:'matches',snapshot:'fixture-snapshot',truncated:false,complete:false,fallback:'embedding provider unavailable',coverage:{eligible:52,indexed:0,passages:0,pending:0,failed:52,stale:0},generation:'fixture-generation',queryEmbeddingCalls:0,provenance:'live_lexical'}};break;
+        case 'conversation.search': {
+          const offset = payload.offset ?? 0, limit = payload.limit ?? 20;
+          if (payload.q === 'sparse snapshot results') {
+            assert.equal(payload.snapshot, offset === 0 ? undefined : 'sparse-snapshot');
+            result.payload = {
+              hits: offset === 0 ? searchHits.slice(0, 1) : offset === 100 ? searchHits.slice(1, 2) : [],
+              total: offset >= 150 ? 0 : 151, offset, limit,
+              reach: {searched:1,ejected:2,recordedOnly:3},
+              retrieval: {requestedMode:payload.mode,effectiveMode:'semantic',totalMeaning:'bounded snapshot slots',snapshot:'sparse-snapshot',truncated:false,complete:false,fallback:'Source visibility/revision changed; invalid references suppressed',coverage:null,generation:'fixture-generation',queryEmbeddingCalls:offset === 0 ? 1 : 0,provenance:'materialized'},
+            };
+          } else {
+            result.payload={hits:searchHits.slice(offset,offset+limit),total:searchHits.length,offset,limit,reach:{searched:1,ejected:2,recordedOnly:3},retrieval:{requestedMode:payload.mode,effectiveMode:'lexical',totalMeaning:'matches',snapshot:'fixture-snapshot',truncated:false,complete:false,fallback:'embedding provider unavailable',coverage:{eligible:52,indexed:0,passages:0,pending:0,failed:52,stale:0},generation:'fixture-generation',queryEmbeddingCalls:0,provenance:'live_lexical'}};
+          }
+          break;
+        }
         case 'schedule.files': result.payload = [...scheduleFiles.values()]; break;
         case 'schedule.sync': result.payload = [...scheduleFiles.values()]; break;
         case 'schedule.save': {

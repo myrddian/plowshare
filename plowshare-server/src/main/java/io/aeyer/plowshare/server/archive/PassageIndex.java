@@ -67,6 +67,13 @@ public final class PassageIndex implements UsageAware {
 
   public record Occurrence(String id, String revision) {}
 
+  /** A bounded ranking window; ANN recall and a filled passage bound are independent limits. */
+  public record Ranking(List<Match> matches, boolean approximate, boolean truncated) {
+    public Ranking {
+      matches = List.copyOf(matches);
+    }
+  }
+
   public record Match(
       String id,
       int position,
@@ -233,14 +240,20 @@ public final class PassageIndex implements UsageAware {
   }
 
   public List<Match> rank(Home home, String type, Query query, int most) {
+    return rankWindow(home, type, query, most).matches();
+  }
+
+  /** Keeps candidate-bound evidence alongside results for conversation-search completeness. */
+  public Ranking rankWindow(Home home, String type, Query query, int most) {
     if (query.admission() != null)
       return query
           .admission()
-          .disclose(() -> rank(home, type, new Query(query.legacy(), query.typed()), most));
-    if (query.typed() == null) return rank(home, type, query.legacy(), most);
+          .disclose(() -> rankWindow(home, type, new Query(query.legacy(), query.typed()), most));
+    if (query.typed() == null)
+      return new Ranking(rank(home, type, query.legacy(), most), false, false);
     return dualEmbeddings.read(
         query.typed().profile(),
-        () -> repository.rank(home, type, query.typed(), most, generation, scope));
+        () -> repository.rankWindow(home, type, query.typed(), most, generation, scope));
   }
 
   public float[] query(String text) {

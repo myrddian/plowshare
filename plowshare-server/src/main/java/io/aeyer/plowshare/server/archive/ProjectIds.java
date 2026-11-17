@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.Supplier;
@@ -88,20 +90,17 @@ final class ProjectIds {
   private static Long boundedRead(JdbcTemplate jdbc, Home home) {
     ReadDeadline.check();
     if (home.isGlobal()) return null;
-    long deadline = ReadDeadline.deadlineNanos(Duration.ofSeconds(2));
-    ReadDeadline.jdbcTimeoutSeconds(deadline);
+    long deadline =
+        JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(Duration.ofSeconds(2)));
     List<Long> found =
         jdbc.query(
             LOOK_UP,
             statement -> {
-              int timeout = ReadDeadline.jdbcTimeoutSeconds(deadline);
-              int transactionTimeout = statement.getQueryTimeout();
-              statement.setQueryTimeout(
-                  transactionTimeout > 0 ? Math.min(timeout, transactionTimeout) : timeout);
               statement.setString(1, home.project());
+              JdbcReadDeadline.apply(statement, deadline);
             },
             (row, position) -> row.getLong(1));
-    ReadDeadline.check();
+    if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
     return found.isEmpty() ? NONE : found.getFirst();
   }
 

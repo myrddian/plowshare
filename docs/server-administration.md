@@ -1123,19 +1123,28 @@ existing raw-text, live-key and deployment-pin behavior.
 
 `plowshare.retrieval.search-budget` defaults to `2s` (positive, at most `1m`).
 Lexical ranking, grouped-reference refresh and passage repository reads inherit
-any earlier read deadline. JDBC query cancellation uses the remaining budget,
-rounded down to JDBC's whole-second timeout. A new statement is refused when less
-than one second remains, and late results are rejected. This
-bounds these SQL executions; connection acquisition and cancellation cleanup
+any earlier read deadline. JDBC query cancellation uses pgJDBC's millisecond timer
+with the earlier of one second, the remaining budget and any shorter configured statement/transaction
+timeout. Sub-second remainders remain usable; expiry refuses new statements and
+late results are rejected. This bounds these SQL executions; connection acquisition and cancellation cleanup
 still have the owning datasource/driver limits described above. Query embeddings
 retain their separate provider/admission budget and run outside SQL transactions.
 V269 adds the stored lexical length used by BM25; no embedding rebuild is needed.
 Semantic-only searches read authorized reach counts without executing BM25.
-Exact passage ranking avoids a redundant global distance sort, and duplicate groups
-retain at most twenty references during aggregation rather than building unbounded
-arrays and slicing them afterward. PostgreSQL query cancellation remains unavailable
-and is described as cancellation rather than a failed connection; no results or
-automatic query replay follow it.
+Conversation entries honor the active embedding index policy. ANN reads first
+select a bounded authorized passage-key window (at most 2,000). A second batched
+query loads text and scores original vectors only for that window, with a source
+revision fence against edits between stages. Both queries share the remaining budget. In-memory source selection,
+excerpt grouping and final limiting avoid full-corpus text sorts. ANN recall is
+explicitly approximate (`complete: false`); filling the passage window also marks
+truncation even if duplicates leave fewer result groups. Exact profiles retain
+exact ranking. Short-lived LOCAL settings enable iterative scans, discourage the
+misestimated full-corpus sort and disable JIT compilation; successful reads restore
+the caller's settings, and failure rolls the transaction back. PostgreSQL query cancellation is typed separately from a failed connection.
+Conversation search maps it to recoverable read unavailability after rollback,
+so the model sees a tool error and can continue the run with earlier evidence.
+No partial results or automatic SQL/embedding/tool replay follow it. Actual archive
+connection failures and generic uncertain writes retain their existing policy.
 V270 adds explicit input provenance, stored evidence-search projections and semantic
 passage provenance. It preserves complete transcript content and unclassified historical
 inputs. Sparse evidence projections reuse historical text and vectors instead of
