@@ -292,8 +292,9 @@ class ConversationPaginationBenchmarkTest {
 
     public Span begin(String sql, String method) {
       statements++;
-      if (sql.startsWith("SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision"))
-        ann++;
+      if (sql.startsWith("WITH authorized_sources AS MATERIALIZED")
+          || sql.startsWith(
+              "SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision")) ann++;
       long start = System.nanoTime();
       return new Span() {
         public void failed() {}

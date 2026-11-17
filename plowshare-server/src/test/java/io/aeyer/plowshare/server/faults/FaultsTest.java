@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.faults;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.frames.Code;
@@ -16,9 +17,14 @@ import io.aeyer.plowshare.server.archive.ValidationException;
 import io.aeyer.plowshare.server.config.ConfigUnavailableException;
 import io.aeyer.plowshare.server.documents.UnreadableDocumentException;
 import io.aeyer.plowshare.server.events.ModelUnavailableException;
+import io.aeyer.plowshare.server.files.SessionGoneException;
+import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.images.UnstorableImageException;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.session.PresenceConflictException;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -32,17 +38,33 @@ import org.junit.jupiter.api.Test;
 class FaultsTest {
 
   @Test
+  void failedReadsPreserveTheirReasonWithoutClaimingBackpressureOrPermissionToReplay() {
+    for (var failure :
+        List.of(
+            ReadFailedException.deadlineExceeded(),
+            ReadFailedException.invalidated(),
+            ReadFailedException.interrupted(),
+            ReadFailedException.closed(),
+            ReadFailedException.queryCancelled(new IllegalStateException("private-query")))) {
+      var fault = Faults.of(failure);
+      assertEquals(Code.ARCHIVE_UNAVAILABLE, fault.code());
+      assertFalse(fault.detail().contains("capacity"));
+      assertFalse(fault.detail().contains("private-query"));
+    }
+    assertTrue(Faults.of(new ReadUnavailableException()).detail().contains("capacity"));
+  }
+
+  @Test
   void a_closed_file_session_and_a_deadline_are_availability_failures_without_private_details() {
     for (var failure :
-        java.util.List.of(
-            new io.aeyer.plowshare.server.files.SessionGoneException("private session identity"),
-            new io.aeyer.plowshare.server.files.WorkspaceUnavailableException(
-                "private file path"))) {
+        List.of(
+            new SessionGoneException("private session identity"),
+            new WorkspaceUnavailableException("private file path"))) {
       var fault = Faults.of(failure);
       assertEquals(Code.ARCHIVE_UNAVAILABLE, fault.code());
       assertTrue(fault.detail().contains("Restore the owning file connection"));
-      org.junit.jupiter.api.Assertions.assertFalse(fault.detail().contains("private"));
-      org.junit.jupiter.api.Assertions.assertFalse(fault.detail().contains("Nothing was read"));
+      assertFalse(fault.detail().contains("private"));
+      assertFalse(fault.detail().contains("Nothing was read"));
     }
   }
 

@@ -36,6 +36,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -972,7 +973,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
                   ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
                   : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
               fence(socket, delivery, requestSession));
-      CompletionStage<Outcome> answer;
+      CompletionStage<FrameRouter.Routed> answer;
       // One socket request, counted on this request's own virtual thread (ConcurrentRequests starts
       // one per request). Only the synchronous part of the handler is counted; work a handler
       // completes on another thread is not part of this scope.
@@ -980,17 +981,24 @@ public final class EventChannelHandler extends TextWebSocketHandler
         answer =
             ConcurrentDispatch.TYPE.equals(type)
                 ? CompletableFuture.completedFuture(
-                    Outcome.ok(
-                        new ConcurrentDispatch.Selected(
-                            ConcurrentDispatch.MODE,
-                            advertisedRequestDepth(),
-                            ConcurrentDispatch.MAX_ID_BYTES)))
-                : router().routeAsync(frame, asking);
+                    new FrameRouter.Routed(
+                        Outcome.ok(
+                            new ConcurrentDispatch.Selected(
+                                ConcurrentDispatch.MODE,
+                                advertisedRequestDepth(),
+                                ConcurrentDispatch.MAX_ID_BYTES)),
+                        false))
+                : router().routeForTransport(frame, asking);
       }
       return answer.thenAccept(
-          outcome -> {
+          routed -> {
+            Outcome outcome = routed.outcome();
             if (!delivery.running || !socket.isOpen()) {
               delivered.run();
+              return;
+            }
+            if (routed.refusedBeforeHandler()) {
+              delivery.refuseAdmitted(id, type, outcome, delivered);
               return;
             }
             delivery.answer(
@@ -1727,6 +1735,41 @@ public final class EventChannelHandler extends TextWebSocketHandler
      */
     boolean refuse(String id, String type, Outcome outcome) {
       return enqueue(id, type, outcome, () -> {}, validity, () -> {}, () -> {}, false);
+    }
+
+    /**
+     * A dispatcher-admitted request whose router proved the business handler never started. Its
+     * execution/queueing stage must settle before releasing the request body and ID; release must
+     * precede the physical send because a client may immediately resubmit that same ID after
+     * receiving capacity flow control, even while send() is still returning. This reply takes no
+     * handoff claim. Its encoded output bytes remain owned until the physical send settles.
+     */
+    boolean refuseAdmitted(
+        String id, String type, Outcome outcome, ConcurrentRequests.Delivery dispatch) {
+      // The dispatcher callback retains its Request/body. Clear that reference before the send,
+      // alongside releasing accounting, rather than keeping uncharged input bytes in this Reply.
+      var ownership = new AtomicReference<>(dispatch);
+      boolean queued =
+          enqueue(
+              id,
+              type,
+              outcome,
+              () -> {},
+              validity,
+              () -> {
+                var owned = ownership.getAndSet(null);
+                if (owned != null) {
+                  owned.executionFinished().toCompletableFuture().join();
+                  owned.run();
+                }
+              },
+              () -> {},
+              false);
+      if (!queued) {
+        var owned = ownership.getAndSet(null);
+        if (owned != null) owned.run();
+      }
+      return queued;
     }
 
     /**

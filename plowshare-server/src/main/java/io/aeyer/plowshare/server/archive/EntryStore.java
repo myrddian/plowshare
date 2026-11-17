@@ -22,7 +22,7 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
-import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -1081,15 +1081,12 @@ public final class EntryStore implements ConversationSearchRepository {
 
   @Override
   public <T> T withinSearchScope(Home home, Supplier<T> operation) {
-    return ReadDeadline.within(
-        searchBudget,
-        () ->
-            ArchiveUnavailableException.translating(
-                "resolve conversation search project",
-                () -> ProjectIds.withinReadSelection(jdbc, home, operation)));
+    return ArchiveUnavailableException.translating(
+        "resolve conversation search project",
+        () -> ProjectIds.withinReadSelection(jdbc, home, searchBudget, operation));
   }
 
-  /** One finite SQL search budget; nested projection waits share its earlier deadline. */
+  /** Per-query SQL budget; independent queries do not share a workflow execution timer. */
   public EntryStore useSearchBudget(Duration budget) {
     if (budget == null
         || budget.isZero()
@@ -1101,27 +1098,20 @@ public final class EntryStore implements ConversationSearchRepository {
   }
 
   private <T> T searchQuery(String sql, ResultSetExtractor<T> mapper, Object... args) {
-    return ReadDeadline.within(
-        searchBudget,
-        () -> {
-          long deadline = ReadDeadline.deadlineNanos(searchBudget);
-          T result =
-              informationScoped
-                  ? visibility.read(
-                      informationAccount, facts -> searchQuery(sql, mapper, deadline, facts, args))
-                  : searchQuery(sql, mapper, deadline, null, args);
-          if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
-          return result;
-        });
+    // Visibility preparation may perform independent SQL before this query. It has its own owner
+    // budgets; only the actual query below starts this statement's completion deadline.
+    return informationScoped
+        ? visibility.read(informationAccount, facts -> searchQuery(sql, mapper, facts, args))
+        : searchQuery(sql, mapper, null, args);
   }
 
   private <T> T searchQuery(
       String sql,
       ResultSetExtractor<T> mapper,
-      long deadline,
       InformationLogVisibility.Facts facts,
       Object... args) {
-    long queryDeadline = JdbcReadDeadline.completionDeadline(deadline);
+    long queryDeadline =
+        JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(searchBudget));
     var bound = new ArrayList<>(Arrays.asList(args));
     if (facts != null) {
       int at = sql.indexOf("/*information*/");
@@ -1140,7 +1130,7 @@ public final class EntryStore implements ConversationSearchRepository {
                 JdbcReadDeadline.apply(statement, queryDeadline);
               },
               mapper);
-      if (System.nanoTime() - queryDeadline >= 0) throw new ReadUnavailableException();
+      if (System.nanoTime() - queryDeadline >= 0) throw ReadFailedException.deadlineExceeded();
       return result;
     } finally {
       setter.cleanupParameters();
@@ -2570,17 +2560,11 @@ public final class EntryStore implements ConversationSearchRepository {
   @Override
   public LogSearch search(
       Home home, String question, int skip, int most, String conversation, boolean includeInputs) {
-    return ReadDeadline.within(
-        searchBudget,
-        () -> {
-          ReadDeadline.check();
-          return withinSearchScope(
-              home,
-              () -> searchWithinDeadline(home, question, skip, most, conversation, includeInputs));
-        });
+    return withinSearchScope(
+        home, () -> searchSelected(home, question, skip, most, conversation, includeInputs));
   }
 
-  private LogSearch searchWithinDeadline(
+  private LogSearch searchSelected(
       Home home, String question, int skip, int most, String conversation, boolean includeInputs) {
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(question, "question");

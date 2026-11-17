@@ -23,7 +23,7 @@ import io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository;
 import io.aeyer.plowshare.server.embedding.JdbcEmbeddingSpaceRepository;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
-import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -164,21 +164,23 @@ class IndexedPassageRankingDatabaseTest {
             call -> {
               Function<InformationLogVisibility.Facts, Object> read = call.getArgument(1);
               read.apply(new InformationLogVisibility.Facts(Optional.of(List.of(hidden))));
-              throw new ReadUnavailableException();
+              throw ReadFailedException.invalidated();
             });
     var repository =
         new JdbcPassageRepository(jdbc, transactions, Duration.ofSeconds(2), visibility);
     int before = jdbc.selections;
-    assertThrows(
-        ReadUnavailableException.class,
-        () ->
-            repository.rankWindow(
-                HOME,
-                "entry",
-                new EmbeddingQuery(profile, new float[] {1, 0, 0}),
-                10,
-                "indexed-fixture",
-                new PassageRepository.ReadScope(true, "reader")));
+    var failure =
+        assertThrows(
+            ReadFailedException.class,
+            () ->
+                repository.rankWindow(
+                    HOME,
+                    "entry",
+                    new EmbeddingQuery(profile, new float[] {1, 0, 0}),
+                    10,
+                    "indexed-fixture",
+                    new PassageRepository.ReadScope(true, "reader")));
+    assertEquals(ReadFailedException.Reason.INVALIDATED, failure.reason());
     assertEquals(before + 1, jdbc.selections);
     verify(visibility).read(eq("reader"), any());
   }
@@ -199,6 +201,8 @@ class IndexedPassageRankingDatabaseTest {
     assertEquals(10, ranking.matches().size());
     assertTrue(ranking.matches().stream().allMatch(match -> match.id().startsWith(selected + ":")));
     assertTrue(jdbc.plan.contains(indexName), jdbc.plan);
+    assertTrue(jdbc.plan.contains("CTE authorized_sources"), jdbc.plan);
+    assertTrue(jdbc.plan.contains("hashed SubPlan"), jdbc.plan);
     assertFalse(jdbc.plan.contains("Seq Scan on retrieval_passages"), jdbc.plan);
     assertTrue(jdbc.candidateRows <= 100, "full precision/text loading must remain bounded");
     assertTrue(jdbc.textRows <= jdbc.candidateRows);
@@ -207,6 +211,35 @@ class IndexedPassageRankingDatabaseTest {
         jdbc.queryForObject(
             "SELECT coalesce(current_setting('hnsw.iterative_scan',true),'off')", String.class));
     assertEquals("on", jdbc.queryForObject("SELECT current_setting('enable_sort')", String.class));
+  }
+
+  @Test
+  void staleSourceGenerationsAreExcludedBeforeTheAnnCandidateLimit() {
+    String stale = selected + ":100";
+    jdbc.update(
+        "UPDATE retrieval_sources SET generation='stale-fixture' WHERE source_type='entry' AND source_id=?",
+        stale);
+    try {
+      var ranking =
+          new JdbcPassageRepository(jdbc, transactions)
+              .rankWindow(
+                  HOME,
+                  "entry",
+                  new EmbeddingQuery(profile, new float[] {1, 0, 0}),
+                  10,
+                  "indexed-fixture",
+                  new PassageRepository.ReadScope(true, "reader", false, selected));
+      assertEquals(10, ranking.matches().size());
+      assertTrue(
+          ranking.matches().stream()
+              .flatMap(match -> match.sources().stream())
+              .noneMatch(source -> source.id().equals(stale)));
+      assertTrue(jdbc.plan.contains("hashed SubPlan"), jdbc.plan);
+    } finally {
+      jdbc.update(
+          "UPDATE retrieval_sources SET generation='indexed-fixture' WHERE source_type='entry' AND source_id=?",
+          stale);
+    }
   }
 
   @Test
@@ -309,7 +342,9 @@ class IndexedPassageRankingDatabaseTest {
     @Override
     public <T> List<T> query(String sql, PreparedStatementSetter setter, RowMapper<T> mapper) {
       boolean selection =
-          sql.startsWith("SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision");
+          sql.startsWith("WITH authorized_sources AS MATERIALIZED")
+              || sql.startsWith(
+                  "SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision");
       if (selection)
         plan =
             String.join("\n", super.query("EXPLAIN " + sql, setter, (row, n) -> row.getString(1)));

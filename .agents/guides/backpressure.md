@@ -30,10 +30,11 @@ physical owners; ending one caller's wait does not settle every occupied resourc
 - `CAPACITY_EXHAUSTED` is the explicit pre-handler outer refusal. Only its owning
   safe flow-control contract permits paced resubmission with original identity
   and deadline. Timeout/disconnect/packet failure never supplies that proof.
-- `ReadUnavailableException` → WS `ARCHIVE_UNAVAILABLE` / HTTP 503 is different:
-  a mutation may already have committed before its projection fails. Reconcile
-  that receipt/effect; retry only the separately safe read. Busy is not permission
-  denial, empty data or authority to use stale allows.
+- `ReadUnavailableException` means actual capacity backpressure only. Before a
+  handler starts, the entry point emits proven `CAPACITY_EXHAUSTED` / HTTP 429 and
+  SDKs pace submission. An internal busy read after dispatch cannot authorize
+  replay of an enclosing mutation. Deadline, invalidation, interruption, closure
+  and query cancellation instead carry `ReadFailedException` reasons.
 - Logical settlement is not physical release. SDK admitted bytes/counts may stay
   owned until the physical writer settles. Server running work, cache loaders,
   provider calls and DB checks can outlive their caller. Keep occupancy until the
@@ -44,12 +45,21 @@ physical owners; ending one caller's wait does not settle every occupied resourc
 - Same-thread nested DB borrows may proceed permit-free at saturation to avoid
   self-deadlock. Margin is not a bound on those borrows. Never hold a connection
   while joining another thread that needs a DB permit; preserve inline FETCH.
-- Foreground reports and FETCH wait FIFO among eligible owners, not globally.
+- Interactive reads, pure authoritative fallbacks, foreground reports and FETCH
+  wait FIFO among eligible owners, not globally. Queue acquisition has its own
+  bound; it never becomes a handler/provider/workflow timer. A cancelled reply
+  does not release a physically running handler. Transaction/synchronization holders do not park for an
+  INTERACTIVE/AUTHORITY seat.
   Background reports yield; per-connection barriers and process-wide conflicting
   resource-key ordering must survive concurrent intake changes.
 - Provider job queues are count-unbounded; submit timeout covers queue start,
   not an already running call. Journal pressure gates tracked inference even
   with zero pricing; retrying metadata must never repeat inference.
+
+Transient socket admission/session-check failures close with overload 1013, not
+policy 1008; genuine revoked-session facts retain 1008. Each socket SQL batch has its own configured wait bound, narrowed by an actual
+existing SQL deadline; no two-second whole-sweep timer is installed. See the [read-boundary audit](../../docs/read-unavailable-boundaries.md)
+for the complete throw/catch owner map and remaining cancellation gaps.
 
 ## Before changing a limit
 
@@ -84,3 +94,10 @@ review; do not start PostgreSQL, real providers or live capacity experiments.
 [LlmPool]: ../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/LlmPool.java
 [AccountingRecorder]: ../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/AccountingRecorder.java
 [AccountingJournal]: ../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/AccountingJournal.java
+
+Whole-workflow/request/cache duration above two seconds is warning-only via
+`WorkPerformanceReporter`. A bounded event queue and singleton logging worker emit
+WARN without exception payloads; observer pressure cannot alter work outcomes.
+Accepted inline cache joins wait for their existing physical load instead of being
+killed by an unrelated cache-workflow timer. Actual query/transaction deadlines
+retain their own two-second default and rollback semantics.

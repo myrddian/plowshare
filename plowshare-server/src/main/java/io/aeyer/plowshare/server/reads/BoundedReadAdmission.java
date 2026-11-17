@@ -1,19 +1,24 @@
 package io.aeyer.plowshare.server.reads;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Bounded admission before the existing database throttle. A single short monitor protects the
  * compound global/principal counters; no owner code, database work or completion runs in it. Only
  * admitted work retains principal entries, bounding metadata even under arbitrary key churn. There
- * is a bounded FIFO queue for foreground report reads only. Background refreshes yield to waiting
- * foreground reports, share the same total/principal budget, and leave a global foreground seat
- * when the report budget has more than one seat. No waiting read owns a database connection.
+ * are bounded eligible FIFO queues for interactive and foreground report reads. Background
+ * refreshes yield to waiting foreground reports, share the same total/principal budget, and leave a
+ * global foreground seat when the report budget has more than one seat. No waiting read owns a
+ * database connection.
  */
 public final class BoundedReadAdmission implements ReadAdmission {
   private record Key(String principal, Work work) {}
@@ -22,9 +27,11 @@ public final class BoundedReadAdmission implements ReadAdmission {
 
   private final ReadCapacityProperties limits;
   private final ReadSchedulingProperties scheduling;
-  private final java.util.ArrayList<Key> waiting = new java.util.ArrayList<>();
+  private final ArrayList<Key> waiting = new ArrayList<>();
   // FIFO tickets for cache fetches; identity, not equality, marks each caller's place.
-  private final java.util.ArrayList<Key> fetching = new java.util.ArrayList<>();
+  private final ArrayList<Key> fetching = new ArrayList<>();
+  private final ArrayList<Key> interactive = new ArrayList<>();
+  private final ArrayList<Key> authoritative = new ArrayList<>();
   private final ConcurrentMap<Key, Integer> principals = new ConcurrentHashMap<>();
   private final int[] active = new int[Work.values().length];
   private final AtomicLong rejected = new AtomicLong();
@@ -44,13 +51,92 @@ public final class BoundedReadAdmission implements ReadAdmission {
     synchronized (this) {
       if (!available(key, work)
           || report(work) && !waiting.isEmpty()
+          || work == Work.INTERACTIVE
+              && interactive.stream().anyMatch(next -> available(next, work))
+          || work == Work.AUTHORITY
+              && authoritative.stream().anyMatch(next -> available(next, work))
           || work == Work.FETCH && fetching.contains(key)) throw rejectedRead();
       return reserve(key, work);
     }
   }
 
   @Override
-  public <T> T read(String principal, Work work, java.util.function.Supplier<T> action) {
+  public Duration interactiveWaitBudget() {
+    return Duration.ofMillis(scheduling.interactiveWaitMillis());
+  }
+
+  @Override
+  public Lease awaitInteractive(String principal) {
+    ReadDeadline.check();
+    if (Thread.currentThread().isInterrupted()) throw ReadFailedException.interrupted();
+    // Entry points normally hold no transaction. A nested caller with retained connections must
+    // not park behind work that may need those connections to release its seat.
+    if (TransactionSynchronizationManager.isSynchronizationActive()
+        || TransactionSynchronizationManager.isActualTransactionActive())
+      return admit(principal, Work.INTERACTIVE);
+    return awaitReadSeat(principal, Work.INTERACTIVE, interactive);
+  }
+
+  @Override
+  public <T> T readAuthoritative(String principal, Supplier<T> action) {
+    Objects.requireNonNull(action);
+    ReadDeadline.check();
+    if (Thread.currentThread().isInterrupted()) throw ReadFailedException.interrupted();
+    var lease =
+        TransactionSynchronizationManager.isSynchronizationActive()
+                || TransactionSynchronizationManager.isActualTransactionActive()
+            ? admit(principal, Work.AUTHORITY)
+            : awaitReadSeat(principal, Work.AUTHORITY, authoritative);
+    try (lease) {
+      ReadDeadline.check();
+      T value = action.get();
+      ReadDeadline.check();
+      return value;
+    }
+  }
+
+  /** Both pure-read queues share the interactive queue bounds, but retain separate active seats. */
+  private synchronized Lease awaitReadSeat(String principal, Work work, ArrayList<Key> queue) {
+    var key = key(principal, work);
+    long deadline = waitDeadline(interactiveWaitBudget());
+    requireTime(deadline);
+    if (available(key, work) && queue.stream().noneMatch(next -> available(next, work)))
+      return reserveBeforeDeadline(key, work, deadline);
+    if (queue.size() >= scheduling.waitingInteractive()
+        || queue.stream().filter(key::equals).count()
+            >= scheduling.waitingInteractivePerPrincipal()) throw rejectedRead();
+    var ticket = new Key(principal, work);
+    queue.add(ticket);
+    try {
+      while (true) {
+        requireTime(deadline);
+        long remaining = deadline - System.nanoTime();
+        var eligible =
+            queue.stream().filter(next -> available(next, work)).findFirst().orElse(null);
+        if (eligible == ticket) return reserveBeforeDeadline(key, work, deadline);
+        try {
+          TimeUnit.NANOSECONDS.timedWait(this, remaining);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw ReadFailedException.interrupted(interrupted);
+        }
+      }
+    } finally {
+      queue.removeIf(candidate -> candidate == ticket);
+      notifyAll();
+    }
+  }
+
+  public synchronized int waitingInteractive() {
+    return interactive.size();
+  }
+
+  public synchronized int waitingAuthoritative() {
+    return authoritative.size();
+  }
+
+  @Override
+  public <T> T read(String principal, Work work, Supplier<T> action) {
     // Only pure report loaders use bounded waiting. Mutations, authority and observer seats keep
     // their existing refusal semantics. Interruption/timeout removes the waiter before any IO.
     // An enclosing synchronization may already retain a caller/version-pool connection, even
@@ -60,10 +146,8 @@ public final class BoundedReadAdmission implements ReadAdmission {
     // inside a transaction cannot starve a slot holder, because a fetch runs inline on its
     // requester's thread and uses that requester's own connection when one is bound.
     boolean parkable =
-        !org.springframework.transaction.support.TransactionSynchronizationManager
-                .isSynchronizationActive()
-            && !org.springframework.transaction.support.TransactionSynchronizationManager
-                .isActualTransactionActive();
+        !TransactionSynchronizationManager.isSynchronizationActive()
+            && !TransactionSynchronizationManager.isActualTransactionActive();
     var lease =
         work == Work.FETCH
             ? awaitFetch(principal)
@@ -75,7 +159,10 @@ public final class BoundedReadAdmission implements ReadAdmission {
 
   private synchronized Lease awaitReport(String principal) {
     var key = key(principal, Work.REPORT);
-    if (waiting.isEmpty() && available(key, Work.REPORT)) return reserve(key, Work.REPORT);
+    long deadline = waitDeadline(Duration.ofMillis(scheduling.reportWaitMillis()));
+    requireTime(deadline);
+    if (waiting.isEmpty() && available(key, Work.REPORT))
+      return reserveBeforeDeadline(key, Work.REPORT, deadline);
     if (waiting.size() >= scheduling.waitingReports()
         || waiting.stream().filter(key::equals).count() >= scheduling.waitingReportsPerPrincipal())
       throw rejectedRead();
@@ -83,21 +170,19 @@ public final class BoundedReadAdmission implements ReadAdmission {
     // key; removal below uses identity, never an earlier equal waiter for the same principal.
     var ticket = new Key(principal, Work.REPORT);
     waiting.add(ticket);
-    long deadline =
-        System.nanoTime()
-            + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(scheduling.reportWaitMillis());
     try {
       while (true) {
+        requireTime(deadline);
         Key eligible =
             waiting.stream().filter(next -> available(next, Work.REPORT)).findFirst().orElse(null);
-        if (eligible == ticket) return reserve(key, Work.REPORT);
+        if (eligible == ticket) return reserveBeforeDeadline(key, Work.REPORT, deadline);
         long remaining = deadline - System.nanoTime();
-        if (remaining <= 0) throw rejectedRead();
+        requireTime(deadline);
         try {
-          java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(this, remaining);
+          TimeUnit.NANOSECONDS.timedWait(this, remaining);
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
-          throw rejectedRead();
+          throw ReadFailedException.interrupted(interrupted);
         }
       }
     } finally {
@@ -116,27 +201,30 @@ public final class BoundedReadAdmission implements ReadAdmission {
    */
   private synchronized Lease awaitFetch(String principal) {
     var key = key(principal, Work.FETCH);
-    if (!fetching.contains(key) && available(key, Work.FETCH)) return reserve(key, Work.FETCH);
+    long deadline = waitDeadline(Duration.ofMillis(scheduling.fetchWaitMillis()));
+    requireTime(deadline);
+    if (!fetching.contains(key) && available(key, Work.FETCH))
+      return reserveBeforeDeadline(key, Work.FETCH, deadline);
     // Every fetch is a cache loader, so the cache's own load limits already bound this queue;
     // the cap keeps that true even for a caller outside a cache.
     if (fetching.size() >= MAX_FETCH_WAITERS) throw rejectedRead();
     var ticket = new Key(principal, Work.FETCH);
     fetching.add(ticket);
-    long deadline = ReadDeadline.deadlineNanos(Duration.ofMillis(scheduling.fetchWaitMillis()));
     try {
       while (true) {
+        requireTime(deadline);
         // The oldest waiter whose cache has a free slot goes next, so one busy cache never
         // holds up another cache's fetch.
         Key eligible =
             fetching.stream().filter(next -> available(next, Work.FETCH)).findFirst().orElse(null);
-        if (eligible == ticket) return reserve(key, Work.FETCH);
+        if (eligible == ticket) return reserveBeforeDeadline(key, Work.FETCH, deadline);
         long remaining = deadline - System.nanoTime();
-        if (remaining <= 0) throw rejectedRead();
+        requireTime(deadline);
         try {
-          java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(this, remaining);
+          TimeUnit.NANOSECONDS.timedWait(this, remaining);
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
-          throw rejectedRead();
+          throw ReadFailedException.interrupted(interrupted);
         }
       }
     } finally {
@@ -147,6 +235,23 @@ public final class BoundedReadAdmission implements ReadAdmission {
 
   public synchronized int waitingFetches() {
     return fetching.size();
+  }
+
+  private static long waitDeadline(Duration limit) {
+    long maximum = System.nanoTime() + limit.toNanos();
+    long inherited = ReadDeadline.deadlineNanos(limit);
+    return inherited - maximum < 0 ? inherited : maximum;
+  }
+
+  private void requireTime(long deadline) {
+    ReadDeadline.check();
+    if (Thread.currentThread().isInterrupted()) throw ReadFailedException.interrupted();
+    if (deadline - System.nanoTime() <= 0) throw rejectedRead();
+  }
+
+  private Lease reserveBeforeDeadline(Key key, Work work, long deadline) {
+    requireTime(deadline);
+    return reserve(key, work);
   }
 
   private static boolean report(Work work) {

@@ -144,6 +144,7 @@ public interface SnapshotCache<T> extends AutoCloseable {
     CAPACITY,
     INVALIDATED,
     VERSION_MISMATCH,
+    /** Request footprint or returned projection cannot fit even without competing loads. */
     LOAD_TOO_LARGE,
     INCONSISTENT_REQUEST,
     REENTRANT_LOAD
@@ -208,9 +209,11 @@ public interface SnapshotCache<T> extends AutoCloseable {
   /**
    * The elected loader runs on the calling thread, outside cache locks, with the same bounded
    * coalescing and invalidation fences as {@link #read}. Joining callers do not rerun the loader.
-   * The elected caller's own read is not subject to {@link Limits#waitTimeout()}: its load always
-   * runs to completion and, if valid, is stored for later reads; joining callers keep the timeout.
-   * This preserves an owning repository's thread-bound committed-read transaction; it does not make
+   * Inline elected and joining readers are not subject to {@link Limits#waitTimeout()}: accepted
+   * work runs to completion and, if valid, is stored. The owner can separately cancel a caller's
+   * wait or enforce an already enclosing SQL transaction deadline without releasing physical load
+   * ownership. The asynchronous {@link #read} API retains its explicit waiter timeout. This
+   * preserves an owning repository's thread-bound committed-read transaction; it does not make
    * transaction-local data safe to share. The owner must prove cache eligibility before the call
    * and immediately before returning the loaded DTO, reject dirty/uncommitted state and
    * independently enforce every caller's current authorization and disclosure/audit boundary.

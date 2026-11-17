@@ -60,6 +60,7 @@ import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.llm.tokens.RatioTokenizer;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.security.ChatFiltering;
 import io.aeyer.plowshare.server.telemetry.FailureReporter;
@@ -445,6 +446,41 @@ class JobRuntimeTest {
   }
 
   @Test
+  void aCancelledSqlUnitDoesNotBecomeAFatalArchiveDependencyOrReplayEarlierTools()
+      throws Exception {
+    var observations = new ArrayList<Throwable>();
+    var cancelled =
+        new ArchiveQueryCancelledException(
+            "write one SQL unit", new IllegalStateException("cancelled"));
+    var calls = new AtomicInteger();
+    var transport =
+        new Scripted()
+            .then(
+                () ->
+                    asking(
+                        "working",
+                        call("saved", "probe_read", "{}"),
+                        call("failed", "probe_read", "{}")))
+            .then(() -> answer("Retained completed work and continued after the failed SQL unit."));
+    var runtime =
+        runtimeOver(
+            (source, failure) -> observations.add(failure),
+            transport,
+            new Probe(
+                "probe_read",
+                args -> {
+                  if (calls.incrementAndGet() == 1) return "earlier committed work remains";
+                  throw cancelled;
+                }));
+    var result = runtime.run(agent("reader"), "go", Home.global(), generous(), null);
+    assertEquals(Ending.ANSWERED, result.ending());
+    assertEquals(2, calls.get());
+    assertEquals(2, transport.calls().size());
+    assertTrue(toolResults(transport, 1).contains("earlier committed work remains"));
+    assertEquals(List.of(cancelled), observations);
+  }
+
+  @Test
   void cancelledConversationSearchKeepsEarlierToolResultsAndLetsTheRunContinue() throws Exception {
     var entries = mock(EntryStore.class);
     var search = new ConversationSearch(entries, mock(PassageIndex.class));
@@ -479,9 +515,12 @@ class JobRuntimeTest {
     assertEquals(
         2, tools.get(), "completed work or cancelled search must not be automatically replayed");
     assertTrue(toolResults(transport, 1).contains("earlier completed evidence"));
-    assertTrue(toolResults(transport, 1).contains("Conversation search was cancelled"));
+    assertTrue(toolResults(transport, 1).contains("Read query was cancelled"));
     assertEquals(1, observations.size());
-    assertTrue(observations.getFirst() instanceof ReadUnavailableException);
+    assertTrue(observations.getFirst() instanceof ReadFailedException);
+    assertEquals(
+        ReadFailedException.Reason.QUERY_CANCELLED,
+        ((ReadFailedException) observations.getFirst()).reason());
     assertSame(cancelled, observations.getFirst().getCause());
   }
 

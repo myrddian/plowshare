@@ -38,6 +38,7 @@ class ConcurrentEventChannelTest {
     final LinkedBlockingQueue<String> received = new LinkedBlockingQueue<>();
     final AtomicBoolean open = new AtomicBoolean(true);
     volatile Runnable beforeWrite = () -> {};
+    volatile Runnable afterWrite = () -> {};
     volatile java.util.function.Consumer<String> onReply = ignored -> {};
 
     Fixture(boolean segmented, FrameRouter router) throws Exception {
@@ -105,6 +106,7 @@ class ConcurrentEventChannelTest {
                               onReply.accept(reply);
                             });
                 }
+                afterWrite.run();
                 return null;
               })
           .when(socket)

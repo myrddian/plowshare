@@ -9,7 +9,13 @@ import org.springframework.web.servlet.AsyncHandlerInterceptor;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-/** Legacy HTTP reads share account/process budgets with sockets. Upgrade channels retain theirs. */
+/**
+ * Legacy HTTP reads share bounded account/process admission with sockets. Upgrade channels retain
+ * theirs. Waiting owns no database connection and ends before the handler starts; its deadline
+ * scope does not remain on a servlet thread across async dispatch. Per-SQL deadlines and physical
+ * ownership after servlet timeout remain with their owning lifecycle; {@code afterCompletion} alone
+ * does not prove an async worker has stopped. Admission does not time out whole handlers.
+ */
 @Component
 public final class HttpReadAdmission implements WebMvcConfigurer, AsyncHandlerInterceptor {
   private static final String LEASE = HttpReadAdmission.class.getName();
@@ -32,10 +38,13 @@ public final class HttpReadAdmission implements WebMvcConfigurer, AsyncHandlerIn
     if (!(handler instanceof HandlerMethod) || !request.getMethod().equals("GET")) return true;
     if (request.getAttribute(LEASE) == null) {
       Object principal = request.getAttribute(AuthFilter.HANDLE_ATTRIBUTE);
-      request.setAttribute(
-          LEASE,
-          admission.admit(
-              principal instanceof String value ? value : null, ReadAdmission.Work.INTERACTIVE));
+      ReadAdmission.Lease lease;
+      try {
+        lease = admission.awaitInteractive(principal instanceof String value ? value : null);
+      } catch (ReadUnavailableException capacity) {
+        throw new IncomingReadCapacityException(capacity);
+      }
+      request.setAttribute(LEASE, lease);
     }
     return true;
   }

@@ -161,34 +161,27 @@ cannot safely finish, retain the work for review instead of losing it or claimin
 success. Raw response/byte, context, identifier and URL bounds remain separate
 resource and protocol constraints. See [model prose](docs/coding-standards.md#model-prose-budgets-and-recovery).
 
-**All active work must be bounded.** Short interactive reads, controls and async
-acceptance replies use a configurable **2-second default ceiling**, aiming much
-lower normally. Model/provider calls, transfers and background stages need their
-own explicit finite budgets. Bound queueing, execution, cancellation and cleanup;
-do not reset the budget on retries, confuse a caller timeout with remote abort,
-or replay uncertain effects. Long-lived workflows/subscriptions retain their
-durable lifecycle with bounded active steps, not a two-second lifetime. See
-[bounded work](docs/coding-standards.md#bound-active-work-in-every-subsystem) and
-the relevant subsystem guide for requirements and current enforcement limits.
+**Bound work at its owner.** Model/provider calls, transfers, SQL units and
+background stages retain their own explicit finite budgets and durable lifecycle.
+A task, request or workflow taking longer than two seconds produces a performance
+warning; it must not acquire a two-second lifetime, throw a capacity exception or
+cancel useful accepted work for crossing that observation threshold. Backpressure
+stops or paces incoming work before it starts; it does not cancel running work.
+Preserve physical ownership until work settles and never replay uncertain effects.
+See [bounded work](docs/coding-standards.md#bound-active-work-in-every-subsystem).
 
-**SQL must have a completion deadline.** Every request-serving database work unit
-must finish within one configurable budget, with a **2-second default ceiling**;
-this is an outer failure boundary, not an acceptable query latency. **Individual
-request-serving queries must normally complete within 500 ms and must never exceed
-1 second**, including lock waits, execution and result materialization. Use the
-earlier of that per-query ceiling and the operation's remaining deadline; queries
-do not each receive a fresh second. Investigate repeated 500 ms breaches and treat
-any 1-second breach as a defect. Track duration distributions, threshold breaches
-and cancellations in Prometheus; averages alone hide slow queries. Admission,
-connection/lock waits, all statements and result materialization share the remaining
-budget, not a fresh
-timeout per query or retry. On expiry cancel database work, roll back its active
-transaction and surface failure without publishing late results or replaying a
-possibly committed mutation. Maintenance/migrations also need explicit bounded
-budgets; a different limit must be configured and justified for that work. See
-[bounded SQL work](docs/coding-standards.md#bound-sql-work-by-a-completion-deadline)
-for the rule and the current enforcement gap; existing cache wait limits alone
-do not establish universal SQL cancellation.
+**SQL must have a completion deadline.** Individual request-serving queries should
+normally finish within 500 ms and use a configurable **2-second default completion
+limit**, including lock waits, execution and materialization. Statements inside one
+actual SQL transaction share that transaction's remaining budget. Independent SQL
+transactions, provider calls, cache coordination and the surrounding workflow must
+not be combined into an invented two-second deadline. Query expiry rolls back its
+active SQL unit and returns a typed query failure; it must not kill the whole job
+or be reported as backpressure. Keep earlier completed work and possible commit
+uncertainty. Track distributions, slow-query counts and cancellations in Prometheus.
+Warnings about slow workflows are queued to a bounded singleton logger and cannot
+change work outcomes. Maintenance/migrations need explicitly configured finite
+budgets appropriate to their work. See [bounded SQL work](docs/coding-standards.md#bound-sql-work-by-a-completion-deadline).
 
 ### Database test policy
 

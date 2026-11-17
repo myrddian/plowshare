@@ -168,8 +168,8 @@ public enum Code {
   VALIDATION_FAILED(422, "validation_failed"),
 
   /**
-   * The archive could not be reached; nothing was read and nothing was written. {@code
-   * ApiExceptionHandler} row 12: {@code ArchiveUnavailableException}.
+   * Archive, workspace or read results are unavailable. This compatibility outcome does not prove
+   * that an enclosing operation performed no earlier work; callers must not replay it blindly.
    */
   ARCHIVE_UNAVAILABLE(503, "archive_unavailable"),
 
@@ -193,10 +193,10 @@ public enum Code {
   MODEL_UNAVAILABLE(503, "model_unavailable"),
 
   /**
-   * The connection's dispatch queue was full, so the frame was refused before anything started: no
-   * handler ran and nothing was written, and the request is safe to retry. Not a row of {@code
-   * ApiExceptionHandler}'s table and never will be: per-connection dispatch depth is a transport
-   * condition that no controller can raise, so it has no HTTP twin to hold a row for.
+   * Entry-point capacity was unavailable before the handler started. No handler ran and nothing was
+   * written, so the client can pace the same request rather than cancel useful work. Socket
+   * dispatch and the HTTP read-admission interceptor can establish this proof; ordinary repository
+   * failures cannot. Reply ownership must release a refused socket identity before resubmission.
    */
   CAPACITY_EXHAUSTED(429, "capacity_exhausted"),
 

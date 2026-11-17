@@ -238,9 +238,10 @@ set is constant whatever the traffic; statement attribution stays in the opt-in 
 `plowshare.JdbcExecute` event. Comparing the `statements` count before and after a
 change measures round trips directly.
 
-Request-serving queries have a **500 ms target** and **1-second worst-case ceiling**;
-the **2-second operation budget** covers all statements and admission/connection waits
-together. The JDBC timer measures physical execute calls, including driver waits and
+Request-serving queries have a **500 ms target** and configurable **2-second default
+completion limit**. Statements inside one actual SQL transaction share its remaining
+budget. Independent queries, provider calls and whole workflows do not share an
+invented two-second timer. The JDBC timer measures physical execute calls, including driver waits and
 cancellation response. It excludes connection acquisition, result iteration/mapping
 after execute returns, and transaction completion; it includes background statements
 using the same pools. These metrics expose slow execution but do not establish a
@@ -249,7 +250,7 @@ universal completion/cancellation guarantee. See the
 Never infer that a cancelled/failed query was fast by looking only at `outcome="ok"`.
 
 Prometheus exports `plowshare_jdbc_statements_seconds_bucket` with exact `le="0.5"`
-and `le="1.0"` buckets. Executions **over** each threshold are `_count` minus that
+`le="1.0"` and `le="2.0"` buckets. Executions **over** each threshold are `_count` minus that
 cumulative bucket; include every outcome. For example, the rate over 500 ms by pool is:
 
 ```promql
@@ -257,11 +258,11 @@ sum by (pool) (rate(plowshare_jdbc_statements_seconds_count[5m]))
   - sum by (pool) (rate(plowshare_jdbc_statements_seconds_bucket{le="0.5"}[5m]))
 ```
 
-Use `le="1.0"` for one-second breaches, and `increase(...[5m])` instead of `rate`
+Use `le="2.0"` for two-second query-limit breaches, and `increase(...[5m])` instead of `rate`
 in both terms for counts over five minutes. Track p95/p99 with
 `histogram_quantile(0.99, sum by (le, pool) (rate(plowshare_jdbc_statements_seconds_bucket[5m])))`,
 the windowed `_max`, and `rate(plowshare_jdbc_cancellations_total[5m])` together.
-Investigate repeated 500 ms breaches and every one-second request-serving breach;
+Investigate repeated 500 ms breaches and every two-second request-serving query breach;
 a good average or percentile does not excuse an outlier. The bundled Grafana
 dashboard includes these panels. The maximum is windowed, not a lifetime maximum;
 long-running queries enter the timer only when execute returns or throws.
@@ -1119,12 +1120,26 @@ the controller's role check. Request parameters and servlet-principal names are
 not substitutes for the filter's account context. Successful writes retain the
 existing raw-text, live-key and deployment-pin behavior.
 
+### Slow-work warnings
+
+`plowshare.telemetry.performance.warning-threshold` defaults to `PT2S`. It observes
+requests, search workflows and accepted cache reads; crossing it only offers a
+warning event to a singleton logger. It does not throw, cancel a job or change its
+outcome. Provider calls keep their own finite budgets.
+
+`event-queue-capacity` (256) and `max-active-watches` (1024) bound observation storage.
+The logging worker emits WARN with kind, fixed operation name and elapsed time,
+without exception payloads. Reporter saturation or backend failure drops diagnostic
+events rather than actual work. `plowshare.performance.observed`, `.slow`, `.dropped`,
+`.pressure` and `.active` use fixed kind-only labels. True operation failures emit
+ERROR diagnostics; recovered/expected warning conditions remain WARN.
+
 ### Conversation search budget
 
 `plowshare.retrieval.search-budget` defaults to `2s` (positive, at most `1m`).
 Lexical ranking, grouped-reference refresh and passage repository reads inherit
 any earlier read deadline. JDBC query cancellation uses pgJDBC's millisecond timer
-with the earlier of one second, the remaining budget and any shorter configured statement/transaction
+with the earlier of two seconds, an active SQL transaction's remaining budget and any shorter configured statement/transaction
 timeout. Sub-second remainders remain usable; expiry refuses new statements and
 late results are rejected. This bounds these SQL executions; connection acquisition and cancellation cleanup
 still have the owning datasource/driver limits described above. Query embeddings
@@ -1141,7 +1156,8 @@ truncation even if duplicates leave fewer result groups. Exact profiles retain
 exact ranking. Short-lived LOCAL settings enable iterative scans, discourage the
 misestimated full-corpus sort and disable JIT compilation; successful reads restore
 the caller's settings, and failure rolls the transaction back. PostgreSQL query cancellation is typed separately from a failed connection.
-Conversation search maps it to recoverable read unavailability after rollback,
+Cancellation is a typed query failure (`ReadFailedException.QUERY_CANCELLED`), not
+backpressure or a lost-archive dependency, after rollback,
 so the model sees a tool error and can continue the run with earlier evidence.
 No partial results or automatic SQL/embedding/tool replay follow it. Actual archive
 connection failures and generic uncertain writes retain their existing policy.
@@ -1150,7 +1166,8 @@ passage provenance. It preserves complete transcript content and unclassified hi
 inputs. Sparse evidence projections reuse historical text and vectors instead of
 duplicating the full transcript payloads. New classified inputs are indexed by the existing bounded repair worker; no
 heuristic historical rewrite or global embedding rebuild is performed. Search SQL uses
-`plowshare.retrieval.search-budget` (default `2s`, maximum `1m`) across nested stages.
+`plowshare.retrieval.search-budget` (default `2s`, maximum `1m`) per query/actual
+rank transaction, not across provider work or separate auto-commit phases.
 Full-input debugging search requires `includeInputs: true`; this also belongs to snapshot
 identity. V270 table/index maintenance has a five-minute statement and two-second lock
 budget; a timeout fails migration rather than continuing with a partial schema.

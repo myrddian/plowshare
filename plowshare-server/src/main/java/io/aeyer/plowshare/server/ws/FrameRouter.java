@@ -2,18 +2,32 @@ package io.aeyer.plowshare.server.ws;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.HostedToolScopes;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.access.AccessRequestDecoder;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
+import io.aeyer.plowshare.server.archive.ClientProjects;
+import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.personal.PersonalAccess;
+import io.aeyer.plowshare.server.personal.PersonalScopeDecoder;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.telemetry.FailureReporter;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * Turns one inbound frame into an {@link Outcome} — a dotted {@code type} to a {@link
@@ -81,6 +95,19 @@ import java.util.Set;
  */
 public final class FrameRouter {
 
+  /** Transport proof, separate from an arbitrary handler's outcome code. */
+  record Routed(Outcome outcome, boolean refusedBeforeHandler) {
+    Routed {
+      Objects.requireNonNull(outcome);
+      if (refusedBeforeHandler && outcome.code() != Code.CAPACITY_EXHAUSTED)
+        throw new IllegalArgumentException("Pre-handler capacity proof needs a capacity outcome");
+    }
+  }
+
+  private static final class AdmissionResult {
+    boolean refused;
+  }
+
   /**
    * Deliberately as lenient as {@code FileChannelHandler}'s own mapper — see {@code EnvelopeTest}'s
    * "the mapper is built here to match a channel's" — because the client and the server ship
@@ -98,6 +125,12 @@ public final class FrameRouter {
   private final ActingRequests acting;
   private final FailureReporter failures;
   private final ReadAdmission readAdmission;
+  private WorkPerformanceReporter performance = WorkPerformanceReporter.NONE;
+
+  @Autowired(required = false)
+  public void useWorkPerformance(WorkPerformanceReporter performance) {
+    this.performance = Objects.requireNonNull(performance);
+  }
 
   /**
    * @param handlers every type this router knows, keyed by the dotted discriminator a frame's
@@ -177,32 +210,31 @@ public final class FrameRouter {
    * @return what the handler answered, or a failure {@link Outcome} if no handler claims this type
    *     or the one that does threw
    */
-  private io.aeyer.plowshare.server.access.ProjectAuthorization authorization;
+  private ProjectAuthorization authorization;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  public void useAuthorization(
-      io.aeyer.plowshare.server.access.ProjectAuthorization authorization) {
+  @Autowired
+  public void useAuthorization(ProjectAuthorization authorization) {
     this.authorization = authorization;
   }
 
-  private io.aeyer.plowshare.server.auth.AdminStore accounts;
+  private AdminStore accounts;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  public void useAccounts(io.aeyer.plowshare.server.auth.AdminStore accounts) {
+  @Autowired
+  public void useAccounts(AdminStore accounts) {
     this.accounts = accounts;
   }
 
-  private io.aeyer.plowshare.server.personal.PersonalAccess personalAccess;
+  private PersonalAccess personalAccess;
 
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  public void usePersonalAccess(io.aeyer.plowshare.server.personal.PersonalAccess access) {
+  @Autowired(required = false)
+  public void usePersonalAccess(PersonalAccess access) {
     this.personalAccess = access;
   }
 
   public Outcome route(Envelope request, Asking asking) {
     try {
       return routeAsync(request, asking, false).toCompletableFuture().join();
-    } catch (java.util.concurrent.CompletionException failure) {
+    } catch (CompletionException failure) {
       if (failure.getCause() instanceof Error fatal) throw fatal;
       throw failure;
     }
@@ -211,15 +243,20 @@ public final class FrameRouter {
   /**
    * Complete routing, including disclosure and failure mapping, before handing a reply to output.
    */
-  public java.util.concurrent.CompletionStage<Outcome> routeAsync(Envelope request, Asking asking) {
+  public CompletionStage<Outcome> routeAsync(Envelope request, Asking asking) {
     return routeAsync(request, asking, true);
   }
 
-  private java.util.concurrent.CompletionStage<Outcome> routeAsync(
+  private CompletionStage<Outcome> routeAsync(
       Envelope request, Asking asking, boolean disclosureFence) {
+    return routeAsync(request, asking, disclosureFence, new AdmissionResult());
+  }
+
+  private CompletionStage<Outcome> routeAsync(
+      Envelope request, Asking asking, boolean disclosureFence, AdmissionResult admissionResult) {
     FrameHandler handler = handlers.get(request.type());
     if (handler == null) {
-      return java.util.concurrent.CompletableFuture.completedFuture(
+      return CompletableFuture.completedFuture(
           Outcome.failed(
               Code.NOT_FOUND, "no handler is registered for type \"" + request.type() + "\""));
     }
@@ -229,39 +266,62 @@ public final class FrameRouter {
     ReadAdmission.Lease lease;
     try {
       lease =
-          readAdmission.admit(
-              asking.handle(),
-              observer ? ReadAdmission.Work.OBSERVER : ReadAdmission.Work.INTERACTIVE);
-    } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException busy) {
-      Fault fault = observedFault(busy);
-      return java.util.concurrent.CompletableFuture.completedFuture(
-          Outcome.failed(fault.code(), fault.detail()));
+          observer
+              ? readAdmission.admit(asking.handle(), ReadAdmission.Work.OBSERVER)
+              : readAdmission.awaitInteractive(asking.handle());
+    } catch (ReadUnavailableException capacity) {
+      admissionResult.refused = true;
+      return CompletableFuture.completedFuture(
+          Outcome.failed(
+              Code.CAPACITY_EXHAUSTED, "Incoming read capacity is busy; no handler was started"));
+    } catch (RuntimeException failure) {
+      Fault fault = observedFault(failure);
+      return CompletableFuture.completedFuture(Outcome.failed(fault.code(), fault.detail()));
     }
     try {
-      return routeAdmitted(request, asking, disclosureFence)
-          .whenComplete((answer, failure) -> lease.close());
-    } catch (RuntimeException | Error failed) {
-      lease.close();
-      throw failed;
+      return readAdmission
+          .readAsync(lease, () -> routeAdmitted(request, asking, disclosureFence))
+          .handle(
+              (answer, failure) -> {
+                if (failure == null) return answer;
+                Throwable cause = failure;
+                while (cause instanceof CompletionException && cause.getCause() != null)
+                  cause = cause.getCause();
+                if (cause instanceof Error fatal) throw fatal;
+                Fault fault = observedFault(cause);
+                return Outcome.failed(fault.code(), fault.detail());
+              });
+    } catch (RuntimeException failure) {
+      Fault fault = observedFault(failure);
+      return CompletableFuture.completedFuture(Outcome.failed(fault.code(), fault.detail()));
     }
   }
 
-  private java.util.concurrent.CompletionStage<Outcome> routeAdmitted(
+  private CompletionStage<Outcome> routeAdmitted(
+      Envelope request, Asking asking, boolean disclosureFence) {
+    // Registered routing keys are fixed code operation names, never payloads or metric labels.
+    // This best-effort observer warns about slow work; it cannot time out or cancel the handler.
+    var observation = performance.watch(WorkPerformanceReporter.Kind.REQUEST, request.type());
+    return readAdmission.readAsync(
+        observation::close, () -> routeHandler(request, asking, disclosureFence));
+  }
+
+  private CompletionStage<Outcome> routeHandler(
       Envelope request, Asking asking, boolean disclosureFence) {
     FrameHandler handler = handlers.get(request.type());
     try {
       if (request.actingFor() != null) {
         if (acting == null) throw new CallerFault("Acting request admission is unavailable");
-        return java.util.concurrent.CompletableFuture.completedFuture(
-            acting.route(request.type(), request.payload(), request.actingFor(), asking));
+        return CompletableFuture.completedFuture(
+            handledOutcome(
+                acting.route(request.type(), request.payload(), request.actingFor(), asking)));
       }
       if (authorization != null
           && !Set.of(FrameTypes.ACTING_CONTEXT_OPEN, FrameTypes.ACTING_CONTEXT_CLOSE)
               .contains(request.type()))
         authorization.require(
             request.type(),
-            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                request.type(), request.payload()),
+            AccessRequestDecoder.decode(request.type(), request.payload()),
             asking.handle());
       if (accounts != null && serverAdministration(request.type()))
         accounts.requireServerAdmin(asking.handle());
@@ -270,31 +330,26 @@ public final class FrameRouter {
       // membership.
       // PROC selectors narrow metadata, not content access. Its repository rechecks custody,
       // membership or explicit fleet authority, including when an administrator narrows by project.
-      if (!io.aeyer.plowshare.protocol.HostedToolScopes.WORKER_OPERATIONS.contains(request.type())
+      if (!HostedToolScopes.WORKER_OPERATIONS.contains(request.type())
           && !ProcFrames.OPERATIONS.contains(request.type())) {
-        var scope =
-            io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(request.payload());
+        var scope = PersonalScopeDecoder.decode(request.payload());
         for (String project : scope.clientProjects())
           if (personalAccess != null)
             personalAccess.requireClientProject(project, asking.sessionId(), asking.handle());
-          else
-            io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
-                project, asking.sessionId(), asking.handle());
-        for (String project : scope.projects())
-          io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(project, asking.handle());
+          else ClientProjects.requireOwn(project, asking.sessionId(), asking.handle());
+        for (String project : scope.projects()) PersonalSpaces.requireOwn(project, asking.handle());
         if (personalAccess != null)
           personalAccess.check(scope, asking.handle(), asking.sessionId());
       }
       var completion =
           disclosureFence
               ? handler.handleAsync(request.payload(), asking)
-              : java.util.concurrent.CompletableFuture.completedFuture(
-                  handler.handle(request.payload(), asking));
+              : CompletableFuture.completedFuture(handler.handle(request.payload(), asking));
       return Objects.requireNonNull(completion)
           .thenApply(
               answer -> {
                 asking.queryValidity().run();
-                Objects.requireNonNull(answer, "Handler returned no outcome");
+                handledOutcome(answer);
                 // A genuinely asynchronous handler may finish after a membership change. This is a
                 // disclosure freshness check, not another admission or a cached permission grant.
                 if (disclosureFence
@@ -303,8 +358,7 @@ public final class FrameRouter {
                         .contains(request.type()))
                   authorization.require(
                       request.type(),
-                      io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                          request.type(), request.payload()),
+                      AccessRequestDecoder.decode(request.type(), request.payload()),
                       asking.handle());
                 return authorization == null
                     ? answer
@@ -321,16 +375,15 @@ public final class FrameRouter {
               (answer, failure) -> {
                 if (failure == null) return answer;
                 Throwable cause = failure;
-                while (cause instanceof java.util.concurrent.CompletionException
-                    && cause.getCause() != null) cause = cause.getCause();
+                while (cause instanceof CompletionException && cause.getCause() != null)
+                  cause = cause.getCause();
                 if (cause instanceof Error fatal) throw fatal;
                 Fault fault = observedFault(cause);
                 return Outcome.failed(fault.code(), fault.detail());
               });
     } catch (RuntimeException thrown) {
       Fault fault = observedFault(thrown);
-      return java.util.concurrent.CompletableFuture.completedFuture(
-          Outcome.failed(fault.code(), fault.detail()));
+      return CompletableFuture.completedFuture(Outcome.failed(fault.code(), fault.detail()));
     }
   }
 
@@ -338,6 +391,14 @@ public final class FrameRouter {
     Fault fault = Faults.of(failure);
     if (fault.httpStatus() >= 500) failures.report(FailureReporter.Source.WEBSOCKET, failure);
     return fault;
+  }
+
+  private static Outcome handledOutcome(Outcome answer) {
+    Objects.requireNonNull(answer, "Handler returned no outcome");
+    if (answer.code() == Code.CAPACITY_EXHAUSTED)
+      throw new IllegalStateException(
+          "A started handler cannot promise that no handler was started");
+    return answer;
   }
 
   /** Release temporary subject contexts on physical connection teardown. */
@@ -366,17 +427,13 @@ public final class FrameRouter {
               .contains(request.type()))
         authorization.require(
             request.type(),
-            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                request.type(), request.payload()),
+            AccessRequestDecoder.decode(request.type(), request.payload()),
             asking.handle());
       if (personalAccess != null
-          && !io.aeyer.plowshare.protocol.HostedToolScopes.WORKER_OPERATIONS.contains(
-              request.type())
+          && !HostedToolScopes.WORKER_OPERATIONS.contains(request.type())
           && !ProcFrames.OPERATIONS.contains(request.type()))
         personalAccess.check(
-            io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(request.payload()),
-            asking.handle(),
-            asking.sessionId());
+            PersonalScopeDecoder.decode(request.payload()), asking.handle(), asking.sessionId());
       if (authorization != null) {
         Outcome filtered =
             new ProjectListingFilter(authorization)
@@ -419,18 +476,32 @@ public final class FrameRouter {
   public Outcome route(String rawFrame, Asking asking) {
     try {
       return routeAsync(rawFrame, asking, false).toCompletableFuture().join();
-    } catch (java.util.concurrent.CompletionException failure) {
+    } catch (CompletionException failure) {
       if (failure.getCause() instanceof Error fatal) throw fatal;
       throw failure;
     }
   }
 
-  public java.util.concurrent.CompletionStage<Outcome> routeAsync(String rawFrame, Asking asking) {
+  public CompletionStage<Outcome> routeAsync(String rawFrame, Asking asking) {
     return routeAsync(rawFrame, asking, true);
   }
 
-  private java.util.concurrent.CompletionStage<Outcome> routeAsync(
+  /**
+   * Only the acquisition catch can attach the proof used to release IDs before a capacity reply.
+   */
+  CompletionStage<Routed> routeForTransport(String rawFrame, Asking asking) {
+    var admission = new AdmissionResult();
+    return routeAsync(rawFrame, asking, true, admission)
+        .thenApply(outcome -> new Routed(outcome, admission.refused));
+  }
+
+  private CompletionStage<Outcome> routeAsync(
       String rawFrame, Asking asking, boolean disclosureFence) {
+    return routeAsync(rawFrame, asking, disclosureFence, new AdmissionResult());
+  }
+
+  private CompletionStage<Outcome> routeAsync(
+      String rawFrame, Asking asking, boolean disclosureFence, AdmissionResult admission) {
     Envelope request;
     try {
       var body = JSON.readTree(rawFrame);
@@ -444,20 +515,19 @@ public final class FrameRouter {
       }
       request = JSON.treeToValue(body, Envelope.class);
     } catch (IOException notAFrame) {
-      return java.util.concurrent.CompletableFuture.completedFuture(refuse(notAFrame));
+      return CompletableFuture.completedFuture(refuse(notAFrame));
     } catch (RuntimeException invalidSelection) {
       var fault = observedFault(invalidSelection);
-      return java.util.concurrent.CompletableFuture.completedFuture(
-          Outcome.failed(fault.code(), fault.detail()));
+      return CompletableFuture.completedFuture(Outcome.failed(fault.code(), fault.detail()));
     }
     if (request == null) {
       // Measured the same way FileChannelHandler measured it for its own
       // reply type on Jackson 2.17: readValue("null", Envelope.class)
       // returns a Java null with no exception thrown at all. The catch
       // above cannot see this; this is the second half of the guard.
-      return java.util.concurrent.CompletableFuture.completedFuture(refuse(null));
+      return CompletableFuture.completedFuture(refuse(null));
     }
-    return routeAsync(request, asking, disclosureFence);
+    return routeAsync(request, asking, disclosureFence, admission);
   }
 
   /**

@@ -1,14 +1,34 @@
 package io.aeyer.plowshare.server.ws;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.auth.SessionAuthority;
 import io.aeyer.plowshare.server.auth.SessionAuthority.Session;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import java.time.Duration;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class QueuedSocketSessionsTest {
@@ -149,7 +169,9 @@ class QueuedSocketSessionsTest {
       var result = callers.submit(() -> queue.sessionCurrent("alice", 1));
       await(entered);
       var failure = assertThrows(ExecutionException.class, () -> result.get(3, TimeUnit.SECONDS));
-      assertInstanceOf(ReadUnavailableException.class, failure.getCause());
+      assertEquals(
+          ReadFailedException.Reason.DEADLINE_EXCEEDED,
+          assertInstanceOf(ReadFailedException.class, failure.getCause()).reason());
       assertEquals(1, queue.pending());
       assertThrows(ReadUnavailableException.class, () -> queue.sessionCurrent("bob", 1));
       verify(facts, times(1)).currentSessions(any());
@@ -157,6 +179,94 @@ class QueuedSocketSessionsTest {
       pending(queue, 0);
     } finally {
       release.countDown();
+    }
+  }
+
+  @Test
+  void anEarlierCallerDeadlineDoesNotRenewAtSessionAdmission() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    when(facts.currentSessions(any()))
+        .thenAnswer(
+            call -> {
+              entered.countDown();
+              await(release);
+              return Set.of(alice);
+            });
+    try (var queue =
+            new QueuedSocketSessions(facts, new SocketSessionProperties(1, 1, 1, 0, 2000));
+        var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var result =
+          callers.submit(
+              () ->
+                  ReadDeadline.within(
+                      Duration.ofMillis(100), () -> queue.sessionCurrent("alice", 1)));
+      await(entered);
+      var failure = assertThrows(ExecutionException.class, () -> result.get(1, TimeUnit.SECONDS));
+      assertEquals(
+          ReadFailedException.Reason.DEADLINE_EXCEEDED,
+          assertInstanceOf(ReadFailedException.class, failure.getCause()).reason());
+      assertEquals(1, queue.pending(), "A timed-out caller does not release running database work");
+      release.countDown();
+      pending(queue, 0);
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
+  void separateSqlChunksKeepTheirOwnWaitBudgetWithoutAWholeSweepTimer() throws Exception {
+    var calls = new AtomicInteger();
+    when(facts.currentSessions(any()))
+        .thenAnswer(
+            call -> {
+              calls.incrementAndGet();
+              Thread.sleep(300);
+              return Set.copyOf(call.getArgument(0));
+            });
+    try (var queue = new QueuedSocketSessions(facts, new SocketSessionProperties(2, 1, 1, 0, 500));
+        var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var result = callers.submit(() -> queue.currentSessions(Set.of(alice, bob)));
+      assertEquals(Set.of(alice, bob), result.get(2, TimeUnit.SECONDS));
+      assertEquals(2, calls.get());
+      pending(queue, 0);
+    }
+  }
+
+  @Test
+  void anExpiredOrInterruptedCallerCannotEnqueueMoreDatabaseWork() {
+    try (var queue =
+        new QueuedSocketSessions(facts, new SocketSessionProperties(2, 1, 1, 0, 2000))) {
+      ReadDeadline.within(
+          Duration.ofMillis(20),
+          () -> {
+            long deadline = ReadDeadline.deadlineNanos(Duration.ofDays(1));
+            while (System.nanoTime() - deadline < 0) Thread.onSpinWait();
+            assertThrows(
+                ReadFailedException.class, () -> queue.currentSessions(Set.of(alice, bob)));
+            return null;
+          });
+      Thread.currentThread().interrupt();
+      try {
+        assertThrows(ReadFailedException.class, () -> queue.sessionCurrent("alice", 1));
+        assertTrue(Thread.currentThread().isInterrupted());
+      } finally {
+        Thread.interrupted();
+      }
+      assertEquals(0, queue.pending());
+      verifyNoInteractions(facts);
+    }
+  }
+
+  @Test
+  void aFatalFactFailureReleasesPhysicalSeatsAndIsNotWrappedAsOrdinaryUnavailability() {
+    var fatal = new AssertionError("fatal session fixture");
+    when(facts.currentSessions(any())).thenThrow(fatal);
+    try (var queue =
+        new QueuedSocketSessions(facts, new SocketSessionProperties(1, 1, 1, 0, 2000))) {
+      assertSame(fatal, assertThrows(AssertionError.class, () -> queue.sessionCurrent("alice", 1)));
+      assertEquals(0, queue.pending());
+      assertThrows(ReadFailedException.class, () -> queue.sessionCurrent("bob", 1));
     }
   }
 
@@ -192,12 +302,12 @@ class QueuedSocketSessionsTest {
       pending(queue, 2);
       queue.close();
       assertInstanceOf(
-          ReadUnavailableException.class,
+          ReadFailedException.class,
           assertThrows(ExecutionException.class, () -> second.get(3, TimeUnit.SECONDS)).getCause());
-      assertThrows(ReadUnavailableException.class, () -> queue.sessionCurrent("charlie", 1));
+      assertThrows(ReadFailedException.class, () -> queue.sessionCurrent("charlie", 1));
       release.countDown();
       assertInstanceOf(
-          ReadUnavailableException.class,
+          ReadFailedException.class,
           assertThrows(ExecutionException.class, () -> first.get(3, TimeUnit.SECONDS)).getCause());
       pending(queue, 0);
     } finally {

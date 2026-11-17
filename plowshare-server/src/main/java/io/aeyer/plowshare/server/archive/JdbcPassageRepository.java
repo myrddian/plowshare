@@ -21,7 +21,7 @@ import io.aeyer.plowshare.server.information.InformationLogSql;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
-import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -227,15 +227,11 @@ public final class JdbcPassageRepository implements PassageRepository {
 
   private <T> List<T> informationRows(
       ReadScope scope, String sql, RowMapper<T> mapper, Object... args) {
-    return ReadDeadline.within(
-        readBudget,
-        () -> {
-          if (scope.constrained() && sql.contains("/*information*/"))
-            return visibility.read(
-                scope.account(), facts -> informationRows(scope, sql, mapper, facts, args));
-          return informationRows(
-              scope, sql, mapper, InformationLogVisibility.Facts.authoritative(), args);
-        });
+    if (scope.constrained() && sql.contains("/*information*/"))
+      return visibility.read(
+          scope.account(), facts -> informationRows(scope, sql, mapper, facts, args));
+    return informationRows(
+        scope, sql, mapper, InformationLogVisibility.Facts.authoritative(), args);
   }
 
   private <T> List<T> informationRows(
@@ -282,7 +278,7 @@ public final class JdbcPassageRepository implements PassageRepository {
                       JdbcReadDeadline.apply(statement, deadline);
                     },
                     mapper);
-            if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
+            if (System.nanoTime() - deadline >= 0) throw ReadFailedException.deadlineExceeded();
             return rows;
           } finally {
             setter.cleanupParameters();
@@ -639,16 +635,32 @@ public final class JdbcPassageRepository implements PassageRepository {
             ? " AND e.content IS NOT NULL AND e.role IS NOT NULL AND e.ejected_at IS NULL "
             : " AND owner.stale_at IS NULL ";
     String column = "p." + plan.column();
-    String sql =
-        "SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision"
-            + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
-            + join
-            + " WHERE s.source_type=? AND s.status='ready' AND s.generation=?"
+    String qualifications =
+        " WHERE s.source_type=? AND s.status='ready' AND s.generation=?"
             + " AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
             + eligible
-            + passageFence(type, scope)
             + digestFence(type, scope)
-            + (type.equals("entry") ? " /*information*/" : "")
+            + (type.equals("entry") ? " /*information*/" : "");
+    // ANN order can visit many other homes before filling this home's window. Joining every
+    // visited vector to its source/conversation repeats tens of thousands of PK probes, even when
+    // the final window has only 2000 keys. Resolve eligible entry IDs once in the same statement
+    // snapshot; IS TRUE deliberately retains a hashed SubPlan inside the ordered index scan rather
+    // than allowing PostgreSQL to flatten membership back into those per-vector joins. The final
+    // source-hash lookup only runs for accepted keys. Visibility still precedes the candidate
+    // limit.
+    String sql =
+        (type.equals("entry")
+                ? "WITH authorized_sources AS MATERIALIZED (SELECT s.source_id FROM retrieval_sources s"
+                    + join
+                    + qualifications
+                    + ") SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision"
+                    + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
+                    + " WHERE p.source_type='entry' AND (p.source_id IN (SELECT source_id FROM authorized_sources)) IS TRUE"
+                : "SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision"
+                    + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
+                    + join
+                    + qualifications)
+            + passageFence(type, scope)
             + " AND "
             + plan.present("p")
             + " ORDER BY "

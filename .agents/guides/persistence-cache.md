@@ -33,20 +33,17 @@ connection acquisition, while the pool separately bounds physical database work.
 
 ## Rules
 
-- Individual request-serving queries must normally finish within **500 ms**, with
-  a **1-second worst-case ceiling** including locks, execution and materialization.
-  Use the earlier of that ceiling and the enclosing operation deadline. Repeated
-  500 ms breaches require investigation; any 1-second breach is a defect, not a
-  reason to increase the budget. Track distributions, threshold breaches and
-  cancellations in Prometheus with bounded labels; execute-only timing does not
-  cover result materialization or connection/admission waits.
-- Every request-serving database work unit has one configurable **2-second default
-  completion ceiling**, covering admission, acquisition, locks, SQL and returned
-  result/transaction completion. Nested queries, cache misses and retries share
-  what remains. This is a failure boundary; normal execution should be much faster.
-  Expiry must cancel SQL, roll back the active transaction and reject late results;
-  preserve uncertain commits and never replay a mutation. Other SQL needs an
-  explicit bounded budget, not an unlimited background/maintenance exemption.
+- Individual request-serving queries should normally finish within **500 ms** and
+  use a configurable **2-second default completion limit**, including locks,
+  execution and materialization. Statements inside one actual SQL transaction
+  share its remaining budget. Separate transactions, cache coordination and
+  provider/workflow stages do not share an invented two-second lifetime.
+- On query expiry, cancel that SQL unit and roll back its active transaction.
+  Retain earlier useful work and possible commit uncertainty; do not kill the
+  entire job or replay prior effects. `ReadFailedException` carries query timeout
+  or cancellation; `ReadUnavailableException` means real backpressure only.
+  Whole-workflow duration is an isolated performance warning, never an exception.
+  Other SQL needs an explicit finite budget appropriate to its maintenance work.
   Follow the [deadline rule and enforcement gap](../../docs/coding-standards.md#bound-sql-work-by-a-completion-deadline).
 - Remove fetch-discard-refetch, N+1 reads and repeated collection/permission
   resolution at their owner. Pass already-loaded typed values where their scope
@@ -84,6 +81,14 @@ cold SQL. Follow the current repository and its actual cache adoption points.
 The existing two-second projection-cache wait budget is not universal SQL
 cancellation: a loader can continue after its caller times out. Trace and verify
 the actual execution/cancellation path before claiming the deadline is enforced.
+
+Collection log visibility can discard a successful tentative cached page after a
+raced global version fence and evaluate one pure authoritative query within the
+callback's SQL-unit budget, narrowed by an already active transaction deadline.
+It never repeats SQL/cancellation failures or mutations.
+Accepted inline cache hits, bypasses and coalesced loads create no hard workflow
+timer. They honor a real caller SQL deadline only when one already exists; slow
+cache work warns through the bounded performance observer instead of failing.
 
 ## Checks
 

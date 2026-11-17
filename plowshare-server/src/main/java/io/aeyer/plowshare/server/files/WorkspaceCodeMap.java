@@ -6,11 +6,24 @@ import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.documents.CodeOutline;
 import io.aeyer.plowshare.server.documents.CodeProjection;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 
 /** Run-local code navigation. Every lookup reconciles through the run's live file grants. */
@@ -49,9 +62,9 @@ public final class WorkspaceCodeMap {
     observations.stop(home);
   }
 
-  private java.util.function.BiConsumer<Home, UUID> revisionReads = (home, revision) -> {};
+  private BiConsumer<Home, UUID> revisionReads = (home, revision) -> {};
 
-  public WorkspaceCodeMap onRevisionRead(java.util.function.BiConsumer<Home, UUID> reads) {
+  public WorkspaceCodeMap onRevisionRead(BiConsumer<Home, UUID> reads) {
     revisionReads = Objects.requireNonNull(reads);
     return this;
   }
@@ -284,9 +297,9 @@ public final class WorkspaceCodeMap {
                             key,
                             WorkspaceValues.retainedKey(provider.files().name(), root, path),
                             metadata));
-              } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
-                // Capacity cannot turn a cached read into source hydration and a new intake.
-                throw capacity;
+              } catch (ReadUnavailableException | ReadFailedException failedRead) {
+                // Neither backpressure nor a failed read authorizes source hydration/new intake.
+                throw failedRead;
               } catch (RuntimeException unavailable) {
                 trouble.add("retained_index_unavailable");
               }
@@ -443,7 +456,7 @@ public final class WorkspaceCodeMap {
             }
           } catch (WorkspaceRefusedException
               | WorkspaceUnavailableException
-              | java.nio.charset.CharacterCodingException
+              | CharacterCodingException
               | IllegalArgumentException failed) {
             trouble.add(provider.files().name() + ": source_unavailable " + path);
           }
@@ -469,9 +482,9 @@ public final class WorkspaceCodeMap {
         found.clear();
         trouble.add("workspace_or_session_changed");
       }
-    } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
-      // Defer the claimed background generation without publishing an empty replacement manifest.
-      throw capacity;
+    } catch (ReadUnavailableException | ReadFailedException failedRead) {
+      // Let the owner handle a failed read without publishing an empty replacement manifest.
+      throw failedRead;
     } catch (WorkspaceRefusedException | WorkspaceUnavailableException failed) {
       found.clear();
       trouble.add("workspace_unavailable");

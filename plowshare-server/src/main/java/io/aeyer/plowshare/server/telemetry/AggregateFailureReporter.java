@@ -5,6 +5,7 @@ import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -24,6 +25,11 @@ public final class AggregateFailureReporter implements FailureReporter {
   private enum Kind {
     SESSION_GONE,
     READ_UNAVAILABLE,
+    READ_TIMEOUT,
+    READ_INVALIDATED,
+    READ_INTERRUPTED,
+    READ_CLOSED,
+    READ_CANCELLED,
     WORKSPACE_UNAVAILABLE,
     ARCHIVE_UNAVAILABLE,
     INFERENCE,
@@ -81,7 +87,7 @@ public final class AggregateFailureReporter implements FailureReporter {
     if (total.shouldLog(ticker.getAsLong(), logIntervalNanos)) {
       // Throwable messages can contain session identities, filesystem paths, SQL or credentials.
       // Keep the thrown type and bounded code locations, but never pass the throwable to SLF4J.
-      log.warn(
+      log.error(
           "Server failure source={} kind={} exception={} observed={} stack={}",
           source,
           kind,
@@ -94,6 +100,14 @@ public final class AggregateFailureReporter implements FailureReporter {
   private static Kind kind(Throwable failure) {
     if (failure instanceof SessionGoneException) return Kind.SESSION_GONE;
     if (failure instanceof ReadUnavailableException) return Kind.READ_UNAVAILABLE;
+    if (failure instanceof ReadFailedException read)
+      return switch (read.reason()) {
+        case DEADLINE_EXCEEDED -> Kind.READ_TIMEOUT;
+        case INVALIDATED -> Kind.READ_INVALIDATED;
+        case INTERRUPTED -> Kind.READ_INTERRUPTED;
+        case CLOSED -> Kind.READ_CLOSED;
+        case QUERY_CANCELLED -> Kind.READ_CANCELLED;
+      };
     if (failure instanceof WorkspaceUnavailableException) return Kind.WORKSPACE_UNAVAILABLE;
     if (failure instanceof ArchiveUnavailableException) return Kind.ARCHIVE_UNAVAILABLE;
     if (failure instanceof LlmException || failure instanceof EmbeddingException)

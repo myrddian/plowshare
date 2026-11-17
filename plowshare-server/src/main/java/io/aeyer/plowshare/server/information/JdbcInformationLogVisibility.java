@@ -1,8 +1,16 @@
 package io.aeyer.plowshare.server.information;
 
-import io.aeyer.plowshare.server.cache.*;
-import io.aeyer.plowshare.server.reads.*;
-import java.util.*;
+import io.aeyer.plowshare.server.cache.ProjectionCache;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,6 +42,7 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
   private final ProjectionVersions versions;
   private final ReadAdmission admission;
   private final LogReadabilityCheck check;
+  private final Duration budget;
 
   /** Targeted checks always use the caller's predicate. */
   public JdbcInformationLogVisibility(
@@ -51,25 +60,41 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
       ProjectionVersions versions,
       ReadAdmission admission,
       LogReadabilityCheck check) {
+    this(jdbc, cache, versions, admission, check, Duration.ofSeconds(2));
+  }
+
+  /** Each consuming SQL unit uses {@code budget}, narrowed by an existing transaction deadline. */
+  public JdbcInformationLogVisibility(
+      JdbcTemplate jdbc,
+      ProjectionCache<Facts> cache,
+      ProjectionVersions versions,
+      ReadAdmission admission,
+      LogReadabilityCheck check,
+      Duration budget) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.cache = Objects.requireNonNull(cache);
     this.versions = Objects.requireNonNull(versions);
     this.admission = Objects.requireNonNull(admission);
     this.check = Objects.requireNonNull(check);
+    this.budget = Objects.requireNonNull(budget);
+    if (budget.isNegative() || budget.isZero() || budget.compareTo(Duration.ofMinutes(1)) > 0)
+      throw new IllegalArgumentException(
+          "Log visibility budget must be positive and at most one minute");
   }
 
   @Override
   public <T> T read(String account, Function<Facts, T> reader) {
-    if (account == null) return reader.apply(Facts.authoritative());
-    if (account.isBlank())
-      throw new IllegalArgumentException("Current account required for log visibility");
     Objects.requireNonNull(reader);
+    if (account != null && account.isBlank())
+      throw new IllegalArgumentException("Current account required for log visibility");
+    ReadDeadline.check();
+    if (account == null) return consume(reader, Facts.authoritative());
     var probe = versions.capture(DOMAINS);
+    ReadDeadline.check();
     if (probe.isEmpty()) {
       // Dirty or historical caller transactions cannot share RAM. Keep the original statement's
       // authority semantics; do not launder its snapshot through a newly captured token.
-      return admission.read(
-          account, ReadAdmission.Work.AUTHORITY, () -> reader.apply(Facts.authoritative()));
+      return authoritative(account, reader);
     }
     var facts =
         cache.read(
@@ -77,17 +102,56 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
             true,
             () -> admission.read(FETCHER, ReadAdmission.Work.FETCH, () -> load(account)),
             value -> value.blocked().map(JdbcInformationLogVisibility::weight).orElse(1024L));
+    ReadDeadline.check();
     // Oversized snapshots retain a versioned fallback marker, never a partial deny list. The
-    // original statement-authoritative path remains available under the same physical budget.
-    var value =
-        facts.blocked().isEmpty()
-            ? admission.read(account, ReadAdmission.Work.AUTHORITY, () -> reader.apply(facts))
-            : reader.apply(facts);
+    // original statement-authoritative path retains its own SQL-unit budget.
+    if (facts.blocked().isEmpty()) return authoritative(account, reader);
+    var value = consume(reader, facts);
+    ReadDeadline.check();
     // A new input, ancestry change, expiry or revocation between the graph hit and the page query
-    // must not disclose the result. No retries: the callback might hold caller-specific locks.
-    if (!versions.canShare() || !versions.current(probe.orElseThrow()))
-      throw new ReadUnavailableException();
+    // must not disclose this tentative result. A caller that became dirty/historical or crossed
+    // an authority expiry still fails closed. Other domain churn may concern an unrelated tree;
+    // discard the result and evaluate selection and authority in one SQL snapshot instead.
+    if (!versions.canShare()) throw ReadFailedException.invalidated();
+    ReadDeadline.check();
+    boolean current = versions.current(probe.orElseThrow());
+    ReadDeadline.check();
+    if (!current) {
+      var fresh = authoritative(account, reader);
+      // A READ COMMITTED outer transaction retains its original now(). Do not let an expiry
+      // crossed during fallback turn its historical authority into a newly disclosed result.
+      if (!versions.canShare()) throw ReadFailedException.invalidated();
+      ReadDeadline.check();
+      return fresh;
+    }
     return value;
+  }
+
+  private <T> T authoritative(String account, Function<Facts, T> reader) {
+    ReadDeadline.check();
+    var value =
+        admission.readAuthoritative(
+            account,
+            () -> {
+              ReadDeadline.check();
+              return consume(reader, Facts.authoritative());
+            });
+    ReadDeadline.check();
+    return value;
+  }
+
+  private <T> T consume(Function<Facts, T> reader, Facts facts) {
+    // A callback is one SQL unit, not the collection workflow. In autocommit a fallback is a new
+    // unit; an existing caller transaction keeps its earlier deadline across every nested unit.
+    // Admission and cache waiting have their own scopes. The SQL owner still supplies cancellation.
+    return ReadDeadline.within(
+        budget,
+        () -> {
+          ReadDeadline.check();
+          T value = reader.apply(facts);
+          ReadDeadline.check();
+          return value;
+        });
   }
 
   /**
@@ -108,6 +172,7 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
   }
 
   private Facts load(String account) {
+    ReadDeadline.check();
     var logs =
         jdbc.queryForList(
             "WITH blocked AS MATERIALIZED (SELECT log FROM information_unreadable_logs(?) LIMIT ?),"
@@ -122,6 +187,7 @@ public final class JdbcInformationLogVisibility implements InformationLogVisibil
             cache.maxWeight(),
             MAX_LOGS,
             cache.maxWeight());
+    ReadDeadline.check();
     // Never truncate a deny set into an allow result or hydrate a value beyond its byte budget.
     if (logs.size() > MAX_LOGS
         || logs.stream().anyMatch(id -> id == null || id.length() > 4096)

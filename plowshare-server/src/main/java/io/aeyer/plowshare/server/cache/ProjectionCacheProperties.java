@@ -9,9 +9,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * is one line (an LRU of its own entries); lines are fixed by server composition and not counted.
  * {@code residentBytes} caps one line and {@code totalResidentBytes} caps all lines together: past
  * the total, the coldest entries of the line furthest above its share are evicted (see {@link
- * ResidentBudget}). {@code timeout} is the single deadline of one cached read: its FETCH slot wait
- * and its wait on a shared reload both draw on it (see {@link
- * io.aeyer.plowshare.server.reads.ReadDeadline}).
+ * ResidentBudget}). {@code timeout} remains the asynchronous snapshot API's explicit waiter bound;
+ * accepted inline repository reads do not use it as a workflow cancellation timer. Their duration
+ * is observed by the shared work-performance reporter. Actual SQL queries retain separate
+ * deadlines.
  */
 @ConfigurationProperties("plowshare.projection-cache")
 public record ProjectionCacheProperties(

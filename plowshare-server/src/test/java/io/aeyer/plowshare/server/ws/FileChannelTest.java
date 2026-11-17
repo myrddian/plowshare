@@ -18,6 +18,7 @@ import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.access.ProjectCreation;
 import io.aeyer.plowshare.server.agents.FileTools;
 import io.aeyer.plowshare.server.agents.Watchers;
+import io.aeyer.plowshare.server.archive.ArchiveQueryCancelledException;
 import io.aeyer.plowshare.server.archive.ArchiveRefusedException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.ProjectRegistry;
@@ -30,6 +31,8 @@ import io.aeyer.plowshare.server.files.Scope;
 import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.session.Presence;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.ProjectRoots;
@@ -2232,6 +2235,26 @@ class FileChannelTest {
   }
 
   @Test
+  void deferredRootMetadataDoesNotDropTheFileConnectionOrItsLivePresence() throws Exception {
+    List<RuntimeException> failures =
+        List.of(
+            ReadFailedException.deadlineExceeded(),
+            new ArchiveQueryCancelledException(
+                "root metadata", new IllegalStateException("cancelled")),
+            new ReadUnavailableException());
+    for (int i = 0; i < failures.size(); i++) {
+      String session = "deferred-root-" + i;
+      Wiring.ROOTED.failWith(failures.get(i));
+      connect(
+          FileChannelHandler.PATH,
+          session,
+          rooting("bench.local", "/home/example/" + session, session));
+      assertTrue(production.isConnected(session));
+      assertEquals(session, productionPresences.serving(session).orElseThrow().session());
+    }
+  }
+
+  @Test
   void a_frame_the_server_cannot_read_is_dropped_and_the_socket_keeps_working() throws Exception {
     // There is no id in it, so there is nothing to fail and nobody to tell.
     // What must not happen is the handler taking the reader thread down with
@@ -2732,6 +2755,7 @@ class FileChannelTest {
       private final List<String> written = Collections.synchronizedList(new ArrayList<>());
       private volatile String refusal;
       private volatile String outage;
+      private volatile RuntimeException failure;
 
       /** When set, a declaration waits here: a connect held mid-claim. */
       private volatile CountDownLatch gate;
@@ -2754,6 +2778,7 @@ class FileChannelTest {
         if (refusal != null) {
           throw new ArchiveRefusedException(refusal);
         }
+        if (failure != null) throw failure;
         if (outage != null) {
           throw new ArchiveUnavailableException(outage, new IllegalStateException(outage));
         }
@@ -2767,6 +2792,7 @@ class FileChannelTest {
         written.clear();
         refusal = null;
         outage = null;
+        failure = null;
         CountDownLatch held = gate;
         gate = null;
         if (held != null) {
@@ -2776,6 +2802,10 @@ class FileChannelTest {
 
       void refuseWith(String reason) {
         refusal = reason;
+      }
+
+      void failWith(RuntimeException failure) {
+        this.failure = failure;
       }
 
       void breakWith(String reason) {

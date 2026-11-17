@@ -69,7 +69,11 @@ occurrences once and aggregates only the representative and at most twenty
 references rather than building unbounded duplicate arrays. Semantic entries honor
 the active embedding profile's index policy. ANN reads
 select a bounded authorized passage-key window in one query, then batch text
-loading and full-precision scoring in a second query under the same deadline.
+loading and full-precision scoring in a second query under the same deadline. Entry
+ANN materializes eligible source IDs once per statement and hashes membership
+inside the ordered vector scan. Only accepted keys join source hashes, avoiding
+source/conversation PK probes for every rejected neighbor. This adds no cache and
+retains the same candidate window and predicates.
 Retained source revisions fence intervening edits or delete/reinsert; bounded in-memory stages choose one passage per source,
 group excerpts and apply the result limit. Iterative scans retain scope/visibility
 filters before the SQL candidate limit. Approximate recall is explicit and never
@@ -96,24 +100,27 @@ Passage SQL consumes the same injected `InformationLogVisibility` capability as
 lexical/reach/source-refresh reads. Reuse its complete version-fenced denied-log
 snapshot before candidate limits and coverage counts; do not recompute the graph
 inside each passage query or create a second cache. Dirty/historical/oversized
-snapshots retain the authoritative SQL predicate. A failed post-read visibility
-fence refuses the result without replay, including while a caller transaction
-holds embedding/disclosure locks.
+snapshots retain the authoritative SQL predicate. A raced global version fence
+after a successful cached callback discards its tentative result and permits one
+pure authoritative query under its own SQL-unit budget, narrowed by any active
+transaction deadline. SQL errors,
+cancellations, expired work and mutations are not replayed. Callers that become
+unsafe for sharing still fail closed; transaction holders never wait for an
+authority seat while retaining embedding/disclosure locks.
 
-All search SQL stages share `plowshare.retrieval.search-budget` (default 2s), including
-an earlier cache/admission deadline. Resolve the project name once under that
-deadline and reuse the operation-local selection across lexical, passage, coverage
-and source-refresh reads; writes never reuse this selection. Do not reset the budget per query or reread
-initial coverage during the same operation. Conversation project selection, lexical,
-source-refresh and passage SQL use pgJDBC millisecond
-cancellation with the earlier of one second, the remaining shared budget and any
-shorter configured statement/transaction timeout. A sub-second remainder remains
-usable; expiry and late results still fail. Provider embedding
-IO keeps its own finite transport budget; late results cannot initiate another SQL
-stage or be disclosed as success.
+`plowshare.retrieval.search-budget` defaults to 2s for individual queries and the
+actual disclosure/profile/ranking transaction. Its nested statements share that
+transaction's remaining budget. Independent auto-commit phases and provider
+embedding do not share a hard search-workflow timer. Resolve the project once
+within each SQL phase; resolve again after provider IO for freshness. Source
+revision and final disclosure fences remain current. pgJDBC cancellation uses
+the earlier of two seconds, an actual transaction's remaining budget and any
+shorter configured timeout. Slow overall search/cache work produces only a
+bounded singleton performance warning, with no job cancellation.
 
-Search catches typed archive query cancellation only after the owning transaction
-unwinds and maps it to a recoverable read failure. This preserves PostgreSQL rollback,
+SQL query cancellation is `ReadFailedException.QUERY_CANCELLED`, not a lost
+archive or capacity failure. Search maps it only after the owning transaction
+unwinds. This preserves PostgreSQL rollback,
 deadline cancellation, telemetry and earlier completed tool work without ending the
 agent run over that cancelled search. It returns no partial window and does not
 retry SQL, embeddings or previous tools. Genuine archive outages and uncertain

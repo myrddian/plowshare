@@ -67,6 +67,8 @@ import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import io.aeyer.plowshare.server.messaging.MessageService;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.relay.RelayPublishing;
 import io.aeyer.plowshare.server.relay.tools.RelayToolDefinition;
 import io.aeyer.plowshare.server.relay.tools.RelayToolInvocations;
@@ -581,7 +583,7 @@ public class AgentsConfig {
             home.isGlobal()
                 ? owner != null && sessions.accountOf(sessionId).filter(owner::equals).isPresent()
                 : owner == null || members.mayWork(home.project(), owner);
-      } catch (ArchiveUnavailableException down) {
+      } catch (ArchiveUnavailableException | ReadFailedException | ReadUnavailableException down) {
         permitted = false;
       }
       Optional<String> personalOwner =

@@ -11,16 +11,110 @@ import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.protocol.transport.ConcurrentDispatch;
 import io.aeyer.plowshare.protocol.transport.PacketBudget;
 import io.aeyer.plowshare.protocol.transport.SegmentedMessages;
+import io.aeyer.plowshare.server.reads.BoundedReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadCapacityProperties;
+import io.aeyer.plowshare.server.reads.ReadSchedulingProperties;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 
 class ConcurrentRequestFailureTest {
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void routerCapacityReleasesTheSameIdBeforeTheRefusalPhysicalSendReturns(boolean segmented)
+      throws Exception {
+    var admission =
+        new BoundedReadAdmission(
+            new ReadCapacityProperties(1, 1, 2, 1, 8, 2),
+            new ReadSchedulingProperties(64, 4, 2000, 2000, 8, 4, 1));
+    var calls = new AtomicInteger();
+    var router =
+        new FrameRouter(
+            Map.of(
+                "information.facets",
+                (payload, asking) -> {
+                  calls.incrementAndGet();
+                  return Outcome.ok(Map.of("done", true));
+                }),
+            null,
+            admission);
+    var held = admission.admit("alice", ReadAdmission.Work.INTERACTIVE);
+    var refusalReceived = new CompletableFuture<Void>();
+    var physicallyHeld = new CompletableFuture<Void>();
+    var holdSend = new AtomicBoolean();
+    var releaseSend = new CompletableFuture<Void>();
+    try (var fixture = new ConcurrentEventChannelTest.Fixture(segmented, router)) {
+      try {
+        select(fixture);
+        fixture.onReply =
+            frame -> {
+              try {
+                if (FrameJson.answering()
+                    .readTree(frame)
+                    .path("payload")
+                    .path("code")
+                    .asText()
+                    .equals("CAPACITY_EXHAUSTED")) {
+                  refusalReceived.complete(null);
+                  holdSend.set(true);
+                }
+              } catch (java.io.IOException invalid) {
+                throw new IllegalStateException(invalid);
+              }
+            };
+        fixture.afterWrite =
+            () -> {
+              if (holdSend.compareAndSet(true, false)) {
+                physicallyHeld.complete(null);
+                releaseSend.join();
+              }
+            };
+        fixture.send("same-id", "information.facets", Map.of());
+        var refusal = FrameJson.answering().readTree(fixture.reply());
+        assertEquals("CAPACITY_EXHAUSTED", refusal.path("payload").path("code").asText());
+        refusalReceived.get(5, TimeUnit.SECONDS);
+        physicallyHeld.get(5, TimeUnit.SECONDS);
+        assertEquals(0, calls.get(), "Refusal is proof the business handler did not start");
+        held.close();
+        var retry =
+            CompletableFuture.runAsync(
+                () -> {
+                  try {
+                    fixture.send("same-id", "information.facets", Map.of());
+                  } catch (java.io.IOException invalid) {
+                    throw new CompletionException(invalid);
+                  }
+                });
+        if (!segmented) awaitEntered(calls, 1);
+        assertTrue(fixture.open.get(), "Same-ID resubmission cannot be a duplicate protocol error");
+        // Segmented resubmission may wait for credit behind the deliberately held server send.
+        releaseSend.complete(null);
+        retry.get(5, TimeUnit.SECONDS);
+        awaitEntered(calls, 1);
+        assertEquals(1, calls.get());
+        var answer = FrameJson.answering().readTree(fixture.reply());
+        assertEquals("same-id", answer.path("id").asText());
+        assertEquals("OK", answer.path("payload").path("code").asText());
+        verify(fixture.socket, never()).close(any(CloseStatus.class));
+      } finally {
+        releaseSend.complete(null);
+      }
+    } finally {
+      held.close();
+    }
+  }
+
   @Test
   void deferred_fatal_error_releases_ownership_and_reaches_uncaught_error_owner() throws Exception {
     var registered = new CompletableFuture<Void>();

@@ -5,15 +5,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.telemetry.FailureReporter.Source;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -54,19 +57,43 @@ class AggregateFailureReporterTest {
       assertEquals(1, count(registry, "runtime", "workspace_unavailable"));
       assertEquals(4, captured.list.size());
       for (var event : captured.list) {
+        assertEquals(Level.ERROR, event.getLevel());
         assertTrue(event.getFormattedMessage().contains("stack="));
         assertFalse(event.getFormattedMessage().contains("private-"));
         assertEquals(null, event.getThrowableProxy());
       }
       assertTrue(captured.list.getFirst().getFormattedMessage().contains("SessionGoneException"));
       assertTrue(captured.list.getFirst().getFormattedMessage().contains("IllegalStateException"));
-      assertEquals(18, registry.getMeters().size(), "Only fixed source/kind combinations exist");
+      assertEquals(33, registry.getMeters().size(), "Only fixed source/kind combinations exist");
       assertTrue(
           registry.getMeters().stream().allMatch(meter -> meter.getId().getTags().size() == 2));
     } finally {
       logger.detachAppender(captured);
       captured.stop();
     }
+  }
+
+  @Test
+  void failedReadReasonsNeverIncrementTheCapacityCounter() {
+    var reporter = new AggregateFailureReporter(Duration.ofSeconds(30), () -> 0);
+    reporter.bind(registry);
+    reporter.report(Source.RUNTIME, ReadFailedException.deadlineExceeded());
+    reporter.report(Source.RUNTIME, ReadFailedException.invalidated());
+    reporter.report(Source.RUNTIME, ReadFailedException.interrupted());
+    reporter.report(Source.RUNTIME, ReadFailedException.closed());
+    reporter.report(
+        Source.RUNTIME,
+        ReadFailedException.queryCancelled(new IllegalStateException("private-query")));
+    assertEquals(0, count(registry, "runtime", "read_unavailable"));
+    for (var kind :
+        List.of(
+            "read_timeout",
+            "read_invalidated",
+            "read_interrupted",
+            "read_closed",
+            "read_cancelled")) assertEquals(1, count(registry, "runtime", kind));
+    reporter.report(Source.RUNTIME, new ReadUnavailableException());
+    assertEquals(1, count(registry, "runtime", "read_unavailable"));
   }
 
   @Test

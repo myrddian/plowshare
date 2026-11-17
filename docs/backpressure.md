@@ -17,7 +17,7 @@ provider endpoint.
 | --- | --- | --- | --- |
 | [SDK connection] | Admitted requests/encoded bytes; negotiated depth | Ordinary callers park; nonblocking callers refuse before submission; explicit outer capacity refusals may be paced | Local terminal settlement **and** physical writer settlement; this never frees server work |
 | [Event channel] | Pending IDs/bodies/bytes plus execution/resource/observer seats | Pre-handler `CAPACITY_EXHAUSTED`; execution rechecks authority | Execution seats settle at handler completion; body/ID admission also waits for physical reply settlement |
-| [Read admission] | Process/principal work seats and selected waiting queues | Most classes refuse; eligible foreground reports and cache FETCH wait | Owning physical work closes its lease |
+| [Read admission] | Process/principal work seats and selected waiting queues | Eligible interactive, pure authoritative, foreground report and FETCH reads wait; other lifetime/maintenance seats refuse | Owning physical work closes its lease |
 | [Socket sessions] | Queued plus physically executing session checks | Full intake/deadline produces unavailable, not revocation | Actual batch settlement; caller timeout does not erase physical work |
 | [Projection cache] | Residents, physical loads, estimated loading bytes, dependency links and waiters | Coalesce one key; evict or refuse over bounds; callers have read deadlines | Physical load/reservation retirement and waiter cleanup are distinct |
 | [DB throttle] + Hikari | Primary-pool permits, then physical connections | Throttle waits; Hikari has a separate acquire timeout | Connection close returns its admission handle; borrow failure also releases it |
@@ -51,6 +51,14 @@ guide](../.agents/guides/transport-sdks.md).
 [Read admission] separates interactive, report, authority, observer, subscription, socket, maintenance and
 FETCH seats. A principal shares its budget across feeds and sockets. HTTP GETs use [HTTP read admission]; WS
 routing and individual cache owners choose their corresponding work class. Not every mutation is a pure read.
+
+Interactive admission waits in a bounded eligible FIFO queue before dispatch. Only
+queue acquisition uses that wait budget (2s default); it does not time out a whole
+handler or provider workflow. Its lease remains owned by the physical source
+stage after reply cancellation. HTTP uses bounded acquisition, with its
+execution/async-settlement gap unchanged. A separately declared pure authoritative
+read may wait for AUTHORITY capacity only without a caller transaction or Spring
+synchronization. Neither queue replays a handler or increases active capacity.
 
 Foreground REPORT waiting is bounded and FIFO **among eligible principals**: an already busy principal does
 not block all others. REPORT_REFRESH shares the report total/per-principal budget, yields to queued foreground
@@ -146,7 +154,8 @@ Defaults below come from source/configuration, not from a deployment measurement
 | [Provider settings] | Per-pool concurrency and submit/transport timeouts; do not confuse queue-start and execution budgets |
 | [AccountingProperties] | Journal 256MiB, segments 4MiB, IO wait 2s, retry buffer 128 metadata events |
 
-Observe the layer that owns the wait: `plowshare.read.active`, `.waiting`, `.fetch.waiting`, `.rejected`;
+Observe the layer that owns the wait: `plowshare.read.active`, `.waiting`, `.fetch.waiting`,
+`.interactive.waiting`, `.authoritative.waiting`, `.rejected`;
 `plowshare.socket.sessions.*`; cache load/coalescing, resident/loading bytes and refusal reasons; Hikari
 active/pending/acquire latency; provider queue/running counts; output pressure; accounting
 health/pending/loss. [Pool metrics] distinguishes `.delay` from `.saturation.wait`; `.overdraft` is a

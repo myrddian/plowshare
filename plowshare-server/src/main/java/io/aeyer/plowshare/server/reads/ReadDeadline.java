@@ -2,15 +2,16 @@ package io.aeyer.plowshare.server.reads;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.function.Supplier;
 
 /**
- * The one deadline of a cached read. A projection cache opens it when a request reaches the cache;
- * every wait on the requester's thread inside it, the FETCH slot wait included, draws on what
- * remains of the same budget. A nested cache read inherits the earlier, enclosing deadline.
+ * An explicit monotonic SQL work-unit deadline. Statements participating in one transaction inherit
+ * the earlier deadline instead of renewing it. This context is not a timer for an entire search,
+ * cache workflow, model call or multi-transaction retry loop.
  *
- * <p>The deadline is thread-confined: the elected loader runs inline on its requester's thread, so
- * its slot wait sees its requester's deadline. Work handed to another thread does not carry it.
+ * <p>The deadline is thread-confined. A component that hands SQL work to another thread must carry
+ * its remaining transaction budget explicitly; merely waiting for a worker does not propagate it.
  */
 public final class ReadDeadline {
   private static final ThreadLocal<Long> DEADLINE = new ThreadLocal<>();
@@ -43,10 +44,17 @@ public final class ReadDeadline {
     return current != null ? current : System.nanoTime() + checked(fallback).toNanos();
   }
 
+  /** Existing enclosing SQL/cache work-unit deadline, without opening a new workflow-wide timer. */
+  public static OptionalLong currentDeadlineNanos() {
+    Long current = DEADLINE.get();
+    return current == null ? OptionalLong.empty() : OptionalLong.of(current);
+  }
+
   /** Rejects late results and prevents a nested stage from starting after the owning deadline. */
   public static void check() {
     Long deadline = DEADLINE.get();
-    if (deadline != null && System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
+    if (deadline != null && System.nanoTime() - deadline >= 0)
+      throw ReadFailedException.deadlineExceeded();
   }
 
   private static Duration checked(Duration budget) {

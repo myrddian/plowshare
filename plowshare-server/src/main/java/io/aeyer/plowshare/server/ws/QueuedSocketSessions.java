@@ -1,9 +1,13 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.server.auth.SessionAuthority;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -14,6 +18,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 /**
  * Shared admission for event/file session facts, including physical disclosure checks. One worker
@@ -36,12 +42,9 @@ public final class QueuedSocketSessions implements SessionAuthority, AutoCloseab
   private int pending;
   private int queued;
   private boolean closed;
-  private final java.util.concurrent.atomic.AtomicLong rejected =
-      new java.util.concurrent.atomic.AtomicLong();
-  private final java.util.concurrent.atomic.AtomicLong timedOut =
-      new java.util.concurrent.atomic.AtomicLong();
-  private final java.util.concurrent.atomic.AtomicLong batches =
-      new java.util.concurrent.atomic.AtomicLong();
+  private final AtomicLong rejected = new AtomicLong();
+  private final AtomicLong timedOut = new AtomicLong();
+  private final AtomicLong batches = new AtomicLong();
 
   public QueuedSocketSessions(SessionAuthority facts, SocketSessionProperties limits) {
     this.facts = Objects.requireNonNull(facts);
@@ -57,25 +60,33 @@ public final class QueuedSocketSessions implements SessionAuthority, AutoCloseab
 
   @Override
   public Set<Session> currentSessions(Collection<Session> sessions) {
+    ReadDeadline.check();
+    if (Thread.currentThread().isInterrupted()) throw ReadFailedException.interrupted();
     var selected = List.copyOf(Set.copyOf(sessions));
     var current = new HashSet<Session>();
     // Scheduled sweeps may span many principals. Each bounded chunk preserves exact versions;
     // failure of any chunk fails the sweep rather than interpreting partial results as revocation.
+    // Each chunk is a separate SQL read with its own configured wait. An already enclosing SQL
+    // deadline still applies, but the complete multi-transaction sweep has no new aggregate timer.
     for (int start = 0; start < selected.size(); start += limits.batch()) {
+      ReadDeadline.check();
       var checks =
           enqueue(selected.subList(start, Math.min(start + limits.batch(), selected.size())));
       for (var check : checks) if (await(check)) current.add(check.session());
     }
+    ReadDeadline.check();
     return Set.copyOf(current);
   }
 
   private List<Check> enqueue(List<Session> sessions) {
-    var counts = new java.util.HashMap<String, Integer>();
+    var counts = new HashMap<String, Integer>();
     for (var session : sessions) counts.merge(session.handle(), 1, Integer::sum);
     var checks = new ArrayList<Check>();
     synchronized (state) {
-      if (closed
-          || sessions.size() > limits.pending() - pending
+      ReadDeadline.check();
+      if (Thread.currentThread().isInterrupted()) throw ReadFailedException.interrupted();
+      if (closed) throw ReadFailedException.closed();
+      if (sessions.size() > limits.pending() - pending
           || counts.entrySet().stream()
               .anyMatch(
                   e ->
@@ -86,6 +97,8 @@ public final class QueuedSocketSessions implements SessionAuthority, AutoCloseab
         throw new ReadUnavailableException();
       }
       long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(limits.waitMillis());
+      long enclosing = ReadDeadline.deadlineNanos(Duration.ofMillis(limits.waitMillis()));
+      if (enclosing - deadline < 0) deadline = enclosing;
       for (var session : sessions) {
         var check = new Check(session, deadline, new CompletableFuture<>());
         checks.add(check);
@@ -103,21 +116,23 @@ public final class QueuedSocketSessions implements SessionAuthority, AutoCloseab
     try {
       long remaining = check.deadline() - System.nanoTime();
       if (remaining <= 0) throw new TimeoutException();
-      return check.result().get(remaining, TimeUnit.NANOSECONDS);
+      boolean current = check.result().get(remaining, TimeUnit.NANOSECONDS);
+      if (check.deadline() - System.nanoTime() <= 0) throw new TimeoutException();
+      return current;
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      throw unavailable(check);
+      throw fail(check, ReadFailedException.interrupted(interrupted));
     } catch (TimeoutException timeout) {
       timedOut.incrementAndGet();
-      throw unavailable(check);
+      throw fail(check, ReadFailedException.deadlineExceeded());
     } catch (ExecutionException failed) {
       if (failed.getCause() instanceof RuntimeException runtime) throw runtime;
+      if (failed.getCause() instanceof Error fatal) throw fatal;
       throw new IllegalStateException("Session check failed", failed.getCause());
     }
   }
 
-  private static ReadUnavailableException unavailable(Check check) {
-    var failure = new ReadUnavailableException();
+  private static ReadFailedException fail(Check check, ReadFailedException failure) {
     check.result().completeExceptionally(failure);
     return failure;
   }
@@ -160,18 +175,16 @@ public final class QueuedSocketSessions implements SessionAuthority, AutoCloseab
               .filter(c -> !c.result().isDone() && c.deadline() > System.nanoTime())
               .toList();
       Set<Session> current = Set.of();
-      RuntimeException failed = null;
+      Throwable failed = null;
       try {
         if (!active.isEmpty()) {
           batches.incrementAndGet();
           current =
               Objects.requireNonNull(
                   facts.currentSessions(
-                      active.stream()
-                          .map(Check::session)
-                          .collect(java.util.stream.Collectors.toSet())));
+                      active.stream().map(Check::session).collect(Collectors.toSet())));
         }
-      } catch (RuntimeException unavailable) {
+      } catch (RuntimeException | Error unavailable) {
         failed = unavailable;
       }
       // Release only after physical completion. Complete futures outside the state lock so a
@@ -181,11 +194,17 @@ public final class QueuedSocketSessions implements SessionAuthority, AutoCloseab
         stopped = closed;
         release(batch);
       }
+      // A fatal fact failure still releases physical ownership and settles every waiter. The
+      // queue cannot remain open with a dead worker and permanently occupied session seats.
+      if (failed instanceof Error) close();
       for (var check : batch) {
         if (failed != null) check.result().completeExceptionally(failed);
-        else if (stopped || check.deadline() <= System.nanoTime()) unavailable(check);
+        else if (stopped) fail(check, ReadFailedException.closed());
+        else if (check.deadline() <= System.nanoTime())
+          fail(check, ReadFailedException.deadlineExceeded());
         else check.result().complete(current.contains(check.session()));
       }
+      if (failed instanceof Error fatal) throw fatal;
     }
   }
 
@@ -228,6 +247,6 @@ public final class QueuedSocketSessions implements SessionAuthority, AutoCloseab
       release(removed);
       state.notifyAll();
     }
-    for (var check : removed) unavailable(check);
+    for (var check : removed) fail(check, ReadFailedException.closed());
   }
 }

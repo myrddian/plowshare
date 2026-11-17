@@ -12,6 +12,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Memory;
 import io.aeyer.plowshare.protocol.Provenance;
 import io.aeyer.plowshare.protocol.VerdictKind;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
@@ -80,7 +81,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 class ArchiveUnavailableTest {
   @Test
-  void postgresCancellationIsUnavailableWithoutClaimingTheConnectionWasLost() {
+  void postgresCancellationIsAReadFailureWithoutClaimingTheConnectionWasLost() {
     var cancelled =
         new DataAccessResourceFailureException(
             "PreparedStatementCallback; SQL [private query]",
@@ -95,6 +96,8 @@ class ArchiveUnavailableTest {
                       throw cancelled;
                     }));
     assertSame(cancelled, failure.getCause());
+    assertFalse(ArchiveUnavailableException.class.isInstance(failure));
+    assertEquals(ReadFailedException.Reason.QUERY_CANCELLED, failure.reason());
     assertTrue(failure.getMessage().contains("SQL was cancelled"));
     assertTrue(failure.getMessage().contains("rank conversation passages"));
     assertFalse(failure.getMessage().contains("could not be reached"));
