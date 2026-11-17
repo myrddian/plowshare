@@ -2,18 +2,34 @@ package io.aeyer.plowshare.server.ws;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.access.AccessRequestDecoder;
+import io.aeyer.plowshare.server.access.ProjectAuthorization.ExternalAdmission;
+import io.aeyer.plowshare.server.agents.ExternalConversationUnavailableException;
+import io.aeyer.plowshare.server.api.ConversationView;
+import io.aeyer.plowshare.server.api.StartedJob;
+import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
+import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.personal.PersonalScope;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
 import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 /**
  * Turns one inbound frame into an {@link Outcome} — a dotted {@code type} to a {@link
@@ -98,6 +114,7 @@ public final class FrameRouter {
   private final ActingRequests acting;
   private final FailureReporter failures;
   private final ReadAdmission readAdmission;
+  private final ExternalConversationRequestWork externalWork;
 
   /**
    * @param handlers every type this router knows, keyed by the dotted discriminator a frame's
@@ -124,11 +141,80 @@ public final class FrameRouter {
       ActingRequests acting,
       ReadAdmission admission,
       FailureReporter failures) {
+    this(handlers, acting, admission, failures, ExternalConversationRequestWork.UNAVAILABLE);
+  }
+
+  public FrameRouter(
+      Map<String, FrameHandler> handlers,
+      ActingRequests acting,
+      ReadAdmission admission,
+      FailureReporter failures,
+      ExternalConversationRequestWork externalWork) {
+    this.externalWork = Objects.requireNonNull(externalWork);
     this.failures = Objects.requireNonNull(failures);
     this.readAdmission = Objects.requireNonNull(admission);
     this.acting = acting;
     handlers.keySet().forEach(FrameTypes::requireWellFormed);
     this.handlers = Map.copyOf(handlers);
+  }
+
+  QueuedExternalConversationRequest externalRequest(
+      long admittedAtNanos,
+      Asking asking,
+      RequestSessionValidity session,
+      BiConsumer<Outcome, Runnable> reply) {
+    return QueuedExternalConversationRequest.begin(
+        externalWork, admittedAtNanos, asking, session, reply);
+  }
+
+  <T> T externalWithin(Supplier<T> action) {
+    return externalWork.within(action);
+  }
+
+  /** Output runs on its existing writer thread and has a separate bounded disclosure phase. */
+  void requireExternalDisclosure(String frame, Asking asking, Outcome outcome) {
+    try {
+      externalWork.within(
+          () -> {
+            requireDisclosure(frame, asking, outcome);
+            return null;
+          });
+    } catch (ArchiveUnavailableException unavailable) {
+      // Includes the queued session fence, not only target projection: earlier work may be
+      // committed.
+      throw ExternalConversationUnavailableException.preserveUncertainty(unavailable);
+    }
+  }
+
+  private static boolean externalSuccess(String operation, Outcome answer) {
+    return ExternalConversationRequestWork.external(operation)
+        && answer.payload() != null
+        && answer.code().httpStatus() >= 200
+        && answer.code().httpStatus() < 300;
+  }
+
+  private void requireExternalTarget(String operation, Asking asking, Outcome answer) {
+    String conversation;
+    if (FrameTypes.CONVERSATION_OPEN_EX.equals(operation)
+        && answer.payload() instanceof ConversationView opened) conversation = opened.id();
+    else if (FrameTypes.AGENT_RUN_EX.equals(operation)
+        && answer.payload() instanceof StartedJob started) conversation = started.conversation();
+    else throw new CallerFault("External conversation reply has no valid target");
+    if (conversation == null) throw new CallerFault("External conversation reply has no target");
+    if (authorization == null) return; // Isolated routers; production requires this collaborator.
+    Home current =
+        authorization.requireExternalConversationTarget(operation, conversation, asking.handle());
+    // Reuse the owning resource's narrow current scope. Passing the conversation again to Personal
+    // would discard/refetch a full row and attach its durable allowance callback unnecessarily.
+    if (personalAccess != null)
+      personalAccess.check(
+          new PersonalScope(List.of(), List.of(current.project()), List.of()),
+          asking.handle(),
+          asking.sessionId());
+    else {
+      PersonalSpaces.requireOwn(current.project(), asking.handle());
+      ClientProjects.requireOwn(current.project(), asking.sessionId(), asking.handle());
+    }
   }
 
   /**
@@ -202,7 +288,7 @@ public final class FrameRouter {
   public Outcome route(Envelope request, Asking asking) {
     try {
       return routeAsync(request, asking, false).toCompletableFuture().join();
-    } catch (java.util.concurrent.CompletionException failure) {
+    } catch (CompletionException failure) {
       if (failure.getCause() instanceof Error fatal) throw fatal;
       throw failure;
     }
@@ -211,17 +297,27 @@ public final class FrameRouter {
   /**
    * Complete routing, including disclosure and failure mapping, before handing a reply to output.
    */
-  public java.util.concurrent.CompletionStage<Outcome> routeAsync(Envelope request, Asking asking) {
+  public CompletionStage<Outcome> routeAsync(Envelope request, Asking asking) {
     return routeAsync(request, asking, true);
   }
 
-  private java.util.concurrent.CompletionStage<Outcome> routeAsync(
+  private CompletionStage<Outcome> routeAsync(
       Envelope request, Asking asking, boolean disclosureFence) {
     FrameHandler handler = handlers.get(request.type());
     if (handler == null) {
-      return java.util.concurrent.CompletableFuture.completedFuture(
+      return CompletableFuture.completedFuture(
           Outcome.failed(
               Code.NOT_FOUND, "no handler is registered for type \"" + request.type() + "\""));
+    }
+    if (ExternalConversationRequestWork.external(request.type())) {
+      try {
+        // Start before common project/session/Personal SQL, not only at the facade handler. Ex
+        // handlers are synchronous; no ThreadLocal SQL or authority context escapes this action.
+        return externalWork.within(() -> routeAdmitted(request, asking, disclosureFence));
+      } catch (RuntimeException unavailable) {
+        Fault fault = observedFault(request.type(), unavailable);
+        return CompletableFuture.completedFuture(Outcome.failed(fault.code(), fault.detail()));
+      }
     }
     boolean observer = request.type().equals("information.await");
     if (!DispatchPolicy.independentRead(request.type()) && !observer)
@@ -234,8 +330,7 @@ public final class FrameRouter {
               observer ? ReadAdmission.Work.OBSERVER : ReadAdmission.Work.INTERACTIVE);
     } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException busy) {
       Fault fault = observedFault(busy);
-      return java.util.concurrent.CompletableFuture.completedFuture(
-          Outcome.failed(fault.code(), fault.detail()));
+      return CompletableFuture.completedFuture(Outcome.failed(fault.code(), fault.detail()));
     }
     try {
       return routeAdmitted(request, asking, disclosureFence)
@@ -246,23 +341,32 @@ public final class FrameRouter {
     }
   }
 
-  private java.util.concurrent.CompletionStage<Outcome> routeAdmitted(
+  private CompletionStage<Outcome> routeAdmitted(
       Envelope request, Asking asking, boolean disclosureFence) {
     FrameHandler handler = handlers.get(request.type());
+    ExternalAdmission admission = null;
     try {
       if (request.actingFor() != null) {
         if (acting == null) throw new CallerFault("Acting request admission is unavailable");
-        return java.util.concurrent.CompletableFuture.completedFuture(
+        return CompletableFuture.completedFuture(
             acting.route(request.type(), request.payload(), request.actingFor(), asking));
       }
       if (authorization != null
           && !Set.of(FrameTypes.ACTING_CONTEXT_OPEN, FrameTypes.ACTING_CONTEXT_CLOSE)
-              .contains(request.type()))
-        authorization.require(
-            request.type(),
-            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
-                request.type(), request.payload()),
-            asking.handle());
+              .contains(request.type())) {
+        if (ExternalConversationRequestWork.external(request.type()))
+          admission =
+              authorization.requireExternalConversation(
+                  request.type(),
+                  AccessRequestDecoder.decode(request.type(), request.payload()),
+                  asking.handle(),
+                  asking.sessionId());
+        else
+          authorization.require(
+              request.type(),
+              AccessRequestDecoder.decode(request.type(), request.payload()),
+              asking.handle());
+      }
       if (accounts != null && serverAdministration(request.type()))
         accounts.requireServerAdmin(asking.handle());
       // A worker facade validates its binding and every nested project/topic before broker use.
@@ -285,11 +389,11 @@ public final class FrameRouter {
         if (personalAccess != null)
           personalAccess.check(scope, asking.handle(), asking.sessionId());
       }
+      Asking admitted = admission == null ? asking : asking.withExternalAdmission(admission);
       var completion =
-          disclosureFence
+          disclosureFence && !ExternalConversationRequestWork.external(request.type())
               ? handler.handleAsync(request.payload(), asking)
-              : java.util.concurrent.CompletableFuture.completedFuture(
-                  handler.handle(request.payload(), asking));
+              : CompletableFuture.completedFuture(handler.handle(request.payload(), admitted));
       return Objects.requireNonNull(completion)
           .thenApply(
               answer -> {
@@ -297,7 +401,9 @@ public final class FrameRouter {
                 Objects.requireNonNull(answer, "Handler returned no outcome");
                 // A genuinely asynchronous handler may finish after a membership change. This is a
                 // disclosure freshness check, not another admission or a cached permission grant.
-                if (disclosureFence
+                if (externalSuccess(request.type(), answer))
+                  requireExternalTarget(request.type(), asking, answer);
+                else if (disclosureFence
                     && authorization != null
                     && !Set.of(FrameTypes.ACTING_CONTEXT_OPEN, FrameTypes.ACTING_CONTEXT_CLOSE)
                         .contains(request.type()))
@@ -321,21 +427,31 @@ public final class FrameRouter {
               (answer, failure) -> {
                 if (failure == null) return answer;
                 Throwable cause = failure;
-                while (cause instanceof java.util.concurrent.CompletionException
-                    && cause.getCause() != null) cause = cause.getCause();
+                while (cause instanceof CompletionException && cause.getCause() != null)
+                  cause = cause.getCause();
                 if (cause instanceof Error fatal) throw fatal;
-                Fault fault = observedFault(cause);
+                Fault fault = observedFault(request.type(), cause);
                 return Outcome.failed(fault.code(), fault.detail());
               });
     } catch (RuntimeException thrown) {
-      Fault fault = observedFault(thrown);
-      return java.util.concurrent.CompletableFuture.completedFuture(
-          Outcome.failed(fault.code(), fault.detail()));
+      Fault fault = observedFault(request.type(), thrown);
+      return CompletableFuture.completedFuture(Outcome.failed(fault.code(), fault.detail()));
+    } finally {
+      if (admission != null) admission.close();
     }
   }
 
   private Fault observedFault(Throwable failure) {
-    Fault fault = Faults.of(failure);
+    return observedFault(null, failure);
+  }
+
+  private Fault observedFault(String operation, Throwable failure) {
+    Throwable mapped =
+        ExternalConversationRequestWork.external(operation)
+                && failure instanceof ArchiveUnavailableException unavailable
+            ? ExternalConversationUnavailableException.preserveUncertainty(unavailable)
+            : failure;
+    Fault fault = Faults.of(mapped);
     if (fault.httpStatus() >= 500) failures.report(FailureReporter.Source.WEBSOCKET, failure);
     return fault;
   }
@@ -357,6 +473,10 @@ public final class FrameRouter {
       if (request.actingFor() != null) {
         if (acting == null) throw new CallerFault("Acting authority unavailable");
         acting.requireDisclosure(request, asking, answer);
+        return;
+      }
+      if (externalSuccess(request.type(), answer)) {
+        requireExternalTarget(request.type(), asking, answer);
         return;
       }
       if (accounts != null && serverAdministration(request.type()))
@@ -419,17 +539,17 @@ public final class FrameRouter {
   public Outcome route(String rawFrame, Asking asking) {
     try {
       return routeAsync(rawFrame, asking, false).toCompletableFuture().join();
-    } catch (java.util.concurrent.CompletionException failure) {
+    } catch (CompletionException failure) {
       if (failure.getCause() instanceof Error fatal) throw fatal;
       throw failure;
     }
   }
 
-  public java.util.concurrent.CompletionStage<Outcome> routeAsync(String rawFrame, Asking asking) {
+  public CompletionStage<Outcome> routeAsync(String rawFrame, Asking asking) {
     return routeAsync(rawFrame, asking, true);
   }
 
-  private java.util.concurrent.CompletionStage<Outcome> routeAsync(
+  private CompletionStage<Outcome> routeAsync(
       String rawFrame, Asking asking, boolean disclosureFence) {
     Envelope request;
     try {
@@ -444,18 +564,17 @@ public final class FrameRouter {
       }
       request = JSON.treeToValue(body, Envelope.class);
     } catch (IOException notAFrame) {
-      return java.util.concurrent.CompletableFuture.completedFuture(refuse(notAFrame));
+      return CompletableFuture.completedFuture(refuse(notAFrame));
     } catch (RuntimeException invalidSelection) {
       var fault = observedFault(invalidSelection);
-      return java.util.concurrent.CompletableFuture.completedFuture(
-          Outcome.failed(fault.code(), fault.detail()));
+      return CompletableFuture.completedFuture(Outcome.failed(fault.code(), fault.detail()));
     }
     if (request == null) {
       // Measured the same way FileChannelHandler measured it for its own
       // reply type on Jackson 2.17: readValue("null", Envelope.class)
       // returns a Java null with no exception thrown at all. The catch
       // above cannot see this; this is the second half of the guard.
-      return java.util.concurrent.CompletableFuture.completedFuture(refuse(null));
+      return CompletableFuture.completedFuture(refuse(null));
     }
     return routeAsync(request, asking, disclosureFence);
   }

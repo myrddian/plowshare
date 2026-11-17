@@ -1,5 +1,13 @@
 # Home Assistant integration
 
+The [integration package design and implementation plan](../../docs/home-assistant-integration-design-and-plan.md)
+describes proposed discovery/control tools, reusable agent capabilities and an HA
+AI Task provider for automations and other integrations. It distinguishes planned
+features from the supported outbound adapter and retained, gated Assist prototype.
+The [delivery graph](../../docs/home-assistant-delivery-plan.md) assigns independent
+implementer/reviewer agents and tracks approval-gated implementation through the
+[coordinator ledger](../../docs/home-assistant-delivery-state.json).
+
 This adapter supplies selected HA states, configured service actions and selected
 state_changed observations to the [external integration runtime](../runtime/README.md).
 Home Assistant owns devices and immediate automation. A Plowshare Application owns
@@ -183,6 +191,12 @@ The root Application manifest holds runtime settings and access grants. Connecti
 mappings, credential references and the integration journal stay in the private
 adapter deployment.
 There is no default live connection or preinstalled HA Application.
+
+The retained [Plowshare Assist prototype](assist/README.md) is gated and cannot
+be packaged or enabled. Its required native HA system-prompt/context handoff is
+not available through the public SDK. Conversation and AI Task features remain
+blocked pending separately authorized implementation and independent review.
+This outbound adapter continues to own selected readings and device actions.
 
 For custom routing, copy [office.mjs](examples/office.mjs) beside the private config
 and add "script": "office.mjs" to the house binding. It replaces the declarative

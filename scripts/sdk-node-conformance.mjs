@@ -16,6 +16,36 @@ const cases = new Map(fixture.cases.map(value => [value.name, value]))
 const catalog = JSON.parse(await readFile(process.env.PLOWSHARE_SDK_CATALOG, 'utf8'))
 assert.deepEqual(OPERATIONS, catalog.operations)
 const origin = process.argv[2]
+// Both Ex calls use the existing public typed request surface, with no resolve request.
+const externalContract = fixture.externalConversationContract
+for (const test of externalContract.cases) {
+    const client = await connectPlowshare({origin,token:'sdk-fixture-token',session:'typed-node/external-'+test.name,timeoutMs:300})
+    try {
+        const payload = test.operation === 'conversation.open.ex' ? externalContract.openRequest : externalContract.runRequest
+        const pending = client.request(test.operation,payload)
+        if (test.delivery) {
+            await assert.rejects(pending,error=>error.delivery===test.delivery)
+        } else {
+            const reply = await pending
+            assert.equal(reply.outcome.code,test.code)
+            if (test.code==='NOT_FOUND') {
+                assert.equal(reply.kind,'refused')
+                assert.equal(Object.hasOwn(reply.outcome,'payload'),false)
+            } else {
+                const value = requirePayload(reply)
+                assert.equal(value.id,test.operation==='conversation.open.ex'?'cnv_external':'job_external')
+                if (test.operation==='conversation.open.ex') assert.equal(value.maxModelCalls,0)
+                else assert.equal(value.conversation,'cnv_external')
+                assert.equal(Object.hasOwn(value,'future'),false)
+                assert.equal(Object.hasOwn(value,'revision'),false)
+            }
+        }
+    } finally { client.close() }
+}
+const invalidExternal = await connectPlowshare({origin,token:'sdk-fixture-token',session:'typed-node/external-invalid'})
+try {
+    await assert.rejects(invalidExternal.request('conversation.open.ex',{...externalContract.openRequest,source:'UPPER'}))
+} finally { invalidExternal.close() }
 await assert.rejects(connectPlowshare({ origin: origin + '/wrong', token: 'sdk-fixture-token' }))
 await assert.rejects(connectPlowshare({ origin, token: 'sdk-redirect-fixture', session: 'node-redirect', timeoutMs: 300 }))
 /** Arbitrary conformance payloads exercise the wire codec, not public operation DTOs. */

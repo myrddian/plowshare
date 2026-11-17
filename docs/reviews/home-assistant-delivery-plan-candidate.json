@@ -1,0 +1,32 @@
+{
+  "node": "PLAN-00",
+  "candidate_id": "ha-plan-00-v1",
+  "created_at": "2026-11-17T07:22:06.258319+11:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_plan_implementer",
+  "reviewer_agent_id": "/root/ha_plan_reviewer",
+  "files": {
+    "docs/home-assistant-delivery-plan.md": "872fa22d91742de639fd7d390b0f42221c4afdcee517c25ddc4440ecb1d0a47b",
+    "docs/reviews/home-assistant-delivery-state-plan-00.json": "0294ac05e7fb12755f3014cb4d586bf8e42fea6f3d9829a67b3248f530003fea",
+    "docs/home-assistant-integration-design-and-plan.md": "13b9c6657151e2458d8dce88cde711b9cddd4e6731bddaa24b02eada462e1b3f",
+    "integrations/home-assistant/README.md": "bd7260f0a892065c24b5561733960251b3c9211e13a95cd3424157bc2fd48699"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-delivery-state-plan-00.json",
+  "bookkeeping_note": "Live ledger status/agents/review-evidence fields may advance after review; frozen snapshot identifies reviewed planning contract. Source/graph/role/gate changes require reapproval.",
+  "validation": {
+    "nodes": 23,
+    "edges": 40,
+    "checks": [
+      "JSON parse",
+      "unique IDs and references",
+      "acyclic graph",
+      "independent roles",
+      "valid gate references",
+      "feature nodes planned with empty actual-agent/evidence fields",
+      "local Markdown links",
+      "balanced fences",
+      "trailing whitespace",
+      "git diff --check"
+    ]
+  }
+}

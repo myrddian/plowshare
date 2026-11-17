@@ -43,6 +43,14 @@ public final class ReadDeadline {
     return current != null ? current : System.nanoTime() + checked(fallback).toNanos();
   }
 
+  /** Scope-bound evidence cannot survive scope exit or be reused under a later fresh deadline. */
+  public static boolean isCurrent(long expectedDeadline) {
+    Long current = DEADLINE.get();
+    return current != null
+        && current.longValue() == expectedDeadline
+        && System.nanoTime() - current < 0;
+  }
+
   /** Rejects late results and prevents a nested stage from starting after the owning deadline. */
   public static void check() {
     Long deadline = DEADLINE.get();

@@ -15,6 +15,8 @@ from plowshare import (
     TransportError,
 )
 from plowshare.contracts import (
+    AgentRunRequestEx,
+    ConversationOpenRequestEx,
     ConversationTurnsRequest,
     JobStatusRequest,
     ProjectListRequest,
@@ -484,6 +486,79 @@ async def main() -> None:
                     error.said
                     == f'no handler is registered for type "{request.operation}"'
                 )
+    # These calls use generated public request types. The shared server checks
+    # every exact field and counts one application frame, including uncertain cases.
+    external = fixture["externalConversationContract"]
+    opening, running = external["openRequest"], external["runRequest"]
+    for test in external["cases"]:
+        async with await Client.connect(
+            origin,
+            "sdk-fixture-token",
+            session="typed-python/external-" + test["name"],
+            timeout=0.3,
+        ) as client:
+            try:
+                if test["operation"] == "conversation.open.ex":
+                    opened = await client.request(
+                        ConversationOpenRequestEx(
+                            project=opening["project"],
+                            source=opening["source"],
+                            external_conversation=opening["externalConversation"],
+                        )
+                    )
+                    assert test.get("delivery") is None
+                    assert opened.code == test["code"]
+                    conversation = opened.require_payload()
+                    assert conversation.id == external["conversation"]["id"]
+                    assert conversation.max_model_calls == 0
+                    assert not hasattr(conversation, "future")
+                else:
+                    started = await client.request(
+                        AgentRunRequestEx(
+                            project=running["project"],
+                            source=running["source"],
+                            external_conversation=running["externalConversation"],
+                            agent=running["agent"],
+                            task=running["task"],
+                            session=None,
+                            images=(),
+                            max_model_calls=running["maxModelCalls"],
+                            max_turns=running["maxTurns"],
+                        )
+                    )
+                    assert test.get("delivery") is None
+                    assert started.code == test["code"]
+                    if started.successful:
+                        job = started.require_payload()
+                        assert job.id == external["startedJob"]["id"]
+                        assert (
+                            job.conversation == external["startedJob"]["conversation"]
+                        )
+                        assert not hasattr(job, "future")
+                    else:
+                        try:
+                            started.require_payload()
+                            raise AssertionError("Ex refusal became success")
+                        except Refusal as error:
+                            assert error.code == "NOT_FOUND"
+            except TransportError as error:
+                assert error.delivery == test.get("delivery"), (
+                    test["name"],
+                    error.delivery,
+                )
+    async with await Client.connect(
+        origin, "sdk-fixture-token", session="typed-python/external-invalid"
+    ) as client:
+        invalid_external = ConversationOpenRequestEx(
+            project=opening["project"],
+            source="UPPER",
+            external_conversation=opening["externalConversation"],
+        )
+        try:
+            await client.request(invalid_external)
+            raise AssertionError("Invalid Ex source reached transport")
+        except ValueError:
+            pass
     async with await Client.connect(
         origin, "sdk-fixture-token", session="typed-python/cancel"
     ) as client:

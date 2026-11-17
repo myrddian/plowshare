@@ -107,11 +107,17 @@ public class PoolAdmissionConfiguration {
 
   @Bean
   GatedConnections gatedConnections(
-      DataSource primary, AdmissionThrottle throttle, ObjectProvider<MeterRegistry> registries) {
-    return new GatedConnections(
+      DataSource primary,
+      AdmissionThrottle throttle,
+      ObjectProvider<MeterRegistry> registries,
+      ObjectProvider<ScopedSqlWorkBudget> budgets) {
+    DataSource source =
         new ThrottledDataSource(
             new TracedDataSource(primary, JdbcExecutionTraces.forPool(registries, "main")),
-            throttle));
+            throttle);
+    ScopedSqlWorkBudget budget = budgets.getIfAvailable();
+    return new GatedConnections(
+        budget == null ? source : budget.decorate(source, (HikariDataSource) primary));
   }
 
   @Bean

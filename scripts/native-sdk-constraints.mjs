@@ -30,6 +30,9 @@ const text = (maxLength, minLength = 0) => ({
   maxLength,
   noNul: true,
 });
+// Used only by Ex-specific properties: other SDK policies keep their existing validators.
+const ecmaWhitespace = '\\x09-\\x0d\\x20' + '\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
+const ecmaNonblank = `^[${ecmaWhitespace}]*[^${ecmaWhitespace}]`;
 const g = (path) => ({ get: path });
 const eq = (path, value) => ({ eq: [g(path), value] });
 const present = (path) => ({ present: path });
@@ -251,6 +254,22 @@ export function constrain(graph) {
       implies(eq('noTurnCap', true), absent('maxTurns')),
       implies(eq('noBudget', true), absent('maxModelCalls')),
     );
+    if (op === 'conversation.open.ex' || op === 'agent.run.ex') {
+      // Ex follows canonical ECMAScript trim semantics without applying a language's strip/Trim
+      // to the value. In particular FEFF is whitespace, while NEL and U+001C are not.
+      const edge = ecmaWhitespace + '\\x00-\\x1f\\x7f-\\x9f';
+      // Equality with native trim also rejects regex '$' matching before a final LF. Native-only
+      // trim characters are already forbidden by the locator's control/ASCII sets; no value is
+      // rewritten. Do not transfer this locator-only check to task/session/agent or reply names.
+      field(s, 'project', {trimmed:true,pattern:`^[^${edge}](?:[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]*[^${edge}])?$`});
+      field(s, 'source', {minLength:1,maxLength:128,trimmed:true,pattern:'^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$'});
+      field(s, 'externalConversation', {minLength:1,maxLength:256,trimmed:true,pattern:'^[\\x21-\\x7e]+$'});
+      if (op === 'agent.run.ex') {
+        field(s,'images',{maxItems:0});
+        for (const key of ['agent','task','session'])
+          field(s,key,{minLength:1,maxLength:50*1024*1024,pattern:ecmaNonblank,nonblank:false,trimmed:false,noNul:false});
+      }
+    }
     if (op === 'document.citations')
       rules(s, { atMostOne: ['document', 'conversation'] });
     if (op === 'conversation.trajectory' || op === 'orchestration.record')
@@ -406,6 +425,24 @@ export function constrain(graph) {
       );
     }
   }
+  // Ex must carry its resolved internal conversation. Clone the root so strengthening this
+  // result cannot mutate the ordinary started-job contracts shared by agent.run/resume.
+  for (const key of ['nativeAgentRunExResult','nativeConversationOpenExResult'])
+    if (Object.hasOwn(graph.$defs,key)) throw new Error('Private Ex result definition already exists');
+  const externalStarted = structuredClone(resolve(graph, graph.results['agent.run.ex']));
+  externalStarted.required = [...new Set([...(externalStarted.required ?? []), 'conversation'])];
+  field(externalStarted,'id',{pattern:ecmaNonblank,nonblank:false});
+  externalStarted.properties.conversation = {type:'string',pattern:'^cnv_'};
+  graph.$defs.nativeAgentRunExResult = externalStarted;
+  graph.results['agent.run.ex'] = {$ref:'#/$defs/nativeAgentRunExResult'};
+  // Reply names preserve their text; they are not request selectors. Clone before supplementing
+  // the shared ordinary view so a new Ex check never changes old operation policy.
+  const externalView = structuredClone(resolve(graph, graph.results['conversation.open.ex']));
+  for (const key of ['id','project']) field(externalView,key,{pattern:ecmaNonblank,nonblank:false});
+  for (const key of ['maxModelCalls','modelCallsSpent','maxTurns'])
+    field(externalView,key,integer(0,9007199254740991));
+  graph.$defs.nativeConversationOpenExResult = externalView;
+  graph.results['conversation.open.ex'] = {$ref:'#/$defs/nativeConversationOpenExResult'};
   for(const operation of ['acting.turn.start','acting.turn.receipt']) {
     const turnReceipt=resolve(graph,graph.results[operation]);
     field(turnReceipt,'requestId',canonicalUuid);

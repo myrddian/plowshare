@@ -225,6 +225,11 @@ public sealed class Client : IAsyncDisposable
         var outcome = await RequestWireAsync(operation, body, cancellationToken, options, admission);
         if (outcome.Code is not ("OK" or "CREATED" or "ACCEPTED" or "NO_CONTENT"))
             return new Reply<TResponse>(outcome.Code, outcome.Said, default!);
+        // Resolving an Ex conversation and accepting durable work are distinct.
+        // Wrong success outcomes remain uncertain and must never cause a replay.
+        if (operation == "conversation.open.ex" && outcome.Code != "OK"
+            || operation == "agent.run.ex" && outcome.Code != "ACCEPTED")
+            throw new TransportException(Delivery.InvalidResponse, "Unexpected external conversation outcome; completion is unknown");
         try { var result = Codec.Result<TResponse>(operation, outcome.Payload); Codec.CorrelateDeployment(operation, body, outcome.Payload); return new Reply<TResponse>(outcome.Code, outcome.Said, result); }
         catch (JsonException) { throw new TransportException(Delivery.InvalidResponse, "Unreadable response; outcome is unknown"); }
     }

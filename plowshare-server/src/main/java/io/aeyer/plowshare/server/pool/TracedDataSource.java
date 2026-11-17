@@ -38,9 +38,19 @@ public final class TracedDataSource extends AbstractDataSource {
   private Connection connection(Connection connection) {
     return (Connection)
         Proxy.newProxyInstance(
-            Connection.class.getClassLoader(),
-            new Class<?>[] {Connection.class},
+            ScopedSqlWorkBudget.current() == null
+                ? Connection.class.getClassLoader()
+                : SqlPoolLease.class.getClassLoader(),
+            ScopedSqlWorkBudget.current() == null
+                ? new Class<?>[] {Connection.class}
+                : new Class<?>[] {Connection.class, SqlPoolLease.class},
             (proxy, method, args) -> {
+              if (method.getDeclaringClass() == SqlPoolLease.class) {
+                if (method.getName().equals("poolHandle"))
+                  return connection instanceof SqlPoolLease lease ? lease.poolHandle() : connection;
+                if (connection instanceof SqlPoolLease lease) lease.callerFinished();
+                return null;
+              }
               var result = invoke(proxy, connection, method, args);
               if (result instanceof Statement statement
                   && (method.getName().equals("prepareStatement")

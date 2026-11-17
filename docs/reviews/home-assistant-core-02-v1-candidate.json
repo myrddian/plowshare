@@ -1,0 +1,42 @@
+{
+  "node": "CORE-02",
+  "candidate_id": "ha-core-02-v1",
+  "created_at": "2026-11-16T22:26:00.226056+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_core_storage_implementer",
+  "reviewer_agent_id": "/root/ha_core_storage_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-core-02-implementation.md": "7f80931c45f4111f35b025f333eb18580a4195471df7fc7784ae7db2fd39004c",
+    "docs/reviews/home-assistant-core-02-v1-state.json": "d156fbfec255b0a40707bf87dea94dcee29cd2024ed2c00fda384127438a7477",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationAliasConfiguration.java": "471f7803d0393fcfa0457d4bfb63b89e2a1a6c3338b5eb13b09c6a2920ede990",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationAliasProperties.java": "d5dbdfe4616ace8f89d108aa189d0cb2c11a57d5b6e72f138f751085c0df077a",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationAliasRepository.java": "a40cf9c70707da3f4156008a073aa6c8331352e7750eb9520f177d49de75504a",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationAliasSqlDeadline.java": "3d6e163030e6c0197fea65cd73f3c292164c0679ed137011d9264a413895d388",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationCreation.java": "039490866fff2dd4ac25f7f090b79f79c7c144df58523a3856c184c6bb6ac937",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ConversationStore.java": "6232cafd0d621734021855cb9478c1f08c546e18f5c8ef5af3b4a6e66830a245",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcConversationAliasRepository.java": "0b98b02fdd10a9769c591e721af115dc4618e8c74a2f99b226a83b38ac3882cf",
+    "plowshare-server/src/main/resources/db/migration/V274__conversation_external_aliases.sql": "0b7a254bb09f3305be6a0dc6d97a712ae7748903661fbe4319314de2212d9b71",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/archive/ConversationAliasRepositoryTest.java": "8ea97c81fecbdd94405a994a8897729c6804cb442eb61964e7bb8bfd858dfc25",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/archive/ConversationAliasSqlDeadlineTest.java": "6aef4687959a42247a17895ff9f0ca39cacb1987dcdf038a1fccf3cb2a63a895",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/archive/ConversationAliasesDatabaseTest.java": "61903bc46f2be0a4fe4912ec676a022f04ac5ef43f6f14e0436fc899c7f0b867"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-core-02-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-core-02-v1.diff",
+    "sha256": "dec0e414b8efdea7e93f05c70e78b419bd9ca2c5a9f8f1b35197e59e12145698",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "CORE-01": {
+      "id": "ha-core-01-v2",
+      "manifest_path": "docs/reviews/home-assistant-core-01-v2-candidate.json",
+      "manifest_sha256": "d15c764b81a308f4365b8406619e3890555c8277218830324e10ce3d4bc1dcca"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Global format/formatCheck passed, 26 non-database alias tests and 11 selected PostgreSQL invocations (7 scenarios, bounded race repetitions) passed. Full non-DB check running on unchanged source; no API/SDK/live claims."
+    }
+  ]
+}

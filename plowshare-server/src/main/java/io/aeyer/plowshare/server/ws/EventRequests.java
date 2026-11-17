@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.ws;
 import io.aeyer.plowshare.protocol.transport.PacketBudget;
 import io.aeyer.plowshare.protocol.transport.SegmentedMessages;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -16,15 +18,17 @@ final class EventRequests {
     private final String frame;
     private final long bytes;
     private boolean released;
+    private final QueuedExternalConversationRequest external;
 
-    Request(String frame, long bytes) {
+    Request(String frame, long bytes, QueuedExternalConversationRequest external) {
       this.frame = frame;
       this.bytes = bytes;
+      this.external = external;
     }
   }
 
   private final PacketBudget budget;
-  private final Consumer<String> route;
+  private final BiConsumer<String, QueuedExternalConversationRequest> route;
   private final EventReadCapacity reads;
   private final ArrayDeque<Request> waiting = new ArrayDeque<>();
   private Request selected;
@@ -39,13 +43,24 @@ final class EventRequests {
   }
 
   EventRequests(PacketBudget budget, Consumer<String> route, EventReadCapacity reads) {
+    this(budget, (frame, external) -> route.accept(frame), reads);
+  }
+
+  EventRequests(
+      PacketBudget budget,
+      BiConsumer<String, QueuedExternalConversationRequest> route,
+      EventReadCapacity reads) {
     this.budget = budget;
     this.route = route;
     this.reads = reads;
   }
 
   synchronized void offer(String frame) {
-    if (!open) return;
+    offer(frame, null);
+  }
+
+  synchronized boolean offer(String frame, QueuedExternalConversationRequest external) {
+    if (!open) return false;
     SegmentedMessages.utf8Length(frame);
     long bytes = 2L * frame.length();
     // Count and bytes include running and globally waiting operations, not just queue membership.
@@ -55,8 +70,9 @@ final class EventRequests {
     budget.acquire(bytes);
     held += bytes;
     retained++;
-    waiting.addLast(new Request(frame, bytes));
+    waiting.addLast(new Request(frame, bytes, external));
     notifyAll();
+    return true;
   }
 
   synchronized void start(String socketId) {
@@ -65,12 +81,20 @@ final class EventRequests {
     Thread.ofVirtual().name("event-requests-" + socketId).start(this::drain);
   }
 
-  synchronized void close() {
-    open = false;
-    for (var request : waiting) release(request);
-    waiting.clear();
-    if (selected != null) release(selected);
-    notifyAll();
+  void close() {
+    var discarded = new ArrayList<Request>();
+    synchronized (this) {
+      open = false;
+      discarded.addAll(waiting);
+      for (var request : waiting) release(request);
+      waiting.clear();
+      if (selected != null) {
+        release(selected);
+        discarded.add(selected);
+      }
+      notifyAll();
+    }
+    for (var request : discarded) if (request.external != null) request.external.close();
   }
 
   private synchronized boolean isOpen() {
@@ -115,7 +139,7 @@ final class EventRequests {
         }
         if (!independent) {
           // The coordinator itself executes ordered work, so it cannot start subsequent reads.
-          route.accept(next.frame);
+          route.accept(next.frame, next.external);
         } else if (reads.acquire(this::isOpen)) {
           boolean launched = false;
           try {
@@ -146,7 +170,7 @@ final class EventRequests {
 
   private void read(Request request) {
     try {
-      route.accept(request.frame);
+      route.accept(request.frame, request.external);
     } catch (RuntimeException | Error failure) {
       close();
       throw failure;

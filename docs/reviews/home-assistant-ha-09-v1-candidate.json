@@ -1,0 +1,43 @@
+{
+  "node": "HA-09",
+  "candidate_id": "ha-ha-09-v1",
+  "created_at": "2026-11-17T02:18:03.710051+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_events_implementer",
+  "reviewer_agent_id": "/root/ha_events_reviewer",
+  "files": {
+    "docs/home-assistant-integration-design-and-plan.md": "29f1b8443cba9177fb9f2d108b5f0ef09bf84d71683b3812244af547a26d3a0d",
+    "docs/reviews/home-assistant-ha-04-observation-safety-implementation.md": "b583c9af2fda9394525be35e67e131da2d5a70d3d7edc0a893b26776216e6879",
+    "docs/reviews/home-assistant-ha-09-implementation.md": "6edf8a5e45b44fe3fb12ae0b8431b7a6314a9d2dc91fdaeaa6f1e4202678699a",
+    "docs/reviews/home-assistant-ha-09-v1-state.json": "e424fc97aa28ebabdd920158d7588ba143884866e2809b36d7bf1ef919847140",
+    "integrations/home-assistant/ACTION-PROVIDER.md": "b8bc91245c793865fe3d11ac235d9702675d130cc0d16b0c6ae58fd020901569",
+    "integrations/home-assistant/OBSERVATION-ROUTES.md": "7aa3092688d1749938979e7d879ca8c4085f2f2539cdeaa8a73f587e5ca0231a",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionPolicy.java": "c1a3da9d5d6408848993bbbd082f1ca901f74ef92d12c56122ad15ac223e505b",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantControlServices.java": "37171d5e34242e48f1cd13a939bbd249d23d54c6972a55f2aecb3e8250071df4",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantControlServicesTest.java": "a39bd9c433c6c048a4c43a7ef1a9a015937b94237f871965581f20075683b804",
+    "integrations/runtime/src/main/java/io/aeyer/plowshare/integrations/Configuration.java": "c28853a3cd0161829b66cbb395d81e71ca5cd9858c6ef77fc22f962642470084",
+    "integrations/runtime/src/main/java/io/aeyer/plowshare/integrations/ThresholdPolicy.java": "83189ebb169b52239622304de7ae108fdbce31d91afe8220d4af1b1853cf57cd",
+    "integrations/runtime/src/test/java/io/aeyer/plowshare/integrations/ConfigurationTest.java": "9ef918b80394f00061fc542fddaa0700c1e92291c7767a233204daabd9f9a9db",
+    "integrations/runtime/src/test/java/io/aeyer/plowshare/integrations/StateRouteTest.java": "8c592ad82069059328dd502338ba8f85649ee0a5af929b3dc3687157892e8586"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-ha-09-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-09-v1.diff.gz",
+    "sha256": "d78391ae81cb75b2af0cb8c2b2c10ce9bd8c3207534003136f8706d0d69f1f89",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "HA-04": {
+      "id": "ha-ha-04-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-04-v2-candidate.json",
+      "manifest_sha256": "a8a46645535397cf3b01b2298b7e96af1b441f78377d97acb07a899647928c96"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Current125scopedtests across15classes PASS49s zeroerrors/failures/skips; globalformat4s and separateformatCheck4s. Runtime exact-state selectedroutes reuse existing holds/cooldowns/retention/recovery/causalowner. AffectedHA04v2 independentlyAPPROVED+accepted. NamedSDKreceipt->legacyfeedback bridge explicitlyunsupported; no newjournal or universalindirectloopsafety claim. Designfeedbackparagraph aligned only; prompt/cache unchanged. No livecalls."
+    }
+  ]
+}

@@ -168,8 +168,11 @@ public enum Code {
   VALIDATION_FAILED(422, "validation_failed"),
 
   /**
-   * The archive could not be reached; nothing was read and nothing was written. {@code
-   * ApiExceptionHandler} row 12: {@code ArchiveUnavailableException}.
+   * Work could not produce an available result. This code alone does not establish whether earlier
+   * reads, writes or durable admission completed; follow the owning operation's receipt/recovery
+   * contract before retrying a mutation. Includes {@code ApiExceptionHandler} row 12's {@code
+   * ArchiveUnavailableException} and scoped completion failures, whose details retain their own
+   * effect certainty.
    */
   ARCHIVE_UNAVAILABLE(503, "archive_unavailable"),
 

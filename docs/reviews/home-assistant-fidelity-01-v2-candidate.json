@@ -1,0 +1,59 @@
+{
+  "node": "FIDELITY-01",
+  "candidate_id": "ha-fidelity-01-v2",
+  "created_at": "2026-11-16T21:49:02.690347+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_fidelity_implementer",
+  "reviewer_agent_id": "/root/ha_fidelity_reviewer",
+  "files": {
+    "docs/home-assistant-integration-design-and-plan.md": "277e3a26ae576e22856582f377fa4f017956210e67e1286b66e0aa922344fbf3",
+    "docs/reviews/home-assistant-fidelity-01-v2-state.json": "8d91a02bfa460ea3fe648ead8a06577a213a653e8ee0a584c8aa2d7905d95432",
+    "docs/reviews/home-assistant-prompt-fidelity-decision.md": "aec6320d4866751a58a7142887abbd38bf76e60c7e2de56c0e2d0c1cbd607471"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-fidelity-01-v2-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-fidelity-01-v2.diff",
+    "sha256": "3bff322c080995a5f4a852350bb90b02f28958ee9761b31b81668a97f10836fa",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "AUDIT-01": {
+      "id": "ha-audit-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+      "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Actual HA six-case ChatLog probe passed; SDK and hook alternatives inspected. No public native role path verified. Investigation must leave prompt_public_path_verified false. Shared design link being serialized through CORE01 ownership; review report first, final acceptance after consistency check."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_fidelity_reviewer",
+      "verdict": "APPROVE",
+      "candidate_id": "ha-fidelity-01-v1",
+      "manifest_sha256": "e6b2632070a658f3260ea146985ffacfb954f7cc67adf386a89d124135271f8c",
+      "report_path": "docs/reviews/home-assistant-fidelity-01-review.md",
+      "report_sha256": "fba88ae2f777a8e38f319e618351687e3ebab65fba5a0f48546e1ee7b1a14e47"
+    },
+    {
+      "kind": "independent_design_consistency_supplement",
+      "reviewer": "/root/ha_fidelity_reviewer",
+      "design_sha256": "e305ff76fb6fc52530bbfb4ce03f989071562fd879964631565664aed4463166",
+      "report_sha256": "fba88ae2f777a8e38f319e618351687e3ebab65fba5a0f48546e1ee7b1a14e47",
+      "result": "APPROVE; exact gap decision accepted, capability gate unsatisfied"
+    },
+    {
+      "kind": "current_design_consistency",
+      "reviewer": "/root/ha_core_contract_reviewer",
+      "design_sha256": "cd2cc8d15070e504fbc71581581e1e7aec5a9bd546b7c9ea101fd2910e788943",
+      "report": "docs/reviews/home-assistant-core-01-v2-review.md",
+      "result": "APPROVE; prompt gap unchanged"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "User cache boundary clarification recorded: primary app/integrator responsibility, common-pattern SDK support only with explicit semantics/compatibility and opt-in transforms; original HA rendering preserved. User leaves prompt features gated. Prose-only links/fences/whitespace and diff check pass; alias contract unchanged."
+    }
+  ]
+}

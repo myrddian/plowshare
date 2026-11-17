@@ -91,6 +91,11 @@ export interface ConnectOptions extends Omit<WireConnectOptions, 'onPush'> {
   readonly onPushFault?: (fault: ConnectionFault) => void;
 }
 export type { Payloads } from './direct.ts';
+export type {
+  ExternalConversationLocator,
+  ConversationOpenRequestEx,
+  AgentRunRequestEx,
+} from './catalog.ts';
 export type { Replies } from './replies.ts';
 export type { JobView, JobOutcome } from '../binding/job-view.ts';
 

@@ -14,6 +14,26 @@
     "surfacedCode": "The outcome code the non-blocking form must hand its caller when the server refuses the request. It is an outcome, not a fault: the waiting form absorbs this code and the caller never sees it, and the whole difference between the two forms is that this one reports it.",
     "handshake": "Refuses the \"control\" dispatch negotiation with CAPACITY_EXHAUSTED. A refused negotiation is never flow control and is never resubmitted: the server treats a second selection on one connection as a protocol violation. The harness asserts a negotiation was actually attempted and refused, so a language that never drives the case cannot report success."
   },
+  "externalConversationContract": {
+    "openRequest": { "project": "fixture", "source": "sdk.instance", "externalConversation": "Case/opaque:ID-1" },
+    "runRequest": { "project": "fixture", "source": "sdk.instance", "externalConversation": "Case/opaque:ID-1", "agent": "worker", "task": "  original\ntext  ", "session": null, "images": [], "maxModelCalls": 23, "maxTurns": 3 },
+    "conversation": { "id": "cnv_external", "project": "fixture", "maxModelCalls": 0, "modelCallsSpent": 0, "maxTurns": null, "noTurnCap": false, "noBudget": false, "title": null },
+    "startedJob": { "id": "job_external", "agent": "worker", "conversation": "cnv_external" },
+    "cases": [
+      { "name": "open", "operation": "conversation.open.ex", "code": "OK" },
+      { "name": "run", "operation": "agent.run.ex", "code": "ACCEPTED" },
+      { "name": "run-agent-omitted", "operation": "agent.run.ex", "code": "ACCEPTED", "omitAgent": true },
+      { "name": "run-agent-null", "operation": "agent.run.ex", "code": "ACCEPTED", "agent": null, "delivery": "INVALID_RESPONSE" },
+      { "name": "open-wrong-status", "operation": "conversation.open.ex", "code": "CREATED", "delivery": "INVALID_RESPONSE" },
+      { "name": "run-wrong-status", "operation": "agent.run.ex", "code": "OK", "delivery": "INVALID_RESPONSE" },
+      { "name": "run-missing-conversation", "operation": "agent.run.ex", "code": "ACCEPTED", "omitConversation": true, "delivery": "INVALID_RESPONSE" },
+      { "name": "run-null-conversation", "operation": "agent.run.ex", "code": "ACCEPTED", "conversation": null, "delivery": "INVALID_RESPONSE" },
+      { "name": "run-wrong-conversation", "operation": "agent.run.ex", "code": "ACCEPTED", "conversation": "job_other", "delivery": "INVALID_RESPONSE" },
+      { "name": "run-refusal", "operation": "agent.run.ex", "code": "NOT_FOUND" },
+      { "name": "run-timeout", "operation": "agent.run.ex", "silent": true, "delivery": "UNKNOWN" },
+      { "name": "run-disconnect", "operation": "agent.run.ex", "disconnect": true, "delivery": "UNKNOWN" }
+    ]
+  },
   "cases": [
     { "name": "success", "response": { "code": "OK", "payload": { "nullable": null, "future": { "nested": [1, "two"] } }, "futureOutcome": true } },
     { "name": "refusal", "response": { "code": "CONFLICT", "said": "fixture refusal" } },

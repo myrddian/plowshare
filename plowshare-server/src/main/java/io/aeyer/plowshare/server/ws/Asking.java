@@ -1,8 +1,11 @@
 package io.aeyer.plowshare.server.ws;
 
+import io.aeyer.plowshare.server.access.ProjectAuthorization.ExternalAdmission;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.relay.RelayReadBudget;
+import java.util.Objects;
 
 /**
  * Who is asking, as much of it as a frame actually carries: the session the socket was opened
@@ -51,28 +54,40 @@ import io.aeyer.plowshare.server.faults.CallerFault;
  * @param handle the account this socket's upgrade carried, or {@code null} for one that carried
  *     none — an operator token with no configured admin handle, say. {@link #requireHandle} is the
  *     door a frame that needs one goes through
+ * @param externalAdmission owner-issued, one-use evidence for the immediate Ex handler, or null;
+ *     never populated from a wire field or retained as continuing authority
  */
 public record Asking(
     String sessionId,
     String handle,
     String connectionId,
-    io.aeyer.plowshare.server.relay.RelayReadBudget relayBudget,
-    Runnable queryValidity) {
+    RelayReadBudget relayBudget,
+    Runnable queryValidity,
+    ExternalAdmission externalAdmission) {
   public Asking {
-    java.util.Objects.requireNonNull(relayBudget);
-    java.util.Objects.requireNonNull(queryValidity);
+    Objects.requireNonNull(relayBudget);
+    Objects.requireNonNull(queryValidity);
   }
 
   public Asking(
       String sessionId,
       String handle,
       String connectionId,
-      io.aeyer.plowshare.server.relay.RelayReadBudget relayBudget) {
+      RelayReadBudget relayBudget,
+      Runnable queryValidity) {
+    this(sessionId, handle, connectionId, relayBudget, queryValidity, null);
+  }
+
+  Asking withExternalAdmission(ExternalAdmission admission) {
+    return new Asking(sessionId, handle, connectionId, relayBudget, queryValidity, admission);
+  }
+
+  public Asking(String sessionId, String handle, String connectionId, RelayReadBudget relayBudget) {
     this(sessionId, handle, connectionId, relayBudget, () -> {});
   }
 
   public Asking(String sessionId, String handle, String connectionId) {
-    this(sessionId, handle, connectionId, io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY);
+    this(sessionId, handle, connectionId, RelayReadBudget.LEGACY);
   }
 
   public Asking(String sessionId, String handle) {

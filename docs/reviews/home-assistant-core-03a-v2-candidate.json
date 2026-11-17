@@ -1,0 +1,73 @@
+{
+  "node": "CORE-03A",
+  "candidate_id": "ha-core-03a-v2",
+  "created_at": "2026-11-17T01:48:10.774114+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_sql_budget_implementer",
+  "reviewer_agent_id": "/root/ha_sql_budget_reviewer",
+  "files": {
+    ".agents/guides/persistence-cache.md": "0a57dbdc0798ab2954cb90188c0b2951f5b457b4ff43f6715bb71b07051c4553",
+    "docs/reviews/home-assistant-core-03a-implementation.md": "6b33162b5d5587eede01b171b42b5d0b93252eb2280c7e5e69582b4ea0f2c72d",
+    "docs/reviews/home-assistant-core-03a-v2-state.json": "07e0f93be972516fd8d8e7583a1e291091b482cf6f501503a6e725968096679d",
+    "docs/reviews/home-assistant-ex-sql-budget-design.md": "3c7239b2fd139d5f6cc738dd4211fadd664c4456b9460a80fc772548bdc6ffb9",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/BoundedSnapshotCache.java": "81e9fd2265e3138e008e564c918e4b8e6e629cec49e6f3070cae133d29993047",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/ProjectionCacheConfiguration.java": "1d66eb2f88d92b496d7082992905af92c025d20c1ab2ef9f5657a798fe048799",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/ProjectionCacheStatistics.java": "ec63160cf776ec81580b8933fcc499883e2961a01d89092c5d55a5ca3c902d6c",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/SnapshotCache.java": "7729916b97cf5efee0d2215448f5dfedab17d43db5ecae4d0519938ab45e1d7a",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/VersionedProjectionCache.java": "38d510d151c06350efebfe31b4ddaef3d8453e7c6a5d9dd00ac4cab68a0c6fa8",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/faults/Faults.java": "b2edea4fa01b5b42a10ee8a737925eaa3e70ea6f9572de0a3ca79953e2a59e33",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/AdmissionThrottle.java": "690f624b058bf7468374816c804ccc8e4965af07386a7a73638927c797c1a249",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/PoolAdmissionConfiguration.java": "d4079666ff60b037abf223d0990c6e418ca483f04942bccdc728ed6d78bb5537",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/PostgresSqlSessionDeadlines.java": "b541cb1aeeecd0cb653250d77c746d821a8abc1abff70d3219baaa8091084c4c",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/ScopedSqlDataSource.java": "b639bbac3520ca3810e535d6f14b3dd9b3d34d6c5b9f0fb8476d59719a02ed60",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudget.java": "0efc32236b1372347d6462bd602fb3e50b60dc26a552cb51cb962f7f98c2b10f",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/SqlAdmissionLease.java": "2f3ba028b63f3b857365980cb66ebadcad93bf5d82d6d50b52c39578060dcb43",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/SqlPoolLease.java": "43dd2011fc67a35e0c7fac483113be1fcfae792d7f4eb81ece3eecea1260d8c7",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/SqlSessionDeadlines.java": "f4a4d8e9dbbd6c9b8e7302e612afa9b5e8a61f34f2ae813cfc0cb410dc6e120e",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/SqlWorkBudget.java": "812c026c6c33bdf2ad447fa2f44307dfb1c1f57aef8344a042492a2c127abc95",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/SqlWorkBudgetConfiguration.java": "3fd733bad666d6f312419f9160002cce57af97b131c936dc0466de9d5d8968d9",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/SqlWorkBudgetProperties.java": "180cced362711c500d43a138313b3d5588fb52538a7360587448b3f79b51415b",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/SqlWorkUnavailableException.java": "031a27739220fed5fe7accba462185d2383bd00bf3c8664e9b19c8ea32b72611",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/ThrottledDataSource.java": "a97dd42710034c46df7faf61afb673dc204d03be96c1d24bd635f0475eaef7ba",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/TracedDataSource.java": "3ab20668a40b108a64796447870dc77a8c7edc67287034936176acba3a9eda65",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/cache/ItemProjectionCacheTest.java": "003155a1abcd62f9401adccde77573e43aef56e632ac694d14676850ff5d9935",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/cache/SnapshotExistingReadTest.java": "fcb100debbe6eafc16a0926341dc62938d3f5ff21550d24e98ca583c5cb68b15",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/cache/VersionedProjectionCacheTest.java": "f28dba3731bc03f8492296a6deffc110affcb5c84b9970f5b9b5d04ebf78ffc7",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetDatabaseTest.java": "d29250d72ec1705a688e715ffc271471c09c5df2e2f65a72890d5e7ffe1d2ab2",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java": "97c836cfe9663e539ace02c1d94a733c75743d6fc5209d0672a677aea619544d",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/SqlWorkBudgetCompositionTest.java": "6a105d896f0122257bd7aa52416f703cd851d79cf2f370772640fe523b2b2b82"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-core-03a-v2-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-core-03a-v2.diff.gz",
+    "sha256": "3c4f922643b71458eb05dea686f5867780d586dcd68a84ed59064a879eb69e6c",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "CORE-02": {
+      "id": "ha-core-02-v3",
+      "manifest_path": "docs/reviews/home-assistant-core-02-v3-candidate.json",
+      "manifest_sha256": "f428a11b4894d58648680361440737b0fead49d567ae665198219c53e6e7e05b"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Current130selectednonDBcasesand6actualPGcasesPASS; separateformatCheckPASS4s. Serverlimits/backendrowlockrelease, originalsettingsreset/unscopedreuse, reservedinterruptcapacity, exactlease/depthownership, warmcachehit/sharedjoin/privateMissproof. Broaderdefaultcheckrunningonfrozencode; noExwiring/globalunscopeddeadlineclaim. Allpreflightfindingsimplementedawaitindependentdisposition."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_sql_budget_reviewer",
+      "verdict": "CHANGES_REQUIRED",
+      "candidate_id": "ha-core-03a-v1",
+      "manifest_sha256": "4b9b318c95657e9b2eb604ecb995421563a6b3385264b1d29ca0852c52330143",
+      "report_path": "docs/reviews/home-assistant-core-03a-review.md",
+      "report_sha256": "fb77f050cdaaed355832073e121fbc7968593610652d77f17affaab820add60f"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "R1 corrected by owning implementer; current 154 focused non-database cases and 6 selected PostgreSQL scenarios pass; global format and separate formatCheck pass. Exact29-path manifest /private/tmp/core03a-v2-source-hashes.json. Independent approval pending."
+    }
+  ]
+}

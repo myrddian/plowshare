@@ -1,0 +1,33 @@
+{
+  "node": "CORE-01",
+  "candidate_id": "ha-core-01-v1",
+  "created_at": "2026-11-16T21:40:52.585770+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_core_contract_implementer",
+  "reviewer_agent_id": "/root/ha_core_contract_reviewer",
+  "files": {
+    "docs/decisions/0077-conversation-external-aliases.md": "499624f43df79f7a8f3f75ce880288bdeb6801f574d5d7e28bcd0fff1ad40cb8",
+    "docs/home-assistant-integration-design-and-plan.md": "e305ff76fb6fc52530bbfb4ce03f989071562fd879964631565664aed4463166",
+    "docs/reviews/home-assistant-core-01-v1-state.json": "a03da123c475539296c80fcbf6b8d93c1e975269d19dc3710561be62cdd54b7f",
+    "docs/sdks.md": "cc4fb3c654037ddeaf75981e7fbde779037ea7fa076d93e301558f55cabe6f9d"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-core-01-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-core-01-v1.diff",
+    "sha256": "94efcb92c997a160873de42108b6ff361e791426a5ce44d3b1b50fa2952a16cf",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "AUDIT-01": {
+      "id": "ha-audit-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+      "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Exact Ex DTO/wire, owner-local source namespace, atomic create/lifecycle/limits and separately authorized generic-platform rationale recorded; source inspected, links/fences/whitespace and git diff --check passed. No code or live behavior claimed."
+    }
+  ]
+}

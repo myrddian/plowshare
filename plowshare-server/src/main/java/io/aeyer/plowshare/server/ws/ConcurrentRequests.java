@@ -25,6 +25,10 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 final class ConcurrentRequests implements AutoCloseable {
   interface Delivery extends Runnable {
+    default QueuedExternalConversationRequest externalRequest() {
+      return null;
+    }
+
     /** One physical writer owns at most one handoff, including its final settlement turn. */
     void started();
 
@@ -166,6 +170,14 @@ final class ConcurrentRequests implements AutoCloseable {
     }
 
     void offer(String frame, Envelope envelope, String account) {
+      offer(frame, envelope, account, null);
+    }
+
+    void offer(
+        String frame,
+        Envelope envelope,
+        String account,
+        QueuedExternalConversationRequest external) {
       ConcurrentDispatch.requireId(envelope.id());
       SegmentedMessages.utf8Length(frame);
       // The dispatch-selection frame is exempt from every congestion check below, and is charged
@@ -180,7 +192,12 @@ final class ConcurrentRequests implements AutoCloseable {
       long bytes = selection ? 0L : 2L * frame.length();
       var request =
           new Request(
-              this, envelope.id(), frame, bytes, DispatchPolicy.decode(envelope, account, id));
+              this,
+              envelope.id(),
+              frame,
+              bytes,
+              DispatchPolicy.decode(envelope, account, id),
+              external);
       state.lock();
       try {
         if (!open || !ConcurrentRequests.this.open)
@@ -253,6 +270,8 @@ final class ConcurrentRequests implements AutoCloseable {
       } finally {
         state.unlock();
       }
+      // Discarded unstarted Ex frames cancel their timer outside dispatcher bookkeeping locks.
+      for (Request request : discarded) if (request.external != null) request.external.close();
       signal();
     }
   }
@@ -263,6 +282,7 @@ final class ConcurrentRequests implements AutoCloseable {
     final String frame;
     final long bytes;
     final DispatchPolicy policy;
+    final QueuedExternalConversationRequest external;
     boolean executed;
     boolean delivered;
     boolean released;
@@ -271,12 +291,19 @@ final class ConcurrentRequests implements AutoCloseable {
     long startedAt;
     final CompletableFuture<Void> executionFinished = new CompletableFuture<>();
 
-    Request(Connection connection, String id, String frame, long bytes, DispatchPolicy policy) {
+    Request(
+        Connection connection,
+        String id,
+        String frame,
+        long bytes,
+        DispatchPolicy policy,
+        QueuedExternalConversationRequest external) {
       this.connection = connection;
       this.id = id;
       this.frame = frame;
       this.bytes = bytes;
       this.policy = policy;
+      this.external = external;
     }
   }
 
@@ -368,6 +395,11 @@ final class ConcurrentRequests implements AutoCloseable {
           .run(
               request.frame,
               new Delivery() {
+                @Override
+                public QueuedExternalConversationRequest externalRequest() {
+                  return request.external;
+                }
+
                 @Override
                 public void started() {
                   handoff(request);

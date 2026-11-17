@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.sdk;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.ServerPush;
@@ -620,9 +621,40 @@ public final class Plowshare implements AutoCloseable {
 
   <T> CompletionStage<T> exchangeAsync(
       String type, Object request, Class<T> response, RequestOptions options) {
-    Map<String, Object> fields =
-        JSON.convertValue(request, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+    Map<String, Object> fields = JSON.convertValue(request, new TypeReference<>() {});
     return requestAsync(type, fields, response, options);
+  }
+
+  /** Ex facades have exact success statuses; ordinary operation policy is unchanged. */
+  <T> CompletionStage<T> exchangeAsync(
+      String type,
+      Object request,
+      Class<T> response,
+      String expectedSuccess,
+      RequestOptions options) {
+    Map<String, Object> fields = JSON.convertValue(request, new TypeReference<>() {});
+    return AsyncSupport.map(
+        requestAsync(type, fields, options),
+        reply -> {
+          if (!reply.successful()) {
+            // Retain the ordinary refusal path; no response payload can bypass it.
+            reply.requirePayload();
+          }
+          if (!expectedSuccess.equals(reply.code()))
+            throw new TransportException(
+                Delivery.INVALID_RESPONSE,
+                "Unexpected external conversation status; completion is unknown");
+          try {
+            return SdkJson.decode(JSON, reply.requirePayload(), response);
+          } catch (IOException invalid) {
+            var failure =
+                new TransportException(
+                    Delivery.INVALID_RESPONSE,
+                    "Unreadable external conversation response; completion is unknown");
+            failure.initCause(invalid);
+            throw failure;
+          }
+        });
   }
 
   CompletionStage<Reply> requestAsync(

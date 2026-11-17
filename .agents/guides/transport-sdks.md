@@ -24,6 +24,13 @@ and the shared contract checks; feature parity is not permission to invent APIs.
   [session composition](../../sdk/node/src/session.ts) own saved-login renewal.
 - [SDK instructions](../../docs/sdks.md), [TypeScript standards](../../docs/typescript-standards.md)
   and [native standards](../../docs/native-sdk-standards.md) name generation and checks.
+- [External conversation SDK calls](../../docs/sdks.md#external-conversation-aliases)
+  use the canonical Ex request/result graph and the Java
+  [ExternalConversationClient](../../sdk/java/src/main/java/io/aeyer/plowshare/sdk/ExternalConversationClient.java).
+  Their account-local selectors resolve in one server operation. Open-Ex requires
+  the complete `OK` view; Run-Ex requires an `ACCEPTED` internal job/conversation
+  receipt. Optional agent metadata is distinct from explicit null, and uncertainty
+  never permits replay. Ordinary operation/result policy remains unchanged.
 
 ## Rules
 
@@ -67,6 +74,39 @@ start at transmission and exclude slot waits; packet/negotiation timers cover
 other phases. Those mechanisms do not yet prove the broader end-to-end policy.
 Caller cancellation is not remote server cancellation. Preserve existing public
 timeout semantics and receipt recovery when addressing the gap.
+
+For `conversation.open.ex` and `agent.run.ex`, the server captures the configured
+deadline at assembled-request admission, before negotiated or segmented legacy
+queueing. Both queue owners retain the exact
+[QueuedExternalConversationRequest](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/QueuedExternalConversationRequest.java)
+token. Queue waits, post-assembly session verification, common authorization and
+synchronous facade admission consume its remaining budget. The scoped SQL owner
+begins before those checks; service nesting keeps the earlier deadline, while
+queued output disclosure has a separate explicit bounded current-authority
+phase. The pre-assembly per-packet session gate is unchanged and excluded from
+this assembled-request claim.
+
+[BoundedExternalConversationCompletions](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/BoundedExternalConversationCompletions.java)
+selects one outcome and suppresses late replies. Its shared alarm only selects
+and dispatches a notification; serialization/callbacks/network work never run on
+it. Retained request capacity bounds timers and notification tasks, including
+blocked notifications. Early output does not release the original ID, queue
+bytes, barrier or physical operation. Queued disposal closes its token; started
+work remains owned until it settles. Expiry is an uncertain unavailable result,
+never a claim of remote abort or permission to replay. JobStore refuses new Ex
+admission after expiry before first start linkage; a job admitted before the
+deadline can physically start later under its ordinary durable lifecycle.
+Hook/file work and stalled-peer delivery retain their existing physical limits;
+SQL scope and reply selection do not prove universal callback termination or
+two-second network delivery.
+
+ARCHIVE_UNAVAILABLE describes result availability, not mutation certainty. Ex
+facade and result/session fences normalize only typed archive-availability
+failures to their shared safe uncertainty policy, retaining exact Ex/SQL outcomes
+and original causes. They never add the ordinary archive mapper's no-write
+assurance after possible commit/admission. Other caller, constraint and
+programming failures retain their existing mapping; queued failures withhold the
+protected result and follow the existing connection-close path without replay.
 
 ## Legacy traps
 

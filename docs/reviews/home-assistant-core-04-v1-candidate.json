@@ -1,0 +1,110 @@
+{
+  "node": "CORE-04",
+  "candidate_id": "ha-core-04-v1",
+  "created_at": "2026-11-17T04:40:27.162049+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_sdk_implementer",
+  "reviewer_agent_id": "/root/ha_sdk_reviewer",
+  "files": {
+    ".agents/guides/transport-sdks.md": "e0b8aa5cf6cc407244a1e89009c9325a781482746d8b58d0c7fc064ef165096c",
+    "docs/reviews/home-assistant-core-03-sdk-input-parity-implementation.md": "7e06fe5e8ab96c68d387f4609cc2612a6738a05a28fa96d22e7259eaee1dec8f",
+    "docs/reviews/home-assistant-core-03-sdk-locator-implementation.md": "1263b5620775a29b84303ff1bcc97bd282bbbdaa4dd46d64a361fce42cd4c726",
+    "docs/reviews/home-assistant-core-04-implementation.md": "96a629cdc09401e491a21aa7b96dc4834e5d51e932d2b7f02c88f4bcb7ee1a5a",
+    "docs/reviews/home-assistant-core-04-preparation.md": "736dbcd4d6273361811d09ebf7d1f2565f53a09f658432484b3f2c72290dc4c8",
+    "docs/reviews/home-assistant-core-04-v1-state.json": "5e9b1d28a0da5352dde5bdf2d40fe7e00f61875683c0443f91e48aecea8670c1",
+    "docs/sdks.md": "c5c01217792f36dce50ad36ea074803e448b9dd2118d0250ab7ffbb2799de824",
+    "scripts/generate-native-sdk-contracts.mjs": "c4b8171bf797166bb33aa73e951e3b76d06c089f7b0ff693abdbba935f88b0c5",
+    "scripts/native-sdk-constraints.mjs": "24aaed8d058a006bc5bd2544ef9861217c9d7db38525a65e7ebc1ffe36b00f35",
+    "scripts/sdk-conformance.mjs": "bc7bddca0c639591042fb8900a13a31a673b84c99e210380f6c9e886c1922d39",
+    "scripts/sdk-dto-fixtures.mjs": "8e69b411a24821f45ec667e973b5bc86e7948796f8d7c9c48c9bf7b1ddbb142f",
+    "scripts/sdk-node-conformance.mjs": "1aa50b1e286b00e9ceb7d17ad1926e18603be4300d3366adb7f32a486328a29a",
+    "scripts/sdk-package-check.py": "23e1ddfae203cd9e694af8f2f2713d44d44861f546fc5500a6d78001c364abc6",
+    "sdk/dotnet/Conformance/Program.cs": "88cd32cab710445b797c52e67c31d7dd32acbaa7dade557edba52e51b6d12722",
+    "sdk/dotnet/Plowshare.Sdk/Client.cs": "f0a8618c190f35bf97866296dbe06f176bf944d2c5e2f3a0cfbe70886d41b933",
+    "sdk/dotnet/Plowshare.Sdk/Schemas.json": "047b571a9724651aaafd2f653102c5df0d09b329ac3a2f93153aab95cf845053",
+    "sdk/go/cmd/conformance/main.go": "ef07a58b6bb6592ad8b3a01631fc49bd8b8db95ecb240fb7db3199725263e85e",
+    "sdk/go/codec.go": "ba642ee73b6793c0ea15fbbc9b8dbcab877e6e1a62be941a89345cfdec2cb34b",
+    "sdk/go/schemas.json": "047b571a9724651aaafd2f653102c5df0d09b329ac3a2f93153aab95cf845053",
+    "sdk/java/src/main/java/io/aeyer/plowshare/sdk/AgentRunRequestEx.java": "66fe67a294e6a0ba7e2e3431006c5f7d2cbee45dca03cdd7990768ce515c23b6",
+    "sdk/java/src/main/java/io/aeyer/plowshare/sdk/ConversationOpenRequestEx.java": "f24384c46f1b3687b6e2956e2a2174e9606c7425623db3a777e47898365e4ce4",
+    "sdk/java/src/main/java/io/aeyer/plowshare/sdk/ExternalConversationClient.java": "d3c1758c88e3ef41bf0d8c6f944f068a98eedd9c45f72ec34b5037714fbc2691",
+    "sdk/java/src/main/java/io/aeyer/plowshare/sdk/Plowshare.java": "c34efe7135b452f3dd673ca34282b5eda2dda1177de10b5eba8a364677554d25",
+    "sdk/java/src/test/java/io/aeyer/plowshare/sdk/ExternalConversationClientTest.java": "09e37eec4fa212cb0dd3e58b8ee0f20cf939227db90419e27f8443c5fe97d477",
+    "sdk/node/src/sdk.ts": "156725a442fa69b73507b56b4a6c708542f1adc158cf25f411ed1a362910b6f5",
+    "sdk/python/src/plowshare/_schemas.json": "047b571a9724651aaafd2f653102c5df0d09b329ac3a2f93153aab95cf845053",
+    "sdk/python/src/plowshare/client.py": "17a253c3bd91df637956df92e3eaeffda10c65a6e9041c59d971afab14b77805",
+    "sdk/python/src/plowshare/contracts.py": "86cd0b718de58eb17d79a5e516948eb9fc254dbe757d00071bfd1b60d6902d52",
+    "sdk/python/tests/conformance.py": "9a4b39e227a3bda33313dfaf6b80761723de918c719413565de019d8959ccdf3",
+    "sdk/python/tests/test_contracts.py": "f0270b72fc8b7ac84d4eee71e3585835d51950e0c1a1faec3840e1b2266564a6",
+    "sdk/typescript/src/operations/conversation-external.test.ts": "fd5dec62e16e0f6ab5ef7258db55c1d13fc33c723ad0d499dd4aa0cc0015b72a",
+    "sdk/typescript/src/operations/schema.ts": "3443b4e3e404ae313402e560a42230b39d178af4eea25a714f2c28aba70a59a5",
+    "sdk/typescript/src/operations/sdk.ts": "0186ff57ccdd9daf486eb48b5144b527165026f604e2b2e250a4faf01f786bc1",
+    "test-support/contracts/sdk-conformance.json": "0ba02694e3edfae2a13c6d9db568065b99fa3911678012fefa032ce4916630bc",
+    "test-support/contracts/sdk-dto-conformance.json": "857235054d243521c97ccdf6b35481d2a97b0d409bd99c4b347897da675c7299"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-core-04-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-core-04-v1.diff.gz",
+    "sha256": "88bcc231b4433ba969fb84c5932b4d88ec563299ea1b3937bb8da29bd3755ec8",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "CORE-03": {
+      "id": "ha-core-03-v4",
+      "manifest_path": "docs/reviews/home-assistant-core-03-v4-candidate.json",
+      "manifest_sha256": "221c9e73088c09d71d637ec0e6281f3b25e8920d53b5a2414cd450809f194ac2"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_ownership",
+      "primary": "/root/ha_sdk_implementer",
+      "coauthor": "/root/ha_sdk_implementer/native_ex",
+      "primary_scope": "Java helper/records/internal typed exchange/tests; TS and Node exports; shared DTO fixture source/harness and Node driver; package consumer/docs/report",
+      "coauthor_scope": "Python client.py, Go codec.go, .NET Client.cs Ex-only typed success status checks; corresponding native tests and existing three native WS drivers",
+      "rule": "Disjoint source ownership; neither implementer may review this node. Root serializes generation/build/format."
+    },
+    {
+      "kind": "sdk_check",
+      "at": "2026-11-17T04:20:46.383629+00:00",
+      "result": "PASS",
+      "duration": "2m7s",
+      "tasks": 20,
+      "log": "/private/tmp/core04-sdk-check-5.log",
+      "note": "Current source; compiler/lint/native DTO cases and real Node/Python/.NET/Go WS conformance including new Ex paths. Public typed Python model binding corrected, no runtime codec change."
+    },
+    {
+      "kind": "repository_check",
+      "at": "2026-11-17T04:27:17.036871+00:00",
+      "candidate": "ha-core-03-v3 / CORE04 draft",
+      "result": "PASS",
+      "duration": "4m1s",
+      "tasks": 141,
+      "log": "/private/tmp/core04-repository-check.log",
+      "note": "Default non-database check; does not waive independently reproduced locator final-LF acceptance, which requires correction/re-review."
+    },
+    {
+      "kind": "sdk_check",
+      "at": "2026-11-17T04:32:04.545142+00:00",
+      "result": "PASS",
+      "duration": "2m7s",
+      "tasks": 20,
+      "log": "/private/tmp/core04-sdk-check-final.log",
+      "note": "Current locator-corrected source; full compiler/lint/1012 DTO corpus and real Ex Node/Python/.NET/Go conformance. Direct public Python encoder also rejects all30 locator terminator cases."
+    },
+    {
+      "kind": "repository_check",
+      "at": "2026-11-17T04:34:34.202812+00:00",
+      "result": "PASS",
+      "duration": "44s",
+      "tasks": 141,
+      "log": "/private/tmp/core04-repository-final-check.log",
+      "note": "Current locator-corrected source, default non-database checks; subsequent Java/manual recovery clarification is docs-only and will be formatted/packaged/checked again."
+    },
+    {
+      "kind": "implementation_report",
+      "text": "Final34path SDK deliverable: Java34 focused tests PASS; current full SDKCheck2m7s/1012 canonical DTO corpus and4 realWS clients PASS;30 invalid locator terminators rejected before transport; CORE03v4 accepted. Final docs qualification formatted+separateformatCheck PASS. Combined current repository/fresh-package gate running at freeze; root supplemental proof required before closure. Primary+native coauthor distinct from reviewer. No merge/publish/deploy/live actions."
+    }
+  ]
+}

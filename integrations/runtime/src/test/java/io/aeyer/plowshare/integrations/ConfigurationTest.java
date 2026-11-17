@@ -3,6 +3,7 @@ package io.aeyer.plowshare.integrations;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +63,40 @@ class ConfigurationTest {
             .bindings()
             .get("house")
             .fingerprint());
+  }
+
+  @Test
+  void exact_state_routes_are_explicit_bounded_and_do_not_require_a_script() throws Exception {
+    Path file = directory.resolve("config.json");
+    String source =
+        config()
+            .replace("\"above\":28,\"unit\":\"°C\"", "\"whenState\":\"open\",\"holdSeconds\":10");
+    Files.writeString(file, source);
+    var parsed = Configuration.read(file, IntegrationFixtures.factories());
+    var route = parsed.bindings().get("house").routes().get("heat");
+    assertEquals("open", route.whenState());
+    assertEquals(10, route.holdSeconds());
+    assertNull(route.above());
+    assertNull(route.unit());
+    for (String invalid :
+        new String[] {
+          source.replace("\"whenState\":\"open\"", "\"whenState\":null"),
+          source.replace("\"whenState\":\"open\"", "\"whenState\":true"),
+          source.replace("\"whenState\":\"open\"", "\"whenState\":2"),
+          source.replace("\"whenState\":\"open\"", "\"whenState\":\"\""),
+          source.replace("\"whenState\":\"open\"", "\"whenState\":\"open\",\"above\":28"),
+          source.replace("\"whenState\":\"open\"", "\"whenState\":\"open\",\"unit\":\"°C\""),
+          source.replace("\"entity\":\"temperature\",", ""),
+          source.replace("\"whenState\":\"open\",", ""),
+          source.replace("\"whenState\":\"open\"", "\"whenState\":\"" + "x".repeat(4097) + "\""),
+          source.replace("\"whenState\":\"open\"", "\"whenState\":\"open\\u0000\"")
+        }) {
+      Files.writeString(file, invalid);
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> Configuration.read(file, IntegrationFixtures.factories()),
+          invalid);
+    }
   }
 
   @Test

@@ -1,0 +1,46 @@
+{
+  "node": "CORE-01",
+  "candidate_id": "ha-core-01-v2",
+  "created_at": "2026-11-16T21:44:03.226706+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_core_contract_implementer",
+  "reviewer_agent_id": "/root/ha_core_contract_reviewer",
+  "files": {
+    "docs/decisions/0077-conversation-external-aliases.md": "8fb1e2179ed2a0fb6615ae31deee7904f1e4195ad767aa5a25d7484167fcc1df",
+    "docs/home-assistant-integration-design-and-plan.md": "cd2cc8d15070e504fbc71581581e1e7aec5a9bd546b7c9ea101fd2910e788943",
+    "docs/reviews/home-assistant-core-01-v2-state.json": "d710b5146d7ebcbd78758e87bb1ae5fe1f7e1a0e8845c72b91793ed554233d39",
+    "docs/sdks.md": "46bd2b01e092144c0812e9f9d54831020136ce30e206224a8dbf0eb450d7eedf"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-core-01-v2-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-core-01-v2.diff",
+    "sha256": "3bff322c080995a5f4a852350bb90b02f28958ee9761b31b81668a97f10836fa",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "AUDIT-01": {
+      "id": "ha-audit-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+      "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Exact Ex DTO/wire, owner-local source namespace, atomic create/lifecycle/limits and separately authorized generic-platform rationale recorded; source inspected, links/fences/whitespace and git diff --check passed. No code or live behavior claimed."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_core_contract_reviewer",
+      "verdict": "CHANGES_REQUIRED",
+      "candidate_id": "ha-core-01-v1",
+      "manifest_sha256": "68019f5a3ee63c9aff3517c2a0a59b0969a3c244d99fa45a7f24c41547fe1585",
+      "report_path": "docs/reviews/home-assistant-core-01-review.md",
+      "report_sha256": "94b6ac1c9e9e97b48bc55e077140518dcb93fa09ae29e5090ee9aa38e5d0139c"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "CORE01-R1 corrected: ordinary ConversationView unchanged, lifecycle validated internally; filtered listing distinguished from lifecycle mutation. Links/fences/whitespace and git diff --check pass. FIDELITY summary unchanged."
+    }
+  ]
+}

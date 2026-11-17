@@ -1,0 +1,35 @@
+{
+  "node": "HA-01",
+  "candidate_id": "ha-ha-01-v1",
+  "created_at": "2026-11-16T21:41:43.810218+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_discovery_implementer",
+  "reviewer_agent_id": "/root/ha_discovery_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-ha-01-v1-state.json": "7b630f38bcedada8a4717304b9e6071b1b6df303a613ad0ae550fcfab4729739",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantDiscoveryPolicy.java": "c05cee3c34232d3182378e3b79a4ed79fabe5a1d43e0499e21af3d77247848f9",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResources.java": "469b57064cfc5611aa2eb866832f2f6a0450be91f01a762dd0d5298022948bca",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ResourceDiscovery.java": "335f9b36528b451afca8e73f1c344602f3c0d12803a55aa2dc64434fbc1ebc3d",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ResourceReader.java": "02caa379adcf11b8ad66398a01444dc8bb0d442cb5504738f3bbcfbb64632b53",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceContractsTest.java": "cc28fd4657fcaaa3ed12d8aa30b67561cab7f71e419618c31f732b45e7697b08"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-ha-01-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-01-v1.diff",
+    "sha256": "94efcb92c997a160873de42108b6ff361e791426a5ce44d3b1b50fa2952a16cf",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "AUDIT-01": {
+      "id": "ha-audit-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+      "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Root ./gradlew format then independent post-format :plowshare-integration-home-assistant:test --tests io.aeyer.plowshare.integrations.ha.HomeAssistantResourceContractsTest formatCheck passed. 8 focused cases passed. No transport/provider or live claims; contract-only node."
+    }
+  ]
+}

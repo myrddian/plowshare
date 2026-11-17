@@ -1,0 +1,1376 @@
+{
+  "schema_version": 1,
+  "plan": "docs/home-assistant-delivery-plan.md",
+  "design": "docs/home-assistant-integration-design-and-plan.md",
+  "created_date": "2026-11-17",
+  "timezone": "Australia/Melbourne",
+  "coordinator": "/root",
+  "baseline": {
+    "commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+    "working_tree": "dirty; candidate manifests must include untracked and modified files",
+    "candidate_manifest": "docs/reviews/home-assistant-delivery-plan-candidate.json"
+  },
+  "scope": {
+    "current_request": "execute the reviewed delivery graph; user instruction: Start it",
+    "runtime_implementation_dispatched": true,
+    "merge_authorized": false,
+    "deployment_authorized": false,
+    "notes": [
+      "Generic core conversation Ex facade proposal is separately identified design scope under ADR 0001.",
+      "No arbitrary/native per-request system-role API implementation is authorized by the facade proposal.",
+      "Preserve HA prompt/context as supplied; assess cache impact without rewriting it.",
+      "2026-11-17: user authorized execution with Start it; merge, deployment, live effects and backend measurements retain their explicit gates.",
+      "User explicitly chose Leave prompt-dependent features gated. No external system-context API or weaker task-text substitution authorized.",
+      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only."
+    ]
+  },
+  "status_values": [
+    "planned",
+    "implementing",
+    "ready_for_review",
+    "in_review",
+    "changes_required",
+    "accepted",
+    "awaiting_gate",
+    "reopened"
+  ],
+  "gates": {
+    "prompt_public_path_verified": {
+      "status": "not_satisfied",
+      "evidence": [
+        {
+          "kind": "user_decision",
+          "at": "2026-11-16T21:45:20.262205+00:00",
+          "decision": "Leave prompt-dependent features gated"
+        }
+      ],
+      "updated_at": null
+    },
+    "cache_backend_measurement_authorized": {
+      "status": "not_satisfied",
+      "evidence": [],
+      "updated_at": null
+    },
+    "deployment_authorized": {
+      "status": "not_satisfied",
+      "evidence": [],
+      "updated_at": null
+    },
+    "live_acceptance_authorized": {
+      "status": "not_satisfied",
+      "evidence": [],
+      "updated_at": null
+    }
+  },
+  "nodes": [
+    {
+      "id": "PLAN-00",
+      "title": "Delivery graph and review protocol",
+      "dependencies": [],
+      "gates": [],
+      "implementer_role": "/root/ha_plan_implementer",
+      "reviewer_role": "/root/ha_plan_reviewer",
+      "implementation_agent_id": "/root/ha_plan_implementer",
+      "review_agent_id": "/root/ha_plan_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "docs/home-assistant-delivery-plan.md",
+        "docs/home-assistant-delivery-state.json"
+      ],
+      "candidate_revision": {
+        "id": "ha-plan-00-v1",
+        "manifest_path": "docs/reviews/home-assistant-delivery-plan-candidate.json",
+        "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a"
+      },
+      "evidence": [
+        {
+          "kind": "coordinator_structural_validation",
+          "checks": [
+            "23 nodes and 40 dependency edges",
+            "acyclic dependencies",
+            "distinct implementer/reviewer roles",
+            "valid gate references",
+            "all feature nodes planned with no claimed completion",
+            "local links/fences/whitespace",
+            "git diff --check"
+          ],
+          "result": "PASS"
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_plan_reviewer",
+          "verdict": "APPROVE",
+          "candidate_id": "ha-plan-00-v1",
+          "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
+          "report_path": "docs/reviews/home-assistant-delivery-plan-review.md",
+          "report_sha256": "5542608b92a045d06a9f4c61836e239f69e7ab498d2a53c4c124a56afe445673"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
+        "report_path": "docs/reviews/home-assistant-delivery-plan-review.md",
+        "report_sha256": "5542608b92a045d06a9f4c61836e239f69e7ab498d2a53c4c124a56afe445673",
+        "approved_at": "2026-11-17T07:27:34.553461+11:00"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-17T07:27:34.553461+11:00"
+    },
+    {
+      "id": "AUDIT-01",
+      "title": "Baseline and capability audit",
+      "dependencies": [
+        "PLAN-00"
+      ],
+      "gates": [],
+      "implementer_role": "ha_audit_implementer",
+      "reviewer_role": "ha_audit_reviewer",
+      "implementation_agent_id": "/root/ha_audit_implementer",
+      "review_agent_id": "/root/ha_audit_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "docs/reviews/home-assistant-baseline-audit.md"
+      ],
+      "candidate_revision": {
+        "id": "ha-audit-01-v1",
+        "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+        "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+      },
+      "evidence": [
+        {
+          "kind": "implementation_report",
+          "text": "Ruff check and format passed; 21 non-socket tests and two separately rerun approved socket fixtures passed on current Assist files (23 total). Actual HA 2026.9.4. Full AI Task import lacks numpy; no Gradle/database/live/model checks claimed."
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_audit_reviewer",
+          "verdict": "APPROVE",
+          "candidate_id": "ha-audit-01-v1",
+          "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855",
+          "report_path": "docs/reviews/home-assistant-audit-01-review.md",
+          "report_sha256": "0b03c62ac6563e29f497f2a66a65c2875f4bfdc637f511735c90f32dc8ff4685"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855",
+        "report_path": "docs/reviews/home-assistant-audit-01-review.md",
+        "report_sha256": "0b03c62ac6563e29f497f2a66a65c2875f4bfdc637f511735c90f32dc8ff4685",
+        "approved_at": "2026-11-16T21:33:50.055430+00:00"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:33:50.055430+00:00"
+    },
+    {
+      "id": "CORE-01",
+      "title": "Generic facade decision and contracts",
+      "dependencies": [
+        "AUDIT-01"
+      ],
+      "gates": [],
+      "implementer_role": "ha_core_contract_implementer",
+      "reviewer_role": "ha_core_contract_reviewer",
+      "implementation_agent_id": "/root/ha_core_contract_implementer",
+      "review_agent_id": "/root/ha_core_contract_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "docs/decisions/<new-conversation-alias-decision>.md",
+        "docs/home-assistant-integration-design-and-plan.md",
+        "docs/sdks.md"
+      ],
+      "candidate_revision": {
+        "id": "ha-core-01-v2",
+        "manifest_path": "docs/reviews/home-assistant-core-01-v2-candidate.json",
+        "manifest_sha256": "d15c764b81a308f4365b8406619e3890555c8277218830324e10ce3d4bc1dcca"
+      },
+      "evidence": [
+        {
+          "kind": "implementation_report",
+          "text": "Exact Ex DTO/wire, owner-local source namespace, atomic create/lifecycle/limits and separately authorized generic-platform rationale recorded; source inspected, links/fences/whitespace and git diff --check passed. No code or live behavior claimed."
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_core_contract_reviewer",
+          "verdict": "CHANGES_REQUIRED",
+          "candidate_id": "ha-core-01-v1",
+          "manifest_sha256": "68019f5a3ee63c9aff3517c2a0a59b0969a3c244d99fa45a7f24c41547fe1585",
+          "report_path": "docs/reviews/home-assistant-core-01-review.md",
+          "report_sha256": "94b6ac1c9e9e97b48bc55e077140518dcb93fa09ae29e5090ee9aa38e5d0139c"
+        },
+        {
+          "kind": "implementation_report",
+          "text": "CORE01-R1 corrected: ordinary ConversationView unchanged, lifecycle validated internally; filtered listing distinguished from lifecycle mutation. Links/fences/whitespace and git diff --check pass. FIDELITY summary unchanged."
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_core_contract_reviewer",
+          "verdict": "APPROVE",
+          "candidate_id": "ha-core-01-v2",
+          "manifest_sha256": "d15c764b81a308f4365b8406619e3890555c8277218830324e10ce3d4bc1dcca",
+          "report_path": "docs/reviews/home-assistant-core-01-v2-review.md",
+          "report_sha256": "9f515559a19a38217cd9c2b107aa3a3050bb2070d6ac848efd9701067365726e"
+        }
+      ],
+      "findings": [
+        {
+          "id": "CORE01-R1",
+          "severity": "P2",
+          "location": "docs/decisions/0077-conversation-external-aliases.md reply/lifecycle promises",
+          "correction": "ConversationView has no lifecycle; preserve ordinary reply shape, internal lifecycle and existing inspection API.",
+          "disposition": "resolved by implementer and independently approved v2"
+        }
+      ],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "d15c764b81a308f4365b8406619e3890555c8277218830324e10ce3d4bc1dcca",
+        "report_path": "docs/reviews/home-assistant-core-01-v2-review.md",
+        "report_sha256": "9f515559a19a38217cd9c2b107aa3a3050bb2070d6ac848efd9701067365726e",
+        "approved_at": "2026-11-16T21:45:20.065667+00:00"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.065667+00:00"
+    },
+    {
+      "id": "CORE-02",
+      "title": "Conversation alias repository and migration",
+      "dependencies": [
+        "CORE-01"
+      ],
+      "gates": [],
+      "implementer_role": "ha_core_storage_implementer",
+      "reviewer_role": "ha_core_storage_reviewer",
+      "implementation_agent_id": "/root/ha_core_storage_implementer",
+      "review_agent_id": "/root/ha_core_storage_reviewer",
+      "status": "in_review",
+      "owned_paths": [
+        "plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/<new-alias-contract-and-repository>",
+        "plowshare-server/src/main/resources/db/migration/<new-version>",
+        "plowshare-server/src/test/java/<selected-alias-tests>"
+      ],
+      "candidate_revision": {
+        "id": "ha-core-02-v1",
+        "manifest_path": "docs/reviews/home-assistant-core-02-v1-candidate.json",
+        "manifest_sha256": "a71f72cc4317ce185c4560066fcb141af293c2855baf67bbbd25f9e253f3cf8e"
+      },
+      "evidence": [
+        {
+          "kind": "implementation_report",
+          "text": "Global format/formatCheck passed, 26 non-database alias tests and 11 selected PostgreSQL invocations (7 scenarios, bounded race repetitions) passed. Full non-DB check running on unchanged source; no API/SDK/live claims."
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "in_review",
+        "verdict": null,
+        "candidate_digest": "a71f72cc4317ce185c4560066fcb141af293c2855baf67bbbd25f9e253f3cf8e",
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T22:26:00.226056+00:00"
+    },
+    {
+      "id": "CORE-03",
+      "title": "Thin Ex operation facades",
+      "dependencies": [
+        "CORE-02"
+      ],
+      "gates": [],
+      "implementer_role": "ha_core_facade_implementer",
+      "reviewer_role": "ha_core_facade_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "planned",
+      "owned_paths": [
+        "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/<Ex-handlers-FrameTypes-and-routing>",
+        "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/<owning-admission-seams>",
+        "plowshare-server/src/main/java/io/aeyer/plowshare/server/api/<Ex-request-contracts>",
+        "plowshare-protocol/<required-shared-contracts>",
+        "sdk/typescript/src/operations/<canonical-Ex-contracts>",
+        "scripts/generate-sdk-contracts.mjs",
+        "sdk/<owning-generated-contract-outputs>",
+        "plowshare-server/src/test/java/<facade-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": null
+    },
+    {
+      "id": "CORE-04",
+      "title": "Shared catalogues and every SDK",
+      "dependencies": [
+        "CORE-03"
+      ],
+      "gates": [],
+      "implementer_role": "ha_sdk_implementer",
+      "reviewer_role": "ha_sdk_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "planned",
+      "owned_paths": [
+        "sdk/typescript/<client-command-surfaces-and-tests>",
+        "sdk/java/<public-helpers-and-tests>",
+        "sdk/node/<public-helpers-and-tests>",
+        "sdk/python/<public-helpers-and-tests>",
+        "sdk/go/<public-helpers-and-tests>",
+        "sdk/dotnet/<public-helpers-and-tests>",
+        "test-support/contracts/<owning-fixtures>",
+        "docs/sdks.md"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": null
+    },
+    {
+      "id": "FIDELITY-01",
+      "title": "Prompt-role fidelity and public capability decision",
+      "dependencies": [
+        "AUDIT-01"
+      ],
+      "gates": [],
+      "implementer_role": "ha_fidelity_implementer",
+      "reviewer_role": "ha_fidelity_reviewer",
+      "implementation_agent_id": "/root/ha_fidelity_implementer",
+      "review_agent_id": "/root/ha_fidelity_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "docs/reviews/home-assistant-prompt-fidelity-decision.md",
+        "docs/home-assistant-integration-design-and-plan.md"
+      ],
+      "candidate_revision": {
+        "id": "ha-fidelity-01-v2",
+        "manifest_path": "docs/reviews/home-assistant-fidelity-01-v2-candidate.json",
+        "manifest_sha256": "7a0bfe2f35c1c9bae60ca78b436b14772575ff163bf27d60ef7d81e4b5928ef7"
+      },
+      "evidence": [
+        {
+          "kind": "implementation_report",
+          "text": "Actual HA six-case ChatLog probe passed; SDK and hook alternatives inspected. No public native role path verified. Investigation must leave prompt_public_path_verified false. Shared design link being serialized through CORE01 ownership; review report first, final acceptance after consistency check."
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_fidelity_reviewer",
+          "verdict": "APPROVE",
+          "candidate_id": "ha-fidelity-01-v1",
+          "manifest_sha256": "e6b2632070a658f3260ea146985ffacfb954f7cc67adf386a89d124135271f8c",
+          "report_path": "docs/reviews/home-assistant-fidelity-01-review.md",
+          "report_sha256": "fba88ae2f777a8e38f319e618351687e3ebab65fba5a0f48546e1ee7b1a14e47"
+        },
+        {
+          "kind": "independent_design_consistency_supplement",
+          "reviewer": "/root/ha_fidelity_reviewer",
+          "design_sha256": "e305ff76fb6fc52530bbfb4ce03f989071562fd879964631565664aed4463166",
+          "report_sha256": "fba88ae2f777a8e38f319e618351687e3ebab65fba5a0f48546e1ee7b1a14e47",
+          "result": "APPROVE; exact gap decision accepted, capability gate unsatisfied"
+        },
+        {
+          "kind": "current_design_consistency",
+          "reviewer": "/root/ha_core_contract_reviewer",
+          "design_sha256": "cd2cc8d15070e504fbc71581581e1e7aec5a9bd546b7c9ea101fd2910e788943",
+          "report": "docs/reviews/home-assistant-core-01-v2-review.md",
+          "result": "APPROVE; prompt gap unchanged"
+        },
+        {
+          "kind": "implementation_report",
+          "text": "User cache boundary clarification recorded: primary app/integrator responsibility, common-pattern SDK support only with explicit semantics/compatibility and opt-in transforms; original HA rendering preserved. User leaves prompt features gated. Prose-only links/fences/whitespace and diff check pass; alias contract unchanged."
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_fidelity_reviewer",
+          "verdict": "APPROVE",
+          "candidate_id": "ha-fidelity-01-v2",
+          "manifest_sha256": "7a0bfe2f35c1c9bae60ca78b436b14772575ff163bf27d60ef7d81e4b5928ef7",
+          "report_path": "docs/reviews/home-assistant-fidelity-01-v2-review.md",
+          "report_sha256": "232f986ed4c403d96e2e787c2b7017266f67c32898c38d165b9c563940883b52"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "7a0bfe2f35c1c9bae60ca78b436b14772575ff163bf27d60ef7d81e4b5928ef7",
+        "report_path": "docs/reviews/home-assistant-fidelity-01-v2-review.md",
+        "report_sha256": "232f986ed4c403d96e2e787c2b7017266f67c32898c38d165b9c563940883b52",
+        "approved_at": "2026-11-16T21:50:46.630922+00:00"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:50:46.630922+00:00"
+    },
+    {
+      "id": "HA-01",
+      "title": "Discovery and read contracts",
+      "dependencies": [
+        "AUDIT-01"
+      ],
+      "gates": [],
+      "implementer_role": "ha_discovery_implementer",
+      "reviewer_role": "ha_discovery_reviewer",
+      "implementation_agent_id": "/root/ha_reads_implementer",
+      "review_agent_id": "/root/ha_discovery_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/<typed-discovery-reader-contracts>",
+        "integrations/home-assistant/src/test/java/<discovery-contract-tests>"
+      ],
+      "candidate_revision": {
+        "id": "ha-ha-01-v3",
+        "manifest_path": "docs/reviews/home-assistant-ha-01-v3-candidate.json",
+        "manifest_sha256": "30815681201017bc26558e2d2eb3888357b8a23185e74d4c61c2173fdcd8a6ac"
+      },
+      "evidence": [
+        {
+          "kind": "implementation_report",
+          "text": "Root ./gradlew format then independent post-format :plowshare-integration-home-assistant:test --tests io.aeyer.plowshare.integrations.ha.HomeAssistantResourceContractsTest formatCheck passed. 8 focused cases passed. No transport/provider or live claims; contract-only node."
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_discovery_reviewer",
+          "verdict": "CHANGES_REQUIRED",
+          "candidate_id": "ha-ha-01-v1",
+          "manifest_sha256": "f5c3e6b41d507e19965b9e5344cfa869c87a226f544697694d7cedbdeeb74a14",
+          "report_path": "docs/reviews/home-assistant-ha-01-review.md",
+          "report_sha256": "a625f17f27756e22b43ef4d8cd238a3e93395c31c70ce98a30964f9ba0e7d554"
+        },
+        {
+          "kind": "implementation_report",
+          "text": "HA01-R1/R2 corrected, 2 regressions added. Root sequential formatter then :plowshare-integration-home-assistant:test --tests io.aeyer.plowshare.integrations.ha.HomeAssistantResourceContractsTest formatCheck PASS, 10 focused cases, final sources unchanged. Mixed-target profile omission never narrows original action execution targets."
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_discovery_reviewer",
+          "verdict": "APPROVE",
+          "candidate_id": "ha-ha-01-v2",
+          "manifest_sha256": "55f10437ab8fde48dfecf7284256dda51c04868f72f27d119c2090b5268f3840",
+          "report_path": "docs/reviews/home-assistant-ha-01-v2-review.md",
+          "report_sha256": "5e80b226beca7a48f0e65edc64c9ddda8c9d6e0fba2f8a3fb4496e5532c6de91"
+        },
+        {
+          "kind": "implementation_report",
+          "text": "Compatible immutable selected-reference accessor by HA02 implementer; original HA01 v2 files/tests otherwise unchanged. Scoped HA formatter passed. Current 10 contract cases and HA02 integration checks await stable server compilation; reviewer may inspect exact code now, final closure must wait current test evidence."
+        },
+        {
+          "kind": "independent_review",
+          "reviewer_agent_id": "/root/ha_discovery_reviewer",
+          "verdict": "APPROVE",
+          "candidate_id": "ha-ha-01-v3",
+          "manifest_sha256": "30815681201017bc26558e2d2eb3888357b8a23185e74d4c61c2173fdcd8a6ac",
+          "report_path": "docs/reviews/home-assistant-ha-01-v3-review.md",
+          "report_sha256": "f1b83cd2aa0a37cf1a6648abd0f74ede23253c06191b3ef0e39702f8385bfe0a"
+        }
+      ],
+      "findings": [
+        {
+          "id": "HA01-R1",
+          "severity": "P2",
+          "correction": "Preserve 256 configured attributes plus implicit unit",
+          "disposition": "resolved by implementer and independently approved v2"
+        },
+        {
+          "id": "HA01-R2",
+          "severity": "P2",
+          "correction": "Prevent mixed fixed-target profile from revealing undisclosed targets",
+          "disposition": "resolved by implementer and independently approved v2"
+        }
+      ],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "30815681201017bc26558e2d2eb3888357b8a23185e74d4c61c2173fdcd8a6ac",
+        "report_path": "docs/reviews/home-assistant-ha-01-v3-review.md",
+        "report_sha256": "f1b83cd2aa0a37cf1a6648abd0f74ede23253c06191b3ef0e39702f8385bfe0a",
+        "approved_at": "2026-11-16T22:24:30.622993+00:00"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T22:24:30.622993+00:00"
+    },
+    {
+      "id": "HA-02",
+      "title": "Discovery and batched reads",
+      "dependencies": [
+        "HA-01"
+      ],
+      "gates": [],
+      "implementer_role": "ha_read_implementer",
+      "reviewer_role": "ha_read_reviewer",
+      "implementation_agent_id": "/root/ha_reads_implementer",
+      "review_agent_id": "/root/ha_reads_reviewer",
+      "status": "in_review",
+      "owned_paths": [
+        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/<discovery-and-read-implementation>",
+        "integrations/home-assistant/src/test/java/<discovery-read-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [
+        {
+          "kind": "implementation_report",
+          "text": "37 focused HA cases passed (10 contracts,8 catalogue,9 native,10 legacy adapter), zero skipped/errors/failures; global format and formatCheck passed. HA01v3 accessor independently accepted. Full non-DB check running on stable source. No live model/device/deployment claim."
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T22:26:21.077776+00:00"
+    },
+    {
+      "id": "HA-03",
+      "title": "Named read tool provider",
+      "dependencies": [
+        "HA-02"
+      ],
+      "gates": [],
+      "implementer_role": "ha_read_provider_implementer",
+      "reviewer_role": "ha_read_provider_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "planned",
+      "owned_paths": [
+        "integrations/home-assistant/<SDK-provider-composition-and-journal>",
+        "integrations/home-assistant/<provider-config-and-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": null
+    },
+    {
+      "id": "HA-04",
+      "title": "Action provider and receipts",
+      "dependencies": [
+        "HA-03"
+      ],
+      "gates": [],
+      "implementer_role": "ha_action_implementer",
+      "reviewer_role": "ha_action_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "planned",
+      "owned_paths": [
+        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/<typed-action-profiles-and-execution>",
+        "integrations/home-assistant/<action-provider-and-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": null
+    },
+    {
+      "id": "HA-05",
+      "title": "Shared typed request gateway",
+      "dependencies": [
+        "CORE-04",
+        "FIDELITY-01"
+      ],
+      "gates": [
+        "prompt_public_path_verified"
+      ],
+      "implementer_role": "ha_gateway_implementer",
+      "reviewer_role": "ha_gateway_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "integrations/home-assistant/assist/custom_components/plowshare/agent.py",
+        "integrations/home-assistant/assist/custom_components/plowshare/models.py",
+        "integrations/home-assistant/assist/tests/<gateway-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "HA-06",
+      "title": "Conversation Entity lifecycle",
+      "dependencies": [
+        "HA-05"
+      ],
+      "gates": [
+        "prompt_public_path_verified"
+      ],
+      "implementer_role": "ha_conversation_implementer",
+      "reviewer_role": "ha_conversation_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "integrations/home-assistant/assist/custom_components/plowshare/conversation.py",
+        "integrations/home-assistant/assist/custom_components/plowshare/config.py",
+        "integrations/home-assistant/assist/custom_components/plowshare/config_flow.py",
+        "integrations/home-assistant/assist/tests/<conversation-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "HA-07",
+      "title": "AI Task text provider",
+      "dependencies": [
+        "HA-05"
+      ],
+      "gates": [
+        "prompt_public_path_verified"
+      ],
+      "implementer_role": "ha_ai_task_implementer",
+      "reviewer_role": "ha_ai_task_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "integrations/home-assistant/assist/custom_components/plowshare/<ai_task-platform>",
+        "integrations/home-assistant/assist/custom_components/plowshare/__init__.py",
+        "integrations/home-assistant/assist/custom_components/plowshare/manifest.json",
+        "integrations/home-assistant/assist/tests/<ai-task-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "HA-08",
+      "title": "Structured AI Task subset",
+      "dependencies": [
+        "HA-07"
+      ],
+      "gates": [
+        "prompt_public_path_verified"
+      ],
+      "implementer_role": "ha_structured_implementer",
+      "reviewer_role": "ha_structured_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "integrations/home-assistant/assist/custom_components/plowshare/<typed-output-spec-and-validator>",
+        "integrations/home-assistant/assist/tests/<structured-output-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "HA-09",
+      "title": "Observation routing and feedback",
+      "dependencies": [
+        "HA-04"
+      ],
+      "gates": [],
+      "implementer_role": "ha_events_implementer",
+      "reviewer_role": "ha_events_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "planned",
+      "owned_paths": [
+        "integrations/home-assistant/<observation-and-route-contracts>",
+        "integrations/runtime/<only-required-compatible-local-routing-seams>",
+        "integrations/home-assistant/src/test/java/<event-and-feedback-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": null
+    },
+    {
+      "id": "HA-10",
+      "title": "Reusable Application profiles",
+      "dependencies": [
+        "HA-04",
+        "HA-06",
+        "HA-07",
+        "HA-09"
+      ],
+      "gates": [
+        "prompt_public_path_verified"
+      ],
+      "implementer_role": "ha_profiles_implementer",
+      "reviewer_role": "ha_profiles_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "integrations/home-assistant/examples/application/",
+        "integrations/home-assistant/examples/config.json",
+        "integrations/home-assistant/src/test/java/<example-loader-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "HA-11",
+      "title": "Installable package and operator docs",
+      "dependencies": [
+        "HA-06",
+        "HA-07",
+        "HA-08",
+        "HA-10"
+      ],
+      "gates": [
+        "prompt_public_path_verified"
+      ],
+      "implementer_role": "ha_package_implementer",
+      "reviewer_role": "ha_package_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "integrations/home-assistant/assist/scripts/package.py",
+        "integrations/home-assistant/assist/README.md",
+        "integrations/home-assistant/README.md",
+        "integrations/home-assistant/assist/custom_components/plowshare/translations/",
+        "integrations/home-assistant/assist/tests/<install-and-migration-tests>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "VERIFY-01",
+      "title": "Integrated independent contract validation",
+      "dependencies": [
+        "CORE-04",
+        "HA-04",
+        "HA-06",
+        "HA-07",
+        "HA-08",
+        "HA-09",
+        "HA-10",
+        "HA-11"
+      ],
+      "gates": [
+        "prompt_public_path_verified"
+      ],
+      "implementer_role": "ha_verification_implementer",
+      "reviewer_role": "ha_verification_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "docs/reviews/home-assistant-integrated-validation.md",
+        "integrations/home-assistant/<only-new-cross-boundary-fixtures>",
+        "test-support/<only-required-contract-fixtures>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "PERF-01",
+      "title": "Faithful HA prefix-cache impact report",
+      "dependencies": [
+        "FIDELITY-01",
+        "HA-06",
+        "HA-07",
+        "VERIFY-01"
+      ],
+      "gates": [
+        "prompt_public_path_verified",
+        "cache_backend_measurement_authorized"
+      ],
+      "implementer_role": "ha_performance_implementer",
+      "reviewer_role": "ha_performance_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "docs/reviews/home-assistant-prefix-cache-impact.md",
+        "integrations/home-assistant/assist/<bounded-investigation-fixtures-if-needed>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "RELEASE-01",
+      "title": "Release readiness and rollout runbook",
+      "dependencies": [
+        "VERIFY-01",
+        "PERF-01"
+      ],
+      "gates": [
+        "prompt_public_path_verified"
+      ],
+      "implementer_role": "ha_release_implementer",
+      "reviewer_role": "ha_release_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "docs/reviews/home-assistant-release-readiness.md",
+        "integrations/home-assistant/<rollout-and-rollback-runbook>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "DEPLOY-01",
+      "title": "Separately authorized installation",
+      "dependencies": [
+        "RELEASE-01"
+      ],
+      "gates": [
+        "deployment_authorized"
+      ],
+      "implementer_role": "ha_deployment_implementer",
+      "reviewer_role": "ha_deployment_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "docs/reviews/home-assistant-deployment-receipt.md",
+        "<private operator config and deployment receipt outside source>"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    },
+    {
+      "id": "LIVE-01",
+      "title": "Separately authorized live acceptance",
+      "dependencies": [
+        "DEPLOY-01"
+      ],
+      "gates": [
+        "live_acceptance_authorized"
+      ],
+      "implementer_role": "ha_live_implementer",
+      "reviewer_role": "ha_live_reviewer",
+      "implementation_agent_id": null,
+      "review_agent_id": null,
+      "status": "awaiting_gate",
+      "owned_paths": [
+        "docs/reviews/home-assistant-live-acceptance.md"
+      ],
+      "candidate_revision": null,
+      "evidence": [],
+      "findings": [],
+      "review": {
+        "state": "not_started",
+        "verdict": null,
+        "candidate_digest": null,
+        "report_path": null,
+        "report_sha256": null,
+        "approved_at": null
+      },
+      "milestones": {
+        "implementation": "not_started",
+        "verified_and_reviewed": false,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "updated_at": "2026-11-16T21:45:20.262205+00:00"
+    }
+  ],
+  "history": [
+    {
+      "date": "2026-11-17",
+      "actor": "/root/ha_plan_implementer",
+      "event": "plan_created_ready_for_independent_review",
+      "node": "PLAN-00",
+      "note": "No feature node is accepted; root must seal exact candidate and obtain independent reviewer APPROVE."
+    },
+    {
+      "date": "2026-11-17",
+      "actor": "/root",
+      "event": "independent_review_dispatched",
+      "node": "PLAN-00",
+      "candidate": "ha-plan-00-v1",
+      "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
+      "reviewer": "/root/ha_plan_reviewer"
+    },
+    {
+      "date": "2026-11-17",
+      "actor": "/root",
+      "event": "node_accepted_after_independent_approval",
+      "node": "PLAN-00",
+      "candidate": "ha-plan-00-v1",
+      "reviewer": "/root/ha_plan_reviewer",
+      "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
+      "report_sha256": "5542608b92a045d06a9f4c61836e239f69e7ab498d2a53c4c124a56afe445673"
+    },
+    {
+      "at": "2026-11-16T21:28:26.998393+00:00",
+      "node": "AUDIT-01",
+      "event": "implementation_started",
+      "agent": "/root/ha_audit_implementer",
+      "authorization": "User: Start it; execute approved graph, preserving explicit gates."
+    },
+    {
+      "at": "2026-11-16T21:31:54.819778+00:00",
+      "node": "AUDIT-01",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+      "sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+    },
+    {
+      "at": "2026-11-16T21:33:50.055430+00:00",
+      "node": "AUDIT-01",
+      "event": "APPROVE",
+      "report": "docs/reviews/home-assistant-audit-01-review.md"
+    },
+    {
+      "at": "2026-11-16T21:34:26.147752+00:00",
+      "node": "CORE-01",
+      "event": "implementation_started",
+      "agent": "/root/ha_core_contract_implementer"
+    },
+    {
+      "at": "2026-11-16T21:34:26.147752+00:00",
+      "node": "FIDELITY-01",
+      "event": "implementation_started",
+      "agent": "/root/ha_fidelity_implementer"
+    },
+    {
+      "at": "2026-11-16T21:34:26.147752+00:00",
+      "node": "HA-01",
+      "event": "implementation_started",
+      "agent": "/root/ha_discovery_implementer"
+    },
+    {
+      "at": "2026-11-16T21:34:26.147752+00:00",
+      "node": "FIDELITY-01",
+      "event": "shared_file_ownership_serialized",
+      "note": "CORE-01 exclusively owns design document until frozen review; fidelity agent writes report first and coordinates later design update."
+    },
+    {
+      "at": "2026-11-16T21:38:16.944626+00:00",
+      "node": "FIDELITY-01",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-fidelity-01-v1-candidate.json",
+      "sha256": "e6b2632070a658f3260ea146985ffacfb954f7cc67adf386a89d124135271f8c"
+    },
+    {
+      "at": "2026-11-16T21:38:57.895013+00:00",
+      "event": "verification_toolchains_prepared",
+      "evidence": ".NET SDK 8.0.428 installed in ignored build/dotnet; documented Python SDK dependencies installed in isolated build/sdk-python-env; version/import probes pass. No SDK conformance claim yet."
+    },
+    {
+      "at": "2026-11-16T21:40:52.585770+00:00",
+      "node": "CORE-01",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-core-01-v1-candidate.json",
+      "sha256": "68019f5a3ee63c9aff3517c2a0a59b0969a3c244d99fa45a7f24c41547fe1585"
+    },
+    {
+      "at": "2026-11-16T21:41:43.810218+00:00",
+      "node": "HA-01",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-ha-01-v1-candidate.json",
+      "sha256": "f5c3e6b41d507e19965b9e5344cfa869c87a226f544697694d7cedbdeeb74a14"
+    },
+    {
+      "at": "2026-11-16T21:42:03.250024+00:00",
+      "node": "FIDELITY-01",
+      "event": "APPROVE",
+      "report": "docs/reviews/home-assistant-fidelity-01-review.md"
+    },
+    {
+      "at": "2026-11-16T21:42:03.335620+00:00",
+      "node": "FIDELITY-01",
+      "event": "prompt_extension_authorization_requested",
+      "note": "Await user reply to concrete externalContext successor; no dependent implementation begins."
+    },
+    {
+      "at": "2026-11-16T21:43:07.940220+00:00",
+      "node": "CORE-01",
+      "event": "CHANGES_REQUIRED",
+      "report": "docs/reviews/home-assistant-core-01-review.md"
+    },
+    {
+      "at": "2026-11-16T21:44:03.226706+00:00",
+      "node": "CORE-01",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-core-01-v2-candidate.json",
+      "sha256": "d15c764b81a308f4365b8406619e3890555c8277218830324e10ce3d4bc1dcca"
+    },
+    {
+      "at": "2026-11-16T21:45:20.065667+00:00",
+      "node": "CORE-01",
+      "event": "APPROVE",
+      "report": "docs/reviews/home-assistant-core-01-v2-review.md"
+    },
+    {
+      "at": "2026-11-16T21:45:20.164016+00:00",
+      "node": "HA-01",
+      "event": "CHANGES_REQUIRED",
+      "report": "docs/reviews/home-assistant-ha-01-review.md"
+    },
+    {
+      "at": "2026-11-16T21:45:20.262205+00:00",
+      "event": "user_prompt_scope_decision",
+      "decision": "Leave prompt-dependent features gated; continue independent authorized branches."
+    },
+    {
+      "at": "2026-11-16T21:45:40.642276+00:00",
+      "node": "CORE-02",
+      "event": "implementation_started",
+      "agent": "/root/ha_core_storage_implementer"
+    },
+    {
+      "at": "2026-11-16T21:48:24.489367+00:00",
+      "node": "FIDELITY-01",
+      "event": "reopened_for_user_cache_boundary_clarification",
+      "agent": "/root/ha_fidelity_implementer",
+      "note": "Documentation-only scope; prompt-dependent gate stays unsatisfied by explicit user choice."
+    },
+    {
+      "at": "2026-11-16T21:48:49.681557+00:00",
+      "node": "HA-01",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-ha-01-v2-candidate.json",
+      "sha256": "55f10437ab8fde48dfecf7284256dda51c04868f72f27d119c2090b5268f3840"
+    },
+    {
+      "at": "2026-11-16T21:49:02.690347+00:00",
+      "node": "FIDELITY-01",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-fidelity-01-v2-candidate.json",
+      "sha256": "7a0bfe2f35c1c9bae60ca78b436b14772575ff163bf27d60ef7d81e4b5928ef7"
+    },
+    {
+      "at": "2026-11-16T21:50:21.176519+00:00",
+      "node": "HA-01",
+      "event": "APPROVE",
+      "report": "docs/reviews/home-assistant-ha-01-v2-review.md"
+    },
+    {
+      "at": "2026-11-16T21:50:33.739454+00:00",
+      "node": "HA-02",
+      "event": "implementation_started",
+      "agent": "/root/ha_reads_implementer"
+    },
+    {
+      "at": "2026-11-16T21:50:46.630922+00:00",
+      "node": "FIDELITY-01",
+      "event": "APPROVE",
+      "report": "docs/reviews/home-assistant-fidelity-01-v2-review.md"
+    },
+    {
+      "at": "2026-11-16T21:51:53.588131+00:00",
+      "node": "HA-01",
+      "event": "dependency_integration_reopens_approval",
+      "agent": "/root/ha_reads_implementer",
+      "note": "HA02 requires narrow immutable policy.references accessor, authorized adapter/wire ownership; continue already-dispatched HA02 against accepted base, freeze/reapprove affected HA01 candidate before HA02 closure."
+    },
+    {
+      "at": "2026-11-16T22:19:19.812184+00:00",
+      "node": "HA-01",
+      "event": "compatible_policy_accessor_ready",
+      "agent": "/root/ha_reads_implementer",
+      "note": "Original v2 authorship retained in prior manifests; v3 only adds immutable selected-reference accessor. Root HA02 fixtures/current contract rerun pending stable server compilation; review may inspect now but no closure until evidence."
+    },
+    {
+      "at": "2026-11-16T22:19:19.920829+00:00",
+      "node": "HA-01",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-ha-01-v3-candidate.json",
+      "sha256": "30815681201017bc26558e2d2eb3888357b8a23185e74d4c61c2173fdcd8a6ac"
+    },
+    {
+      "at": "2026-11-16T22:24:30.622993+00:00",
+      "node": "HA-01",
+      "event": "APPROVE",
+      "report": "docs/reviews/home-assistant-ha-01-v3-review.md"
+    },
+    {
+      "at": "2026-11-16T22:26:00.226056+00:00",
+      "node": "CORE-02",
+      "event": "candidate_frozen",
+      "manifest": "docs/reviews/home-assistant-core-02-v1-candidate.json",
+      "sha256": "a71f72cc4317ce185c4560066fcb141af293c2855baf67bbbd25f9e253f3cf8e"
+    }
+  ]
+}

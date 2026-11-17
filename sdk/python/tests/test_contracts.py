@@ -18,9 +18,51 @@ from plowshare._codec import (
     deployment_matches,
     encode_request,
 )
+from plowshare._values import UNSET
 
 
 class ContractsTest(unittest.TestCase):
+    def test_external_reply_overlays_keep_generated_object_models(self) -> None:
+        view = {
+            "id": " original-id ",
+            "project": None,
+            "maxModelCalls": 0,
+            "modelCallsSpent": 2147483648,
+            "maxTurns": None,
+            "noTurnCap": False,
+            "noBudget": False,
+            "title": "x" * 32769,
+            "future": "discard",
+        }
+        opened = decode_reply("conversation.open.ex", view)
+        self.assertIsInstance(opened, contracts.ConversationViewDto)
+        assert isinstance(opened, contracts.ConversationViewDto)
+        self.assertEqual(opened.id, " original-id ")
+        self.assertEqual(opened.max_model_calls, 0)
+        self.assertEqual(opened.model_calls_spent, 2147483648)
+        self.assertFalse(hasattr(opened, "future"))
+        job = {
+            "id": "job_original",
+            "conversation": "cnv_original",
+            "revision": "discard",
+        }
+        started = decode_reply("agent.run.ex", job)
+        self.assertIsInstance(started, contracts.ConversationStartedJobDto)
+        assert isinstance(started, contracts.ConversationStartedJobDto)
+        self.assertIs(started.agent, UNSET)
+        self.assertEqual(started.conversation, "cnv_original")
+        self.assertFalse(hasattr(started, "revision"))
+        for invalid in [
+            dict(job, conversation=None),
+            dict(job, agent=None),
+            dict(job, id="\ufeff"),
+        ]:
+            with self.assertRaises(ValueError):
+                decode_reply("agent.run.ex", invalid)
+        for count in [-1, 1.5, 9007199254740992]:
+            with self.assertRaises(ValueError):
+                decode_reply("conversation.open.ex", dict(view, maxModelCalls=count))
+
     def test_invocation_result_belongs_to_the_exact_read(self) -> None:
         invocation = "11111111-1111-1111-1111-111111111111"
         result = decode_reply(

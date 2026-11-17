@@ -13,6 +13,70 @@ const input = (operation, value, valid) =>
 const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
+// External selectors are opaque account-local labels; no SDK may repair or reinterpret them.
+const externalLocator = {project:'fixture',source:'sdk.instance',externalConversation:'Case/opaque:ID-1'};
+for (const operation of ['conversation.open.ex','agent.run.ex']) {
+  const base = {...externalLocator,...(operation === 'agent.run.ex' ? {agent:'worker',task:'  original\ntext  '} : {})};
+  input(operation,base,true);
+  input(operation,{...base,project:'屋'.repeat(1024),source:'a'.repeat(128),externalConversation:'~'.repeat(256)},true);
+  input(operation,{...base,project:'😀'.repeat(512)},true);
+  for (const project of ['ho\u00a0use','ho\ufeffuse']) input(operation,{...base,project},true);
+  for (const field of ['project','source','externalConversation'])
+    for (const suffix of ['\n','\r','\r\n','\u2028','\u2029'])
+      input(operation,{...base,[field]:base[field]+suffix},false);
+  for (const required of Object.keys(base)) {
+    const missing={...base}; delete missing[required]; input(operation,missing,false);
+    input(operation,{...base,[required]:null},false);
+    input(operation,{...base,[required]:42},false);
+  }
+  for (const project of ['', ' padded ', '\u00a0p', 'p\u00a0', '\ufeffp', 'p\ufeff', 'bad\ncontrol', 'bad\u007fcontrol', 'bad\u0085control', 'bad\u2028separator', 'p'.repeat(1025), '😀'.repeat(513)])
+    input(operation,{...base,project},false);
+  for (const source of ['', 'UPPER', 'é', 'a..b', 'has space', 'a'.repeat(129)])
+    input(operation,{...base,source},false);
+  for (const externalConversation of ['', 'has space', 'é', '😀', 'bad\0id', 'bad\tcontrol', '\u007f', 'x'.repeat(257)])
+    input(operation,{...base,externalConversation},false);
+  for (const extra of [{owner:'other'},{conversation:'cnv_internal'},{newConversation:false},{sourceId:'foreign'}])
+    input(operation,{...base,...extra},false);
+  for (const field of ['maxModelCalls','maxTurns']) {
+    for (const value of [0,-1,1.5,2147483648,null,'1']) input(operation,{...base,[field]:value},false);
+    input(operation,{...base,[field]:2147483647},true);
+  }
+  input(operation,{...base,maxTurns:2,noTurnCap:true},false);
+  for (const noTurnCap of [null,'false',0]) input(operation,{...base,noTurnCap},false);
+}
+input('conversation.open.ex',{...externalLocator,noBudget:true},true);
+input('conversation.open.ex',{...externalLocator,noBudget:true,maxModelCalls:1},false);
+input('conversation.open.ex',{...externalLocator,noBudget:null},false);
+const externalRun={...externalLocator,agent:'worker',task:'  original\ntext  '};
+input('agent.run.ex',{...externalRun,session:null,images:[],maxModelCalls:23,maxTurns:3},true);
+input('agent.run.ex',{...externalRun,task:'x'.repeat(32769)},true);
+for (const field of ['agent','task','session']) {
+  for(const value of ['\u0085','\u001c','\0',' padded ','\ufeffworker','  original\ntext é  ','x'.repeat(32769)])
+    input('agent.run.ex',{...externalRun,[field]:value},true);
+  for(const value of ['', ' ', '\ufeff', '\u00a0', ' \u2003\n'])
+    input('agent.run.ex',{...externalRun,[field]:value},false);
+}
+for(const change of [{images:['image']},{images:null},{session:''},{noBudget:false},{task:''},{task:'  '},{task:'\ufeff'},{task:'\u00a0'},{task:' \u2003\n'}])
+  input('agent.run.ex',{...externalRun,...change},false);
+const externalView={id:'cnv_external',project:'fixture',maxModelCalls:0,modelCallsSpent:0,maxTurns:null,noTurnCap:false,noBudget:false,title:null};
+result('conversation.open.ex',{...externalView,future:'discard'},true);
+result('conversation.open.ex',{...externalView,project:null,maxModelCalls:null,modelCallsSpent:null},true);
+result('conversation.open.ex',{...externalView,id:' cnv_external ',project:' renamed-project ',title:'x'.repeat(32769),maxModelCalls:2147483648,maxTurns:9007199254740991},true);
+for (const field of ['maxModelCalls','modelCallsSpent','maxTurns'])
+  for (const value of [-1,1.5,9007199254740992]) result('conversation.open.ex',{...externalView,[field]:value},false);
+for(const change of [{id:''},{id:'\ufeff'},{project:'\u00a0'},{noBudget:null},{noTurnCap:'false'}])
+  result('conversation.open.ex',{...externalView,...change},false);
+for(const required of Object.keys(externalView)) {
+  const missing={...externalView}; delete missing[required]; result('conversation.open.ex',missing,false);
+}
+const externalStarted={id:'job_external',conversation:'cnv_external'};
+result('agent.run.ex',{...externalStarted,future:'discard'},true);
+result('agent.run.ex',{...externalStarted,agent:'worker',revision:'future-ignored'},true);
+for(const change of [{conversation:null},{conversation:'job_other'},{conversation:2},{agent:null}])
+  result('agent.run.ex',{...externalStarted,...change},false);
+result('agent.run.ex',{id:'job_external'},false);
+result('agent.run.ex',{...externalStarted,id:'\ufeff'},false);
+result('agent.run.ex',{...externalStarted,id:' original-id ',agent:'',conversation:'cnv_\0preserved'},true);
 // Grouped conversation evidence must validate every occurrence, including native SDKs.
 input('conversation.search',{project:'atlas',q:'failure',conversation:'cnv_selected',mode:'semantic'},true);
 for(const conversation of [' padded ','', 'x'.repeat(257)])

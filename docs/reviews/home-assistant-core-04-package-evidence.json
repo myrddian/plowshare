@@ -1,0 +1,78 @@
+{
+  "node": "CORE-04",
+  "created_at": "2026-11-17T04:44:04.084055+00:00",
+  "source_candidate": "docs/reviews/home-assistant-core-04-v1-candidate.json",
+  "source_candidate_sha256": "9a0afecb2fc6d4840119bac0bbda08c6e3e32c475fbc3a966cccc7a1dd910da0",
+  "frozen_source_hashes_verified": true,
+  "command": "./gradlew check sdkPackageCheck",
+  "result": "PASS",
+  "duration": "5m18s",
+  "tasks": 153,
+  "log_sha256": "88fa6daa5be0b66c8cfe4c87c6492ee745421aa053f7054a6b39301549fcf850",
+  "fresh_consumer": "build/sdk-consumer-sqpk5gxp",
+  "coverage": [
+    "current repository non-database check",
+    "source SDK compiler, lint, DTO and real WS conformance",
+    "fresh npm/wheel/NuGet/Go consumers and Java binary consumer",
+    "installed Node/Python/.NET/Go Ex WS conformance",
+    "five-language authentication conformance"
+  ],
+  "artifacts": [
+    {
+      "path": "build/distributions/Plowshare.Sdk.0.1.0.nupkg",
+      "bytes": 791367,
+      "sha256": "9fd1b4fc942cfba8773cff2bc6c887aa71e35526f84e678b44ec8864017350e5"
+    },
+    {
+      "path": "build/distributions/plowshare-client-node-0.1.0.tgz",
+      "bytes": 92666,
+      "sha256": "f76eb25e20191833b0ba6e7e53191420d27eee919215317fae8e903cbfbfd4f0"
+    },
+    {
+      "path": "build/distributions/plowshare-client-ts-0.1.0.tgz",
+      "bytes": 356069,
+      "sha256": "adc7b61efe3c8877a29306c5081c5b8a0774ee48fbdd82932ce1c20d5b708e3f"
+    },
+    {
+      "path": "build/distributions/plowshare-sdk-go-0.1.0.tar.gz",
+      "bytes": 151151,
+      "sha256": "ddbcce3d97badbaf628b73ce34431b7ca3eee838fd691730dacc664bcb5a4e47"
+    },
+    {
+      "path": "build/distributions/plowshare_sdk-0.1.0-py3-none-any.whl",
+      "bytes": 172495,
+      "sha256": "fa73b06219ec529330f98b06ffa63c181fcb33632587ae43fc97ac68f003f7b2"
+    },
+    {
+      "path": "plowshare-protocol/build/libs/plowshare-protocol-0.1.0-SNAPSHOT-javadoc.jar",
+      "bytes": 2287194,
+      "sha256": "2b55cbe2910b7281b92f56471cedb984bac38da70b35b34271a16b38628717b0"
+    },
+    {
+      "path": "plowshare-protocol/build/libs/plowshare-protocol-0.1.0-SNAPSHOT-sources.jar",
+      "bytes": 231378,
+      "sha256": "511a46be7f17872a8be696cde9af9c0e731d5d8154c82dae9afd8df2bce56f52"
+    },
+    {
+      "path": "plowshare-protocol/build/libs/plowshare-protocol-0.1.0-SNAPSHOT.jar",
+      "bytes": 812338,
+      "sha256": "4872ca948e7b24f1e4a9a53e2c8a6b0e0ce3e689fecbac2cc06280aea65d80f4"
+    },
+    {
+      "path": "sdk/java/build/libs/plowshare-sdk-0.1.0-SNAPSHOT-javadoc.jar",
+      "bytes": 712739,
+      "sha256": "5964c675d4ce626ce2ad83904a80cea1aca766e3051d029a0d002016cfea1679"
+    },
+    {
+      "path": "sdk/java/build/libs/plowshare-sdk-0.1.0-SNAPSHOT-sources.jar",
+      "bytes": 103021,
+      "sha256": "f0a9a201474690e56e2a4d6786cfde8da8e624902ce94333ef2f3a1f9e572046"
+    },
+    {
+      "path": "sdk/java/build/libs/plowshare-sdk-0.1.0-SNAPSHOT.jar",
+      "bytes": 398158,
+      "sha256": "2f05ed142a5fda6d304f3a1a18ced76f89adf14ff67b3ad71318ceb6c79b6582"
+    }
+  ],
+  "publication": "local artifacts only; no push, publication, deployment, live model or device actions"
+}

@@ -22,6 +22,13 @@ export interface StartedJob {
 }
 export type ObservedStartedJob = Pick<StartedJob, 'id'> &
   Partial<Pick<StartedJob, 'agent' | 'conversation'>>;
+/** Ex always resolves an existing internal conversation and returns that identity with its job. */
+export type ConversationStartedJob = Omit<
+  ObservedStartedJob,
+  'conversation'
+> & {
+  readonly conversation: string;
+};
 export interface ContextCount {
   readonly tokens: string | null;
   readonly basis: 'MEASURED' | 'ESTIMATED' | 'UNKNOWN';
@@ -90,6 +97,7 @@ export interface Replies
   'memory.digest': ObservedStartedJob;
   'agent.curate': ObservedStartedJob;
   'agent.run': ObservedStartedJob;
+  'agent.run.ex': ConversationStartedJob;
   // Typed here rather than with the other contained operations because it is the only one that
   // answers ACCEPTED: a run is a handle to poll, so its reply belongs with the started-job shapes
   // and not with the conversation family's OK replies. Its own shape, not a StartedJob: the handle
