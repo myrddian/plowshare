@@ -127,6 +127,7 @@ export async function protocolFixture(options = {}) {
   }
   const unreadInbox = () => inbox.filter(item => !readInbox.has(item.id));
   let approvalPolicy = { revision: 0, mode: 'MANUAL', bot: null, rules: [] };
+  let refuseApprovalOnce = false;
   const approvals = options.emptyApprovals ? [] : [approvalWire({ id: 'fixture-approval', conversation: 'fixture-first', agent: 'fixture-bot', command: ['echo','fixture approval'] })];
   const conversationOnlyApprovals = new Set(options.foregroundApprovals ? ['fixture-approval'] : []);
   let socket;
@@ -616,6 +617,7 @@ export async function protocolFixture(options = {}) {
           if(index>=0)standingApprovals.splice(index,1);result.payload={id:payload.id,revoked:index>=0};break;
         }
         case 'approval.answer': {
+          if (refuseApprovalOnce) { refuseApprovalOnce = false; result = { code: 'BAD_REQUEST', said: 'Fixture approval refused by server' }; break; }
           const index = approvals.findIndex(row => row.id === payload.id);
           if (index < 0) { result = { code: 'BAD_REQUEST', said: 'Fixture approval already answered' }; break; }
           if (approvals[index].file && payload.decision !== 'deny' && payload.fileDigest !== approvals[index].file.inputDigest) { result = { code: 'BAD_REQUEST', said: 'Read the typed file request before approving.' }; break; }
@@ -812,11 +814,14 @@ export async function protocolFixture(options = {}) {
       const answer = `Approve running echo ${id} in /fixture on the server side? [${id}]`;
       if (notifyInbox) inbox.unshift({ id: `inbox-${id}`, kind: 'approval', answer, ...(legacy ? {} : { about: `approval:${id}` }), arrivedAt: '2026-10-02T00:00:00Z' });
       else conversationOnlyApprovals.add(id);
+      // Background approval logs need not appear in the top-level conversation catalog.
+      if (!entries.has(conversation)) entries.set(conversation, []);
       const log = entries.get(conversation); const ordinal = (log.at(-1)?.ordinal ?? 0) + 1;
       log.push({ ordinal, turnOrdinal: ordinal, kind: 'answer', state: 'stands', excerpt: answer });
       grew(conversation);
       if (notifyInbox) push({ kind: 'inbox.changed', unread: unreadInbox().length });
     },
+    refuseNextApproval() { refuseApprovalOnce = true; },
     // Abrupt loss must reach the peer even when the logical packet owner has pending frames.
     disconnectProject(name) { const id = fileSockets.get(name)?.claim.session; eventSockets.get(id)?.socket.terminate(); },
     setRefuseProjects(value) { refuseProjects = value; },

@@ -67,6 +67,11 @@ refuse execution after approval. A client must echo the displayed input digest
 when approving a file request, preventing an older command-only client from
 approving details it cannot display. Denial remains available without that digest.
 
+Inbox decisions use the connected session retaining the reviewed approval. Its
+background or delegated conversation need not appear in Desktop's chat list.
+Server refusals remain visible; uncertain answers are retained for inspection and
+are never retried automatically on another session.
+
 ## TUI
 
 ```text

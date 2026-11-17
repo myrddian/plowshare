@@ -1351,11 +1351,22 @@ export class DesktopWorkspace {
         [...this.children.values(), this.control].find((client) =>
           client.state.jobs.some((row) => row.id === request.job),
         ) ?? this.control;
-    else if (request.action === 'answer') {
-      const approval = this.state.approvals.find(
-        (row) => row.id === request.id,
+    else if (request.action === 'answer' && this.state.mode === 'live') {
+      // Inbox questions can belong to background/delegated logs absent from the chat
+      // catalog. Use a connected session retaining the reviewed question rather than
+      // requiring a listed conversation or opening another session to answer it.
+      const retained = [...this.children.values(), this.control].find(
+        (client) =>
+          client.state.connected &&
+          client.state.approvals.some(
+            (row) => row.id === request.id && row.state === 'asked',
+          ),
       );
-      if (approval) owner = await this.conversationOwner(approval.conversation);
+      if (!retained)
+        throw new Error(
+          'Refresh approvals to read this request before answering it.',
+        );
+      owner = retained;
     }
     if (
       request.action === 'refresh' ||

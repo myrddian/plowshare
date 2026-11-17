@@ -123,23 +123,31 @@ try {
 
   const newWindow = app.waitForEvent('window'); await page.locator('#inbox-open').click();
   const inbox = await newWindow; inbox.on('pageerror', error => errors.push(error.message));
-  fixture.queueApproval('inbox-request');
+  fixture.queueApproval('inbox-request', 'unlisted-background-log', false, true, file);
   await expect(inbox.locator('[data-item="inbox-inbox-request"]')).toBeVisible();
   await inbox.locator('[data-item="inbox-inbox-request"]').click();
   await expect(prompt(inbox, 'inbox-request')).toBeVisible();
+  assert.equal((await page.evaluate(() => window.plowshare.request({ action: 'bootstrap' }))).state.conversations.some(row => row.id === 'unlisted-background-log'), false);
+  await expect(prompt(inbox, 'inbox-request')).toContainText(file.inputDigest);
+  fixture.refuseNextApproval();
+  const beforeRefusal = decisions().length;
+  await prompt(inbox, 'inbox-request').getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(inbox.getByText(/Fixture approval refused by server/)).toBeVisible();
+  await expect(prompt(inbox, 'inbox-request')).toBeVisible();
+  assert.equal(decisions().length, beforeRefusal + 1, 'A server refusal is displayed and never retried automatically');
   await inbox.screenshot({ path: 'build/smoke/inbox-approval.png' });
   await prompt(inbox, 'inbox-request').getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(prompt(inbox, 'inbox-request')).toHaveCount(0);
   await expect(prompt(page.locator('#approval-bar'), 'inbox-request')).toHaveCount(0);
-  assert.deepEqual(decisions().at(-1).payload, { id: 'inbox-request', decision: 'once' });
+  assert.deepEqual(decisions().at(-1).payload, { id: 'inbox-request', decision: 'once', fileDigest: file.inputDigest });
   assert.equal(fixture.frames.some(frame => frame.type === 'inbox.read'), false, 'Answering and marking a notice read are different actions');
 
-  fixture.queueApproval('legacy-inbox-request', 'fixture-first', true);
+  fixture.queueApproval('legacy-inbox-request', 'unlisted-background-log', true, true, file);
   await expect(inbox.locator('[data-item="inbox-legacy-inbox-request"]')).toBeVisible();
   await inbox.locator('[data-item="inbox-legacy-inbox-request"]').click();
   await prompt(inbox, 'legacy-inbox-request').getByRole('button', { name: 'Deny', exact: true }).click();
   await expect(prompt(inbox, 'legacy-inbox-request')).toHaveCount(0);
-  assert.deepEqual(decisions().at(-1).payload, { id: 'legacy-inbox-request', decision: 'deny' });
+  assert.deepEqual(decisions().at(-1).payload, { id: 'legacy-inbox-request', decision: 'deny', fileDigest: file.inputDigest });
   await inbox.close();
 
   const trajectoryWindow = app.waitForEvent('window'); await page.locator('#trajectory-open').click();
@@ -151,7 +159,7 @@ try {
   await expect(page.locator('#approval-bar')).toBeHidden();
   assert.deepEqual(decisions().at(-1).payload, { id: 'trajectory-request', decision: 'once' });
   assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 1, 'Decisions continue their original request, never submit another agent turn');
-  assert.equal(decisions().length, 8, 'Each explicit click answers exactly one approval');
+  assert.equal(decisions().length, 9, 'Each explicit click sends exactly one decision, including the displayed refusal');
   assert.deepEqual(errors, []);
   console.log('Approval smoke passed: direct Approve/Deny in command prompts, chat, Inbox and trajectory; live discovery, legacy notices and no replay.');
 } finally {

@@ -4,6 +4,7 @@ import {
 } from 'plowshare-client-ts/operations/schema';
 import type { Request as WsRequest } from 'plowshare-client-ts/operations/direct';
 import type { Arrival } from 'plowshare-client-ts/binding/connection';
+import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import type { SavedProject } from './project-config.ts';
 import { present } from './fixture.test-support.ts';
 import { replyState } from './shared.ts';
@@ -25,6 +26,7 @@ import {
   projectWire,
   entryPageWire,
   entryWire,
+  approvalWire,
 } from './wire-fixtures.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,6 +49,8 @@ function fixture(
     NonNullable<ReturnType<typeof agentWire>['commands']>
   >();
   let serverProjects = [projectWire('Research'), projectWire('Writing')];
+  const approvals = new Map<string, ReturnType<typeof approvalWire>[]>();
+  let answerApproval: (() => Outcome) | undefined;
   const sessions: {
     id: string;
     closed: boolean;
@@ -190,8 +194,40 @@ function fixture(
                 }),
               ],
             };
-          if (type === 'approval.list')
-            return { code: 'OK', payload: { approvals: [] } };
+          if (type === 'approval.list') {
+            const conversation = decodePayload(
+              'approval.list',
+              payload,
+            ).conversation;
+            return {
+              code: 'OK',
+              payload: {
+                approvals: (approvals.get(row.id) ?? []).filter(
+                  (approval) =>
+                    !conversation || approval.conversation === conversation,
+                ),
+              },
+            };
+          }
+          if (type === 'approval.answer') {
+            if (answerApproval) return answerApproval();
+            const decision = decodePayload('approval.answer', payload);
+            for (const [session, rows] of approvals)
+              approvals.set(
+                session,
+                rows.filter((approval) => approval.id !== decision.id),
+              );
+            return {
+              code: 'OK',
+              payload: {
+                id: decision.id,
+                state: decision.decision === 'deny' ? 'denied' : 'allowed',
+                job: null,
+                busy: true,
+                note: null,
+              },
+            };
+          }
           if (type === 'conversation.trajectory') {
             const id = decodePayload(
               'conversation.trajectory',
@@ -334,6 +370,10 @@ function fixture(
     store,
     sessions,
     catalogs,
+    approvals,
+    answerApproval: (answer: () => Outcome) => {
+      answerApproval = answer;
+    },
     setServerProjects: (rows: ReturnType<typeof projectWire>[]) => {
       serverProjects = rows;
     },
@@ -362,6 +402,144 @@ const connect = (workspace: DesktopWorkspace, handle = 'alice') =>
     handle,
     password: 'fixture-password',
   });
+
+for (const projectSession of [false, true])
+  for (const decision of ['once', 'deny'] as const)
+    await test(`an Inbox file approval absent from chat listings is answered once on its retaining ${projectSession ? 'project' : 'account'} session: ${decision}`, async () => {
+      const { workspace, sessions, approvals } = fixture();
+      try {
+        await connect(workspace);
+        if (projectSession)
+          await workspace.dispatch({ action: 'scope', project: 'Research' });
+        const owner = present(sessions.at(-1));
+        const approval = approvalWire({
+          id: 'background-file-approval',
+          conversation: 'unlisted-background-log',
+          command: [],
+          file: {
+            kind: 'FILE_READ',
+            provider: 'mirror',
+            paths: ['/fixture/preferences.md'],
+            inputDigest: 'a'.repeat(64),
+            inputPreview: '{"path":"/fixture/preferences.md"}',
+          },
+        });
+        approvals.set(owner.id, [approval]);
+        await workspace.dispatch({ action: 'approvals-refresh' });
+        assert.equal(workspace.state.approvals[0]?.id, approval.id);
+        assert.equal(
+          workspace.state.conversations.some(
+            (row) => row.id === approval.conversation,
+          ),
+          false,
+        );
+        const sessionCount = sessions.length;
+        await workspace.dispatch({
+          action: 'answer',
+          id: approval.id,
+          decision,
+        });
+        const decisions = sessions.flatMap((row) =>
+          row.calls.filter((call) => call.type === 'approval.answer'),
+        );
+        assert.equal(decisions.length, 1);
+        assert.ok(owner.calls.includes(present(decisions[0])));
+        assert.deepEqual(present(decisions[0]).payload, {
+          id: approval.id,
+          decision,
+          fileDigest: approval.file?.inputDigest,
+        });
+        assert.equal(sessions.length, sessionCount);
+        assert.equal(
+          sessions.some((row) =>
+            row.calls.some((call) => call.type === 'agent.run'),
+          ),
+          false,
+        );
+        assert.deepEqual(workspace.state.approvals, []);
+      } finally {
+        await workspace.shutdown();
+      }
+    });
+
+await test('an uncertain Inbox approval answer is not retried on another session', async () => {
+  const { workspace, sessions, approvals, answerApproval } = fixture();
+  try {
+    await connect(workspace);
+    await workspace.dispatch({ action: 'scope', project: 'Research' });
+    const approval = approvalWire({ conversation: 'unlisted-background-log' });
+    for (const session of sessions) approvals.set(session.id, [approval]);
+    await workspace.dispatch({ action: 'approvals-refresh' });
+    answerApproval(() => {
+      throw new Error('Reply lost after possible submission');
+    });
+    await assert.rejects(
+      workspace.dispatch({
+        action: 'answer',
+        id: approval.id,
+        decision: 'deny',
+      }),
+      /Reply lost after possible submission/,
+    );
+    assert.equal(
+      sessions.flatMap((row) =>
+        row.calls.filter((call) => call.type === 'approval.answer'),
+      ).length,
+      1,
+    );
+    assert.equal(workspace.state.approvals[0]?.id, approval.id);
+    assert.ok(workspace.state.jobs.some((job) => job.status === 'unknown'));
+  } finally {
+    await workspace.shutdown();
+  }
+});
+
+await test('an Inbox approval server refusal remains visible without another submission', async () => {
+  const { workspace, sessions, approvals, answerApproval } = fixture();
+  try {
+    await connect(workspace);
+    approvals.set(present(sessions[0]).id, [
+      approvalWire({ conversation: 'unlisted-background-log' }),
+    ]);
+    await workspace.dispatch({ action: 'approvals-refresh' });
+    answerApproval(() => ({
+      code: 'BAD_REQUEST',
+      said: 'The approval was withdrawn by the server.',
+    }));
+    await assert.rejects(
+      workspace.dispatch({
+        action: 'answer',
+        id: 'approval-one',
+        decision: 'once',
+      }),
+      /The approval was withdrawn by the server/,
+    );
+    assert.equal(
+      sessions.flatMap((row) =>
+        row.calls.filter((call) => call.type === 'approval.answer'),
+      ).length,
+      1,
+    );
+    assert.equal(workspace.state.approvals[0]?.id, 'approval-one');
+    assert.deepEqual(workspace.state.jobs, []);
+    await assert.rejects(
+      workspace.dispatch({
+        action: 'answer',
+        id: 'unread-approval',
+        decision: 'once',
+      }),
+      /Refresh approvals/,
+    );
+    assert.equal(
+      sessions.flatMap((row) =>
+        row.calls.filter((call) => call.type === 'approval.answer'),
+      ).length,
+      1,
+    );
+  } finally {
+    await workspace.shutdown();
+  }
+});
 
 await test('lazily loaded project sessions retain independent human command catalogs during refresh', async () => {
   const { workspace, sessions, catalogs } = fixture();
