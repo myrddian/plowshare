@@ -11,6 +11,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.embedding.EmbeddingIndexPlan;
@@ -24,10 +26,13 @@ import io.aeyer.plowshare.server.embedding.JdbcEmbeddingSpaceRepository;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadFailedException;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -41,6 +46,7 @@ import org.springframework.jdbc.core.PreparedStatementSetter;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.support.SqlArrayValue;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -202,6 +208,7 @@ class IndexedPassageRankingDatabaseTest {
     assertTrue(ranking.matches().stream().allMatch(match -> match.id().startsWith(selected + ":")));
     assertTrue(jdbc.plan.contains(indexName), jdbc.plan);
     assertTrue(jdbc.plan.contains("CTE authorized_sources"), jdbc.plan);
+    assertTrue(jdbc.plan.contains("CTE candidate_keys"), jdbc.plan);
     assertTrue(jdbc.plan.contains("hashed SubPlan"), jdbc.plan);
     assertFalse(jdbc.plan.contains("Seq Scan on retrieval_passages"), jdbc.plan);
     assertTrue(jdbc.candidateRows <= 100, "full precision/text loading must remain bounded");
@@ -211,6 +218,124 @@ class IndexedPassageRankingDatabaseTest {
         jdbc.queryForObject(
             "SELECT coalesce(current_setting('hnsw.iterative_scan',true),'off')", String.class));
     assertEquals("on", jdbc.queryForObject("SELECT current_setting('enable_sort')", String.class));
+  }
+
+  @Test
+  void authorizedHashReusePreservesTheCandidateWindowAndUsesOneTimeHashJoins() throws Exception {
+    // A second visible log supplies repeated source hashes and tied vector distances. Hashes are
+    // projected by source identity, never used to merge distinct authorized occurrences.
+    jdbc.update("DELETE FROM information_quarantined_payloads WHERE payload_id=?", hidden);
+    try {
+      var query = new EmbeddingQuery(profile, new float[] {1, 0, 0});
+      var plan = new EmbeddingIndexPlan(profile);
+      int most = 200;
+      List<Key> original =
+          transactions.inTransaction(
+              () -> {
+                jdbc.execute(
+                    "SET LOCAL hnsw.iterative_scan='strict_order'; SET LOCAL enable_sort=off; SET LOCAL jit=off");
+                // The previously shipped candidate shape is retained only as this parity oracle. It
+                // probes source hashes again for each accepted passage instead of reusing the
+                // projection.
+                return jdbc.query(
+                    "WITH authorized_sources AS MATERIALIZED (SELECT s.source_id FROM retrieval_sources s"
+                        + " JOIN entries e ON e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal"
+                        + " JOIN conversations owner ON owner.id=e.conversation_id"
+                        + " WHERE s.source_type='entry' AND s.status='ready' AND s.generation=?"
+                        + " AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
+                        + " AND e.content IS NOT NULL AND e.role IS NOT NULL AND e.ejected_at IS NULL"
+                        + " AND s.conversation_id NOT IN (SELECT log FROM information_unreadable_logs(?))"
+                        + ") SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision"
+                        + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
+                        + " WHERE p.source_type='entry'"
+                        + " AND (p.source_id IN (SELECT source_id FROM authorized_sources)) IS TRUE"
+                        + " AND NOT p.supplied_context"
+                        + " AND "
+                        + plan.present("p")
+                        + " ORDER BY "
+                        + plan.candidateDistance("p.prose_embedding")
+                        + " LIMIT ?",
+                    (row, n) -> key(row),
+                    "indexed-fixture",
+                    ProjectIds.toRead(jdbc, HOME),
+                    "reader",
+                    query.vectorText(),
+                    plan.candidates(most));
+              });
+      jdbc.analyzeNextSelection = true;
+      var ranking =
+          new JdbcPassageRepository(jdbc, transactions)
+              .rankWindow(
+                  HOME,
+                  "entry",
+                  query,
+                  most,
+                  "indexed-fixture",
+                  new PassageRepository.ReadScope(true, "reader"));
+      assertEquals(2000, original.size());
+      assertEquals(original.size(), jdbc.selectedKeys.size());
+      assertEquals(Set.copyOf(original), Set.copyOf(jdbc.selectedKeys));
+      assertTrue(
+          jdbc.selectedKeys.stream().map(Key::hash).distinct().count() < jdbc.selectedKeys.size());
+      var originalPassages =
+          jdbc.query(
+              "SELECT p.source_id,p.position,p.passage,s.source_hash,"
+                  + plan.denseDistance("p.prose_embedding")
+                  + " AS distance"
+                  + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
+                  + " WHERE p.source_type='entry' AND p.source_id=ANY(CAST(? AS text[]))",
+              (row, n) ->
+                  new PassageRanking.Candidate(
+                      row.getString("source_id"),
+                      row.getInt("position"),
+                      row.getString("passage"),
+                      row.getString("source_hash"),
+                      row.getDouble("distance")),
+              query.vectorText(),
+              new SqlArrayValue("text", original.stream().map(Key::id).toArray()));
+      assertEquals(PassageRanking.group(originalPassages, most, true, true), ranking.matches());
+
+      JsonNode actual = new ObjectMapper().readTree(jdbc.analyzedPlan).get(0).path("Plan");
+      assertEquals("Hash Join", actual.path("Node Type").asText(), jdbc.analyzedPlan);
+      assertEquals(1, actual.path("Actual Loops").asInt(), jdbc.analyzedPlan);
+      var nodes = nodes(actual);
+      assertTrue(
+          nodes.stream().anyMatch(node -> indexName.equals(node.path("Index Name").asText())));
+      assertFalse(
+          nodes.stream()
+              .anyMatch(node -> "retrieval_sources_pkey".equals(node.path("Index Name").asText())),
+          jdbc.analyzedPlan);
+      var projectionReads =
+          nodes.stream()
+              .filter(node -> "authorized_sources".equals(node.path("CTE Name").asText()))
+              .toList();
+      assertEquals(2, projectionReads.size(), jdbc.analyzedPlan);
+      assertTrue(
+          projectionReads.stream().allMatch(node -> node.path("Actual Loops").asInt() == 1),
+          jdbc.analyzedPlan);
+    } finally {
+      jdbc.analyzeNextSelection = false;
+      jdbc.update(
+          "INSERT INTO information_quarantined_payloads(payload_id,reason) VALUES(?,'fixture')",
+          hidden);
+    }
+  }
+
+  private record Key(String id, int position, String hash, long revision) {}
+
+  private static Key key(ResultSet row) throws SQLException {
+    return new Key(
+        row.getString("source_id"),
+        row.getInt("position"),
+        row.getString("source_hash"),
+        row.getLong("embedding_source_revision"));
+  }
+
+  private static List<JsonNode> nodes(JsonNode root) {
+    var nodes = new ArrayList<JsonNode>();
+    nodes.add(root);
+    root.path("Plans").forEach(child -> nodes.addAll(nodes(child)));
+    return nodes;
   }
 
   @Test
@@ -333,6 +458,9 @@ class IndexedPassageRankingDatabaseTest {
     int textRows;
     String selectionSql = "";
     int selections;
+    List<Key> selectedKeys = List.of();
+    boolean analyzeNextSelection;
+    String analyzedPlan = "";
     Consumer<String> afterSelection = ignored -> {};
 
     RecordingJdbc(DriverManagerDataSource ds) {
@@ -348,19 +476,34 @@ class IndexedPassageRankingDatabaseTest {
       if (selection)
         plan =
             String.join("\n", super.query("EXPLAIN " + sql, setter, (row, n) -> row.getString(1)));
+      if (selection && analyzeNextSelection) {
+        analyzeNextSelection = false;
+        analyzedPlan =
+            String.join(
+                "\n",
+                super.query(
+                    "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) " + sql,
+                    setter,
+                    (row, n) -> row.getString(1)));
+      }
       var ids = new ArrayList<String>();
+      var keys = new ArrayList<Key>();
       var result =
           super.query(
               sql,
               setter,
               (row, n) -> {
-                if (selection) ids.add(row.getString("source_id"));
+                if (selection) {
+                  ids.add(row.getString("source_id"));
+                  keys.add(key(row));
+                }
                 return mapper.mapRow(row, n);
               });
       if (selection) {
         selectionSql = sql;
         selections++;
         candidateRows = result.size();
+        selectedKeys = List.copyOf(keys);
         if (!ids.isEmpty()) afterSelection.accept(ids.getFirst());
       }
       if (sql.startsWith("SELECT selected.source_id")) textRows = result.size();

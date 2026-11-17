@@ -645,16 +645,18 @@ public final class JdbcPassageRepository implements PassageRepository {
     // visited vector to its source/conversation repeats tens of thousands of PK probes, even when
     // the final window has only 2000 keys. Resolve eligible entry IDs once in the same statement
     // snapshot; IS TRUE deliberately retains a hashed SubPlan inside the ordered index scan rather
-    // than allowing PostgreSQL to flatten membership back into those per-vector joins. The final
-    // source-hash lookup only runs for accepted keys. Visibility still precedes the candidate
-    // limit.
+    // than allowing PostgreSQL to flatten membership back into those per-vector joins. Retain the
+    // source hashes with those IDs too: refetching them for the accepted keys adds random source
+    // index/heap reads on a cold database. The separately materialized ANN window keeps its ordered
+    // limit before the hash projection joins the already authorized rows. Full-precision ranking
+    // below owns final ordering, so this projection cannot change candidate membership or ties.
     String sql =
         (type.equals("entry")
-                ? "WITH authorized_sources AS MATERIALIZED (SELECT s.source_id FROM retrieval_sources s"
+                ? "WITH authorized_sources AS MATERIALIZED (SELECT s.source_id,s.source_hash FROM retrieval_sources s"
                     + join
                     + qualifications
-                    + ") SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision"
-                    + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
+                    + "), candidate_keys AS MATERIALIZED (SELECT p.source_id,p.position,p.embedding_source_revision"
+                    + " FROM retrieval_passages p"
                     + " WHERE p.source_type='entry' AND (p.source_id IN (SELECT source_id FROM authorized_sources)) IS TRUE"
                 : "SELECT p.source_id,p.position,s.source_hash,p.embedding_source_revision"
                     + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
@@ -665,7 +667,11 @@ public final class JdbcPassageRepository implements PassageRepository {
             + plan.present("p")
             + " ORDER BY "
             + plan.candidateDistance(column)
-            + " LIMIT ?";
+            + " LIMIT ?"
+            + (type.equals("entry")
+                ? ") SELECT k.source_id,k.position,authorized.source_hash,k.embedding_source_revision"
+                    + " FROM candidate_keys k JOIN authorized_sources authorized USING(source_id)"
+                : "");
     CandidateWindow window =
         transactions.inTransaction(
             () -> {
