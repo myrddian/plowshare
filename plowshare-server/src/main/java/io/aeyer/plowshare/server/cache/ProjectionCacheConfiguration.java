@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.cache;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.metrics.micrometer.MicrometerMetricsTrackerFactory;
 import io.aeyer.plowshare.server.pool.JdbcExecutionTraces;
+import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget;
 import io.aeyer.plowshare.server.pool.TracedDataSource;
 import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -95,11 +96,15 @@ public class ProjectionCacheConfiguration {
       JdbcTemplate jdbc,
       VersionConnections authoritative,
       ProjectionCacheProperties properties,
-      ObjectProvider<MeterRegistry> registries) {
+      ObjectProvider<MeterRegistry> registries,
+      ObjectProvider<ScopedSqlWorkBudget> budgets) {
+    DataSource source =
+        new TracedDataSource(
+            authoritative.source(), JdbcExecutionTraces.forPool(registries, "projection-versions"));
+    ScopedSqlWorkBudget budget = budgets.getIfAvailable();
     return new JdbcProjectionVersions(
         jdbc,
-        new TracedDataSource(
-            authoritative.source(), JdbcExecutionTraces.forPool(registries, "projection-versions")),
+        budget == null ? source : budget.decorate(source, authoritative.source()),
         properties.maxPendingTransactions());
   }
 

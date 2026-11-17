@@ -1,0 +1,48 @@
+{
+  "node": "HA-04",
+  "candidate_id": "ha-ha-04-v1",
+  "created_at": "2026-11-17T01:52:09.161213+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_action_implementer",
+  "reviewer_agent_id": "/root/ha_action_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-ha-04-implementation.md": "006802e66dafdab0287f6de0087e28b2d5b25eade099ac78fccdce3c46e5dc61",
+    "docs/reviews/home-assistant-ha-04-v1-state.json": "4362fd757d87d1e2613f54bbe14c23fd369a0cfdb11509358ea54d941ca7c66a",
+    "integrations/home-assistant/ACTION-PROVIDER.md": "eba98fe9641c532987e33d9d729ffae8c0fc4240f6503442acdb227e3af672f8",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionExecutor.java": "c861895a316e1f8803087ea9c22eff826397bd45032904aa568914cd131bfa6e",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionOfferValidator.java": "8397c83dc70604e7a076f7ba0167e70ea0b6336e4d4a18e8316f2e5f938004ef",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionVerifier.java": "b47fed524cae1924f28cac34edb3a5e9e4941bb2c86056c5da15d622f3621944",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionPolicy.java": "d1b654579d3e5cb8fc68e27e41adfbcfdb8998691c9386416a052b69c23e1680",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionProfiles.java": "9b6692f03e587019a38b985dda2c5dd92d4fcf103fe150a2cac741642124b0b4",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionTools.java": "2c8d62d69b30ebf7c4cd39040c3f79cb30b25e493a0d96e737ca18ba19a7dc1e",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionVerifier.java": "579e5c42c0996e20c9e829b60f08fd171356416186f017c719ad927e1eda861c",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapter.java": "24baa8a0c5116b71f989ff16903ba5ba134c312409d2f48b8a1bae7b1a1f21ce",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCatalog.java": "186f5dddbb62622a3e57f192882a2acd3ca4f93cda66f5cd93abd7c6b1c46acb",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantWire.java": "34477a58ce99edc6677c61e9079ae7468c88f85350bb38519a7d9e0c608504cb",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionOfferFenceTest.java": "1ae2bda7b5f55f9cc0f01f94a6f8dc9c2511ac44d6a4a7fa836cbec5620adb25",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionProviderTest.java": "adc9a1d4c8e108322f6efcaf07a8b12b0fd78c2a2c29703e44b4a844bd2eeade",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionToolsTest.java": "bae50af73ad2297e028a9f3157dbd4aae241550ff0683d8fd26a4b1c44779487",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionVerifierTest.java": "88d382e445909466ac29a0d131a8f0f5a3f95e3e9b26db787f8d04a7aa91fc9d",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantNativeActionsTest.java": "5fe5c2d276c872a01c25fe9faf3f1927464be95e26a0499fd9d9de5f0ecddc01"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-ha-04-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-04-v1.diff.gz",
+    "sha256": "b84ecd1fb68a35dbfeb01827f41b1413398f4b82330059ac82cea651ca3c13c3",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "HA-03": {
+      "id": "ha-ha-03-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-03-v2-candidate.json",
+      "manifest_sha256": "8d29b5b267b8fb298b1a24d9e66e2c262b2f822981c0a3eb1838d5837bf99424"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Current90 tests/13classes incl24 new action cases and selected HA01/02/03 regressions PASS14s; format and separate formatCheck PASS. Exact17 paths frozen. Affected3 HA02 seams undergoing independent v3 reapproval; HA04 closure requires that approval too. No legacy full suite/live effects/physical result claim."
+    }
+  ]
+}

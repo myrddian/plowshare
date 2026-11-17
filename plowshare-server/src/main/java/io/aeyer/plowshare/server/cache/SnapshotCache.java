@@ -221,6 +221,16 @@ public interface SnapshotCache<T> extends AutoCloseable {
   Read<T> readInline(Request request, Loader<T> loader);
 
   /**
+   * Atomically reuses a resident result or joins an existing compatible load without electing a
+   * loader. A miss owns no cache work and is not refused because unrelated loads occupy waiter
+   * capacity. An accepted join has no cache-workflow timeout: the owner controls its actual SQL
+   * deadline or local cancellation. Cancelling the returned handle affects only this waiter.
+   */
+  default Optional<Read<T>> readExisting(Request request) {
+    return Optional.empty();
+  }
+
+  /**
    * Looks up a resident value and updates its recency without loading, joining an in-flight load,
    * allocating a waiter or waiting for SQL. Recovery and misses return empty.
    */

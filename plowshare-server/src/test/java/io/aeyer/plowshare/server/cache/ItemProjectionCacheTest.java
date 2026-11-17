@@ -1,10 +1,12 @@
 package io.aeyer.plowshare.server.cache;
 
+import static io.aeyer.plowshare.server.cache.CacheTestSupport.awaitStatistics;
 import static io.aeyer.plowshare.server.cache.CacheTestSupport.namespace;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOAD;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.TRUSTED_HIT;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -16,6 +18,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.cache.CacheTestSupport.Value;
+import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.HashMap;
@@ -27,6 +32,10 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
@@ -417,6 +426,65 @@ class ItemProjectionCacheTest {
       verify(counters, never()).currentItems(any());
       verify(counters, times(1)).captureItems(any());
       assertEquals(0, cache.statistics().count(LOAD));
+    }
+  }
+
+  @Test
+  void scopedKnownTokenJoinAfterEvictionKeepsItsOwnDeadlineAndTheOrdinaryFillAlive()
+      throws Exception {
+    var loading = new CountDownLatch(1);
+    var finish = new CountDownLatch(1);
+    var settings =
+        new SqlWorkBudgetProperties(Duration.ofSeconds(1), Duration.ofMillis(100), 4, 2, 8, 1);
+    try (var f = new Fixture();
+        var sql = new ScopedSqlWorkBudget(settings, null);
+        var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      unconfirmed(f, KEY_A, TREE_A).orElseThrow();
+      f.backing.invalidate(KEY_A); // evicts the resident; the projection still knows its token
+      var ordinary =
+          callers.submit(
+              () ->
+                  f.cache.read(
+                      KEY_A,
+                      Set.of(TREE_A),
+                      true,
+                      () -> {
+                        loading.countDown();
+                        try {
+                          assertTrue(finish.await(2, TimeUnit.SECONDS));
+                        } catch (InterruptedException interrupted) {
+                          Thread.currentThread().interrupt();
+                          throw new AssertionError(interrupted);
+                        }
+                        return new Value("refill");
+                      },
+                      () -> fail("ordinary fill must remain shared"),
+                      ignored -> 100));
+      try {
+        assertTrue(loading.await(1, TimeUnit.SECONDS));
+        var scoped =
+            callers.submit(
+                () ->
+                    sql.within(
+                        Duration.ofMillis(250),
+                        () ->
+                            f.cache.readUnconfirmed(
+                                KEY_A,
+                                Set.of(TREE_A),
+                                () -> fail("existing stored-token refill must join"),
+                                ignored -> 100)));
+        awaitStatistics(f.backing, stats -> stats.waiters() == 2);
+        var refused =
+            assertThrows(ExecutionException.class, () -> scoped.get(500, TimeUnit.MILLISECONDS));
+        assertEquals(
+            ReadFailedException.Reason.DEADLINE_EXCEEDED,
+            assertInstanceOf(ReadFailedException.class, refused.getCause()).reason());
+        assertTrue(!ordinary.isDone());
+      } finally {
+        finish.countDown();
+      }
+      assertEquals(new Value("refill"), ordinary.get(1, TimeUnit.SECONDS));
+      assertEquals(1, f.backing.statistics().entries());
     }
   }
 }

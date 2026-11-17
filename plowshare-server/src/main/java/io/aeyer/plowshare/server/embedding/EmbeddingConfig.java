@@ -1,15 +1,27 @@
 package io.aeyer.plowshare.server.embedding;
 
 import io.aeyer.plowshare.server.agents.digests.Digester;
-import io.aeyer.plowshare.server.archive.*;
-import io.aeyer.plowshare.server.documents.*;
+import io.aeyer.plowshare.server.archive.Archive;
+import io.aeyer.plowshare.server.archive.MemoryRepository;
+import io.aeyer.plowshare.server.archive.PassageIndex;
+import io.aeyer.plowshare.server.documents.DocumentStore;
+import io.aeyer.plowshare.server.documents.IngestService;
+import io.aeyer.plowshare.server.documents.RetrievalService;
+import io.aeyer.plowshare.server.documents.SummaryEmbeddings;
+import io.aeyer.plowshare.server.lifecycle.WorkerShutdown;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
-import java.util.concurrent.*;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
 /** Composition for the opt-in transition. Both models are required; no deployment defaults. */
 @Configuration
@@ -98,13 +110,13 @@ public class EmbeddingConfig {
               if (properties.paused()) return;
               try {
                 dual.tick();
-              } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
+              } catch (ReadUnavailableException capacity) {
                 // Shared maintenance admission defers this tick; it is not an outage to log on
                 // every timer pass. No provider attempt has started at this discovery boundary.
               } catch (RuntimeException failure) {
-                org.slf4j.LoggerFactory.getLogger(EmbeddingConfig.class)
-                    .warn(
-                        "Embedding repair/activation deferred: {}",
+                LoggerFactory.getLogger(EmbeddingConfig.class)
+                    .error(
+                        "Embedding repair/activation failed: {}",
                         failure.getClass().getSimpleName());
               }
             },
@@ -121,8 +133,7 @@ public class EmbeddingConfig {
           stopping = executor;
         }
         try {
-          io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(
-              stopping, "dual-embedding-repair");
+          WorkerShutdown.stop(stopping, "dual-embedding-repair");
           running = false;
           stopped.complete(null);
         } catch (RuntimeException | Error failure) {

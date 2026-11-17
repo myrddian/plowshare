@@ -57,6 +57,7 @@ const MUTATIONS = new Set<string>([
   'proposal.resolve',
   'proposal.reconsider',
   'conversation.open',
+  'conversation.open.ex',
   'conversation.lifecycle',
   'agent.define',
   'job.cancel',
@@ -235,6 +236,18 @@ const examples: Record<string, unknown> = {
     requestId: '00000000-0000-0000-0000-000000000001',
   },
   'conversation.open': { project: 'my_project' },
+  'conversation.open.ex': {
+    project: 'my_project',
+    source: 'external_client',
+    externalConversation: 'session_1',
+  },
+  'agent.run.ex': {
+    project: 'my_project',
+    source: 'external_client',
+    externalConversation: 'session_1',
+    agent: 'my_agent',
+    task: 'Inspect retained sources',
+  },
   'conversation.list': { project: 'my_project' },
   'conversation.latest': { project: 'my_project', agent: 'my_agent' },
   'agent.run': {

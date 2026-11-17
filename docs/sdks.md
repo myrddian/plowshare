@@ -228,6 +228,95 @@ continuation. Existing global setup/memory contracts remain unchanged. Server
 wire defaults are unchanged; no record is moved and no retry is introduced.
 Explicit reply-selector checks still reject a foreign project without replay.
 
+## External conversation aliases
+
+[ADR 0077](decisions/0077-conversation-external-aliases.md) defines the generic
+platform contract. The public SDK surfaces below consume the two Ex operations;
+the [delivery ledger](home-assistant-delivery-state.json) separately records
+implementation, independent review, packaging and deployment evidence. A server
+without these operations refuses them; the SDK supplies no fallback or local map.
+
+`ConversationOpenRequestEx` (`conversation.open.ex`) requires `project`, `source`
+and `externalConversation`, plus ordinary optional conversation creation limits.
+It atomically gets or opens one ordinary conversation. Reopening keeps existing
+limits/spending/lifecycle and does not repeat log.open. `AgentRunRequestEx`
+(`agent.run.ex`) requires those three locator fields plus `agent` and `task`, with
+ordinary optional `session`, run caps, explicit `maxModelCalls` absolute-total
+raise and empty `images`. It resolves an existing alias, then uses normal run
+admission; missing aliases return NOT_FOUND without opening. Neither request
+accepts internal `conversation`, `newConversation`, caller-selected owners or
+arbitrary prompt/message-role fields.
+
+The server qualifies `source` with the authenticated immutable account identity
+and resolved project ID. A source label is account-local, never a grant or an
+attested external user identity. Source grammar is 1–128 lower-case ASCII
+characters matching `^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`; external IDs are 1–256
+visible ASCII characters, opaque/case-sensitive without normalization. Separate
+installations/profiles using one account must choose separate stable sources and
+qualify external IDs for external callers. Token rotation within the same account
+preserves aliases; another account cannot choose its namespace. Current project,
+target conversation, agent/tool, lifecycle and budget checks remain authoritative.
+
+Both replies keep the existing conversation/job result shapes and real internal
+IDs for inspection/cancellation. ConversationView has no lifecycle field; preserve
+that state internally and use existing lifecycle-filtered conversation listing
+when a separate observation is needed. Do not mutate lifecycle merely to inspect
+it. Alias resolution removes a client lookup round
+trip but does not deduplicate utterances. A possibly transmitted Run-Ex with no
+reply stays uncertain and must not be automatically resent. No HTTP fallback or
+legacy-map import API is supplied; phased client migration must preserve pending
+jobs and keep one map owner for each key. Full request, retention, transaction,
+rollback and cross-SDK verification requirements live in the ADR.
+
+Repeating an uncertain Open-Ex with identical selectors resolves the same mapping
+only while they denote the same authenticated account and stable project
+namespace. Project names can be renamed or reused: the same supplied name alone
+does not establish the same resolved project identity. Retain that namespace
+binding when reconciling an uncertain open; the SDK does not repeat it automatically.
+
+Use the existing authenticated connection and explicit configured project/source:
+
+| SDK | Open one external mapping | Submit one turn to an existing mapping |
+| --- | --- | --- |
+| TypeScript / Node | `client.request('conversation.open.ex', request)` | `client.request('agent.run.ex', request)` |
+| Java | `new ExternalConversationClient(connection).open(request)` | `client.run(request)`; async forms take `RequestOptions` |
+| Python | `await client.request(ConversationOpenRequestEx(...))` | `await client.request(AgentRunRequestEx(...))` |
+| Go | `client.ConversationOpenEx(ctx, request)` | `client.AgentRunEx(ctx, request)` |
+| .NET | `client.ConversationOpenExAsync(request)` | `client.AgentRunExAsync(request)` |
+
+The named Ex DTO types are exported from the TypeScript and Node package roots;
+Python requests live in `plowshare.contracts`. Java exposes the exact public
+`ConversationOpenRequestEx` and `AgentRunRequestEx` records. Each method sends one
+application request and resolves the alias inside the server; it performs no
+preliminary lookup RPC. Opening and submitting a turn remain separate operations.
+
+Open-Ex requires `OK` and the complete ordinary conversation view, including
+nullable fields. A configured zero-call default is a valid reply; explicit request
+`maxModelCalls: 0` is invalid. Run-Ex requires `ACCEPTED` with its actual internal
+job and `cnv_` conversation identifiers. Agent metadata may be omitted, but must
+be a string when present. Java returns `ExternalConversationClient.StartedJob`
+for this exact three-field projection. Open-Ex returns
+`ExternalConversationClient.ConversationView`, preserving the eight canonical
+fields, exact text and nullable safe-integer counts as `Long`. Ordinary Java
+`ServerClient.StartedJob` and `ServerClient.Conversation` keep their existing
+contracts. Future undeclared fields are not exposed.
+
+Optional values are omitted unless supplied. `session` alone also supports
+explicit null. In Java, a null outer `AgentRunRequestEx.Session` omits it;
+`new AgentRunRequestEx.Session(null)` writes explicit null, and a non-null session
+value writes that exact validated name. Other nullable Java option components
+mean omission. Native SDKs keep their existing absent/null representation.
+Requests do not strip or normalize locator strings or task text.
+
+Use finite per-call deadlines and retain accepted-job evidence. Cancellation of
+an SDK request does not abort admitted server work. A malformed result or wrong
+success status is an invalid response with uncertain completion; timeout or
+disconnect after possible transmission likewise does not permit a replacement
+Run-Ex. Real refusals remain explicit outcomes. The SDK never retries these cases,
+changes transports or silently reopens under another identifier. The transport's
+existing explicit capacity-refusal behavior remains a separate pre-admission
+contract.
+
 ## Server FileStores
 
 `filestore.list` accepts an empty request and returns `stores`, each with an

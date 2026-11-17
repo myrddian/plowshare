@@ -1,0 +1,58 @@
+{
+  "node": "HA-03",
+  "candidate_id": "ha-ha-03-v2",
+  "created_at": "2026-11-17T01:10:48.918501+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_provider_implementer",
+  "reviewer_agent_id": "/root/ha_provider_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-ha-03-implementation.md": "23f9daf2ed10751dc9c8c48c07372479b6e9be4ea1b4e18dbc687d5b36f340e9",
+    "docs/reviews/home-assistant-ha-03-v2-state.json": "02dd83ea5c6f4b4b0ddb09eda28f8163f8f1e2576f1eb4dff15ad3d4e048dfb9",
+    "integrations/home-assistant/TOOL-PROVIDER.md": "7df8fc5495c9b1218cab89fe7316cfc5cdde26bfb4c5fb51a71a29f66db957dc",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderJournal.java": "6b6762a050d34f91cf2daa180dd724279b807b57065ab27cb1e2f83cac8ff3a6",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadTools.java": "96955c0d5084570e0b62e58355ae0845959f5049974db3fcde71ce94121e4619",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResources.java": "b8d8671e10b78a27665b6bb9aa5f683f6fd62f56b8868ea9c587cf0bdfb3ed56",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolHandlers.java": "bea32d08c93c6a77e0e46e333fa454b1ba3f9d72bd7deca97f1772b6db749918",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolJournal.java": "843b2e15f2ba84e2939047166a2c134919427dc7dd72da175da6d6b0b4df1378",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolProvider.java": "438f44f75e3f9a2419e5dbd835302d0c89efa15263b1d5494d997bab7b2b11e6",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolTransport.java": "e05acd7aee44abcea06f63629d48a2bf1411afc19641a28a538213f0acd9aa02",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadToolsTest.java": "bfca22bf16e06b328df2e48561aa362f54cd8b0940e13937d3b533feb523a70f",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceContractsTest.java": "beb90d8c2225ca5dc3b2cf02878133a9a854e805c24039e1fd525e90009c99f9",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolJournalTest.java": "219deafb9a791287bcbf453bc92abe6c5bbb2f2ab3fe8cb441196740d595d961",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolProviderTest.java": "2cc87ee7153559dbabf9c8f8ddf9feff0b363fa1291a22230477b9a4c3cc9907",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolTransportTest.java": "a4f8cb1855585025360b2530a86304eaa69ce32c3b5a9d2c0577c59e1a32f236"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-ha-03-v2-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-03-v2.diff.gz",
+    "sha256": "409fc7e4e427c7ce61824792cc901c682069553ce152090fe0c242d97d1d2b50",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "HA-02": {
+      "id": "ha-ha-02-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-02-v2-candidate.json",
+      "manifest_sha256": "0cf20cf8f129e6f10fda75fb25c284d11575b33bca78abdf5a75add287cb3c01"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Current40canonicalHAprovider/contractJUnitcasesPASSzeroerrors/skips, formatterappliedandseparateformatCheckPASS4s43tasks. HA01v5independentlyapproved. Retirementproof80settledreadsacrossrestart, UNKNOWNretained, publicSDKonly. Noactionexecution/liveclaim; productioncompositionlibraryAPI, packaginglatergatedscope."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_provider_reviewer",
+      "verdict": "CHANGES_REQUIRED",
+      "candidate_id": "ha-ha-03-v1",
+      "manifest_sha256": "25ae4382d22cdc71e4046dbc9cfc916cc8e2b0ad91ba773103b0bf69b5f3ed5b",
+      "report_path": "docs/reviews/home-assistant-ha-03-review.md",
+      "report_sha256": "82b45f1067ca9682c7b246389dc8d414947b215b78f5f0021c92dee9e9cb5c9d"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "HA03-R1evidencecorrection: freshUUID+logicalidentitypernewinvocation,80distinctCOMPLETEDresultsacrossrestart+exactoriginalretiredreplayproof. Current40canonicalJUnitPASS10s,separateformatCheckPASS4s43tasks. Onlyprovidertest/reportchangedfromv1; productionallunchanged."
+    }
+  ]
+}

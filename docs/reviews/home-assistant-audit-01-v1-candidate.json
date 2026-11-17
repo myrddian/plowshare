@@ -1,0 +1,32 @@
+{
+  "node": "AUDIT-01",
+  "candidate_id": "ha-audit-01-v1",
+  "created_at": "2026-11-16T21:31:54.819778+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_audit_implementer",
+  "reviewer_agent_id": "/root/ha_audit_reviewer",
+  "files": {
+    "docs/home-assistant-delivery-plan.md": "872fa22d91742de639fd7d390b0f42221c4afdcee517c25ddc4440ecb1d0a47b",
+    "docs/reviews/home-assistant-audit-01-v1-state.json": "492844914cd4813055d011777bb104d47776e712c6a963e03e24865b31c028b5",
+    "docs/reviews/home-assistant-baseline-audit.md": "33dd279ab7290d76e3fbda4f3e3cc9499a5970ade18a7b212c6825684b7e7093"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-audit-01-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-audit-01-v1.diff",
+    "sha256": "c19b8a0f993caf50663707fa8267c5c37e0f9a80b8a0c24639ce452308420ae2",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "PLAN-00": {
+      "id": "ha-plan-00-v1",
+      "manifest_path": "docs/reviews/home-assistant-delivery-plan-candidate.json",
+      "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Ruff check and format passed; 21 non-socket tests and two separately rerun approved socket fixtures passed on current Assist files (23 total). Actual HA 2026.9.4. Full AI Task import lacks numpy; no Gradle/database/live/model checks claimed."
+    }
+  ]
+}

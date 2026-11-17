@@ -3,8 +3,9 @@
 Backpressure limits admitted work, retained bytes or access to a scarce resource. It is separate from
 authentication, permission, a completion deadline and a durable job's lifecycle. This is a current source map,
 not a live capacity measurement. The [bounded-work
-standard](coding-standards.md#bound-active-work-in-every-subsystem) requires a configurable two-second default
-for short interactive work; the existing mechanisms below do not universally enforce that end-to-end contract.
+standard](coding-standards.md#bound-active-work-in-every-subsystem) gives actual query/transaction units a configurable two-second default. Whole-request or workflow
+duration above that threshold warns without cancelling accepted work. Existing explicit transport/provider
+timeouts retain their owning contracts; they do not prove remote abort.
 
 ## Several owners, not one queue
 
@@ -19,7 +20,7 @@ provider endpoint.
 | [Event channel] | Pending IDs/bodies/bytes plus execution/resource/observer seats | Pre-handler `CAPACITY_EXHAUSTED`; execution rechecks authority | Execution seats settle at handler completion; body/ID admission also waits for physical reply settlement |
 | [Read admission] | Process/principal work seats and selected waiting queues | Eligible interactive, pure authoritative, foreground report and FETCH reads wait; other lifetime/maintenance seats refuse | Owning physical work closes its lease |
 | [Socket sessions] | Queued plus physically executing session checks | Full intake/deadline produces unavailable, not revocation | Actual batch settlement; caller timeout does not erase physical work |
-| [Projection cache] | Residents, physical loads, estimated loading bytes, dependency links and waiters | Coalesce one key; evict or refuse over bounds; callers have read deadlines | Physical load/reservation retirement and waiter cleanup are distinct |
+| [Projection cache] | Residents, physical loads, estimated loading bytes, dependency links and waiters | Coalesce one key; evict or refuse over bounds; accepted inline reads keep physical ownership; explicit async waits have their own timeout | Physical load/reservation retirement and waiter cleanup are distinct |
 | [DB throttle] + Hikari | Primary-pool permits, then physical connections | Throttle waits; Hikari has a separate acquire timeout | Connection close returns its admission handle; borrow failure also releases it |
 | [LLM pool] | Running chat/embedding lanes per configured inference resource | Queue until start budget expires; queue count itself is unbounded | Physical task completion; queued work shed before dispatch is removed |
 | [Event output] + [packet transport] | Queued pushes/replies, logical bytes, physical segments/credits | Drop lossy progress; response failure/disconnect remains uncertain | Drain/transfer completion or explicit retirement, not frontend disappearance |
@@ -70,12 +71,13 @@ Account-shaped report keys additionally retain the caller's report seat. A FETCH
 requester's thread, using that caller's bound connection when applicable; do not move it to another thread and
 then wait while retaining the caller's connection/permit.
 
-[ReadDeadline] lets FETCH acquisition consume the remaining cache-read budget; outside a cache read it uses
-`fetch-wait-millis`. Nested cache reads inherit the earlier deadline, but this thread-local context does not
-cross worker threads. A cache miss coalesces onto one fill rather than duplicating SQL after a waiter gives
-up. A loader can outlive the caller: an elected inline load may finish and store a valid value even though the
-requesting read then reports unavailable. Physical loading reservations remain occupied until the load
-actually exits.
+[ReadDeadline] carries only an existing actual SQL-unit deadline into FETCH acquisition;
+outside one, acquisition uses `fetch-wait-millis`. It does not create a cache-workflow timer or
+cross worker threads. A miss coalesces onto one fill rather than duplicating SQL. Accepted inline
+loads and joiners wait for that physical load without an unrelated two-second caller timer.
+Slow composed reads warn only. The explicit asynchronous cache API retains its documented wait
+timeout, and an existing SQL deadline can still fail the owning SQL unit. Physical loading
+reservations remain occupied until the load exits.
 
 `ReadUnavailableException` maps to `ARCHIVE_UNAVAILABLE` on WS and HTTP 503. It is **not**
 `CAPACITY_EXHAUSTED`: an enclosing operation may have committed a mutation before attempting a projection.
@@ -149,7 +151,7 @@ Defaults below come from source/configuration, not from a deployment measurement
 | [Event channel] / [application configuration] | Advertised pending depth 8; 2 finite execution slots/connection, global 0 (no configured global execution-count cap), observers 256; separate coordinator/byte limits remain |
 | [Read capacity settings] / [read scheduling settings] | REPORT 2 total/1 principal; foreground waiters 64/4; report/FETCH wait defaults 2000ms |
 | [Socket session settings] | Pending 256/32 principal, batch 128, gather 2ms, caller wait 2000ms |
-| [Projection settings] | One read timeout 2s; independent resident/load/byte/waiter limits |
+| [Projection settings] | Explicit async read wait 2s; accepted inline work warns only; independent resident/load/byte/waiter limits |
 | [Pool settings] / [application configuration] | Margin 2, threshold fraction 0.5, delay quantum 20ms/ceiling 3s; Hikari acquire default 5000ms |
 | [Provider settings] | Per-pool concurrency and submit/transport timeouts; do not confuse queue-start and execution budgets |
 | [AccountingProperties] | Journal 256MiB, segments 4MiB, IO wait 2s, retry buffer 128 metadata events |

@@ -70,8 +70,9 @@ raising limits. Pool `.overdraft` counts nested admissions; it is not a live
 occupancy gauge. Avoid unbounded principal/query/job metric labels.
 
 Follow the [completion policy](../../docs/coding-standards.md#bound-active-work-in-every-subsystem):
-short interactive work has a configurable 2s default budget and nested work must
-inherit the earlier remaining budget. Current request, cache, DB and provider
+actual SQL query/transaction units have a configurable 2s default budget and
+nested statements inherit their transaction remaining time. Slow whole workflows
+warn without cancelling accepted work. Current request, cache, DB and provider
 limits cover different phases; this policy is not a claim that every boundary
 already cancels physical work end-to-end. Cleanup needs its own finite bound.
 

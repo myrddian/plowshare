@@ -68,7 +68,7 @@ import org.springframework.jdbc.core.RowMapper;
  * {@link #inHome}, whose {@code ORDER BY created_at, id} became the order that screen lists them
  * in.
  */
-public final class ConversationStore {
+public final class ConversationStore implements ConversationCreation {
 
   /**
    * The third caller of {@code MemoryIds}' scheme, after {@code mem_} and {@code prp_}. Its javadoc

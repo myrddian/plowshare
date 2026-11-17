@@ -1,0 +1,33 @@
+{
+  "node": "FIDELITY-01",
+  "candidate_id": "ha-fidelity-01-v1",
+  "created_at": "2026-11-16T21:38:16.944626+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_fidelity_implementer",
+  "reviewer_agent_id": "/root/ha_fidelity_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-fidelity-01-v1-state.json": "58c45dc0969abd6b7632dc13ec32cc2693cb61421cdb6f77be41efe4c4c28126",
+    "docs/reviews/home-assistant-prompt-fidelity-decision.md": "c3b6b7890e92c8f64e361bbcc9b08bfe0aaca9c3228f3b01678553ef6e2a775d",
+    "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java": "f0aa469fcb192c821ceac1f23553016f370633bb91f71f8392d0a372a868fd2f",
+    "sdk/python/src/plowshare/contracts.py": "eb6b67a2dbb916ed876edf8eb94fd12cde1c9568e4212a8b4cc5b19d193c3765"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-fidelity-01-v1-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-fidelity-01-v1.diff",
+    "sha256": "c19b8a0f993caf50663707fa8267c5c37e0f9a80b8a0c24639ce452308420ae2",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "AUDIT-01": {
+      "id": "ha-audit-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+      "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Actual HA six-case ChatLog probe passed; SDK and hook alternatives inspected. No public native role path verified. Investigation must leave prompt_public_path_verified false. Shared design link being serialized through CORE01 ownership; review report first, final acceptance after consistency check."
+    }
+  ]
+}

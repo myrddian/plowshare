@@ -96,8 +96,12 @@ public final class ThrottledDataSource extends AbstractDataSource {
       throttle.observed(Duration.ofNanos(nanoClock.getAsLong() - started));
       return (Connection)
           Proxy.newProxyInstance(
-              Connection.class.getClassLoader(),
-              new Class<?>[] {Connection.class},
+              ScopedSqlWorkBudget.current() == null
+                  ? Connection.class.getClassLoader()
+                  : SqlPoolLease.class.getClassLoader(),
+              ScopedSqlWorkBudget.current() == null
+                  ? new Class<?>[] {Connection.class}
+                  : new Class<?>[] {Connection.class, SqlPoolLease.class},
               new ReleasingHandler(connection, admission));
     } catch (Throwable failure) {
       // Any failure before hand-off, including an Error, must return the permit: otherwise it is
@@ -142,6 +146,7 @@ public final class ThrottledDataSource extends AbstractDataSource {
     private final Connection connection;
     private final Admission admission;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final boolean scoped = ScopedSqlWorkBudget.current() != null;
 
     ReleasingHandler(Connection connection, Admission admission) {
       this.connection = connection;
@@ -150,6 +155,13 @@ public final class ThrottledDataSource extends AbstractDataSource {
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+      if (method.getDeclaringClass() == SqlPoolLease.class) {
+        if (method.getName().equals("poolHandle"))
+          return connection instanceof SqlPoolLease lease ? lease.poolHandle() : connection;
+        if (admission instanceof SqlAdmissionLease owned) owned.callerFinished();
+        if (connection instanceof SqlPoolLease lease) lease.callerFinished();
+        return null;
+      }
       if (method.getDeclaringClass() == Object.class) {
         return switch (method.getName()) {
           case "equals" -> proxy == args[0];
@@ -171,16 +183,24 @@ public final class ThrottledDataSource extends AbstractDataSource {
 
     /**
      * Closes the real connection and releases the permit exactly once. Repeat closes are no-ops, as
-     * {@link Connection#close()} requires; the permit is released even if the real close fails.
+     * {@link Connection#close()} requires. Ordinary handles preserve their existing finally-release
+     * contract; an explicitly scoped handle retains physical occupancy when close fails.
      */
     private void close() throws SQLException {
       if (!closed.compareAndSet(false, true)) {
         return;
       }
-      try {
+      if (scoped) {
+        // Scoped failures retain their finite physical slot. Caller nesting was detached before
+        // asynchronous cleanup; it must not make a reused caller an overdraft borrower.
         connection.close();
-      } finally {
         admission.close();
+      } else {
+        try {
+          connection.close();
+        } finally {
+          admission.close();
+        }
       }
     }
   }

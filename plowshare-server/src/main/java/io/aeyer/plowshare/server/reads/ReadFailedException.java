@@ -28,8 +28,12 @@ public class ReadFailedException extends RuntimeException {
   }
 
   public static ReadFailedException deadlineExceeded() {
+    return deadlineExceeded(null);
+  }
+
+  public static ReadFailedException deadlineExceeded(Throwable cause) {
     return new ReadFailedException(
-        Reason.DEADLINE_EXCEEDED, "Read deadline expired before a result was available", null);
+        Reason.DEADLINE_EXCEEDED, "Read deadline expired before a result was available", cause);
   }
 
   public static ReadFailedException invalidated() {
@@ -47,7 +51,11 @@ public class ReadFailedException extends RuntimeException {
   }
 
   public static ReadFailedException closed() {
-    return new ReadFailedException(Reason.CLOSED, "Read service is closed", null);
+    return closed(null);
+  }
+
+  public static ReadFailedException closed(Throwable cause) {
+    return new ReadFailedException(Reason.CLOSED, "Read service is closed", cause);
   }
 
   public static ReadFailedException queryCancelled(Throwable cause) {

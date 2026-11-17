@@ -1,17 +1,27 @@
 package io.aeyer.plowshare.server;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.zip.GZIPInputStream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -88,8 +98,8 @@ class SourceIsTextTest {
   private static final Pattern INCLUDED = Pattern.compile("\"(plowshare-[a-z-]+)\"");
 
   /**
-   * Explicit binary assets: adding one requires naming it here, while every source file remains
-   * subject to the NUL guard.
+   * Explicit application/build binary assets. Archived review diffs are separately named and
+   * digest-bound below; every source file remains subject to the NUL guard.
    */
   private static final Set<String> BINARY_ASSETS =
       Set.of(
@@ -98,6 +108,67 @@ class SourceIsTextTest {
           "plowshare-desktop/assets/icons/plowshare.png",
           "plowshare-desktop/assets/icons/plowshare.icns",
           "plowshare-desktop/assets/icons/plowshare.ico");
+
+  /**
+   * Frozen independent-review evidence, not executable source. Never admit an extension or a
+   * directory wholesale: each archive must retain its approved bytes and expand to readable text.
+   */
+  private static final Map<String, String> ARCHIVED_REVIEW_DIFFS =
+      Map.ofEntries(
+          Map.entry(
+              "docs/reviews/home-assistant-core-03-v1.diff.gz",
+              "4c86ecc9efd9f6180ac258303f8cc31cf1d3905aa732d5639e4cd8393ed8fee3"),
+          Map.entry(
+              "docs/reviews/home-assistant-core-03-v2.diff.gz",
+              "a5f806005dfc995987468fa7530149f4038c461e0a4a4d21d1e795b672f037b4"),
+          Map.entry(
+              "docs/reviews/home-assistant-core-03-v3.diff.gz",
+              "fcd896299dcc022ff9f3820c73ce432b938cb44c637f2f836de8201342fbc64e"),
+          Map.entry(
+              "docs/reviews/home-assistant-core-03-v4.diff.gz",
+              "bd81ab50ba829f49b7eb75f05332f0923520b6a26bb4d9adc9cf9040f74e3ffc"),
+          Map.entry(
+              "docs/reviews/home-assistant-core-03a-v1.diff.gz",
+              "933e7ce33b11d5495a3020e77b6ac10742f525dd688a1e2c15cf4ea9edc43fa1"),
+          Map.entry(
+              "docs/reviews/home-assistant-core-03a-v2.diff.gz",
+              "3c4f922643b71458eb05dea686f5867780d586dcd68a84ed59064a879eb69e6c"),
+          Map.entry(
+              "docs/reviews/home-assistant-core-04-v1.diff.gz",
+              "88bcc231b4433ba969fb84c5932b4d88ec563299ea1b3937bb8da29bd3755ec8"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-01-v4.diff.gz",
+              "d49652d2ee55de0fbb9ec102cd32e5ae85d400bb7447caf0ef2751f441570ddd"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-01-v5.diff.gz",
+              "d49652d2ee55de0fbb9ec102cd32e5ae85d400bb7447caf0ef2751f441570ddd"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-02-v2.diff.gz",
+              "d61c026ab409d7e5564a4c707f36c03f214f5f20d350ac886c3630742611cca3"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-02-v3.diff.gz",
+              "3c4f922643b71458eb05dea686f5867780d586dcd68a84ed59064a879eb69e6c"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-03-v1.diff.gz",
+              "d49652d2ee55de0fbb9ec102cd32e5ae85d400bb7447caf0ef2751f441570ddd"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-03-v2.diff.gz",
+              "409fc7e4e427c7ce61824792cc901c682069553ce152090fe0c242d97d1d2b50"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-04-v1.diff.gz",
+              "b84ecd1fb68a35dbfeb01827f41b1413398f4b82330059ac82cea651ca3c13c3"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-04-v2.diff.gz",
+              "d78391ae81cb75b2af0cb8c2b2c10ce9bd8c3207534003136f8706d0d69f1f89"),
+          Map.entry(
+              "docs/reviews/home-assistant-ha-09-v1.diff.gz",
+              "d78391ae81cb75b2af0cb8c2b2c10ce9bd8c3207534003136f8706d0d69f1f89"),
+          Map.entry(
+              "docs/reviews/home-assistant-plan-00-v2.diff.gz",
+              "d61c026ab409d7e5564a4c707f36c03f214f5f20d350ac886c3630742611cca3"));
+
+  // Current frozen diffs expand to less than 5 MiB. Bound decompression independently of gzip size.
+  private static final int MAX_REVIEW_DIFF_BYTES = 8 * 1024 * 1024;
 
   @Test
   void the_modules_this_walks_are_the_ones_the_build_declares() throws IOException {
@@ -158,7 +229,7 @@ class SourceIsTextTest {
   }
 
   @Test
-  void the_only_unreadable_files_are_the_wrapper_and_application_icons() throws IOException {
+  void the_only_unreadable_tracked_files_are_explicit_binary_assets() throws IOException {
     // The wider statement, for the invariant that scans the whole tracked
     // tree rather than only src. Build outputs and tool directories are
     // skipped because they are not tracked and are full of legitimate
@@ -167,9 +238,7 @@ class SourceIsTextTest {
     // The source tests above also cover untracked code. This wider guard covers
     // the actual tracked tree, so unrelated local attachments are outside its scope.
     Process listing = new ProcessBuilder("git", "ls-files", "-z").directory(ROOT.toFile()).start();
-    String paths =
-        new String(
-            listing.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    String paths = new String(listing.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     try {
       assertEquals(0, listing.waitFor(), "cannot inventory the tracked tree");
     } catch (InterruptedException stopped) {
@@ -182,18 +251,42 @@ class SourceIsTextTest {
         unreadable.add(relative);
     }
 
+    Set<String> expected = new HashSet<>(BINARY_ASSETS);
+    expected.addAll(ARCHIVED_REVIEW_DIFFS.keySet());
     assertEquals(
-        BINARY_ASSETS,
+        expected,
         Set.copyOf(unreadable),
-        "the address grep runs over every tracked file outside docs/, and this is the"
-            + " list of the ones it cannot read");
+        "every tracked binary asset must be explicitly named; archived review evidence is"
+            + " additionally digest-bound and scanned after decompression");
+  }
+
+  @Test
+  void archived_review_diffs_retain_their_approved_bytes_and_expand_to_readable_text()
+      throws IOException, NoSuchAlgorithmException {
+    for (var archive : ARCHIVED_REVIEW_DIFFS.entrySet()) {
+      Path path = ROOT.resolve(archive.getKey());
+      assertEquals(
+          archive.getValue(),
+          HexFormat.of()
+              .formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path))),
+          "frozen review archive changed: " + archive.getKey());
+      byte[] expanded;
+      try (var gzip = new GZIPInputStream(Files.newInputStream(path))) {
+        expanded = gzip.readNBytes(MAX_REVIEW_DIFF_BYTES + 1);
+      }
+      assertTrue(expanded.length <= MAX_REVIEW_DIFF_BYTES, "review diff exceeds expansion limit");
+      assertFalse(holdsNul(expanded), "review diff contains a NUL: " + archive.getKey());
+      String text =
+          StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(expanded)).toString();
+      assertTrue(text.startsWith("diff --git "), "archive is not a text diff: " + archive.getKey());
+    }
   }
 
   private static List<String> modules() throws IOException {
     List<String> modules = new ArrayList<>();
     String settings = Files.readString(ROOT.resolve("settings.gradle.kts"));
     // Gradle identities remain stable when physical source directories move.
-    java.util.Map<String, String> directories = new java.util.HashMap<>();
+    Map<String, String> directories = new HashMap<>();
     Matcher locations =
         Pattern.compile("project\\(\":([^\"]+)\"\\)\\.projectDir = file\\(\"([^\"]+)\"\\)")
             .matcher(settings);
@@ -240,7 +333,11 @@ class SourceIsTextTest {
   }
 
   private static boolean holdsNul(Path file) throws IOException {
-    for (byte b : Files.readAllBytes(file)) {
+    return holdsNul(Files.readAllBytes(file));
+  }
+
+  private static boolean holdsNul(byte[] content) {
+    for (byte b : content) {
       if (b == 0) {
         return true;
       }

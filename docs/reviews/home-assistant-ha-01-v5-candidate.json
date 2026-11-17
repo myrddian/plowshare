@@ -1,0 +1,84 @@
+{
+  "node": "HA-01",
+  "candidate_id": "ha-ha-01-v5",
+  "created_at": "2026-11-17T00:43:14.260298+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_provider_implementer",
+  "reviewer_agent_id": "/root/ha_discovery_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-ha-01-v5-state.json": "f734940adcf6a0f9f0b4c6db856c0e1f54946f460ab9540e3e6f88d841e758fe",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantDiscoveryPolicy.java": "05828ef6f9dd4e4168fa03ff4852117a5d0111d7057f32ef6809a529f7f769be",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResources.java": "b8d8671e10b78a27665b6bb9aa5f683f6fd62f56b8868ea9c587cf0bdfb3ed56",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ResourceDiscovery.java": "335f9b36528b451afca8e73f1c344602f3c0d12803a55aa2dc64434fbc1ebc3d",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ResourceReader.java": "02caa379adcf11b8ad66398a01444dc8bb0d442cb5504738f3bbcfbb64632b53",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceContractsTest.java": "beb90d8c2225ca5dc3b2cf02878133a9a854e805c24039e1fd525e90009c99f9"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-ha-01-v5-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-01-v5.diff.gz",
+    "sha256": "d49652d2ee55de0fbb9ec102cd32e5ae85d400bb7447caf0ef2751f441570ddd",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "AUDIT-01": {
+      "id": "ha-audit-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+      "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "implementation_report",
+      "text": "Root ./gradlew format then independent post-format :plowshare-integration-home-assistant:test --tests io.aeyer.plowshare.integrations.ha.HomeAssistantResourceContractsTest formatCheck passed. 8 focused cases passed. No transport/provider or live claims; contract-only node."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_discovery_reviewer",
+      "verdict": "CHANGES_REQUIRED",
+      "candidate_id": "ha-ha-01-v1",
+      "manifest_sha256": "f5c3e6b41d507e19965b9e5344cfa869c87a226f544697694d7cedbdeeb74a14",
+      "report_path": "docs/reviews/home-assistant-ha-01-review.md",
+      "report_sha256": "a625f17f27756e22b43ef4d8cd238a3e93395c31c70ce98a30964f9ba0e7d554"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "HA01-R1/R2 corrected, 2 regressions added. Root sequential formatter then :plowshare-integration-home-assistant:test --tests io.aeyer.plowshare.integrations.ha.HomeAssistantResourceContractsTest formatCheck PASS, 10 focused cases, final sources unchanged. Mixed-target profile omission never narrows original action execution targets."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_discovery_reviewer",
+      "verdict": "APPROVE",
+      "candidate_id": "ha-ha-01-v2",
+      "manifest_sha256": "55f10437ab8fde48dfecf7284256dda51c04868f72f27d119c2090b5268f3840",
+      "report_path": "docs/reviews/home-assistant-ha-01-v2-review.md",
+      "report_sha256": "5e80b226beca7a48f0e65edc64c9ddda8c9d6e0fba2f8a3fb4496e5532c6de91"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "Compatible immutable selected-reference accessor by HA02 implementer; original HA01 v2 files/tests otherwise unchanged. Scoped HA formatter passed. Current 10 contract cases and HA02 integration checks await stable server compilation; reviewer may inspect exact code now, final closure must wait current test evidence."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_discovery_reviewer",
+      "verdict": "APPROVE",
+      "candidate_id": "ha-ha-01-v3",
+      "manifest_sha256": "30815681201017bc26558e2d2eb3888357b8a23185e74d4c61c2173fdcd8a6ac",
+      "report_path": "docs/reviews/home-assistant-ha-01-v3-review.md",
+      "report_sha256": "f1b83cd2aa0a37cf1a6648abd0f74ede23253c06191b3ef0e39702f8385bfe0a"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "Additive immutable OperationBudget.capped(Duration) by HA03 author. Current11ResourceContractsTest cases passed and globalformatCheck passed. CombinedHA03taskhad1unrelatedhostfixture-clockfailure (34/35passed), not claimed whole success. No HA01changesaftercanonicalchecks; HA03retirementworkcontinuesinotherfiles."
+    },
+    {
+      "kind": "verification_claim_correction",
+      "at": "2026-11-17T00:37:59.094537+00:00",
+      "note": "HA03combinedtaskfailedbeforeaggregateformatCheck; rootpreviousglobalpassclaimunverified. ScopedformatterApplyand11contractcasespassed. Reviewerproperlykeepsv4pending; requireactualcurrentformatCheckandnewv5manifestbeforeapproval."
+    },
+    {
+      "kind": "implementation_report",
+      "text": "Corrected verification candidate: separate ./gradlew formatCheck PASS4s43tasks log/private/tmp/ha-delivery-current-format-check.log. Current11contractcases PASS withall40HA03cases; combinedtaskfailedunrelatedserverfixturecompile, notclaimedoverallpass. Sourceunchangedfromv4. v4aggregateformatclaimwithdrawn, thisv5containsactualproof."
+    }
+  ]
+}

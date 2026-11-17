@@ -122,6 +122,81 @@ await using (var client = await Open("provider-owner-compat"))
     try { hosted.RequirePayload(); throw new Exception("unsupported hosted management became success"); }
     catch (RefusalException e) { Check(e.Code == "NOT_FOUND" && e.Said == "no handler is registered for type \"tool.scope.host.list\"", "hosted refusal lost"); }
 }
+// Public generated Ex requests retain exact selectors and nullable/empty fields.
+// The shared fixture counts one application frame even after uncertain delivery.
+var external = fixture.RootElement.GetProperty("externalConversationContract");
+var opening = external.GetProperty("openRequest");
+var running = external.GetProperty("runRequest");
+foreach (var test in external.GetProperty("cases").EnumerateArray())
+{
+    var name = test.GetProperty("name").GetString()!;
+    var expectedDelivery = test.TryGetProperty("delivery", out var expected) ? expected.GetString() : null;
+    await using var client = await Open("external-" + name);
+    try
+    {
+        if (test.GetProperty("operation").GetString() == "conversation.open.ex")
+        {
+            var reply = await client.ConversationOpenExAsync(new ConversationOpenRequestEx
+            {
+                Project = opening.GetProperty("project").GetString()!,
+                Source = opening.GetProperty("source").GetString()!,
+                ExternalConversation = opening.GetProperty("externalConversation").GetString()!
+            });
+            Check(expectedDelivery is null && reply.Code == test.GetProperty("code").GetString(), "Wrong Ex open outcome");
+            var conversation = reply.RequirePayload();
+            Check(conversation.Id == external.GetProperty("conversation").GetProperty("id").GetString()
+                && conversation.MaxModelCalls.Variant2.IsSet && conversation.MaxModelCalls.Variant2.Value == 0,
+                "Wrong Ex conversation or configured-zero budget");
+        }
+        else
+        {
+            var reply = await client.AgentRunExAsync(new AgentRunRequestEx
+            {
+                Project = running.GetProperty("project").GetString()!,
+                Source = running.GetProperty("source").GetString()!,
+                ExternalConversation = running.GetProperty("externalConversation").GetString()!,
+                Agent = running.GetProperty("agent").GetString()!,
+                Task = running.GetProperty("task").GetString()!,
+                Session = TierDtoProject.FromVariant1(default),
+                Images = Array.Empty<string>(),
+                MaxModelCalls = running.GetProperty("maxModelCalls").GetDouble(),
+                MaxTurns = running.GetProperty("maxTurns").GetDouble()
+            });
+            Check(expectedDelivery is null && reply.Code == test.GetProperty("code").GetString(), "Wrong Ex run outcome");
+            if (reply.Successful)
+            {
+                var job = reply.RequirePayload();
+                Check(job.Id == external.GetProperty("startedJob").GetProperty("id").GetString()
+                    && job.Conversation == external.GetProperty("startedJob").GetProperty("conversation").GetString(),
+                    "Wrong Ex internal job receipt");
+            }
+            else
+            {
+                try { reply.RequirePayload(); throw new Exception("Ex refusal became success"); }
+                catch (RefusalException error) { Check(error.Code == "NOT_FOUND", "Ex refusal lost"); }
+            }
+        }
+    }
+    catch (TransportException error)
+    {
+        var observed = error.Delivery switch { Delivery.Unknown => "UNKNOWN", Delivery.InvalidResponse => "INVALID_RESPONSE", _ => "NOT_SUBMITTED" };
+        Check(observed == expectedDelivery, "Wrong Ex delivery: " + name);
+    }
+}
+await using (var client = await Open("external-invalid"))
+{
+    try
+    {
+        await client.ConversationOpenExAsync(new ConversationOpenRequestEx
+        {
+            Project = opening.GetProperty("project").GetString()!,
+            Source = "UPPER",
+            ExternalConversation = opening.GetProperty("externalConversation").GetString()!
+        });
+        throw new Exception("Invalid Ex source submitted");
+    }
+    catch (JsonException) { }
+}
 await using (var client = await Client.ConnectAsync(origin, "sdk-fixture-token", "packet-large-dotnet",TimeSpan.FromSeconds(30)))
 {
     var text=new string('\u0001',5*1024*1024);

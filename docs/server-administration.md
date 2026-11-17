@@ -519,7 +519,7 @@ sum by (instance, lane, operation) (
 )
 ```
 
-The `AggregateFailureReporter` logger emits WARN diagnostics containing the source,
+The `AggregateFailureReporter` logger emits ERROR diagnostics containing the source,
 kind, cumulative observation count, exception type and bounded stack locations. It
 omits exception messages, suppressed exceptions, payloads, user/session/job identifiers
 and filesystem paths. Cause diagnostics stop after four exceptions and twelve frames

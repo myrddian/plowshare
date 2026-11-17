@@ -36,6 +36,37 @@ type scenario struct {
 	WaitingDelivery    plowshare.Delivery `json:"waitingDelivery"`
 }
 
+// Ex cases share exact selectors and outcome expectations across all SDK drivers.
+type externalConversationContract struct {
+	OpenRequest struct {
+		Project              string `json:"project"`
+		Source               string `json:"source"`
+		ExternalConversation string `json:"externalConversation"`
+	} `json:"openRequest"`
+	RunRequest struct {
+		Project              string  `json:"project"`
+		Source               string  `json:"source"`
+		ExternalConversation string  `json:"externalConversation"`
+		Agent                string  `json:"agent"`
+		Task                 string  `json:"task"`
+		MaxModelCalls        float64 `json:"maxModelCalls"`
+		MaxTurns             float64 `json:"maxTurns"`
+	} `json:"runRequest"`
+	Conversation struct {
+		Id string `json:"id"`
+	} `json:"conversation"`
+	StartedJob struct {
+		Id           string `json:"id"`
+		Conversation string `json:"conversation"`
+	} `json:"startedJob"`
+	Cases []struct {
+		Name      string             `json:"name"`
+		Operation string             `json:"operation"`
+		Code      string             `json:"code"`
+		Delivery  plowshare.Delivery `json:"delivery"`
+	} `json:"cases"`
+}
+
 // result is one settled request, carried on a channel so a driver can observe
 // that a request is still pending without collecting it.
 type result struct {
@@ -106,7 +137,8 @@ func main() {
 	bytes, err := os.ReadFile(os.Getenv("PLOWSHARE_SDK_FIXTURES"))
 	check(err == nil, "fixture unavailable")
 	var fixture struct {
-		Cases []scenario `json:"cases"`
+		Cases                        []scenario                   `json:"cases"`
+		ExternalConversationContract externalConversationContract `json:"externalConversationContract"`
 	}
 	check(json.Unmarshal(bytes, &fixture) == nil, "invalid fixture")
 	cases := map[string]scenario{}
@@ -279,6 +311,7 @@ func main() {
 	_, err = hostedReply.RequirePayload()
 	check(errors.As(err, &managementRefusal) && managementRefusal.Code == "NOT_FOUND" && managementRefusal.Said != nil && *managementRefusal.Said == `no handler is registered for type "tool.scope.host.list"`, "unsupported hosted management became success")
 	client.Close()
+	externalConversations(ctx, origin, fixture.ExternalConversationContract)
 	large, err := plowshare.Connect(ctx, origin, "sdk-fixture-token", plowshare.Options{Session: "packet-large-go", Timeout: 30 * time.Second})
 	check(err == nil, "large packet upgrade failed")
 	text := strings.Repeat("\u0001", 5*1024*1024)
@@ -294,6 +327,56 @@ func main() {
 	large.Close()
 	backpressure(ctx, origin, cases)
 	fmt.Println("Go typed SDK conformance passed")
+}
+
+func externalConversations(ctx context.Context, origin string, fixture externalConversationContract) {
+	for _, test := range fixture.Cases {
+		client, err := plowshare.Connect(ctx, origin, "sdk-fixture-token", plowshare.Options{Session: "typed-go/external-" + test.Name, Timeout: 300 * time.Millisecond})
+		check(err == nil, "Ex connection failed")
+		if test.Operation == "conversation.open.ex" {
+			reply, requestErr := client.ConversationOpenEx(ctx, plowshare.ConversationOpenRequestEx{
+				Project: fixture.OpenRequest.Project, Source: fixture.OpenRequest.Source, ExternalConversation: fixture.OpenRequest.ExternalConversation,
+			})
+			err = requestErr
+			if err == nil {
+				check(test.Delivery == "" && reply.Code == test.Code, "wrong Ex open outcome")
+				conversation, payloadErr := reply.RequirePayload()
+				check(payloadErr == nil && conversation.Id == fixture.Conversation.Id && conversation.MaxModelCalls.Variant2 != nil && *conversation.MaxModelCalls.Variant2 == 0, "wrong Ex conversation or configured-zero budget")
+			}
+		} else {
+			images := []string{}
+			reply, requestErr := client.AgentRunEx(ctx, plowshare.AgentRunRequestEx{
+				Project: fixture.RunRequest.Project, Source: fixture.RunRequest.Source, ExternalConversation: fixture.RunRequest.ExternalConversation,
+				Agent: fixture.RunRequest.Agent, Task: fixture.RunRequest.Task, Session: &plowshare.TierDtoProject{Variant1: &plowshare.Unit{}}, Images: &images,
+				MaxModelCalls: &fixture.RunRequest.MaxModelCalls, MaxTurns: &fixture.RunRequest.MaxTurns,
+			})
+			err = requestErr
+			if err == nil {
+				check(test.Delivery == "" && reply.Code == test.Code, "wrong Ex run outcome")
+				job, payloadErr := reply.RequirePayload()
+				if reply.Successful() {
+					check(payloadErr == nil && job.Id == fixture.StartedJob.Id && job.Conversation == fixture.StartedJob.Conversation, "wrong Ex internal job receipt")
+				} else {
+					var refusal *plowshare.RefusalError
+					check(errors.As(payloadErr, &refusal) && refusal.Code == "NOT_FOUND", "Ex refusal became success")
+				}
+			}
+		}
+		if test.Delivery != "" {
+			var delivery *plowshare.TransportError
+			check(errors.As(err, &delivery) && delivery.Delivery == test.Delivery, "wrong Ex delivery: "+test.Name)
+		} else {
+			check(err == nil, "Ex request unexpectedly failed: "+test.Name)
+		}
+		client.Close()
+	}
+	client, err := plowshare.Connect(ctx, origin, "sdk-fixture-token", plowshare.Options{Session: "typed-go/external-invalid", Timeout: 300 * time.Millisecond})
+	check(err == nil, "Ex invalid-input connection failed")
+	_, err = client.ConversationOpenEx(ctx, plowshare.ConversationOpenRequestEx{
+		Project: fixture.OpenRequest.Project, Source: "UPPER", ExternalConversation: fixture.OpenRequest.ExternalConversation,
+	})
+	check(err != nil, "invalid Ex source submitted")
+	client.Close()
 }
 
 // capacityConnectionTimeout is the connection-level timeout every backpressure

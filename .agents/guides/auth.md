@@ -85,9 +85,10 @@ durable. Both paths enforce current issuance authority, role and scope ceilings.
 
 Authentication, session checks, role resolution and admission use the
 [bounded-work rule](../../docs/coding-standards.md#bound-active-work-in-every-subsystem):
-short interactive checks have a configurable two-second default ceiling, with
-queueing and nested SQL sharing remaining time. Expiry is unavailable/timeout,
-never an allow, a fabricated revocation or permission to fall back to another
+actual query/transaction units have a configurable two-second default ceiling.
+Nested SQL shares the transaction remaining time. Slow composed authorization
+work warns without a workflow timeout. Query expiry is a typed failed read,
+never an allow, fabricated revocation or permission to fall back to another
 identity. Do not replay uncertain login/refresh/grant mutations. Retained work
 still needs current effect/disclosure fences after queueing or resumption.
 
@@ -96,6 +97,31 @@ grant expiry/notification staleness is not a request execution deadline. Trace
 [session admission](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/SocketSessionProperties.java)
 and the actual credential/SQL owner before claiming a universal two-second bound.
 Use the owner's cancellation and retain physical capacity until work settles.
+
+The two external-conversation Ex operations reuse only their immediate common
+namespace work check. [ProjectAuthorization] first runs its complete ordinary
+policy, including service-operation, Personal and effective-role rules, then
+mints an opaque `ExternalAdmission` for the synchronous handler. Only that owner
+can construct it. Internal Asking/Caller values carry it with exact project,
+account, transport session and Ex-operation binding; consumption also requires
+the original thread, one use and the identity of the still-open handler scope.
+The router closes it when that scope ends. It is neither a wire field nor a
+cache/continuing grant. Direct typed calls and wrong, reused or closed-scope evidence
+perform the live namespace work check. Actual-target work after alias commit,
+post-definition run admission, post-handler and queued-output authority fences
+retain their distinct freshness purposes. See
+[ExternalConversationService](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ExternalConversationService.java)
+and [FrameRouter](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/FrameRouter.java).
+
+After definition loading, an Ex turn's work check runs against Turn's freshly
+loaded/claimed row before any allowance access or raise. The aliased root's
+project identity is fixed by its database constraint; its current Home name can
+change. A stale name reused for another project is not authority over that row.
+Successful Ex result fences derive the internal conversation ID from the typed
+result and resolve its current project through ResourceScopeRepository. They
+reuse that narrow scope for common and Personal checks rather than hydrating and
+discarding a conversation with an attached allowance callback. Post-handler and
+queued-output checks remain independent fresh boundaries.
 
 ## Change and verification path
 

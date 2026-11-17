@@ -10,9 +10,14 @@ public final class JdbcReadDeadline {
   private JdbcReadDeadline() {}
 
   /**
-   * Includes acquisition and row mapping in the per-query ceiling and preserves any earlier
-   * deadline belonging to the current SQL transaction.
+   * An owned JDBC wrapper can tighten cancellation/materialization without exposing a native
+   * handle. Reused statements never extend an earlier applied absolute deadline.
    */
+  public interface StatementDeadline {
+    void constrainReadDeadline(long deadline) throws SQLException;
+  }
+
+  /** Includes acquisition/mapping and preserves an earlier active SQL transaction deadline. */
   public static long completionDeadline(long sqlDeadline) {
     long queryDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
     return sqlDeadline - queryDeadline < 0 ? sqlDeadline : queryDeadline;
@@ -27,6 +32,10 @@ public final class JdbcReadDeadline {
   public static void apply(Statement statement, long deadline) throws SQLException {
     long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
     if (remaining < 1) throw ReadFailedException.deadlineExceeded();
+    if (statement.isWrapperFor(StatementDeadline.class)) {
+      statement.unwrap(StatementDeadline.class).constrainReadDeadline(completionDeadline(deadline));
+      return;
+    }
     PgStatement postgres = statement.unwrap(PgStatement.class);
     long configured = postgres.getQueryTimeoutMs();
     long timeout = Math.min(2000, remaining);

@@ -9,6 +9,9 @@ const pascal = (s) =>
     .filter(Boolean)
     .map((s) => s[0].toUpperCase() + s.slice(1))
     .join('');
+// Published Ex request names keep RequestEx rather than deriving ExRequest from the wire verb.
+const requestName = (op) => op === 'conversation.open.ex' ? 'ConversationOpenRequestEx'
+  : op === 'agent.run.ex' ? 'AgentRunRequestEx' : pascal(op) + 'Request';
 const snake = (s) =>
   s
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
@@ -159,6 +162,33 @@ function pyClass(n, k, base = '') {
       .join('')
   );
 }
+
+/** Validation-only aliases must preserve the declared DTO graph, not create an untyped object. */
+function declaredShape(schema, graph, ancestors = new Set()) {
+  if (schema.$ref) {
+    if (['type','const','optional','forbidden','required','properties','additionalProperties','items','anyOf','prefixItems'].some(key=>key in schema))
+      throw new Error('Structural result overlays require a private definition');
+    const key = id(schema);
+    if (!graph.$defs[key] || ancestors.has(key))
+      throw new Error('Invalid or recursive private result model binding');
+    return declaredShape(graph.$defs[key], graph, new Set([...ancestors,key]));
+  }
+  const shape = {};
+  for (const key of ['type','const','optional','forbidden'])
+    if (key in schema) shape[key] = schema[key];
+  if (schema.required) shape.required = [...schema.required].sort();
+  if (schema.properties)
+    shape.properties = Object.fromEntries(Object.entries(schema.properties).sort(([a],[b])=>a.localeCompare(b))
+      .map(([key,value])=>[key,declaredShape(value,graph,ancestors)]));
+  if ('additionalProperties' in schema)
+    shape.additionalProperties = typeof schema.additionalProperties === 'object'
+      ? declaredShape(schema.additionalProperties,graph,ancestors) : schema.additionalProperties;
+  if (schema.items) shape.items = declaredShape(schema.items,graph,ancestors);
+  for (const key of ['anyOf','prefixItems'])
+    if (schema[key]) shape[key] = schema[key].map(value=>declaredShape(value,graph,ancestors));
+  return shape;
+}
+
 export function nativeContracts() {
   let py = `# ${header}\nfrom __future__ import annotations\nfrom dataclasses import dataclass, field\nfrom typing import ClassVar, Generic, Literal, Mapping, TypeAlias, TypeVar\nfrom ._values import UNSET, Unset\nT = TypeVar("T", covariant=True)\nclass Request(Generic[T]):\n    """An operation paired with its validated result type; only generated requests are accepted."""\n    operation: ClassVar[str]\n`;
   for (const [k, n] of classes) {
@@ -171,7 +201,7 @@ export function nativeContracts() {
   }
   for (const op of operations) {
     const result = typ(id(OPERATION_SCHEMAS.results[op]), 'py'),
-      n = pascal(op) + 'Request';
+      n = requestName(op);
     const key = id(OPERATION_SCHEMAS.inputs[op]);
     py +=
       '\n' +
@@ -191,7 +221,7 @@ export function nativeContracts() {
   py +=
     '\n_REQUESTS = {\n' +
     operations
-      .map((op) => `    ${pascal(op)}Request: ${quote(op)},\n`)
+      .map((op) => `    ${requestName(op)}: ${quote(op)},\n`)
       .join('') +
     '}\n';
   py +=
@@ -208,7 +238,7 @@ export function nativeContracts() {
     operations
       .map(
         (op) =>
-          `    ${pascal(op)}Request: {${fields(id(OPERATION_SCHEMAS.inputs[op]))
+          `    ${requestName(op)}: {${fields(id(OPERATION_SCHEMAS.inputs[op]))
             .map(([f]) => quote(f) + ': ' + quote(pyField(f)))
             .join(', ')}},\n`,
       )
@@ -315,7 +345,7 @@ export function nativeContracts() {
       'throw new JsonException("Select a union variant");}\n}\n';
   }
   for (const op of operations) {
-    const n = pascal(op) + 'Request',
+    const n = requestName(op),
       k = id(OPERATION_SCHEMAS.inputs[op]),
       gresult = typ(id(OPERATION_SCHEMAS.results[op]), 'go'),
       cresult = typ(id(OPERATION_SCHEMAS.results[op]), 'cs');
@@ -329,6 +359,24 @@ export function nativeContracts() {
   go += `\n// ServerPush is a validated notification; reconcile durable state through operations.\ntype ServerPush = ${typ(id(OPERATION_SCHEMAS.pushes), 'go')}\n`;
   cs += `\npublic sealed record ServerPush(${typ(id(OPERATION_SCHEMAS.pushes), 'cs')} Notification);\n`;
   const checkedSchemas = constrain(structuredClone(OPERATION_SCHEMAS));
+  // Public result classes/signatures still come from the canonical graph. An operation-private
+  // validation definition needs the same Python object-model binding after its constraints pass.
+  // Go/.NET already deserialize their explicit generic result type; runtime codecs stay unchanged.
+  for (const op of operations) {
+    const original = OPERATION_SCHEMAS.results[op], checked = checkedSchemas.results[op];
+    if (original.$ref === checked.$ref) continue;
+    if (!original.$ref || !checked.$ref)
+      throw new Error('Private result validation requires a known model reference: '+op);
+    const originalKey = id(original), privateKey = id(checked);
+    if (!checkedSchemas.$defs[privateKey]
+        || defs[originalKey]?.type !== 'object' || dictionary(defs[originalKey])
+        || !classes.some(([key])=>key===originalKey)
+        || checkedSchemas.$defs[privateKey].type !== 'object'
+        || JSON.stringify(declaredShape(original,OPERATION_SCHEMAS))
+          !== JSON.stringify(declaredShape(checked,checkedSchemas)))
+      throw new Error('Private result validation changes its declared model: '+op);
+    py += `\n_MODELS[${quote(privateKey)}] = ${names.get(originalKey)}\n`;
+  }
   return {
     'sdk/python/src/plowshare/contracts.py': py,
     'sdk/go/contracts_generated.go': go,

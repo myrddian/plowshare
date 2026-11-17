@@ -192,6 +192,10 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
       return new DispatchPolicy(Kind.OBSERVER, List.of());
     if (request.actingFor() != null)
       return resource("acting", connection, request.actingFor().context().toString());
+    if (type.equals("conversation.open.ex") || type.equals("agent.run.ex"))
+      // Resolving an alias can create a row or start durable work; keep the normal mutation
+      // barrier until the actual conversation is known. Domain exclusion is still Turn's.
+      return barrier();
     if (type.equals("relay.group.inspect")) return new DispatchPolicy(Kind.FINITE, List.of());
     if (independentRead(type)) return new DispatchPolicy(Kind.FINITE, List.of());
     if (type.equals("web.search")) {

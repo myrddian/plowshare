@@ -789,6 +789,10 @@ export const SHAPES: Record<
     [],
     ['project', 'maxModelCalls', 'maxTurns', 'noTurnCap', 'noBudget'],
   ],
+  'conversation.open.ex': [
+    ['project', 'source', 'externalConversation'],
+    ['maxModelCalls', 'maxTurns', 'noTurnCap', 'noBudget'],
+  ],
   'conversation.list': [[], ['project', 'lifecycle']],
   'conversation.latest': [['agent'], ['project']],
   'conversation.lifecycle': [['conversation', 'lifecycle'], []],
@@ -822,6 +826,10 @@ export const SHAPES: Record<
       'images',
       'maxModelCalls',
     ],
+  ],
+  'agent.run.ex': [
+    ['project', 'source', 'externalConversation', 'agent', 'task'],
+    ['session', 'maxTurns', 'noTurnCap', 'images', 'maxModelCalls'],
   ],
   'job.list': [[], []],
   'job.limits': [['job'], ['maxTurns', 'noTurnCap', 'maxModelCalls']],
@@ -1596,6 +1604,44 @@ export function commandProblem(
       body['project'] !== body['project'].trim()
     )
       return 'Choose an explicit project or an existing conversation';
+  }
+  if (type === 'conversation.open.ex' || type === 'agent.run.ex') {
+    const source = body['source'];
+    const external = body['externalConversation'];
+    if (
+      typeof body['project'] !== 'string' ||
+      body['project'] !== body['project'].trim() ||
+      body['project'].length > 1024 ||
+      Array.from(body['project']).some((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return (
+          code < 32 ||
+          (code >= 127 && code <= 159) ||
+          code === 0x2028 ||
+          code === 0x2029
+        );
+      }) ||
+      typeof source !== 'string' ||
+      source.length > 128 ||
+      !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(source) ||
+      typeof external !== 'string' ||
+      !/^[\x21-\x7e]{1,256}$/.test(external)
+    )
+      return 'Invalid external conversation locator';
+    for (const key of [
+      'maxModelCalls',
+      'maxTurns',
+      'noTurnCap',
+      'noBudget',
+      'images',
+    ])
+      if (key in body && body[key] === null) return `${key} cannot be null`;
+    if (
+      type === 'agent.run.ex' &&
+      isList(body['images']) &&
+      body['images'].length > 0
+    )
+      return 'images are not supported in conversation turns';
   }
   if (type === 'agent.run' && body['newConversation'] === true) {
     if (body['conversation'] != null)

@@ -19,6 +19,8 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.pool.OperationStatements;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.relay.RelayReadBudget;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import io.aeyer.plowshare.server.session.WorkspaceRecovery;
@@ -711,9 +713,9 @@ public final class EventChannelHandler extends TextWebSocketHandler
       delivery.requests =
           new EventRequests(
               packetBudget,
-              frame -> {
+              (frame, external) -> {
                 try {
-                  routeFrame(socket, delivery, frame);
+                  routeFrame(socket, delivery, frame, external);
                 } catch (RuntimeException | Error failure) {
                   delivery.stop();
                   try {
@@ -807,10 +809,12 @@ public final class EventChannelHandler extends TextWebSocketHandler
       return;
     }
     String frame;
+    long assembledAtNanos;
     try {
       var assembled = delivery.transport.receive(message.getPayload());
       if (assembled.isEmpty()) return;
       frame = assembled.get();
+      assembledAtNanos = System.nanoTime();
     } catch (IOException | RuntimeException invalidPacket) {
       delivery.stop();
       try {
@@ -824,23 +828,86 @@ public final class EventChannelHandler extends TextWebSocketHandler
       delivery.disconnect("server stopping");
       return;
     }
-    if (concurrentFrame(socket, delivery, frame)) return;
+    QueuedExternalConversationRequest external;
+    try {
+      external = retainExternal(socket, delivery, frame, assembledAtNanos);
+    } catch (ReadUnavailableException capacity) {
+      var correlation = correlationOf(frame);
+      // No dispatcher entry or handler exists yet; this refusal permits paced resubmission.
+      delivery.refuse(
+          text(correlation.get("id")),
+          text(correlation.get("type")),
+          Outcome.failed(
+              Code.CAPACITY_EXHAUSTED,
+              "Incoming request capacity is busy; no handler was started"));
+      return;
+    } catch (RuntimeException unavailable) {
+      var correlation = correlationOf(frame);
+      Fault fault = Faults.of(unavailable);
+      delivery.answer(
+          text(correlation.get("id")),
+          text(correlation.get("type")),
+          Outcome.failed(fault.code(), fault.detail()));
+      return;
+    }
+    if (concurrentFrame(socket, delivery, frame, external)) return;
     if (delivery.requests == null) {
-      routeFrame(socket, delivery, frame);
+      routeFrame(socket, delivery, frame, external);
     } else {
       try {
-        delivery.requests.offer(frame);
+        if (!delivery.requests.offer(frame, external) && external != null) external.close();
       } catch (IllegalArgumentException capacity) {
+        if (external != null) external.close();
         delivery.requests.close();
         delivery.disconnect("request admission");
       }
     }
   }
 
+  private QueuedExternalConversationRequest retainExternal(
+      WebSocketSession socket, Delivery delivery, String frame, long assembledAtNanos) {
+    var correlation = correlationOf(frame);
+    String type = text(correlation.get("type"));
+    if (!ExternalConversationRequestWork.external(type)) return null;
+    var requestSession = sessionValidity(socket);
+    var asking =
+        new Asking(
+            named(socket),
+            (String) socket.getAttributes().get(HANDLE),
+            socket.getId(),
+            delivery.transport instanceof PacketEventTransport
+                ? RelayReadBudget.SEGMENTED
+                : RelayReadBudget.LEGACY,
+            fence(socket, delivery, requestSession));
+    return router()
+        .externalRequest(
+            assembledAtNanos,
+            asking,
+            requestSession,
+            (outcome, acknowledged) -> {
+              if (!delivery.running || !socket.isOpen()) {
+                acknowledged.run();
+                return;
+              }
+              // A normal Ex reply retains its input ownership until physical output settlement.
+              // SQL/provider budgets belong to their actual owners, never to this callback.
+              delivery.answer(
+                  text(correlation.get("id")),
+                  type,
+                  outcome,
+                  acknowledged,
+                  () -> router().requireExternalDisclosure(frame, asking, outcome));
+            });
+  }
+
   /**
    * Private transport control is admitted before domain routing and never grants domain authority.
    */
-  private boolean concurrentFrame(WebSocketSession socket, Delivery delivery, String frame) {
+  private boolean concurrentFrame(
+      WebSocketSession socket,
+      Delivery delivery,
+      String frame,
+      QueuedExternalConversationRequest external) {
     com.fasterxml.jackson.databind.JsonNode body;
     try {
       body = json.readTree(frame);
@@ -903,12 +970,15 @@ public final class EventChannelHandler extends TextWebSocketHandler
         delivery.domainSeen = true;
       }
       try {
-        delivery.concurrent.offer(frame, request, (String) socket.getAttributes().get(HANDLE));
+        delivery.concurrent.offer(
+            frame, request, (String) socket.getAttributes().get(HANDLE), external);
       } catch (ConcurrentRequests.CapacityExceededException congested) {
+        if (external != null) external.close();
         refuseCongested(delivery, request);
       }
       return true;
     } catch (RuntimeException invalid) {
+      if (external != null) external.close();
       delivery.stop();
       delivery.disconnect("invalid request admission");
       return true;
@@ -951,6 +1021,21 @@ public final class EventChannelHandler extends TextWebSocketHandler
       Delivery delivery,
       String frame,
       ConcurrentRequests.Delivery delivered) {
+    var external = delivered.externalRequest();
+    if (external != null) {
+      external.bind(delivered);
+      return routeExternal(
+          external,
+          () ->
+              router()
+                  .externalWithin(
+                      () -> {
+                        if (!socket.isOpen() || !delivery.running || !external.verify())
+                          throw new CallerFault("Query connection ended");
+                        String type = text(correlationOf(frame).get("type"));
+                        return concurrentAnswer(type, frame, external.asking());
+                      }));
+    }
     var requestSession = sessionValidity(socket);
     // The entry check is this request's one session check; the instance carries its result to the
     // handler, the post-handler fence, the disclosure fence and every wait iteration.
@@ -1008,7 +1093,9 @@ public final class EventChannelHandler extends TextWebSocketHandler
                 delivered,
                 ConcurrentDispatch.TYPE.equals(type)
                     ? delivery.validity
-                    : () -> router().requireDisclosure(frame, asking, outcome),
+                    : ExternalConversationRequestWork.external(type)
+                        ? () -> router().requireExternalDisclosure(frame, asking, outcome)
+                        : () -> router().requireDisclosure(frame, asking, outcome),
                 delivered::started,
                 () -> delivered.executionFinished().toCompletableFuture().join());
             if (usageSubscriptions != null
@@ -1020,9 +1107,89 @@ public final class EventChannelHandler extends TextWebSocketHandler
     }
   }
 
+  @SuppressWarnings("try")
+  private CompletionStage<Outcome> concurrentAnswer(String type, String frame, Asking asking) {
+    // Keep accounting on the existing request thread, including Ex routing. Notification threads
+    // never inherit this scope or execute the handler, SQL, hook loading or durable job admission.
+    try (var ignored = OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
+      return ConcurrentDispatch.TYPE.equals(type)
+          ? CompletableFuture.completedFuture(
+              Outcome.ok(
+                  new ConcurrentDispatch.Selected(
+                      ConcurrentDispatch.MODE,
+                      advertisedRequestDepth(),
+                      ConcurrentDispatch.MAX_ID_BYTES)))
+          : router().routeAsync(frame, asking);
+    }
+  }
+
+  private CompletionStage<Void> routeExternal(
+      QueuedExternalConversationRequest completion, Supplier<CompletionStage<Outcome>> route) {
+    CompletionStage<Outcome> source;
+    try {
+      source = completion.within(route);
+    } catch (RuntimeException unavailable) {
+      try {
+        Fault fault = Faults.of(unavailable);
+        completion.answer(Outcome.failed(fault.code(), fault.detail()));
+      } finally {
+        completion.close();
+      }
+      return CompletableFuture.completedFuture(null);
+    } catch (Error fatal) {
+      completion.close();
+      throw fatal;
+    }
+    var reply = new CompletableFuture<Void>();
+    // The unexposed observer owns physical cleanup even if the returned reply is cancelled.
+    // No transport timer or fresh SQL context surrounds accepted handler/provider work.
+    source.whenComplete(
+        (outcome, failure) -> {
+          Throwable settledFailure = null;
+          try {
+            if (failure instanceof Error fatal) throw fatal;
+            if (failure == null) completion.answer(outcome);
+            else {
+              Fault fault = Faults.of(failure);
+              completion.answer(Outcome.failed(fault.code(), fault.detail()));
+            }
+          } catch (RuntimeException | Error failed) {
+            settledFailure = failed;
+          } finally {
+            completion.close();
+          }
+          if (settledFailure == null) reply.complete(null);
+          else reply.completeExceptionally(settledFailure);
+        });
+    return reply;
+  }
+
   /** Recheck authority at execution, because a queued operation may outlive its account session. */
   @SuppressWarnings("try")
-  private void routeFrame(WebSocketSession socket, Delivery delivery, String frame) {
+  private void routeFrame(
+      WebSocketSession socket,
+      Delivery delivery,
+      String frame,
+      QueuedExternalConversationRequest external) {
+    if (external != null) {
+      routeExternal(
+              external,
+              () ->
+                  router()
+                      .externalWithin(
+                          () -> {
+                            if (!socket.isOpen() || !delivery.running || !external.verify())
+                              throw new CallerFault("Query connection ended");
+                            try (var ignored =
+                                OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
+                              return CompletableFuture.completedFuture(
+                                  router().route(frame, external.asking()));
+                            }
+                          }))
+          .toCompletableFuture()
+          .join();
+      return;
+    }
     if (!socket.isOpen() || !delivery.running) return;
     if (socketAuthorization != null && !socketAuthorization.current(socket)) return;
     String session = named(socket);
@@ -1038,6 +1205,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
             () -> {
               if (!socket.isOpen()) throw new CallerFault("Query connection ended");
             });
+    String type = text(correlation.get("type"));
     Outcome outcome;
     // One socket request, counted on this thread, which runs it to completion here.
     try (var ignored = OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
@@ -1056,7 +1224,6 @@ public final class EventChannelHandler extends TextWebSocketHandler
           "Answering a frame on session '{}' failed outside the router.", session, unexpected);
       outcome = Outcome.failed(fault.code(), fault.detail());
     }
-    String type = text(correlation.get("type"));
     // Independent reads can complete after a membership change, including while waiting for the
     // physical writer. Retain the same disclosure fence as negotiated concurrent dispatch without
     // changing the synchronous handler contract for older clients. This is a fresh boundary check,

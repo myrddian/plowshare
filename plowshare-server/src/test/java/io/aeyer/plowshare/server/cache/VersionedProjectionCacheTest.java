@@ -12,6 +12,7 @@ import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LO
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOADED_RETURN;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,6 +30,8 @@ import static org.mockito.Mockito.when;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.server.cache.CacheTestSupport.Value;
 import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
@@ -42,6 +45,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -574,6 +578,100 @@ class VersionedProjectionCacheTest {
 
     public void close() {
       observers.clear();
+    }
+  }
+
+  @Test
+  void scopedSqlPreservesWarmHitsAndMakesOnlyColdMissesPrivate() {
+    var settings =
+        new SqlWorkBudgetProperties(Duration.ofSeconds(1), Duration.ofMillis(100), 4, 2, 8, 1);
+    try (var fixture = new Fixture();
+        var sql = new ScopedSqlWorkBudget(settings, null)) {
+      Value shared = new Value("shared");
+      fixture.cache.read(KEY, true, () -> shared, () -> fail("unexpected bypass"), ignored -> 100);
+      assertSame(
+          shared,
+          sql.within(
+              Duration.ofSeconds(1),
+              () ->
+                  fixture.cache.read(
+                      KEY,
+                      true,
+                      () -> fail("warm scoped read must not load"),
+                      () -> fail("warm scoped read must reuse"),
+                      ignored -> 100)));
+      var cold = new SnapshotCache.Key("cold", "selection");
+      AtomicInteger privateReads = new AtomicInteger();
+      for (int i = 0; i < 2; i++) {
+        assertEquals(
+            new Value("private"),
+            sql.within(
+                Duration.ofSeconds(1),
+                () ->
+                    fixture.cache.read(
+                        cold,
+                        true,
+                        () -> fail("scoped miss cannot create shared fill"),
+                        () -> {
+                          privateReads.incrementAndGet();
+                          return new Value("private");
+                        },
+                        ignored -> 100)));
+      }
+      assertEquals(2, privateReads.get());
+      assertEquals(1, fixture.backing.statistics().entries());
+      assertEquals(1, fixture.cache.statistics().count(LOAD));
+    }
+  }
+
+  @Test
+  void scopedJoinerDeadlineNeverCancelsTheOrdinarySharedLoader() throws Exception {
+    var settings =
+        new SqlWorkBudgetProperties(Duration.ofMillis(100), Duration.ofMillis(100), 4, 2, 8, 1);
+    var loading = new CountDownLatch(1);
+    var finish = new CountDownLatch(1);
+    try (var fixture = new Fixture();
+        var sql = new ScopedSqlWorkBudget(settings, null);
+        var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var ordinary =
+          callers.submit(
+              () ->
+                  fixture.cache.read(
+                      KEY,
+                      true,
+                      () -> {
+                        loading.countDown();
+                        await(finish);
+                        return new Value("ordinary");
+                      },
+                      () -> fail("no second ordinary load"),
+                      ignored -> 100));
+      try {
+        assertTrue(loading.await(1, TimeUnit.SECONDS));
+        var scoped =
+            callers.submit(
+                () ->
+                    sql.within(
+                        Duration.ofMillis(250),
+                        () ->
+                            fixture.cache.read(
+                                KEY,
+                                true,
+                                () -> fail("cannot elect shared load"),
+                                () -> fail("existing load must join"),
+                                ignored -> 100)));
+        awaitStatistics(fixture.backing, stats -> stats.waiters() == 2);
+        var refused = assertThrows(ExecutionException.class, () -> scoped.get(1, TimeUnit.SECONDS));
+        assertEquals(
+            ReadFailedException.Reason.DEADLINE_EXCEEDED,
+            assertInstanceOf(ReadFailedException.class, refused.getCause()).reason());
+        assertTrue(!ordinary.isDone());
+      } finally {
+        finish.countDown();
+      }
+      assertEquals(new Value("ordinary"), ordinary.get(1, TimeUnit.SECONDS));
+      assertEquals(1, fixture.backing.statistics().entries());
+      assertEquals(1, fixture.cache.statistics().count(LOAD));
     }
   }
 

@@ -1,0 +1,104 @@
+{
+  "node": "CORE-03",
+  "candidate_id": "ha-core-03-v3",
+  "created_at": "2026-11-17T04:18:51.991527+00:00",
+  "base_commit": "2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e",
+  "implementer_agent_id": "/root/ha_sdk_implementer",
+  "reviewer_agent_id": "/root/ha_core_facade_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-core-03-sdk-input-parity-implementation.md": "7e06fe5e8ab96c68d387f4609cc2612a6738a05a28fa96d22e7259eaee1dec8f",
+    "docs/reviews/home-assistant-core-03-v3-state.json": "546c171db22943541c87488fc0b455eabb76876db8dfcd5c9cd83831e4b24444",
+    "scripts/generate-native-sdk-contracts.mjs": "c4b8171bf797166bb33aa73e951e3b76d06c089f7b0ff693abdbba935f88b0c5",
+    "scripts/native-sdk-constraints.mjs": "b46fff1f0d5296a5621932f4b55ce76146bf099817ca4cc905ab549e7399cf90",
+    "sdk/dotnet/Plowshare.Sdk/Schemas.json": "be8066193347424fa9d21d0a3addc1a42d1325294cee975b37b8fdeec2b0d053",
+    "sdk/go/schemas.json": "be8066193347424fa9d21d0a3addc1a42d1325294cee975b37b8fdeec2b0d053",
+    "sdk/python/src/plowshare/_schemas.json": "be8066193347424fa9d21d0a3addc1a42d1325294cee975b37b8fdeec2b0d053",
+    "sdk/python/src/plowshare/contracts.py": "86cd0b718de58eb17d79a5e516948eb9fc254dbe757d00071bfd1b60d6902d52",
+    "sdk/python/tests/test_contracts.py": "f0270b72fc8b7ac84d4eee71e3585835d51950e0c1a1faec3840e1b2266564a6",
+    "sdk/typescript/src/operations/conversation-external.test.ts": "fd5dec62e16e0f6ab5ef7258db55c1d13fc33c723ad0d499dd4aa0cc0015b72a",
+    "sdk/typescript/src/operations/schema.ts": "3443b4e3e404ae313402e560a42230b39d178af4eea25a714f2c28aba70a59a5"
+  },
+  "ledger_snapshot": "docs/reviews/home-assistant-core-03-v3-state.json",
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-core-03-v3.diff.gz",
+    "sha256": "fcd896299dcc022ff9f3820c73ce432b938cb44c637f2f836de8201342fbc64e",
+    "compression": "gzip",
+    "note": "Full tracked dirty tree at freeze; other disjoint nodes may continue. Authored scope and dependencies are binding."
+  },
+  "dependencies": {
+    "CORE-03A": {
+      "id": "ha-core-03a-v2",
+      "manifest_path": "docs/reviews/home-assistant-core-03a-v2-candidate.json",
+      "manifest_sha256": "ebf322a572498875df1c9866a34f4c1556d972fbe5fe344851b4b83145dc2914"
+    }
+  },
+  "evidence": [
+    {
+      "kind": "semantic_stage_verification",
+      "at": "2026-11-16T23:20:04.700574+00:00",
+      "result": "PASS",
+      "checks": [
+        "115 focused Ex/ordinary lifecycle Java cases",
+        "221 focused TypeScript contract cases",
+        "owning schema/manifest/SDK generators and drift check",
+        "sdkCheck + typescriptFormatCheck (1m44s, all typed cross-language transport conformance)"
+      ],
+      "limit": "CORE03 still implementing; final bounded SQL admission wiring/verification awaits accepted CORE03A."
+    },
+    {
+      "kind": "existing_assist_sdk_compatibility",
+      "at": "2026-11-16T23:21:07.667079+00:00",
+      "result": "PASS",
+      "checks": "Ruff and 23 actual-HA/public-SDK prototype tests including loopback fixtures against regenerated SDK",
+      "limit": "Backward compatibility of existing prototype only, not prompt fidelity, AI Task or live HA acceptance."
+    },
+    {
+      "kind": "implementation_report",
+      "text": "Current frozen 73-path CORE03 stage:213 Java cases/18classes PASS32s after WorkAccess seam;243 focused TS cases/4files PASS;owninggeneration/clientbuild/drift/legacy-audit/format/separateformatCheck PASS;unchangedcanonicalSDK sdkCheck PASS2m12s. Public JavaEx helper/native successstatus/Exconformance/package coverage remain CORE04. Assembledrequest deadline includes dispatchqueues+postassembly sessionSQL; preassembly transportgate/physical callbacktermination/networkdelivery/universalSQL outside scope. PRE1/2/3 exact independent review pending."
+    },
+    {
+      "kind": "repository_check",
+      "candidate": "ha-core-03-v1",
+      "result": "PASS",
+      "duration": "3m49s",
+      "tasks": 141,
+      "log": "/private/tmp/core03-final-repository-check.log",
+      "note": "Default non-database check, including large transport; does not waive independent stable-scope/import/documentation findings. Frozen candidate unchanged."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_core_facade_reviewer",
+      "verdict": "CHANGES_REQUIRED",
+      "candidate_id": "ha-core-03-v1",
+      "manifest_sha256": "cdf4e89c194c7c932136474f32891e3aa59b777b3c08675ed1bc207879d2ff69",
+      "report_path": "docs/reviews/home-assistant-core-03-review.md",
+      "report_sha256": "f5d7594e63c0eb9eaf3fdd4fa3cfbe5a89b904d1b733bd22d914d1c773025917"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "V2 R1/R2/R3/COORD2 corrections:264 focused Java invocations/23classes PASS38s; globalformat/separateformatCheck and generation/manifest/diff checks PASS. All23 SDK/generator paths byteidentical to v1, prior243TS+SDKCheck proof applies. Current full nonDB check running at freeze; root records actual supplemental result before acceptance. Current-row preallowance work guard and actual-target posthandler/queued disclosure; Ex-only full-fence uncertainty translation preserving original reporting and exact typed errors; docs/import correction. Independent approval pending."
+    },
+    {
+      "kind": "repository_check",
+      "candidate": "ha-core-03-v2",
+      "result": "PASS",
+      "duration": "3m49s",
+      "tasks": 141,
+      "log": "/private/tmp/core03-v2-repository-check.log",
+      "note": "Current revised candidate, default non-database check including large transport. Final independent approval pending."
+    },
+    {
+      "kind": "independent_review",
+      "reviewer_agent_id": "/root/ha_core_facade_reviewer",
+      "verdict": "APPROVE",
+      "candidate_id": "ha-core-03-v2",
+      "manifest_sha256": "510f9a8b6a050c39684df937bd3edbc754ac2ff78cf88be243cc94894dd34724",
+      "report_path": "docs/reviews/home-assistant-core-03-v2-review.md",
+      "report_sha256": "5cf4bb7438692e79897d0ae4ef1c6ac2c321cd2a400163747f31d1f7878563d7"
+    },
+    {
+      "kind": "implementation_report",
+      "text": "Affected SDK-only canonical parity slice: exact10paths, Ex-only field predicates and semantic result checks/private schemas, deterministic private definitions with generator-owned Python DTO model aliases and structural guard. Owning generation+978 canonical cases pass, direct typed Python Open/Run model regression passes. Current SDK/full/package checks pending supplemental root evidence before acceptance. Server/auth/SQL behavior and ordinary SDK schemas/public signatures unchanged. Runtime codecs unchanged."
+    }
+  ]
+}

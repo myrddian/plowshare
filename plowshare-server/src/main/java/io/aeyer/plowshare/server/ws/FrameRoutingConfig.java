@@ -77,13 +77,15 @@ public class FrameRoutingConfig {
       ActingRequests acting,
       ReadAdmission admission,
       ObjectProvider<SessionChannel> channels,
-      ObjectProvider<FailureReporter> failures) {
+      ObjectProvider<FailureReporter> failures,
+      ExternalConversationRequestWork externalWork) {
     return assemble(
         areas,
         acting,
         admission,
         channels.getIfAvailable(),
-        failures.getIfAvailable(() -> FailureReporter.NONE));
+        failures.getIfAvailable(() -> FailureReporter.NONE),
+        externalWork);
   }
 
   public FrameRouter frameRouter(
@@ -122,6 +124,17 @@ public class FrameRoutingConfig {
       ReadAdmission admission,
       SessionChannel files,
       FailureReporter failures) {
+    return assemble(
+        areas, acting, admission, files, failures, ExternalConversationRequestWork.UNAVAILABLE);
+  }
+
+  private FrameRouter assemble(
+      List<FrameArea> areas,
+      ActingRequests acting,
+      ReadAdmission admission,
+      SessionChannel files,
+      FailureReporter failures,
+      ExternalConversationRequestWork externalWork) {
     Map<String, FrameHandler> table = new HashMap<>();
     for (FrameArea area : areas) {
       for (Map.Entry<String, FrameHandler> entry : area.frames().entrySet()) {
@@ -152,6 +165,6 @@ public class FrameRoutingConfig {
         table.computeIfPresent(type, (ignored, handler) -> new ContextInputHandler(handler, files));
       }
     }
-    return new FrameRouter(table, acting, admission, failures);
+    return new FrameRouter(table, acting, admission, failures, externalWork);
   }
 }

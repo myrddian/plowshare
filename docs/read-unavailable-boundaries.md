@@ -20,10 +20,10 @@ cancel the job or change its result.
 
 ## Complete owner audit
 
-Merged revision `abef4b11` had 45 production references, including 15 construction
-or factory sites in ten throwing owners. The other references were imports,
-catches, telemetry and interface documentation. This table traces those owners
-and consumers; it does not treat every mention as a throw.
+The integrated correction has 48 production references across 21 files. These
+include imports, catches, telemetry and interface documentation, as well as actual
+construction sites. This table traces the owners and consumers; it does not treat
+every mention as a throw. The attached instance inventory records each location.
 
 | Owner | Audited boundary and correction |
 | --- | --- |
@@ -31,6 +31,8 @@ and consumers; it does not treat every mention as a throw.
 | [FrameRouter](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/FrameRouter.java) | Acquisition is separate from handler execution. Only acquisition can prove a pre-handler capacity refusal; an arbitrary handler cannot return that proof. The physical source owns its lease and warning observation until settlement, independent of reply cancellation. |
 | [EventChannelHandler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/EventChannelHandler.java) | A proven refused request releases its admitted input ID/body after execution settles and before the physical capacity reply permits same-ID resubmission. Encoded output bytes remain owned until send settles. Both legacy and segmented SDK retries execute the eventual handler once. |
 | [HttpReadAdmission](../plowshare-server/src/main/java/io/aeyer/plowshare/server/reads/HttpReadAdmission.java) | Its narrow pre-handler marker maps to 429. This does not change a mid-operation failure into permission to replay a mutation. HTTP async physical settlement remains an owning-lifecycle gap. |
+| [BoundedExternalConversationCompletions](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/BoundedExternalConversationCompletions.java) | Occupied reply slots refuse only before dispatch. No elapsed request timer selects an exception or suppresses accepted success. Shutdown stops intake; physical routing and notification keep ownership until settlement. |
+| [ScopedSqlWorkBudget](../plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudget.java) | Only actual occupied SQL-scope capacity is backpressure. Deadline/cancellation/closure are typed failed reads; invalid resource usage remains a programming error. This opt-in owner surrounds actual SQL units, never external facade hooks or job admission. SQL watchdogs cancel owned JDBC resources without injecting an interrupt into the workflow thread. Genuine caller interruption is preserved. |
 | [JdbcInformationLogVisibility](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationLogVisibility.java) | A global version change used to fail an otherwise successful inbox/orchestration page. Discard that tentative cached page and run one pure authoritative SQL callback. Each independent callback has its own query budget; an active transaction's deadline is not renewed. Already-authoritative reads do not depend on unrelated cache-token churn. Unsafe dirty/historical/expiry-spanning sharing remains withheld with `INVALIDATED`, never "no seats". |
 | [VersionedProjectionCache](../plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/VersionedProjectionCache.java) | Actual occupied load/byte/waiter capacity can apply backpressure. An impossible intrinsic reservation is `LOAD_TOO_LARGE`, not occupied capacity, and follows its ordinary projection fallback. Accepted inline hits/loads/joins do not create a hard two-second workflow timer. Only an already existing SQL deadline limits their wait; slow work emits warnings. |
 | [BoundedSnapshotCache](../plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/BoundedSnapshotCache.java) | Both elected and joining accepted `readInline` calls are exempt from the asynchronous API's caller-wait timer. Count, byte, dependency, load and waiter bounds remain. The separate explicit asynchronous `read` API retains its documented timeout contract. No timed-out observer releases another caller's physical load. |
@@ -86,6 +88,10 @@ A failed inference *attempt* is separate from a failed terminal call/job: a retr
 may succeed, so those metric series must not be interpreted interchangeably.
 
 ## Remaining enforcement limits
+
+SQL cancellation never clears or injects a caller-thread interrupt. Physical
+connection acquisition or a broken driver can settle after logical SQL expiry;
+late results remain withheld and their resource seats remain owned.
 
 Some version probes, datasource connection acquisition and HTTP async lifecycles
 still need owner-specific physical cancellation/settlement adoption. A warning or

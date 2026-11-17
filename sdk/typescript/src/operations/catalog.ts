@@ -19,6 +19,25 @@ type Conversation = { readonly conversation: string };
 type Page = { readonly offset?: number; readonly limit?: number };
 type Turns = { readonly maxTurns?: number; readonly noTurnCap?: boolean };
 type Budget = { readonly maxModelCalls?: number };
+/** Account-local source labels and opaque IDs are not grants or utterance idempotency keys. */
+export interface ExternalConversationLocator {
+  readonly project: string;
+  readonly source: string;
+  readonly externalConversation: string;
+}
+export type ConversationOpenRequestEx = ExternalConversationLocator &
+  Turns &
+  Budget & {
+    readonly noBudget?: boolean;
+  };
+export type AgentRunRequestEx = ExternalConversationLocator &
+  Turns &
+  Budget & {
+    readonly agent: string;
+    readonly task: string;
+    readonly session?: string | null;
+    readonly images?: readonly string[];
+  };
 export interface ExtendedPayloads
   extends
     ProcPayloads,
@@ -33,6 +52,7 @@ export interface ExtendedPayloads
   'artifact.admission.status': ImageAdmissionRequest;
   'tool.invocation.read': ToolInvocationRead;
   'conversation.open': Tier & Turns & Budget & { readonly noBudget?: boolean };
+  'conversation.open.ex': ConversationOpenRequestEx;
   'conversation.list': Tier & { readonly lifecycle?: string };
   'conversation.latest': Tier & { readonly agent: string };
   'conversation.lifecycle': Conversation & { readonly lifecycle: string };
@@ -71,6 +91,7 @@ export interface ExtendedPayloads
       readonly newConversation?: boolean;
       readonly images?: readonly string[];
     };
+  'agent.run.ex': AgentRunRequestEx;
   'board.topics': Tier & Page;
   'board.messages': { readonly topic: string };
   'swarm.status': Record<string, never>;
@@ -468,6 +489,7 @@ export const CLI_OPERATIONS = {
   'information acquisitions': 'information.acquisitions',
 
   'conversation open': 'conversation.open',
+  'conversation open.ex': 'conversation.open.ex',
   'conversation list': 'conversation.list',
   'conversation latest': 'conversation.latest',
   'conversation lifecycle': 'conversation.lifecycle',
@@ -481,6 +503,7 @@ export const CLI_OPERATIONS = {
   'agent list': 'agent.list',
   'agent define': 'agent.define',
   'agent run': 'agent.run',
+  'agent run.ex': 'agent.run.ex',
   'job list': 'job.list',
   'job limits': 'job.limits',
   'document ask': 'document.ask',

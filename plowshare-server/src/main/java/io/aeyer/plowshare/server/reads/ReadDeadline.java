@@ -44,10 +44,18 @@ public final class ReadDeadline {
     return current != null ? current : System.nanoTime() + checked(fallback).toNanos();
   }
 
-  /** Existing enclosing SQL/cache work-unit deadline, without opening a new workflow-wide timer. */
+  /** Existing enclosing SQL deadline, without opening a new workflow-wide timer. */
   public static OptionalLong currentDeadlineNanos() {
     Long current = DEADLINE.get();
     return current == null ? OptionalLong.empty() : OptionalLong.of(current);
+  }
+
+  /** Scope-bound evidence cannot survive scope exit or be reused under a later SQL deadline. */
+  public static boolean isCurrent(long expectedDeadline) {
+    Long current = DEADLINE.get();
+    return current != null
+        && current.longValue() == expectedDeadline
+        && System.nanoTime() - current < 0;
   }
 
   /** Rejects late results and prevents a nested stage from starting after the owning deadline. */

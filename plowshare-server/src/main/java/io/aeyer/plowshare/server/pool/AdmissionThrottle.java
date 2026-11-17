@@ -517,10 +517,11 @@ public final class AdmissionThrottle {
    * the release is decided by the level that took it rather than by whichever close happens to
    * bring the depth to zero. The {@code closed} flag makes that release happen exactly once.
    */
-  private final class Handle implements Admission {
+  private final class Handle implements Admission, SqlAdmissionLease {
     private final Depth owner;
     private final boolean ownsPermit;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean callerFinished = new AtomicBoolean();
 
     Handle(Depth owner, boolean ownsPermit) {
       this.owner = owner;
@@ -532,10 +533,15 @@ public final class AdmissionThrottle {
       if (!closed.compareAndSet(false, true)) {
         return;
       }
-      owner.value.decrementAndGet();
+      callerFinished();
       if (ownsPermit) {
         semaphore.release();
       }
+    }
+
+    @Override
+    public void callerFinished() {
+      if (callerFinished.compareAndSet(false, true)) owner.value.decrementAndGet();
     }
   }
 }

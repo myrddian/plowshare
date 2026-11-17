@@ -73,13 +73,67 @@ connection acquisition, while the pool separately bounds physical database work.
   history requires an explicitly reviewed, rehearsed reconciliation; never blindly
   relabel/repair rows or falsify the record of what ran.
 
+## Explicit SQL-unit scope
+
+`SqlWorkBudget` is an explicit opt-in query/actual-transaction completion scope,
+not a facade/workflow lifetime, grant or arbitrary SQL executor. Hooks, provider
+IO and job admission stay outside it. Its pool
+infrastructure decorates repository and independent authoritative-version leases;
+the raw primary Hikari source, Flyway and LISTEN lifecycle stay intact. A shared
+JdbcTemplate and transaction manager must retain the same decorated source
+identity, including when ordinary pool admission is disabled.
+
+An active scope shares the earlier actual SQL deadline with nested ReadDeadline
+work and bounds acquisition, statement execution/materialization and owned
+cleanup. Deadline/cancellation/closure use `ReadFailedException`; only occupied scope
+capacity uses `ReadUnavailableException`. Logical timeout can be uncertain and
+never supplies the outer CAPACITY_EXHAUSTED proof for mutation replay. Abort/close retains physical lease
+and throttle occupancy until it settles; late alarms cannot target a recycled
+lease or worker. Supported driver assumptions and exact test evidence belong in
+the implementation report, not a claim of universal JDBC termination.
+
+Projection-cache owners preserve authorized resident/trusted hits and join an
+existing compatible shared load with caller-local cancellation. An active SQL
+scope never elects a new shared fill: an actual miss uses its existing private
+uncached loader path. This ownership boundary prevents cancellation of another
+caller's fill and records the private-miss/query-count cost. Existing unscoped
+inline loaders keep their original completion/coalescing contract. Reuse typed
+facts and stored freshness tokens; do not bypass warm valid entries or refresh
+unconditionally merely because this scope is active.
+
+Scoped PostgreSQL leases additionally clamp server statement/lock limits before
+commands, preserving earlier settings. Transaction-local limits follow Spring's
+transaction; touched autocommit settings must be restored before pool return.
+Control queries consume the same remaining budget (normally one per command,
+plus restoration), and ordinary unscoped SQL gains no control queries. Commit and
+possible autocommit commits refresh the server limit. Rollback cannot prepend
+configuration SQL inside an aborted PostgreSQL transaction; it retains the live
+network/watchdog deadline and owned physical abort/close path. Failed
+reset discards the exact still-owned pool lease before close can recycle it.
+Client expiry/socket closure alone does not prove backend cancellation; selected
+PostgreSQL tests must check remote activity/row-lock release and clean reuse.
+SQL watchdogs cancel only owned JDBC resources; they never inject an interrupt into
+the enclosing workflow thread. Java cannot distinguish that bit from genuine
+caller cancellation. Server statement/lock limits, driver network deadlines and
+owned abort/close enforce the SQL boundary. Connection acquisition and a broken
+driver can return after logical expiry; physical ownership remains until they
+settle, and a late result is withheld. This is not a claim of instantaneous abort.
+Genuine caller interruption is preserved and never cleared.
+
+These contracts do not establish universal SQL cancellation for unscoped callers,
+and SQL-only deadlines do not bound arbitrary hook/file loading or user callbacks.
+See the [scoped design](../../docs/reviews/home-assistant-ex-sql-budget-design.md)
+and independent delivery evidence before asserting that an entry point is wired
+or verified.
+
 ## Legacy traps
 
 Do not copy direct JDBC from an old service, treat a proposed operation-pipeline
 document as an implemented API, or introduce a shared cache to hide expensive
 cold SQL. Follow the current repository and its actual cache adoption points.
-The existing two-second projection-cache wait budget is not universal SQL
-cancellation: a loader can continue after its caller times out. Trace and verify
+The explicit asynchronous projection-cache API wait budget is not universal SQL
+cancellation: a loader can continue after its caller times out. Accepted inline
+reads have no new workflow timer; only an existing caller SQL deadline applies. Trace and verify
 the actual execution/cancellation path before claiming the deadline is enforced.
 
 Collection log visibility can discard a successful tentative cached page after a

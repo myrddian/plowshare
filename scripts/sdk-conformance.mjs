@@ -10,6 +10,7 @@ import { WebSocketServer } from '../sdk/node/node_modules/ws/wrapper.mjs'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const fixture = JSON.parse(await readFile(root + 'test-support/contracts/sdk-conformance.json', 'utf8'))
 const cases = new Map(fixture.cases.map(value => [value.name, value]))
+const externalCases = new Map(fixture.externalConversationContract.cases.map(value => [value.name, value]))
 const counts = new Map()
 const packetCounts = new Map()
 const packetMax = new Map()
@@ -174,6 +175,33 @@ server.on('upgrade', (request, socket, head) => {
                         return
                     }
                     applicationStarted = true
+                    if (session.split('/')[1]?.startsWith('external-')) {
+                        const name = session.split('/')[1].slice('external-'.length)
+                        const test = externalCases.get(name)
+                        assert.ok(test, 'invalid external conversation request reached the transport')
+                        assert.equal(sent.type, test.operation, 'external facade used an extra resolve RPC')
+                        const request = test.operation === 'conversation.open.ex'
+                            ? fixture.externalConversationContract.openRequest
+                            : fixture.externalConversationContract.runRequest
+                        assert.deepEqual(sent.payload, request, 'external request was rewritten')
+                        const key = session + '/' + test.operation
+                        counts.set(key, (counts.get(key) ?? 0) + 1)
+                        assert.equal(counts.get(key), 1, 'external mutation was replayed')
+                        if (test.silent) return
+                        if (test.disconnect) { ws.terminate(); return }
+                        const payload = { ...(test.operation === 'conversation.open.ex'
+                            ? fixture.externalConversationContract.conversation
+                            : fixture.externalConversationContract.startedJob), future: 'discard' }
+                        if (test.operation === 'agent.run.ex') payload.revision = 'future-ignored'
+                        if (test.omitConversation) delete payload.conversation
+                        if (Object.hasOwn(test, 'conversation')) payload.conversation = test.conversation
+                        if (test.omitAgent) delete payload.agent
+                        if (Object.hasOwn(test, 'agent')) payload.agent = test.agent
+                        envelope(sent, test.code === 'NOT_FOUND'
+                            ? { code: test.code, said: 'No external alias', payload: { secret: 'must-not-escape' } }
+                            : { code: test.code, payload })
+                        return
+                    }
                     if (session.startsWith('packet-large-')) {
                         assert.equal(physical.protocol, 'plowshare-segments-v1')
                         assert.ok(['relay.publish','relay.consume'].includes(sent.type))
@@ -324,6 +352,12 @@ try {
         assert.ok(packetMax.get('packet-large-'+language)<=128*1024,'packet exceeds wire allowance')
         for(const operation of ['provider.connection.list','tool.scope.host.list'])
             assert.equal(counts.get('typed-'+language+'/provider-owner-compat/'+operation),1,language+' replayed unsupported management');
+        for (const test of fixture.externalConversationContract.cases)
+            assert.equal(counts.get('typed-'+language+'/external-'+test.name+'/'+test.operation),1,
+                language+' missed or replayed external conversation '+test.name);
+        for (const operation of ['conversation.open.ex','agent.run.ex'])
+            assert.equal(counts.get('typed-'+language+'/external-invalid/'+operation),undefined,
+                language+' submitted invalid external selectors');
         if(language==='node') assert.equal(counts.get('node-typed/undefined'),3,'public SDK replayed work or sent invalid input')
         assert.equal(upgrades.get(language + '-redirect'), 1, language + ' followed an authenticated upgrade redirect')
         for(const name of ['timeout','disconnect','cancel'])assert.equal(counts.get(language==='node'? language+(name==='cancel'?'-cancel':'')+'/'+name:'typed-'+language+'/'+name+'/'+name),1,language+' replayed '+name+' work')

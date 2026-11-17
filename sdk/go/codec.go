@@ -295,6 +295,11 @@ func requestTyped[T any](ctx context.Context, c *Client, operation string, reque
 	}
 	result.Code, result.Said = outcome.Code, outcome.Said
 	if result.Successful() {
+		// Ex resolution and durable admission have distinct success outcomes. Do not
+		// turn a malformed acknowledgement into a success or another submission.
+		if operation == "conversation.open.ex" && result.Code != "OK" || operation == "agent.run.ex" && result.Code != "ACCEPTED" {
+			return Reply[T]{}, &TransportError{Delivery: InvalidResponse, Cause: errors.New("unexpected external conversation outcome; completion is unknown")}
+		}
 		data, err = project(catalog.Results[operation], outcome.Payload, false)
 		if err == nil {
 			err = json.Unmarshal(data, &result.payload)

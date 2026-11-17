@@ -415,6 +415,7 @@ export interface ConversationReplies {
   'tool.scope.worker.ack': HostedToolReplies['tool.scope.worker.ack'];
 
   'conversation.open': ConversationView;
+  'conversation.open.ex': ConversationView;
   'conversation.list': readonly ConversationView[];
   'conversation.latest': ConversationView | null;
   'conversation.lifecycle': LifecycleView;
@@ -824,6 +825,7 @@ const applicationDocument = record({
 
 const readers = {
   'conversation.open': conversation,
+  'conversation.open.ex': conversation,
   'conversation.list': list(conversation),
   'conversation.latest': (value) => noContent(value) || conversation(value),
   'conversation.lifecycle': record({ id: named, lifecycle: named }),

@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.faults;
 
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.server.agents.DefinitionAlreadyExistsException;
+import io.aeyer.plowshare.server.agents.ExternalConversationUnavailableException;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.api.ConflictException;
 import io.aeyer.plowshare.server.api.NotFoundException;
@@ -282,6 +283,11 @@ public final class Faults {
         });
 
     // Row 12: the archive could not be reached at all.
+    // Ex may already have committed an alias or admitted durable work before a later phase fails.
+    m.put(
+        ExternalConversationUnavailableException.class,
+        e -> new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e)));
+
     m.put(
         ArchiveUnavailableException.class,
         e -> {

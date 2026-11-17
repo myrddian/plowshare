@@ -116,12 +116,20 @@ public record Configuration(
       String agent,
       String request,
       String completionAction,
-      long holdSeconds) {
+      long holdSeconds,
+      String whenState) {
     public Route {
       Configuration.name(name);
       if (entity != null) Configuration.name(entity);
-      if ((entity == null) != (above == null) || above != null && !Double.isFinite(above))
-        throw new IllegalArgumentException("finite threshold and entity must be supplied together");
+      if (above != null && (!Double.isFinite(above) || whenState != null)
+          || (entity == null) != (above == null && whenState == null))
+        throw new IllegalArgumentException(
+            "entity requires exactly one finite threshold or exact state condition");
+      if (whenState != null) {
+        if (whenState.isBlank() || unit != null)
+          throw new IllegalArgumentException("exact state requires nonblank text without a unit");
+        IntegrationContracts.text(whenState, 4096);
+      }
       if (unit != null) IntegrationContracts.identity(unit, 256);
       if (cooldownSeconds < 0 || cooldownSeconds > 86400)
         throw new IllegalArgumentException("invalid cooldown");
@@ -131,11 +139,35 @@ public record Configuration(
         throw new IllegalArgumentException("route request required");
       IntegrationContracts.text(request, 1048576);
       if (completionAction != null) Configuration.name(completionAction);
-      if (holdSeconds < 0
-          || holdSeconds > 86400
-          || holdSeconds > 0 && (entity == null || above == null))
+      if (holdSeconds < 0 || holdSeconds > 86400 || holdSeconds > 0 && entity == null)
         throw new IllegalArgumentException(
-            "held duration requires a threshold and 0 to 86400 seconds");
+            "held duration requires a state condition and 0 to 86400 seconds");
+    }
+
+    /** Existing numeric routes retain their exact constructor and default condition semantics. */
+    public Route(
+        String name,
+        String entity,
+        Double above,
+        String unit,
+        long cooldownSeconds,
+        String definition,
+        String agent,
+        String request,
+        String completionAction,
+        long holdSeconds) {
+      this(
+          name,
+          entity,
+          above,
+          unit,
+          cooldownSeconds,
+          definition,
+          agent,
+          request,
+          completionAction,
+          holdSeconds,
+          null);
     }
 
     public Route(
@@ -192,7 +224,7 @@ public record Configuration(
       allowBindings.forEach(Configuration::name);
       IntegrationContracts.text(script, Json.MAX_MESSAGE / 2);
       for (Route route : routes.values())
-        if (route.above() == null && script == null)
+        if (route.entity() == null && script == null)
           throw new IllegalArgumentException(
               "unconditional routes require an explicit script handler");
     }
@@ -396,6 +428,7 @@ public record Configuration(
             r,
             "entity",
             "above",
+            "whenState",
             "unit",
             "cooldownSeconds",
             "holdSeconds",
@@ -417,9 +450,11 @@ public record Configuration(
             && (!r.path("holdSeconds").isIntegralNumber()
                 || !r.path("holdSeconds").canConvertToLong()))
           throw new IllegalArgumentException("integral held duration required");
-        if ((above != null) != r.has("entity"))
-          throw new IllegalArgumentException("entity and threshold must be supplied together");
-        if (above == null && !n.has("script"))
+        String whenState = r.has("whenState") ? Json.text(r, "whenState") : null;
+        if ((above != null || whenState != null) != r.has("entity"))
+          throw new IllegalArgumentException(
+              "entity and state condition must be supplied together");
+        if (above == null && whenState == null && !n.has("script"))
           throw new IllegalArgumentException(
               "unconditional routes require an explicit script handler");
         routes.put(
@@ -434,7 +469,8 @@ public record Configuration(
                 Json.text(r, "agent"),
                 Json.text(r, "request"),
                 r.has("completionAction") ? Json.text(r, "completionAction") : null,
-                hold));
+                hold,
+                whenState));
       }
       Set<String> allowed = new HashSet<>();
       allowed.add(name);

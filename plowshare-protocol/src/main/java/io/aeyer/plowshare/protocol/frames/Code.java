@@ -168,8 +168,11 @@ public enum Code {
   VALIDATION_FAILED(422, "validation_failed"),
 
   /**
-   * Archive, workspace or read results are unavailable. This compatibility outcome does not prove
-   * that an enclosing operation performed no earlier work; callers must not replay it blindly.
+   * Work could not produce an available result. This code alone does not establish whether earlier
+   * reads, writes or durable admission completed; follow the owning operation's receipt/recovery
+   * contract before retrying a mutation. Includes {@code ApiExceptionHandler} row 12's {@code
+   * ArchiveUnavailableException} and scoped completion failures, whose details retain their own
+   * effect certainty.
    */
   ARCHIVE_UNAVAILABLE(503, "archive_unavailable"),
 
