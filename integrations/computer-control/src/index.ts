@@ -24,6 +24,7 @@ export type {
 } from './provider.ts';
 export { computerProviderConnection } from './provider-connection.ts';
 export { CapacityToolJournal } from './journal.ts';
+export type { CapacityToolJournalStatus } from './journal.ts';
 export {
   BackendError,
   computerId,
@@ -97,6 +98,19 @@ export type {
 } from './backends/macos.ts';
 export type { BackendHandle } from './backends/types.ts';
 export { absolutePrivatePath, decodeComputerHostConfig } from './config.ts';
+export {
+  FileComputerConfigReader,
+  PrivateConfigError,
+} from './private-config.ts';
+export type {
+  ComputerConfigReader,
+  PrivateConfigCode,
+} from './private-config.ts';
+export {
+  createHostDiagnostics,
+  formatHostDiagnostic,
+} from './host-diagnostics.ts';
+export type { HostDiagnostic, HostDiagnostics } from './host-diagnostics.ts';
 export type {
   ComputerCredential,
   ComputerHostConfig,

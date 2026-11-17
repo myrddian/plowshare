@@ -1,9 +1,15 @@
-# P0/P1 platform and live-acceptance gaps
+# Computer-control platform and live-acceptance gaps
 
 These findings do not authorize core changes. The provider remains a public SDK
 consumer under [ADR 0001](../../docs/decisions/0001-integration-boundary.md).
 Implementation/reviewer approval and live acceptance are recorded separately in
 the [delivery graph](IMPLEMENTATION.md).
+
+The bootstrap and BETA findings below record earlier P0/P1 attempts, not a fresh
+audit of the user's later deployments or credentials. Configured server/model
+validation remains deferred. Current native source and no-input evidence are in
+the [readiness graph](READINESS-IMPLEMENTATION.md); operational fixture/distribution
+evidence is in the [P4 graph](P4-IMPLEMENTATION.md).
 
 ## Fresh managed Application bootstrap
 
@@ -61,7 +67,7 @@ authorized ordinary-project deployments are unavailable.
 On continuation, the proposed saved human BETA connection was selected instead
 of the operator connection. Its public CLI identity check returned LoginRequired:
 the registry entry exists but has no usable authenticated session. This is the
-current live-test prerequisite, not evidence of that human account's permissions.
+live-test prerequisite at that attempt, not evidence of that human account's permissions.
 After private sign-in, the reproducible SDK harness can test the supported
 ordinary external-workspace route under that caller's own project-creation
 authority. It does not require changing the separate managed-Application
@@ -79,13 +85,16 @@ repair logins, upgrade either server or switch the acceptance test to PROD.
 
 P3 native source work does not close the following native operating gaps:
 
-- There is no verified supported positive unlocked-state proof in the current
-  macOS backend. Console/login flags and old application focus do not establish
-  it. Native readiness remains unknown and production input is refused. Do not
-  call P3 a complete usable desktop loop until a reviewed readiness mechanism
-  and the native acceptance matrix pass.
+- The reviewed macOS backend now implements a short local confirmation grant
+  gated by scoped GUI routing and compositor evidence. Console/login flags and
+  old application focus alone still do not establish readiness. Its real
+  no-input trial passed unarmed AX discovery, capture denial, stable PENDING,
+  revoke and cleanup. Positive compositor/input and the native fault matrix
+  remain OPEN; implementation alone does not qualify a usable desktop loop.
 - Screen capture, Accessibility, event posting and event listening require
-  separate permission evidence under the actual packaged helper identity. The
+  separate permission evidence under the OS-reported responsible identity for
+  the actual helper launch, which may be its SDK/Terminal host. A bundle's code
+  signature does not establish that attribution. The
   no-prompt preflight is a diagnostic, not consent or successful native input.
 - Compiled input paths and simulated ready-state SDK tests cannot prove Unicode
   insertion into a native app, menu/dialog behavior, lock or permission revocation,
@@ -96,9 +105,11 @@ P3 native source work does not close the following native operating gaps:
   Isolated headless browser sessions can coexist through the shared SDK provider.
 
 - Personal/Global invocation images are refused by the current admission API.
-- Native live capture requires OS screen-capture consent. The current helper's
-  no-prompt preflight reported no screen-capture or accessibility permission;
-  compilation and denial/protocol tests do not establish native pixel delivery.
+- Native live capture requires OS screen-capture consent. The final controlled
+  P3 launch reported Accessibility, event posting and event listening allowed,
+  with Screen Recording false. Earlier sandbox checks had all flags false.
+  Neither result establishes permissions for every host identity or native pixel
+  delivery. Genuine local confirmation and positive acceptance remain required.
 - The direct model endpoint accepted the synthetic PNG fixture. This verifies
   endpoint vision only, not Relay admission, retained observation replay or the
   next model request through Plowshare.
@@ -113,6 +124,10 @@ P3 native source work does not close the following native operating gaps:
 - Rolling image-context selection, general external-tool Personal approvals,
   immediate remote cancellation, hosted typed producers and language parity
   remain the [design's separate platform work](../../docs/computer-control-design-and-plan.md#platform-gaps-and-disposition).
+- General journal archival is also a public capability gap. P4 reserves future
+  result/publication space and refuses full journals; it does not prune receipts,
+  clear physical fences or reset retained image counts. Follow the
+  [capacity and recovery procedure](OPERATIONS.md#journal-capacity-and-recovery).
 
 P1 full live acceptance stays open until a supported authorized project/agent
 fixture completes capture → Relay invocation → image admission → retained model

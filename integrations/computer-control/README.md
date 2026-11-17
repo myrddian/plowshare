@@ -9,7 +9,8 @@ The default observation mode exposes `computer_targets`, `computer_open`,
 `computer_observe` and `computer_close`. P2 adds explicitly enabled browser
 control using the same SDK provider. See the
 [design](../../docs/computer-control-design-and-plan.md) and
-[P0/P1](IMPLEMENTATION.md), [P2](P2-IMPLEMENTATION.md) and [P3](P3-IMPLEMENTATION.md) review graphs for dependencies, independent approvals and
+[P0/P1](IMPLEMENTATION.md), [P2](P2-IMPLEMENTATION.md), [P3](P3-IMPLEMENTATION.md)
+and [P4](P4-IMPLEMENTATION.md) review graphs for dependencies, independent approvals and
 the distinction between code approval and live acceptance.
 Current live bootstrap/permission findings are in [platform gaps](PLATFORM-GAPS.md).
 
@@ -50,6 +51,10 @@ supervises only native helpers; separately connected hosts require supported
 explicit Application bindings. No TUI/GUI controls are added in this slice.
 
 ## Foreground host
+
+The [operations runbook](OPERATIONS.md) covers offline installation, private
+configuration, bounded diagnostics, lease renewal, shutdown and original-receipt
+recovery. Those controls remain reusable by an embedding SDK host.
 
 Build the module, then supply an explicit private configuration file:
 
@@ -386,12 +391,15 @@ its pixels. Invocation/result reads return descriptors, not redeemed model pixel
 ./gradlew check
 ```
 
-The consumer check compiles the integration against packed public SDK artifacts
-in a fresh directory and imports its package self-reference through the exports
-map. Its shared deadline defaults to 300 seconds and can be set with
-`PLOWSHARE_COMPUTER_CONSUMER_TIMEOUT_SECONDS` (1–1800). It does not publish packages.
+The consumer check builds and installs the exact offline provider/public SDK
+artifacts in a fresh directory, verifies runtime exports and the foreground CLI,
+and compiles a separate typed consumer. It executes no npm install, network,
+authentication, browser or helper startup. Its shared deadline defaults to 120
+seconds; the owning script accepts `--timeout` up to 300 seconds. It does not
+rerun the entire integration suite in that consumer or publish packages.
 
-The default suite uses SDK transports and backend/process fakes; it does not
+The default suite uses SDK transports, backend fakes and controlled child
+processes, including a real Node crash/restart with a synthetic effect. It does not
 require PostgreSQL, Docker, native permission or a running browser. Explicit real
 browser evidence uses an isolated changing canvas fixture:
 
