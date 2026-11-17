@@ -12,8 +12,8 @@ import java.util.List;
  *
  * <h2>Why this is not {@link EntryPageView}</h2>
  *
- * <p>The paging half is the same and is right to be — {@code total}, {@code offset} and {@code
- * limit} are needed for that record's reasons word for word. Two things are not.
+ * <p>The paging fields support lexical offsets and stable semantic snapshot slots. Two other
+ * aspects differ.
  *
  * <p><b>A hit's text is a snippet and not an excerpt.</b> {@link EntryView#excerpt} is the
  * <em>opening</em> of an entry and its contract is that {@code length > excerpt.length()} means
@@ -29,10 +29,11 @@ import java.util.List;
  * one corpus over.
  *
  * @param hits what matched, best first. Never null; empty for a question nothing matched and for a
- *     page past the end, which {@code total} tells apart
- * @param total how many distinct matching passage groups were found — about the tier and not about
- *     this page
- * @param offset how many hits this page skipped, as asked for
+ *     page past the end. Withdrawn snapshot slots can also leave an empty interior page.
+ * @param total lexical matching group count, or one past the last currently visible original
+ *     semantic/hybrid snapshot slot (zero if all are withdrawn). Snapshot holes are not compacted;
+ *     advance by {@code offset + limit}, even on short or empty pages, until reaching this extent.
+ * @param offset lexical hits or original snapshot slots skipped, as asked for
  * @param limit how many hits this page could hold — <b>the number this server used and not the one
  *     the caller sent</b>, which differ exactly when the caller asked for more than {@code
  *     ConversationController.MOST_ENTRIES_A_PAGE}

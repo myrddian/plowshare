@@ -79,6 +79,9 @@ iterative scans, `enable_sort=off` (revision-column equality is underestimated) 
 `jit=off` to the short transaction, restoring caller settings on success and rolling
 back on failure. Each group exposes at most twenty authorized source references. Snapshot refresh rechecks all retained revisions
 in a batch and suppresses changed/moved/hidden references without filling later slots.
+Offsets retain original slots; `total` extends through the last currently visible
+slot (zero if none remain). Clients advance by `offset + limit` through sparse pages,
+not by the number of returned hits.
 New delegated research inputs carry explicit supplied-context spans and declared
 source references. Default lexical statistics/snippets use the stored evidence
 projection; semantic passage provenance is filtered before ranking and limits.

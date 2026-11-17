@@ -42,6 +42,8 @@ export type SearchValue = {
   query: string;
   project: string | null;
   mode: 'lexical' | 'semantic' | 'hybrid';
+  /** Next server page offset; revoked snapshot slots do not contribute hits. */
+  nextOffset?: number;
   reply:
     | RetrievalReplies['conversation.search']
     | RetrievalReplies['document.search']

@@ -218,6 +218,49 @@ class ConversationSearchTest {
       verify(entries).search(HOME, "question", 0, ConversationSearch.CANDIDATES);
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"semantic", "hybrid"})
+  void withdrawnSnapshotSlotsDoNotHideSurvivingTailPages(String mode) {
+    var sources = IntStream.range(0, 25).mapToObj(i -> source("cnv_%02d".formatted(i))).toList();
+    ranking(
+        IntStream.range(0, sources.size())
+            .mapToObj(
+                i ->
+                    new PassageIndex.Match(
+                        sources.get(i).id(), 0, "passage " + i, 1 - i * .01, "hash"))
+            .toList());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(sources);
+    var first = search.search(HOME, "question", 0, 10, mode, null);
+    String token = first.retrieval().snapshot();
+
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(sources.subList(20, 25));
+    var middle = search.search(HOME, "question", 10, 10, mode, token);
+    var tail = search.search(HOME, "question", 20, 10, mode, token);
+    assertEquals(List.of(), middle.hits());
+    assertEquals(25, middle.total());
+    assertEquals(25, tail.total());
+    assertEquals(
+        sources.subList(20, 25).stream().map(LogSearch.Source::conversationId).toList(),
+        tail.hits().stream().map(hit -> hit.conversationId()).toList());
+    assertFalse(middle.retrieval().complete());
+    assertEquals("bounded snapshot slots", middle.retrieval().totalMeaning());
+
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(sources.subList(20, 24));
+    var shorter = search.search(HOME, "question", 20, 10, mode, token);
+    assertEquals(24, shorter.total());
+    assertEquals(4, shorter.hits().size());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
+    var withdrawn = search.search(HOME, "question", 30, 10, mode, token);
+    assertEquals(0, withdrawn.total());
+    assertEquals(List.of(), withdrawn.hits());
+    for (var page : List.of(middle, tail, shorter, withdrawn)) {
+      assertEquals(token, page.retrieval().snapshot());
+      assertEquals(0, page.retrieval().queryEmbeddingCalls());
+    }
+    verify(index).capture(eq("question"), any(UsageAttribution.class), eq(HOME));
+    verify(index).rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt());
+  }
+
   @Test
   void laterPagesRequireTheOriginalSnapshotQuestionModeHomeAndReader() {
     ranking(List.of(new PassageIndex.Match(a.id(), 0, "passage", .8, "hash")));
@@ -264,7 +307,7 @@ class ConversationSearchTest {
     assertEquals(1, result.total());
     assertFalse(result.retrieval().complete());
     assertEquals(true, result.retrieval().truncated());
-    assertEquals("bounded approximate passage groups", result.retrieval().totalMeaning());
+    assertEquals("bounded approximate snapshot slots", result.retrieval().totalMeaning());
     var replay = search.search(HOME, "question", 0, 10, "semantic", result.retrieval().snapshot());
     assertFalse(replay.retrieval().complete());
     assertEquals(true, replay.retrieval().truncated());

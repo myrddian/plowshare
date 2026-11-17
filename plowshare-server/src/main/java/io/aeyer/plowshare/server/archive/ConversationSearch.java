@@ -341,7 +341,7 @@ public final class ConversationSearch implements UsageAware {
         new LogSearchView.Retrieval(
             mode,
             fallback == null ? mode : "lexical",
-            approximate ? "bounded approximate passage groups" : "qualified bounded passage groups",
+            approximate ? "bounded approximate snapshot slots" : "bounded snapshot slots",
             token,
             truncated,
             coverage.complete() && fallback == null && !truncated && !approximate,
@@ -452,7 +452,7 @@ public final class ConversationSearch implements UsageAware {
         .searchSources(window.home(), expected)
         .forEach(source -> current.put(source.id(), source));
     List<LogSearchView.Hit> hits = new ArrayList<>();
-    int visible = 0;
+    int extent = 0;
     boolean changed = false;
     boolean referencesTruncated =
         window.hits().stream()
@@ -466,7 +466,9 @@ public final class ConversationSearch implements UsageAware {
               .toList();
       if (sources.size() != candidate.sources().size()) changed = true;
       if (sources.isEmpty()) continue;
-      visible++;
+      // Offsets address original slots. Count through the last surviving slot so withdrawals
+      // cannot make a caller stop before a later page; an entirely withdrawn window has extent 0.
+      extent = i + 1;
       if (i < skip || i - skip >= most) continue;
       var representative = sources.getFirst();
       var hit =
@@ -523,7 +525,7 @@ public final class ConversationSearch implements UsageAware {
             : entries.searchReach(window.home(), window.conversation());
     return new LogSearchView(
         hits,
-        visible,
+        extent,
         skip,
         most,
         new LogSearchView.Reach(reach.searched(), reach.ejected(), reach.recordedOnly()),

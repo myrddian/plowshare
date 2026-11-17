@@ -558,11 +558,12 @@ export class LibraryClient {
       slot,
       async () => {
         let reply: SearchValue['reply'];
+        let nextOffset: number | undefined;
         if (kind === 'conversation') {
           const prior = more
               ? (previous!.reply as LogSearchResponse)
               : undefined,
-            offset = prior ? prior.hits.length : 0;
+            offset = prior ? (previous?.nextOffset ?? prior.hits.length) : 0;
           if (prior && offset >= prior.total)
             throw new Error('No more search results.');
           if (
@@ -585,19 +586,29 @@ export class LibraryClient {
                 : {}),
             }),
           );
+          // Snapshot offsets address stable slots, including evidence revoked since
+          // materialization. Short/empty pages can still precede accessible slots.
+          const snapshot = !!page.retrieval?.snapshot;
           if (
             page.offset !== offset ||
+            page.limit <= 0 ||
             page.hits.length > page.limit ||
             page.limit > 50 ||
-            page.total < offset + page.hits.length ||
-            (page.hits.length === 0 && page.total > offset) ||
+            (page.total < offset + page.hits.length &&
+              !(snapshot && page.hits.length === 0)) ||
+            (!snapshot && page.hits.length === 0 && page.total > offset) ||
             (prior?.retrieval?.snapshot &&
               page.retrieval?.snapshot !== prior.retrieval.snapshot)
           )
             throw new Error(
               'Search snapshot or page coordinates changed. Submit a new search.',
             );
-          const hits = prior ? [...prior.hits, ...page.hits] : page.hits;
+          const hits =
+            page.total === 0
+              ? []
+              : prior
+                ? [...prior.hits, ...page.hits]
+                : page.hits;
           if (
             new Set(hits.map((hit) => `${hit.conversationId}:${hit.ordinal}`))
               .size !== hits.length
@@ -606,6 +617,7 @@ export class LibraryClient {
               'Search results changed while paging. Submit a new search.',
             );
           reply = { ...page, hits, offset: 0 };
+          nextOffset = page.offset + page.limit;
         } else if (kind === 'documents')
           reply = await this.checked(
             request('document.search', {
@@ -637,7 +649,14 @@ export class LibraryClient {
             reply.question !== query)
         )
           throw new Error('The search reply names a different question.');
-        return { kind, query, mode, project, reply };
+        return {
+          kind,
+          query,
+          mode,
+          project,
+          reply,
+          ...(nextOffset !== undefined ? { nextOffset } : {}),
+        };
       },
       (value) => {
         slot.value = value;

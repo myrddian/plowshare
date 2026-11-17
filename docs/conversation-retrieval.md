@@ -36,10 +36,13 @@ model-funded navigation automatically.
 For semantic/hybrid pages, reuse the returned `retrieval.snapshot`, the exact
 question, mode and scope with `--offset N`. Snapshots last five minutes; a restart
 or eviction from the 128-window cache requires a fresh first page. The qualified
-result window has at most 200 entries; `total` counts original snapshot slots,
-not every semantically related entry. Source removal/movement/revision suppresses
-invalid slots without shifting the remaining pages and marks the result
-incomplete. Coverage is current; candidate identities/order are frozen. Lexical
+result window has at most 200 entries; `total` is one past the last currently
+visible original snapshot slot, or zero if all results were withdrawn. It does
+not count every semantically related entry. Source removal/movement/revision
+suppresses invalid slots without shifting the remaining pages and marks the
+result incomplete. Advance by the returned `offset + limit`, including after a
+short or empty interior page, until that offset reaches `total`. Clear retained
+hits if `total` becomes zero. Coverage is current; candidate identities/order are frozen. Lexical
 paging remains the existing exact offset paging.
 
 For example, the `conversation_search` tool pages the same hybrid snapshot with:

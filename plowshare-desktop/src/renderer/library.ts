@@ -424,7 +424,7 @@ function searchResults() {
       )
       .join('');
     if (
-      r.hits.length < r.total &&
+      (value.nextOffset ?? r.hits.length) < r.total &&
       (meta?.effectiveMode === 'lexical' || !!meta?.snapshot)
     )
       html += '<button id="search-more">Load more from this search</button>';
