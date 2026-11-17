@@ -13,6 +13,9 @@ import type {
   NativeBrokerRequest,
 } from './native-broker-protocol.ts';
 import { FakeClock } from '../contracts.test-support.ts';
+import { decodeNativeLease } from '../native-control.ts';
+import type { NativeLease } from '../native-control.ts';
+import { decodeNativeArmStatus } from '../native-arming.ts';
 import {
   NativeProcessError,
   SpawnNativeControlProcess,
@@ -23,6 +26,7 @@ interface Command {
   readonly operation: string;
   readonly requestId: string;
   readonly targetRequestId?: string;
+  readonly lease?: NativeLease;
 }
 function object(value: unknown): Readonly<Record<string, unknown>> {
   assert.ok(
@@ -45,6 +49,9 @@ function command(source: string): Command {
     operation,
     requestId,
     ...(typeof targetRequestId === 'string' ? { targetRequestId } : {}),
+    ...(row['lease'] === undefined
+      ? {}
+      : { lease: decodeNativeLease(row['lease']) }),
   };
 }
 function decode(value: unknown): NativeBrokerReply {
@@ -54,6 +61,13 @@ function decode(value: unknown): NativeBrokerReply {
   assert.equal(typeof requestId, 'string');
   if (typeof requestId !== 'string')
     throw new Error('Missing test correlation');
+  if (row['operation'] === 'arm_revoke')
+    return {
+      version: NATIVE_BROKER_VERSION,
+      requestId,
+      operation: 'arm_revoke',
+      result: decodeNativeArmStatus(row['result']),
+    };
   if (row['operation'] === 'preflight')
     return {
       version: NATIVE_BROKER_VERSION,
@@ -93,6 +107,10 @@ function decode(value: unknown): NativeBrokerReply {
 }
 function decodeRequest(value: unknown): NativeBrokerRequest {
   const row = object(value);
+  if (row['operation'] === 'arm_revoke') {
+    assert.deepEqual(Object.keys(row).sort(), ['lease', 'operation']);
+    return { operation: 'arm_revoke', lease: decodeNativeLease(row['lease']) };
+  }
   assert.deepEqual(Object.keys(row), ['operation']);
   const operation = row['operation'];
   assert.ok(operation === 'preflight' || operation === 'stop');
@@ -163,6 +181,136 @@ function uncertain(error: unknown): boolean {
     error.physicalSettlement === 'uncertain'
   );
 }
+
+const lease = decodeNativeLease({
+  leaseId: 'lease',
+  sessionId: 'session',
+  generation: 'provider-generation',
+  targetId: 'screen',
+});
+const revoked = {
+  state: 'REVOKED',
+  binding: { lease, helperGeneration: '11111111-2222-3333-4444-555555555555' },
+  requestId: null,
+  armGeneration: null,
+  revokedAt: '2026-11-17T00:00:00Z',
+  reason: 'HOST_REVOKED',
+};
+
+await test('revoke bypasses pending input, rejects duplicate and normal work, and correlates both reply orders', async () => {
+  for (const reverse of [false, true]) {
+    const { child, process } = fixture();
+    const deadline = new OperationDeadline(1000);
+    try {
+      const normal = process.request({ operation: 'preflight' }, deadline);
+      const control = process.revoke(lease, deadline);
+      assert.equal(child.writes.length, 2);
+      assert.deepEqual(child.writes[1]?.lease, lease);
+      await assert.rejects(
+        process.revoke(lease, deadline),
+        (error) => error instanceof NativeProcessError && error.code === 'BUSY',
+      );
+      await assert.rejects(
+        process.request({ operation: 'preflight' }, deadline),
+        (error) => error instanceof NativeProcessError && error.code === 'BUSY',
+      );
+      const replies = child.writes.map((command) => ({
+        version: NATIVE_BROKER_VERSION,
+        requestId: command.requestId,
+        operation: command.operation,
+        result: command.operation === 'arm_revoke' ? revoked : {},
+      }));
+      if (reverse) replies.reverse();
+      child.stdout.write(
+        replies.map((reply) => JSON.stringify(reply) + '\n').join(''),
+      );
+      assert.equal((await control).operation, 'arm_revoke');
+      assert.equal((await normal).operation, 'preflight');
+      child.cleanStop();
+      assert.equal(
+        (await process.close(deadline)).physicalSettlement,
+        'settled',
+      );
+    } finally {
+      deadline.dispose();
+    }
+  }
+});
+
+await test('pre-write expired revoke leaves the ordinary request healthy', async () => {
+  const { child, process } = fixture();
+  const deadline = new OperationDeadline(1000),
+    expired = new OperationDeadline(1);
+  expired.cancel();
+  try {
+    const normal = process.request({ operation: 'preflight' }, deadline);
+    await assert.rejects(process.revoke(lease, expired));
+    await assert.rejects(
+      process.request({ operation: 'arm_revoke', lease }, deadline),
+    );
+    assert.equal(child.writes.length, 1);
+    const command = child.writes[0];
+    assert.ok(command);
+    child.reply(command);
+    assert.equal((await normal).operation, 'preflight');
+    child.cleanStop();
+    assert.equal((await process.close(deadline)).physicalSettlement, 'settled');
+  } finally {
+    deadline.dispose();
+    expired.dispose();
+  }
+});
+
+await test('revoke timeout fences both pending lanes, sends one cancellation and never replays', async () => {
+  const { child, process } = fixture();
+  const deadline = new OperationDeadline(1000),
+    controlDeadline = new OperationDeadline(1000);
+  try {
+    const normal = assert.rejects(
+      process.request({ operation: 'preflight' }, deadline),
+      uncertain,
+    );
+    const control = assert.rejects(
+      process.revoke(lease, controlDeadline),
+      uncertain,
+    );
+    controlDeadline.cancel();
+    await Promise.all([normal, control]);
+    assert.equal(child.writes.length, 3);
+    assert.equal(child.writes[2]?.operation, 'cancel');
+    assert.equal(child.writes[2]?.targetRequestId, child.writes[0]?.requestId);
+    assert.equal(
+      (await process.close(deadline)).physicalSettlement,
+      'uncertain',
+    );
+  } finally {
+    deadline.dispose();
+    controlDeadline.dispose();
+  }
+});
+
+await test('bad revoke correlation fences both pending requests without cleanup proof', async () => {
+  const { child, process } = fixture();
+  const deadline = new OperationDeadline(1000);
+  try {
+    const normal = assert.rejects(
+      process.request({ operation: 'preflight' }, deadline),
+      uncertain,
+    );
+    const control = assert.rejects(process.revoke(lease, deadline), uncertain);
+    const command = child.writes[1];
+    assert.ok(command);
+    child.reply(command, revoked, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    await Promise.all([normal, control]);
+    assert.equal(child.writes.length, 2);
+    assert.equal(
+      (await process.close(deadline)).physicalSettlement,
+      'uncertain',
+    );
+  } finally {
+    deadline.dispose();
+  }
+});
 
 await test('native already-expired and queued monotonic startup performs zero launches', () => {
   const clock = new FakeClock();

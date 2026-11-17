@@ -10,10 +10,11 @@ implementation is tracked in the
 [P2 delivery graph](../integrations/computer-control/P2-IMPLEMENTATION.md), including
 explicit control opt-in, independent reviews and the continuing live-validation
 deferral. Native macOS work is tracked in the
-[P3 delivery graph](../integrations/computer-control/P3-IMPLEMENTATION.md).
-Its source review does not establish usable native input: unknown desktop
-readiness refuses actions, and native permission/lock/interference acceptance
-remains a separate open gate. Browser and full desktop
+[P3 delivery graph](../integrations/computer-control/P3-IMPLEMENTATION.md) and
+[verified readiness continuation](../integrations/computer-control/READINESS-IMPLEMENTATION.md).
+The continuation adds SDK host-only local confirmation and scoped live GUI
+evidence; its source review does not replace actual native
+permission/lock/interference acceptance. Browser and full desktop
 control remain intended deliverables; browser-first delivery is a sequence,
 not the final scope.
 

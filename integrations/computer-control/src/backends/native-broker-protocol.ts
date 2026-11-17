@@ -25,10 +25,16 @@ import {
   decodeNativePermissions,
   decodeNativeWindows,
 } from '../native-control.ts';
-import { computerId } from '../contracts.ts';
+import { computerId, decodeOwner } from '../contracts.ts';
+import {
+  decodeNativeArmRequest,
+  decodeNativeArmStatus,
+} from '../native-arming.ts';
+import type { ComputerOwner } from '../contracts.ts';
+import type { NativeArmRequest, NativeArmStatus } from '../native-arming.ts';
 import { isAbsolute } from 'node:path';
 
-export const NATIVE_BROKER_VERSION = 'computer-control-native/2';
+export const NATIVE_BROKER_VERSION = 'computer-control-native/3';
 export const NATIVE_BROKER_MAX_REQUEST_BYTES = 65_536;
 export const NATIVE_BROKER_MAX_REPLY_BYTES = 2_097_152;
 export const NATIVE_BROKER_MAX_PROCESS_VISITS = 256;
@@ -77,6 +83,15 @@ export type NativeBrokerRequest =
       readonly lease: NativeLease;
       readonly request: NativePerformRequest;
     }
+  | {
+      readonly operation: 'arm_request';
+      readonly lease: NativeLease;
+      /** Stored acquire-time owner, never an arm caller/model override. */
+      readonly owner: ComputerOwner;
+      readonly request: NativeArmRequest;
+    }
+  | { readonly operation: 'arm_status'; readonly lease: NativeLease }
+  | { readonly operation: 'arm_revoke'; readonly lease: NativeLease }
   | { readonly operation: 'stop' };
 
 export type NativeBrokerRequestEnvelope = NativeBrokerRequest & {
@@ -139,6 +154,10 @@ export type NativeBrokerReply = ReplyHeader &
     | {
         readonly operation: 'focus' | 'perform';
         readonly result: NativeActionResult;
+      }
+    | {
+        readonly operation: 'arm_request' | 'arm_status' | 'arm_revoke';
+        readonly result: NativeArmStatus;
       }
     | { readonly operation: 'stop'; readonly result: NativeBrokerCleanupProof }
     | { readonly operation: 'failure'; readonly result: NativeBrokerFailure }
@@ -256,6 +275,7 @@ export function decodeNativeBrokerRequest(value: unknown): NativeBrokerRequest {
     'lease',
     'configuration',
     'request',
+    'owner',
   ]);
   switch (command['operation']) {
     case 'preflight':
@@ -271,6 +291,21 @@ export function decodeNativeBrokerRequest(value: unknown): NativeBrokerRequest {
       if (lease.targetId !== configuration.target.targetId) invalid();
       return Object.freeze({ operation: 'acquire', lease, configuration });
     }
+    case 'arm_request':
+      row(value, ['operation', 'lease', 'owner', 'request']);
+      return Object.freeze({
+        operation: 'arm_request',
+        lease: decodeNativeLease(command['lease']),
+        owner: decodeOwner(command['owner']),
+        request: decodeNativeArmRequest(command['request']),
+      });
+    case 'arm_status':
+    case 'arm_revoke':
+      row(value, ['operation', 'lease']);
+      return Object.freeze({
+        operation: command['operation'],
+        lease: decodeNativeLease(command['lease']),
+      });
     case 'windows':
       row(value, ['operation', 'lease']);
       return Object.freeze({
@@ -411,6 +446,14 @@ export function decodeNativeBrokerReply(value: unknown): NativeBrokerReply {
         }),
       });
     }
+    case 'arm_request':
+    case 'arm_status':
+    case 'arm_revoke':
+      return Object.freeze({
+        ...header,
+        operation: reply['operation'],
+        result: decodeNativeArmStatus(reply['result']),
+      });
     case 'acquire':
       return Object.freeze({
         ...header,

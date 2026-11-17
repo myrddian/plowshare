@@ -5,7 +5,6 @@ import type {
   NativeActionResult,
   NativeCleanupResult,
   NativeControl,
-  NativeControlBackend,
   NativeControlPolicy,
   NativeFocusRequest,
   NativeLease,
@@ -28,12 +27,25 @@ import {
   decodeNativePerformRequest,
   decodeNativeWindows,
 } from '../native-control.ts';
-import type { ComputerTarget } from '../contracts.ts';
+import type { ComputerTarget, ComputerOwner } from '../contracts.ts';
+import type {
+  NativeArmingBackend,
+  NativeArming,
+  NativeArmRequest,
+  NativeArmStatus,
+} from '../native-arming.ts';
+import {
+  decodeNativeArmRequest,
+  decodeNativeArmStatus,
+} from '../native-arming.ts';
 import { decodeTargets } from '../contracts.ts';
 import { OperationDeadline } from '../deadline.ts';
 import type { NativeControlProcess } from './native-control-process.ts';
 import { SpawnNativeControlProcess } from './native-control-process.ts';
-import { nativeBrokerCodec } from './native-broker-protocol.ts';
+import {
+  nativeBrokerCodec,
+  NATIVE_BROKER_VERSION,
+} from './native-broker-protocol.ts';
 import type {
   NativeBrokerConfiguration,
   NativeBrokerReply,
@@ -51,7 +63,7 @@ export interface MacOSControlBackendConfig extends MacOSBackendConfig {
   readonly maxVisitedNodes?: number;
 }
 export interface MacOSControlBackendHandle {
-  readonly backend: NativeControlBackend;
+  readonly backend: NativeArmingBackend;
   close(deadline: OperationDeadline): Promise<void>;
 }
 export type NativeControlProcessFactory = (
@@ -118,12 +130,18 @@ export function decodeMacOSControlBackendConfig(
 interface LeaseEntry {
   readonly lease: NativeLease;
   readonly ownership: NativeDirectoryOwnership;
+  readonly owner: ComputerOwner;
+  /** Set before any acquire transport attempt. Never inferred from its response. */
+  acquireSubmitted: boolean;
+  helperGeneration?: string;
+  revokeRunning?: Promise<NativeArmStatus>;
   process?: NativeControlProcess;
   phase: 'opening' | 'active' | 'closing' | 'fenced';
   busy: boolean;
   running: Promise<unknown>;
   cancel?: () => void;
   cleanup?: Promise<NativeCleanupResult>;
+  processClose?: Promise<NativeCleanupResult>;
 }
 /** Proven host-side refusal before a private helper command can be submitted. */
 class LocalNativeRefusal extends NativeControlError {}
@@ -133,9 +151,15 @@ const uncertainCleanup: NativeCleanupResult = Object.freeze({
   helperStopped: false,
 });
 
-class MacOSController implements NativeControlBackend, NativeControl {
+class MacOSController implements NativeArmingBackend, NativeControl {
   readonly desktopIsolation = 'native-broker';
   readonly nativeControl: NativeControl = this;
+  readonly nativeArming: NativeArming = {
+    request: (lease, request, deadline) =>
+      this.armRequest(lease, request, deadline),
+    status: (lease, deadline) => this.armStatus(lease, deadline),
+    revoke: (lease, deadline) => this.armRevoke(lease, deadline),
+  };
   readonly allowedTools: readonly NativeToolName[];
   private entry: LeaseEntry | undefined;
   private closed = false;
@@ -211,6 +235,8 @@ class MacOSController implements NativeControlBackend, NativeControl {
     });
     const entry: LeaseEntry = {
       lease,
+      owner: checked.owner,
+      acquireSubmitted: false,
       ownership: new NativeDirectoryOwnership(this.config.ownershipDirectory),
       phase: 'opening',
       busy: true,
@@ -229,6 +255,20 @@ class MacOSController implements NativeControlBackend, NativeControl {
       if (this.closed || entry.phase !== 'opening')
         throw new NativeControlError('FENCED');
       entry.process = this.factory(budget);
+      // Protocol 3 adds mandatory arming/revoke semantics. A read-only handshake
+      // rejects older helpers before they can claim the global desktop domain.
+      const preflight = await entry.process.request(
+        { operation: 'preflight' },
+        budget,
+      );
+      budget.requireActive();
+      if (
+        this.closed ||
+        entry.phase !== 'opening' ||
+        preflight.operation !== 'preflight' ||
+        preflight.version !== NATIVE_BROKER_VERSION
+      )
+        throw new NativeControlError('UNSUPPORTED_ACTION');
       const configuration: NativeBrokerConfiguration = {
         ownershipDirectory: this.config.ownershipDirectory,
         target,
@@ -238,6 +278,7 @@ class MacOSController implements NativeControlBackend, NativeControl {
         maxVisitedNodes: this.config.maxVisitedNodes ?? 2000,
         cleanupBudgetMs: this.config.cleanupBudgetMs ?? 2000,
       };
+      entry.acquireSubmitted = true;
       const reply = await entry.process.request(
         { operation: 'acquire', lease, configuration },
         budget,
@@ -290,12 +331,31 @@ class MacOSController implements NativeControlBackend, NativeControl {
             : 'CLEANUP_UNCERTAIN',
       };
     } catch {
+      // Lost/invalid read-only handshake is not an uncertain input/acquisition.
+      // Cancel publication first so a late preflight cannot proceed to acquire.
+      const expired = budget.signal.aborted || budget.remainingMs() <= 0;
+      budget.cancel();
+      if (!entry.acquireSubmitted && entry.process !== undefined) {
+        const cleanup = new OperationDeadline(
+          this.config.cleanupBudgetMs ?? 2000,
+        );
+        try {
+          const result = await this.cleanup(entry, cleanup);
+          if (result.physicalSettlement === 'settled')
+            return {
+              outcome: 'NOT_ACQUIRED',
+              code: expired ? 'DEADLINE_EXPIRED' : 'UNSUPPORTED_ACTION',
+            };
+        } finally {
+          cleanup.dispose();
+        }
+      }
       entry.phase = 'fenced';
       entry.ownership.fence();
       return {
         outcome: 'UNCERTAIN',
         lease,
-        code: budget.signal.aborted ? 'DEADLINE_EXPIRED' : 'FENCED',
+        code: expired ? 'DEADLINE_EXPIRED' : 'FENCED',
       };
     } finally {
       delete entry.cancel;
@@ -352,6 +412,126 @@ class MacOSController implements NativeControlBackend, NativeControl {
       entry.busy = false;
       delete entry.cancel;
       budget.dispose();
+    }
+  }
+  private armReply(
+    entry: LeaseEntry,
+    reply: NativeBrokerReply,
+    operation: 'arm_request' | 'arm_status' | 'arm_revoke',
+    deadline: OperationDeadline,
+    requestId?: string,
+  ): NativeArmStatus {
+    if (reply.operation === 'failure') {
+      if (reply.result.physicalSettlement === 'uncertain') {
+        entry.phase = 'fenced';
+        entry.ownership.fence();
+      }
+      throw new NativeControlError(reply.result.code);
+    }
+    try {
+      deadline.requireActive();
+      if (reply.operation !== operation) throw new NativeControlError('FENCED');
+      const status = decodeNativeArmStatus(reply.result),
+        binding = status.binding;
+      if (
+        operation === 'arm_request' &&
+        (status.state !== 'PENDING' || status.requestId !== requestId)
+      )
+        throw new NativeControlError('FENCED');
+      if (operation === 'arm_revoke' && status.state !== 'REVOKED')
+        throw new NativeControlError('FENCED');
+      if (
+        binding.lease.leaseId !== entry.lease.leaseId ||
+        binding.lease.targetId !== entry.lease.targetId ||
+        binding.lease.sessionId !== entry.lease.sessionId ||
+        binding.lease.generation !== entry.lease.generation ||
+        binding.helperGeneration === entry.lease.generation ||
+        (entry.helperGeneration !== undefined &&
+          binding.helperGeneration !== entry.helperGeneration)
+      ) {
+        entry.phase = 'fenced';
+        entry.ownership.fence();
+        throw new NativeControlError('FENCED');
+      }
+      entry.helperGeneration = binding.helperGeneration;
+      return status;
+    } catch (error) {
+      entry.phase = 'fenced';
+      entry.ownership.fence();
+      throw error;
+    }
+  }
+  private async armRequest(
+    lease: NativeLease,
+    request: NativeArmRequest,
+    deadline: OperationDeadline,
+  ): Promise<NativeArmStatus> {
+    const checked = decodeNativeArmRequest(request),
+      entry = this.owned(lease);
+    const reply = await this.request(
+      lease,
+      {
+        operation: 'arm_request',
+        lease: entry.lease,
+        owner: entry.owner,
+        request: checked,
+      },
+      deadline,
+    );
+    return this.armReply(
+      entry,
+      reply,
+      'arm_request',
+      deadline,
+      checked.requestId,
+    );
+  }
+  private async armStatus(
+    lease: NativeLease,
+    deadline: OperationDeadline,
+  ): Promise<NativeArmStatus> {
+    const entry = this.owned(lease);
+    const reply = await this.request(
+      lease,
+      { operation: 'arm_status', lease: entry.lease },
+      deadline,
+    );
+    return this.armReply(entry, reply, 'arm_status', deadline);
+  }
+  private async armRevoke(
+    lease: NativeLease,
+    deadline: OperationDeadline,
+  ): Promise<NativeArmStatus> {
+    const entry = this.owned(lease);
+    deadline.requireActive();
+    if (entry.process === undefined || entry.phase === 'opening')
+      throw new LocalNativeRefusal('NO_LEASE');
+    if (entry.revokeRunning !== undefined)
+      return awaitBrowserWork(entry.revokeRunning, deadline);
+    if (entry.phase === 'fenced') throw new LocalNativeRefusal('FENCED');
+    const process = entry.process;
+    const work = Promise.resolve().then(async () => {
+      deadline.requireActive();
+      const reply = await process.revoke(entry.lease, deadline);
+      return this.armReply(entry, reply, 'arm_revoke', deadline);
+    });
+    entry.revokeRunning = work;
+    // A caller timeout is not physical command settlement. Keep the original
+    // control promise attached until its own lifecycle actually settles.
+    void work.then(
+      () => {
+        if (entry.revokeRunning === work) delete entry.revokeRunning;
+      },
+      () => {
+        if (entry.revokeRunning === work) delete entry.revokeRunning;
+      },
+    );
+    try {
+      return await awaitBrowserWork(work, deadline);
+    } catch (error) {
+      entry.phase = 'fenced';
+      entry.ownership.fence();
+      throw error;
     }
   }
   private tool(name: NativeToolName): void {
@@ -472,11 +652,22 @@ class MacOSController implements NativeControlBackend, NativeControl {
     entry.cleanup = this.finishCleanup(entry, deadline);
     return entry.cleanup;
   }
+  private closeProcess(
+    entry: LeaseEntry,
+    deadline: OperationDeadline,
+  ): Promise<NativeCleanupResult> {
+    if (entry.processClose !== undefined) return entry.processClose;
+    const process = entry.process;
+    if (process === undefined) return Promise.resolve(uncertainCleanup);
+    entry.processClose = Promise.resolve().then(() => process.close(deadline));
+    return entry.processClose;
+  }
   private async finishCleanup(
     entry: LeaseEntry,
     deadline: OperationDeadline,
   ): Promise<NativeCleanupResult> {
-    entry.cancel?.();
+    const opening = entry.phase === 'opening';
+    if (opening) entry.cancel?.();
     entry.phase = 'closing';
     if (entry.process === undefined) {
       entry.ownership.fence();
@@ -484,11 +675,32 @@ class MacOSController implements NativeControlBackend, NativeControl {
       return uncertainCleanup;
     }
     try {
+      if (!entry.acquireSubmitted) {
+        // Only preflight was allowed onto stdin. Actual child exit/reap plus
+        // settlement proves there was no acquire, held input or global claim;
+        // an old helper need not understand v3 stop/revoke to prove this case.
+        const stopped = await awaitBrowserWork(
+          this.closeProcess(entry, deadline),
+          deadline,
+        );
+        await awaitBrowserWork(Promise.allSettled([entry.running]), deadline);
+        if (!stopped.helperStopped)
+          throw new NativeControlError('CLEANUP_UNCERTAIN');
+        deadline.requireActive();
+        await entry.ownership.releaseAfterQuiescence(deadline);
+        this.entry = undefined;
+        return {
+          physicalSettlement: 'settled',
+          heldInputsReleased: true,
+          helperStopped: true,
+        };
+      }
+      if (!opening) await this.armRevoke(entry.lease, deadline);
+      await awaitBrowserWork(Promise.allSettled([entry.running]), deadline);
       const result = await awaitBrowserWork(
-        entry.process.close(deadline),
+        this.closeProcess(entry, deadline),
         deadline,
       );
-      await awaitBrowserWork(Promise.allSettled([entry.running]), deadline);
       if (
         result.physicalSettlement !== 'settled' ||
         !result.helperStopped ||
@@ -499,6 +711,14 @@ class MacOSController implements NativeControlBackend, NativeControl {
       this.entry = undefined;
       return result;
     } catch {
+      // Even failed revocation/drain must initiate physical child shutdown once.
+      // The process capability owns its finite kill/reap budget; keep its promise
+      // and this durable fence when the caller's cleanup deadline is exhausted.
+      entry.running = Promise.allSettled([
+        entry.running,
+        entry.revokeRunning ?? Promise.resolve(),
+        this.closeProcess(entry, deadline),
+      ]);
       entry.ownership.fence();
       entry.phase = 'fenced';
       return uncertainCleanup;

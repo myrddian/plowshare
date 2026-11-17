@@ -451,6 +451,111 @@ class NativeScriptsTest(unittest.TestCase):
         memory.assert_not_called()
         self.assertIn("Readiness=unknown", output.getvalue())
 
+    def test_memory_reply_requires_exact_owned_main_loop_evidence(self):
+        reply = {
+            "version": "computer-control-native/self-test/1",
+            "ok": True,
+            "unicodeScalars": 10,
+            "utf16Units": 13,
+            "eventRoundTrips": 20,
+            "pointerRoundTrip": True,
+            "keyRoundTrip": True,
+            "scrollRoundTrip": True,
+            "cancelledBudgetRejected": True,
+            "protocolFramesChecked": 19,
+            "acknowledgementCasesChecked": 8,
+            "executorCasesChecked": 6,
+            "readinessUICasesChecked": 29,
+            "readinessCasesChecked": 67,
+            "mainLoopCasesChecked": 2,
+        }
+
+        def checked(value):
+            def invoke(*args, diagnostic_flags=None, **kwargs):
+                self.assertEqual(args[1], ["--check-input-memory"])
+                diagnostic_flags.append(False)
+                return json.dumps(value).encode()
+
+            with patch.object(check, "invoke", side_effect=invoke):
+                return check.check_memory(
+                    pathlib.Path("/unused"),
+                    pathlib.Path("/private/tmp"),
+                    check.builder.Deadline(2),
+                )
+
+        self.assertFalse(checked(reply))
+        for invalid in (
+            {
+                key: value
+                for key, value in reply.items()
+                if key != "mainLoopCasesChecked"
+            },
+            {**reply, "mainLoopCasesChecked": True},
+            {**reply, "mainLoopCasesChecked": 1},
+            {**reply, "mainLoopCasesChecked": 3},
+            {**reply, "unknown": True},
+        ):
+            with self.assertRaises(check.builder.Failure):
+                checked(invalid)
+
+    def test_legacy_capture_and_rejected_v2_control_are_both_checked_without_effects(
+        self,
+    ):
+        packets = []
+
+        def invoke(executable, arguments, request, directory, overall, allowed=(0,)):
+            value = json.loads(request)
+            packets.append((arguments, value, allowed))
+            if arguments:
+                self.assertEqual(arguments, ["--control"])
+                self.assertEqual(value["operation"], "preflight")
+                self.assertEqual(allowed, (1,))
+                return b""
+            self.assertEqual(value["operation"], "status")
+            try:
+                check.strict_json(request)
+                unique_fields = True
+            except check.builder.Failure:
+                unique_fields = False
+            valid = (
+                unique_fields
+                and set(value) == {"version", "operation", "timeoutMs"}
+                and (
+                    value["version"] == check.V1
+                    and type(value["timeoutMs"]) is int
+                    and value["timeoutMs"] > 0
+                )
+            )
+            if valid:
+                return json.dumps(
+                    {
+                        "version": check.V1,
+                        "ok": True,
+                        "operation": "status",
+                        "screenCaptureAllowed": False,
+                        "accessibilityAllowed": False,
+                    }
+                ).encode()
+            return json.dumps(
+                {"version": check.V1, "ok": False, "code": "INVALID_REQUEST"}
+            ).encode()
+
+        with patch.object(check, "invoke", side_effect=invoke):
+            deadline = check.builder.Deadline(2)
+            check.check_v1(
+                pathlib.Path("/unused"), pathlib.Path("/private/tmp"), deadline
+            )
+            check.check_control_invalid(
+                pathlib.Path("/unused"), pathlib.Path("/private/tmp"), deadline
+            )
+        self.assertTrue(any(not arguments for arguments, _, _ in packets))
+        self.assertTrue(
+            any(
+                arguments and value["version"] == "computer-control-native/2"
+                for arguments, value, _ in packets
+            )
+        )
+
     @unittest.skipUnless(sys.platform == "darwin", "Darwin exclusive rename primitive")
     def test_atomic_publication_refuses_racing_destination(self):
         with tempfile.TemporaryDirectory() as directory:

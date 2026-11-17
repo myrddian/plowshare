@@ -1,5 +1,23 @@
 export { computerDeclarations, createComputerProvider } from './provider.ts';
 export type {
+  NativeHostArming,
+  NativeHostSession,
+} from './native-host-arming.ts';
+export type {
+  NativeArming,
+  NativeArmingBackend,
+  NativeArmRequest,
+  NativeArmStatus,
+  NativeArmProof,
+  NativeArmBinding,
+  NativeArmRevocationReason,
+} from './native-arming.ts';
+export {
+  decodeNativeArmRequest,
+  decodeNativeArmStatus,
+  decodeNativeArmProof,
+} from './native-arming.ts';
+export type {
   ComputerProvider,
   ComputerProviderOptions,
   ProviderBudgets,

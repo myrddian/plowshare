@@ -71,9 +71,12 @@ import { BrowserToolRuntime } from './browser-runtime.ts';
 import { browserComposition } from './browser-composition.ts';
 import {
   nativeComposition,
+  nativeArmingComposition,
   requireDistinctControlPorts,
 } from './native-composition.ts';
 import { NativeToolRuntime } from './native-runtime.ts';
+import type { NativeArmingBackend } from './native-arming.ts';
+import type { NativeHostArming } from './native-host-arming.ts';
 
 export interface ComputerProviderOptions {
   readonly connection: Pick<Plowshare, 'request'>;
@@ -94,6 +97,8 @@ export interface ComputerProviderOptions {
   readonly browserTools?: readonly BrowserToolName[];
   readonly browserObservationReserveMs?: number;
   readonly nativeControls?: readonly NativeControlBackend[];
+  /** Exact configured native backend instances; host-local, never model tools. */
+  readonly nativeArmingControls?: readonly NativeArmingBackend[];
   readonly nativeTools?: readonly NativeToolName[];
   readonly nativeObservationReserveMs?: number;
   readonly cleanupBudgetMs?: number;
@@ -103,6 +108,7 @@ export interface ComputerProviderOptions {
   readonly parentDeadline?: () => OperationDeadline | undefined;
 }
 export interface ComputerProvider {
+  readonly nativeArming?: NativeHostArming;
   readonly provider: ToolProvider;
   /** SDK registrations for inspection/composition, not a client execution API; use provider.poll(). */
   readonly tools: readonly RegisteredTool[];
@@ -282,6 +288,10 @@ export async function createComputerProvider(
     options.nativeTools === undefined ? [] : options.nativeTools,
   );
   requireDistinctControlPorts(browserControls, nativeControls);
+  const armingControls = nativeArmingComposition(
+    nativeControls,
+    options.nativeArmingControls ?? [],
+  );
   const observationReserveMs = positiveBudget(
     options.browserObservationReserveMs === undefined
       ? 3000
@@ -395,6 +405,7 @@ export async function createComputerProvider(
           binding,
           sessions,
           controls: nativeControls,
+          armingControls,
           tools: nativeTools,
           clock,
           origin,
@@ -805,6 +816,9 @@ export async function createComputerProvider(
   );
   return Object.freeze({
     provider,
+    ...(native === undefined || armingControls.length === 0
+      ? {}
+      : { nativeArming: native.nativeArming }),
     tools,
     declarations,
     sessions,

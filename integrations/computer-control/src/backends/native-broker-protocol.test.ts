@@ -42,6 +42,96 @@ function wireObservation() {
   };
 }
 
+await test('private arming wire variants project complete typed ownership and reject extra or missing evidence', () => {
+  const owner = {
+      account: 'owner',
+      project: 'project',
+      provider: 'provider',
+      run: 'run',
+    },
+    request = {
+      requestId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      durationMs: 30_000,
+    };
+  const arm = { operation: 'arm_request', lease, owner, request };
+  assert.deepEqual(decodeNativeBrokerRequest(arm), arm);
+  for (const operation of ['arm_status', 'arm_revoke'])
+    assert.deepEqual(decodeNativeBrokerRequest({ operation, lease }), {
+      operation,
+      lease,
+    });
+  for (const invalid of [
+    { ...arm, owner: undefined },
+    { ...arm, owner: { ...owner, account: undefined } },
+    { ...arm, owner: { ...owner, helperGeneration: requestId } },
+    { ...arm, request: undefined },
+    { ...arm, request: { ...request, durationMs: 30_001 } },
+    { ...arm, request: { ...request, ready: true } },
+    { ...arm, lease: { ...lease, leaseId: undefined } },
+    { ...arm, nonce: 'caller-answer' },
+    { operation: 'arm_status', lease, owner },
+    { operation: 'arm_revoke', lease, request },
+    { operation: 'arm_status' },
+    { operation: 'arm_confirm', lease },
+  ])
+    assert.throws(() => decodeNativeBrokerRequest(invalid));
+  const binding = { lease, helperGeneration: requestId };
+  const statuses = [
+    {
+      operation: 'arm_request',
+      result: {
+        state: 'PENDING',
+        binding,
+        requestId: request.requestId,
+        challengeId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+        requestedAt: '2026-11-17T00:00:00Z',
+        expiresAt: '2026-11-17T00:00:30Z',
+      },
+    },
+    { operation: 'arm_status', result: { state: 'UNARMED', binding } },
+    {
+      operation: 'arm_revoke',
+      result: {
+        state: 'REVOKED',
+        binding,
+        requestId: null,
+        armGeneration: null,
+        revokedAt: '2026-11-17T00:00:00Z',
+        reason: 'HOST_REVOKED',
+      },
+    },
+  ];
+  for (const value of statuses) {
+    assert.deepEqual(
+      decodeNativeBrokerReply(envelope(value.operation, value.result)),
+      envelope(value.operation, value.result),
+    );
+    assert.throws(() =>
+      decodeNativeBrokerReply(
+        envelope(value.operation, { ...value.result, nonce: 'private' }),
+      ),
+    );
+    assert.throws(() =>
+      decodeNativeBrokerReply(
+        envelope(value.operation, { ...value.result, binding: { lease } }),
+      ),
+    );
+    assert.throws(() =>
+      decodeNativeBrokerReply(
+        envelope(value.operation, { ...value.result, state: 'READY' }),
+      ),
+    );
+  }
+  assert.throws(() =>
+    decodeNativeBrokerReply(
+      envelope('arm_confirm', { state: 'UNARMED', binding }),
+    ),
+  );
+  assert.throws(() =>
+    decodeNativeBrokerReply(envelope('acquire', statuses[0]?.result)),
+  );
+});
+
 await test('native private outgoing codec validates complete configuration and lease correlation', () => {
   const checked = decodeNativeBrokerRequest({
     operation: 'acquire',

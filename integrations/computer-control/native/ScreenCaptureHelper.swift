@@ -232,11 +232,61 @@ private func capture(_ request: Request) async throws {
   try writeReply(reply, bytes: data as Data)
 }
 
+/// The async-main runtime can exit successfully when its single CF main-loop
+/// drain returns, even while the async worker is unfinished. AppKit may stop a
+/// run-loop turn. This explicit process owner only completes when its one mode
+/// worker returns; a CF return is never a success or physical-settlement proof.
+private final class NativeMainCompletion: @unchecked Sendable {
+  // This one flag is accessed only through this lock, including worker wakeup.
+  private let lock = NSLock()
+  private var completed = false
+  var isCompleted: Bool { lock.withLock { completed } }
+  func finish() { lock.withLock { completed = true } }
+}
+
+/// Fixed no-GUI regression: the original async-main entrypoint would exit zero
+/// before either continuation/strict self-test JSON. One original work budget
+/// covers both turns; no AppKit, capture, input, tap or ownership is initialized.
+@MainActor
+private func nativeMainLoopMemoryCheck() async throws -> Int {
+  let budget = NativeBudget(milliseconds: 100)
+  for _ in 0..<2 {
+    try budget.check()
+    CFRunLoopStop(CFRunLoopGetMain())
+    try await budget.sleep(milliseconds: 10)
+  }
+  return 2
+}
+
 @main
 private enum Main {
-  static func main() async {
+  @MainActor static func main() {
+    let completion = NativeMainCompletion()
+    Task { @MainActor in
+      await runMode()
+      completion.finish()
+      CFRunLoopStop(CFRunLoopGetMain())
+    }
+    // A persistent stdin subscription has no two-second lifetime; its active
+    // commands retain their existing original deadlines/watchdogs and cleanup
+    // budgets. This loop only services the owning main executor, never polls UI
+    // state or renews a grant. A stopped/empty turn cannot complete the worker.
+    while !completion.isCompleted {
+      let started = DispatchTime.now().uptimeNanoseconds
+      autoreleasepool { _ = CFRunLoopRunInMode(.defaultMode, 0.1, false) }
+      if !completion.isCompleted,
+        DispatchTime.now().uptimeNanoseconds - started < 1_000_000
+      {
+        Thread.sleep(forTimeInterval: 0.001)
+      }
+    }
+  }
+  @MainActor private static func runMode() async {
     if CommandLine.arguments == [CommandLine.arguments[0], "--check-input-memory"] {
-      do { try await runNativeInputMemoryCheck() } catch { exit(1) }
+      do {
+        let mainLoopCases = try await nativeMainLoopMemoryCheck()
+        try await runNativeInputMemoryCheck(mainLoopCasesChecked: mainLoopCases)
+      } catch { exit(1) }
       return
     }
     if CommandLine.arguments == [CommandLine.arguments[0], "--control"] {

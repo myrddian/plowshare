@@ -6,9 +6,11 @@ control. TUI, GUI and standalone SDK hosts use the same implementation on their
 existing authenticated connection. Dedicated client controls, other operating
 systems and deployments remain separate deliverables.
 
-P3 native acceptance remains OPEN. Production readiness is unknown and native
-input is refused. Reviewed source and no-post checks do not establish a usable
-desktop loop; the native matrix below must pass before claiming that phase done.
+This graph records the initial foundation and its no-input evidence. The
+[verified readiness continuation](READINESS-IMPLEMENTATION.md) adds host-only
+local confirmation and scoped live evidence to make native input usable. Native
+acceptance remains separately tracked there; the matrix must pass before claiming
+the phase complete. Historical evidence below does not qualify the continuation.
 
 This work builds on the reviewed P2 source in draft PR #295, itself stacked on
 draft PR #293. Implementation does not close their deferred configured

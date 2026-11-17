@@ -25,6 +25,9 @@ SOURCES = (
     "NativeBrokerProtocol.swift",
     "NativeInput.swift",
     "NativeObservation.swift",
+    "NativeReadinessUIContract.swift",
+    "NativeReadinessUI.swift",
+    "NativeReadiness.swift",
     "NativeBroker.swift",
 )
 EXECUTABLE = "plowshare-computer-helper"

@@ -128,6 +128,33 @@ const nativeControlled = {
   },
 };
 
+await test('native arming configuration only requests local confirmation and never declares readiness', () => {
+  const base = {
+    ...source,
+    browser: undefined,
+    macosControl: nativeControlled,
+  };
+  const nativeArming = { mode: 'local-confirmation', durationMs: 30_000 };
+  const config = decodeComputerHostConfig({ ...base, nativeArming });
+  assert.deepEqual(config.nativeArming, nativeArming);
+  assert.deepEqual(decodeComputerHostConfig(config), config);
+  for (const invalid of [
+    true,
+    null,
+    {},
+    { ...nativeArming, durationMs: 30_001 },
+    { ...nativeArming, durationMs: 0 },
+    { ...nativeArming, durationMs: 0.5 },
+    { ...nativeArming, mode: 'force-ready' },
+    { ...nativeArming, armed: true },
+  ])
+    assert.throws(() =>
+      decodeComputerHostConfig({ ...base, nativeArming: invalid }),
+    );
+  assert.throws(() => decodeComputerHostConfig({ ...source, nativeArming }));
+  assert.equal(decodeComputerHostConfig(base).nativeArming, undefined);
+});
+
 await test('native host control is explicit, bounded and shares one canonical catalogue with browser tools', () => {
   const config = decodeComputerHostConfig({
     ...source,

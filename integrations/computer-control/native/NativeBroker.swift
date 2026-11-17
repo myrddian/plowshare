@@ -90,13 +90,57 @@ private struct BrokerActionReply: Encodable {
 /// cancellation while a bounded operation awaits a native RPC/capture. Ordinary
 /// commands never overlap; EOF/cancel is not an application action or a replay.
 /// A killed/hung process leaves BOTH durable evidence and kernel fence intact.
-final class NativeBroker {
+final class NativeBroker: NativeInspectorLocalAccess {
   private let lock = NSLock(), outputLock = NSLock()
   private var activeId: String?, activeBudget: NativeBudget?, stopping = false
   private var lease: BrokerLease?, configuration: BrokerConfiguration?, inspector: NativeInspector?
   private var fence: NativeGlobalFence?, evidence: NativeEvidence?, input: NativeInputExecutor?
+  private var readiness: NativeReadiness?
+  private var shutdownTask: Task<Void, Never>?
   private var physicallyUncertain = false
   private var cleanupBudgetMs = 2000  // Protected by lock; reader never reads configuration.
+  func reserveInspector(budget: NativeBudget) async throws -> NativeInspectorLocalReservation {
+    let id = "local:" + UUID().uuidString.lowercased()
+    while true {
+      try budget.check()
+      let admitted = try lock.withLock { () -> Bool in
+        guard !stopping else { throw BrokerFailure.fenced }
+        if activeId != nil { return false }
+        activeId = id
+        activeBudget = budget
+        return true
+      }
+      if admitted {
+        return NativeInspectorLocalReservation { [weak self] in
+          self?.lock.withLock {
+            if self?.activeId == id {
+              self?.activeId = nil
+              self?.activeBudget = nil
+            }
+          }
+        }
+      }
+      try await budget.sleep(milliseconds: 2)
+    }
+  }
+  private func drainOwnedWork(_ budget: NativeBudget) async throws {
+    while lock.withLock({ activeId != nil }) {
+      try budget.check()
+      try await budget.sleep(milliseconds: 2)
+    }
+    try budget.check()
+  }
+  private func readArmingStatus(_ candidate: BrokerLease) throws -> NativeArmStatusValue {
+    let snapshot = lock.withLock { (lease == candidate, readiness) }
+    guard snapshot.0, let readiness = snapshot.1 else { throw BrokerFailure.noLease }
+    return readiness.status()
+  }
+  private func beginStoppingLocked() {
+    stopping = true
+    readiness?.revoke("LEASE_CLOSED")
+    activeBudget?.cancel()
+  }
+  private func beginStopping() { lock.withLock { beginStoppingLocked() } }
   private func reply<T: Encodable>(
     _ request: BrokerRequest, _ operation: String, _ value: T, completesOperation: Bool = true
   ) throws {
@@ -130,25 +174,32 @@ final class NativeBroker {
     guard #available(macOS 15.2, *) else {
       return BrokerAcquisition(outcome: "NOT_ACQUIRED", lease: nil, code: "UNSUPPORTED_ACTION")
     }
-    let permissions = BrokerPermissions.current()
-    guard permissions.screenCapture else {
-      return BrokerAcquisition(outcome: "NOT_ACQUIRED", lease: nil, code: "PERMISSION_DENIED")
-    }
+    // Acquisition proves only exclusive ownership. Missing permissions keep all
+    // capture/input disarmed, but explicit host-local setup UI remains reachable.
     let view = NativeInspector(configuration: config)
-    _ = try view.display(budget)
+    try view.validateDisplayPresence(budget)
     do { fence = try NativeGlobalFence() } catch NativeFenceFailure.busy {
       return BrokerAcquisition(outcome: "NOT_ACQUIRED", lease: nil, code: "BUSY")
     } catch { return BrokerAcquisition(outcome: "NOT_ACQUIRED", lease: nil, code: "FENCED") }
     // From here any unproved exception retains the kernel fence. Parent owns the
     // exact local capture.lock and may remove it only after our stop proof+exit.
-    lease = candidate
-    configuration = config
-    lock.withLock { cleanupBudgetMs = config.cleanupBudgetMs }
-    inspector = view
+    lock.withLock {
+      lease = candidate
+      configuration = config
+      cleanupBudgetMs = config.cleanupBudgetMs
+      inspector = view
+    }
     do {
       let ownedEvidence = try NativeEvidence(directory: config.ownershipDirectory, lease: candidate)
       evidence = ownedEvidence
-      input = NativeInputExecutor(evidence: ownedEvidence)
+      let readiness = NativeReadiness(
+        lease: candidate, configuration: config, inspector: view,
+        uiFactory: { NativeAppKitReadinessUI() }, localAccess: self)
+      lock.withLock { self.readiness = readiness }
+      view.bindReadiness(readiness)
+      input = NativeInputExecutor(
+        evidence: ownedEvidence, sink: NativeArmedEventSink(readiness: readiness),
+        monitor: NativeArmedInputMonitor(readiness: readiness))
       try budget.check()
       return BrokerAcquisition(outcome: "ACQUIRED", lease: candidate, code: nil)
     } catch {
@@ -161,6 +212,8 @@ final class NativeBroker {
   ) async throws -> BrokerObservation {
     guard let inspector, inspector.accepts(surface: surface) else { throw BrokerFailure.gone }
     guard #available(macOS 15.2, *) else { throw BrokerFailure.unsupported }
+    guard let readiness else { throw BrokerFailure.noLease }
+    try await readiness.prepareReadPlane(budget: budget)
     if structured { _ = try inspector.discover(budget) }
     let initial = try inspector.state(surface: surface, budget)
     let projection =
@@ -174,7 +227,12 @@ final class NativeBroker {
         snapshotId: $0.snapshotId, rootElementId: $0.rootElementId, guardValue: before.guardValue,
         capturedAt: $0.capturedAt, nodes: $0.nodes, truncated: $0.truncated)
     }
-    let image = try await nativeCapture(display: before.display, state: before, budget: budget)
+    let regions = try await readiness.captureRegions(budget: budget)
+    let image = try await nativeCapture(
+      display: before.display, state: before, budget: budget, redactions: regions.rectangles)
+    if regions != (try await readiness.captureRegions(budget: budget)) {
+      throw BrokerFailure.stale
+    }
     let after = try inspector.state(surface: surface, budget)
     guard before.guardValue == after.guardValue, before.permissions == after.permissions,
       before.display == after.display
@@ -182,10 +240,9 @@ final class NativeBroker {
     try budget.check()
     return BrokerObservation(image: image, state: after, snapshot: snapshot)
   }
-  /// No public positive unlocked/session-readiness proof is available in this
-  /// implementation. Neither AX focus nor console-active nor secure-input=false
-  /// is silently upgraded to ready. The bounded posting executor is separately
-  /// implemented/testable; this gate keeps all production input unavailable.
+  /// A bounded local grant plus fresh helper-owned compositor/GUI-route evidence
+  /// enables this scoped operating envelope. Auxiliary console/focus/secure-input
+  /// facts alone never become global unlocked authority; loss revokes the grant.
   private func readiness(_ state: BrokerState) -> BrokerFailure? {
     if state.secureInput == "active" { return .secure }
     if !state.permissions.accessibility || !state.permissions.eventPosting
@@ -203,7 +260,7 @@ final class NativeBroker {
   {
     do {
       return .captured(
-        try await observe(surface: surface, structured: false, root: nil, budget: budget))
+        try await observe(surface: surface, structured: true, root: nil, budget: budget))
     } catch { return .failed(((error as? BrokerFailure) ?? .observation).rawValue) }
   }
   private func dispatch(
@@ -277,6 +334,7 @@ final class NativeBroker {
     }
   }
   private func stop(_ budget: NativeBudget) async -> BrokerCleanup {
+    readiness?.revoke("LEASE_CLOSED")
     if physicallyUncertain {
       return BrokerCleanup(physicalSettlement: "uncertain", heldInputsReleased: false)
     }
@@ -287,13 +345,17 @@ final class NativeBroker {
     }
     do {
       try budget.check()
+      try await readiness?.stop(budget: budget)
+      lock.withLock { readiness = nil }
       try evidence?.removeAfterQuiescence()
       evidence = nil
       try fence?.releaseAfterQuiescence()
       fence = nil
-      lease = nil
-      configuration = nil
-      inspector = nil
+      lock.withLock {
+        lease = nil
+        configuration = nil
+        inspector = nil
+      }
       return BrokerCleanup(physicalSettlement: "settled", heldInputsReleased: true)
     } catch {
       physicallyUncertain = true
@@ -315,11 +377,24 @@ final class NativeBroker {
       case .preflight: try reply(request, "preflight", BrokerPreflight())
       case .acquire(let candidate, let config):
         try reply(request, "acquire", acquire(candidate, config, budget))
+      case .armRequest(let candidate, let owner, let arm):
+        try self.owner(candidate)
+        guard let readiness else { throw BrokerFailure.noLease }
+        try reply(
+          request, "arm_request",
+          try await readiness.request(owner: owner, request: arm, budget: budget))
+      case .armStatus(let candidate):
+        try self.owner(candidate)
+        guard let readiness else { throw BrokerFailure.noLease }
+        try reply(request, "arm_status", readiness.status())
+      case .armRevoke: throw BrokerFailure.invalid  // Reader owns the dedicated control lane.
       case .windows(let candidate):
         try owner(candidate)
         guard let inspector, let configuration, configuration.tools.contains("windows") else {
           throw BrokerFailure.disabled
         }
+        guard let readiness else { throw BrokerFailure.noLease }
+        try await readiness.prepareReadPlane(budget: budget)
         try reply(request, "windows", inspector.discover(budget))
       case .observe(let candidate, let surface, let structured, let root):
         try owner(candidate)
@@ -336,6 +411,15 @@ final class NativeBroker {
           try reply(request, "focus", BrokerRefusal(delivery: .init(code: code.rawValue)))
           break
         }
+        guard let readiness else { throw BrokerFailure.unknown }
+        let targetApplication = try inspector.focusApplication(surface: surface, budget: budget)
+        guard readiness.applicationGranted(targetApplication) else {
+          try reply(request, "focus", BrokerRefusal(delivery: .init(code: "TARGET_NOT_ALLOWED")))
+          break
+        }
+        try await readiness.enterAction(
+          pid: try inspector.routePid(state: state, budget: budget), budget: budget)
+        defer { readiness.leaveAction() }
         do {
           let work = try budget.work(reserving: reserve)
           guard let evidence else { throw BrokerFailure.noLease }
@@ -352,6 +436,7 @@ final class NativeBroker {
               observation: observed))
         } catch {
           physicallyUncertain = true
+          readiness.revoke("WITNESS_FAILED")
           try reply(
             request, "focus",
             BrokerActionReply(
@@ -374,6 +459,10 @@ final class NativeBroker {
           try reply(request, "perform", BrokerRefusal(delivery: .init(code: code.rawValue)))
           break
         }
+        guard let readiness else { throw BrokerFailure.unknown }
+        try await readiness.enterAction(
+          pid: try inspector.routePid(state: state, budget: budget), budget: budget)
+        defer { readiness.leaveAction() }
         let prepared: NativePreparedInput
         do { prepared = try inspector.prepare(action, state: state, budget: budget) } catch {
           try reply(
@@ -410,7 +499,69 @@ final class NativeBroker {
   private func accept(_ request: BrokerRequest) {
     lock.lock()
     if case .cancel(let target) = request.command {
-      if activeId == target { activeBudget?.cancel() }
+      if activeId == target {
+        readiness?.revoke("HOST_REVOKED")
+        activeBudget?.cancel()
+      }
+      lock.unlock()
+      return
+    }
+    if case .armStatus(let candidate) = request.command {
+      lock.unlock()
+      do {
+        try reply(request, "arm_status", try readArmingStatus(candidate), completesOperation: false)
+      } catch {
+        do {
+          try reply(
+            request, "failure",
+            BrokerFailureResult(
+              code: ((error as? BrokerFailure) ?? .fenced).rawValue, physicalSettlement: "settled"),
+            completesOperation: false)
+        } catch { exit(1) }
+      }
+      return
+    }
+    if case .armRevoke(let candidate) = request.command {
+      let readiness = self.readiness
+      let owned = self.lease == candidate
+      lock.unlock()
+      do {
+        guard owned, let readiness else { throw BrokerFailure.noLease }
+        readiness.revoke("HOST_REVOKED")
+        try reply(request, "arm_revoke", readiness.status(), completesOperation: false)
+      } catch {
+        do {
+          try reply(
+            request, "failure",
+            BrokerFailureResult(
+              code: ((error as? BrokerFailure) ?? .fenced).rawValue, physicalSettlement: "settled"),
+            completesOperation: false)
+        } catch { exit(1) }
+      }
+      return
+    }
+    if case .stop = request.command, activeId != nil, !stopping {
+      beginStoppingLocked()
+      let budget = NativeBudget(milliseconds: request.timeoutMs)
+      shutdownTask = Task { [self] in
+        do {
+          try await drainOwnedWork(budget)
+          try lock.withLock {
+            try budget.check()
+            activeId = request.requestId
+            activeBudget = budget
+          }
+          await process(request, budget)
+        } catch {
+          do {
+            try reply(
+              request, "stop",
+              BrokerCleanup(physicalSettlement: "uncertain", heldInputsReleased: false),
+              completesOperation: false)
+          } catch { exit(1) }
+          exit(1)
+        }
+      }
       lock.unlock()
       return
     }
@@ -423,7 +574,7 @@ final class NativeBroker {
       } catch { exit(1) }
       return
     }
-    if case .stop = request.command { stopping = true }
+    if case .stop = request.command { beginStoppingLocked() }
     let budget = NativeBudget(milliseconds: request.timeoutMs)
     activeId = request.requestId
     activeBudget = budget
@@ -433,6 +584,7 @@ final class NativeBroker {
   private func finishEOF() async {
     let cleanupMs = lock.withLock {
       stopping = true
+      readiness?.revoke("HOST_REVOKED")
       activeBudget?.cancel()
       return cleanupBudgetMs
     }
@@ -473,4 +625,93 @@ final class NativeBroker {
       await finishEOF()
     }.value
   }
+}
+
+extension NativeBroker {
+  /// Pure local Inspector concurrency fixtures: no helper process, semaphore,
+  /// AX call, UI, event tap or OS input is started by these reservations.
+  static func inspectorMemoryCheck() async throws -> Int {
+    var checks = 0
+    let broker = NativeBroker()
+    let budget = NativeBudget(milliseconds: 100)
+    let held = try await broker.reserveInspector(budget: budget)
+    let original = broker.lock.withLock { broker.activeId }
+    do {
+      _ = try await broker.reserveInspector(budget: NativeBudget(milliseconds: 5))
+      throw BrokerFailure.invalid
+    } catch BrokerFailure.expired { checks += 1 }
+    guard broker.lock.withLock({ broker.activeId == original }) else { throw BrokerFailure.invalid }
+    checks += 1
+    let config = BrokerConfiguration(
+      ownershipDirectory: "/memory/not-used", targetId: "memory", label: "Memory",
+      surfaceId: "display:1", displayId: 1, tools: ["pointer"],
+      allowedBundleIds: ["org.fixture.Allowed"], maxWindows: 1, maxNodes: 1, maxVisitedNodes: 1,
+      cleanupBudgetMs: 100)
+    let lease = BrokerLease(
+      leaseId: "memory", targetId: "memory", sessionId: "memory", generation: "memory")
+    let inspector = NativeInspector(configuration: config)
+    let readiness = NativeReadiness(
+      lease: lease, configuration: config, inspector: inspector,
+      uiFactory: { NativeReadinessMemoryUI() }, localAccess: broker)
+    broker.lock.withLock {
+      broker.lease = lease
+      broker.readiness = readiness
+    }
+    guard try broker.readArmingStatus(lease).state == "UNARMED",
+      broker.lock.withLock({ broker.activeId == original }), !budgetIsCancelled(budget)
+    else { throw BrokerFailure.invalid }
+    checks += 1
+    broker.beginStopping()
+    let settled = NativeSettlementLatchForBroker()
+    let drained = Task {
+      try await broker.drainOwnedWork(NativeBudget(milliseconds: 100))
+      settled.finish()
+    }
+    try await Task.sleep(nanoseconds: 2_000_000)
+    guard !settled.isFinished, broker.lock.withLock({ broker.activeId == original }) else {
+      throw BrokerFailure.invalid
+    }
+    checks += 1
+    held.finish()
+    try await drained.value
+    guard broker.lock.withLock({ broker.activeId == nil }) else { throw BrokerFailure.invalid }
+    checks += 1
+    do {
+      _ = try await broker.reserveInspector(budget: NativeBudget(milliseconds: 100))
+      throw BrokerFailure.invalid
+    } catch BrokerFailure.fenced { checks += 1 }
+    let pending = NativeBroker()
+    let reservation = try await pending.reserveInspector(budget: NativeBudget(milliseconds: 100))
+    pending.beginStopping()
+    do {
+      try await pending.drainOwnedWork(NativeBudget(milliseconds: 5))
+      throw BrokerFailure.invalid
+    } catch BrokerFailure.expired { checks += 1 }
+    guard pending.lock.withLock({ pending.activeId != nil }) else { throw BrokerFailure.invalid }
+    checks += 1
+    reservation.finish()
+    try await pending.drainOwnedWork(NativeBudget(milliseconds: 100))
+    pending.lock.withLock { pending.stopping = false }
+    let next = try await pending.reserveInspector(budget: NativeBudget(milliseconds: 100))
+    let newId = pending.lock.withLock { pending.activeId }
+    reservation.finish()
+    guard pending.lock.withLock({ pending.activeId == newId }) else { throw BrokerFailure.invalid }
+    checks += 1
+    next.finish()
+    try await readiness.stop(budget: NativeBudget(milliseconds: 100))
+    withExtendedLifetime(inspector) {}
+    return checks
+  }
+}
+private func budgetIsCancelled(_ budget: NativeBudget) -> Bool {
+  do {
+    try budget.check()
+    return false
+  } catch { return true }
+}
+private final class NativeSettlementLatchForBroker: @unchecked Sendable {
+  private let lock = NSLock()
+  private var done = false
+  func finish() { lock.withLock { done = true } }
+  var isFinished: Bool { lock.withLock { done } }
 }

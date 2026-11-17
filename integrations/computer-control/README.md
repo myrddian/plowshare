@@ -266,14 +266,17 @@ nonsecure editable AX element; it never uses the clipboard. Native scroll deltas
 are integer pixels or lines. Keyboard chords are plain/Shift navigation and
 macOS Meta+A, Meta+Z and Meta+Shift+Z; browser-only chord variants are refused.
 
-**Native input readiness remains an open platform gate.** Public console/session
-flags do not establish that the screen is unlocked. The production helper must
-report unknown readiness and refuse input until that proof exists. Implemented
-input primitives, synthetic ready-state tests and helper compilation do not
-establish a usable native desktop loop. Capture, Accessibility, event-posting and
-event-listening permissions are separate facts and are checked without prompts.
-The [P3 graph](P3-IMPLEMENTATION.md) records native acceptance separately from
-source review. Configured Plowshare/model validation remains deferred.
+**Native readiness requires a short local interactive grant.** Hosts explicitly
+request local confirmation through the shared SDK facade, or enable the
+foreground host's `nativeArming` configuration. Prompts are not enabled by default;
+configuration or a model cannot assert readiness. The helper checks live own-GUI
+routing/compositor evidence and revokes on observed loss. Public console flags
+alone remain insufficient. See
+[native readiness](READINESS.md) for host composition, permissions, evidence,
+revocation and supported-envelope limits. The
+[readiness graph](READINESS-IMPLEMENTATION.md) records source review and actual
+native acceptance separately. Positive native input acceptance remains OPEN.
+Configured Plowshare/model validation remains deferred.
 
 Native control requires macOS 15.2+ for composited display capture. The earlier
 capture-only helper retains its separate macOS 14.2 floor. Helpers receive private
@@ -334,7 +337,7 @@ python3 integrations/computer-control/scripts/native-check.py
 ```
 
 The explicit native check compiles and tests status/invalid-request framing;
-it also checks the separate protocol-2 preflight and no-post memory fixtures.
+it also checks the separate protocol-3 preflight and no-post memory fixtures.
 It does not capture the desktop. Code approval does not establish OS permission
 or native live screenshot/input acceptance. Use the configured-bundle checks in
 the [native guide](NATIVE.md) to inspect the helper actually selected by a host.

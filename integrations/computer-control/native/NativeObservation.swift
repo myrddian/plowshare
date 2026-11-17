@@ -34,12 +34,84 @@ struct BrokerBounds: Encodable, Equatable {
 struct BrokerDisplay: Encodable, Equatable {
   let displayId: String, bounds: BrokerBounds, scaleX: Double, scaleY: Double, rotation: Int
 }
+/// Mode dimensions distinguish logical display points from backing pixels.
+/// CGDisplayPixelsWide/High can report logical dimensions after AppKit registers
+/// a Retina process; using them would undercount the capture allocation and
+/// misidentify the backing scale. One current mode snapshot supplies both units.
+struct NativeDisplayPixels {
+  let width: Int, height: Int, scaleX: Double, scaleY: Double
+}
+func nativeDisplayPixels(
+  bounds: BrokerBounds, rotation: Int, logicalWidth: Int, logicalHeight: Int,
+  pixelWidth: Int, pixelHeight: Int
+) throws -> NativeDisplayPixels {
+  guard [0, 90, 180, 270].contains(rotation), logicalWidth > 0, logicalHeight > 0,
+    logicalWidth <= 16384, logicalHeight <= 16384,
+    pixelWidth > 0, pixelHeight > 0, pixelWidth <= 16384, pixelHeight <= 16384,
+    pixelWidth * pixelHeight <= 33_554_432
+  else { throw BrokerFailure.unsupported }
+  let width: Int
+  let height: Int
+  if bounds.width == Double(logicalWidth), bounds.height == Double(logicalHeight) {
+    width = pixelWidth
+    height = pixelHeight
+  } else if [90, 270].contains(rotation), bounds.width == Double(logicalHeight),
+    bounds.height == Double(logicalWidth)
+  {
+    width = pixelHeight
+    height = pixelWidth
+  } else {
+    // No DPI or orientation guessing if the current mode and Quartz geometry
+    // disagree. A later fresh read may succeed; no capture is attempted here.
+    throw BrokerFailure.unsupported
+  }
+  let scaleX = Double(width) / bounds.width
+  let scaleY = Double(height) / bounds.height
+  guard scaleX.isFinite, scaleY.isFinite, scaleX > 0, scaleY > 0,
+    scaleX <= 16, scaleY <= 16
+  else { throw BrokerFailure.unsupported }
+  return NativeDisplayPixels(width: width, height: height, scaleX: scaleX, scaleY: scaleY)
+}
+func nativeDisplayPixelMemoryCheck() throws -> Int {
+  let retina = try BrokerBounds(CGRect(x: 0, y: 0, width: 1920, height: 1080))
+  let unit = try BrokerBounds(CGRect(x: -4096, y: -44, width: 4096, height: 2160))
+  let rotated = try BrokerBounds(CGRect(x: 0, y: 0, width: 1080, height: 1920))
+  let cases: [(BrokerBounds, Int, Int, Int, Int, Int, Bool, Double)] = [
+    (retina, 0, 1920, 1080, 3840, 2160, true, 2),
+    (unit, 0, 4096, 2160, 4096, 2160, true, 1),
+    (rotated, 90, 1920, 1080, 3840, 2160, true, 2),
+    (rotated, 270, 1080, 1920, 2160, 3840, true, 2),
+    (retina, 0, 1600, 900, 3200, 1800, false, 0),
+    (rotated, 0, 1920, 1080, 3840, 2160, false, 0),
+    (retina, 0, 1920, 1080, 16385, 2160, false, 0),
+    (retina, 0, 1920, 1080, 16384, 16384, false, 0),
+    (retina, 0, 1920, 1080, 0, 2160, false, 0),
+    (retina, 45, 1920, 1080, 3840, 2160, false, 0),
+  ]
+  for (bounds, rotation, logicalWidth, logicalHeight, pixelWidth, pixelHeight, accepted, scale)
+    in cases
+  {
+    do {
+      let value = try nativeDisplayPixels(
+        bounds: bounds, rotation: rotation, logicalWidth: logicalWidth,
+        logicalHeight: logicalHeight, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+      guard accepted, value.scaleX == scale, value.scaleY == scale,
+        Double(value.width) == bounds.width * scale,
+        Double(value.height) == bounds.height * scale
+      else { throw BrokerFailure.invalid }
+    } catch BrokerFailure.unsupported {
+      guard !accepted else { throw BrokerFailure.invalid }
+    }
+  }
+  return cases.count
+}
+
 struct BrokerState: Encodable {
   let guardValue: BrokerGuard
-  let availability: String = "unknown"
+  let availability: String
   let permissions: BrokerPermissions
   let secureInput: String
-  let interference = "unknown"
+  let interference: String
   let focusKnown: Bool
   let focusedElementId: String?
   let display: BrokerDisplay
@@ -104,7 +176,7 @@ struct BrokerSnapshot: Encodable {
 struct BrokerWindow: Encodable {
   let surfaceId: String, applicationId: String, windowId: String, captureSurfaceId: String,
     applicationLabel: String, bundleId: String, title: String
-  let bounds: BrokerBounds, focused: Bool, state = "available"
+  let bounds: BrokerBounds, focused: Bool, state: String
 }
 struct BrokerWindows: Encodable {
   let windowsId: String, capturedAt: String, windows: [BrokerWindow], truncated: Bool
@@ -181,6 +253,8 @@ func nativeKeyCode(_ key: String) throws -> CGKeyCode {
 /// truncation explicitly means omitted applications/windows may still exist.
 final class NativeInspector {
   let configuration: BrokerConfiguration
+  private var readiness: NativeReadiness?
+  func bindReadiness(_ readiness: NativeReadiness) { self.readiness = readiness }
   private var applications: [AXApplication] = []
   private var windows: [AXWindow] = []
   private var windowsId = UUID().uuidString.lowercased()
@@ -287,6 +361,7 @@ final class NativeInspector {
     guard length >= 0 else { throw BrokerFailure.ax }
     try budget.check()
     let count = min(Int(length) / MemoryLayout<pid_t>.size, pids.count)
+    let selectedDisplay = try display(budget)
     let system = AXUIElementCreateSystemWide()
     let globalApp = axElement(
       try attribute(system, kAXFocusedApplicationAttribute as CFString, budget))
@@ -300,7 +375,7 @@ final class NativeInspector {
     var discoveredApps: [AXApplication] = []
     var discoveredWindows: [AXWindow] = []
     var projected: [BrokerWindow] = []
-    for pid in pids.prefix(min(count, 256)) where pid > 0 {
+    for pid in pids.prefix(min(count, 256)) where pid > 0 && pid != getpid() {
       try budget.check()
       guard let process = NSRunningApplication(processIdentifier: pid), !process.isTerminated,
         let bundle = process.bundleIdentifier, configuration.allowedBundleIds.contains(bundle)
@@ -342,7 +417,9 @@ final class NativeInspector {
             captureSurfaceId: configuration.surfaceId, applicationLabel: app.label,
             bundleId: bundle, title: try text(element, kAXTitleAttribute as CFString, budget) ?? "",
             bounds: rectangle,
-            focused: pid == foregroundPid && (focusedWindow.map { CFEqual($0, element) } ?? false)))
+            focused: pid == foregroundPid && (focusedWindow.map { CFEqual($0, element) } ?? false),
+            state: selectedDisplay.bounds.rect.contains(rectangle.rect)
+              ? "available" : "unavailable"))
       }
     }
     applications = discoveredApps
@@ -351,27 +428,33 @@ final class NativeInspector {
     return BrokerWindows(
       windowsId: windowsId, capturedAt: brokerTime(), windows: projected, truncated: truncated)
   }
-  func display(_ budget: NativeBudget) throws -> BrokerDisplay {
+  /// Acquisition establishes exclusion only and runs before AppKit registration.
+  /// It does not promise capture geometry, permissions, or input readiness.
+  func validateDisplayPresence(_ budget: NativeBudget) throws {
     try budget.check()
+    guard CGDisplayIsActive(configuration.displayId) != 0 else { throw BrokerFailure.gone }
+    _ = try BrokerBounds(CGDisplayBounds(configuration.displayId))
+    try budget.check()
+  }
+  func display(_ budget: NativeBudget) throws -> BrokerDisplay {
+    try validateDisplayPresence(budget)
     let id = configuration.displayId
-    guard CGDisplayIsActive(id) != 0 else { throw BrokerFailure.gone }
     let rectangle = try BrokerBounds(CGDisplayBounds(id))
-    let pixelsX = CGDisplayPixelsWide(id)
-    let pixelsY = CGDisplayPixelsHigh(id)
-    let scaleX = Double(pixelsX) / rectangle.width
-    let scaleY = Double(pixelsY) / rectangle.height
     let rotation = CGDisplayRotation(id)
-    // A finite source cap is enforced BEFORE ScreenCaptureKit allocation. This is
-    // a supported single-display envelope, not arbitrary virtual desktop capture.
-    guard pixelsX > 0, pixelsY > 0, pixelsX <= 16384, pixelsY <= 16384,
-      pixelsX * pixelsY <= 33_554_432,
-      scaleX > 0, scaleY > 0, scaleX <= 16, scaleY <= 16,
-      [0.0, 90.0, 180.0, 270.0].contains(rotation)
+    guard [0.0, 90.0, 180.0, 270.0].contains(rotation),
+      let mode = CGDisplayCopyDisplayMode(id)
     else { throw BrokerFailure.unsupported }
     try budget.check()
+    // Bound actual backing pixels BEFORE ScreenCaptureKit allocation. This is
+    // a single current-mode snapshot, not a physical-monitor/native-resolution
+    // estimate or an unbounded display-mode enumeration.
+    let pixels = try nativeDisplayPixels(
+      bounds: rectangle, rotation: Int(rotation), logicalWidth: mode.width,
+      logicalHeight: mode.height, pixelWidth: mode.pixelWidth, pixelHeight: mode.pixelHeight)
+    try budget.check()
     return BrokerDisplay(
-      displayId: configuration.surfaceId, bounds: rectangle, scaleX: scaleX, scaleY: scaleY,
-      rotation: Int(rotation))
+      displayId: configuration.surfaceId, bounds: rectangle, scaleX: pixels.scaleX,
+      scaleY: pixels.scaleY, rotation: Int(rotation))
   }
   private func focused(_ budget: NativeBudget) throws -> (
     AXApplication?, AXWindow?, AXUIElement?, Bool
@@ -443,14 +526,28 @@ final class NativeInspector {
       elementLayout +=
         "\(name):\(id):\(String(describing: try bounds(binding.element, budget))):\(try text(binding.element, kAXRoleAttribute as CFString, budget) ?? ""):\(try text(binding.element, kAXSubroleAttribute as CFString, budget) ?? ""):\(try flag(binding.element, kAXEnabledAttribute as CFString, budget) ?? false);"
     }
+    let capability = readiness?.snapshot()
+    let grantedApplication =
+      app.map {
+        readiness?.applicationGranted(
+          NativeArmingApplication(
+            id: $0.id, pid: $0.pid, launchDate: $0.launchDate, bundleId: $0.bundleId)) == true
+      } ?? false
+    let secureInput = IsSecureEventInputEnabled() ? "active" : "clear"
     let guardValue = BrokerGuard(
       surfaceId: surface, applicationId: app?.id, windowId: window?.id,
       layoutGeneration: brokerHash("\(geometry):\(windowLayout):\(elementLayout)"),
       focusGeneration: focusGeneration,
-      displayGeneration: brokerHash("\(geometry)"), interactionGeneration: interactionGeneration)
+      displayGeneration: brokerHash("\(geometry)"),
+      interactionGeneration: capability?.interactionGeneration ?? interactionGeneration)
     return BrokerState(
-      guardValue: guardValue, permissions: permission,
-      secureInput: IsSecureEventInputEnabled() ? "active" : "clear", focusKnown: known,
+      guardValue: guardValue,
+      availability: capability?.ready == true && known && grantedApplication && window != nil
+        && permission.screenCapture && permission.accessibility && permission.eventPosting
+        && permission.eventListening && secureInput == "clear" ? "ready" : "unknown",
+      permissions: permission,
+      secureInput: secureInput,
+      interference: capability?.interference ?? "unknown", focusKnown: known,
       focusedElementId: focusedId, display: geometry, applicationLabel: app?.label,
       bundleId: app?.bundleId)
   }
@@ -636,6 +733,10 @@ final class NativeInspector {
   func prepare(_ action: BrokerAction, state: BrokerState, budget: NativeBudget) throws
     -> NativePreparedInput
   {
+    guard let selected = windows.first(where: { $0.id == state.guardValue.windowId }),
+      let rectangle = try bounds(selected.element, budget),
+      state.display.bounds.rect.contains(rectangle.rect), selected.application.pid != getpid()
+    else { throw BrokerFailure.notAllowed }
     guard state.focusKnown, state.guardValue.applicationId != nil, state.guardValue.windowId != nil,
       state.bundleId.map(configuration.allowedBundleIds.contains) == true
     else { throw BrokerFailure.focus }
@@ -674,6 +775,9 @@ final class NativeInspector {
       try live(window.application, budget),
       let app = NSRunningApplication(processIdentifier: window.application.pid)
     else { throw BrokerFailure.stale }
+    guard let rectangle = try bounds(window.element, budget),
+      try display(budget).bounds.rect.contains(rectangle.rect)
+    else { throw BrokerFailure.notAllowed }
     try budget.check()
     guard app.activate(options: []) else { throw BrokerFailure.input }
     try budget.check()
@@ -694,13 +798,68 @@ final class NativeInspector {
       try await budget.sleep(milliseconds: 5)
     }
   }
+  func armingContext(_ budget: NativeBudget) throws -> NativeArmingContext {
+    _ = try discover(budget)
+    let geometry = try display(budget)
+    var targets: [NativeConsentTarget] = []
+    for window in windows where window.application.pid != getpid() {
+      guard let rectangle = try bounds(window.element, budget),
+        geometry.bounds.rect.contains(rectangle.rect)
+      else { continue }
+      targets.append(
+        NativeConsentTarget(
+          surfaceId: window.id, applicationId: window.application.id,
+          applicationLabel: window.application.label, bundleId: window.application.bundleId,
+          windowTitle: try text(window.element, kAXTitleAttribute as CFString, budget) ?? ""))
+    }
+    let selectedIds = Set(targets.map { $0.applicationId })
+    let apps = applications.filter { selectedIds.contains($0.id) }.map {
+      NativeArmingApplication(
+        id: $0.id, pid: $0.pid, launchDate: $0.launchDate, bundleId: $0.bundleId)
+    }
+    return NativeArmingContext(display: geometry, targets: targets, applications: apps)
+  }
+  func applicationGeneration(_ budget: NativeBudget) throws -> String {
+    try budget.check()
+    let apps = applications.filter { $0.pid != getpid() }.map {
+      NativeArmingApplication(
+        id: $0.id, pid: $0.pid, launchDate: $0.launchDate, bundleId: $0.bundleId)
+    }
+    return NativeArmingContext(display: try display(budget), targets: [], applications: apps)
+      .applicationGeneration
+  }
+  func focusForLocalConsent(surface: String, budget: NativeBudget) async throws {
+    try await focusWindow(listId: windowsId, surface: surface, budget: budget)
+  }
+  func focusApplication(surface: String, budget: NativeBudget) throws -> NativeArmingApplication {
+    guard let window = windows.first(where: { $0.id == surface }),
+      window.application.pid != getpid(), try live(window.application, budget),
+      let rectangle = try bounds(window.element, budget),
+      try display(budget).bounds.rect.contains(rectangle.rect)
+    else { throw BrokerFailure.notAllowed }
+    let app = window.application
+    return NativeArmingApplication(
+      id: app.id, pid: app.pid, launchDate: app.launchDate, bundleId: app.bundleId)
+  }
+  func routePid(state: BrokerState, budget: NativeBudget) throws -> pid_t {
+    guard let app = applications.first(where: { $0.id == state.guardValue.applicationId }),
+      app.pid != getpid(), try live(app, budget),
+      let window = windows.first(where: { $0.id == state.guardValue.windowId }),
+      window.application.id == app.id,
+      let rectangle = try bounds(window.element, budget),
+      state.display.bounds.rect.contains(rectangle.rect)
+    else { throw BrokerFailure.notAllowed }
+    return app.pid
+  }
   func accepts(surface: String) -> Bool {
     surface == configuration.surfaceId || windows.contains { $0.id == surface }
   }
 }
 
 @available(macOS 15.2, *)
-func nativeCapture(display: BrokerDisplay, state: BrokerState, budget: NativeBudget) async throws
+func nativeCapture(
+  display: BrokerDisplay, state: BrokerState, budget: NativeBudget, redactions: [CGRect] = []
+) async throws
   -> BrokerImage
 {
   try budget.check()
@@ -722,6 +881,19 @@ func nativeCapture(display: BrokerDisplay, state: BrokerState, budget: NativeBud
   context.interpolationQuality = .medium
   context.draw(captured, in: CGRect(x: 0, y: 0, width: width, height: height))
   try budget.check()
+  guard redactions.count <= 8 else { throw BrokerFailure.observation }
+  context.setFillColor(CGColor(gray: 0.25, alpha: 1))
+  for raw in redactions {
+    let visible = raw.intersection(display.bounds.rect)
+    if visible.isNull || visible.isEmpty { continue }
+    let sx = Double(width) / display.bounds.width
+    let sy = Double(height) / display.bounds.height
+    let left = floor((visible.minX - display.bounds.x) * sx) - 2
+    let bottom = floor(Double(height) - (visible.maxY - display.bounds.y) * sy) - 2
+    let right = ceil((visible.maxX - display.bounds.x) * sx) + 2
+    let top = ceil(Double(height) - (visible.minY - display.bounds.y) * sy) + 2
+    context.fill(CGRect(x: left, y: bottom, width: right - left, height: top - bottom))
+  }
   guard let scaled = context.makeImage() else { throw BrokerFailure.observation }
   let data = NSMutableData()
   guard

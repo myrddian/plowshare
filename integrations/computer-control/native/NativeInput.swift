@@ -17,6 +17,13 @@ final class NativeBudget {
     self.end = end
     self.parent = parent
   }
+  func capped(milliseconds: Int) throws -> NativeBudget {
+    try check()
+    guard milliseconds > 0, milliseconds <= 300000 else { throw BrokerFailure.invalid }
+    return NativeBudget(
+      end: min(end, DispatchTime.now().uptimeNanoseconds + UInt64(milliseconds) * 1_000_000),
+      parent: self)
+  }
   func work(reserving milliseconds: Int) throws -> NativeBudget {
     try check()
     guard milliseconds > 0, milliseconds <= 300000 else { throw BrokerFailure.invalid }
@@ -157,9 +164,18 @@ protocol NativeInputValidation {
   func beforePost(_ event: CGEvent, budget: NativeBudget) throws
 }
 
-protocol NativeEventSink { func post(_ event: CGEvent) }
+protocol NativeEventSink {
+  func post(_ event: CGEvent, budget: NativeBudget, cleanup: Bool) throws
+  func settle(_ event: CGEvent, budget: NativeBudget) throws
+}
+extension NativeEventSink {
+  func settle(_ event: CGEvent, budget: NativeBudget) throws {}
+}
 struct NativeHIDEventSink: NativeEventSink {
-  func post(_ event: CGEvent) { event.post(tap: .cghidEventTap) }
+  func post(_ event: CGEvent, budget: NativeBudget, cleanup: Bool) throws {
+    try budget.check()
+    event.post(tap: .cghidEventTap)
+  }
 }
 
 /// Pure bounded acknowledgement accounting. Each event has a distinct token;
@@ -296,8 +312,9 @@ final class NativeInputExecutor {
       guard postedMoves + postedClicks > 0 else { return nil }
       return NativeInputExtent(kind: "pointer", moves: postedMoves, clicks: postedClicks)
     case .drag:
-      guard postedDragPoints > 0 else { return nil }
-      return NativeInputExtent(kind: "drag", points: postedDragPoints, buttonReleased: true)
+      let points = max(postedDragPoints, postedClicks)
+      guard points > 0 else { return nil }
+      return NativeInputExtent(kind: "drag", points: points, buttonReleased: true)
     case .type:
       guard postedUtf16 > 0 || clearPosted else { return nil }
       return NativeInputExtent(
@@ -395,7 +412,9 @@ final class NativeInputExecutor {
       }
     }
   }
-  private func post(_ event: CGEvent, budget: NativeBudget, cleanup: Bool = false) throws {
+  private func post(
+    _ event: CGEvent, budget: NativeBudget, cleanup: Bool = false, submitted: () -> Void = {}
+  ) throws {
     if cleanup {
       try budget.check()
       guard platform.postingPermitted() else { throw BrokerFailure.denied }
@@ -409,7 +428,9 @@ final class NativeInputExecutor {
     guard event.getIntegerValueField(.eventSourceUserData) == token else {
       throw BrokerFailure.input
     }
-    sink.post(event)
+    try sink.post(event, budget: budget, cleanup: cleanup)
+    submitted()  // Record proven local submission before any receipt wait.
+    try sink.settle(event, budget: budget)
   }
   static func unicodeChunks(_ text: String) -> [[UniChar]] {
     text.unicodeScalars.map { Array(String($0).utf16) }
@@ -445,8 +466,9 @@ final class NativeInputExecutor {
       try evidence.recordHeld(keys: heldKeys, buttons: heldButtons)
       downMayHaveBegun = true
     }
-    try post(event, budget: budget, cleanup: cleanup)
-    if down { postedKeyDowns.insert(code) } else { postedKeyUps.insert(code) }
+    try post(event, budget: budget, cleanup: cleanup) {
+      if down { self.postedKeyDowns.insert(code) } else { self.postedKeyUps.insert(code) }
+    }
     // Held entries remain until cleanup observes tagged-up + combined-up. A void
     // post(up) never clears crash evidence on its own.
   }
@@ -464,8 +486,7 @@ final class NativeInputExecutor {
       heldKeys.insert(0)
       try evidence.recordHeld(keys: heldKeys, buttons: heldButtons)
       downMayHaveBegun = true
-      try post(down, budget: budget)
-      postedUtf16 += chunk.count
+      try post(down, budget: budget) { self.postedUtf16 += chunk.count }
       try post(up, budget: budget)
       delivered += chunk.count
     }
@@ -521,8 +542,7 @@ final class NativeInputExecutor {
         mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point,
         mouseButton: .left)
     else { throw BrokerFailure.input }
-    try post(event, budget: budget)
-    postedMoves += 1
+    try post(event, budget: budget) { self.postedMoves += 1 }
   }
   private func mouse(
     _ point: CGPoint, button: CGMouseButton, down: Bool, clicks: Int64 = 1,
@@ -549,8 +569,7 @@ final class NativeInputExecutor {
       try evidence.recordHeld(keys: heldKeys, buttons: heldButtons)
       downMayHaveBegun = true
     }
-    try post(event, budget: budget, cleanup: cleanup)
-    if down { postedClicks += 1 }
+    try post(event, budget: budget, cleanup: cleanup) { if down { self.postedClicks += 1 } }
   }
   func click(
     _ point: CGPoint, button: CGMouseButton, count: Int, modifiers: [String] = [],
@@ -598,9 +617,8 @@ final class NativeInputExecutor {
           mouseCursorPosition: CGPoint(x: point.x, y: point.y), mouseButton: button)
       else { throw BrokerFailure.input }
       event.flags = flags
-      try post(event, budget: budget)
+      try post(event, budget: budget) { self.postedDragPoints += 1 }
       delivered += 1
-      postedDragPoints += 1
     }
     if let last = points.last {
       try mouse(
@@ -621,8 +639,7 @@ final class NativeInputExecutor {
         wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
     else { throw BrokerFailure.input }
     event.location = point
-    try post(event, budget: budget)
-    scrollPosted = true
+    try post(event, budget: budget) { self.scrollPosted = true }
   }
   /// Never releases someone else's key/button. All owned downs stay recorded
   /// until tagged ups and combined-state reads corroborate local release. Loss of
@@ -703,9 +720,10 @@ final class NativeInputExecutor {
 
 }
 
-/// Explicit no-post test entrypoint. It constructs CoreGraphics objects only:
-/// never creates a broker, semaphore, evidence file, event tap or TCC request.
-func runNativeInputMemoryCheck() async throws {
+/// Explicit no-post test entrypoint: in-memory events and injected lifecycle
+/// fixtures. It never starts a broker reader, acquires a global fence, writes
+/// evidence, creates a real event tap, presents UI or requests permission.
+func runNativeInputMemoryCheck(mainLoopCasesChecked: Int) async throws {
   let text = "Aé\n\t🙂e\u{301}👩‍💻"
   let chunks = NativeInputExecutor.unicodeChunks(text)
   guard brokerLabel(String(repeating: "🙂", count: 200)).utf16.count == 256,
@@ -740,6 +758,8 @@ func runNativeInputMemoryCheck() async throws {
     let version = "computer-control-native/self-test/1", ok = true
     let unicodeScalars: Int, utf16Units: Int, eventRoundTrips: Int
     let protocolFramesChecked: Int, acknowledgementCasesChecked: Int, executorCasesChecked: Int
+    let readinessUICasesChecked: Int, readinessCasesChecked: Int
+    let mainLoopCasesChecked: Int
     let pointerRoundTrip = true, keyRoundTrip = true, scrollRoundTrip = true,
       cancelledBudgetRejected = true
   }
@@ -747,7 +767,10 @@ func runNativeInputMemoryCheck() async throws {
     unicodeScalars: chunks.count, utf16Units: text.utf16.count, eventRoundTrips: chunks.count * 2,
     protocolFramesChecked: try runNativeProtocolMemoryCheck(),
     acknowledgementCasesChecked: try runNativePostMemoryCheck(),
-    executorCasesChecked: try await runNativeExecutorMemoryCheck())
+    executorCasesChecked: try await runNativeExecutorMemoryCheck(),
+    readinessUICasesChecked: try nativeReadinessUIMemoryCheck(),
+    readinessCasesChecked: try await NativeReadiness.memoryCheck(),
+    mainLoopCasesChecked: mainLoopCasesChecked)
   try FileHandle.standardOutput.write(contentsOf: JSONEncoder().encode(result))
   try FileHandle.standardOutput.write(contentsOf: Data([10]))
 }
@@ -815,7 +838,7 @@ private final class MemoryInputSink: NativeEventSink {
     self.platform = platform
     self.monitor = monitor
   }
-  func post(_ event: CGEvent) {
+  func post(_ event: CGEvent, budget: NativeBudget, cleanup: Bool) {
     events.append(event)
     if event.type == .keyDown {
       platform.keys.insert(CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))

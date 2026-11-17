@@ -46,8 +46,11 @@ import {
 } from './backends/macos.ts';
 import { createMacOSControlBackend } from './backends/macos-control.ts';
 import type { NativeControlBackend } from './native-control.ts';
+import type { NativeArmingBackend } from './native-arming.ts';
+import { NativeArmingRequests } from './native-arming-requests.ts';
 import {
   nativeComposition,
+  nativeArmingComposition,
   requireDistinctControlPorts,
 } from './native-composition.ts';
 import type { BackendHandle } from './backends/types.ts';
@@ -309,6 +312,7 @@ export interface ComputerHostOptions {
   readonly backends?: readonly BackendHandle[];
   readonly browserControls?: readonly BrowserControlBackend[];
   readonly nativeControls?: readonly NativeControlBackend[];
+  readonly nativeArmingControls?: readonly NativeArmingBackend[];
   readonly journal?: ToolJournal;
   readonly intents?: CatalogueIntents;
   readonly clock?: Clock;
@@ -467,6 +471,22 @@ export async function runComputerHost(
     injectedControls ?? [],
     injectedNativeControls ?? [],
   );
+  const injectedArming = nativeArmingComposition(
+    injectedNativeControls ?? [],
+    options.nativeArmingControls ?? [],
+  );
+  if (
+    injectedArming.some(
+      (backend) => !injectedNativeControls?.includes(backend),
+    ) ||
+    new Set(injectedArming).size !== injectedArming.length ||
+    (config.nativeArming !== undefined &&
+      injectedHandles !== undefined &&
+      injectedArming.length !== injectedNativeControls?.length)
+  )
+    throw new Error(
+      'Injected arming requires the exact configured native backend capabilities',
+    );
   const declarations = computerDeclarations(
     config.prefix,
     {
@@ -514,6 +534,7 @@ export async function runComputerHost(
         const nativeControls: NativeControlBackend[] = [
           ...(injectedNativeControls ?? []),
         ];
+        const armingControls: NativeArmingBackend[] = [...injectedArming];
         const passes = new ComputerPasses(
           options.connection,
           config.budgets.controlMs,
@@ -555,6 +576,7 @@ export async function runComputerHost(
                 );
                 handles.push(handle);
                 nativeControls.push(handle.backend);
+                armingControls.push(handle.backend);
               }
               if (config.macos !== undefined)
                 handles.push(
@@ -577,6 +599,7 @@ export async function runComputerHost(
               browserControls: controls,
               browserTools,
               nativeControls,
+              nativeArmingControls: armingControls,
               nativeTools,
               generation: randomUUID(),
               origin: config.origin,
@@ -643,6 +666,10 @@ export async function runComputerHost(
           initialStartup.dispose();
           let renewedAt = clock.monotonicNow(),
             completed = 0;
+          const armingRequests =
+            config.nativeArming === undefined
+              ? undefined
+              : new NativeArmingRequests(config.nativeArming.durationMs);
           while (
             !options.signal.aborted &&
             (options.maxPasses === undefined || completed < options.maxPasses)
@@ -656,6 +683,20 @@ export async function runComputerHost(
                 renewedAt = clock.monotonicNow();
               }
               await running.provider.poll();
+              if (
+                armingRequests !== undefined &&
+                running.nativeArming !== undefined
+              ) {
+                const armingDeadline = deadline.child(config.budgets.controlMs);
+                try {
+                  await armingRequests.present(
+                    running.nativeArming,
+                    armingDeadline,
+                  );
+                } finally {
+                  armingDeadline.dispose();
+                }
+              }
             });
             completed++;
             if (

@@ -4,7 +4,7 @@ The SDK provider launches the helper executable supplied in configuration. It do
 not install an app, grant consent, unlock a keychain or change the helper's signing
 identity. Package the helper first, then configure its exact executable path.
 The helper supports Apple Silicon and Intel macOS. Legacy capture requires macOS
-14.2; protocol-2 desktop capture requires macOS 15.2. These are build/runtime
+14.2; protocol-3 desktop capture requires macOS 15.2. These are build/runtime
 requirements, not proof that desktop control is usable.
 
 ## Build an operator-owned identity
@@ -75,7 +75,7 @@ python3 integrations/computer-control/scripts/native-check.py \
 ```
 
 This verifies the bundle signature, identifier and executable metadata. It then
-sends only a correlated protocol-2 `preflight`, followed by a sequential `stop`,
+sends only a correlated protocol-3 `preflight`, followed by a sequential `stop`,
 and requires a clean helper exit. It does not compile a replacement, run input
 fixtures, capture pixels, create an event tap, post input, request consent or
 acquire the production ownership semaphore. The kernel-fence value comes from a
@@ -84,15 +84,16 @@ usable unlocked desktop.
 
 The output reports four independent permission flags: screen capture,
 accessibility, event posting and event listening. None implies another. It also
-reports readiness, secure-input state and kernel-fence presence. Current
-production readiness is `unknown`, so native actions refuse even if permissions
-are granted. A successful diagnostic command does not close that platform gap or
-prove capture, native input, cleanup after actual held input, or model vision.
+reports readiness, secure-input state and kernel-fence presence. A fresh helper
+without a locally confirmed grant reports `unknown`, even if permissions are
+granted. The [shared SDK readiness controls](READINESS.md) request local
+confirmation and verify a scoped live witness. This read-only diagnostic does
+not request that grant or prove capture, input, held-input cleanup or model vision.
 
 ## Test source contracts separately
 
 With no `--executable`, the checker compiles a temporary helper and exercises
-strict protocol-1 status/invalid requests, protocol-2 preflight/stop and malformed
+strict protocol-1 status/invalid requests, protocol-3 preflight/stop and malformed
 preflight requests, plus the helper's `--check-input-memory` entry point:
 
 ```sh
@@ -108,10 +109,24 @@ fields, key encoding, cancelled budgets, strict nested protocol decoding and pur
 acknowledgement accounting. Six injected executor fault cases also exercise
 cancellation, foreign held input, interference, dropped acknowledgements, partial
 Unicode dispatch and partial drag dispatch, using in-memory ports only. It never
-starts a broker, installs a tap, takes a
-capture or acquires the production fence. CoreGraphics may emit bounded framework
+starts a broker reader, installs a tap, takes a capture or acquires the production
+fence. CoreGraphics may emit bounded framework
 diagnostics in a sandbox; their contents are suppressed and their presence is
 reported separately. Protocol/status checks require empty diagnostic output.
+
+Readiness fixtures separately exercise local gesture/nonce handling, auxiliary
+session-field validation, grant expiry, event routing, hung witness ownership,
+Inspector serialization and unresolved-probe shutdown fencing. They use injected
+ports and fixed event data; they do not establish actual GUI/compositor evidence.
+The strict checker requires the exact current fixture result schema and counts.
+
+The helper owns its main run loop until its single asynchronous mode worker
+actually finishes. A stopped run-loop turn is neither successful completion nor
+physical settlement. Two no-GUI regressions stop that loop and require the
+original worker's later continuations and final result. A real own-UI comparison
+motivated this correction; the related [Swift runtime report](https://github.com/swiftlang/swift/issues/91716)
+does not establish a particular compiler-version regression or the exact caller
+that stopped the earlier UI probe's loop.
 
 The second command tests the Python lifecycle and validation logic with harmless
 child processes and mocked signing operations. Its exclusive-rename case is

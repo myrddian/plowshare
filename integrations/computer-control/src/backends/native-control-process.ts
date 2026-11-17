@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
-import type { NativeCleanupResult } from '../native-control.ts';
+import type { NativeCleanupResult, NativeLease } from '../native-control.ts';
 import type { OperationDeadline } from '../deadline.ts';
 import { positiveBudget } from '../deadline.ts';
 import type { NativeChild, NativeChildLauncher } from './macos.ts';
@@ -35,10 +35,15 @@ export class NativeProcessError extends Error {
   }
 }
 
-/** One normal command, plus a one-way cancellation lane; never retries input. */
+/** One normal command, one acknowledged revoke control and one-way cancellation; never retries input. */
 export interface NativeControlProcess {
   request(
     command: NativeBrokerRequest,
+    deadline: OperationDeadline,
+  ): Promise<NativeBrokerReply>;
+  /** Exact-lease revocation bypasses an outstanding ordinary input command. */
+  revoke(
+    lease: NativeLease,
     deadline: OperationDeadline,
   ): Promise<NativeBrokerReply>;
   /** Combines typed owned-input cleanup proof with actual process close. */
@@ -99,6 +104,7 @@ const launch: NativeChildLauncher = (executable) =>
 export class SpawnNativeControlProcess implements NativeControlProcess {
   private readonly child: NativeChild;
   private pending: Pending | undefined;
+  private controlPending: Pending | undefined;
   private buffer = Buffer.alloc(0);
   private fenced = false;
   private closing = false;
@@ -158,14 +164,7 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
         this.diagnostics !== 0
       )
         this.fenced = true;
-      const pending = this.pending;
-      if (pending !== undefined) {
-        this.pending = undefined;
-        pending.detach();
-        pending.reject(
-          pending.failure ?? new NativeProcessError('UNCERTAIN', 'uncertain'),
-        );
-      }
+      this.rejectPending();
       this.finishExit();
     });
   }
@@ -174,16 +173,24 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
     command: NativeBrokerRequest,
     deadline: OperationDeadline,
   ): Promise<NativeBrokerReply> {
-    if (command.operation === 'stop')
+    if (command.operation === 'stop' || command.operation === 'arm_revoke')
       return Promise.reject(
         new NativeProcessError('INVALID_REQUEST', 'settled'),
       );
     return this.send(command, deadline);
   }
 
+  revoke(
+    lease: NativeLease,
+    deadline: OperationDeadline,
+  ): Promise<NativeBrokerReply> {
+    return this.send({ operation: 'arm_revoke', lease }, deadline, true);
+  }
+
   private send(
     command: NativeBrokerRequest,
     deadline: OperationDeadline,
+    control = false,
   ): Promise<NativeBrokerReply> {
     let checked: NativeBrokerRequest;
     try {
@@ -203,13 +210,21 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
     if (
       this.fenced ||
       this.didClose ||
-      (this.closing && command.operation !== 'stop')
+      (this.closing && checked.operation !== 'stop')
     )
       return Promise.reject(
         new NativeProcessError('CLOSED', this.fenced ? 'uncertain' : 'settled'),
       );
-    if (this.pending !== undefined)
+    if (
+      control
+        ? this.controlPending !== undefined
+        : this.pending !== undefined || this.controlPending !== undefined
+    )
       return Promise.reject(new NativeProcessError('BUSY', 'settled'));
+    if (control && checked.operation !== 'arm_revoke')
+      return Promise.reject(
+        new NativeProcessError('INVALID_REQUEST', 'settled'),
+      );
     const requestId = randomUUID();
     const wire = Buffer.from(
       JSON.stringify({
@@ -225,7 +240,7 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
       );
     return new Promise((resolve, reject) => {
       const abort = () => this.fail('DEADLINE_EXPIRED', true);
-      this.pending = {
+      const pending: Pending = {
         requestId,
         operation: checked.operation,
         deadline,
@@ -233,11 +248,14 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
         reject,
         detach: () => deadline.signal.removeEventListener('abort', abort),
       };
+      if (control) this.controlPending = pending;
+      else this.pending = pending;
       deadline.signal.addEventListener('abort', abort, { once: true });
       if (deadline.signal.aborted || deadline.remainingMs() <= 0) {
         // Nothing entered stdin. Keep the existing lease alive; only this call
         // is a proven pre-dispatch refusal.
-        this.pending = undefined;
+        if (control) this.controlPending = undefined;
+        else this.pending = undefined;
         deadline.signal.removeEventListener('abort', abort);
         reject(new NativeProcessError('DEADLINE_EXPIRED', 'settled'));
         return;
@@ -252,34 +270,42 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
 
   private receive(bytes: Buffer): void {
     if (this.fenced) return;
-    if (
-      this.buffer.length + bytes.byteLength >
-      NATIVE_BROKER_MAX_REPLY_BYTES + 1
-    ) {
-      this.fail('INVALID_PROTOCOL', false);
-      return;
-    }
-    this.buffer = Buffer.concat([this.buffer, bytes]);
-    const newline = this.buffer.indexOf(10);
-    if (newline < 0) {
-      if (this.buffer.length > NATIVE_BROKER_MAX_REPLY_BYTES)
+    let offset = 0;
+    let frames = 0;
+    // Two correlated replies may share a pipe read. Bound each frame rather
+    // than the concatenated read, retaining at most one incomplete frame.
+    while (offset < bytes.length) {
+      if (this.pending === undefined && this.controlPending === undefined) {
         this.fail('INVALID_PROTOCOL', false);
-      return;
+        return;
+      }
+      const newline = bytes.indexOf(10, offset);
+      const end = newline < 0 ? bytes.length : newline;
+      if (this.buffer.length + end - offset > NATIVE_BROKER_MAX_REPLY_BYTES) {
+        this.fail('INVALID_PROTOCOL', false);
+        return;
+      }
+      this.buffer = Buffer.concat([this.buffer, bytes.subarray(offset, end)]);
+      if (newline < 0) return;
+      if (++frames > 2) {
+        this.fail('INVALID_PROTOCOL', false);
+        return;
+      }
+      const frame = this.buffer;
+      this.buffer = Buffer.alloc(0);
+      this.receiveFrame(frame);
+      if (this.fenced) return;
+      offset = end + 1;
     }
-    const frame = this.buffer.subarray(0, newline);
-    this.buffer = this.buffer.subarray(newline + 1);
-    const pending = this.pending;
-    if (
-      pending === undefined ||
-      frame.length === 0 ||
-      this.buffer.length !== 0
-    ) {
-      this.fail('INVALID_PROTOCOL', false);
-      return;
-    }
+  }
+
+  private receiveFrame(frame: Buffer): void {
     try {
       const reply = this.codec.decodeReply(parseNativeReplyJson(frame));
+      const control = reply.requestId === this.controlPending?.requestId;
+      const pending = control ? this.controlPending : this.pending;
       if (
+        pending === undefined ||
         reply.version !== NATIVE_BROKER_VERSION ||
         reply.requestId !== pending.requestId ||
         (reply.operation !== pending.operation && reply.operation !== 'failure')
@@ -293,7 +319,8 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
         return;
       }
       if (reply.operation === 'stop') this.cleanupProof = reply.result;
-      this.pending = undefined;
+      if (control) this.controlPending = undefined;
+      else this.pending = undefined;
       pending.detach();
       pending.resolve(reply);
     } catch {
@@ -310,23 +337,26 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
 
   private fail(code: NativeProcessError['code'], cancel: boolean): void {
     if (this.didClose) return;
-    const pending = this.pending;
     this.fenced = true;
-    if (pending !== undefined && pending.failure === undefined) {
-      pending.failure = new NativeProcessError(code, 'uncertain');
+    const pending = this.pending ?? this.controlPending;
+    const firstFailure = this.pendingWork().every(
+      (work) => work.failure === undefined,
+    );
+    for (const pending of this.pendingWork()) {
+      pending.failure ??= new NativeProcessError(code, 'uncertain');
       pending.detach();
-      if (cancel) {
-        const message: NativeBrokerCancel = {
-          version: NATIVE_BROKER_VERSION,
-          requestId: randomUUID(),
-          operation: 'cancel',
-          targetRequestId: pending.requestId,
-        };
-        try {
-          this.child.stdin.write(JSON.stringify(message) + '\n');
-        } catch {
-          this.child.kill('SIGKILL');
-        }
+    }
+    if (cancel && firstFailure && pending !== undefined) {
+      const message: NativeBrokerCancel = {
+        version: NATIVE_BROKER_VERSION,
+        requestId: randomUUID(),
+        operation: 'cancel',
+        targetRequestId: pending.requestId,
+      };
+      try {
+        this.child.stdin.write(JSON.stringify(message) + '\n');
+      } catch {
+        this.child.kill('SIGKILL');
       }
     }
     if (this.didClose || this.drainTimer !== undefined) return;
@@ -334,11 +364,7 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
     // settles the JS waiter as uncertain but never makes this process reusable.
     this.drainTimer = setTimeout(() => {
       this.clearTimers();
-      const active = this.pending;
-      this.pending = undefined;
-      active?.reject(
-        active.failure ?? new NativeProcessError('UNCERTAIN', 'uncertain'),
-      );
+      this.rejectPending();
     }, this.cleanupBudgetMs);
     if (cancel)
       this.killTimer = setTimeout(
@@ -346,6 +372,24 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
         Math.max(1, Math.floor(this.cleanupBudgetMs / 2)),
       );
     else this.child.kill('SIGKILL');
+  }
+
+  private pendingWork(): readonly Pending[] {
+    return [this.pending, this.controlPending].flatMap((pending) =>
+      pending === undefined ? [] : [pending],
+    );
+  }
+
+  private rejectPending(): void {
+    const pending = this.pendingWork();
+    this.pending = undefined;
+    this.controlPending = undefined;
+    for (const work of pending) {
+      work.detach();
+      work.reject(
+        work.failure ?? new NativeProcessError('UNCERTAIN', 'uncertain'),
+      );
+    }
   }
 
   close(deadline: OperationDeadline): Promise<NativeCleanupResult> {
@@ -360,7 +404,8 @@ export class SpawnNativeControlProcess implements NativeControlProcess {
     deadline: OperationDeadline,
   ): Promise<NativeCleanupResult> {
     this.closing = true;
-    if (this.pending !== undefined) this.fail('UNCERTAIN', true);
+    if (this.pending !== undefined || this.controlPending !== undefined)
+      this.fail('UNCERTAIN', true);
     try {
       if (!this.fenced && !this.didClose) {
         const reply = await this.send({ operation: 'stop' }, deadline);

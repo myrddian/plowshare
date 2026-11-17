@@ -1,6 +1,30 @@
 import type { ComputerBackend } from './contracts.ts';
 import type { NativeControlBackend, NativeToolName } from './native-control.ts';
 import { checkedNativeTools } from './native-tool-arguments.ts';
+import type { NativeArmingBackend } from './native-arming.ts';
+
+/** Validate host-only capabilities before caller-owned handles/state transfer. */
+export function nativeArmingComposition(
+  native: readonly NativeControlBackend[],
+  controls: readonly NativeArmingBackend[],
+): readonly NativeArmingBackend[] {
+  const copied = Object.freeze([...controls]);
+  if (
+    copied.length > 32 ||
+    new Set(copied).size !== copied.length ||
+    copied.some(
+      (backend) =>
+        !native.includes(backend) ||
+        typeof backend.nativeArming?.request !== 'function' ||
+        typeof backend.nativeArming.status !== 'function' ||
+        typeof backend.nativeArming.revoke !== 'function',
+    )
+  )
+    throw new Error(
+      'Native arming requires exact configured native backend capabilities',
+    );
+  return copied;
+}
 
 export interface NativeComposition {
   readonly controls: readonly NativeControlBackend[];

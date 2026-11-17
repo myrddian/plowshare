@@ -1,7 +1,7 @@
 import CoreFoundation
 import Foundation
 
-let nativeBrokerVersion = "computer-control-native/2"
+let nativeBrokerVersion = "computer-control-native/3"
 let nativeBrokerRequestLimit = 65_536
 let nativeBrokerReplyLimit = 2_097_152
 
@@ -30,6 +30,10 @@ enum BrokerFailure: String, Error {
   case cleanup = "CLEANUP_UNCERTAIN"
 }
 
+struct BrokerOwner: Encodable, Equatable {
+  let account: String, project: String, run: String, provider: String
+}
+struct BrokerArmRequest { let requestId: String, durationMs: Int }
 struct BrokerLease: Encodable, Equatable {
   let leaseId: String, targetId: String, sessionId: String, generation: String
 }
@@ -87,6 +91,9 @@ enum BrokerCommand {
   case preflight, stop
   case cancel(String)
   case acquire(BrokerLease, BrokerConfiguration)
+  case armRequest(BrokerLease, BrokerOwner, BrokerArmRequest)
+  case armStatus(BrokerLease)
+  case armRevoke(BrokerLease)
   case windows(BrokerLease)
   case observe(BrokerLease, String, Bool, BrokerElementTarget?)
   case focus(BrokerLease, String, String, String, Int)
@@ -369,7 +376,7 @@ func decodeBrokerRequest(_ input: Data) throws -> BrokerRequest {
     JSONSerialization.jsonObject(with: input),
     [
       "version", "requestId", "operation", "timeoutMs", "lease", "configuration", "request",
-      "targetRequestId",
+      "targetRequestId", "owner",
     ])
   guard try root.string("version") == nativeBrokerVersion else { throw BrokerFailure.invalid }
   let id = try root.id("requestId")
@@ -379,12 +386,15 @@ func decodeBrokerRequest(_ input: Data) throws -> BrokerRequest {
   let command: BrokerCommand
   switch operation {
   case "preflight", "stop":
-    guard !["lease", "configuration", "request", "targetRequestId"].contains(where: root.has) else {
+    guard
+      !["lease", "configuration", "request", "targetRequestId", "owner"].contains(where: root.has)
+    else {
       throw BrokerFailure.invalid
     }
     command = operation == "preflight" ? .preflight : .stop
   case "cancel":
-    guard !["timeoutMs", "lease", "configuration", "request"].contains(where: root.has) else {
+    guard !["timeoutMs", "lease", "configuration", "request", "owner"].contains(where: root.has)
+    else {
       throw BrokerFailure.invalid
     }
     let target = try root.id("targetRequestId")
@@ -393,7 +403,9 @@ func decodeBrokerRequest(_ input: Data) throws -> BrokerRequest {
     }
     command = .cancel(target)
   case "acquire":
-    guard !root.has("request"), !root.has("targetRequestId") else { throw BrokerFailure.invalid }
+    guard !root.has("request"), !root.has("targetRequestId"), !root.has("owner") else {
+      throw BrokerFailure.invalid
+    }
     let l = try lease(root.object("lease", leaseFields))
     let c = try root.object(
       "configuration",
@@ -433,8 +445,27 @@ func decodeBrokerRequest(_ input: Data) throws -> BrokerRequest {
         surfaceId: surface, displayId: display, tools: Set(tools), allowedBundleIds: Set(bundles),
         maxWindows: try c.int("maxWindows", max: 32), maxNodes: nodes, maxVisitedNodes: visited,
         cleanupBudgetMs: try c.int("cleanupBudgetMs", max: 300000)))
+  case "arm_request":
+    try root.only(["version", "requestId", "operation", "timeoutMs", "lease", "owner", "request"])
+    let l = try lease(root.object("lease", leaseFields))
+    let o = try root.object("owner", ["account", "project", "run", "provider"])
+    let r = try root.object("request", ["requestId", "durationMs"])
+    let requestId = try r.id("requestId")
+    guard UUID(uuidString: requestId)?.uuidString.lowercased() == requestId else {
+      throw BrokerFailure.invalid
+    }
+    command = .armRequest(
+      l,
+      try BrokerOwner(
+        account: o.id("account"), project: o.id("project"), run: o.id("run"),
+        provider: o.id("provider")),
+      try BrokerArmRequest(requestId: requestId, durationMs: r.int("durationMs", max: 30000)))
+  case "arm_status", "arm_revoke":
+    try root.only(["version", "requestId", "operation", "timeoutMs", "lease"])
+    let l = try lease(root.object("lease", leaseFields))
+    command = operation == "arm_status" ? .armStatus(l) : .armRevoke(l)
   case "windows", "observe", "focus", "perform":
-    guard !root.has("configuration"), !root.has("targetRequestId") else {
+    guard !root.has("configuration"), !root.has("targetRequestId"), !root.has("owner") else {
       throw BrokerFailure.invalid
     }
     let l = try lease(root.object("lease", leaseFields))

@@ -42,6 +42,11 @@ export interface ComputerHostConfig {
   readonly browserControl?: BrowserControlBackendConfig;
   readonly macos?: MacOSBackendConfig;
   readonly macosControl?: MacOSControlBackendConfig;
+  /** Only requests a local confirmation prompt once per opened native session. */
+  readonly nativeArming?: {
+    readonly mode: 'local-confirmation';
+    readonly durationMs: number;
+  };
   readonly sessions?: {
     readonly frameFreshMs: number;
     readonly idleMs: number;
@@ -96,6 +101,7 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     'browserControl',
     'macos',
     'macosControl',
+    'nativeArming',
     'sessions',
   ]);
   if (
@@ -244,6 +250,26 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     row['macosControl'] === undefined
       ? undefined
       : decodeMacOSControlBackendConfig(row['macosControl']);
+  const arm =
+    row['nativeArming'] === undefined
+      ? undefined
+      : object(row['nativeArming'], ['mode', 'durationMs']);
+  const nativeArming = (() => {
+    if (arm === undefined) return undefined;
+    const durationMs = arm['durationMs'];
+    if (
+      macosControl === undefined ||
+      arm['mode'] !== 'local-confirmation' ||
+      typeof durationMs !== 'number' ||
+      !Number.isSafeInteger(durationMs) ||
+      durationMs < 1 ||
+      durationMs > 30_000
+    )
+      throw new Error(
+        'Native arming requires native control and local-confirmation with a 1..30000ms lifetime',
+      );
+    return Object.freeze({ mode: 'local-confirmation' as const, durationMs });
+  })();
   if (
     macosControl !== undefined &&
     (browser?.headless === false || browserControl?.headless === false)
@@ -319,6 +345,7 @@ export function decodeComputerHostConfig(value: unknown): ComputerHostConfig {
     ...(browserControl === undefined ? {} : { browserControl }),
     ...(macos === undefined ? {} : { macos }),
     ...(macosControl === undefined ? {} : { macosControl }),
+    ...(nativeArming === undefined ? {} : { nativeArming }),
     ...(sessions === undefined ? {} : { sessions }),
   });
 }

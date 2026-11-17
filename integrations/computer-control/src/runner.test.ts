@@ -451,6 +451,85 @@ await test('native foreground composition serves the shared SDK provider and dra
   }
 });
 
+await test('malformed same-instance arming port refuses before host state or ownership transfer', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'native-bad-arming-')),
+    clock = new FakeClock(),
+    wire = new RelayWire(),
+    connection = client(wire);
+  const fail = async (): Promise<never> => {
+    throw new Error('Unexpected arming');
+  };
+  const backend = Object.assign(new FakeNativeControlBackend(clock), {
+    nativeArming: { request: fail, status: fail, revoke: fail },
+  });
+  Object.defineProperty(backend, 'nativeArming', {
+    value: {},
+    configurable: true,
+  });
+  let closed = 0,
+    transported = 0;
+  wire.send = () => {
+    transported++;
+    throw new Error('Unexpected transport');
+  };
+  const config = decodeComputerHostConfig({
+    ...configFor(directory),
+    browser: undefined,
+    macosControl: {
+      helperExecutable: join(directory, 'helper'),
+      ownershipDirectory: join(directory, 'ownership'),
+      targets: [
+        {
+          targetId: backend.targetId,
+          label: 'Synthetic native',
+          surfaceId: backend.surfaceId,
+        },
+      ],
+      control: {
+        enabled: true,
+        tools: backend.allowedTools,
+        allowedBundleIds: ['org.example.NativeFixture'],
+      },
+    },
+    nativeArming: { mode: 'local-confirmation', durationMs: 30_000 },
+  });
+  try {
+    await assert.rejects(
+      runComputerHost({
+        config,
+        connection,
+        currentBearer: fail,
+        signal: new AbortController().signal,
+        backends: [
+          {
+            backend,
+            close: async () => {
+              closed++;
+            },
+          },
+        ],
+        nativeControls: [backend],
+        nativeArmingControls: [backend],
+        clock,
+        maxPasses: 1,
+      }),
+      /arming requires/,
+    );
+    assert.deepEqual(await readdir(directory), []);
+    assert.equal(
+      backend.acquireCalls +
+        backend.captureCalls +
+        backend.releaseCalls +
+        transported +
+        closed,
+      0,
+    );
+  } finally {
+    connection.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 await test('dual-port native host injection refuses before filesystem, transport or ownership transfer', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'computer-native-dual-port-'));
   const wire = new RelayWire();

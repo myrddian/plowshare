@@ -4,6 +4,7 @@ import { toolDeploymentConfig } from 'plowshare-client-node/tools';
 import { canonicalToolSchema, decodeToolCall } from 'plowshare-client-ts';
 import type { ToolCall, ToolResult } from 'plowshare-client-ts';
 import type { NativeToolName } from './native-control.ts';
+import type { NativeArmingBackend } from './native-arming.ts';
 import type {
   BrowserControlBackend,
   BrowserToolName,
@@ -45,6 +46,7 @@ export async function nativeProviderFixture(
     readonly idleMs?: number;
     readonly browserControls?: readonly BrowserControlBackend[];
     readonly browserTools?: readonly BrowserToolName[];
+    readonly armingControls?: readonly NativeArmingBackend[];
   } = {},
 ) {
   const clock = options.clock ?? new FakeClock(),
@@ -72,6 +74,7 @@ export async function nativeProviderFixture(
     journal,
     backends: [backend, ...(options.additionalBackends ?? [])],
     nativeControls: [backend],
+    nativeArmingControls: options.armingControls ?? [],
     nativeTools: tools,
     browserControls: options.browserControls ?? [],
     browserTools: options.browserTools ?? [],

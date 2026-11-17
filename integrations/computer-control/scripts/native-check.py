@@ -19,7 +19,7 @@ builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
 
 V1 = "computer-control-native/1"
-V2 = "computer-control-native/2"
+CONTROL_VERSION = "computer-control-native/3"
 
 
 @dataclass(frozen=True)
@@ -96,7 +96,7 @@ def preflight(value):
 
 def frame(operation, deadline):
     return {
-        "version": V2,
+        "version": CONTROL_VERSION,
         "requestId": str(uuid.uuid4()),
         "operation": operation,
         "timeoutMs": max(1, min(1000, int(deadline.remaining() * 1000))),
@@ -110,7 +110,7 @@ def reply(process, request, deadline):
         ("version", "requestId", "operation", "result"),
     )
     require(
-        value["version"] == V2
+        value["version"] == CONTROL_VERSION
         and value["requestId"] == request["requestId"]
         and value["operation"] == request["operation"]
     )
@@ -230,7 +230,7 @@ def check_v1(executable, directory, overall):
         )
 
 
-def check_v2_invalid(executable, directory, overall):
+def check_control_invalid(executable, directory, overall):
     request = frame("preflight", overall)
     invalid = [
         json.dumps({**request, **extra}).encode()
@@ -239,6 +239,8 @@ def check_v2_invalid(executable, directory, overall):
             {"timeoutMs": 0},
             {"timeoutMs": True},
             {"version": "invalid"},
+            # Legacy control envelopes are rejected before any acquisition/input.
+            {"version": "computer-control-native/2"},
         )
     ]
     duplicate = json.dumps(request).replace(
@@ -281,6 +283,9 @@ def check_memory(executable, directory, overall):
             "protocolFramesChecked",
             "acknowledgementCasesChecked",
             "executorCasesChecked",
+            "readinessUICasesChecked",
+            "readinessCasesChecked",
+            "mainLoopCasesChecked",
         ),
     )
     fixture = "Aé\n\t🙂e\u0301👩‍💻"
@@ -295,6 +300,9 @@ def check_memory(executable, directory, overall):
         "protocolFramesChecked": 19,
         "acknowledgementCasesChecked": 8,
         "executorCasesChecked": 6,
+        "readinessUICasesChecked": 29,
+        "readinessCasesChecked": 67,
+        "mainLoopCasesChecked": 2,
     }
     require(
         all(
@@ -344,15 +352,15 @@ def main():
             executable = builder.absolute_path(options.executable)
             builder.verify_bundle(executable, options.bundle_id, directory, overall)
             status = check_preflight(executable, directory, overall)
-            heading = "PASS: configured bundle signature and read-only protocol-2 preflight/stop."
+            heading = "PASS: configured bundle signature and read-only protocol-3 preflight/stop."
         else:
             executable = directory / "helper"
             builder.build_artifact(executable, overall)
             check_v1(executable, directory, overall)
             status = check_preflight(executable, directory, overall)
-            check_v2_invalid(executable, directory, overall)
+            check_control_invalid(executable, directory, overall)
             memory_diagnostics = check_memory(executable, directory, overall)
-            heading = "PASS: temporary compilation, strict protocols 1/2 and no-post memory fixtures."
+            heading = "PASS: temporary compilation, strict protocols 1/3 and no-post memory fixtures."
         overall.remaining()
     except builder.Failure as error:
         safe_cleanup = str(error) != "PROCESS_CLEANUP_UNCERTAIN"

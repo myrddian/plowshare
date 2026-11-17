@@ -14,6 +14,7 @@ import type {
 } from '../native-control.ts';
 import { decodeNativeStateGuard } from '../native-control.ts';
 import type { NativeControlProcess } from './native-control-process.ts';
+import { NativeProcessError } from './native-control-process.ts';
 import {
   createMacOSControlBackend,
   decodeMacOSControlBackendConfig,
@@ -37,6 +38,10 @@ class Broker implements NativeControlProcess {
   readonly commands: NativeBrokerRequest[] = [];
   readonly fake = new FakeNativeControlBackend(new FakeClock());
   closeCalls = 0;
+  revocations = 0;
+  rejectPreflight = false;
+  preflightDelay?: Promise<void>;
+  preflightSeen?: () => void;
   cleanup: NativeCleanupResult = {
     physicalSettlement: 'settled',
     heldInputsReleased: true,
@@ -51,7 +56,57 @@ class Broker implements NativeControlProcess {
     const request = decodeNativeBrokerRequest(value);
     deadline.requireActive();
     this.commands.push(request);
+    if (request.operation === 'preflight' && this.rejectPreflight)
+      return Promise.reject(
+        new NativeProcessError('INVALID_PROTOCOL', 'uncertain'),
+      );
+    if (request.operation === 'preflight') {
+      this.preflightSeen?.();
+      return (this.preflightDelay ?? Promise.resolve()).then(() => ({
+        ...replyHeader,
+        operation: 'preflight',
+        result: {
+          permissions: {
+            screenCapture: false,
+            accessibility: false,
+            eventPosting: false,
+            eventListening: false,
+          },
+          availability: 'unknown',
+          secureInput: 'unknown',
+          globalFence: 'clear',
+        },
+      }));
+    }
     if (this.respond !== undefined) return this.respond(request);
+    if (request.operation === 'arm_request')
+      return Promise.resolve({
+        ...replyHeader,
+        operation: request.operation,
+        result: {
+          state: 'PENDING',
+          binding: {
+            lease: request.lease,
+            helperGeneration: replyHeader.requestId,
+          },
+          requestId: request.request.requestId,
+          challengeId: 'aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb',
+          requestedAt: '2026-11-17T00:00:00Z',
+          expiresAt: '2026-11-17T00:00:30Z',
+        },
+      });
+    if (request.operation === 'arm_status')
+      return Promise.resolve({
+        ...replyHeader,
+        operation: request.operation,
+        result: {
+          state: 'UNARMED',
+          binding: {
+            lease: request.lease,
+            helperGeneration: replyHeader.requestId,
+          },
+        },
+      });
     if (request.operation === 'acquire')
       return Promise.resolve({
         ...replyHeader,
@@ -94,6 +149,25 @@ class Broker implements NativeControlProcess {
     deadline.requireActive();
     this.closeCalls++;
     return Promise.resolve(this.cleanup);
+  }
+  revoke(
+    lease: NativeLease,
+    deadline: OperationDeadline,
+  ): Promise<NativeBrokerReply> {
+    deadline.requireActive();
+    this.revocations++;
+    return Promise.resolve({
+      ...replyHeader,
+      operation: 'arm_revoke',
+      result: {
+        state: 'REVOKED',
+        binding: { lease, helperGeneration: replyHeader.requestId },
+        requestId: null,
+        armGeneration: null,
+        revokedAt: new Date(this.fake.clock.wall).toISOString(),
+        reason: 'HOST_REVOKED',
+      },
+    });
   }
 }
 function config(directory: string): MacOSControlBackendConfig {
@@ -146,6 +220,129 @@ async function acquire(
   if (result.outcome !== 'ACQUIRED') throw new Error('Expected fixture lease');
   return result.lease;
 }
+
+await test('host arming uses acquire-time owner, exact lease, and dedicated revoke capability', async () => {
+  const f = await fixture();
+  try {
+    const lease = await acquire(f),
+      arming = f.handle.backend.nativeArming;
+    const request = {
+      requestId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      durationMs: 30_000,
+    };
+    assert.equal(
+      (await arming.request(lease, request, f.deadline)).state,
+      'PENDING',
+    );
+    const sent = f.broker.commands.at(-1);
+    assert.ok(sent?.operation === 'arm_request');
+    assert.deepEqual(sent.owner, owner);
+    assert.deepEqual(sent.lease, lease);
+    assert.deepEqual(sent.request, request);
+    assert.equal((await arming.status(lease, f.deadline)).state, 'UNARMED');
+    const before = f.broker.commands.length;
+    await assert.rejects(
+      arming.status({ ...lease, leaseId: 'foreign' }, f.deadline),
+    );
+    await assert.rejects(
+      arming.request(lease, { ...request, durationMs: 30_001 }, f.deadline),
+    );
+    assert.equal(f.broker.commands.length, before);
+    assert.equal((await arming.revoke(lease, f.deadline)).state, 'REVOKED');
+    assert.equal(f.broker.revocations, 1);
+    assert.equal(f.broker.commands.length, before);
+    await f.control.release(lease, f.deadline);
+  } finally {
+    await f.dispose();
+  }
+});
+
+await test('foreign arming status binding fences the original lease without a retry', async () => {
+  const f = await fixture();
+  try {
+    const lease = await acquire(f);
+    f.broker.respond = async (request) => {
+      assert.equal(request.operation, 'arm_status');
+      return {
+        ...replyHeader,
+        operation: 'arm_status',
+        result: {
+          state: 'UNARMED',
+          binding: {
+            lease: { ...lease, leaseId: 'foreign' },
+            helperGeneration: replyHeader.requestId,
+          },
+        },
+      };
+    };
+    await assert.rejects(
+      f.handle.backend.nativeArming.status(lease, f.deadline),
+    );
+    const before = f.broker.commands.length;
+    await assert.rejects(
+      f.handle.backend.nativeArming.status(lease, f.deadline),
+    );
+    assert.equal(f.broker.commands.length, before);
+    assert.equal(
+      (await f.control.release(lease, f.deadline)).physicalSettlement,
+      'uncertain',
+    );
+    assert.ok(existsSync(join(f.directory, 'capture.lock')));
+  } finally {
+    await f.dispose();
+  }
+});
+
+await test('same-lease old arming intent and non-revoked control reply fence without rearming', async () => {
+  for (const operation of ['request', 'revoke'] as const) {
+    const f = await fixture();
+    try {
+      const lease = await acquire(f),
+        arming = f.handle.backend.nativeArming;
+      const status = {
+        state: 'PENDING' as const,
+        binding: { lease, helperGeneration: replyHeader.requestId },
+        requestId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        challengeId: 'aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb',
+        requestedAt: '2026-11-17T00:00:00Z',
+        expiresAt: '2026-11-17T00:00:30Z',
+      };
+      if (operation === 'request') {
+        f.broker.respond = async () => ({
+          ...replyHeader,
+          operation: 'arm_request',
+          result: status,
+        });
+        await assert.rejects(
+          arming.request(
+            lease,
+            {
+              requestId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+              durationMs: 30_000,
+            },
+            f.deadline,
+          ),
+        );
+      } else {
+        f.broker.revoke = async () => ({
+          ...replyHeader,
+          operation: 'arm_revoke',
+          result: status,
+        });
+        await assert.rejects(arming.revoke(lease, f.deadline));
+      }
+      const count = f.broker.commands.length;
+      await assert.rejects(arming.status(lease, f.deadline));
+      assert.equal(f.broker.commands.length, count);
+      assert.equal(
+        (await f.control.release(lease, f.deadline)).physicalSettlement,
+        'uncertain',
+      );
+    } finally {
+      await f.dispose();
+    }
+  }
+});
 function click(broker: Broker): NativePerformRequest {
   const state = broker.fake.state();
   return {
@@ -199,6 +396,92 @@ await test('native config and expired factory reject before helper or filesystem
   }
 });
 
+await test('old private protocol is refused before acquire and only proved child exit frees the empty reservation', async () => {
+  for (const reaped of [true, false]) {
+    const broker = new Broker();
+    broker.rejectPreflight = true;
+    broker.cleanup = {
+      physicalSettlement: 'uncertain',
+      heldInputsReleased: false,
+      helperStopped: reaped,
+    };
+    const f = await fixture(broker);
+    try {
+      const result = await f.control.acquire(
+        { owner, session, targetId: 'native' },
+        f.deadline,
+      );
+      assert.equal(result.outcome, reaped ? 'NOT_ACQUIRED' : 'UNCERTAIN');
+      assert.deepEqual(
+        broker.commands.map((command) => command.operation),
+        ['preflight'],
+      );
+      assert.equal(broker.revocations, 0);
+      assert.equal(broker.closeCalls, 1);
+      assert.equal(existsSync(join(f.directory, 'capture.lock')), !reaped);
+      if (reaped) {
+        await f.handle.close(f.deadline);
+        assert.deepEqual(await readdir(f.directory), []);
+      } else {
+        await assert.rejects(f.handle.close(f.deadline));
+        assert.equal(broker.closeCalls, 1);
+      }
+    } finally {
+      await f.dispose();
+    }
+  }
+});
+
+await test('late valid preflight cannot acquire after monotonic expiry or host stop', async () => {
+  for (const stopped of [false, true]) {
+    const broker = new Broker(),
+      clock = new FakeClock(),
+      deadline = new OperationDeadline(10, clock);
+    let release = () => {},
+      entered = () => {};
+    broker.preflightDelay = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seen = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    broker.preflightSeen = entered;
+    const f = await fixture(broker);
+    try {
+      const pending = f.control.acquire(
+        { owner, session, targetId: 'native' },
+        deadline,
+      );
+      await seen;
+      assert.ok(existsSync(join(f.directory, 'capture.lock')));
+      assert.equal(broker.closeCalls, 0);
+      let closing: Promise<void> | undefined;
+      if (stopped) closing = f.handle.close(f.deadline);
+      else clock.monotonic += 11; // Deliberately do not fire the deadline timer.
+      assert.deepEqual(
+        broker.commands.map((command) => command.operation),
+        ['preflight'],
+      );
+      release();
+      assert.equal((await pending).outcome, 'NOT_ACQUIRED');
+      await closing;
+      assert.deepEqual(
+        broker.commands.map((command) => command.operation),
+        ['preflight'],
+      );
+      assert.equal(broker.revocations, 0);
+      assert.equal(broker.closeCalls, 1);
+      assert.deepEqual(await readdir(f.directory), []);
+      await f.handle.close(f.deadline);
+    } finally {
+      release();
+      deadline.dispose();
+      await f.dispose();
+    }
+    assert.equal(clock.pendingTimers(), 0);
+  }
+});
+
 await test('native lease acquires durable exclusion before helper and bare capture cannot bypass it', async () => {
   const f = await fixture();
   try {
@@ -230,7 +513,10 @@ await test('native lease acquires durable exclusion before helper and bare captu
         f.deadline,
       ),
     );
-    assert.equal(f.broker.commands.length, 1);
+    assert.deepEqual(
+      f.broker.commands.map((command) => command.operation),
+      ['preflight', 'acquire'],
+    );
     await f.control.release(lease, f.deadline);
     await f.handle.close(f.deadline);
     assert.deepEqual(await readdir(f.directory), []);
@@ -402,7 +688,7 @@ await test('native concurrent action is a pre-dispatch busy refusal without pois
       physicalSettlement: 'settled',
       code: 'BUSY',
     });
-    assert.equal(f.broker.commands.length, 2);
+    assert.equal(f.broker.commands.length, 3);
     assert.ok(settle);
     settle({
       ...replyHeader,
@@ -447,7 +733,7 @@ await test('native queued monotonic expiry submits no helper command and preserv
     const rejected = assert.rejects(f.control.windows(lease, deadline));
     clock.monotonic += 11;
     await rejected;
-    assert.equal(f.broker.commands.length, 1);
+    assert.equal(f.broker.commands.length, 2);
     await f.control.observe(
       lease,
       { surfaceId: 'display:1', structured: false },

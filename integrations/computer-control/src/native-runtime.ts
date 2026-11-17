@@ -9,7 +9,19 @@ import type {
   ComputerOwner,
   SessionReference,
 } from './contracts.ts';
-import { decodeCapturedImage, decodeTargets } from './contracts.ts';
+import {
+  decodeCapturedImage,
+  decodeTargets,
+  decodeOwner,
+  decodeCloseArguments,
+} from './contracts.ts';
+import type { NativeArmingBackend } from './native-arming.ts';
+import type { NativeArmStatus } from './native-arming.ts';
+import {
+  decodeNativeArmRequest,
+  decodeNativeArmStatus,
+} from './native-arming.ts';
+import type { NativeHostArming } from './native-host-arming.ts';
 import type {
   NativeActionResult,
   NativeControlBackend,
@@ -60,6 +72,13 @@ interface OwnedNative {
   deadline?: OperationDeadline;
   running?: Promise<void>;
   cleanup?: Promise<void>;
+  revoking?: Promise<NativeArmStatus>;
+  helperGeneration?: string;
+  publicationGeneration: number;
+  publication?: {
+    readonly generation: number;
+    readonly controller: AbortController;
+  };
   closing: boolean;
   provenEmpty?: boolean;
 }
@@ -67,6 +86,7 @@ export interface NativeRuntimeOptions {
   readonly binding: ToolBinding;
   readonly sessions: ComputerSessions;
   readonly controls: readonly NativeControlBackend[];
+  readonly armingControls?: readonly NativeArmingBackend[];
   readonly tools: readonly NativeToolName[];
   readonly clock: Clock;
   readonly origin: string;
@@ -166,6 +186,7 @@ function decodeCommand(
  * cleanup capability even after a caller expires or the session becomes fenced.
  */
 export class NativeToolRuntime {
+  readonly nativeArming: NativeHostArming;
   private readonly entries = new Map<string, OwnedNative>();
   private readonly enabled: ReadonlySet<NativeToolName>;
   private readonly controls: ReadonlySet<NativeControlBackend>;
@@ -182,6 +203,175 @@ export class NativeToolRuntime {
     });
     this.enabled = new Set(options.tools);
     this.controls = new Set(options.controls);
+    const resolve = (
+      rawOwner: ComputerOwner,
+      rawReference: SessionReference,
+    ) => {
+      const owner = decodeOwner(rawOwner),
+        reference = decodeCloseArguments(rawReference);
+      const entry = this.entries.get(reference.sessionId);
+      if (
+        this.stopped ||
+        owner.project !== options.binding.project ||
+        owner.provider !== options.binding.provider ||
+        entry === undefined ||
+        !sameOwner(owner, entry.owner) ||
+        entry.session.generation !== reference.generation ||
+        entry.lease === undefined
+      )
+        throw new SessionError('NO_SESSION');
+      const backend = options.armingControls?.find(
+        (candidate) => candidate === entry.backend,
+      );
+      if (backend === undefined)
+        throw new NativeControlError('CONTROL_DISABLED');
+      return { entry, backend, lease: entry.lease };
+    };
+    this.nativeArming = Object.freeze({
+      sessions: () =>
+        Object.freeze(
+          [...this.entries.values()]
+            .filter(
+              (entry) =>
+                options.armingControls?.some(
+                  (backend) => backend === entry.backend,
+                ) === true,
+            )
+            .map((entry) =>
+              Object.freeze({
+                owner: Object.freeze({ ...entry.owner }),
+                session: Object.freeze({
+                  sessionId: entry.session.sessionId,
+                  generation: entry.session.generation,
+                }),
+                targetId: entry.session.targetId,
+                closing: entry.closing,
+              }),
+            ),
+        ),
+      request: async (owner, reference, rawRequest, deadline) => {
+        const request = decodeNativeArmRequest(rawRequest);
+        const { entry, backend, lease } = resolve(owner, reference);
+        deadline.requireActive();
+        if (entry.closing) throw new NativeControlError('FENCED');
+        return this.armOperation(entry, deadline, async () => {
+          this.references.invalidate(entry.owner, entry.session);
+          const status = this.armStatus(
+            entry,
+            await backend.nativeArming.request(lease, request, deadline),
+          );
+          if (
+            status.state !== 'PENDING' ||
+            status.requestId !== request.requestId
+          ) {
+            this.fence(entry);
+            throw new NativeControlError('CLEANUP_UNCERTAIN');
+          }
+          return status;
+        });
+      },
+      status: async (owner, reference, deadline) => {
+        const { entry, backend, lease } = resolve(owner, reference);
+        if (entry.closing) throw new NativeControlError('FENCED');
+        return this.armOperation(entry, deadline, async () =>
+          this.armStatus(
+            entry,
+            await backend.nativeArming.status(lease, deadline),
+          ),
+        );
+      },
+      revoke: async (owner, reference, deadline) => {
+        const { entry, backend, lease } = resolve(owner, reference);
+        deadline.requireActive();
+        if (entry.revoking !== undefined) return wait(entry.revoking, deadline);
+        entry.publicationGeneration++;
+        entry.publication?.controller.abort();
+        this.references.invalidate(entry.owner, entry.session);
+        // Do not join withEntry: revocation must reach the helper while an input
+        // owns the ordinary lane. It does not assert physical input settlement.
+        const work = (async () => {
+          try {
+            const value = await backend.nativeArming.revoke(lease, deadline);
+            const status = this.armStatus(entry, value);
+            if (status.state !== 'REVOKED') {
+              this.fence(entry);
+              throw new NativeControlError('CLEANUP_UNCERTAIN');
+            }
+            deadline.requireActive();
+            if (this.stopped || entry.closing)
+              throw new NativeControlError('FENCED');
+            return status;
+          } catch (error) {
+            this.fence(entry);
+            throw error;
+          }
+        })();
+        entry.revoking = work;
+        // Keep physical ownership even if this host waiter expires. Drain joins
+        // the original promise; no second revocation is submitted for cleanup.
+        const settled = () => {
+          if (entry.revoking === work) delete entry.revoking;
+        };
+        // Both branches account only for physical completion. The original
+        // rejection remains owned by the caller and cleanup waiter.
+        void work.then(settled, settled);
+        try {
+          return await wait(work, deadline);
+        } catch (error) {
+          this.fence(entry);
+          throw error;
+        }
+      },
+    } satisfies NativeHostArming);
+  }
+  private async armOperation(
+    entry: OwnedNative,
+    deadline: OperationDeadline,
+    operation: () => Promise<NativeArmStatus>,
+  ): Promise<NativeArmStatus> {
+    let started = false;
+    const work = this.withEntry(entry, deadline, async () => {
+      started = true;
+      try {
+        return await operation();
+      } catch (error) {
+        this.fence(entry);
+        throw error;
+      }
+    });
+    try {
+      return await wait(work, deadline);
+    } catch (error) {
+      if (started) this.fence(entry);
+      throw error;
+    }
+  }
+  private assertPublication(entry: OwnedNative): void {
+    if (
+      entry.publication?.controller.signal.aborted ||
+      (entry.publication !== undefined &&
+        entry.publication.generation !== entry.publicationGeneration)
+    )
+      throw new NativeControlError('STALE_OBSERVATION');
+  }
+  private armStatus(entry: OwnedNative, value: unknown): NativeArmStatus {
+    const status = decodeNativeArmStatus(value),
+      actual = status.binding.lease,
+      expected = entry.lease;
+    if (
+      expected === undefined ||
+      actual.leaseId !== expected.leaseId ||
+      actual.sessionId !== expected.sessionId ||
+      actual.generation !== expected.generation ||
+      actual.targetId !== expected.targetId ||
+      (entry.helperGeneration !== undefined &&
+        entry.helperGeneration !== status.binding.helperGeneration)
+    ) {
+      this.fence(entry);
+      throw new NativeControlError('CLEANUP_UNCERTAIN');
+    }
+    entry.helperGeneration = status.binding.helperGeneration;
+    return status;
   }
   controlsBackend(value: object): value is NativeControlBackend {
     return this.options.controls.some((backend) => backend === value);
@@ -264,19 +454,28 @@ export class NativeToolRuntime {
     const running = new Promise<void>((done) => {
       resolve = done;
     });
-    if (entry.running !== undefined) throw new SessionError('BUSY');
+    if (entry.running !== undefined || entry.revoking !== undefined)
+      throw new SessionError('BUSY');
+    const publication = {
+      generation: entry.publicationGeneration,
+      controller: new AbortController(),
+    };
+    entry.publication = publication;
     entry.running = running;
     entry.deadline = deadline;
     try {
-      return await this.options.sessions.withSession(
+      const result = await this.options.sessions.withSession(
         entry.owner,
         entry.session,
         deadline,
         work,
       );
+      this.assertPublication(entry);
+      return result;
     } finally {
       delete entry.deadline;
       delete entry.running;
+      if (entry.publication === publication) delete entry.publication;
       resolve();
       this.armMaintenance();
     }
@@ -295,6 +494,16 @@ export class NativeToolRuntime {
         const result = decodeNativeCleanupResult(
           await entry.backend.nativeControl.release(lease, deadline),
         );
+        if (entry.revoking !== undefined)
+          // The host already retains the original refusal/UNKNOWN. Cleanup needs
+          // settlement plus its own helper-stop/release proof, not a late status.
+          await wait(
+            entry.revoking.then(
+              () => undefined,
+              () => undefined,
+            ),
+            deadline,
+          );
         if (
           result.physicalSettlement !== 'settled' ||
           !result.heldInputsReleased ||
@@ -395,7 +604,13 @@ export class NativeToolRuntime {
       )
         throw new NativeControlError('CONTROL_DISABLED');
       const session = this.references.open(owner(call), targetId);
-      entry = { session, owner: owner(call), backend, closing: false };
+      entry = {
+        session,
+        owner: owner(call),
+        backend,
+        closing: false,
+        publicationGeneration: 0,
+      };
       this.entries.set(session.sessionId, entry);
       this.armMaintenance();
       const held = entry;
@@ -533,6 +748,7 @@ export class NativeToolRuntime {
     deadline: OperationDeadline,
     delivery: NativeDelivery | null,
   ): Promise<ToolResult> {
+    this.assertPublication(entry);
     const observation = decodeNativeObservation(value),
       image = decodeCapturedImage(
         observation.image,
@@ -540,12 +756,15 @@ export class NativeToolRuntime {
       );
     const boundedHttp: typeof fetch = (input, init) => {
       deadline.requireActive();
+      this.assertPublication(entry);
+      const publicationSignal = entry.publication?.controller.signal;
       return this.options.http(input, {
         ...init,
-        signal:
-          init?.signal == null
-            ? deadline.signal
-            : AbortSignal.any([deadline.signal, init.signal]),
+        signal: AbortSignal.any([
+          deadline.signal,
+          ...(init?.signal == null ? [] : [init.signal]),
+          ...(publicationSignal === undefined ? [] : [publicationSignal]),
+        ]),
       });
     };
     const admitted = await admitToolImage(
@@ -558,6 +777,7 @@ export class NativeToolRuntime {
       boundedHttp,
     );
     deadline.requireActive();
+    this.assertPublication(entry);
     if (
       admitted.receipt.width !== image.width ||
       admitted.receipt.height !== image.height ||
@@ -661,6 +881,7 @@ export class NativeToolRuntime {
         await this.current(held, deadline);
         // Renewal can outlive a tree reference; recheck the root after that wait.
         const bearer = await this.bearer(deadline);
+        this.assertPublication(held);
         if (args.root !== undefined)
           this.references.resolveElement(held.owner, held.session, args.root);
         this.options.sessions.reserveImage(held.owner);
@@ -719,6 +940,7 @@ export class NativeToolRuntime {
                 windows,
               },
             );
+            this.assertPublication(entry);
             this.references.recordWindows(entry.owner, entry.session, windows);
             return result;
           } catch (error) {
@@ -760,6 +982,7 @@ export class NativeToolRuntime {
         // Credential renewal can wait. Resolve freshness-sensitive references only
         // after it settles, immediately before the synchronous input preflight.
         const bearer = await this.bearer(deadline);
+        this.assertPublication(held);
         const prepare = (
           target: Parameters<NativeSessionReferences['prepareTarget']>[2],
         ) => sessions.prepareTarget(held.owner, held.session, target);
@@ -973,7 +1196,18 @@ export class NativeToolRuntime {
             : code(error);
         // No late success/image disclosure. Keep established local delivery proof
         // even when the SDK deadline can only retain an immutable UNKNOWN receipt.
-        return this.minimal(call, entry, outcome.delivery, failure, 'UNKNOWN');
+        const revokedPublication =
+          error instanceof NativeControlError &&
+          error.code === 'STALE_OBSERVATION' &&
+          !deadline.signal.aborted &&
+          deadline.remainingMs() > 0;
+        return this.minimal(
+          call,
+          entry,
+          outcome.delivery,
+          failure,
+          revokedPublication ? undefined : 'UNKNOWN',
+        );
       }
       return this.failure(call, error, attempted, entry?.session);
     }
