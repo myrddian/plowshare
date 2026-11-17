@@ -275,26 +275,23 @@ public final class ConversationSearch implements UsageAware {
     PassageIndex.Ranking ranking;
     String fallback;
     // Capture owns finite provider transport/admission budgets. It must not consume a SQL deadline
-    // or retain the project-ID selection across provider IO. Ranking starts a fresh SQL unit and
-    // resolves the home again because it may have changed while the provider was running.
+    // or retain the project-ID selection across provider IO. Ranking reacquires
+    // SQL/disclosure/profile units and
+    // resolves the home in each unit because it may have changed between transactions.
     try (var query = scoped.capture(question, owner, home)) {
       ranking =
-          readPhase(
+          scoped.rankSearchWindow(
               home,
-              () ->
-                  // Unlike the surrounding independent queries, rankWindow opens/joins one physical
-                  // disclosure/profile/ranking transaction. Its nested statements retain the
-                  // earlier
-                  // transaction deadline rather than each renewing the lock-holding transaction's
-                  // budget.
-                  ReadDeadline.within(
-                      searchBudget,
-                      () -> {
-                        ReadDeadline.check();
-                        var result = scoped.rankWindow(home, "entry", query, CANDIDATES + 1);
-                        ReadDeadline.check();
-                        return result;
-                      }));
+              "entry",
+              query,
+              CANDIDATES + 1,
+              searchBudget,
+              new PassageIndex.ReadSelection() {
+                @Override
+                public <T> T within(Supplier<T> read) {
+                  return readPhase(home, read);
+                }
+              });
       fallback = null;
     } catch (EmbeddingException unavailable) {
       if (mode.equals("semantic"))

@@ -211,7 +211,7 @@ class ConversationPaginationBenchmarkTest {
             .thenAnswer(
                 call -> {
                   Supplier<Object> read = call.getArgument(1);
-                  return read.get();
+                  return transactions.inTransaction(read);
                 });
         index.useDualEmbeddings(dual);
         var root = new ConversationSearch(entries, index);
@@ -246,7 +246,7 @@ class ConversationPaginationBenchmarkTest {
               if (offset == 0) {
                 snapshot = page.retrieval().snapshot();
                 total = page.total();
-                assertEquals(1, trace.ann);
+                assertEquals(4, trace.ann);
                 assertEquals(1, embeddings.get() - before);
               } else {
                 assertEquals(snapshot, page.retrieval().snapshot());

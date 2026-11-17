@@ -47,6 +47,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.support.SqlArrayValue;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -189,6 +190,248 @@ class IndexedPassageRankingDatabaseTest {
     assertEquals(ReadFailedException.Reason.INVALIDATED, failure.reason());
     assertEquals(before + 1, jdbc.selections);
     verify(visibility).read(eq("reader"), any());
+  }
+
+  private static PassageRepository.RankingReadUnit units(
+      List<Long> connections, List<Long> deadlines, Consumer<Integer> before) {
+    return new PassageRepository.RankingReadUnit() {
+      int count;
+
+      public <T> T independent(Supplier<T> read) {
+        assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+        assertTrue(ReadDeadline.currentDeadlineNanos().isEmpty());
+        before.accept(++count);
+        var result =
+            ReadDeadline.within(
+                Duration.ofSeconds(2),
+                () ->
+                    transactions.inTransaction(
+                        () -> {
+                          connections.add(
+                              jdbc.queryForObject("SELECT pg_backend_pid()::bigint", Long.class));
+                          deadlines.add(ReadDeadline.deadlineNanos(Duration.ofSeconds(2)));
+                          return read.get();
+                        }));
+        assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+        return result;
+      }
+
+      public <T> T joined(Supplier<T> read) {
+        assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+        return read.get();
+      }
+    };
+  }
+
+  @Test
+  void independentCandidatePagesMatchTheWholeWindowAndReleaseEachActualTransaction() {
+    var repository = new JdbcPassageRepository(jdbc, transactions);
+    var query = new EmbeddingQuery(profile, new float[] {1, 0, 0});
+    var scope = new PassageRepository.ReadScope(true, "reader");
+    var expected = repository.rankWindow(HOME, "entry", query, 200, "indexed-fixture", scope);
+    var expectedKeys = Set.copyOf(jdbc.selectedKeys);
+    int first = jdbc.windows.size();
+    var connections = new ArrayList<Long>();
+    var deadlines = new ArrayList<Long>();
+    var actual =
+        repository.rankWindow(
+            HOME,
+            "entry",
+            query,
+            200,
+            "indexed-fixture",
+            scope,
+            units(connections, deadlines, ignored -> {}));
+    assertEquals(expected, actual);
+    var pages = jdbc.windows.subList(first, jdbc.windows.size());
+    assertEquals(List.of(500, 500, 500, 500), pages.stream().map(List::size).toList());
+    var actualKeys = pages.stream().flatMap(List::stream).toList();
+    assertEquals(2000, actualKeys.size());
+    assertEquals(expectedKeys, Set.copyOf(actualKeys));
+    assertEquals(5, connections.size());
+    assertEquals(
+        5, Set.copyOf(connections).size(), "each actual unit releases its JDBC connection");
+    assertEquals(deadlines.stream().sorted().toList(), deadlines);
+    assertEquals(5, Set.copyOf(deadlines).size());
+    assertTrue(jdbc.selectionSql.contains("LIMIT ? OFFSET ?) SELECT"), jdbc.selectionSql);
+    assertTrue(jdbc.plan.contains(indexName), jdbc.plan);
+    assertTrue(jdbc.plan.contains("hashed SubPlan"), jdbc.plan);
+    assertTrue(ReadDeadline.currentDeadlineNanos().isEmpty());
+  }
+
+  @Test
+  void multiplePassagePositionsKeepDistinctRevisionTokensAndTheSameGlobalGrouping() {
+    jdbc.update(
+        "INSERT INTO retrieval_passages(source_type,source_id,position,passage)"
+            + " SELECT source_type,source_id,1,passage FROM retrieval_passages WHERE source_id LIKE ? AND position=0",
+        selected + ":%");
+    jdbc.update(
+        "UPDATE retrieval_passages p SET prose_space_id=original.prose_space_id,"
+            + " prose_embedding=original.prose_embedding,prose_source_revision=p.embedding_source_revision"
+            + " FROM retrieval_passages original WHERE p.source_id=original.source_id"
+            + " AND p.source_type=original.source_type AND original.position=0 AND p.position=1");
+    try {
+      var repository = new JdbcPassageRepository(jdbc, transactions);
+      var query = new EmbeddingQuery(profile, new float[] {1, 0, 0});
+      var scope = new PassageRepository.ReadScope(true, "reader");
+      var expected = repository.rankWindow(HOME, "entry", query, 200, "indexed-fixture", scope);
+      var original = Set.copyOf(jdbc.selectedKeys);
+      int first = jdbc.windows.size();
+      var actual =
+          repository.rankWindow(
+              HOME,
+              "entry",
+              query,
+              200,
+              "indexed-fixture",
+              scope,
+              units(new ArrayList<>(), new ArrayList<>(), ignored -> {}));
+      var keys =
+          jdbc.windows.subList(first, jdbc.windows.size()).stream().flatMap(List::stream).toList();
+      assertEquals(2000, keys.size());
+      assertTrue(keys.stream().anyMatch(key -> key.position() == 1));
+      assertEquals(original, Set.copyOf(keys));
+      assertEquals(expected, actual);
+    } finally {
+      jdbc.update(
+          "DELETE FROM retrieval_passages WHERE position=1 AND source_id LIKE ?", selected + ":%");
+    }
+  }
+
+  @Test
+  void aCallerTransactionUsesTheOriginalSingleWindowAndEarlierDeadline() {
+    var repository = new JdbcPassageRepository(jdbc, transactions);
+    int before = jdbc.selections;
+    transactions.inTransaction(
+        () ->
+            ReadDeadline.within(
+                Duration.ofMillis(900),
+                () -> {
+                  long deadline = ReadDeadline.deadlineNanos(Duration.ofSeconds(2));
+                  var joined =
+                      new PassageRepository.RankingReadUnit() {
+                        public <T> T independent(Supplier<T> read) {
+                          throw new AssertionError(
+                              "caller transaction must not be split or renewed");
+                        }
+
+                        public <T> T joined(Supplier<T> read) {
+                          assertEquals(deadline, ReadDeadline.deadlineNanos(Duration.ofSeconds(2)));
+                          return read.get();
+                        }
+                      };
+                  repository.rankWindow(
+                      HOME,
+                      "entry",
+                      new EmbeddingQuery(profile, new float[] {1, 0, 0}),
+                      200,
+                      "indexed-fixture",
+                      new PassageRepository.ReadScope(true, "reader"),
+                      joined);
+                  assertEquals(deadline, ReadDeadline.deadlineNanos(Duration.ofSeconds(2)));
+                  return null;
+                }));
+    assertEquals(before + 1, jdbc.selections);
+    assertFalse(jdbc.selectionSql.contains("OFFSET"));
+  }
+
+  @Test
+  void failureInTheSecondUnitReturnsNoPartialRankingOrRetry() {
+    int before = jdbc.selections;
+    jdbc.afterSelection =
+        ignored -> {
+          if (jdbc.selections == before + 2) {
+            jdbc.execute("SET LOCAL statement_timeout='5ms'");
+            ArchiveUnavailableException.translating(
+                "exercise second candidate unit cancellation",
+                () -> jdbc.queryForObject("SELECT pg_sleep(0.1)", Object.class));
+          }
+        };
+    try {
+      var actual =
+          assertThrows(
+              ReadFailedException.class,
+              () ->
+                  new JdbcPassageRepository(jdbc, transactions)
+                      .rankWindow(
+                          HOME,
+                          "entry",
+                          new EmbeddingQuery(profile, new float[] {1, 0, 0}),
+                          200,
+                          "indexed-fixture",
+                          new PassageRepository.ReadScope(true, "reader"),
+                          units(new ArrayList<>(), new ArrayList<>(), ignored -> {})));
+      assertEquals(ReadFailedException.Reason.QUERY_CANCELLED, actual.reason());
+      assertEquals(before + 2, jdbc.selections);
+      assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+      assertEquals(1, jdbc.queryForObject("SELECT 1", Integer.class));
+    } finally {
+      jdbc.afterSelection = ignored -> {};
+    }
+  }
+
+  @Test
+  void finalUnitRejectsRevocationAfterTheEarlierCandidateTransactionsEnded() {
+    try {
+      var failure =
+          assertThrows(
+              ReadFailedException.class,
+              () ->
+                  new JdbcPassageRepository(jdbc, transactions)
+                      .rankWindow(
+                          HOME,
+                          "entry",
+                          new EmbeddingQuery(profile, new float[] {1, 0, 0}),
+                          200,
+                          "indexed-fixture",
+                          new PassageRepository.ReadScope(true, "reader"),
+                          units(
+                              new ArrayList<>(),
+                              new ArrayList<>(),
+                              unit -> {
+                                if (unit == 5)
+                                  jdbc.update(
+                                      "INSERT INTO information_quarantined_payloads(payload_id,reason) VALUES(?,'fixture')",
+                                      selected);
+                              })));
+      assertEquals(ReadFailedException.Reason.INVALIDATED, failure.reason());
+    } finally {
+      jdbc.update("DELETE FROM information_quarantined_payloads WHERE payload_id=?", selected);
+    }
+  }
+
+  @Test
+  void finalUnitRejectsSourceChangesAfterTheEarlierCandidateTransactionsEnded() {
+    String id = selected + ":100";
+    String hash =
+        jdbc.queryForObject(
+            "SELECT source_hash FROM retrieval_sources WHERE source_id=?", String.class, id);
+    try {
+      var failure =
+          assertThrows(
+              ReadFailedException.class,
+              () ->
+                  new JdbcPassageRepository(jdbc, transactions)
+                      .rankWindow(
+                          HOME,
+                          "entry",
+                          new EmbeddingQuery(profile, new float[] {1, 0, 0}),
+                          200,
+                          "indexed-fixture",
+                          new PassageRepository.ReadScope(true, "reader"),
+                          units(
+                              new ArrayList<>(),
+                              new ArrayList<>(),
+                              unit -> {
+                                if (unit == 5)
+                                  jdbc.update(
+                                      "UPDATE retrieval_sources SET source_hash='changed' WHERE source_id=?",
+                                      id);
+                              })));
+      assertEquals(ReadFailedException.Reason.INVALIDATED, failure.reason());
+    } finally {
+      jdbc.update("UPDATE retrieval_sources SET source_hash=? WHERE source_id=?", hash, id);
+    }
   }
 
   @Test
@@ -459,6 +702,7 @@ class IndexedPassageRankingDatabaseTest {
     String selectionSql = "";
     int selections;
     List<Key> selectedKeys = List.of();
+    final List<List<Key>> windows = new ArrayList<>();
     boolean analyzeNextSelection;
     String analyzedPlan = "";
     Consumer<String> afterSelection = ignored -> {};
@@ -504,6 +748,7 @@ class IndexedPassageRankingDatabaseTest {
         selections++;
         candidateRows = result.size();
         selectedKeys = List.copyOf(keys);
+        windows.add(selectedKeys);
         if (!ids.isEmpty()) afterSelection.accept(ids.getFirst());
       }
       if (sql.startsWith("SELECT selected.source_id")) textRows = result.size();

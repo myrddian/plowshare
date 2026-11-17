@@ -8,7 +8,11 @@ import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.*;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import java.time.Duration;
 import java.util.*;
+import java.util.function.Supplier;
 
 /** Committed-source queue, shared by retained entries and durable digest summaries. */
 public final class PassageIndex implements UsageAware {
@@ -254,6 +258,79 @@ public final class PassageIndex implements UsageAware {
     return dualEmbeddings.read(
         query.typed().profile(),
         () -> repository.rankWindow(home, type, query.typed(), most, generation, scope));
+  }
+
+  /** Resolves a fresh project selection for each independent SQL transaction. */
+  public interface ReadSelection {
+    <T> T within(Supplier<T> read);
+  }
+
+  /**
+   * Builds tentative search candidates in bounded SQL units. Captured provider work is reused once;
+   * every unit reacquires the captured profile and disclosure fences. Entry HNSW_VECTOR searches
+   * use independent candidate pages; other policies retain one guarded ranking unit. After pages,
+   * the repository revalidates retained key metadata in a final guarded unit. The search owner
+   * still refreshes retained source revisions/visibility when hydrating and publishing its
+   * snapshot.
+   */
+  public Ranking rankSearchWindow(
+      Home home, String type, Query query, int most, Duration budget, ReadSelection selection) {
+    var units =
+        new PassageRepository.RankingReadUnit() {
+          @Override
+          public <T> T independent(Supplier<T> read) {
+            return ReadDeadline.within(
+                budget,
+                () -> {
+                  ReadDeadline.check();
+                  // Disclosure/profile guards open the actual SQL transaction before project
+                  // lookup.
+                  // The lookup and ranking statements therefore share one physical owner's budget.
+                  var result = guarded(() -> selection.within(read));
+                  ReadDeadline.check();
+                  return result;
+                });
+          }
+
+          @Override
+          public <T> T joined(Supplier<T> read) {
+            ReadDeadline.check();
+            var result = guarded(() -> selection.within(read));
+            ReadDeadline.check();
+            return result;
+          }
+
+          private <T> T guarded(Supplier<T> read) {
+            Supplier<T> profile =
+                () -> {
+                  try {
+                    return query.typed() == null
+                        ? read.get()
+                        : dualEmbeddings.read(query.typed().profile(), read);
+                  } catch (EmbeddingException changed) {
+                    // Activation between batches invalidates the whole candidate window. It must
+                    // not be
+                    // mistaken for an unavailable provider and silently converted into lexical
+                    // fallback.
+                    throw ReadFailedException.invalidated(changed);
+                  }
+                };
+            return query.admission() == null ? profile.get() : query.admission().disclose(profile);
+          }
+        };
+    if (query.typed() == null)
+      // Preserve the existing single legacy disclosure transaction and its completion budget.
+      return selection.within(
+          () ->
+              ReadDeadline.within(
+                  budget,
+                  () -> {
+                    ReadDeadline.check();
+                    var result = rankWindow(home, type, query, most);
+                    ReadDeadline.check();
+                    return result;
+                  }));
+    return repository.rankWindow(home, type, query.typed(), most, generation, scope, units);
   }
 
   public float[] query(String text) {

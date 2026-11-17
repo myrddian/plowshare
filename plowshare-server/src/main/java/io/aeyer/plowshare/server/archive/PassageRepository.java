@@ -1,10 +1,16 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.archive.PassageIndex.*;
-import io.aeyer.plowshare.server.embedding.*;
+import io.aeyer.plowshare.server.archive.PassageIndex.Coverage;
+import io.aeyer.plowshare.server.archive.PassageIndex.Match;
+import io.aeyer.plowshare.server.archive.PassageIndex.PassageText;
+import io.aeyer.plowshare.server.archive.PassageIndex.Ranking;
+import io.aeyer.plowshare.server.archive.PassageIndex.Source;
+import io.aeyer.plowshare.server.embedding.EmbeddingProfile;
+import io.aeyer.plowshare.server.embedding.EmbeddingQuery;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /** Committed retrieval sources and atomic derived-vector publication, without model dispatch. */
 public interface PassageRepository {
@@ -28,6 +34,18 @@ public interface PassageRepository {
     }
 
     public static final ReadScope UNRESTRICTED = new ReadScope(false, null);
+  }
+
+  /**
+   * Rechecks the captured embedding profile and read disclosure inside an actual ranking SQL unit.
+   * Independent units release their transaction before returning; joined units retain their
+   * caller's transaction and earlier deadline. The repository alone decides whether a transaction
+   * is joined.
+   */
+  interface RankingReadUnit {
+    <T> T independent(Supplier<T> read);
+
+    <T> T joined(Supplier<T> read);
   }
 
   record LogOwner(String conversation, int turn) {}
@@ -122,6 +140,22 @@ public interface PassageRepository {
   default Ranking rankWindow(
       Home home, String type, EmbeddingQuery query, int most, String generation, ReadScope scope) {
     return new Ranking(rank(home, type, query, most, generation, scope), false, false);
+  }
+
+  /**
+   * Bounded independent candidate reads, with one final global rerank. Implementations that cannot
+   * split their SQL use one guarded unit. No partial result survives a failed unit, and callers
+   * must still apply their final retained-source disclosure fence before returning search results.
+   */
+  default Ranking rankWindow(
+      Home home,
+      String type,
+      EmbeddingQuery query,
+      int most,
+      String generation,
+      ReadScope scope,
+      RankingReadUnit units) {
+    return units.independent(() -> rankWindow(home, type, query, most, generation, scope));
   }
 
   default Coverage coverage(

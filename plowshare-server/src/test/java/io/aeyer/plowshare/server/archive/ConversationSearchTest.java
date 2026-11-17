@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.archive;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -17,6 +18,8 @@ import static org.mockito.Mockito.when;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -165,8 +168,33 @@ class ConversationSearchTest {
         () -> search.search(HOME, "question", 0, 10, "lexical", null, " "));
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"semantic", "hybrid"})
+  void invalidatedCandidateUnitsCannotBecomeLexicalFallbackOrAPartialSnapshot(String mode) {
+    var failure = ReadFailedException.invalidated(new IllegalStateException("profile changed"));
+    when(index.rankSearchWindow(
+            eq(HOME),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class)))
+        .thenThrow(failure);
+    assertSame(
+        failure,
+        assertThrows(
+            ReadFailedException.class, () -> search.search(HOME, "question", 0, 10, mode, null)));
+    verify(entries, never()).searchSources(any(), anyList());
+  }
+
   private void ranking(List<PassageIndex.Match> matches) {
-    when(index.rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+    when(index.rankSearchWindow(
+            eq(HOME),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class)))
         .thenReturn(new PassageIndex.Ranking(matches, false, false));
   }
 
@@ -181,7 +209,13 @@ class ConversationSearchTest {
                     new PassageIndex.Match(
                         sources.get(i).id(), 0, "passage " + i, 1 - i * .01, "hash"))
             .toList();
-    when(index.rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+    when(index.rankSearchWindow(
+            eq(HOME),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class)))
         .thenReturn(new PassageIndex.Ranking(matches, true, true));
     when(entries.searchSources(eq(HOME), anyList())).thenReturn(sources);
 
@@ -208,11 +242,13 @@ class ConversationSearchTest {
       assertEquals(0, page.retrieval().queryEmbeddingCalls());
     verify(index).capture(eq("question"), any(UsageAttribution.class), eq(HOME));
     verify(index)
-        .rankWindow(
+        .rankSearchWindow(
             eq(HOME),
             eq("entry"),
             any(PassageIndex.Query.class),
-            eq(ConversationSearch.CANDIDATES + 1));
+            eq(ConversationSearch.CANDIDATES + 1),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class));
     verify(entries, times(4)).searchSources(eq(HOME), anyList());
     if (mode.equals("hybrid"))
       verify(entries).search(HOME, "question", 0, ConversationSearch.CANDIDATES);
@@ -258,7 +294,14 @@ class ConversationSearchTest {
       assertEquals(0, page.retrieval().queryEmbeddingCalls());
     }
     verify(index).capture(eq("question"), any(UsageAttribution.class), eq(HOME));
-    verify(index).rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt());
+    verify(index)
+        .rankSearchWindow(
+            eq(HOME),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class));
   }
 
   @Test
@@ -283,12 +326,25 @@ class ConversationSearchTest {
         ValidationException.class,
         () -> search.forAccount("other").search(HOME, "question", 1, 1, "semantic", token));
     verify(index).capture(eq("question"), any(UsageAttribution.class), eq(HOME));
-    verify(index).rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt());
+    verify(index)
+        .rankSearchWindow(
+            eq(HOME),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class));
   }
 
   @Test
   void approximateRecallDoesNotClaimCompletenessWhenThePassageWindowIsNotFull() {
-    when(index.rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+    when(index.rankSearchWindow(
+            eq(HOME),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class)))
         .thenReturn(new PassageIndex.Ranking(List.of(), true, false));
     when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
     var result = search.search(HOME, "question", 0, 10, "semantic", null);
@@ -298,7 +354,13 @@ class ConversationSearchTest {
 
   @Test
   void approximateRecallAndExhaustedPassageWindowRemainVisibleEvenAfterDeduplication() {
-    when(index.rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+    when(index.rankSearchWindow(
+            eq(HOME),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class)))
         .thenReturn(
             new PassageIndex.Ranking(
                 List.of(new PassageIndex.Match(a.id(), 0, "shared", .8, "hash")), true, true));
