@@ -1,4 +1,4 @@
-# Computer observation provider
+# Computer control provider
 
 This integration supplies bounded browser and macOS screenshots to a Plowshare
 agent through the public SDK and Relay `content/1` path. It is a reusable library:
@@ -9,7 +9,7 @@ The default observation mode exposes `computer_targets`, `computer_open`,
 `computer_observe` and `computer_close`. P2 adds explicitly enabled browser
 control using the same SDK provider. See the
 [design](../../docs/computer-control-design-and-plan.md) and
-[P0/P1](IMPLEMENTATION.md) and [P2](P2-IMPLEMENTATION.md) review graphs for dependencies, independent approvals and
+[P0/P1](IMPLEMENTATION.md), [P2](P2-IMPLEMENTATION.md) and [P3](P3-IMPLEMENTATION.md) review graphs for dependencies, independent approvals and
 the distinction between code approval and live acceptance.
 Current live bootstrap/permission findings are in [platform gaps](PLATFORM-GAPS.md).
 
@@ -223,6 +223,92 @@ require the helper and shared ownership directory described below.
 
 ## Backends and limits
 
+### Native macOS control
+
+The [native packaging and diagnostics guide](NATIVE.md) describes stable helper
+identity, explicit signing, configured no-input checks and their limits.
+
+`createMacOSControlBackend` supplies the native control port to the same
+`createComputerProvider` used by TUI, GUI and standalone SDK hosts. Supply its
+exact backend instance in both `backends` and `nativeControls`, and its configured
+tools in `nativeTools`. Pass those tools as the fourth argument to
+`computerDeclarations` when deriving the private SDK journal identity. Browser
+tools remain the third argument; a shared tool name appears once in the catalogue.
+The foreground host accepts the equivalent explicit `macosControl` section:
+
+```json
+{
+  "macosControl": {
+    "helperExecutable": "REPLACE_WITH_PRIVATE_ABSOLUTE_NATIVE_HELPER",
+    "ownershipDirectory": "REPLACE_WITH_PRIVATE_ABSOLUTE_OWNERSHIP_DIRECTORY",
+    "targets": [{
+      "targetId": "desktop",
+      "label": "Configured desktop display",
+      "surfaceId": "display:REPLACE_WITH_EXPLICIT_DISPLAY_ID"
+    }],
+    "control": {
+      "enabled": true,
+      "tools": ["windows", "focus", "pointer", "type", "key", "scroll"],
+      "allowedBundleIds": ["REPLACE_WITH_EXACT_ALLOWED_APPLICATION_BUNDLE_ID"]
+    }
+  },
+  "budgets": { "nativeObservationReserveMs": 3000 }
+}
+```
+
+Retain the earlier template's server, binding, credential, catalogue and journal
+fields. Every placeholder requires replacement. The target names an explicit
+display; AX window references returned by `computer_windows` are separate focus
+references, not guessed capture-window IDs. Native dialogs are observed UI and
+require explicit subsequent actions. Native control has no `navigate` or automatic
+browser `dialogDecision` policy. Text insertion needs the exact observed focused
+nonsecure editable AX element; it never uses the clipboard. Native scroll deltas
+are integer pixels or lines. Keyboard chords are plain/Shift navigation and
+macOS Meta+A, Meta+Z and Meta+Shift+Z; browser-only chord variants are refused.
+
+**Native readiness requires a short local interactive grant.** Hosts explicitly
+request local confirmation through the shared SDK facade, or enable the
+foreground host's `nativeArming` configuration. Prompts are not enabled by default;
+configuration or a model cannot assert readiness. The helper checks live own-GUI
+routing/compositor evidence and revokes on observed loss. Public console flags
+alone remain insufficient. See
+[native readiness](READINESS.md) for host composition, permissions, evidence,
+revocation and supported-envelope limits. The
+[readiness graph](READINESS-IMPLEMENTATION.md) records source review and actual
+native acceptance separately. Positive native input acceptance remains OPEN.
+Configured Plowshare/model validation remains deferred.
+
+Native control requires macOS 15.2+ for composited display capture. The earlier
+capture-only helper retains its separate macOS 14.2 floor. Helpers receive private
+typed stdio requests and remaining budgets, with no Plowshare credentials or
+inherited environment. Local foreground stop requests bounded cleanup. A killed
+helper does not prove that posted keys or buttons were released. Missing
+input-release proof retains the global fence and never retries input. After
+proven quiescence, semaphore unlink or marker removal can succeed before a
+descriptor close or directory fsync fails. That instance remains fenced even if
+the resource name is already absent; another process may safely acquire the
+quiet resource. This never resolves or authorizes replay of the original action.
+
+One kernel exclusion domain covers the physical desktop across all configured
+displays, windows, provider bindings and ownership directories. Native control
+holds it for the lease. Cooperating capture-only helpers join the same domain
+for captures. The synchronous `createMacOSBackend` remains unverified for mixed
+composition; `createCoordinatedMacOSBackend` performs an explicit bounded helper
+handshake before claiming broker cooperation. Required coordination fields make
+old helpers reject before capture, including after an executable swap.
+
+An embedding host must supply truthful `ComputerBackend.desktopIsolation`:
+`isolated` means no physical desktop access; `physical` means uncoordinated
+access; `native-broker` means every physical capture/input joins the shared
+kernel domain. Missing metadata means unknown. With native controls, composition
+refuses unknown/physical companions and requires native ports themselves to
+declare `native-broker`, before SDK or filesystem effects. Shipped headless
+browser factories declare isolated; headful browsers cannot currently share the
+native controller. Third-party backends must implement this contract; the flag
+does not grant server authority or make an old helper cooperative.
+
+### Observation backends
+
 `createBrowserBackend` takes an explicit browser executable, headless selection,
 configured HTTP(S) target URLs and viewport dimensions. It creates isolated
 provider-owned contexts; it never adopts a user's browser profile. Playwright is
@@ -235,22 +321,26 @@ the same OS session must use that directory. Its durable capture lock is acquire
 before spawning a helper and released only after physical completion and cleanup;
 failed drain or a crash leaves a marker requiring explicit operator recovery.
 Never remove it merely because a timeout, PID check or reconnect suggests the
-work stopped. This is P1 capture exclusion; the P2/P3 input/session broker remains
-separate work.
+work stopped. This durable capture marker remains part of compatibility with
+earlier capture hosts; coordinated native composition additionally requires the
+shared kernel domain described above.
 
-The ScreenCaptureKit helper requires macOS 14.2+, a Swift toolchain to build and
-OS screen-capture permission to return pixels. It reports permission state without
-requesting consent and never injects input. Accessibility permission is reported
-for the future input/structured-inspection slice; capture does not imply it.
+The capture-only ScreenCaptureKit protocol requires macOS 14.2+, a Swift toolchain
+to build and OS screen-capture permission to return pixels. This mode reports
+permission state without requesting consent and never injects input. Native
+control uses the separate opt-in protocol and newer OS floor above; capture
+permission does not imply Accessibility or input permission.
 
 ```sh
 python3 integrations/computer-control/scripts/native-build.py --output /absolute/private/path/capture-helper
 python3 integrations/computer-control/scripts/native-check.py
 ```
 
-The explicit native check compiles and tests status/invalid-request framing only;
-it does not capture the desktop. Code approval does not establish OS permission,
-signed packaging or native live screenshot acceptance.
+The explicit native check compiles and tests status/invalid-request framing;
+it also checks the separate protocol-3 preflight and no-post memory fixtures.
+It does not capture the desktop. Code approval does not establish OS permission
+or native live screenshot/input acceptance. Use the configured-bundle checks in
+the [native guide](NATIVE.md) to inspect the helper actually selected by a host.
 
 Default control and observation budgets are 2 and 10 seconds, with a separate
 2-second cleanup budget. One capture is at most 1 MiB and 1600 pixels on its

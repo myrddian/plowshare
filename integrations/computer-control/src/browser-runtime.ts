@@ -625,13 +625,13 @@ export class BrowserToolRuntime {
       const held = entry;
       return await this.withEntry(held, deadline, async () => {
         await this.current(held, deadline);
+        const bearer = await this.bearer(deadline);
         if (args.root !== undefined)
           this.options.sessions.prepareBrowserTarget(
             held.owner,
             held.session,
             args.root,
           );
-        const bearer = await this.bearer(deadline);
         this.options.sessions.reserveImage(held.owner);
         started = true;
         const observed = await held.backend.browserControl.observe(
@@ -734,6 +734,9 @@ export class BrowserToolRuntime {
       this.assertTool(held, name);
       return await this.withEntry(held, deadline, async () => {
         await this.current(held, deadline);
+        // Credential lookup may consume the frame lifetime. Resolve the exact
+        // references afterwards, with no intervening await before dispatch.
+        const bearer = await this.bearer(deadline);
         const prepare = (
           target: Parameters<ComputerSessions['prepareBrowserTarget']>[2],
         ) => sessions.prepareBrowserTarget(held.owner, held.session, target);
@@ -889,7 +892,6 @@ export class BrowserToolRuntime {
             messageTruncated: true,
           },
         );
-        const bearer = await this.bearer(deadline);
         deadline.requireActive();
         if (deadline.remainingMs() <= this.options.observationReserveMs)
           throw new DeadlineExceeded();

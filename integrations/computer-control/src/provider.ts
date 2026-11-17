@@ -62,11 +62,21 @@ import {
   decodeBrowserObserveArguments,
 } from './browser-tool-arguments.ts';
 import {
-  browserObserveDeclaration,
-  browserToolDeclarations,
-} from './browser-tool-catalogue.ts';
+  controlledObserveDeclaration,
+  controlledToolDeclarations,
+} from './native-tool-catalogue.ts';
+import type { NativeControlBackend, NativeToolName } from './native-control.ts';
+import { checkedNativeTools } from './native-tool-arguments.ts';
 import { BrowserToolRuntime } from './browser-runtime.ts';
 import { browserComposition } from './browser-composition.ts';
+import {
+  nativeComposition,
+  nativeArmingComposition,
+  requireDistinctControlPorts,
+} from './native-composition.ts';
+import { NativeToolRuntime } from './native-runtime.ts';
+import type { NativeArmingBackend } from './native-arming.ts';
+import type { NativeHostArming } from './native-host-arming.ts';
 
 export interface ComputerProviderOptions {
   readonly connection: Pick<Plowshare, 'request'>;
@@ -86,6 +96,11 @@ export interface ComputerProviderOptions {
   readonly browserControls?: readonly BrowserControlBackend[];
   readonly browserTools?: readonly BrowserToolName[];
   readonly browserObservationReserveMs?: number;
+  readonly nativeControls?: readonly NativeControlBackend[];
+  /** Exact configured native backend instances; host-local, never model tools. */
+  readonly nativeArmingControls?: readonly NativeArmingBackend[];
+  readonly nativeTools?: readonly NativeToolName[];
+  readonly nativeObservationReserveMs?: number;
   readonly cleanupBudgetMs?: number;
   readonly frameFreshMs?: number;
   readonly idleMs?: number;
@@ -93,6 +108,7 @@ export interface ComputerProviderOptions {
   readonly parentDeadline?: () => OperationDeadline | undefined;
 }
 export interface ComputerProvider {
+  readonly nativeArming?: NativeHostArming;
   readonly provider: ToolProvider;
   /** SDK registrations for inspection/composition, not a client execution API; use provider.poll(). */
   readonly tools: readonly RegisteredTool[];
@@ -121,6 +137,7 @@ export function computerDeclarations(
   prefix = 'computer_',
   budgets: ProviderBudgets = { controlBudgetMs: 2000, observeBudgetMs: 10_000 },
   browserTools: readonly BrowserToolName[] = [],
+  nativeTools: readonly NativeToolName[] = [],
 ): readonly ToolDeclaration[] {
   checkedPrefix(prefix);
   positiveBudget(budgets.controlBudgetMs);
@@ -157,18 +174,29 @@ export function computerDeclarations(
       fields: ['sessionId', 'generation'],
     },
   ];
-  const enabled = checkedBrowserTools(browserTools);
+  const native = checkedNativeTools(nativeTools);
+  const enabled = checkedBrowserTools([
+    ...new Set([...browserTools, ...native]),
+  ]);
   return Object.freeze([
     ...specs.map((spec): ToolDeclaration => {
       if (enabled.length > 0 && spec.suffix === 'observe')
-        return browserObserveDeclaration(prefix, budgets.observeBudgetMs);
+        return controlledObserveDeclaration(
+          prefix,
+          budgets.observeBudgetMs,
+          native.length > 0,
+        );
       return Object.freeze({
         name: prefix + spec.suffix,
         description:
           enabled.length > 0 && spec.suffix === 'open'
-            ? 'Acquire an owner-bound session; controlled browser targets get a fresh isolated lease.'
+            ? native.length > 0
+              ? 'Acquire an owner-bound session for the selected configured browser or native desktop target.'
+              : 'Acquire an owner-bound session; controlled browser targets get a fresh isolated lease.'
             : enabled.length > 0 && spec.suffix === 'close'
-              ? 'Stop this session and release it only after physical browser cleanup is established.'
+              ? native.length > 0
+                ? 'Stop this session and release it only after physical cleanup and owned-input release are established.'
+                : 'Stop this session and release it only after physical browser cleanup is established.'
               : spec.description,
         parameters: Object.freeze(spec.fields.map(parameter)),
         resultProfile: 'content/1',
@@ -179,7 +207,7 @@ export function computerDeclarations(
         ),
       });
     }),
-    ...browserToolDeclarations(prefix, budgets, enabled),
+    ...controlledToolDeclarations(prefix, budgets, browserTools, native),
   ]);
 }
 
@@ -254,6 +282,16 @@ export async function createComputerProvider(
     options.browserControls === undefined ? [] : options.browserControls,
     options.browserTools === undefined ? [] : options.browserTools,
   );
+  const { controls: nativeControls, tools: nativeTools } = nativeComposition(
+    backends,
+    options.nativeControls === undefined ? [] : options.nativeControls,
+    options.nativeTools === undefined ? [] : options.nativeTools,
+  );
+  requireDistinctControlPorts(browserControls, nativeControls);
+  const armingControls = nativeArmingComposition(
+    nativeControls,
+    options.nativeArmingControls ?? [],
+  );
   const observationReserveMs = positiveBudget(
     options.browserObservationReserveMs === undefined
       ? 3000
@@ -262,9 +300,18 @@ export async function createComputerProvider(
   const cleanupBudgetMs = positiveBudget(
     options.cleanupBudgetMs === undefined ? 2000 : options.cleanupBudgetMs,
   );
+  const nativeObservationReserveMs = positiveBudget(
+    options.nativeObservationReserveMs === undefined
+      ? 3000
+      : options.nativeObservationReserveMs,
+  );
   if (browserTools.length > 0 && observationReserveMs >= observeBudgetMs)
     throw new Error(
       'Browser actions require an input budget and reserved post-observation allowance',
+    );
+  if (nativeTools.length > 0 && nativeObservationReserveMs >= observeBudgetMs)
+    throw new Error(
+      'Native actions require an input budget and reserved post-observation allowance',
     );
   const clock = options.clock ?? systemClock;
   const http = options.http ?? fetch;
@@ -275,9 +322,10 @@ export async function createComputerProvider(
       observeBudgetMs,
     },
     browserTools,
+    nativeTools,
   );
   const actionTools = new Set(
-    browserTools
+    [...new Set([...browserTools, ...nativeTools])]
       .filter((name) => name !== 'windows')
       .map((name) => prefix + name),
   );
@@ -349,6 +397,25 @@ export async function createComputerProvider(
               ? 60_000
               : positiveBudget(options.idleMs),
           ),
+        });
+  const native =
+    nativeControls.length === 0
+      ? undefined
+      : new NativeToolRuntime({
+          binding,
+          sessions,
+          controls: nativeControls,
+          armingControls,
+          tools: nativeTools,
+          clock,
+          origin,
+          currentBearer: options.currentBearer,
+          http,
+          captureLimits,
+          observationReserveMs: nativeObservationReserveMs,
+          cleanupBudgetMs,
+          frameFreshMs: options.frameFreshMs ?? 5000,
+          idleCheckMs: Math.min(1000, options.idleMs ?? 60_000),
         });
   let active = true;
   const activeDeadlines = new Map<string, OperationDeadline>();
@@ -451,6 +518,7 @@ export async function createComputerProvider(
         throw new Error('Foreign or unnegotiated computer invocation');
       const invocationOwner = owner(call);
       browser?.reap();
+      native?.reap();
       if (call.tool === prefix + 'targets') {
         decodeTargetsArguments(call.arguments);
         const discovery = await discover(deadline);
@@ -462,7 +530,14 @@ export async function createComputerProvider(
                   (name) => prefix + name,
                 ),
               }
-            : row.target,
+            : native?.controlsBackend(row.backend)
+              ? {
+                  ...row.target,
+                  nativeTools: row.backend.nativeControl.allowedTools.map(
+                    (name) => prefix + name,
+                  ),
+                }
+              : row.target,
         );
         let visible = targets.length;
         while (
@@ -497,6 +572,13 @@ export async function createComputerProvider(
             target.backend,
             deadline,
           );
+        if (native?.controlsBackend(target.backend))
+          return await native.open(
+            call,
+            args.targetId,
+            target.backend,
+            deadline,
+          );
         return textResult(call, binding.account, {
           version: 'computer-control/1',
           session: sessions.open(invocationOwner, args.targetId),
@@ -504,6 +586,8 @@ export async function createComputerProvider(
       }
       if (call.tool === prefix + 'close') {
         const args = decodeCloseArguments(call.arguments);
+        if (native?.hasSession(args))
+          return await native.close(call, args, deadline);
         if (browser?.hasSession(args))
           return await browser.close(call, args, deadline);
         sessions.close(invocationOwner, args);
@@ -512,6 +596,19 @@ export async function createComputerProvider(
           closed: true,
         });
       }
+      const nativeName = nativeTools.find(
+        (name) => call.tool === prefix + name,
+      );
+      if (native !== undefined && nativeName !== undefined) {
+        const reference = decodeCloseArguments({
+          sessionId: call.arguments['sessionId'],
+          generation: call.arguments['generation'],
+        });
+        if (native.hasSession(reference) || browser === undefined)
+          return nativeName === 'windows'
+            ? await native.windows(call, deadline)
+            : await native.action(call, nativeName, deadline);
+      }
       if (browser !== undefined) {
         const name = browserTools.find((name) => call.tool === prefix + name);
         if (name !== undefined)
@@ -519,12 +616,18 @@ export async function createComputerProvider(
             ? await browser.windows(call, deadline)
             : await browser.action(call, name, deadline);
       }
+      if (native !== undefined && nativeName !== undefined)
+        return nativeName === 'windows'
+          ? await native.windows(call, deadline)
+          : await native.action(call, nativeName, deadline);
       if (call.tool !== prefix + 'observe')
         throw new Error('Unknown computer tool');
       let args: ObserveArguments;
-      if (browser !== undefined) {
+      if (browser !== undefined || native !== undefined) {
         const controlledArgs = decodeBrowserObserveArguments(call.arguments);
-        if (browser.hasSession(controlledArgs))
+        if (native?.hasSession(controlledArgs))
+          return await native.observe(call, controlledArgs, deadline);
+        if (browser?.hasSession(controlledArgs))
           return await browser.observe(call, controlledArgs, deadline);
         if (
           call.arguments['structured'] === true ||
@@ -713,6 +816,9 @@ export async function createComputerProvider(
   );
   return Object.freeze({
     provider,
+    ...(native === undefined || armingControls.length === 0
+      ? {}
+      : { nativeArming: native.nativeArming }),
     tools,
     declarations,
     sessions,
@@ -722,11 +828,13 @@ export async function createComputerProvider(
       active = false;
       for (const deadline of activeDeadlines.values()) deadline.cancel();
       browser?.stop();
+      native?.stop();
     },
     async drain(deadline: OperationDeadline) {
       await abortable(
         Promise.all([
           ...(browser === undefined ? [] : [browser.drain(deadline)]),
+          ...(native === undefined ? [] : [native.drain(deadline)]),
           Promise.all(
             [...physical].map((work) =>
               work.then(

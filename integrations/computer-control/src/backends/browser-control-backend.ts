@@ -168,6 +168,7 @@ interface LeaseRecord {
 }
 
 class ControlledBackend implements BrowserControlBackend, BrowserControl {
+  readonly desktopIsolation: 'isolated' | 'physical';
   readonly browserControl: BrowserControl = this;
   readonly allowedTools: readonly BrowserToolName[];
   private readonly leases = new Map<string, LeaseRecord>();
@@ -178,6 +179,7 @@ class ControlledBackend implements BrowserControlBackend, BrowserControl {
     private readonly driver: BrowserControlDriver,
     private readonly ownership: BrowserOwnership,
   ) {
+    this.desktopIsolation = config.headless ? 'isolated' : 'physical';
     this.allowedTools = config.control.tools;
     this.targetsList = decodeTargets(
       config.targets.map((target) => ({

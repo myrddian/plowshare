@@ -1,5 +1,23 @@
 export { computerDeclarations, createComputerProvider } from './provider.ts';
 export type {
+  NativeHostArming,
+  NativeHostSession,
+} from './native-host-arming.ts';
+export type {
+  NativeArming,
+  NativeArmingBackend,
+  NativeArmRequest,
+  NativeArmStatus,
+  NativeArmProof,
+  NativeArmBinding,
+  NativeArmRevocationReason,
+} from './native-arming.ts';
+export {
+  decodeNativeArmRequest,
+  decodeNativeArmStatus,
+  decodeNativeArmProof,
+} from './native-arming.ts';
+export type {
   ComputerProvider,
   ComputerProviderOptions,
   ProviderBudgets,
@@ -70,6 +88,7 @@ export type {
 } from './backends/browser.ts';
 export {
   createMacOSBackend,
+  createCoordinatedMacOSBackend,
   decodeMacOSBackendConfig,
 } from './backends/macos.ts';
 export type {
@@ -164,6 +183,74 @@ export {
   createBrowserControlBackend,
   decodeBrowserControlBackendConfig,
 } from './backends/browser-control-backend.ts';
+export {
+  NativeControlError,
+  decodeNativeControlPolicy,
+  requireAllowedNativeBundle,
+  decodeNativePermissions,
+  decodeNativeAcquireRequest,
+  decodeNativeLease,
+  decodeNativeAcquisition,
+  decodeNativeStateGuard,
+  sameNativeGuard,
+  decodeNativeState,
+  requireReadyNativeState,
+  decodeNativeSnapshot,
+  decodeNativeObservation,
+  decodeNativeWindows,
+  decodeNativeActionTarget,
+  decodePreparedNativeAction,
+  requireNativeActionState,
+  decodeNativeObserveRequest,
+  decodeNativeFocusRequest,
+  decodeNativePerformRequest,
+  decodeNativeDelivery,
+  decodeNativeActionResult,
+  decodeNativeCleanupResult,
+} from './native-control.ts';
+export type {
+  NativeToolName,
+  NativeControlCode,
+  NativePermissions,
+  NativeControlPolicy,
+  NativeAcquireRequest,
+  NativeLease,
+  NativeAcquisition,
+  NativeStateGuard,
+  NativeBounds,
+  NativeDisplayGeometry,
+  NativeState,
+  NativeElement,
+  NativeSnapshot,
+  NativeObservation,
+  NativeWindow,
+  NativeWindows,
+  NativeActionTarget,
+  NativeElementTarget,
+  PreparedNativeTarget,
+  NativeButton,
+  NativeModifier,
+  NativeKey,
+  NativeDragPoint,
+  PreparedNativeAction,
+  NativeInputMechanism,
+  NativeScrollDelivery,
+  NativeDeliveredExtent,
+  NativeDelivery,
+  NativePostObservation,
+  NativeActionResult,
+  NativeCleanupResult,
+  NativeObserveRequest,
+  NativeFocusRequest,
+  NativePerformRequest,
+  NativeControl,
+  NativeControlBackend,
+} from './native-control.ts';
+export {
+  createMacOSControlBackend,
+  decodeMacOSControlBackendConfig,
+} from './backends/macos-control.ts';
+export type { MacOSControlBackendConfig } from './backends/macos-control.ts';
 export type {
   BrowserControlBackendConfig,
   BrowserControlBackendHandle,

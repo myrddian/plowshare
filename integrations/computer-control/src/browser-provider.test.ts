@@ -4,6 +4,62 @@ import { decodeToolCall } from 'plowshare-client-ts';
 import { createComputerProvider, computerDeclarations } from './provider.ts';
 import { admissions, binding, metadata } from './provider.test-support.ts';
 import { browserProviderFixture as fixture } from './browser-provider-fixture.test-support.ts';
+import { FakeClock } from './contracts.test-support.ts';
+
+await test('browser credential wait cannot dispatch expired action references', async () => {
+  const clock = new FakeClock();
+  let lookups = 0;
+  const f = await fixture({
+    clock,
+    currentBearer: async () => {
+      if (++lookups === 2) clock.advance(6000);
+      return 'fixture';
+    },
+  });
+  try {
+    const session = await f.open();
+    const observed = await f.observe(session);
+    const result = await f.invoke('type', {
+      ...session,
+      target: observed.target,
+      mode: 'insert',
+      text: 'stale',
+    });
+    assert.equal(result.state, 'REJECTED');
+    assert.equal(metadata(result)['code'], 'STALE_OBSERVATION');
+    assert.equal(f.backend.inputs, 0);
+    assert.equal(f.backend.captureCalls, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+await test('browser credential wait cannot dispatch expired readonly subtree references', async () => {
+  const clock = new FakeClock();
+  let lookups = 0;
+  const f = await fixture({
+    clock,
+    currentBearer: async () => {
+      if (++lookups === 2) clock.advance(6000);
+      return 'fixture';
+    },
+  });
+  try {
+    const session = await f.open();
+    const observed = await f.observe(session);
+    const result = await f.invoke('observe', {
+      ...session,
+      surfaceId: f.backend.surfaceId,
+      root: observed.target,
+    });
+    assert.equal(result.state, 'REJECTED');
+    assert.equal(metadata(result)['code'], 'STALE_OBSERVATION');
+    assert.equal(f.backend.inputs, 0);
+    assert.equal(f.backend.captureCalls, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
 
 await test('P1 catalogue stays observation-only; P2 requires exact explicitly bound capabilities', async () => {
   assert.deepEqual(

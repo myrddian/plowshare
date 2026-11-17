@@ -8,9 +8,12 @@ import { test } from 'node:test';
 import { OperationDeadline } from '../deadline.ts';
 import {
   createMacOSBackend,
+  createCoordinatedMacOSBackend,
   decodeMacOSBackendConfig,
+  NATIVE_COORDINATION_VERSION,
   SpawnNativeCaptureProcess,
 } from './macos.ts';
+import { FakeClock } from '../contracts.test-support.ts';
 import type {
   NativeCaptureProcess,
   NativeRequest,
@@ -50,6 +53,246 @@ function captureMetadata() {
 function fake(run: NativeCaptureProcess['run']): NativeCaptureProcess {
   return { run, close: async () => {} };
 }
+
+await test('native capture cooperation requires a validated handshake and every later wire request', async () => {
+  const requests: NativeRequest[] = [];
+  const deadline = new OperationDeadline(1000);
+  let closes = 0;
+  const process: NativeCaptureProcess = {
+    run: async (_executable, request) => {
+      requests.push(request);
+      assert.equal(request.coordination, NATIVE_COORDINATION_VERSION);
+      return request.operation === 'status'
+        ? frame({
+            version: 'computer-control-native/1',
+            ok: true,
+            operation: 'status',
+            screenCaptureAllowed: true,
+            accessibilityAllowed: false,
+            coordination: NATIVE_COORDINATION_VERSION,
+          })
+        : frame(
+            { ...captureMetadata(), coordination: NATIVE_COORDINATION_VERSION },
+            png,
+          );
+    },
+    close: async () => {
+      closes++;
+    },
+  };
+  try {
+    assert.equal(
+      createMacOSBackend(
+        config,
+        fake(async () => new Uint8Array()),
+      ).backend.desktopIsolation,
+      'physical',
+    );
+    const handle = await createCoordinatedMacOSBackend(
+      config,
+      deadline,
+      process,
+    );
+    assert.equal(handle.backend.desktopIsolation, 'native-broker');
+    assert.deepEqual(
+      (
+        await handle.backend.capture(
+          { targetId: 'fixture', surfaceId: 'window:42' },
+          deadline,
+        )
+      ).bytes,
+      png,
+    );
+    assert.deepEqual(
+      requests.map((request) => request.operation),
+      ['status', 'capture'],
+    );
+    await handle.close(deadline);
+    assert.equal(closes, 1);
+  } finally {
+    deadline.dispose();
+  }
+});
+
+await test('old or malformed helper cooperation cannot be promoted or produce pixels', async () => {
+  for (const output of [
+    frame({
+      version: 'computer-control-native/1',
+      ok: false,
+      code: 'INVALID_REQUEST',
+    }),
+    frame({
+      version: 'computer-control-native/1',
+      ok: true,
+      operation: 'status',
+      screenCaptureAllowed: true,
+      accessibilityAllowed: true,
+    }),
+    frame({
+      version: 'computer-control-native/1',
+      ok: true,
+      operation: 'status',
+      screenCaptureAllowed: true,
+      accessibilityAllowed: true,
+      coordination: 'unverified',
+    }),
+  ]) {
+    const deadline = new OperationDeadline(1000);
+    let closes = 0;
+    let captures = 0;
+    try {
+      await assert.rejects(
+        createCoordinatedMacOSBackend(config, deadline, {
+          run: async (_executable, request) => {
+            if (request.operation === 'capture') captures++;
+            return output;
+          },
+          close: async () => {
+            closes++;
+          },
+        }),
+      );
+      assert.equal(captures, 0);
+      assert.equal(closes, 1);
+    } finally {
+      deadline.dispose();
+    }
+  }
+});
+
+await test('coordinated capture handshake does not pretend to grant screen permission', async () => {
+  const deadline = new OperationDeadline(1000);
+  const process = fake(async () =>
+    frame({
+      version: 'computer-control-native/1',
+      ok: true,
+      operation: 'status',
+      screenCaptureAllowed: false,
+      accessibilityAllowed: true,
+      coordination: NATIVE_COORDINATION_VERSION,
+    }),
+  );
+  try {
+    const handle = await createCoordinatedMacOSBackend(
+      config,
+      deadline,
+      process,
+    );
+    assert.equal(handle.backend.desktopIsolation, 'native-broker');
+    await assert.rejects(handle.backend.targets(deadline), {
+      code: 'PERMISSION_DENIED',
+    });
+    await handle.close(deadline);
+  } finally {
+    deadline.dispose();
+  }
+});
+
+await test('swapping to the old strict helper after handshake rejects before capture', async () => {
+  const deadline = new OperationDeadline(1000);
+  let realCaptures = 0;
+  let calls = 0;
+  const process = fake(async (_executable, request) => {
+    if (++calls === 1)
+      return frame({
+        version: 'computer-control-native/1',
+        ok: true,
+        operation: 'status',
+        screenCaptureAllowed: true,
+        accessibilityAllowed: true,
+        coordination: NATIVE_COORDINATION_VERSION,
+      });
+    // The shipped old strict helper refuses the new required coordination field
+    // before choosing capture. It cannot silently accept an uncoordinated path.
+    if (request.coordination !== undefined)
+      return frame({
+        version: 'computer-control-native/1',
+        ok: false,
+        code: 'INVALID_REQUEST',
+      });
+    realCaptures++;
+    return frame(captureMetadata(), png);
+  });
+  try {
+    const handle = await createCoordinatedMacOSBackend(
+      config,
+      deadline,
+      process,
+    );
+    await assert.rejects(
+      handle.backend.capture(
+        { targetId: 'fixture', surfaceId: 'window:42' },
+        deadline,
+      ),
+    );
+    assert.equal(realCaptures, 0);
+    await handle.close(deadline);
+  } finally {
+    deadline.dispose();
+  }
+});
+
+await test('native coordination startup honors monotonic expiry without late promotion', async () => {
+  const clock = new FakeClock();
+  const deadline = new OperationDeadline(10, clock);
+  let closes = 0;
+  try {
+    await assert.rejects(
+      createCoordinatedMacOSBackend(config, deadline, {
+        run: async () => {
+          clock.monotonic += 11;
+          return frame({
+            version: 'computer-control-native/1',
+            ok: true,
+            operation: 'status',
+            screenCaptureAllowed: true,
+            accessibilityAllowed: true,
+            coordination: NATIVE_COORDINATION_VERSION,
+          });
+        },
+        close: async () => {
+          closes++;
+        },
+      }),
+    );
+    assert.equal(closes, 1);
+  } finally {
+    deadline.dispose();
+  }
+});
+
+await test('native coordination rechecks cutoff between validated status and promoted handle publication', async () => {
+  const clock = new FakeClock();
+  const deadline = new OperationDeadline(10, clock);
+  let closes = 0;
+  try {
+    await assert.rejects(
+      createCoordinatedMacOSBackend(config, deadline, {
+        run: async () => {
+          queueMicrotask(() =>
+            queueMicrotask(() => {
+              clock.monotonic += 11;
+            }),
+          );
+          return frame({
+            version: 'computer-control-native/1',
+            ok: true,
+            operation: 'status',
+            screenCaptureAllowed: true,
+            accessibilityAllowed: true,
+            coordination: NATIVE_COORDINATION_VERSION,
+          });
+        },
+        close: async () => {
+          closes++;
+        },
+      }),
+    );
+    assert.equal(closes, 1);
+  } finally {
+    deadline.dispose();
+  }
+});
 
 await test('native config rejects unconfigured paths, handles and extra fields', () => {
   assert.throws(() =>

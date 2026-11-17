@@ -65,6 +65,14 @@ export const DEFAULT_CAPTURE_LIMITS: CaptureLimits = Object.freeze({
  * They own cancellation until physical capture settles. No credentials or vendor objects cross here.
  */
 export interface ComputerBackend {
+  /**
+   * Trusted adapter composition fact, not server authority. Isolated backends
+   * never touch the physical desktop; native-broker backends join its shared
+   * kernel exclusion domain for every capture/input. Missing means unknown and
+   * is refused when composed with native control. Physical access cannot be
+   * mixed with a native lease until that backend joins the broker.
+   */
+  readonly desktopIsolation?: 'isolated' | 'physical' | 'native-broker';
   targets(deadline: OperationDeadline): Promise<readonly ComputerTarget[]>;
   capture(
     request: CaptureRequest,

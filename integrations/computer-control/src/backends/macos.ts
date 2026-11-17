@@ -16,11 +16,11 @@ import type {
   ComputerBackend,
   ComputerTarget,
 } from '../contracts.ts';
-import type { OperationDeadline } from '../deadline.ts';
-import { positiveBudget } from '../deadline.ts';
+import { OperationDeadline, positiveBudget } from '../deadline.ts';
 import type { BackendHandle } from './types.ts';
 
 const VERSION = 'computer-control-native/1';
+export const NATIVE_COORDINATION_VERSION = 'native-host-fence/1';
 const MAX_OUTPUT_BYTES = 1_048_576 + 8192;
 
 export interface MacOSTargetConfig {
@@ -41,6 +41,7 @@ export interface NativeRequest {
   readonly surfaceId?: string;
   readonly maxEdge?: number;
   readonly maxBytes?: number;
+  readonly coordination?: typeof NATIVE_COORDINATION_VERSION;
 }
 /** One process per operation; resolve/reject only after exit, or fence permanently on failed drain. */
 export interface NativeCaptureProcess {
@@ -104,6 +105,7 @@ export function decodeMacOSBackendConfig(value: unknown): MacOSBackendConfig {
   const helperExecutable = row['helperExecutable'];
   if (
     typeof helperExecutable !== 'string' ||
+    helperExecutable.length > 4096 ||
     !isAbsolute(helperExecutable) ||
     Array.from(helperExecutable).some(
       (character) => (character.codePointAt(0) ?? 0) < 32,
@@ -115,6 +117,7 @@ export function decodeMacOSBackendConfig(value: unknown): MacOSBackendConfig {
   const ownershipDirectory = row['ownershipDirectory'];
   if (
     typeof ownershipDirectory !== 'string' ||
+    ownershipDirectory.length > 4096 ||
     !isAbsolute(ownershipDirectory) ||
     Array.from(ownershipDirectory).some(
       (character) => (character.codePointAt(0) ?? 0) < 32,
@@ -203,6 +206,7 @@ function decodeReply(bytes: Uint8Array): {
     'transform',
     'capturedAt',
     'layoutGeneration',
+    'coordination',
   ]);
   if (metadata['version'] !== VERSION || typeof metadata['ok'] !== 'boolean')
     throw new BackendError('CAPTURE_FAILED');
@@ -421,13 +425,16 @@ export class SpawnNativeCaptureProcess implements NativeCaptureProcess {
 }
 
 class MacOSBackend implements ComputerBackend {
+  readonly desktopIsolation: 'physical' | 'native-broker';
   private closed = false;
   private readonly targetList: readonly ComputerTarget[];
 
   constructor(
     private readonly config: MacOSBackendConfig,
     private readonly process: NativeCaptureProcess,
+    private readonly coordinated = false,
   ) {
+    this.desktopIsolation = coordinated ? 'native-broker' : 'physical';
     this.targetList = decodeTargets(
       config.targets.map((target) => ({
         targetId: target.targetId,
@@ -439,13 +446,20 @@ class MacOSBackend implements ComputerBackend {
     );
   }
 
-  private async status(deadline: OperationDeadline): Promise<void> {
+  async status(
+    deadline: OperationDeadline,
+    requireCapturePermission = true,
+  ): Promise<void> {
+    deadline.requireActive();
     const output = await this.process.run(
       this.config.helperExecutable,
       {
         version: VERSION,
         operation: 'status',
         timeoutMs: Math.max(1, Math.floor(deadline.remainingMs())),
+        ...(this.coordinated
+          ? { coordination: NATIVE_COORDINATION_VERSION }
+          : {}),
       },
       deadline,
     );
@@ -457,6 +471,7 @@ class MacOSBackend implements ComputerBackend {
       'operation',
       'screenCaptureAllowed',
       'accessibilityAllowed',
+      'coordination',
     ]);
     if (
       metadata['operation'] !== 'status' ||
@@ -465,9 +480,15 @@ class MacOSBackend implements ComputerBackend {
       typeof metadata['accessibilityAllowed'] !== 'boolean'
     )
       throw new BackendError('CAPTURE_FAILED');
-    if (!metadata['screenCaptureAllowed'])
+    if (
+      this.coordinated &&
+      metadata['coordination'] !== NATIVE_COORDINATION_VERSION
+    )
+      throw new BackendError('CAPTURE_FAILED');
+    if (requireCapturePermission && !metadata['screenCaptureAllowed'])
       throw new BackendError('PERMISSION_DENIED');
     // Accessibility is reported separately by the helper; pixel capture does not require it.
+    deadline.requireActive();
   }
 
   async targets(
@@ -504,6 +525,9 @@ class MacOSBackend implements ComputerBackend {
           maxEdge: 1600,
           maxBytes: 1_048_576,
           timeoutMs: Math.max(1, Math.floor(deadline.remainingMs())),
+          ...(this.coordinated
+            ? { coordination: NATIVE_COORDINATION_VERSION }
+            : {}),
         },
         deadline,
       );
@@ -519,10 +543,16 @@ class MacOSBackend implements ComputerBackend {
         'transform',
         'capturedAt',
         'layoutGeneration',
+        'coordination',
       ]);
       if (
         metadata['operation'] !== 'capture' ||
         metadata['byteLength'] !== image.byteLength
+      )
+        throw new BackendError('CAPTURE_FAILED');
+      if (
+        this.coordinated &&
+        metadata['coordination'] !== NATIVE_COORDINATION_VERSION
       )
         throw new BackendError('CAPTURE_FAILED');
       return decodeCapturedImage({
@@ -564,4 +594,42 @@ export function createMacOSBackend(
       ),
   );
   return { backend, close: (deadline) => backend.close(deadline) };
+}
+
+/**
+ * Promotion requires an actual versioned handshake. Every later request also
+ * requires coordination, so the old strict helper rejects a binary swap before
+ * it can capture. The original synchronous factory remains conservatively
+ * physical, including when configured with an unverified third-party helper.
+ */
+export async function createCoordinatedMacOSBackend(
+  value: MacOSBackendConfig,
+  deadline: OperationDeadline,
+  process?: NativeCaptureProcess,
+): Promise<BackendHandle> {
+  deadline.requireActive();
+  const config = decodeMacOSBackendConfig(value);
+  const backend = new MacOSBackend(
+    config,
+    process ??
+      new SpawnNativeCaptureProcess(
+        config.ownershipDirectory,
+        launchChild,
+        config.cleanupBudgetMs ?? 2000,
+      ),
+    true,
+  );
+  try {
+    await backend.status(deadline, false);
+    deadline.requireActive();
+    return { backend, close: (budget) => backend.close(budget) };
+  } catch (error) {
+    const cleanup = new OperationDeadline(config.cleanupBudgetMs ?? 2000);
+    try {
+      await backend.close(cleanup);
+    } finally {
+      cleanup.dispose();
+    }
+    throw error;
+  }
 }

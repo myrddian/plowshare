@@ -33,7 +33,10 @@ private func rejectDuplicateFields(_ input: Data) throws {
   var index = 0
   var names = Set<String>()
   while index < bytes.count {
-    guard bytes[index] == 34 else { index += 1; continue }
+    guard bytes[index] == 34 else {
+      index += 1
+      continue
+    }
     let start = index
     index += 1
     while index < bytes.count, bytes[index] != 34 {
@@ -57,9 +60,10 @@ private struct Request: Decodable {
   let surfaceId: String?
   let maxEdge: Int?
   let maxBytes: Int?
+  let coordination: String?
 
   private enum CodingKeys: String, CodingKey {
-    case version, operation, timeoutMs, surfaceId, maxEdge, maxBytes
+    case version, operation, timeoutMs, surfaceId, maxEdge, maxBytes, coordination
   }
 
   init(from decoder: Decoder) throws {
@@ -68,18 +72,24 @@ private struct Request: Decodable {
     let version = try fields.decode(String.self, forKey: .version)
     operation = try fields.decode(String.self, forKey: .operation)
     timeoutMs = try fields.decode(Int.self, forKey: .timeoutMs)
+    coordination = try fields.decodeIfPresent(String.self, forKey: .coordination)
+    if let coordination, coordination != NativeGlobalFence.coordinationVersion {
+      throw HelperFailure.invalidRequest
+    }
     guard version == protocolVersion, (1...300_000).contains(timeoutMs) else {
       throw HelperFailure.invalidRequest
     }
     let allowed: Set<String>
     switch operation {
     case "status":
-      allowed = ["version", "operation", "timeoutMs"]
+      allowed = ["version", "operation", "timeoutMs", "coordination"]
       surfaceId = nil
       maxEdge = nil
       maxBytes = nil
     case "capture":
-      allowed = ["version", "operation", "timeoutMs", "surfaceId", "maxEdge", "maxBytes"]
+      allowed = [
+        "version", "operation", "timeoutMs", "surfaceId", "maxEdge", "maxBytes", "coordination",
+      ]
       let surface = try fields.decode(String.self, forKey: .surfaceId)
       let edge = try fields.decode(Int.self, forKey: .maxEdge)
       let bytes = try fields.decode(Int.self, forKey: .maxBytes)
@@ -114,6 +124,7 @@ private struct StatusReply: Encodable {
   let operation = "status"
   let screenCaptureAllowed: Bool
   let accessibilityAllowed: Bool
+  let coordination: String?
 }
 
 private struct CaptureReply: Encodable {
@@ -126,6 +137,7 @@ private struct CaptureReply: Encodable {
   let transform: Transform
   let capturedAt: String
   let layoutGeneration: String
+  let coordination: String?
 }
 
 private struct FailureReply: Encodable {
@@ -200,8 +212,9 @@ private func capture(_ request: Request) async throws {
     throw HelperFailure.captureTooLarge
   }
   let data = NSMutableData()
-  guard let destination = CGImageDestinationCreateWithData(
-    data, UTType.png.identifier as CFString, 1, nil)
+  guard
+    let destination = CGImageDestinationCreateWithData(
+      data, UTType.png.identifier as CFString, 1, nil)
   else { throw HelperFailure.captureFailed }
   CGImageDestinationAddImage(destination, image, nil)
   guard CGImageDestinationFinalize(destination) else { throw HelperFailure.captureFailed }
@@ -214,13 +227,73 @@ private func capture(_ request: Request) async throws {
     transform: Transform(
       a: frame.width / Double(image.width), d: frame.height / Double(image.height),
       e: frame.origin.x, f: frame.origin.y),
-    capturedAt: formatter.string(from: capturedAt), layoutGeneration: geometry)
+    capturedAt: formatter.string(from: capturedAt), layoutGeneration: geometry,
+    coordination: request.coordination)
   try writeReply(reply, bytes: data as Data)
+}
+
+/// The async-main runtime can exit successfully when its single CF main-loop
+/// drain returns, even while the async worker is unfinished. AppKit may stop a
+/// run-loop turn. This explicit process owner only completes when its one mode
+/// worker returns; a CF return is never a success or physical-settlement proof.
+private final class NativeMainCompletion: @unchecked Sendable {
+  // This one flag is accessed only through this lock, including worker wakeup.
+  private let lock = NSLock()
+  private var completed = false
+  var isCompleted: Bool { lock.withLock { completed } }
+  func finish() { lock.withLock { completed = true } }
+}
+
+/// Fixed no-GUI regression: the original async-main entrypoint would exit zero
+/// before either continuation/strict self-test JSON. One original work budget
+/// covers both turns; no AppKit, capture, input, tap or ownership is initialized.
+@MainActor
+private func nativeMainLoopMemoryCheck() async throws -> Int {
+  let budget = NativeBudget(milliseconds: 100)
+  for _ in 0..<2 {
+    try budget.check()
+    CFRunLoopStop(CFRunLoopGetMain())
+    try await budget.sleep(milliseconds: 10)
+  }
+  return 2
 }
 
 @main
 private enum Main {
-  static func main() async {
+  @MainActor static func main() {
+    let completion = NativeMainCompletion()
+    Task { @MainActor in
+      await runMode()
+      completion.finish()
+      CFRunLoopStop(CFRunLoopGetMain())
+    }
+    // A persistent stdin subscription has no two-second lifetime; its active
+    // commands retain their existing original deadlines/watchdogs and cleanup
+    // budgets. This loop only services the owning main executor, never polls UI
+    // state or renews a grant. A stopped/empty turn cannot complete the worker.
+    while !completion.isCompleted {
+      let started = DispatchTime.now().uptimeNanoseconds
+      autoreleasepool { _ = CFRunLoopRunInMode(.defaultMode, 0.1, false) }
+      if !completion.isCompleted,
+        DispatchTime.now().uptimeNanoseconds - started < 1_000_000
+      {
+        Thread.sleep(forTimeInterval: 0.001)
+      }
+    }
+  }
+  @MainActor private static func runMode() async {
+    if CommandLine.arguments == [CommandLine.arguments[0], "--check-input-memory"] {
+      do {
+        let mainLoopCases = try await nativeMainLoopMemoryCheck()
+        try await runNativeInputMemoryCheck(mainLoopCasesChecked: mainLoopCases)
+      } catch { exit(1) }
+      return
+    }
+    if CommandLine.arguments == [CommandLine.arguments[0], "--control"] {
+      await NativeBroker().run()
+      return
+    }
+    guard CommandLine.arguments.count == 1 else { exit(1) }
     // This upper bound starts before stdin. The caller closes the bounded stdin
     // request immediately, then the request's earlier deadline replaces it.
     let watchdog = DispatchSource.makeTimerSource(queue: .global())
@@ -244,12 +317,19 @@ private enum Main {
       watchdog.schedule(deadline: .now() + .milliseconds(request.timeoutMs))
       switch request.operation {
       case "status":
-        try writeReply(StatusReply(
-          screenCaptureAllowed: CGPreflightScreenCaptureAccess(),
-          accessibilityAllowed: AXIsProcessTrusted()))
+        try writeReply(
+          StatusReply(
+            screenCaptureAllowed: CGPreflightScreenCaptureAccess(),
+            accessibilityAllowed: AXIsProcessTrusted(), coordination: request.coordination))
       case "capture":
         guard #available(macOS 14.2, *) else { throw HelperFailure.unsupportedPlatform }
-        try await capture(request)
+        // Legacy-shaped accepted requests also join the host-wide fence. Only
+        // explicit coordinated requests add feature metadata to old wire replies.
+        let fence = try NativeGlobalFence()
+        var captureError: Error?
+        do { try await capture(request) } catch { captureError = error }
+        try fence.releaseAfterQuiescence()
+        if let captureError { throw captureError }
       default:
         throw HelperFailure.invalidRequest
       }
