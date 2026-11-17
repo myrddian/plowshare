@@ -146,7 +146,15 @@ class StateRouteTest {
         Map.of("house", adapter),
         gateway,
         journal,
-        new ScriptHost(Duration.ofSeconds(2)),
+        (source, handler, event, context) -> {
+          try {
+            // Match the production worker budget: these cases test routing and causality,
+            // including cold child-JVM startup, rather than the script execution limit.
+            return new ScriptHost(Duration.ofSeconds(5)).evaluate(source, handler, event, context);
+          } catch (IOException failure) {
+            throw new AssertionError("State-route fixture script failed", failure);
+          }
+        },
         clock::get);
   }
 
