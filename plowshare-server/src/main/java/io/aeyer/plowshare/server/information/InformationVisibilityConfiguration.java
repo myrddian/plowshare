@@ -7,7 +7,8 @@ import io.aeyer.plowshare.server.cache.ProjectionItemVersions;
 import io.aeyer.plowshare.server.cache.ProjectionVersions;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
 import java.util.Set;
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** One lifecycle owner and one shared entry/byte budget for all log-visibility consumers. */
@@ -50,6 +51,7 @@ public class InformationVisibilityConfiguration {
             ProjectionCaches.Freshness.NOTIFIED),
         versions,
         admission,
-        trees);
+        trees,
+        properties.timeout());
   }
 }

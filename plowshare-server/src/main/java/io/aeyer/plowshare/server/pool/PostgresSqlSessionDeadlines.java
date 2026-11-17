@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.pool;
 
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -49,14 +50,14 @@ final class PostgresSqlSessionDeadlines implements SqlSessionDeadlines {
           long available = remaining.millis();
           long reserve = Math.max(2, Math.multiplyExact(lastSetupMillis, 2));
           long target = available - reserve;
-          if (target < 1) throw new SqlWorkUnavailableException(null);
+          if (target < 1) throw ReadFailedException.deadlineExceeded();
           boolean local = !connection.getAutoCommit();
           attempted = true;
           long started = System.nanoTime();
           long previousStatement;
           long previousLock;
           try (PreparedStatement setup = connection.prepareStatement(LIMIT)) {
-            setup.setQueryTimeout(1);
+            setup.setQueryTimeout(2);
             setup.setLong(1, initialized ? statementOriginal : 0);
             setup.setLong(2, target);
             setup.setBoolean(3, local);
@@ -81,7 +82,7 @@ final class PostgresSqlSessionDeadlines implements SqlSessionDeadlines {
           long applied = limit(previousStatement, statementOriginal, target);
           if (applied <= remaining.millis()) return;
         }
-        throw new SqlWorkUnavailableException(null);
+        throw ReadFailedException.deadlineExceeded();
       }
 
       @Override
@@ -94,7 +95,7 @@ final class PostgresSqlSessionDeadlines implements SqlSessionDeadlines {
               "Scoped session settings cannot be restored inside unfinished work");
         remaining.millis();
         try (PreparedStatement restore = connection.prepareStatement(RESTORE)) {
-          restore.setQueryTimeout(1);
+          restore.setQueryTimeout(2);
           restore.setLong(1, statementOriginal);
           restore.setLong(2, lockOriginal);
           restore.execute();

@@ -5,6 +5,7 @@ import com.zaxxer.hikari.metrics.micrometer.MicrometerMetricsTrackerFactory;
 import io.aeyer.plowshare.server.pool.JdbcExecutionTraces;
 import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget;
 import io.aeyer.plowshare.server.pool.TracedDataSource;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Properties;
 import javax.sql.DataSource;
@@ -161,13 +162,15 @@ public class ProjectionCacheConfiguration {
       ProjectionChangeSignals signals,
       ProjectionCacheProperties properties,
       ProjectionNotificationProperties notified,
-      ProjectionTelemetry telemetry) {
+      ProjectionTelemetry telemetry,
+      ObjectProvider<WorkPerformanceReporter> performance) {
     return new ProjectionCaches(
         versions,
         itemVersions,
         signals,
         properties,
         notified.enabled() ? notified.staleness() : null,
-        telemetry);
+        telemetry,
+        performance.getIfAvailable(() -> WorkPerformanceReporter.NONE));
   }
 }

@@ -62,7 +62,7 @@ class FailureBoundaryTest {
   }
 
   @Test
-  void readAdmissionFailureIsVisibleBeforeAHandlerStarts() {
+  void readAdmissionPressureRefusesBeforeTheHandlerWithoutCountingAServerFailure() {
     var busy = new ReadUnavailableException();
     var router =
         router(
@@ -72,9 +72,8 @@ class FailureBoundaryTest {
             (principal, work) -> {
               throw busy;
             });
-    assertEquals(Code.ARCHIVE_UNAVAILABLE, router.route(request, FrameParity.ASKING).code());
-    verify(failures).report(Source.WEBSOCKET, busy);
-    verifyNoMoreInteractions(failures);
+    assertEquals(Code.CAPACITY_EXHAUSTED, router.route(request, FrameParity.ASKING).code());
+    verifyNoInteractions(failures);
   }
 
   @Test

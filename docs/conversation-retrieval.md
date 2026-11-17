@@ -80,14 +80,24 @@ filtered rows within pgvector's configured scan bounds and the shared SQL deadli
 Passage ranking and coverage reuse the existing account-specific, version-fenced
 log-visibility facts used by lexical/reach reads. A cache miss resolves the complete
 denied-log graph once for that account/version. Ineligible, dirty, historical or
-oversized snapshots use the authoritative SQL predicate; a visibility change during
-the query refuses its results without replay. Authorization still precedes the
+oversized snapshots use the authoritative SQL predicate. If a global visibility
+version changes after a successful cached query, its tentative result is discarded
+and one pure authoritative query may run under its own SQL-unit budget, narrowed
+by any active caller transaction deadline.
+SQL failures/cancellations are not retried; callers that become unsafe for sharing
+still fail closed. Authorization still precedes the
 candidate limit, and no result-window or scoring bounds are reduced.
+
+For entry ANN search, the first statement materializes authorized source IDs once
+and hashes membership inside the ordered vector scan. Source/hash joins then
+apply only to accepted keys, avoiding repeated home/visibility joins for every
+rejected neighbor. This is statement-local work, not another cache, and retains
+the same candidate limit and visibility predicates.
 
 The first SQL query returns only passage keys and source revisions. A second,
 batched SQL query loads text and scores original vectors for those keys, rechecking
 the source revision so an intervening edit or delete/reinsert cannot reuse a stale
-candidate. Both queries share the same remaining deadline. Bounded
+candidate. Both queries share their actual ranking transaction's remaining deadline. Bounded
 in-memory stages select the best passage per entry, collapse whitespace-equivalent
 excerpts with at most twenty source references, and then limit the result groups.
 Cosine ranking retains the similarity floor of 0.35; other configured metrics do
@@ -213,3 +223,9 @@ The diagnostician's independent diagnosis verifier also has scoped `conversation
 reading so it can check cited historical entries without a workspace. It receives
 neither search nor memory-navigation grants.
 
+
+The two-second default is an SQL query/transaction limit, not a whole search
+workflow lifetime. Provider embedding and query-owner cleanup execute outside
+newly installed SQL scopes. Separate auto-commit phases resolve the home again
+for freshness after provider IO. Slow overall searches warn through the bounded
+performance observer and keep running.

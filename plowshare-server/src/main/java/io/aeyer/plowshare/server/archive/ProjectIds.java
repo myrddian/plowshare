@@ -3,7 +3,7 @@ package io.aeyer.plowshare.server.archive;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
-import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.Supplier;
@@ -74,10 +74,15 @@ final class ProjectIds {
   private static final ThreadLocal<ReadSelection> READ_SELECTION = new ThreadLocal<>();
 
   static <T> T withinReadSelection(JdbcTemplate jdbc, Home home, Supplier<T> work) {
+    return withinReadSelection(jdbc, home, Duration.ofSeconds(2), work);
+  }
+
+  static <T> T withinReadSelection(
+      JdbcTemplate jdbc, Home home, Duration queryBudget, Supplier<T> work) {
     ReadSelection previous = READ_SELECTION.get();
     if (previous != null && previous.jdbc() == jdbc && previous.home().equals(home))
       return work.get();
-    Long id = boundedRead(jdbc, home);
+    Long id = boundedRead(jdbc, home, queryBudget);
     READ_SELECTION.set(new ReadSelection(jdbc, home, id));
     try {
       return work.get();
@@ -87,11 +92,10 @@ final class ProjectIds {
     }
   }
 
-  private static Long boundedRead(JdbcTemplate jdbc, Home home) {
+  private static Long boundedRead(JdbcTemplate jdbc, Home home, Duration queryBudget) {
     ReadDeadline.check();
     if (home.isGlobal()) return null;
-    long deadline =
-        JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(Duration.ofSeconds(2)));
+    long deadline = JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(queryBudget));
     List<Long> found =
         jdbc.query(
             LOOK_UP,
@@ -100,7 +104,7 @@ final class ProjectIds {
               JdbcReadDeadline.apply(statement, deadline);
             },
             (row, position) -> row.getLong(1));
-    if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
+    if (System.nanoTime() - deadline >= 0) throw ReadFailedException.deadlineExceeded();
     return found.isEmpty() ? NONE : found.getFirst();
   }
 

@@ -24,11 +24,11 @@ import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.pool.AdmissionThrottle.Admission;
 import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import java.io.IOException;
 import java.net.SocketTimeoutException;
-import java.nio.channels.spi.AbstractInterruptibleChannel;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -40,15 +40,20 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.postgresql.jdbc.PgStatement;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.TransactionSystemException;
 
 class ScopedSqlWorkBudgetTest {
   private static ScopedSqlWorkBudget fakeBudget(
@@ -87,7 +92,7 @@ class ScopedSqlWorkBudgetTest {
           IllegalArgumentException.class,
           () ->
               new SqlWorkBudgetProperties(
-                  Duration.ofMillis(1001), Duration.ofSeconds(1), 1, 1, 1, 1));
+                  Duration.ofMillis(2001), Duration.ofSeconds(1), 1, 1, 1, 1));
       verify(raw, never()).abort(any());
     }
   }
@@ -235,20 +240,16 @@ class ScopedSqlWorkBudgetTest {
   }
 
   @Test
-  void deadlineInterruptsAcquisitionWithoutAbortingAnotherBorrower() throws Exception {
+  void lateAcquisitionIsRefusedWithoutInterruptingTheCallerOrAnotherBorrower() throws Exception {
     DataSource source = mock(DataSource.class);
     CountDownLatch acquiring = new CountDownLatch(1);
+    Connection late = mock(Connection.class);
     when(source.getConnection())
         .thenAnswer(
             invocation -> {
               acquiring.countDown();
-              try {
-                new CountDownLatch(1).await();
-              } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                throw new SQLException("fixture acquisition interrupted", interrupted);
-              }
-              throw new AssertionError("unreachable");
+              platformRead(150);
+              return late;
             });
     try (var budget = fakeBudget(limits(), new SimpleMeterRegistry());
         var calls = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -266,7 +267,7 @@ class ScopedSqlWorkBudgetTest {
                       }));
       assertTrue(acquiring.await(1, TimeUnit.SECONDS));
       var failed = assertThrows(ExecutionException.class, () -> pending.get(1, TimeUnit.SECONDS));
-      assertInstanceOf(SqlWorkUnavailableException.class, failed.getCause());
+      assertInstanceOf(ReadFailedException.class, failed.getCause());
     }
   }
 
@@ -289,7 +290,7 @@ class ScopedSqlWorkBudgetTest {
             invocation -> {
               materializing.countDown();
               try {
-                new CountDownLatch(1).await();
+                new CountDownLatch(1).await(150, TimeUnit.MILLISECONDS);
               } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
               }
@@ -331,7 +332,7 @@ class ScopedSqlWorkBudgetTest {
       try {
         assertTrue(materializing.await(1, TimeUnit.SECONDS));
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> pending.get(1, TimeUnit.SECONDS))
                 .getCause());
         assertTrue(aborted.await(1, TimeUnit.SECONDS));
@@ -358,14 +359,14 @@ class ScopedSqlWorkBudgetTest {
                               Duration.ofMillis(50),
                               () -> {
                                 try {
-                                  new CountDownLatch(1).await();
+                                  new CountDownLatch(1).await(150, TimeUnit.MILLISECONDS);
                                 } catch (InterruptedException interrupted) {
                                   Thread.currentThread().interrupt();
                                 }
                                 return "late";
                               })));
       assertInstanceOf(
-          SqlWorkUnavailableException.class,
+          ReadFailedException.class,
           assertThrows(ExecutionException.class, () -> pending.get(1, TimeUnit.SECONDS))
               .getCause());
       var interrupted =
@@ -373,7 +374,7 @@ class ScopedSqlWorkBudgetTest {
               () -> {
                 Thread.currentThread().interrupt();
                 assertThrows(
-                    SqlWorkUnavailableException.class,
+                    ReadFailedException.class,
                     () -> budget.within(Duration.ofSeconds(1), () -> "never"));
                 return Thread.currentThread().isInterrupted();
               });
@@ -389,7 +390,7 @@ class ScopedSqlWorkBudgetTest {
     var budget = fakeBudget(limits(), null);
     try {
       assertThrows(
-          SqlWorkUnavailableException.class,
+          IllegalStateException.class,
           () ->
               budget.within(
                   Duration.ofSeconds(1),
@@ -402,8 +403,7 @@ class ScopedSqlWorkBudgetTest {
                   }));
       budget.close();
       assertThrows(
-          SqlWorkUnavailableException.class,
-          () -> budget.within(Duration.ofSeconds(1), () -> "never"));
+          ReadFailedException.class, () -> budget.within(Duration.ofSeconds(1), () -> "never"));
     } finally {
       budget.close();
     }
@@ -423,7 +423,7 @@ class ScopedSqlWorkBudgetTest {
             });
     try (var budget = fakeBudget(limits(), null)) {
       assertThrows(
-          SqlWorkUnavailableException.class,
+          IllegalStateException.class,
           () ->
               budget.within(
                   Duration.ofSeconds(1),
@@ -499,15 +499,17 @@ class ScopedSqlWorkBudgetTest {
         var scheduler = Executors.newSingleThreadScheduledExecutor()) {
       try {
         assertThrows(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             () ->
                 budget.within(
-                    Duration.ofSeconds(1),
+                    Duration.ofMillis(100),
                     () -> {
-                      try {
-                        return budget.decorate(source).getConnection();
+                      try (Connection held = budget.decorate(source).getConnection()) {
+                        assertFalse(held.isClosed());
+                        platformRead(150);
+                        return "late";
                       } catch (SQLException failed) {
-                        throw new AssertionError(failed);
+                        throw new IllegalStateException(failed);
                       }
                     }));
         assertTrue(cleanupBlocked.await(1, TimeUnit.SECONDS));
@@ -548,7 +550,7 @@ class ScopedSqlWorkBudgetTest {
         assertTrue(socketRead.await(1, TimeUnit.SECONDS));
         assertTrue(captured.get() <= 150, "late I/O must not retain checkout's longer timeout");
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> pending.get(250, TimeUnit.MILLISECONDS))
                 .getCause());
         verify(second, never()).abort(any());
@@ -603,10 +605,11 @@ class ScopedSqlWorkBudgetTest {
                       }));
       Throwable failure =
           assertThrows(ExecutionException.class, () -> call.get(1, TimeUnit.SECONDS)).getCause();
-      assertInstanceOf(SqlWorkUnavailableException.class, failure);
+      assertEquals(
+          ReadFailedException.Reason.QUERY_CANCELLED,
+          assertInstanceOf(ReadFailedException.class, failure).reason());
       var fault = Faults.of(failure);
       assertEquals(Code.ARCHIVE_UNAVAILABLE, fault.code());
-      assertTrue(fault.detail().contains("retained work"));
       assertFalse(fault.detail().contains("Nothing was read"));
       assertFalse(fault.detail().contains("nothing was written"));
     }
@@ -672,7 +675,7 @@ class ScopedSqlWorkBudgetTest {
             };
     try (var budget = new ScopedSqlWorkBudget(limits(), null, sessions)) {
       assertThrows(
-          SqlWorkUnavailableException.class,
+          ReadFailedException.class,
           () ->
               budget.within(
                   Duration.ofSeconds(1),
@@ -693,101 +696,121 @@ class ScopedSqlWorkBudgetTest {
     }
   }
 
-  private static final class BlockingChannel extends AbstractInterruptibleChannel {
-    private final CountDownLatch entered;
-    private final CountDownLatch interrupting;
-    private final CountDownLatch release;
-
-    BlockingChannel(CountDownLatch entered, CountDownLatch interrupting, CountDownLatch release) {
-      this.entered = entered;
-      this.interrupting = interrupting;
-      this.release = release;
-    }
-
-    @Override
-    protected void implCloseChannel() {
-      interrupting.countDown();
-      boolean interrupted = false;
-      while (release.getCount() != 0) {
-        try {
-          release.await();
-        } catch (InterruptedException observed) {
-          interrupted = true;
-        }
-      }
-      if (interrupted) Thread.currentThread().interrupt();
-    }
-
-    void waitForCancellation() {
-      begin();
-      entered.countDown();
+  @Test
+  void expiredSqlDoesNotInterruptMaterializationAndSameThreadCanContinue() throws Exception {
+    DataSource source = mock(DataSource.class);
+    Connection raw = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    ResultSet rows = mock(ResultSet.class);
+    var entered = new CountDownLatch(1);
+    var aborted = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    when(source.getConnection()).thenReturn(raw);
+    when(raw.prepareStatement("query")).thenReturn(statement);
+    when(statement.executeQuery()).thenReturn(rows);
+    when(rows.next())
+        .thenAnswer(
+            call -> {
+              entered.countDown();
+              release.await(2, TimeUnit.SECONDS);
+              return true;
+            });
+    doAnswer(
+            call -> {
+              aborted.countDown();
+              return null;
+            })
+        .when(raw)
+        .abort(any());
+    try (var budget = fakeBudget(limits(), null);
+        var calls = Executors.newSingleThreadExecutor()) {
+      var pending =
+          calls.submit(
+              () -> {
+                assertThrows(
+                    ReadFailedException.class,
+                    () ->
+                        budget.within(
+                            Duration.ofMillis(80),
+                            () -> {
+                              try (Connection connection = budget.decorate(source).getConnection();
+                                  PreparedStatement selected =
+                                      connection.prepareStatement("query");
+                                  ResultSet values = selected.executeQuery()) {
+                                return values.next();
+                              } catch (SQLException failed) {
+                                throw new IllegalStateException(failed);
+                              }
+                            }));
+                assertFalse(Thread.currentThread().isInterrupted());
+                return budget.within(Duration.ofSeconds(1), () -> "continued");
+              });
       try {
-        new CountDownLatch(1).await();
-      } catch (InterruptedException observed) {
-        Thread.currentThread().interrupt();
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        assertTrue(aborted.await(1, TimeUnit.SECONDS));
+        assertFalse(pending.isDone(), "physical materialization remains owned until it returns");
+        release.countDown();
+        assertEquals("continued", pending.get(1, TimeUnit.SECONDS));
       } finally {
-        try {
-          end(false);
-        } catch (IOException ignored) {
-          /* expected cancellation */
-        }
+        release.countDown();
       }
     }
   }
 
   @Test
-  void blockingChannelInterruptorCannotHoldAlarmOrOtherScopeBookkeeping() throws Exception {
-    CountDownLatch interrupting = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    CountDownLatch entered = new CountDownLatch(1);
-    var budget = fakeBudget(limits(), null);
-    try (var calls = Executors.newFixedThreadPool(2)) {
-      try {
-        var first =
-            calls.submit(
-                () ->
-                    budget.within(
-                        Duration.ofMillis(80),
-                        () -> {
-                          new BlockingChannel(entered, interrupting, release).waitForCancellation();
-                          return "late";
-                        }));
-        assertTrue(entered.await(1, TimeUnit.SECONDS));
-        assertTrue(interrupting.await(1, TimeUnit.SECONDS));
-        var second =
-            calls.submit(
-                () ->
-                    budget.within(
-                        Duration.ofMillis(60),
-                        () -> {
-                          try {
-                            new CountDownLatch(1).await();
-                          } catch (InterruptedException observed) {
-                            Thread.currentThread().interrupt();
-                          }
-                          return "late";
-                        }));
-        assertInstanceOf(
-            SqlWorkUnavailableException.class,
-            assertThrows(ExecutionException.class, () -> second.get(500, TimeUnit.MILLISECONDS))
-                .getCause());
-        assertFalse(first.isDone()); // its physical interruptor still owns the caller thread
-        long closing = System.nanoTime();
-        budget.close();
-        assertTrue(System.nanoTime() - closing < Duration.ofMillis(500).toNanos());
-        assertFalse(first.isDone());
-        release.countDown();
-        assertInstanceOf(
-            SqlWorkUnavailableException.class,
-            assertThrows(ExecutionException.class, () -> first.get(1, TimeUnit.SECONDS))
-                .getCause());
-        assertFalse(
-            calls.submit(() -> Thread.currentThread().isInterrupted()).get(1, TimeUnit.SECONDS));
-      } finally {
-        release.countDown();
-      }
-    } finally {
-      budget.close();
+  void genuineCallerInterruptionDuringSqlIsPreserved() throws Exception {
+    DataSource source = mock(DataSource.class);
+    Connection raw = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    ResultSet rows = mock(ResultSet.class);
+    var entered = new CountDownLatch(1);
+    var caller = new AtomicReference<Thread>();
+    when(source.getConnection()).thenReturn(raw);
+    when(raw.prepareStatement("query")).thenReturn(statement);
+    when(statement.executeQuery()).thenReturn(rows);
+    when(rows.next())
+        .thenAnswer(
+            call -> {
+              caller.set(Thread.currentThread());
+              entered.countDown();
+              try {
+                new CountDownLatch(1).await(5, TimeUnit.SECONDS);
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new SQLException("caller stopped", interrupted);
+              }
+              return true;
+            });
+    var limits =
+        new SqlWorkBudgetProperties(Duration.ofSeconds(2), Duration.ofMillis(100), 4, 2, 8, 2);
+    try (var budget = fakeBudget(limits, null);
+        var calls = Executors.newSingleThreadExecutor()) {
+      var pending =
+          calls.submit(
+              () -> {
+                var failure =
+                    assertThrows(
+                        ReadFailedException.class,
+                        () ->
+                            budget.within(
+                                Duration.ofSeconds(5),
+                                () -> {
+                                  try (Connection connection =
+                                          budget.decorate(source).getConnection();
+                                      PreparedStatement selected =
+                                          connection.prepareStatement("query");
+                                      ResultSet values = selected.executeQuery()) {
+                                    return values.next();
+                                  } catch (SQLException failed) {
+                                    throw new IllegalStateException(failed);
+                                  }
+                                }));
+                assertEquals(ReadFailedException.Reason.INTERRUPTED, failure.reason());
+                return Thread.currentThread().isInterrupted();
+              });
+      assertTrue(entered.await(1, TimeUnit.SECONDS));
+      caller.get().interrupt();
+      assertTrue(pending.get(1, TimeUnit.SECONDS));
     }
   }
 
@@ -795,7 +818,7 @@ class ScopedSqlWorkBudgetTest {
   void failedScopedCloseRetainsPhysicalPermitButDetachesReusedCallerNesting() throws Exception {
     DataSource source = mock(DataSource.class);
     Connection raw = mock(Connection.class);
-    when(source.getConnection()).thenReturn(raw);
+    when(source.getConnection()).thenReturn(raw, mock(Connection.class));
     doThrow(new SQLException("fixture close is not confirmed")).when(raw).close();
     AdmissionThrottle throttle =
         new AdmissionThrottle(
@@ -826,7 +849,7 @@ class ScopedSqlWorkBudgetTest {
                           }
                         }));
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> first.get(1, TimeUnit.SECONDS))
                 .getCause());
         assertEquals(1, throttle.held());
@@ -845,10 +868,15 @@ class ScopedSqlWorkBudgetTest {
                             throw new IllegalArgumentException(failure);
                           }
                         }));
+        // Logical SQL expiry does not interrupt a workflow thread parked in the physical
+        // throttle. Its seat stays owned until acquisition can return; no nested overdraft.
+        assertThrows(TimeoutException.class, () -> next.get(200, TimeUnit.MILLISECONDS));
+        verify(source, times(1)).getConnection();
+        otherOwners.removeFirst().close();
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> next.get(1, TimeUnit.SECONDS)).getCause());
-        verify(source, times(1)).getConnection(); // no nested overdraft by the reused caller
+        verify(source, times(2)).getConnection();
       } finally {
         otherOwners.forEach(Admission::close);
       }
@@ -856,8 +884,9 @@ class ScopedSqlWorkBudgetTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"42601", "23505"})
-  void exactOwnedSqlDefectIsPreservedWhenItsResponseRacesExpiry(String state) throws Exception {
+  @CsvSource({"42601,false", "23505,false", "42601,true", "23505,true"})
+  void exactOwnedSqlDefectIsPreservedWhenItsResponseRacesExpiry(String state, boolean rollback)
+      throws Exception {
     DataSource source = mock(DataSource.class);
     Connection raw = mock(Connection.class);
     PreparedStatement statement = mock(PreparedStatement.class);
@@ -884,80 +913,79 @@ class ScopedSqlWorkBudgetTest {
                                 connection.prepareStatement("late defect")) {
                           return selected.executeQuery();
                         } catch (SQLException failure) {
+                          if (rollback) {
+                            var replaced =
+                                new TransactionSystemException(
+                                    "rollback failed", new SQLException("closed", "08003"));
+                            replaced.initApplicationException(
+                                new DataIntegrityViolationException("original", failure));
+                            throw replaced;
+                          }
                           throw new IllegalArgumentException("original", failure);
                         }
                       }));
       Throwable observed =
           assertThrows(ExecutionException.class, () -> call.get(1, TimeUnit.SECONDS)).getCause();
-      assertInstanceOf(IllegalArgumentException.class, observed);
-      assertSame(original, observed.getCause());
+      if (rollback) {
+        var replaced = assertInstanceOf(TransactionSystemException.class, observed);
+        assertSame(original, replaced.getApplicationException().getCause());
+      } else {
+        assertInstanceOf(IllegalArgumentException.class, observed);
+        assertSame(original, observed.getCause());
+      }
     }
   }
 
   @Test
-  void everyBlockedInterruptReservationRefusesNewScopeBeforeCheckoutAndRecovers() throws Exception {
-    CountDownLatch entered = new CountDownLatch(2);
-    CountDownLatch interrupting = new CountDownLatch(2);
-    CountDownLatch release = new CountDownLatch(1);
+  void latePhysicalAcquisitionsRetainCapacityUntilTheyReturn() throws Exception {
     DataSource source = mock(DataSource.class);
-    SqlWorkBudgetProperties bounded =
+    var entered = new CountDownLatch(2);
+    when(source.getConnection())
+        .thenAnswer(
+            call -> {
+              entered.countDown();
+              platformRead(250);
+              return mock(Connection.class);
+            });
+    var settings =
         new SqlWorkBudgetProperties(Duration.ofMillis(100), Duration.ofMillis(100), 2, 2, 8, 2);
-    SimpleMeterRegistry registry = new SimpleMeterRegistry();
-    try (var budget = fakeBudget(bounded, registry);
-        var callers = Executors.newFixedThreadPool(2)) {
-      try {
-        var first =
+    var registry = new SimpleMeterRegistry();
+    try (var budget = fakeBudget(settings, registry);
+        var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var tasks = new ArrayList<Future<Connection>>();
+      for (int i = 0; i < 2; i++)
+        tasks.add(
             callers.submit(
                 () ->
                     budget.within(
                         Duration.ofMillis(80),
                         () -> {
-                          new BlockingChannel(entered, interrupting, release).waitForCancellation();
-                          return "late";
-                        }));
-        var second =
-            callers.submit(
-                () ->
-                    budget.within(
-                        Duration.ofMillis(80),
-                        () -> {
-                          new BlockingChannel(entered, interrupting, release).waitForCancellation();
-                          return "late";
-                        }));
-        assertTrue(entered.await(1, TimeUnit.SECONDS));
-        assertTrue(interrupting.await(1, TimeUnit.SECONDS));
-        assertThrows(
-            SqlWorkUnavailableException.class,
-            () ->
-                budget.within(
-                    Duration.ofSeconds(1),
-                    () -> {
-                      try {
-                        return budget.decorate(source).getConnection();
-                      } catch (SQLException failed) {
-                        throw new AssertionError(failed);
-                      }
-                    }));
-        verify(source, never()).getConnection();
-        assertFalse(first.isDone());
-        assertFalse(second.isDone());
-        release.countDown();
+                          try {
+                            return budget.decorate(source).getConnection();
+                          } catch (SQLException failed) {
+                            throw new IllegalStateException(failed);
+                          }
+                        })));
+      assertTrue(entered.await(1, TimeUnit.SECONDS));
+      long due = System.nanoTime() + Duration.ofSeconds(1).toNanos();
+      while ((registry.find("plowshare.sql.work.cancellations").counter() == null
+              || registry.get("plowshare.sql.work.cancellations").counter().count() < 2)
+          && System.nanoTime() - due < 0) Thread.onSpinWait();
+      assertEquals(2, registry.get("plowshare.sql.work.cancellations").counter().count());
+      assertThrows(
+          ReadUnavailableException.class,
+          () -> budget.within(Duration.ofSeconds(1), () -> "not started"));
+      verify(source, times(2)).getConnection();
+      for (var task : tasks)
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
-            assertThrows(ExecutionException.class, () -> first.get(1, TimeUnit.SECONDS))
-                .getCause());
-        assertInstanceOf(
-            SqlWorkUnavailableException.class,
-            assertThrows(ExecutionException.class, () -> second.get(1, TimeUnit.SECONDS))
-                .getCause());
-        long settling = System.nanoTime() + Duration.ofSeconds(1).toNanos();
-        while (registry.get("plowshare.sql.work.owned.scopes").gauge().value() != 0
-            && System.nanoTime() - settling < 0) Thread.yield();
-        assertEquals(0, registry.get("plowshare.sql.work.owned.scopes").gauge().value());
-        assertEquals("recovered", budget.within(Duration.ofSeconds(1), () -> "recovered"));
-      } finally {
-        release.countDown();
-      }
+            ReadFailedException.class,
+            assertThrows(ExecutionException.class, () -> task.get(1, TimeUnit.SECONDS)).getCause());
+      due = System.nanoTime() + Duration.ofSeconds(1).toNanos();
+      while (registry.get("plowshare.sql.work.owned.scopes").gauge().value() != 0
+          && System.nanoTime() - due < 0) Thread.onSpinWait();
+      assertEquals("recovered", budget.within(Duration.ofSeconds(1), () -> "recovered"));
+    } finally {
+      registry.close();
     }
   }
 
@@ -1082,7 +1110,7 @@ class ScopedSqlWorkBudgetTest {
                         () -> {
                           thirdEntered.countDown();
                           try {
-                            new CountDownLatch(1).await();
+                            new CountDownLatch(1).await(150, TimeUnit.MILLISECONDS);
                           } catch (InterruptedException observed) {
                             Thread.currentThread().interrupt();
                           }
@@ -1090,7 +1118,7 @@ class ScopedSqlWorkBudgetTest {
                         }));
         assertTrue(thirdEntered.await(1, TimeUnit.SECONDS));
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> third.get(350, TimeUnit.MILLISECONDS))
                 .getCause());
         assertFalse(first.isDone());
@@ -1108,11 +1136,11 @@ class ScopedSqlWorkBudgetTest {
         }
         release.countDown();
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> first.get(1, TimeUnit.SECONDS))
                 .getCause());
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> second.get(1, TimeUnit.SECONDS))
                 .getCause());
         long settled = System.nanoTime() + Duration.ofSeconds(1).toNanos();

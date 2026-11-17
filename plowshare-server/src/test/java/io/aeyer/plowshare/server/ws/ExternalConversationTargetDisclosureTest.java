@@ -28,7 +28,6 @@ import io.aeyer.plowshare.server.agents.ExternalConversationUnavailableException
 import io.aeyer.plowshare.server.api.ConversationView;
 import io.aeyer.plowshare.server.api.StartedJob;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
-import io.aeyer.plowshare.server.archive.ConversationAliasProperties;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRole;
@@ -39,8 +38,6 @@ import io.aeyer.plowshare.server.personal.PersonalAccess;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
 import io.aeyer.plowshare.server.relay.RelayReadBudget;
 import io.aeyer.plowshare.server.telemetry.FailureReporter;
-import io.aeyer.plowshare.server.testing.LogicalSqlWorkBudget;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -104,10 +101,7 @@ class ExternalConversationTargetDisclosureTest {
               null,
               ReadAdmission.direct(),
               failures,
-              new ScopedExternalConversationRequestWork(
-                  new LogicalSqlWorkBudget(),
-                  new ConversationAliasProperties(Duration.ofSeconds(2), Duration.ofSeconds(1)),
-                  completions));
+              new ScopedExternalConversationRequestWork(completions));
       router.useAuthorization(authorization);
       router.usePersonalAccess(new PersonalAccess(rows));
       return router;
@@ -187,7 +181,7 @@ class ExternalConversationTargetDisclosureTest {
     var blocked = new CompletableFuture<Void>();
     var release = new CompletableFuture<Void>();
     var executions = new AtomicInteger();
-    try (var completions = new BoundedExternalConversationCompletions(Duration.ofSeconds(2), 2)) {
+    try (var completions = new BoundedExternalConversationCompletions(2)) {
       var router =
           target.router(
               operation,

@@ -1,13 +1,23 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.server.documents.Chunking;
+import io.aeyer.plowshare.server.embedding.EmbeddingTokenizers;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
-import io.aeyer.plowshare.server.llm.*;
+import io.aeyer.plowshare.server.lifecycle.WorkerShutdown;
+import io.aeyer.plowshare.server.llm.EmbeddingClient;
+import io.aeyer.plowshare.server.llm.LlmProperties;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import java.time.Duration;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -19,9 +29,7 @@ public class RetrievalIndexConfig {
       UnitOfWork transactions,
       EmbeddingClient embeddings,
       Tokenizer tokenizer,
-      org.springframework.beans.factory.ObjectProvider<
-              io.aeyer.plowshare.server.embedding.EmbeddingTokenizers>
-          embeddingTokenizers,
+      ObjectProvider<EmbeddingTokenizers> embeddingTokenizers,
       LlmProperties llm,
       InformationLogVisibility visibility,
       Environment env) {
@@ -55,12 +63,15 @@ public class RetrievalIndexConfig {
 
   @Bean
   public ConversationSearch conversationSearch(
-      EntryStore entries, PassageIndex index, Environment env) {
+      EntryStore entries,
+      PassageIndex index,
+      Environment env,
+      WorkPerformanceReporter performance) {
     return new ConversationSearch(
         entries,
         index,
-        env.getProperty(
-            "plowshare.retrieval.search-budget", Duration.class, Duration.ofSeconds(2)));
+        env.getProperty("plowshare.retrieval.search-budget", Duration.class, Duration.ofSeconds(2)),
+        performance);
   }
 
   @Bean
@@ -90,7 +101,7 @@ public class RetrievalIndexConfig {
               try {
                 index.repair();
               } catch (RuntimeException failure) {
-                org.slf4j.LoggerFactory.getLogger(RetrievalIndexConfig.class)
+                LoggerFactory.getLogger(RetrievalIndexConfig.class)
                     .warn("Retrieval repair deferred: {}", failure.getClass().getSimpleName());
               }
             },
@@ -107,7 +118,7 @@ public class RetrievalIndexConfig {
           stopping = worker;
         }
         try {
-          io.aeyer.plowshare.server.lifecycle.WorkerShutdown.stop(stopping, "retrieval-repair");
+          WorkerShutdown.stop(stopping, "retrieval-repair");
           running = false;
           stopped.complete(null);
         } catch (RuntimeException | Error failure) {

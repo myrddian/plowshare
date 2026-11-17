@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 /** Finite resource ceilings for explicitly scoped work; ordinary unscoped SQL is unchanged. */
 @ConfigurationProperties("plowshare.sql-work-budget")
 public record SqlWorkBudgetProperties(
-    @DefaultValue("1s") Duration queryCeiling,
+    @DefaultValue("2s") Duration queryCeiling,
     @DefaultValue("500ms") Duration cleanupBudget,
     @DefaultValue("128") int scopes,
     @DefaultValue("8") int leasesPerScope,
@@ -17,7 +17,7 @@ public record SqlWorkBudgetProperties(
   public SqlWorkBudgetProperties {
     positive(queryCeiling);
     positive(cleanupBudget);
-    if (queryCeiling.compareTo(Duration.ofSeconds(1)) > 0
+    if (queryCeiling.compareTo(Duration.ofSeconds(2)) > 0
         || scopes < 1
         || scopes > 4096
         || leasesPerScope < 1

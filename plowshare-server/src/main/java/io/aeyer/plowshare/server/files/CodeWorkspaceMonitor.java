@@ -3,12 +3,33 @@ package io.aeyer.plowshare.server.files;
 import io.aeyer.plowshare.protocol.CodeTrackingStatus;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.documents.CodeProjection;
-import java.util.*;
-import java.util.concurrent.*;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Background reconciliation and gated syntax indexing of durable subscriptions. */
 public final class CodeWorkspaceMonitor implements AutoCloseable, WorkspaceChanges {
+  private static final Logger log = LoggerFactory.getLogger(CodeWorkspaceMonitor.class);
+
   @FunctionalInterface
   public interface Access {
     ProviderRouter router(CodeWorkspaceStore.Scope scope);
@@ -17,9 +38,9 @@ public final class CodeWorkspaceMonitor implements AutoCloseable, WorkspaceChang
   private final CodeWorkspaceStore store;
   private final Access access;
   private final boolean enabled;
-  private java.util.function.Supplier<CodeIndexes> indexes = () -> null;
+  private Supplier<CodeIndexes> indexes = () -> null;
 
-  public CodeWorkspaceMonitor indexing(java.util.function.Supplier<CodeIndexes> indexes) {
+  public CodeWorkspaceMonitor indexing(Supplier<CodeIndexes> indexes) {
     this.indexes = Objects.requireNonNull(indexes);
     return this;
   }
@@ -42,9 +63,8 @@ public final class CodeWorkspaceMonitor implements AutoCloseable, WorkspaceChang
   private final AtomicInteger running = new AtomicInteger();
   private volatile boolean closed;
   private boolean started;
-  private io.aeyer.plowshare.server.reads.ReadAdmission admission =
-      io.aeyer.plowshare.server.reads.ReadAdmission.direct();
-  private java.util.function.Consumer<Change> changeAuthority;
+  private ReadAdmission admission = ReadAdmission.direct();
+  private Consumer<Change> changeAuthority;
 
   private record ChangeKey(Home home, String owner, String personalSession) {}
 
@@ -54,9 +74,7 @@ public final class CodeWorkspaceMonitor implements AutoCloseable, WorkspaceChang
   /**
    * Composition supplies live session/project checks; hints never retain those checks as grants.
    */
-  public CodeWorkspaceMonitor changes(
-      java.util.function.Consumer<Change> authority,
-      io.aeyer.plowshare.server.reads.ReadAdmission admission) {
+  public CodeWorkspaceMonitor changes(Consumer<Change> authority, ReadAdmission admission) {
     this.changeAuthority = Objects.requireNonNull(authority);
     this.admission = Objects.requireNonNull(admission);
     return this;
@@ -89,35 +107,54 @@ public final class CodeWorkspaceMonitor implements AutoCloseable, WorkspaceChang
         if (changes.remove(entry.getKey(), entry.getValue())) batch.add(entry.getValue());
       }
     }
+    // The authorization phase is repeatable; store.changed may have applied a mutation before
+    // reporting failure. Keep that boundary explicit so accepted hints are neither lost nor
+    // replayed.
+    boolean[] publicationStarted = {false};
     try {
       admission.read(
           "code-change-hints",
-          io.aeyer.plowshare.server.reads.ReadAdmission.Work.MAINTENANCE,
+          ReadAdmission.Work.MAINTENANCE,
           () -> {
             var authorized = new ArrayList<Change>();
             for (var change : batch) {
               try {
                 changeAuthority.accept(change);
                 authorized.add(change);
-              } catch (io.aeyer.plowshare.server.faults.CallerFault
-                  | WorkspaceRefusedException denied) {
+              } catch (CallerFault | WorkspaceRefusedException denied) {
                 // Revoked or departed sessions cannot wake retained registrations.
               }
             }
-            if (!authorized.isEmpty()) store.changed(List.copyOf(authorized));
+            if (!authorized.isEmpty()) {
+              publicationStarted[0] = true;
+              store.changed(List.copyOf(authorized));
+            }
             return null;
           });
-    } catch (io.aeyer.plowshare.server.reads.ReadUnavailableException capacity) {
-      synchronized (changeAdmission) {
-        for (var change : batch) {
-          var key =
-              new ChangeKey(
-                  change.home(),
-                  change.owner(),
-                  change.home().isGlobal() ? change.session() : null);
-          // A reconnect arriving during admission supersedes this batch's socket identity.
-          if (changes.size() < 64) changes.putIfAbsent(key, change);
-        }
+    } catch (ReadUnavailableException capacity) {
+      if (publicationStarted[0]) throw capacity;
+      requeueChanges(batch);
+    } catch (ReadFailedException failedRead) {
+      if (!publicationStarted[0] && failedRead.reason() != ReadFailedException.Reason.CLOSED)
+        requeueChanges(batch);
+      if (failedRead.reason() == ReadFailedException.Reason.INTERRUPTED)
+        Thread.currentThread().interrupt();
+      if (failedRead.reason() == ReadFailedException.Reason.CLOSED) close();
+      if (!publicationStarted[0]
+          && (failedRead.reason() == ReadFailedException.Reason.DEADLINE_EXCEEDED
+              || failedRead.reason() == ReadFailedException.Reason.INVALIDATED)) return;
+      throw failedRead;
+    }
+  }
+
+  private void requeueChanges(List<Change> batch) {
+    synchronized (changeAdmission) {
+      for (var change : batch) {
+        var key =
+            new ChangeKey(
+                change.home(), change.owner(), change.home().isGlobal() ? change.session() : null);
+        // A reconnect arriving during the failed read supersedes the old socket identity.
+        if (changes.size() < 64) changes.putIfAbsent(key, change);
       }
     }
   }
@@ -146,6 +183,13 @@ public final class CodeWorkspaceMonitor implements AutoCloseable, WorkspaceChang
               () -> {
                 try {
                   reconcile(scan.get());
+                } catch (ReadFailedException failedRead) {
+                  // Keep diagnostic payloads/SQL causes out of background-thread uncaught logs.
+                  // pollOnce still propagates the typed failure to its explicit owner.
+                  if (failedRead.reason() == ReadFailedException.Reason.INTERRUPTED
+                      || failedRead.reason() == ReadFailedException.Reason.CLOSED)
+                    log.debug("Code workspace reconciliation stopped: {}", failedRead.reason());
+                  else log.error("Code workspace reconciliation failed: {}", failedRead.reason());
                 } finally {
                   running.decrementAndGet();
                 }
@@ -190,10 +234,25 @@ public final class CodeWorkspaceMonitor implements AutoCloseable, WorkspaceChang
         access.router(scan.scope());
         store.publish(scan.ticket(), view);
       }
+    } catch (ReadUnavailableException capacity) {
+      store.defer(scan.ticket());
+    } catch (ReadFailedException failedRead) {
+      // A failed read cannot publish an empty replacement or assert that access was revoked.
+      // Only independent, read-only reconciliation may be deferred under its retained ticket.
+      switch (failedRead.reason()) {
+        case DEADLINE_EXCEEDED, INVALIDATED -> store.defer(scan.ticket());
+        case INTERRUPTED -> {
+          Thread.currentThread().interrupt();
+          throw failedRead;
+        }
+        case CLOSED -> {
+          close();
+          throw failedRead;
+        }
+        case QUERY_CANCELLED -> throw failedRead;
+      }
     } catch (RuntimeException unavailable) {
-      if (unavailable instanceof io.aeyer.plowshare.server.reads.ReadUnavailableException)
-        store.defer(scan.ticket());
-      else store.unavailable(scan.ticket(), "workspace_access_or_scan_unavailable");
+      store.unavailable(scan.ticket(), "workspace_access_or_scan_unavailable");
     }
   }
 

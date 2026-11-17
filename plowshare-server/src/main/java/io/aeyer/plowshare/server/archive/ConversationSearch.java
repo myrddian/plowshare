@@ -8,7 +8,8 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageAware;
 import io.aeyer.plowshare.server.llm.accounting.UsageOwners;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
-import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -22,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /** Scoped BM25 and passage retrieval. Snapshots retain identities, never authority leases. */
@@ -32,6 +34,7 @@ public final class ConversationSearch implements UsageAware {
   private final ConversationSearchRepository entries;
   private final PassageIndex index;
   private final Duration searchBudget;
+  private final WorkPerformanceReporter performance;
   private String account;
   // The lock protects bounded eviction plus insertion; reads use the concurrent map.
   private ConcurrentMap<String, Window> windows = new ConcurrentHashMap<>();
@@ -78,6 +81,14 @@ public final class ConversationSearch implements UsageAware {
 
   public ConversationSearch(
       ConversationSearchRepository entries, PassageIndex index, Duration searchBudget) {
+    this(entries, index, searchBudget, WorkPerformanceReporter.NONE);
+  }
+
+  public ConversationSearch(
+      ConversationSearchRepository entries,
+      PassageIndex index,
+      Duration searchBudget,
+      WorkPerformanceReporter performance) {
     if (searchBudget == null
         || searchBudget.isZero()
         || searchBudget.isNegative()
@@ -86,6 +97,7 @@ public final class ConversationSearch implements UsageAware {
     this.entries = entries;
     this.index = index;
     this.searchBudget = searchBudget;
+    this.performance = Objects.requireNonNull(performance);
   }
 
   @Override
@@ -96,7 +108,7 @@ public final class ConversationSearch implements UsageAware {
   public ConversationSearch forAccount(String account) {
     var copy =
         new ConversationSearch(
-            entries.forAccount(account), index.forAccount(account), searchBudget);
+            entries.forAccount(account), index.forAccount(account), searchBudget, performance);
     copy.account = account;
     copy.windows = windows;
     copy.usageOwners = usageOwners;
@@ -167,53 +179,26 @@ public final class ConversationSearch implements UsageAware {
       UsageAttribution owner,
       String conversation,
       boolean includeInputs) {
-    try {
-      return searchWithinBudget(
+    var observation = performance.watch(WorkPerformanceReporter.Kind.SEARCH, "conversation-search");
+    try (observation) {
+      return searchPhases(
           home, question, skip, most, requested, snapshot, owner, conversation, includeInputs);
     } catch (ArchiveQueryCancelledException cancelled) {
       // Catch outside the owning read/embedding transaction: rollback and resource cleanup must
-      // complete before the runtime receives its ordinary recoverable read failure. No partial
+      // complete before the runtime receives its ordinary recoverable read failure. Cancellation
+      // is a failed SQL read, never an admission/backpressure refusal. No partial
       // window is returned and neither SQL, embeddings nor completed tool work are replayed.
-      throw new ReadUnavailableException(
-          "Conversation search was cancelled before a result was available; no search results were returned. Continue with other evidence or report the search as unavailable.",
-          cancelled);
+      throw ReadFailedException.queryCancelled(cancelled);
     }
   }
 
-  private LogSearchView searchWithinBudget(
-      Home home,
-      String question,
-      int skip,
-      int most,
-      String requested,
-      String snapshot,
-      UsageAttribution owner,
-      String conversation,
-      boolean includeInputs) {
-    return ReadDeadline.within(
-        searchBudget,
-        () -> {
-          ReadDeadline.check();
-          var result =
-              entries.withinSearchScope(
-                  home,
-                  () ->
-                      searchWithinDeadline(
-                          home,
-                          question,
-                          skip,
-                          most,
-                          requested,
-                          snapshot,
-                          owner,
-                          conversation,
-                          includeInputs));
-          ReadDeadline.check();
-          return result;
-        });
+  /** Reuse only the current SQL phase's project selection; this is not an aggregate deadline. */
+  private <T> T readPhase(Home home, Supplier<T> read) {
+    ReadDeadline.check();
+    return entries.withinSearchScope(home, read);
   }
 
-  private LogSearchView searchWithinDeadline(
+  private LogSearchView searchPhases(
       Home home,
       String question,
       int skip,
@@ -232,7 +217,8 @@ public final class ConversationSearch implements UsageAware {
     if (mode.equals("lexical")) {
       if (snapshot != null)
         throw new ValidationException("Lexical search uses offset paging without a snapshot");
-      var found = lexical(home, question, skip, most, conversation, includeInputs);
+      var found =
+          readPhase(home, () -> lexical(home, question, skip, most, conversation, includeInputs));
       var view = LogSearchView.of(found, skip, most);
       if (requested == null) return view;
       return new LogSearchView(
@@ -270,38 +256,54 @@ public final class ConversationSearch implements UsageAware {
           || window.includeInputs() != includeInputs)
         throw new ValidationException(
             "Search snapshot belongs to a different scope, conversation, question or mode");
-      return page(window, skip, most, true);
+      return readPhase(home, () -> page(window, skip, most, true));
     }
     if (skip != 0)
       throw new ValidationException(
           "Semantic/hybrid pages after offset 0 need the first page's snapshot");
-    var scoped = index.inConversation(conversation);
-    if (includeInputs) scoped = scoped.includingInputs(true);
     // Semantic ranking needs the authorized reach, not BM25 statistics, snippets or groups.
     // Keep that work for hybrid searches, which actually consume the lexical candidates.
     var lexical =
-        mode.equals("hybrid")
-            ? lexical(home, question, 0, CANDIDATES, conversation, includeInputs)
-            : new LogSearch(List.of(), 0, entries.searchReach(home, conversation));
-    List<PassageIndex.Match> semantic = List.of();
-    boolean approximate = false;
-    boolean candidateLimitReached = false;
-    String fallback = null;
+        readPhase(
+            home,
+            () ->
+                mode.equals("hybrid")
+                    ? lexical(home, question, 0, CANDIDATES, conversation, includeInputs)
+                    : new LogSearch(List.of(), 0, entries.searchReach(home, conversation)));
+    var narrowed = index.inConversation(conversation);
+    var scoped = includeInputs ? narrowed.includingInputs(true) : narrowed;
+    PassageIndex.Ranking ranking;
+    String fallback;
+    // Capture owns finite provider transport/admission budgets. It must not consume a SQL deadline
+    // or retain the project-ID selection across provider IO. Ranking starts a fresh SQL unit and
+    // resolves the home again because it may have changed while the provider was running.
     try (var query = scoped.capture(question, owner, home)) {
-      var ranking = scoped.rankWindow(home, "entry", query, CANDIDATES + 1);
-      semantic = ranking.matches();
-      approximate = ranking.approximate();
-      candidateLimitReached = ranking.truncated();
+      ranking =
+          readPhase(
+              home,
+              () ->
+                  // Unlike the surrounding independent queries, rankWindow opens/joins one physical
+                  // disclosure/profile/ranking transaction. Its nested statements retain the
+                  // earlier
+                  // transaction deadline rather than each renewing the lock-holding transaction's
+                  // budget.
+                  ReadDeadline.within(
+                      searchBudget,
+                      () -> {
+                        ReadDeadline.check();
+                        var result = scoped.rankWindow(home, "entry", query, CANDIDATES + 1);
+                        ReadDeadline.check();
+                        return result;
+                      }));
+      fallback = null;
     } catch (EmbeddingException unavailable) {
       if (mode.equals("semantic"))
         throw new EmbeddingException(
             "Semantic query embedding unavailable; lexical search remains available", unavailable);
       fallback = "Query embedding unavailable; only BM25 candidates were ranked";
+      ranking = new PassageIndex.Ranking(List.of(), false, false);
     }
-    boolean truncated =
-        candidateLimitReached
-            || semantic.size() > CANDIDATES
-            || mode.equals("hybrid") && lexical.total() > CANDIDATES;
+    var semantic = ranking.matches();
     List<Candidate> candidates = new ArrayList<>();
     int rank = 0;
     for (var match : semantic.subList(0, Math.min(CANDIDATES, semantic.size()))) {
@@ -331,50 +333,60 @@ public final class ConversationSearch implements UsageAware {
     }
     candidates.sort(
         Comparator.comparingDouble(Candidate::score).reversed().thenComparing(Candidate::id));
-    if (candidates.size() > CANDIDATES) {
-      truncated = true;
-      candidates = candidates.subList(0, CANDIDATES);
-    }
+    boolean truncated =
+        ranking.truncated()
+            || semantic.size() > CANDIDATES
+            || mode.equals("hybrid") && lexical.total() > CANDIDATES
+            || candidates.size() > CANDIDATES;
+    var retained = candidates.stream().limit(CANDIDATES).toList();
+    boolean approximate = ranking.approximate();
+    String finalFallback = fallback;
     String token = UUID.randomUUID().toString();
-    var coverage = scoped.coverage(home, "entry");
-    var retrieval =
-        new LogSearchView.Retrieval(
-            mode,
-            fallback == null ? mode : "lexical",
-            approximate ? "bounded approximate snapshot slots" : "bounded snapshot slots",
-            token,
-            truncated,
-            coverage.complete() && fallback == null && !truncated && !approximate,
-            fallback,
-            coverage,
-            index.generation(),
-            1,
-            (approximate
-                    ? "Scoped BM25 and indexed passage candidates reranked at full precision; ANN recall is approximate; duplicate groups and source counts cover only the candidate window; "
-                    : "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; ")
-                + "hybrid RRF (k=60). Evidence is quoted data; "
-                + inputSelection(includeInputs));
-    var window =
-        new Window(
-            account,
-            home,
-            conversation,
-            question,
-            mode,
-            includeInputs,
-            Instant.now().plusSeconds(300),
-            List.copyOf(candidates),
-            lexical.reach(),
-            retrieval);
-    synchronized (windows) {
-      windows.entrySet().removeIf(e -> e.getValue().expires().isBefore(Instant.now()));
-      while (windows.size() >= WINDOWS)
-        windows.entrySet().stream()
-            .min(Comparator.comparing(entry -> entry.getValue().expires()))
-            .ifPresent(entry -> windows.remove(entry.getKey()));
-      windows.put(token, window);
-    }
-    return page(window, skip, most, false);
+    // These independent coverage/refresh queries each own a SQL deadline. Their cumulative
+    // workflow duration is observed as a warning, never treated as one query's cancellation budget.
+    return readPhase(
+        home,
+        () -> {
+          var coverage = scoped.coverage(home, "entry");
+          var retrieval =
+              new LogSearchView.Retrieval(
+                  mode,
+                  finalFallback == null ? mode : "lexical",
+                  approximate ? "bounded approximate snapshot slots" : "bounded snapshot slots",
+                  token,
+                  truncated,
+                  coverage.complete() && finalFallback == null && !truncated && !approximate,
+                  finalFallback,
+                  coverage,
+                  index.generation(),
+                  1,
+                  (approximate
+                          ? "Scoped BM25 and indexed passage candidates reranked at full precision; ANN recall is approximate; duplicate groups and source counts cover only the candidate window; "
+                          : "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; ")
+                      + "hybrid RRF (k=60). Evidence is quoted data; "
+                      + inputSelection(includeInputs));
+          var window =
+              new Window(
+                  account,
+                  home,
+                  conversation,
+                  question,
+                  mode,
+                  includeInputs,
+                  Instant.now().plusSeconds(300),
+                  retained,
+                  lexical.reach(),
+                  retrieval);
+          synchronized (windows) {
+            windows.entrySet().removeIf(e -> e.getValue().expires().isBefore(Instant.now()));
+            while (windows.size() >= WINDOWS)
+              windows.entrySet().stream()
+                  .min(Comparator.comparing(entry -> entry.getValue().expires()))
+                  .ifPresent(entry -> windows.remove(entry.getKey()));
+            windows.put(token, window);
+          }
+          return page(window, skip, most, false);
+        });
   }
 
   private static String inputSelection(boolean includeInputs) {

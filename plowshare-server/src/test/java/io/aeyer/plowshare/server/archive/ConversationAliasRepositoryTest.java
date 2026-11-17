@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.archive;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -26,9 +27,10 @@ import io.aeyer.plowshare.server.archive.ConversationAliasRepository.Key;
 import io.aeyer.plowshare.server.archive.ConversationAliasRepository.Opening;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
-import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.requests.RequestedBudget;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.net.SocketTimeoutException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -45,11 +47,15 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -66,6 +72,7 @@ class ConversationAliasRepositoryTest {
   private final ConversationCreation conversations = mock(ConversationCreation.class);
   private final Transactions transactions = new Transactions();
   private JdbcConversationAliasRepository repository;
+  private final CountDownLatch aborted = new CountDownLatch(1);
 
   @BeforeEach
   void setup() throws Exception {
@@ -77,6 +84,13 @@ class ConversationAliasRepositoryTest {
             new ConversationAliasProperties(Duration.ofSeconds(5), Duration.ofSeconds(1)),
             new SimpleMeterRegistry());
     Connection connection = mock(Connection.class);
+    doAnswer(
+            call -> {
+              aborted.countDown();
+              return null;
+            })
+        .when(connection)
+        .abort(any());
     doAnswer(
             call -> {
               ConnectionCallback<?> callback = call.getArgument(0);
@@ -197,7 +211,7 @@ class ConversationAliasRepositoryTest {
   @Test
   void theEarlierEnclosingDeadlineCannotBeResetByTheRepository() {
     assertThrows(
-        ReadUnavailableException.class,
+        ReadFailedException.class,
         () -> ReadDeadline.within(Duration.ofNanos(1), () -> repository.find(key)));
     assertEquals(0, transactions.commits);
     verifyNoInteractions(conversations);
@@ -229,7 +243,7 @@ class ConversationAliasRepositoryTest {
     try {
       var pending = executor.submit(() -> repository.open(key, new Opening(Budget.of(20), null)));
       var failed = assertThrows(ExecutionException.class, () -> pending.get(3, TimeUnit.SECONDS));
-      assertTrue(failed.getCause() instanceof ArchiveUnavailableException);
+      assertInstanceOf(ReadFailedException.class, failed.getCause());
       assertEquals(0, transactions.commits);
       assertEquals(1, transactions.rollbacks);
       verify(jdbc, never())
@@ -240,12 +254,43 @@ class ConversationAliasRepositoryTest {
     }
   }
 
-  private static void blockOwner() {
+  /** Simulates driver work released by cancellation of its own attached JDBC connection. */
+  private void blockOwner() {
     try {
-      new CountDownLatch(1).await(3, TimeUnit.SECONDS);
+      assertTrue(aborted.await(2, TimeUnit.SECONDS), "Owned JDBC abort must release the read");
+      assertFalse(
+          Thread.currentThread().isInterrupted(), "SQL timeout must not interrupt its caller");
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      throw new ArchiveUnavailableException("Fixture owner interrupted", interrupted);
+      throw ReadFailedException.interrupted(interrupted);
+    }
+  }
+
+  @Test
+  void aCancelledSqlUnitLeavesTheSameCallerAbleToFinishTheNextRead() throws Exception {
+    var retained = record(Home.of("house"), ConversationLifecycle.ACTIVE);
+    lookup(retained.id());
+    when(conversations.find(retained.id()))
+        .thenAnswer(
+            call -> {
+              blockOwner();
+              return Optional.of(retained);
+            });
+    try (var caller = Executors.newSingleThreadExecutor()) {
+      var result =
+          caller.submit(
+              () -> {
+                var failure = assertThrows(ReadFailedException.class, () -> repository.find(key));
+                assertEquals(ReadFailedException.Reason.DEADLINE_EXCEEDED, failure.reason());
+                assertFalse(Thread.currentThread().isInterrupted());
+                when(conversations.find(retained.id())).thenReturn(Optional.of(retained));
+                var next = repository.find(key);
+                assertFalse(Thread.currentThread().isInterrupted());
+                return next;
+              });
+      assertEquals(Optional.of(retained), result.get(3, TimeUnit.SECONDS));
+      assertEquals(1, transactions.rollbacks);
+      assertEquals(1, transactions.commits);
     }
   }
 
@@ -267,10 +312,10 @@ class ConversationAliasRepositoryTest {
       assertTrue(entered.await(2, TimeUnit.SECONDS));
       repository.close();
       var failed = assertThrows(ExecutionException.class, () -> pending.get(2, TimeUnit.SECONDS));
-      assertTrue(failed.getCause() instanceof ArchiveUnavailableException);
+      assertInstanceOf(ReadFailedException.class, failed.getCause());
       assertEquals(0, transactions.commits);
       assertEquals(1, transactions.rollbacks);
-      assertThrows(ArchiveUnavailableException.class, () -> repository.find(key));
+      assertThrows(ReadFailedException.class, () -> repository.find(key));
       verify(conversations).find(retained.id());
     } finally {
       executor.shutdownNow();
@@ -293,7 +338,7 @@ class ConversationAliasRepositoryTest {
     try {
       var pending = executor.submit(() -> repository.find(key));
       var failed = assertThrows(ExecutionException.class, () -> pending.get(3, TimeUnit.SECONDS));
-      assertTrue(failed.getCause() instanceof ArchiveUnavailableException);
+      assertInstanceOf(ReadFailedException.class, failed.getCause());
       assertSame(transactions.rollbackFailure, failed.getCause().getCause());
       assertEquals(0, transactions.commits);
     } finally {
@@ -312,8 +357,80 @@ class ConversationAliasRepositoryTest {
         .thenThrow(
             new DataAccessResourceFailureException(
                 "fixture cancellation", new SQLException("fixture", state)));
-    var failed = assertThrows(ArchiveUnavailableException.class, () -> repository.find(key));
+    var failed = assertThrows(ReadFailedException.class, () -> repository.find(key));
     assertSame(transactions.rollbackFailure, failed.getCause());
+    assertEquals(0, transactions.commits);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void anOwnedDriverDeadlineKeepsItsReadFailureWhenRollbackRacesTheWatchdog(boolean rollback) {
+    var retained = record(Home.of("house"), ConversationLifecycle.ACTIVE);
+    lookup(retained.id());
+    var original =
+        new DataAccessResourceFailureException(
+            "fixture timed out",
+            new SQLException(
+                "fixture socket timeout", "08006", new SocketTimeoutException("fixture")));
+    if (rollback) transactions.rollbackFailure = rollbackFailure();
+    when(conversations.find(retained.id())).thenThrow(original);
+    var observed = assertThrows(ReadFailedException.class, () -> repository.find(key));
+    if (rollback) {
+      assertSame(transactions.rollbackFailure, observed.getCause());
+      assertSame(
+          original,
+          assertInstanceOf(TransactionSystemException.class, observed.getCause())
+              .getApplicationException());
+    } else {
+      Throwable retainedCause = observed;
+      for (int depth = 0; retainedCause != null && retainedCause != original && depth < 8; depth++)
+        retainedCause = retainedCause.getCause();
+      assertSame(original, retainedCause);
+    }
+    assertTrue(observed.getMessage().contains("commit may be uncertain"));
+    assertFalse(Thread.currentThread().isInterrupted());
+    assertEquals(0, transactions.commits);
+  }
+
+  @Test
+  void aConnectionOutageWithoutOwnedTimeoutEvidenceKeepsItsArchiveFailure() {
+    var retained = record(Home.of("house"), ConversationLifecycle.ACTIVE);
+    lookup(retained.id());
+    var original =
+        new DataAccessResourceFailureException(
+            "fixture disconnected", new SQLException("fixture lost connection", "08006"));
+    when(conversations.find(retained.id())).thenThrow(original);
+    var observed = assertThrows(ArchiveUnavailableException.class, () -> repository.find(key));
+    assertSame(original, observed.getCause());
+    assertEquals(0, transactions.commits);
+  }
+
+  @ParameterizedTest
+  @CsvSource({"42601,false", "42601,true", "23505,false", "23505,true"})
+  void aDefiniteSqlDefectIsPreservedWhenItsResponseRacesTheDeadline(
+      String state, boolean rollback) {
+    var retained = record(Home.of("house"), ConversationLifecycle.ACTIVE);
+    lookup(retained.id());
+    SQLException sql = new SQLException("fixture SQL defect", state);
+    DataAccessException original =
+        state.equals("42601")
+            ? new BadSqlGrammarException("fixture", "fixture query", sql)
+            : new DataIntegrityViolationException("fixture constraint", sql);
+    if (rollback) transactions.rollbackFailure = rollbackFailure();
+    when(conversations.find(retained.id()))
+        .thenAnswer(
+            call -> {
+              blockOwner();
+              throw original;
+            });
+    var observed = assertThrows(RuntimeException.class, () -> repository.find(key));
+    if (rollback) {
+      assertSame(transactions.rollbackFailure, observed);
+      assertSame(
+          original,
+          assertInstanceOf(TransactionSystemException.class, observed).getApplicationException());
+    } else assertSame(original, observed);
+    assertFalse(Thread.currentThread().isInterrupted());
     assertEquals(0, transactions.commits);
   }
 
@@ -346,7 +463,7 @@ class ConversationAliasRepositoryTest {
         () -> new ConversationAliasProperties(Duration.ZERO, Duration.ofSeconds(1)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ConversationAliasProperties(Duration.ofSeconds(2), Duration.ofMillis(1001)));
+        () -> new ConversationAliasProperties(Duration.ofSeconds(2), Duration.ofMillis(2001)));
   }
 
   @Test

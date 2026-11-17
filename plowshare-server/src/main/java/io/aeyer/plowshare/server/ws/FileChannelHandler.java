@@ -18,6 +18,8 @@ import io.aeyer.plowshare.server.files.SessionCloseListener;
 import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceChanges;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.session.Presence;
 import io.aeyer.plowshare.server.session.PresenceConflictException;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
@@ -1223,7 +1225,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
                 trimmed("this account may not root '" + claim.project() + "'")));
         return false;
       }
-    } catch (ArchiveUnavailableException down) {
+    } catch (ArchiveUnavailableException | ReadFailedException | ReadUnavailableException down) {
       presences.withdraw(id);
       log.warn("Session '{}' cannot check membership and roots nothing: {}", id, down.getMessage());
       return true;
@@ -1264,7 +1266,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
           held.getMessage());
       refuse(socket, id, held.getMessage());
       return false;
-    } catch (ArchiveUnavailableException down) {
+    } catch (ArchiveUnavailableException | ReadFailedException | ReadUnavailableException down) {
       if (creating) {
         // A project being created has no row and no member until the archive
         // says so. A presence standing for it would serve a project nobody

@@ -7,9 +7,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
 /**
- * An assembled Ex frame owns its deadline before queueing. The queue retains this exact token,
- * never a fresh deadline or an ID side table. An early reply acknowledgement cannot release a
- * queued/concurrently executing request: it is bridged to the physical dispatcher when it starts.
+ * An assembled Ex frame owns a bounded completion slot before queueing. The queue retains this
+ * exact token until physical execution and reply settlement; it never adds a workflow deadline.
+ * Reply acknowledgement is bridged to the physical dispatcher when execution starts.
  */
 final class QueuedExternalConversationRequest implements AutoCloseable {
   private final ExternalConversationCompletions.Request completion;

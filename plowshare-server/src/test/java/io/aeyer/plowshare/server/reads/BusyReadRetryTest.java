@@ -93,7 +93,7 @@ class BusyReadRetryTest {
     var attempts = new AtomicInteger();
     try {
       assertThrows(
-          ReadUnavailableException.class,
+          ReadFailedException.class,
           () ->
               interrupted.run(
                   () -> {
@@ -105,6 +105,134 @@ class BusyReadRetryTest {
       Thread.interrupted();
     }
     assertEquals(1, attempts.get());
+  }
+
+  @Test
+  void attemptsAndBackoffUseTheSameEarlierDeadline() {
+    var deadlines = new ArrayList<Long>();
+    ReadDeadline.within(
+        Duration.ofMillis(500),
+        () -> {
+          long enclosing = ReadDeadline.deadlineNanos(Duration.ofDays(1));
+          retry.run(
+              () -> {
+                deadlines.add(ReadDeadline.deadlineNanos(Duration.ofDays(1)));
+                if (deadlines.size() < 3) throw new ReadUnavailableException();
+              });
+          assertEquals(List.of(enclosing, enclosing, enclosing), deadlines);
+          return null;
+        });
+  }
+
+  @Test
+  void aBackoffCannotExceedTheRemainingBudget() {
+    var bounded =
+        new BusyReadRetry(
+            4,
+            Duration.ofSeconds(1),
+            duration -> {
+              pauses.add(duration);
+              throw new InterruptedException();
+            });
+    try {
+      ReadDeadline.within(
+          Duration.ofMillis(200),
+          () -> {
+            assertThrows(
+                ReadFailedException.class,
+                () ->
+                    bounded.run(
+                        () -> {
+                          throw new ReadUnavailableException();
+                        }));
+            return null;
+          });
+      assertEquals(1, pauses.size());
+      assertTrue(pauses.getFirst().compareTo(Duration.ofMillis(200)) <= 0);
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  void anExpiredEnclosingSqlUnitCannotRetryOrPublishLateSuccess() {
+    var attempts = new AtomicInteger();
+    ReadDeadline.within(
+        Duration.ofMillis(20),
+        () -> {
+          assertThrows(
+              ReadFailedException.class,
+              () ->
+                  retry.run(
+                      () -> {
+                        attempts.incrementAndGet();
+                        long deadline = ReadDeadline.currentDeadlineNanos().orElseThrow();
+                        while (System.nanoTime() - deadline < 0) Thread.onSpinWait();
+                      }));
+          return null;
+        });
+    assertEquals(1, attempts.get());
+    assertTrue(pauses.isEmpty());
+  }
+
+  @Test
+  void separateAttemptsDoNotAcquireANewWholeWorkflowTimer() {
+    var attempts = new AtomicInteger();
+    retry.run(
+        () -> {
+          assertTrue(ReadDeadline.currentDeadlineNanos().isEmpty());
+          if (attempts.incrementAndGet() < 3) throw new ReadUnavailableException();
+        });
+    assertEquals(3, attempts.get());
+    assertTrue(ReadDeadline.currentDeadlineNanos().isEmpty());
+  }
+
+  @Test
+  void anAlreadyInterruptedCallerDoesNotStartAnotherCheck() {
+    var attempts = new AtomicInteger();
+    Thread.currentThread().interrupt();
+    try {
+      assertThrows(ReadFailedException.class, () -> retry.run(attempts::incrementAndGet));
+      assertEquals(0, attempts.get());
+      assertTrue(Thread.currentThread().isInterrupted());
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  void aPureCheckMayRecoverFromItsOwnIndependentReadDeadline() {
+    var attempts = new AtomicInteger();
+    retry.run(
+        () -> {
+          if (attempts.incrementAndGet() < 3) throw ReadFailedException.deadlineExceeded();
+        });
+    assertEquals(3, attempts.get());
+    assertEquals(List.of(Duration.ofMillis(100), Duration.ofMillis(200)), pauses);
+  }
+
+  @Test
+  void invalidationClosureCancellationAndInterruptionAreNotRetriedAsBackpressure() {
+    for (var failure :
+        List.of(
+            ReadFailedException.invalidated(),
+            ReadFailedException.closed(),
+            ReadFailedException.interrupted(),
+            ReadFailedException.queryCancelled(new Exception("private detail")))) {
+      var attempts = new AtomicInteger();
+      assertSame(
+          failure,
+          assertThrows(
+              ReadFailedException.class,
+              () ->
+                  retry.run(
+                      () -> {
+                        attempts.incrementAndGet();
+                        throw failure;
+                      })));
+      assertEquals(1, attempts.get());
+    }
+    assertTrue(pauses.isEmpty());
   }
 
   @Test

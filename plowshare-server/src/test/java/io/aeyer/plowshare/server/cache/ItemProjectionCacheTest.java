@@ -6,6 +6,7 @@ import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LO
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.TRUSTED_HIT;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -19,7 +20,7 @@ import static org.mockito.Mockito.when;
 import io.aeyer.plowshare.server.cache.CacheTestSupport.Value;
 import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget;
 import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
-import io.aeyer.plowshare.server.pool.SqlWorkUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.HashMap;
@@ -475,7 +476,9 @@ class ItemProjectionCacheTest {
         awaitStatistics(f.backing, stats -> stats.waiters() == 2);
         var refused =
             assertThrows(ExecutionException.class, () -> scoped.get(500, TimeUnit.MILLISECONDS));
-        assertTrue(refused.getCause() instanceof SqlWorkUnavailableException);
+        assertEquals(
+            ReadFailedException.Reason.DEADLINE_EXCEEDED,
+            assertInstanceOf(ReadFailedException.class, refused.getCause()).reason());
         assertTrue(!ordinary.isDone());
       } finally {
         finish.countDown();

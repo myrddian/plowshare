@@ -1,36 +1,58 @@
 package io.aeyer.plowshare.server.ws;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.access.AuthorityCheckTelemetry;
+import io.aeyer.plowshare.server.access.AuthoritySnapshots;
+import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.auth.SessionAuthority;
+import io.aeyer.plowshare.server.auth.StoredSessionAuthority;
+import io.aeyer.plowshare.server.reads.BoundedReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadCapacityConfiguration;
+import io.aeyer.plowshare.server.reads.ReadCapacityProperties;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 
 class SocketAuthorizationBatchTest {
   @Test
   void production_composition_bounds_both_channels_and_keeps_live_revocation() {
-    var accounts = mock(io.aeyer.plowshare.server.auth.AdminStore.class);
+    var accounts = mock(AdminStore.class);
     when(accounts.currentSessions(any())).thenAnswer(call -> Set.copyOf(call.getArgument(0)));
-    new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+    new ApplicationContextRunner()
         .withUserConfiguration(
             SocketSessionConfiguration.class,
             SocketAuthorization.class,
-            io.aeyer.plowshare.server.auth.StoredSessionAuthority.class,
-            io.aeyer.plowshare.server.reads.ReadCapacityConfiguration.class)
-        .withBean(io.aeyer.plowshare.server.auth.AdminStore.class, () -> accounts)
-        .withBean(
-            io.aeyer.plowshare.server.access.AuthoritySnapshots.class,
-            io.aeyer.plowshare.server.access.AuthoritySnapshots::none)
+            StoredSessionAuthority.class,
+            ReadCapacityConfiguration.class)
+        .withBean(AdminStore.class, () -> accounts)
+        .withBean(AuthoritySnapshots.class, AuthoritySnapshots::none)
         .withBean(AuthorityCheckTelemetry.class, AuthorityCheckTelemetry::none)
-        .withBean(
-            io.micrometer.core.instrument.MeterRegistry.class,
-            io.micrometer.core.instrument.simple.SimpleMeterRegistry::new)
+        .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
         .run(
             context -> {
               assertInstanceOf(QueuedSocketSessions.class, context.getBean(SessionAuthority.class));
@@ -44,7 +66,7 @@ class SocketAuthorizationBatchTest {
               assertFalse(authorization.current(files));
               assertFalse(authorization.current(events));
               verify(accounts, never()).sessionCurrent(anyString(), anyLong());
-              var registry = context.getBean(io.micrometer.core.instrument.MeterRegistry.class);
+              var registry = context.getBean(MeterRegistry.class);
               assertEquals(0, registry.get("plowshare.socket.sessions.pending").gauge().value());
               assertTrue(
                   registry.get("plowshare.socket.sessions.batches").functionCounter().count() >= 5);
@@ -59,7 +81,9 @@ class SocketAuthorizationBatchTest {
     var socket = socket("alice", 1);
     assertTrue(authorization.attach(socket));
     when(accounts.currentSessions(any()))
-        .thenThrow(new io.aeyer.plowshare.server.reads.ReadUnavailableException());
+        .thenThrow(new ReadUnavailableException())
+        .thenThrow(ReadFailedException.invalidated());
+    authorization.sweep();
     authorization.sweep();
     verify(socket, never()).close(any());
     when(accounts.sessionCurrent("alice", 1)).thenReturn(false);
@@ -68,13 +92,45 @@ class SocketAuthorizationBatchTest {
   }
 
   @Test
+  void aBusySessionCheckClosesTemporarilyAndReleasesItsSocketSeat() throws Exception {
+    var accounts = mock(SessionAuthority.class);
+    when(accounts.sessionCurrent("alice", 1))
+        .thenThrow(new ReadUnavailableException())
+        .thenReturn(true);
+    var admission =
+        new BoundedReadAdmission(new ReadCapacityProperties(4, 2, 2, 1, 4, 2, 1, 1, 4, 2));
+    var authorization = new SocketAuthorization(accounts, admission);
+    var first = socket("alice", 1);
+    assertFalse(authorization.attach(first));
+    verify(first).close(CloseStatus.SERVICE_OVERLOAD.withReason("Socket capacity is busy"));
+    assertEquals(0, admission.active(ReadAdmission.Work.SOCKET));
+    assertTrue(
+        authorization.attach(socket("alice", 1)), "A new connection can use the released seat");
+  }
+
+  @Test
+  void aFailedSessionReadIsTemporaryAndDoesNotPretendCapacityWasExhausted() throws Exception {
+    var accounts = mock(SessionAuthority.class);
+    when(accounts.sessionCurrent("alice", 1)).thenThrow(ReadFailedException.deadlineExceeded());
+    var admission =
+        new BoundedReadAdmission(new ReadCapacityProperties(4, 2, 2, 1, 4, 2, 1, 1, 4, 2));
+    var authorization = new SocketAuthorization(accounts, admission);
+    var socket = socket("alice", 1);
+    assertFalse(authorization.attach(socket));
+    verify(socket)
+        .close(
+            CloseStatus.SERVICE_OVERLOAD.withReason(
+                "Socket session check is temporarily unavailable"));
+    assertEquals(0, admission.active(ReadAdmission.Work.SOCKET));
+    assertEquals(0, admission.rejected(), "A failed session read is not admission backpressure");
+  }
+
+  @Test
   void socketsSharePrincipalCapacityAndReleaseItOnDetachOrRevocation() throws Exception {
     var accounts = mock(SessionAuthority.class);
     when(accounts.sessionCurrent(anyString(), anyLong())).thenReturn(true);
     var admission =
-        new io.aeyer.plowshare.server.reads.BoundedReadAdmission(
-            new io.aeyer.plowshare.server.reads.ReadCapacityProperties(
-                4, 2, 2, 1, 4, 2, 3, 2, 4, 2));
+        new BoundedReadAdmission(new ReadCapacityProperties(4, 2, 2, 1, 4, 2, 3, 2, 4, 2));
     var authorization = new SocketAuthorization(accounts, admission);
     var first = socket("alice", 1L);
     var second = socket("alice", 1L);
@@ -85,6 +141,7 @@ class SocketAuthorizationBatchTest {
     assertTrue(authorization.attach(second));
     clearInvocations(accounts);
     assertFalse(authorization.attach(refused));
+    verify(refused).close(CloseStatus.SERVICE_OVERLOAD.withReason("Socket capacity is busy"));
     verifyNoInteractions(accounts);
     assertTrue(authorization.attach(other), "One principal must leave room for another");
     authorization.detach(first);
@@ -93,7 +150,7 @@ class SocketAuthorizationBatchTest {
     when(accounts.currentSessions(any()))
         .thenReturn(Set.of(new SessionAuthority.Session("bob", 1)));
     authorization.sweep();
-    assertEquals(1, admission.active(io.aeyer.plowshare.server.reads.ReadAdmission.Work.SOCKET));
+    assertEquals(1, admission.active(ReadAdmission.Work.SOCKET));
     assertTrue(authorization.attach(socket("alice", 1L)), "Revoked sockets release their capacity");
     authorization.detach(other);
     verify(second).close(any(CloseStatus.class));

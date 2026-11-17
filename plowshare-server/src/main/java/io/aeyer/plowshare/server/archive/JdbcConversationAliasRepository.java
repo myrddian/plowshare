@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.archive;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.nio.ByteBuffer;
@@ -241,8 +242,10 @@ public final class JdbcConversationAliasRepository
               // Closing an expired socket can make rollback fail and replace the application's
               // original timeout. Preserve that known cancellation classification and uncertainty;
               // never relabel unrelated transaction/programming failures as a timeout.
-              if (deadline.cancelledOrExpired() || cancelledApplication(failed))
-                throw deadline.unavailable(failed);
+              if (deadline.preservesSqlDefect(failed)) throw failed;
+              if (deadline.cancelledOrExpired()
+                  || deadline.hasOwnedCancellation(failed)
+                  || cancelledApplication(failed)) throw deadline.unavailable(failed);
               throw failed;
             } finally {
               active.remove(deadline);
@@ -262,7 +265,11 @@ public final class JdbcConversationAliasRepository
   private static boolean cancelledApplication(RuntimeException failed) {
     if (!(failed instanceof TransactionSystemException transaction)) return false;
     Throwable application = transaction.getApplicationException();
-    if (application instanceof ArchiveUnavailableException) return true;
+    if (application instanceof ReadFailedException read)
+      return switch (read.reason()) {
+        case DEADLINE_EXCEEDED, QUERY_CANCELLED, INTERRUPTED, CLOSED -> true;
+        case INVALIDATED -> false;
+      };
     for (int depth = 0;
         application != null && depth < 16;
         depth++, application = application.getCause()) {
@@ -274,8 +281,7 @@ public final class JdbcConversationAliasRepository
 
   private ConversationAliasSqlDeadline register(String operation, long end) {
     synchronized (lifecycle) {
-      if (closed)
-        throw new ArchiveUnavailableException("Conversation alias storage is closed", null);
+      if (closed) throw ReadFailedException.closed();
       var deadline =
           new ConversationAliasSqlDeadline(
               end,
@@ -307,12 +313,15 @@ public final class JdbcConversationAliasRepository
       T result = work.get();
       deadline.check();
       return result;
+    } catch (RuntimeException failed) {
+      deadline.observeSqlFailure(failed);
+      throw failed;
     } finally {
       query.close();
       long duration = System.nanoTime() - started;
       // A group includes timeout configuration and all execution/materialization in work. Ordinary
       // create/hydrate groups contain several owner statements. Their aggregate ceiling is stricter
-      // than a fresh per-statement second; these meters are not individual-query measurements.
+      // than a fresh per-statement budget; these meters are not individual-query measurements.
       Timer.builder("plowshare.conversation.alias.sql.group")
           .tag("group", name)
           .publishPercentileHistogram()

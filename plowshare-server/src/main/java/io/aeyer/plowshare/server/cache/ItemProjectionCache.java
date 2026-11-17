@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.cache;
 
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -23,8 +25,8 @@ public interface ItemProjectionCache<T> {
    *     of the cache's domains. The cache adds each domain's fallback item. The same key and item
    *     set must always describe the same selection.
    * @param uncachedLoader the original read, used when sharing is unsafe or unavailable
-   * @throws io.aeyer.plowshare.server.reads.ReadUnavailableException when the read's deadline
-   *     passes or cache capacity is exhausted; no uncached load is started in that case
+   * @throws ReadUnavailableException when cache capacity is exhausted; no uncached load starts
+   * @throws ReadFailedException when the read deadline expires or the read is interrupted
    */
   T read(
       SnapshotCache.Key key,
@@ -56,8 +58,8 @@ public interface ItemProjectionCache<T> {
    * @return empty when the cache cannot serve: the listener is not ready, the caller's transaction
    *     is ineligible, or the loader or backing cache refused the value. The caller then uses its
    *     ordinary SQL path.
-   * @throws io.aeyer.plowshare.server.reads.ReadUnavailableException when the read's deadline
-   *     passes or cache capacity is exhausted
+   * @throws ReadUnavailableException when cache capacity is exhausted
+   * @throws ReadFailedException when the read deadline expires or the read is interrupted
    */
   Optional<Unconfirmed<T>> readUnconfirmed(
       SnapshotCache.Key key,

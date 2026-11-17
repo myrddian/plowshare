@@ -84,6 +84,7 @@ import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
 import io.aeyer.plowshare.server.pool.OperationStatements;
 import io.aeyer.plowshare.server.reads.BusyReadRetry;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.relay.RelayPublishing;
 import io.aeyer.plowshare.server.telemetry.FailureReporter;
@@ -4773,7 +4774,8 @@ public final class JobRuntime {
                   result = withheldForAuthority(wanted.name());
                   told = ToolLines.ERROR;
                 } catch (RuntimeException failed) {
-                  if (failed instanceof ReadUnavailableException)
+                  if (failed instanceof ReadUnavailableException
+                      || failed instanceof ReadFailedException)
                     failures.report(FailureReporter.Source.RUNTIME, failed);
                   if (failed instanceof SessionGoneException) {
                     failures.report(FailureReporter.Source.RUNTIME, failed);

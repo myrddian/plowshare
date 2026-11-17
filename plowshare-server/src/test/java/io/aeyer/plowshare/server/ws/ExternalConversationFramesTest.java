@@ -17,14 +17,11 @@ import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.ExternalConversations;
 import io.aeyer.plowshare.server.agents.Runs;
 import io.aeyer.plowshare.server.api.ConversationView;
-import io.aeyer.plowshare.server.archive.ConversationAliasProperties;
 import io.aeyer.plowshare.server.archive.ConversationLifecycle;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
 import io.aeyer.plowshare.server.telemetry.FailureReporter;
-import io.aeyer.plowshare.server.testing.LogicalSqlWorkBudget;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -42,10 +39,7 @@ class ExternalConversationFramesTest {
           null,
           ReadAdmission.direct(),
           FailureReporter.NONE,
-          new ScopedExternalConversationRequestWork(
-              new LogicalSqlWorkBudget(),
-              new ConversationAliasProperties(Duration.ofSeconds(2), Duration.ofSeconds(1)),
-              mock(ExternalConversationCompletions.class)));
+          new ScopedExternalConversationRequestWork(mock(ExternalConversationCompletions.class)));
   private final Asking caller = new Asking("socket", "alice");
 
   static Map<String, Object> locator() {

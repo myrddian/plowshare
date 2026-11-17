@@ -2,6 +2,8 @@ package io.aeyer.plowshare.server.pool;
 
 import com.zaxxer.hikari.HikariDataSource;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -27,6 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
@@ -41,7 +44,6 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
   private final Counter refusedResults;
   private final ScheduledThreadPoolExecutor alarms;
   private final ExecutorService cleanup;
-  private final ThreadPoolExecutor interruptions;
   private final SqlSessionDeadlines sessionDeadlines;
   private final Set<Scope> active = ConcurrentHashMap.newKeySet();
   private final Object lifecycle = new Object();
@@ -71,15 +73,6 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
             TimeUnit.NANOSECONDS,
             new ArrayBlockingQueue<>(Math.multiplyExact(limits.scopes(), limits.leasesPerScope())),
             Thread.ofPlatform().daemon().name("sql-work-cleanup-", 0).factory());
-    interruptions =
-        new ThreadPoolExecutor(
-            limits.scopes(),
-            limits.scopes(),
-            30,
-            TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(limits.scopes()),
-            Thread.ofPlatform().daemon().name("sql-work-interrupt-", 0).factory());
-    interruptions.allowCoreThreadTimeOut(true);
     if (metrics != null) {
       metrics.gauge("plowshare.sql.work.owned.scopes", active, Set::size);
       metrics.gauge(
@@ -124,14 +117,15 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
             }
           }
           if (TransactionSynchronizationManager.isActualTransactionActive())
-            throw unavailable(
-                null); // a connection acquired before this scope cannot be instrumented
+            throw new IllegalStateException(
+                "SQL work scope must begin before its transaction acquires a connection");
           Scope scope;
           synchronized (lifecycle) {
-            // Each registration reserves one interruption worker before any caller work or
-            // checkout. A blocked interruptor retains this slot; another admitted scope never
-            // queues behind it. Workers are created lazily only when interruption is needed.
-            if (closed || active.size() >= limits.scopes()) throw unavailable(null);
+            // Physical SQL ownership remains counted until the driver/cleanup really settles.
+            if (closed) throw ReadFailedException.closed();
+            if (active.size() >= limits.scopes())
+              throw new ReadUnavailableException(
+                  "SQL work capacity is busy; do not replay an enclosing operation", null);
             scope = new Scope(end);
             active.add(scope);
           }
@@ -145,7 +139,13 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
             return result;
           } catch (RuntimeException failure) {
             if (scope.preserves(failure)) throw failure;
-            if (scope.cancelled()) throw unavailable(failure);
+            if (failure instanceof ReadUnavailableException) throw failure;
+            if (failure instanceof ReadFailedException read) {
+              if (read.reason() == ReadFailedException.Reason.INTERRUPTED && scope.cancelled())
+                throw scope.failure(read);
+              throw read;
+            }
+            if (scope.cancelled()) throw scope.failure(failure);
             throw failure;
           } finally {
             CURRENT.remove();
@@ -170,10 +170,6 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
     return false;
   }
 
-  private SqlWorkUnavailableException unavailable(Throwable cause) {
-    return new SqlWorkUnavailableException(cause);
-  }
-
   private void duration(String phase, long start) {
     if (metrics == null) return;
     long elapsed = System.nanoTime() - start;
@@ -195,7 +191,6 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
     synchronized (lifecycle) {
       if (closed && active.isEmpty()) {
         cleanup.shutdown();
-        interruptions.shutdown();
       }
     }
   }
@@ -208,12 +203,11 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
       closed = true;
       scopes = new ArrayList<>(active);
     }
-    scopes.forEach(Scope::expire);
+    scopes.forEach(scope -> scope.expire(ReadFailedException.Reason.CLOSED));
     alarms.shutdown();
     synchronized (lifecycle) {
       if (active.isEmpty()) {
         cleanup.shutdown();
-        interruptions.shutdown();
       }
     }
     try {
@@ -228,14 +222,12 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
   final class Scope {
     private final Thread owner = Thread.currentThread();
     private final Object lock = new Object();
-    private final Object interruptFence = new Object();
-    private volatile boolean interruptEligible = true;
-    private boolean interruptPending;
     private Throwable definiteSqlFailure;
     private final Set<Lease> leases = ConcurrentHashMap.newKeySet();
     private final Set<Query> queries = ConcurrentHashMap.newKeySet();
     private long end;
     private boolean expired;
+    private ReadFailedException.Reason terminalReason;
     private boolean running = true;
     private int acquiring;
     private ScheduledFuture<?> alarm;
@@ -282,14 +274,16 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
       synchronized (lock) {
         if (expired || !running || owner.isInterrupted() || System.nanoTime() - end >= 0) {
           if (refusedResults != null) refusedResults.increment();
-          throw unavailable(null);
+          throw failure(null);
         }
       }
     }
 
     void checkReleased() {
       synchronized (lock) {
-        if (acquiring != 0 || !leases.isEmpty()) throw unavailable(null);
+        if (acquiring != 0 || !leases.isEmpty())
+          throw new IllegalStateException(
+              "SQL work cannot return live JDBC handles or lazy results");
       }
     }
 
@@ -299,14 +293,42 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
       }
     }
 
+    ReadFailedException failure(Throwable cause) {
+      synchronized (lock) {
+        var reason = terminalReason;
+        if (reason == null)
+          reason =
+              !running
+                  ? ReadFailedException.Reason.CLOSED
+                  : owner.isInterrupted()
+                      ? ReadFailedException.Reason.INTERRUPTED
+                      : ReadFailedException.Reason.DEADLINE_EXCEEDED;
+        return switch (reason) {
+          case CLOSED -> ReadFailedException.closed(cause);
+          case INTERRUPTED -> ReadFailedException.interrupted(cause);
+          case QUERY_CANCELLED -> ReadFailedException.queryCancelled(cause);
+          case DEADLINE_EXCEEDED -> ReadFailedException.deadlineExceeded(cause);
+          case INVALIDATED -> ReadFailedException.invalidated();
+        };
+      }
+    }
+
     boolean preserves(Throwable failure) {
       Throwable observed;
       synchronized (lock) {
         observed = definiteSqlFailure;
       }
       if (observed == null) return false;
-      for (int depth = 0; failure != null && depth < 16; depth++, failure = failure.getCause())
+      for (int depth = 0; failure != null && depth < 16; depth++, failure = failure.getCause()) {
         if (failure == observed) return true;
+        if (failure instanceof TransactionSystemException transaction) {
+          Throwable application = transaction.getApplicationException();
+          for (int nested = 0;
+              application != null && nested < 16;
+              nested++, application = application.getCause())
+            if (application == observed) return true;
+        }
+      }
       return false;
     }
 
@@ -317,36 +339,32 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
     }
 
     void expire() {
-      expire(null);
+      expire(null, ReadFailedException.Reason.DEADLINE_EXCEEDED);
+    }
+
+    void expire(ReadFailedException.Reason reason) {
+      expire(null, reason);
     }
 
     private void expire(Object expectedAlarm) {
+      expire(expectedAlarm, ReadFailedException.Reason.DEADLINE_EXCEEDED);
+    }
+
+    private void expire(Object expectedAlarm, ReadFailedException.Reason reason) {
       ArrayList<Lease> owned;
       synchronized (lock) {
         if (expectedAlarm != null && alarmToken != expectedAlarm) return;
         if (expired || !running) return;
         expired = true;
+        terminalReason = reason;
         owned = new ArrayList<>(leases);
-        interruptPending = true;
       }
       if (metrics != null) metrics.counter("plowshare.sql.work.cancellations").increment();
       owned.forEach(Lease::abort);
-      // Thread.interrupt may synchronously execute a blocking channel interruptor. It must never
-      // run on an alarm thread or under the scope monitor. The fence prevents a queued or active
-      // interrupt from hitting the owner's next task; physical ownership is retained until return.
-      interruptions.execute(
-          () -> {
-            try {
-              synchronized (interruptFence) {
-                if (interruptEligible) owner.interrupt();
-              }
-            } finally {
-              synchronized (lock) {
-                interruptPending = false;
-              }
-              releaseIfDone();
-            }
-          });
+      // A SQL watchdog never interrupts the enclosing workflow thread: Java cannot distinguish
+      // that signal from genuine caller cancellation. Owned connection abort plus server/network
+      // limits end JDBC work; acquisition/materialization can return late, and no late result is
+      // published. Its physical capacity remains owned until the driver and cleanup settle.
     }
 
     Connection borrow(ScopedSqlDataSource.Borrow borrow, HikariDataSource pool)
@@ -354,7 +372,8 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
       long started = System.nanoTime();
       synchronized (lock) {
         check();
-        if (acquiring + leases.size() >= limits.leasesPerScope()) throw unavailable(null);
+        if (acquiring + leases.size() >= limits.leasesPerScope())
+          throw new IllegalStateException("SQL work exceeded its configured connection bound");
         acquiring++;
       }
       Connection connection = null;
@@ -368,7 +387,7 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
         }
         if (cancelled()) {
           lease.abort();
-          throw unavailable(null);
+          throw failure(null);
         }
         lease.networkDeadline(earlier(end, System.nanoTime() + limits.queryCeiling().toNanos()));
         check();
@@ -381,7 +400,7 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
           failure.addSuppressed(closing);
         }
         if (failure instanceof Error fatal) throw fatal;
-        if (cancelled()) throw unavailable(failure);
+        if (cancelled()) throw failure(failure);
         throw failure;
       } finally {
         synchronized (lock) {
@@ -399,7 +418,8 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
     private Query query(Lease lease, String phase, boolean constrained, long ceiling) {
       synchronized (lock) {
         check();
-        if (queries.size() >= limits.queriesPerScope()) throw unavailable(null);
+        if (queries.size() >= limits.queriesPerScope())
+          throw new IllegalStateException("SQL work exceeded its configured query bound");
         long deadline = earlier(end, System.nanoTime() + limits.queryCeiling().toNanos());
         if (constrained) deadline = earlier(deadline, ceiling);
         for (Query parent : queries) deadline = earlier(deadline, parent.end);
@@ -410,11 +430,6 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
     }
 
     void finish() {
-      // Do not let an already executing interruptor race reuse of this caller thread. An arbitrary
-      // blocking interruptor is a retained physical cancellation, not evidence of bounded abort.
-      synchronized (interruptFence) {
-        interruptEligible = false;
-      }
       ArrayList<Lease> owned;
       synchronized (lock) {
         running = false;
@@ -434,7 +449,7 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
 
     private void releaseIfDone() {
       synchronized (lock) {
-        if (running || acquiring != 0 || interruptPending || !leases.isEmpty()) return;
+        if (running || acquiring != 0 || !leases.isEmpty()) return;
       }
       retired(this);
     }
@@ -468,9 +483,9 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
 
       void networkDeadline(long selected) throws SQLException {
         synchronized (state) {
-          if (closing.get()) throw new SQLException("Scoped JDBC lease is closed", "08003");
+          if (closing.get()) throw ReadFailedException.closed();
           long millis = TimeUnit.NANOSECONDS.toMillis(selected - System.nanoTime());
-          if (millis < 1) throw unavailable(null);
+          if (millis < 1) throw ReadFailedException.deadlineExceeded();
           // Physical cleanup takes this same fence after logical retirement has been queued.
           // A clamp cannot target a recycled lease; a blocked setter cannot occupy alarm threads.
           connection.setNetworkTimeout(Runnable::run, (int) Math.min(Integer.MAX_VALUE, millis));
@@ -480,7 +495,7 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
       void statementOpened() {
         if (statements.incrementAndGet() > limits.queriesPerScope()) {
           statements.decrementAndGet();
-          throw unavailable(null);
+          throw new IllegalStateException("SQL work exceeded its configured statement bound");
         }
       }
 
@@ -491,8 +506,8 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
       void check() throws SQLException {
         Scope.this.check();
         if (Thread.currentThread() != owner)
-          throw new SQLException("Scoped JDBC must remain on its caller thread");
-        if (closing.get()) throw new SQLException("Scoped JDBC lease is closed", "08003");
+          throw new IllegalStateException("Scoped JDBC must remain on its caller thread");
+        if (closing.get()) throw ReadFailedException.closed();
       }
 
       Query query(String phase) {
@@ -523,12 +538,12 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
           settled.get(Math.min(remaining, limits.cleanupBudget().toNanos()), TimeUnit.NANOSECONDS);
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
-          throw unavailable(interrupted);
+          throw Scope.this.failure(interrupted);
         } catch (TimeoutException late) {
           Scope.this.expire();
-          throw unavailable(late);
+          throw Scope.this.failure(late);
         } catch (ExecutionException failed) {
-          throw unavailable(failed.getCause());
+          throw ReadFailedException.closed(failed.getCause());
         }
       }
 
@@ -553,7 +568,7 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
                           () -> {
                             long remaining =
                                 TimeUnit.NANOSECONDS.toMillis(cleanupEnd - System.nanoTime());
-                            if (remaining < 1) throw unavailable(null);
+                            if (remaining < 1) throw ReadFailedException.deadlineExceeded();
                             connection.setNetworkTimeout(
                                 Runnable::run, (int) Math.min(Integer.MAX_VALUE, remaining));
                             return remaining;
@@ -626,7 +641,7 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
           selected = earlier(end, Scope.this.end);
         }
         long remaining = TimeUnit.NANOSECONDS.toMillis(selected - System.nanoTime());
-        if (remaining < 1) throw unavailable(null);
+        if (remaining < 1) throw ReadFailedException.deadlineExceeded();
         return remaining;
       }
 
@@ -648,8 +663,8 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
         if (timedOut(failure)) {
           // A driver network/server deadline can win the watchdog race. Mark cancellation at
           // the actual JDBC boundary, not by relabelling arbitrary application exceptions.
-          Scope.this.expire();
-          throw unavailable(failure);
+          Scope.this.expire(ReadFailedException.Reason.QUERY_CANCELLED);
+          throw Scope.this.failure(failure);
         }
       }
 
@@ -668,7 +683,7 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
         }
         if (System.nanoTime() - selected >= 0) {
           Scope.this.expire();
-          throw unavailable(null);
+          throw Scope.this.failure(null);
         }
         lease.networkDeadline(selected);
       }

@@ -15,7 +15,6 @@ import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.api.ConversationView;
-import io.aeyer.plowshare.server.archive.ConversationAliasProperties;
 import io.aeyer.plowshare.server.pool.SqlWorkBudget;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
@@ -61,14 +60,11 @@ class ExternalConversationRoutingBudgetTest {
         null,
         ReadAdmission.direct(),
         FailureReporter.NONE,
-        new ScopedExternalConversationRequestWork(
-            sql,
-            new ConversationAliasProperties(TIMEOUT, Duration.ofSeconds(1)),
-            mock(ExternalConversationCompletions.class)));
+        new ScopedExternalConversationRequestWork(mock(ExternalConversationCompletions.class)));
   }
 
   @Test
-  void scopeBeginsBeforeCommonAuthorizationAndNestsWithoutResettingTheDeadline() {
+  void routingLeavesIndependentSqlUnitsToTheirOwners() {
     var sql = new SqlScope();
     Thread original = Thread.currentThread();
     var phases = new ArrayList<String>();
@@ -77,12 +73,12 @@ class ExternalConversationRoutingBudgetTest {
           @Override
           public Outcome handle(Map<String, Object> payload, Asking asking) {
             assertEquals(original, Thread.currentThread());
-            assertEquals(1, sql.depth);
+            assertEquals(0, sql.depth);
             phases.add("handler");
             return sql.within(
                 TIMEOUT,
                 () -> {
-                  assertEquals(2, sql.depth);
+                  assertEquals(1, sql.depth);
                   return Outcome.ok(view());
                 });
           }
@@ -99,7 +95,7 @@ class ExternalConversationRoutingBudgetTest {
         .requireExternalConversation(anyString(), any(), anyString(), anyString());
     doAnswer(
             call -> {
-              assertEquals(1, sql.depth);
+              assertEquals(0, sql.depth);
               phases.add("authority");
               return null;
             })
@@ -107,7 +103,7 @@ class ExternalConversationRoutingBudgetTest {
         .require(anyString(), any(), anyString());
     doAnswer(
             call -> {
-              assertEquals(1, sql.depth);
+              assertEquals(0, sql.depth);
               phases.add("authority");
               return Home.of("house");
             })
@@ -128,13 +124,12 @@ class ExternalConversationRoutingBudgetTest {
             .join();
     assertEquals(Code.OK, result.code());
     assertEquals(List.of("authority", "handler", "authority"), phases);
-    assertEquals(2, sql.deadlines.size());
-    assertEquals(sql.deadlines.getFirst(), sql.deadlines.getLast());
+    assertEquals(1, sql.deadlines.size());
     assertEquals(0, sql.depth);
   }
 
   @Test
-  void queuedDisclosureHasAnExplicitBoundedPhaseAndOrdinaryRoutesDoNotOptIn() throws Exception {
+  void disclosureDoesNotCreateADeadlineAcrossIndependentAuthorizationReads() throws Exception {
     var sql = new SqlScope();
     var router =
         router(
@@ -152,7 +147,7 @@ class ExternalConversationRoutingBudgetTest {
     var authority = mock(ProjectAuthorization.class);
     doAnswer(
             call -> {
-              assertEquals(1, sql.depth);
+              assertEquals(0, sql.depth);
               return Home.of("house");
             })
         .when(authority)
@@ -166,7 +161,7 @@ class ExternalConversationRoutingBudgetTest {
                     "ex", FrameTypes.CONVERSATION_OPEN_EX, Envelope.CURRENT_VERSION, Map.of()));
     router.requireExternalDisclosure(
         frame, new Asking("session", "alice", "socket"), Outcome.ok(view()));
-    assertEquals(1, sql.deadlines.size());
+    assertTrue(sql.deadlines.isEmpty());
     assertFalse(sql.depth > 0);
   }
 }

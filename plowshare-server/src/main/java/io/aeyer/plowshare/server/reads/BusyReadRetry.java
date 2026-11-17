@@ -5,15 +5,14 @@ import java.util.Objects;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
- * Bounded retry of a side-effect-free check refused with {@link ReadUnavailableException}. A busy
- * refusal means a cached read reached its deadline, usually while another request's reload was
- * still running; that reload stores its value, so a short pause usually turns the next attempt into
- * a hit.
+ * Bounded recovery of a side-effect-free check refused by capacity or its own read deadline. A
+ * still-running shared cache fill can serve a later independent attempt. Invalidation, closure,
+ * interruption and query cancellation are different failures and are not retried here.
  *
  * <p>Only checks that change nothing may be retried, such as the agent job runtime's per-step log
  * check. A caller holding a Spring-managed transaction or synchronization is never retried: it may
- * hold locks or connections that the reload it waits for needs, so it keeps refusing at once, like
- * {@code JdbcInformationLogVisibility.read}'s callback. Any other failure propagates at once.
+ * hold locks or connections that the reload it waits for needs, so a busy result propagates at
+ * once. Any other failure also propagates at once.
  */
 public final class BusyReadRetry {
   /** Sleeps between attempts; tests substitute a recording pause. */
@@ -44,8 +43,9 @@ public final class BusyReadRetry {
   }
 
   /**
-   * Four attempts with pauses of 100, 200 and 400 ms: at most 0.7 s of waiting on top of each
-   * attempt's own read deadline.
+   * Four attempts with pauses of 100, 200 and 400 ms. Separate SQL transactions retain their own
+   * completion budgets; this loop does not invent a deadline for the whole workflow. An already
+   * enclosing SQL/cache deadline still limits every remaining attempt and pause.
    */
   public static BusyReadRetry defaults() {
     return new BusyReadRetry(4, Duration.ofMillis(100), Thread::sleep);
@@ -53,23 +53,36 @@ public final class BusyReadRetry {
 
   /**
    * Runs {@code check}, retrying it after a busy refusal until it passes or the attempts are spent.
-   * The last refusal is rethrown unchanged; an interrupt during a pause ends the retries at once,
-   * with the interrupt status restored.
+   * Exhausted retryable failures are rethrown unchanged. An interrupt during a pause ends recovery
+   * with an interrupted read failure and restores the interrupt status.
    */
   public void run(Runnable check) {
     Objects.requireNonNull(check);
     Duration next = backoff;
     for (int attempt = 1; ; attempt++) {
+      ReadDeadline.check();
+      if (Thread.currentThread().isInterrupted()) throw ReadFailedException.interrupted();
       try {
         check.run();
+        ReadDeadline.check();
         return;
-      } catch (ReadUnavailableException busy) {
-        if (attempt >= attempts || holdsTransaction()) throw busy;
+      } catch (ReadUnavailableException | ReadFailedException busy) {
+        if (busy instanceof ReadFailedException failed
+            && failed.reason() != ReadFailedException.Reason.DEADLINE_EXCEEDED) throw failed;
+        if (attempt >= attempts || holdsTransaction() || Thread.currentThread().isInterrupted())
+          throw busy;
+        Duration waiting = next;
+        var enclosing = ReadDeadline.currentDeadlineNanos();
+        if (enclosing.isPresent()) {
+          long remaining = enclosing.getAsLong() - System.nanoTime();
+          if (remaining <= 0) throw ReadFailedException.deadlineExceeded();
+          waiting = Duration.ofNanos(Math.min(next.toNanos(), remaining));
+        }
         try {
-          pause.sleep(next);
+          pause.sleep(waiting);
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
-          throw busy;
+          throw ReadFailedException.interrupted(interrupted);
         }
         next = next.multipliedBy(2);
       }

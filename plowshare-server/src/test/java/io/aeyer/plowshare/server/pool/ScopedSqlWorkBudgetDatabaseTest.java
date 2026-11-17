@@ -10,6 +10,7 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import io.aeyer.plowshare.server.access.JdbcIdentityRepository;
 import io.aeyer.plowshare.server.cache.JdbcProjectionVersions;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.sql.Connection;
 import java.time.Duration;
@@ -21,6 +22,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -134,7 +136,7 @@ class ScopedSqlWorkBudgetDatabaseTest {
             calls.submit(
                 () -> budget.within(Duration.ofMillis(500), () -> identities.account(account)));
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> call.get(2, TimeUnit.SECONDS)).getCause());
         assertFalse(blocker.isClosed());
       } finally {
@@ -162,7 +164,7 @@ class ScopedSqlWorkBudgetDatabaseTest {
             calls.submit(
                 () -> budget.within(Duration.ofMillis(500), projections::databaseIdentity));
         assertInstanceOf(
-            SqlWorkUnavailableException.class,
+            ReadFailedException.class,
             assertThrows(ExecutionException.class, () -> call.get(2, TimeUnit.SECONDS)).getCause());
       } finally {
         blocker.rollback();
@@ -193,7 +195,7 @@ class ScopedSqlWorkBudgetDatabaseTest {
                                 return "must not publish";
                               })));
       assertInstanceOf(
-          SqlWorkUnavailableException.class,
+          ReadFailedException.class,
           assertThrows(ExecutionException.class, () -> call.get(2, TimeUnit.SECONDS)).getCause());
     }
     assertEquals(
@@ -267,7 +269,7 @@ class ScopedSqlWorkBudgetDatabaseTest {
                               (row, index) -> {
                                 materializing.countDown();
                                 try {
-                                  new CountDownLatch(1).await();
+                                  new CountDownLatch(1).await(300, TimeUnit.MILLISECONDS);
                                 } catch (InterruptedException interrupted) {
                                   Thread.currentThread().interrupt();
                                 }
@@ -275,7 +277,7 @@ class ScopedSqlWorkBudgetDatabaseTest {
                               })));
       assertTrue(materializing.await(1, TimeUnit.SECONDS));
       assertInstanceOf(
-          SqlWorkUnavailableException.class,
+          ReadFailedException.class,
           assertThrows(ExecutionException.class, () -> call.get(2, TimeUnit.SECONDS)).getCause());
     }
     assertEquals(1, setup.queryForObject("SELECT 1", Integer.class));
@@ -284,8 +286,8 @@ class ScopedSqlWorkBudgetDatabaseTest {
   @Test
   void mainPoolAcquisitionUsesRemainingOperationBudgetAndKeepsOtherLeasesOwned() throws Exception {
     var budget = budget();
-    try (Connection one = main.getConnection();
-        Connection two = main.getConnection();
+    Connection one = main.getConnection();
+    try (Connection two = main.getConnection();
         var calls = Executors.newVirtualThreadPerTaskExecutor()) {
       var call =
           calls.submit(
@@ -295,11 +297,16 @@ class ScopedSqlWorkBudgetDatabaseTest {
                       () ->
                           new JdbcTemplate(budget.decorate(main))
                               .queryForObject("SELECT 1", Integer.class)));
-      assertInstanceOf(
-          SqlWorkUnavailableException.class,
-          assertThrows(ExecutionException.class, () -> call.get(2, TimeUnit.SECONDS)).getCause());
+      assertThrows(TimeoutException.class, () -> call.get(250, TimeUnit.MILLISECONDS));
       assertFalse(one.isClosed());
       assertFalse(two.isClosed());
+      one.close(); // Release one physical borrower; the expired SQL scope refuses its late lease.
+      assertInstanceOf(
+          ReadFailedException.class,
+          assertThrows(ExecutionException.class, () -> call.get(2, TimeUnit.SECONDS)).getCause());
+      assertFalse(two.isClosed());
+    } finally {
+      one.close();
     }
     assertEquals(1, setup.queryForObject("SELECT 1", Integer.class));
   }

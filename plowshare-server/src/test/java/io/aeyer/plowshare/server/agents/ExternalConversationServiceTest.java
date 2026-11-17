@@ -2,12 +2,14 @@ package io.aeyer.plowshare.server.agents;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -42,9 +44,11 @@ import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
-import io.aeyer.plowshare.server.pool.SqlWorkUnavailableException;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import io.aeyer.plowshare.server.testing.LogicalSqlWorkBudget;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -209,6 +213,41 @@ class ExternalConversationServiceTest {
   }
 
   @Test
+  void hooksAndAcceptedRunsAreObservedWithoutAWorkflowDeadlineOrLateFailure() {
+    var performance = mock(WorkPerformanceReporter.class);
+    var observation = mock(WorkPerformanceReporter.Observation.class);
+    when(performance.watch(eq(WorkPerformanceReporter.Kind.WORKFLOW), any()))
+        .thenReturn(observation);
+    var facade =
+        new ExternalConversationService(
+            aliases, identities, access, runs, pictures, stages, defaults, performance);
+    var target = row(ConversationLifecycle.ACTIVE);
+    when(aliases.open(any(), any()))
+        .thenReturn(new ConversationAliasRepository.Opened(target, true));
+    doAnswer(
+            call -> {
+              assertFalse(ReadDeadline.currentDeadlineNanos().isPresent());
+              return null;
+            })
+        .when(stages)
+        .opened(any());
+    assertSame(
+        target,
+        facade.open(locator, new ExternalConversations.Open(null, null, null, null), caller));
+    when(aliases.find(any())).thenReturn(Optional.of(target));
+    when(runs.startResolved(any(), eq(pictures), any()))
+        .thenAnswer(
+            call -> {
+              assertFalse(ReadDeadline.currentDeadlineNanos().isPresent());
+              return new Runs.Started("accepted", "worker", target.id());
+            });
+    assertEquals("accepted", facade.run(locator, run(), caller).id());
+    verify(performance).watch(WorkPerformanceReporter.Kind.WORKFLOW, "external-conversation.open");
+    verify(performance).watch(WorkPerformanceReporter.Kind.WORKFLOW, "external-conversation.run");
+    verify(observation, times(2)).close();
+  }
+
+  @Test
   void actualTargetScopeAndCurrentAccessAreCheckedBeforeRunOrHook() {
     var target = row(ConversationLifecycle.ACTIVE);
     when(aliases.find(any())).thenReturn(Optional.of(target));
@@ -306,7 +345,7 @@ class ExternalConversationServiceTest {
   @CsvSource({"false,false", "false,true", "true,false", "true,true"})
   void aliasAvailabilityFailureRetainsUncertaintyWithoutRetryOrRawDependencyDetails(
       boolean opening, boolean cancelled) {
-    ArchiveUnavailableException outage =
+    RuntimeException outage =
         cancelled
             ? new ArchiveQueryCancelledException("private dependency diagnostic", null)
             : new ArchiveUnavailableException("private dependency diagnostic", null);
@@ -314,7 +353,7 @@ class ExternalConversationServiceTest {
     else doThrow(outage).when(aliases).find(any());
     var failure =
         assertThrows(
-            ExternalConversationUnavailableException.class,
+            RuntimeException.class,
             () -> {
               if (opening)
                 service.open(
@@ -323,8 +362,16 @@ class ExternalConversationServiceTest {
             });
     var fault = Faults.of(failure);
     assertEquals(Code.ARCHIVE_UNAVAILABLE, fault.code());
-    assertTrue(fault.detail().contains("may have committed"));
-    assertTrue(fault.detail().contains("do not replay"));
+    if (cancelled) {
+      assertSame(outage, failure);
+      assertEquals(
+          ReadFailedException.Reason.QUERY_CANCELLED,
+          assertInstanceOf(ReadFailedException.class, failure).reason());
+    } else {
+      assertInstanceOf(ExternalConversationUnavailableException.class, failure);
+      assertTrue(fault.detail().contains("may have committed"));
+      assertTrue(fault.detail().contains("do not replay"));
+    }
     assertFalse(fault.detail().contains("Nothing was read"));
     assertFalse(fault.detail().contains("nothing was written"));
     assertFalse(fault.detail().contains("private dependency diagnostic"));
@@ -335,20 +382,21 @@ class ExternalConversationServiceTest {
 
   @Test
   void exactExAndSqlAvailabilityFailuresKeepTheirOwningOutcome() {
-    for (ArchiveUnavailableException failure :
+    for (RuntimeException failure :
         List.of(
             new ExternalConversationUnavailableException("owned Ex failure", null),
-            new SqlWorkUnavailableException(null))) {
+            ReadFailedException.deadlineExceeded(),
+            new ReadUnavailableException())) {
       doThrow(failure).when(aliases).open(any(), any());
       assertSame(
           failure,
           assertThrows(
-              ArchiveUnavailableException.class,
+              RuntimeException.class,
               () ->
                   service.open(
                       locator, new ExternalConversations.Open(null, null, null, null), caller)));
     }
-    verify(aliases, times(2)).open(any(), any());
+    verify(aliases, times(3)).open(any(), any());
   }
 
   static Stream<RuntimeException> nonAvailabilityFailures() {

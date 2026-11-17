@@ -7,6 +7,7 @@ import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.api.ConflictException;
 import io.aeyer.plowshare.server.api.NotFoundException;
 import io.aeyer.plowshare.server.archive.ArchiveException;
+import io.aeyer.plowshare.server.archive.ArchiveQueryCancelledException;
 import io.aeyer.plowshare.server.archive.ArchiveRefusedException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.ValidationException;
@@ -16,7 +17,9 @@ import io.aeyer.plowshare.server.events.ModelUnavailableException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.images.UnstorableImageException;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
-import io.aeyer.plowshare.server.pool.SqlWorkUnavailableException;
+import io.aeyer.plowshare.server.reads.IncomingReadCapacityException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.session.PresenceConflictException;
 import java.util.HashMap;
 import java.util.Map;
@@ -137,9 +140,20 @@ public final class Faults {
 
   private static Map<Class<? extends Throwable>, Function<Throwable, Fault>> buildMappers() {
     Map<Class<? extends Throwable>, Function<Throwable, Fault>> m = new HashMap<>();
+    // Only the entry-point acquisition boundary can create this proof. A busy repository after
+    // dispatch cannot invite resubmission of an enclosing operation that may have written data.
     m.put(
-        io.aeyer.plowshare.server.reads.ReadUnavailableException.class,
-        e -> new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e)));
+        IncomingReadCapacityException.class,
+        e -> new Fault(Code.CAPACITY_EXHAUSTED, safeMessage(e)));
+    m.put(ReadUnavailableException.class, e -> new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e)));
+    // Deployed clients understand this availability outcome. A failed read is not proof that
+    // capacity was exhausted or that an enclosing operation never started; retain its own reason.
+    m.put(ReadFailedException.class, e -> new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e)));
+    m.put(
+        ArchiveQueryCancelledException.class,
+        e ->
+            new Fault(
+                Code.ARCHIVE_UNAVAILABLE, ReadFailedException.queryCancelled(e).getMessage()));
     // Keep the existing availability outcome understood by deployed clients. Unlike the archive
     // mapper, this must not blame PostgreSQL or promise that an enclosing mutation never started.
     m.put(
@@ -266,15 +280,6 @@ public final class Faults {
         e -> {
           log.debug("proposal failed validation: {}", e.getMessage());
           return new Fault(Code.VALIDATION_FAILED, safeMessage(e));
-        });
-
-    // Scoped work can have committed before a later SQL deadline. Keep the deployed unavailable
-    // code without inheriting the archive mapper's misleading "nothing was written" assurance.
-    m.put(
-        SqlWorkUnavailableException.class,
-        e -> {
-          log.debug("scoped database work ended without a publishable result");
-          return new Fault(Code.ARCHIVE_UNAVAILABLE, safeMessage(e));
         });
 
     // Row 12: the archive could not be reached at all.

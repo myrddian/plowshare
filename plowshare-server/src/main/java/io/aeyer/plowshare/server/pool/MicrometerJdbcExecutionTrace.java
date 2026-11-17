@@ -56,7 +56,8 @@ public final class MicrometerJdbcExecutionTrace implements JdbcExecutionTrace {
                 .tag("pool", pool)
                 .tag("method", method)
                 .tag("outcome", failed ? "failed" : "ok")
-                .serviceLevelObjectives(Duration.ofMillis(500), Duration.ofSeconds(1))
+                .serviceLevelObjectives(
+                    Duration.ofMillis(500), Duration.ofSeconds(1), Duration.ofSeconds(2))
                 .publishPercentileHistogram()
                 .minimumExpectedValue(Duration.ofMillis(1))
                 .maximumExpectedValue(Duration.ofSeconds(2))

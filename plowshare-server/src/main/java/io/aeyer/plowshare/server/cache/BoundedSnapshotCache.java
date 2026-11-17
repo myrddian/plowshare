@@ -300,21 +300,29 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T>, Resident
     synchronized (lock) {
       if (closed) return Optional.of(failed(Failure.CLOSED));
       if (recovering) return Optional.of(failed(Failure.RECOVERING));
-      if (request.dependencies().size() > limits.dependenciesPerKey())
-        return Optional.of(failed(Failure.CAPACITY));
       var identity = new Identity(request.key(), request.version());
       Entry entry = entries.get(identity);
+      flight = joining.get(identity);
+      if (entry != null && !entry.request.equals(request)
+          || flight != null && !flight.request.equals(request))
+        return Optional.of(failed(Failure.INCONSISTENT_REQUEST));
+      long metadata = metadataWeight(request);
+      int requiredLinks = request.dependencies().size() + 1;
+      // An impossible footprint is not contention. A projection owner can take its ordinary
+      // read path, whereas actual occupied capacity must continue bounding physical loads.
+      if (request.dependencies().size() > limits.dependenciesPerKey()
+          || request.maxLoadWeight() > limits.loadingWeight() - metadata
+          || requiredLinks > limits.dependencyLinks())
+        return Optional.of(failed(Failure.LOAD_TOO_LARGE));
       if (entry != null) {
-        if (!entry.request.equals(request))
-          return Optional.of(failed(Failure.INCONSISTENT_REQUEST));
         hits++;
         recent(entry);
         return Optional.of(completed(entry.snapshot));
       }
       misses++;
-      flight = joining.get(identity);
-      if (flight != null && !flight.request.equals(request))
-        return Optional.of(failed(Failure.INCONSISTENT_REQUEST));
+      // Existing-only misses need no waiter or load seat; a full unrelated flight must not
+      // turn the caller's private SQL fallback into a false backpressure refusal.
+      if (flight == null && existingOnly) return Optional.empty();
       Flight caller = loading.get();
       // An invalidated loader retains physical capacity but may create an independently fenced
       // replacement. A current unfinished loader must never join its own same-key work.
@@ -327,12 +335,8 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T>, Resident
       if (waiterCount >= limits.waiters()
           || flight != null && flight.waiting.size() + flight.deliveries >= limits.waitersPerLoad())
         return Optional.of(failed(Failure.CAPACITY));
-      if (flight == null && existingOnly) return Optional.empty();
       if (flight == null) {
-        long metadata = metadataWeight(request);
-        int requiredLinks = request.dependencies().size() + 1;
         if (physical.size() >= limits.loads()
-            || request.maxLoadWeight() > limits.loadingWeight() - metadata
             || metadata + request.maxLoadWeight() > limits.loadingWeight() - loadingWeight
             || requiredLinks > limits.dependencyLinks() - links)
           return Optional.of(failed(Failure.CAPACITY));
@@ -352,11 +356,10 @@ public final class BoundedSnapshotCache<T> implements SnapshotCache<T>, Resident
     }
     Flight selected = flight;
     try {
-      // An elected inline loader runs on this thread and has finished before readInline returns,
-      // so its own waiter needs no deadline. Arming one would let the timer abandon the flight
-      // when a slow load outlives it, discarding a value that would serve the next request; the
-      // caller's deadline is decided by its owner after the load instead.
-      if (!(dispatch && inline)) schedule(waiter);
+      // Inline repository reads and existing-only joins retain accepted physical work until
+      // settlement. Their owner enforces an actual SQL scope or local interruption, rather than
+      // a cache-workflow timer. Only the explicitly asynchronous API arms its waiter timeout.
+      if (!inline && !existingOnly) schedule(waiter);
       if (dispatch) {
         if (inline) load(selected, loader);
         else executor.execute(() -> load(selected, loader));

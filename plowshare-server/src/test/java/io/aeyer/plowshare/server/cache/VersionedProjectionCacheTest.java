@@ -12,6 +12,7 @@ import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LO
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.LOADED_RETURN;
 import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VERSIONED_HIT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,7 +32,8 @@ import io.aeyer.plowshare.server.cache.CacheTestSupport.Value;
 import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget;
 import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
-import io.aeyer.plowshare.server.pool.SqlWorkUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.time.Duration;
 import java.util.List;
@@ -84,6 +86,33 @@ class VersionedProjectionCacheTest {
       assertEquals(1, fixture.cache.statistics().count(LOAD));
       assertEquals(1, fixture.cache.statistics().count(LOADED_RETURN));
       assertEquals(1, fixture.cache.statistics().count(VERSIONED_HIT));
+    }
+  }
+
+  @Test
+  void anAlreadyCompletedResidentReadStillHonorsTheCallersRemainingDeadline() {
+    try (var fixture = new Fixture()) {
+      fixture.cache.read(KEY, true, () -> new Value("stored"), ignored -> 100);
+      doAnswer(
+              call -> {
+                Object read = call.callRealMethod();
+                long deadline = ReadDeadline.deadlineNanos(Duration.ofDays(1));
+                while (System.nanoTime() - deadline < 0) Thread.onSpinWait();
+                return read;
+              })
+          .when(fixture.backing)
+          .readInline(any(), any());
+      ReadDeadline.within(
+          Duration.ofMillis(20),
+          () -> {
+            assertThrows(
+                ReadFailedException.class,
+                () ->
+                    fixture.cache.read(
+                        KEY, true, () -> fail("Resident hit must not reload"), ignored -> 100));
+            return null;
+          });
+      assertEquals(1, fixture.cache.statistics().count(LOAD));
     }
   }
 
@@ -356,6 +385,24 @@ class VersionedProjectionCacheTest {
   }
 
   @Test
+  void anIntrinsicallyOversizedCacheRequestUsesTheOrdinaryReadWithoutBackpressure() {
+    try (var fixture = new Fixture()) {
+      doReturn(failed(SnapshotCache.Failure.LOAD_TOO_LARGE))
+          .when(fixture.backing)
+          .readInline(any(), any());
+      assertEquals(
+          new Value("ordinary"),
+          fixture.cache.read(
+              KEY,
+              true,
+              () -> fail("The cache cannot admit this projection"),
+              () -> new Value("ordinary"),
+              ignored -> 100));
+      assertEquals(0, fixture.cache.statistics().count(CAPACITY_REJECTED));
+    }
+  }
+
+  @Test
   void recursiveAndInconsistentRequestFailuresAreNotHiddenByUncachedReplay() {
     try (var fixture = new Fixture()) {
       for (var failure :
@@ -615,7 +662,9 @@ class VersionedProjectionCacheTest {
                                 ignored -> 100)));
         awaitStatistics(fixture.backing, stats -> stats.waiters() == 2);
         var refused = assertThrows(ExecutionException.class, () -> scoped.get(1, TimeUnit.SECONDS));
-        assertTrue(refused.getCause() instanceof SqlWorkUnavailableException);
+        assertEquals(
+            ReadFailedException.Reason.DEADLINE_EXCEEDED,
+            assertInstanceOf(ReadFailedException.class, refused.getCause()).reason());
         assertTrue(!ordinary.isDone());
       } finally {
         finish.countDown();

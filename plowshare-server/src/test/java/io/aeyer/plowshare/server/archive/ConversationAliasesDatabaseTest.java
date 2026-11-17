@@ -15,6 +15,7 @@ import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.archive.ConversationAliasRepository.Key;
 import io.aeyer.plowshare.server.archive.ConversationAliasRepository.Opened;
 import io.aeyer.plowshare.server.archive.ConversationAliasRepository.Opening;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -31,6 +32,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -45,6 +47,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.support.JdbcTransactionManager;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -465,7 +468,7 @@ class ConversationAliasesDatabaseTest {
         ExecutionException refusal =
             assertThrows(ExecutionException.class, () -> pending.get(2, TimeUnit.SECONDS));
         assertTrue(
-            refusal.getCause() instanceof ArchiveUnavailableException,
+            refusal.getCause() instanceof ReadFailedException,
             () -> failureTypes(refusal.getCause()));
       } finally {
         blocker.rollback();
@@ -490,10 +493,15 @@ class ConversationAliasesDatabaseTest {
     try {
       for (int i = 0; i < 8; i++) held.add(pool.getConnection());
       Future<?> pending = executor.submit(() -> bounded.find(key));
+      // Expiry cannot interrupt the workflow thread or abort an unrelated pooled borrower.
+      // Physical acquisition stays owned until a connection is available; its late result fails.
+      assertThrows(TimeoutException.class, () -> pending.get(350, TimeUnit.MILLISECONDS));
+      for (Connection connection : held) assertFalse(connection.isClosed());
+      held.removeFirst().close();
       ExecutionException refusal =
           assertThrows(ExecutionException.class, () -> pending.get(2, TimeUnit.SECONDS));
       assertTrue(
-          refusal.getCause() instanceof ArchiveUnavailableException,
+          refusal.getCause() instanceof ReadFailedException,
           () -> failureTypes(refusal.getCause()));
       for (Connection connection : held) assertFalse(connection.isClosed());
     } finally {
@@ -531,6 +539,13 @@ class ConversationAliasesDatabaseTest {
     StringBuilder types = new StringBuilder("Unexpected cancellation classification: ");
     for (int depth = 0; failure != null && depth < 12; depth++, failure = failure.getCause()) {
       types.append(failure.getClass().getSimpleName());
+      if (failure instanceof TransactionSystemException transaction
+          && transaction.getApplicationException() != null) {
+        types
+            .append("{application=")
+            .append(failureTypes(transaction.getApplicationException()))
+            .append('}');
+      }
       if (failure instanceof SQLException sql)
         types.append('[').append(sql.getSQLState()).append(']');
       types.append(" -> ");

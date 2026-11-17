@@ -256,11 +256,14 @@ committed. Use the system's existing durable delivery mechanisms.
 
 ## Bound active work in every subsystem
 
-Every active request or work step must have an explicit, configurable, positive
-finite completion budget. Short interactive reads, controls and asynchronous
-acceptance replies use a **2-second default ceiling**, with normal execution
-expected substantially faster. A long-running task should return its durable
-acceptance/status rather than hold an interactive request until completion.
+Every active component keeps an explicit finite budget appropriate to the resource
+it owns. The two-second SQL limit belongs to a query or actual SQL transaction,
+not an agent run, cache workflow or provider-backed request. An entire task or
+workflow exceeding two seconds is a performance warning only: it must not throw
+a capacity exception, cancel the job or discard useful work. Warning observations
+use the bounded singleton performance reporter; reporter pressure never affects
+execution. Backpressure holds or paces incoming work before dispatch, preserving
+accepted physical work until it settles.
 
 Model/provider calls, embeddings, file transfers, workflow stages, adapter actions
 and operator tasks need explicit finite budgets appropriate to their operation.
@@ -361,35 +364,23 @@ defines the proposed implementation and its acceptance criteria.
 
 ### Bound SQL work by a completion deadline
 
-Individual request-serving queries must normally complete within **500 ms** and
-must never exceed **1 second**, including lock waits, execution and result
-materialization. These are per-query performance and completion requirements,
-not p95 allowances: a percentile or average below the limit does not excuse slow
-outliers. Investigate repeated 500 ms breaches; treat every 1-second breach as a
-defect requiring query, projection, index or contention work. Validate representative
-cardinality, cold and warm reads and concurrent load. Do not raise limits to hide
-regressions. Background maintenance and migrations may use separately configured,
-justified finite budgets as described below.
+Individual request-serving queries should normally complete within **500 ms** and
+have a configurable **2-second default completion limit**, including lock waits,
+execution and result materialization. Investigate slow-query outliers and fix query
+shape, repeated reads, indexes and contention. Background SQL, maintenance and
+migrations may use explicitly configured finite budgets appropriate to their work.
 
-Every request-serving database work unit must resolve within one configurable
-completion budget, with a **2-second default ceiling**. This is a generous failure
-boundary for the entire unit, not a per-query allowance: ordinary queries,
-especially cache-backed paths, should finish substantially sooner. Fix duplicated
-work, query shape, projections and indexes rather than raising the limit to conceal
-slow SQL.
-
-A work unit is the database phase that produces one repository operation's result
-or atomic effect, not an entire agent job spanning provider calls. Its monotonic
-deadline starts before database admission and covers admission/connection waits,
-lock waits, every statement, result materialization and transaction completion.
-Nested database work inherits the earlier enclosing deadline. Multiple statements,
-cache misses, fallback SQL and permitted retries consume the remaining budget;
-none starts a new two-second allowance. Keep provider work outside this unit.
-Each statement uses the earlier of its one-second ceiling and the remaining
-operation deadline; a new query or retry never resets the shared budget.
+A hard SQL scope covers one query or one actual SQL transaction. Nested statements
+inside that transaction inherit its remaining deadline; do not reset an active
+transaction's allowance. Separate auto-commit queries/transactions, cache
+coordination, provider calls and a larger workflow do not share an invented
+two-second lifetime. Provider work stays outside database connections and has its
+own finite transport/admission budget. Slow whole-workflow observations are WARN
+events, not thrown exceptions. Genuine failed operations are ERROR diagnostics;
+recovered/expected warning conditions retain their warning classification.
 
 Track query duration distributions, maximum observed duration, counts exceeding
-500 ms and 1 second, failures and cancellations in Prometheus with bounded labels.
+500 ms and 2 seconds, failures and cancellations in Prometheus with bounded labels.
 Include failed/cancelled executions so a success-only latency graph cannot conceal
 timeouts. SQL text, parameters, query hashes and account/resource identities must
 not become metric labels. Separate database execution from admission/connection
@@ -399,7 +390,9 @@ query or operation completed within its budget.
 Enforce the remaining budget at database/JDBC execution as well as caller waits.
 A future, socket or cache-wait timeout alone does not cancel SQL. At expiry stop
 new statements, cancel outstanding SQL, roll back the active transaction and
-return the owning typed timeout/unavailable failure. Do not publish late results,
+return the owning typed query failure. `ReadUnavailableException` means real
+capacity backpressure, never elapsed time or invalidated visibility. A failed SQL
+unit must not masquerade as a missing database dependency and terminate the whole job. Do not publish late results,
 admit further effects or deliberately commit after observing expiry. Retain
 physical-work accounting until cancellation/completion actually releases resources.
 
@@ -418,15 +411,14 @@ rollback, no late result publication, resource release and mutation uncertainty.
 Use mocks for deadline propagation; select PostgreSQL tests only for behavior
 that requires actual cancellation, locks or transactional effects.
 
-**Current enforcement gap:** this is the required contract, not a claim that
-every existing SQL path already enforces the 500 ms target, one-second query ceiling
-or shared two-second completion budget. `plowshare.projection-cache.timeout`
-defaults to two seconds and bounds read waits; an elected cache loader may outlive
-that caller budget. Some paths set their own SQL/transaction timeouts. Connection
-admission remains wait-only, and no universal two-second SQL cancellation default
-is configured. Treat these gaps as implementation work; do not report a timeout
-guarantee without tracing the actual database cancellation and transaction path.
-Preserve the throttle's no-mid-handler-replay contract when implementing deadlines.
+**Current enforcement gap:** not every SQL owner implements physical cancellation
+and bounded connection acquisition. Do not claim universal cancellation from a
+caller-side timer. The accepted inline projection path coalesces until its physical
+load settles; `plowshare.projection-cache.timeout` is not a workflow/SQL deadline.
+Its explicit asynchronous cache API retains its separately documented wait bound.
+Work warnings use `plowshare.telemetry.performance.warning-threshold` (2s default)
+and never fail requests. Trace actual query cancellation, rollback and physical
+resource release before making stronger guarantees.
 
 ### Hold connections briefly
 

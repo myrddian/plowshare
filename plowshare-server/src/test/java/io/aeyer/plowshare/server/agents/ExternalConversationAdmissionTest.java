@@ -16,6 +16,8 @@ import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -24,29 +26,37 @@ import org.junit.jupiter.api.Test;
 
 class ExternalConversationAdmissionTest {
   @Test
-  void expiredExIsRefusedBeforeAnyJobLinkageOrRuntimeCall() {
+  void interruptedExIsRefusedBeforeAnyJobLinkageOrRuntimeCall() {
     var authority = mock(OperationAuthority.class);
     var runtime = mock(JobRuntime.class);
     var transcript = mock(Transcript.class);
     try (var jobs = new JobStore(authority, runtime)) {
-      var expired =
-          assertThrows(
-              ExternalConversationUnavailableException.class,
-              () ->
-                  ExternalConversationAdmission.within(
-                      Duration.ofNanos(1),
-                      () ->
-                          jobs.submit(
-                              mock(AgentDefinition.class),
-                              "work",
-                              Home.of("house"),
-                              null,
-                              Budget.of(10),
-                              transcript,
-                              Origin.TURN,
-                              ignored -> {})));
+      Thread.currentThread().interrupt();
+      ReadFailedException interrupted;
+      try {
+        interrupted =
+            assertThrows(
+                ReadFailedException.class,
+                () ->
+                    ExternalConversationAdmission.within(
+                        Duration.ofNanos(1),
+                        () ->
+                            jobs.submit(
+                                mock(AgentDefinition.class),
+                                "work",
+                                Home.of("house"),
+                                null,
+                                Budget.of(10),
+                                transcript,
+                                Origin.TURN,
+                                ignored -> {})));
+        assertTrue(Thread.currentThread().isInterrupted());
+      } finally {
+        Thread.interrupted(); // The caller's genuine cancellation must not leak into another test.
+      }
       verifyNoInteractions(authority, runtime, transcript);
-      var fault = Faults.of(expired);
+      assertEquals(ReadFailedException.Reason.INTERRUPTED, interrupted.reason());
+      var fault = Faults.of(interrupted);
       assertEquals(Code.ARCHIVE_UNAVAILABLE, fault.code());
       assertFalse(fault.detail().contains("Nothing was read"));
       assertFalse(fault.detail().contains("nothing was written"));
@@ -56,7 +66,20 @@ class ExternalConversationAdmissionTest {
   }
 
   @Test
-  void admittedWorkMayPhysicallyStartAfterCallerExpiryWithoutANewRejectionBranch()
+  void elapsedObservationThresholdDoesNotRefuseAdmissionOrInstallASqlDeadline() {
+    assertTrue(
+        ExternalConversationAdmission.within(
+            Duration.ofNanos(1),
+            () -> {
+              assertFalse(ReadDeadline.currentDeadlineNanos().isPresent());
+              ExternalConversationAdmission.requireAdmission();
+              return true;
+            }));
+    ExternalConversationAdmission.requireAdmission();
+  }
+
+  @Test
+  void admittedWorkMayPhysicallyStartAfterObservationThresholdWithoutANewRejectionBranch()
       throws Exception {
     var runtime = mock(JobRuntime.class);
     var definition = mock(AgentDefinition.class);

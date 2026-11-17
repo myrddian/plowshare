@@ -11,9 +11,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.aeyer.plowshare.server.cache.CacheTestSupport.HeldExecutor;
 import io.aeyer.plowshare.server.cache.CacheTestSupport.ManualTimer;
 import io.aeyer.plowshare.server.cache.CacheTestSupport.Value;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class SnapshotExistingReadTest {
+  @Test
+  void aColdExistingOnlyMissDoesNotNeedTheOccupiedWaiterOrLoadSeat() {
+    HeldExecutor executor = new HeldExecutor();
+    var limits =
+        new SnapshotCache.Limits(4, 100_000, 1, 100_000, 1, 1, 4, 32, Duration.ofSeconds(5));
+    try (ManualTimer timer = new ManualTimer();
+        var cache =
+            new BoundedSnapshotCache<Value>(namespace(), limits, executor, timer, Runnable::run)) {
+      assertTrue(cache.completeRecovery(cache.beginRecovery()));
+      var heldRequest = request("held");
+      var held = cache.read(heldRequest, () -> loaded(heldRequest, "held"));
+      assertEquals(1, cache.statistics().waiters());
+      assertTrue(cache.readExisting(request("cold")).isEmpty());
+      assertEquals(1, cache.statistics().waiters());
+      assertEquals(1, cache.statistics().loads());
+      assertEquals(1, executor.size());
+      held.cancel();
+      executor.runNext();
+      assertEquals(0, cache.statistics().loads());
+    }
+  }
+
   @Test
   void missDoesNotElectAndExistingJoinCancellationIsCallerLocal() {
     HeldExecutor executor = new HeldExecutor();

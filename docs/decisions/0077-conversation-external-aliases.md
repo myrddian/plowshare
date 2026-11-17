@@ -227,20 +227,23 @@ capability, which is outside this slice.
 
 ## Budgets, persistence and evidence
 
-Alias work uses one configurable completion budget, default two seconds, covering
-admission, connection acquisition, lock waits, all statements/materialization and
-transaction completion. Nested ordinary creation/authority work shares the
-remaining budget. Each query normally completes within 500 ms and has a ceiling
-of the earlier of one second and remaining operation time. On expiry cancel SQL,
-roll back active work, reject late results and retain uncertainty if commit status
-cannot be established; never retry a possibly committed mutation. Track bounded
-latency distributions, 500 ms/one-second breaches and cancellation in Prometheus.
-Do not hold a connection while performing hooks, network or inference work.
+Each alias query or actual SQL transaction uses a configurable two-second default
+completion budget, including connection acquisition, lock waits, statements,
+materialization and transaction completion. Nested SQL shares the earlier actual
+transaction deadline. On expiry cancel SQL, roll back active work and retain
+uncertainty if commit status cannot be established; never retry a possibly
+committed mutation. Track latency distributions, 500 ms breaches and two-second
+cancellation in Prometheus. Do not hold a connection during hooks, network or
+inference work.
 
-This is the required new-path contract, not proof of existing universal SQL
-cancellation: `ReadDeadline` currently owns cache/read waits, and existing SDK
-reply timers exclude some queueing. CORE-02 must inspect actual owner enforcement,
-implement the affected bounded alias path and report any wider remaining gap.
+The facade, common authorization, hooks, job admission and reply delivery do not
+share an invented two-second workflow lifetime. Slow request observations warn
+through the bounded singleton performance reporter and never replace accepted
+work with an exception. Intake and retained reply counts remain bounded;
+backpressure refuses new work before dispatch without cancelling accepted work.
+SQL scope ownership does not establish universal cancellation for repositories
+that have not adopted it. Existing SDK reply timers retain their own public
+semantics and do not prove remote abort.
 A new cache is unnecessary for this indexed point lookup; current authority is
 checked every operation and aliases do not become permission leases.
 

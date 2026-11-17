@@ -33,20 +33,17 @@ connection acquisition, while the pool separately bounds physical database work.
 
 ## Rules
 
-- Individual request-serving queries must normally finish within **500 ms**, with
-  a **1-second worst-case ceiling** including locks, execution and materialization.
-  Use the earlier of that ceiling and the enclosing operation deadline. Repeated
-  500 ms breaches require investigation; any 1-second breach is a defect, not a
-  reason to increase the budget. Track distributions, threshold breaches and
-  cancellations in Prometheus with bounded labels; execute-only timing does not
-  cover result materialization or connection/admission waits.
-- Every request-serving database work unit has one configurable **2-second default
-  completion ceiling**, covering admission, acquisition, locks, SQL and returned
-  result/transaction completion. Nested queries, cache misses and retries share
-  what remains. This is a failure boundary; normal execution should be much faster.
-  Expiry must cancel SQL, roll back the active transaction and reject late results;
-  preserve uncertain commits and never replay a mutation. Other SQL needs an
-  explicit bounded budget, not an unlimited background/maintenance exemption.
+- Individual request-serving queries should normally finish within **500 ms** and
+  use a configurable **2-second default completion limit**, including locks,
+  execution and materialization. Statements inside one actual SQL transaction
+  share its remaining budget. Separate transactions, cache coordination and
+  provider/workflow stages do not share an invented two-second lifetime.
+- On query expiry, cancel that SQL unit and roll back its active transaction.
+  Retain earlier useful work and possible commit uncertainty; do not kill the
+  entire job or replay prior effects. `ReadFailedException` carries query timeout
+  or cancellation; `ReadUnavailableException` means real backpressure only.
+  Whole-workflow duration is an isolated performance warning, never an exception.
+  Other SQL needs an explicit finite budget appropriate to its maintenance work.
   Follow the [deadline rule and enforcement gap](../../docs/coding-standards.md#bound-sql-work-by-a-completion-deadline).
 - Remove fetch-discard-refetch, N+1 reads and repeated collection/permission
   resolution at their owner. Pass already-loaded typed values where their scope
@@ -76,19 +73,21 @@ connection acquisition, while the pool separately bounds physical database work.
   history requires an explicitly reviewed, rehearsed reconciliation; never blindly
   relabel/repair rows or falsify the record of what ran.
 
-## Explicit Ex-operation SQL scope
+## Explicit SQL-unit scope
 
-The Ex conversation facade's internal `SqlWorkBudget` is an explicit opt-in
-completion scope, not a transaction, grant or arbitrary SQL executor. Its pool
+`SqlWorkBudget` is an explicit opt-in query/actual-transaction completion scope,
+not a facade/workflow lifetime, grant or arbitrary SQL executor. Hooks, provider
+IO and job admission stay outside it. Its pool
 infrastructure decorates repository and independent authoritative-version leases;
 the raw primary Hikari source, Flyway and LISTEN lifecycle stay intact. A shared
 JdbcTemplate and transaction manager must retain the same decorated source
 identity, including when ordinary pool admission is disabled.
 
-An active scope shares the earlier operation deadline with nested ReadDeadline
+An active scope shares the earlier actual SQL deadline with nested ReadDeadline
 work and bounds acquisition, statement execution/materialization and owned
-cleanup. Logical timeout is unavailable/possibly uncertain, never the outer
-CAPACITY_EXHAUSTED proof for mutation replay. Abort/close retains physical lease
+cleanup. Deadline/cancellation/closure use `ReadFailedException`; only occupied scope
+capacity uses `ReadUnavailableException`. Logical timeout can be uncertain and
+never supplies the outer CAPACITY_EXHAUSTED proof for mutation replay. Abort/close retains physical lease
 and throttle occupancy until it settles; late alarms cannot target a recycled
 lease or worker. Supported driver assumptions and exact test evidence belong in
 the implementation report, not a claim of universal JDBC termination.
@@ -113,9 +112,13 @@ network/watchdog deadline and owned physical abort/close path. Failed
 reset discards the exact still-owned pool lease before close can recycle it.
 Client expiry/socket closure alone does not prove backend cancellation; selected
 PostgreSQL tests must check remote activity/row-lock release and clean reuse.
-Cancellation uses a separate bounded interrupt owner because Thread.interrupt
-can itself block inside a channel interruptor. Such physical work stays owned;
-watchdogs and scope bookkeeping must remain free to cancel other scopes.
+SQL watchdogs cancel only owned JDBC resources; they never inject an interrupt into
+the enclosing workflow thread. Java cannot distinguish that bit from genuine
+caller cancellation. Server statement/lock limits, driver network deadlines and
+owned abort/close enforce the SQL boundary. Connection acquisition and a broken
+driver can return after logical expiry; physical ownership remains until they
+settle, and a late result is withheld. This is not a claim of instantaneous abort.
+Genuine caller interruption is preserved and never cleared.
 
 These contracts do not establish universal SQL cancellation for unscoped callers,
 and SQL-only deadlines do not bound arbitrary hook/file loading or user callbacks.
@@ -128,9 +131,18 @@ or verified.
 Do not copy direct JDBC from an old service, treat a proposed operation-pipeline
 document as an implemented API, or introduce a shared cache to hide expensive
 cold SQL. Follow the current repository and its actual cache adoption points.
-The existing two-second projection-cache wait budget is not universal SQL
-cancellation: a loader can continue after its caller times out. Trace and verify
+The explicit asynchronous projection-cache API wait budget is not universal SQL
+cancellation: a loader can continue after its caller times out. Accepted inline
+reads have no new workflow timer; only an existing caller SQL deadline applies. Trace and verify
 the actual execution/cancellation path before claiming the deadline is enforced.
+
+Collection log visibility can discard a successful tentative cached page after a
+raced global version fence and evaluate one pure authoritative query within the
+callback's SQL-unit budget, narrowed by an already active transaction deadline.
+It never repeats SQL/cancellation failures or mutations.
+Accepted inline cache hits, bypasses and coalesced loads create no hard workflow
+timer. They honor a real caller SQL deadline only when one already exists; slow
+cache work warns through the bounded performance observer instead of failing.
 
 ## Checks
 

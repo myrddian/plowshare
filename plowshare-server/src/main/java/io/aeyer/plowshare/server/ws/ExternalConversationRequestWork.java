@@ -5,7 +5,7 @@ import io.aeyer.plowshare.server.agents.ExternalConversationUnavailableException
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/** Typed Ex routing scope; SQL implementation and caller notification remain separate owners. */
+/** Typed Ex routing facade; actual SQL budgets and physical reply ownership remain separate. */
 public interface ExternalConversationRequestWork {
   <T> T within(Supplier<T> action);
 

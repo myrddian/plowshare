@@ -53,25 +53,34 @@ class ExternalConversationProjectAdmissionTest {
   }
 
   @Test
-  void deadlineAndScopeEndInvalidateRetainedEvidence() {
-    var expired =
+  void sqlDeadlineDoesNotEndTheExplicitRequestScopeAndClosingStillInvalidatesEvidence() {
+    var scoped =
         ReadDeadline.within(
             Duration.ofNanos(1),
             () ->
                 authorization.requireExternalConversation(
                     "agent.run.ex", AccessRequest.project("house"), "alice", "socket"));
-    assertFalse(expired.consume("house", "alice", "socket", "agent.run.ex"));
-    var leftScope =
-        ReadDeadline.within(
-            Duration.ofSeconds(2),
-            () ->
-                authorization.requireExternalConversation(
-                    "agent.run.ex", AccessRequest.project("house"), "alice", "socket"));
-    assertFalse(leftScope.consume("house", "alice", "socket", "agent.run.ex"));
-    var scoped =
+    try (scoped) {
+      assertTrue(scoped.consume("house", "alice", "socket", "agent.run.ex"));
+    }
+    assertFalse(scoped.consume("house", "alice", "socket", "agent.run.ex"));
+  }
+
+  @Test
+  void anotherExplicitRequestScopeCannotConsumeTheOuterScopesEvidence() {
+    var outer =
         authorization.requireExternalConversation(
             "agent.run.ex", AccessRequest.project("house"), "alice", "socket");
-    scoped.close();
-    assertFalse(scoped.consume("house", "alice", "socket", "agent.run.ex"));
+    try (outer) {
+      var inner =
+          authorization.requireExternalConversation(
+              "agent.run.ex", AccessRequest.project("house"), "alice", "socket");
+      try (inner) {
+        assertFalse(outer.consume("house", "alice", "socket", "agent.run.ex"));
+        assertTrue(inner.consume("house", "alice", "socket", "agent.run.ex"));
+      }
+      assertTrue(outer.consume("house", "alice", "socket", "agent.run.ex"));
+    }
+    assertFalse(outer.consume("house", "alice", "socket", "agent.run.ex"));
   }
 }

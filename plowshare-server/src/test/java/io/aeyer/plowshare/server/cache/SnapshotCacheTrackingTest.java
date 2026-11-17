@@ -1,6 +1,14 @@
 package io.aeyer.plowshare.server.cache;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import io.aeyer.plowshare.server.information.InformationCatalogueRepository.AuthorizedText;
 import io.aeyer.plowshare.server.information.InformationContext;
@@ -290,15 +298,18 @@ class SnapshotCacheTrackingTest {
   }
 
   @Test
-  void dependencyAndReservationCapacityRefusalsDoNotCallLoadersOrRetainMetadata() {
+  void intrinsicSizeLimitsDoNotCallLoadersOrPretendTransientCapacityCanHelp() {
     var fixture = ready(limits(2, 100_000, 100_000, 1, 4));
     var one = new SnapshotCache.Dependency("one");
     var two = new SnapshotCache.Dependency("two");
     var tooMany = request("many", "owner", "v1", Set.of(one, two), 100);
-    failure(SnapshotCache.Failure.CAPACITY, fixture, fixture.cache.read(tooMany, mustNotLoad()));
+    failure(
+        SnapshotCache.Failure.LOAD_TOO_LARGE, fixture, fixture.cache.read(tooMany, mustNotLoad()));
     var unreservable = request("huge", "owner", "v1", Set.of(), Long.MAX_VALUE);
     failure(
-        SnapshotCache.Failure.CAPACITY, fixture, fixture.cache.read(unreservable, mustNotLoad()));
+        SnapshotCache.Failure.LOAD_TOO_LARGE,
+        fixture,
+        fixture.cache.read(unreservable, mustNotLoad()));
     empty(fixture.cache.statistics());
     var a = request("a", "owner", "v1", Set.of(one), 100);
     load(fixture, a, "a", 100);
@@ -322,7 +333,10 @@ class SnapshotCacheTrackingTest {
     var dependent =
         request(
             "dependent", "owner", "v1", Set.of(new SnapshotCache.Dependency("collection")), 100);
-    failure(SnapshotCache.Failure.CAPACITY, fixture, fixture.cache.read(dependent, mustNotLoad()));
+    failure(
+        SnapshotCache.Failure.LOAD_TOO_LARGE,
+        fixture,
+        fixture.cache.read(dependent, mustNotLoad()));
     assertEquals(1, fixture.cache.statistics().entries());
     assertEquals(1, fixture.cache.statistics().dependencyLinks());
   }

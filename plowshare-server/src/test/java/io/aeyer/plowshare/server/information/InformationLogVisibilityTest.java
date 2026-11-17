@@ -1,16 +1,47 @@
 package io.aeyer.plowshare.server.information;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
-import io.aeyer.plowshare.server.cache.*;
-import io.aeyer.plowshare.server.reads.*;
+import io.aeyer.plowshare.server.cache.BoundedSnapshotCache;
+import io.aeyer.plowshare.server.cache.ProjectionChangeSignals;
+import io.aeyer.plowshare.server.cache.ProjectionVersions;
+import io.aeyer.plowshare.server.cache.SnapshotCache;
+import io.aeyer.plowshare.server.cache.VersionedProjectionCache;
+import io.aeyer.plowshare.server.reads.BoundedReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadAdmission;
+import io.aeyer.plowshare.server.reads.ReadCapacityProperties;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 class InformationLogVisibilityTest {
@@ -35,6 +66,10 @@ class InformationLogVisibilityTest {
     final JdbcInformationLogVisibility visibility;
 
     Fixture() {
+      this(Duration.ofSeconds(2));
+    }
+
+    Fixture(Duration budget) {
       when(versions.capture(DOMAINS)).thenReturn(Optional.of(token));
       when(versions.current(any())).thenReturn(true);
       when(versions.canShare()).thenReturn(true);
@@ -56,7 +91,9 @@ class InformationLogVisibilityTest {
               signals,
               DOMAINS,
               1_000_000);
-      visibility = new JdbcInformationLogVisibility(jdbc, cache, versions, admission);
+      visibility =
+          new JdbcInformationLogVisibility(
+              jdbc, cache, versions, admission, LogReadabilityCheck.none(), budget);
       when(jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
           .thenReturn(List.of("restricted"));
     }
@@ -86,20 +123,308 @@ class InformationLogVisibilityTest {
   }
 
   @Test
-  void revocationDuringTheConsumerRefusesWithoutRepeatingItsQuery() {
+  void revocationDuringTheConsumerDiscardsTentativeAllowsAndUsesOneAuthoritativeRead() {
+    try (var f = new Fixture()) {
+      var queries = new AtomicInteger();
+      var result =
+          f.visibility.read(
+              "reader",
+              facts -> {
+                queries.incrementAndGet();
+                if (facts.blocked().isPresent()) {
+                  when(f.versions.current(f.token)).thenReturn(false);
+                  return List.of("protected");
+                }
+                assertEquals(1, f.admission.active(ReadAdmission.Work.AUTHORITY));
+                return List.<String>of();
+              });
+      assertEquals(List.of(), result, "The tentative stale allow must never be returned");
+      assertEquals(2, queries.get());
+      verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
+      assertEquals(0, f.admission.active(ReadAdmission.Work.AUTHORITY));
+    }
+  }
+
+  @Test
+  void unrelatedDomainChurnDoesNotInvalidateTheAuthoritativeFallback() {
+    try (var f = new Fixture()) {
+      var queries = new AtomicInteger();
+      assertEquals(
+          "current page",
+          f.visibility.read(
+              "reader",
+              facts -> {
+                queries.incrementAndGet();
+                when(f.versions.current(f.token)).thenReturn(false);
+                return facts.blocked().isPresent() ? "tentative page" : "current page";
+              }));
+      assertEquals(2, queries.get(), "One direct read, without a cache reload or retry loop");
+      verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
+    }
+  }
+
+  @Test
+  void concurrentRacedReadsWaitForTheSameAccountsAuthoritativeSeat() throws Exception {
+    try (var f = new Fixture();
+        var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var cached = new CountDownLatch(2);
+      var firstAuthoritative = new CountDownLatch(1);
+      var release = new CountDownLatch(1);
+      var authoritative = new AtomicInteger();
+      Function<InformationLogVisibility.Facts, String> reader =
+          facts -> {
+            if (facts.blocked().isPresent()) {
+              cached.countDown();
+              await(cached);
+              when(f.versions.current(f.token)).thenReturn(false);
+              return "tentative";
+            }
+            assertEquals(1, f.admission.active(ReadAdmission.Work.AUTHORITY));
+            if (authoritative.incrementAndGet() == 1) {
+              firstAuthoritative.countDown();
+              await(release);
+            }
+            return "current page";
+          };
+      var first = callers.submit(() -> f.visibility.read("reader", reader));
+      var second = callers.submit(() -> f.visibility.read("reader", reader));
+      try {
+        assertTrue(firstAuthoritative.await(5, TimeUnit.SECONDS));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (f.admission.waitingAuthoritative() != 1 && System.nanoTime() - deadline < 0)
+          Thread.sleep(1);
+        assertEquals(1, f.admission.waitingAuthoritative());
+      } finally {
+        release.countDown();
+      }
+      assertEquals("current page", first.get(5, TimeUnit.SECONDS));
+      assertEquals("current page", second.get(5, TimeUnit.SECONDS));
+      assertEquals(2, authoritative.get());
+      assertEquals(0, f.admission.active(ReadAdmission.Work.AUTHORITY));
+      assertEquals(0, f.admission.waitingAuthoritative());
+    }
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      assertTrue(latch.await(5, TimeUnit.SECONDS));
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(interrupted);
+    }
+  }
+
+  @Test
+  void aCallerThatBecomesIneligibleStillFailsClosedWithoutFallback() {
     try (var f = new Fixture()) {
       var queries = new AtomicInteger();
       assertThrows(
-          ReadUnavailableException.class,
+          ReadFailedException.class,
           () ->
               f.visibility.read(
                   "reader",
                   facts -> {
                     queries.incrementAndGet();
-                    when(f.versions.current(f.token)).thenReturn(false);
+                    when(f.versions.canShare()).thenReturn(false);
                     return "protected";
                   }));
+      assertEquals(1, queries.get(), "Dirty/historical/expiry-spanning callers cannot retry");
+    }
+  }
+
+  @Test
+  void anExpiryCrossedDuringFallbackStillRefusesHistoricalAuthority() {
+    try (var f = new Fixture()) {
+      var queries = new AtomicInteger();
+      assertThrows(
+          ReadFailedException.class,
+          () ->
+              f.visibility.read(
+                  "reader",
+                  facts -> {
+                    queries.incrementAndGet();
+                    if (facts.blocked().isPresent())
+                      when(f.versions.current(f.token)).thenReturn(false);
+                    else when(f.versions.canShare()).thenReturn(false);
+                    return "protected";
+                  }));
+      assertEquals(2, queries.get());
+      assertEquals(0, f.admission.active(ReadAdmission.Work.AUTHORITY));
+    }
+  }
+
+  @Test
+  void anAlreadyAuthoritativeCallbackIsNotRefusedByCacheVersionChurn() {
+    try (var f = new Fixture()) {
+      when(f.jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
+          .thenReturn(Collections.nCopies(32769, "blocked"));
+      var queries = new AtomicInteger();
+      assertEquals(
+          "current page",
+          f.visibility.read(
+              "reader",
+              facts -> {
+                assertTrue(facts.blocked().isEmpty());
+                queries.incrementAndGet();
+                when(f.versions.current(f.token)).thenReturn(false);
+                return "current page";
+              }));
       assertEquals(1, queries.get());
+    }
+  }
+
+  @Test
+  void anExistingTransactionDeadlineConstrainsCacheAndBothSqlUnits() {
+    try (var f = new Fixture()) {
+      var deadlines = new ArrayList<Long>();
+      when(f.jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
+          .thenAnswer(
+              call -> {
+                deadlines.add(ReadDeadline.deadlineNanos(Duration.ofDays(1)));
+                return List.of("restricted");
+              });
+      ReadDeadline.within(
+          Duration.ofSeconds(1),
+          () -> {
+            long expected = ReadDeadline.deadlineNanos(Duration.ofDays(1));
+            assertEquals(
+                "current page",
+                f.visibility.read(
+                    "reader",
+                    facts -> {
+                      deadlines.add(ReadDeadline.deadlineNanos(Duration.ofDays(1)));
+                      when(f.versions.current(f.token)).thenReturn(false);
+                      return facts.blocked().isPresent() ? "tentative page" : "current page";
+                    }));
+            assertEquals(List.of(expected, expected, expected), deadlines);
+            return true;
+          });
+    }
+  }
+
+  @Test
+  void autocommitCacheWaitingAndFallbackDoNotConsumeAnotherSqlUnitsBudget() {
+    try (var f = new Fixture(Duration.ofMillis(100))) {
+      when(f.jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
+          .thenAnswer(
+              call -> {
+                Thread.sleep(150);
+                return List.of("restricted");
+              });
+      var deadlines = new ArrayList<Long>();
+      assertEquals(
+          "current page",
+          f.visibility.read(
+              "reader",
+              facts -> {
+                long deadline = ReadDeadline.deadlineNanos(Duration.ofDays(1));
+                deadlines.add(deadline);
+                assertTrue(
+                    deadline - System.nanoTime() > Duration.ofMillis(50).toNanos(),
+                    "A new autocommit SQL unit starts after its cache/admission wait");
+                if (facts.blocked().isPresent()) {
+                  long until = System.nanoTime() + Duration.ofMillis(20).toNanos();
+                  while (System.nanoTime() - until < 0) Thread.onSpinWait();
+                  when(f.versions.current(f.token)).thenReturn(false);
+                  return "tentative page";
+                }
+                return "current page";
+              }));
+      assertEquals(2, deadlines.size());
+      assertTrue(
+          deadlines.get(1) > deadlines.getFirst(),
+          "Autocommit fallback is a new SQL unit, not a renewed active transaction");
+      assertTrue(
+          ReadDeadline.deadlineNanos(Duration.ofDays(1)) - System.nanoTime()
+              > Duration.ofHours(1).toNanos());
+    }
+  }
+
+  @Test
+  void aLateCachedResultCannotStartFallbackAndALateAuthoritativeResultCannotEscape() {
+    for (boolean authoritative : List.of(false, true)) {
+      try (var f = new Fixture(Duration.ofMillis(100))) {
+        if (authoritative) when(f.versions.capture(DOMAINS)).thenReturn(Optional.empty());
+        var queries = new AtomicInteger();
+        assertThrows(
+            ReadFailedException.class,
+            () ->
+                f.visibility.read(
+                    "reader",
+                    facts -> {
+                      queries.incrementAndGet();
+                      when(f.versions.current(f.token)).thenReturn(false);
+                      long deadline = ReadDeadline.deadlineNanos(Duration.ofDays(1));
+                      while (System.nanoTime() - deadline < 0) Thread.onSpinWait();
+                      return "late page";
+                    }));
+        assertEquals(1, queries.get());
+        assertEquals(0, f.admission.active(ReadAdmission.Work.AUTHORITY));
+      }
+    }
+  }
+
+  @Test
+  void actualCallbackErrorsAndCancellationAreNeverRetried() {
+    for (var failure :
+        List.of(
+            new DataAccessResourceFailureException("SQL cancelled"),
+            new ReadUnavailableException(),
+            new IllegalStateException("mapper failed"))) {
+      try (var f = new Fixture()) {
+        var queries = new AtomicInteger();
+        assertSame(
+            failure,
+            assertThrows(
+                RuntimeException.class,
+                () ->
+                    f.visibility.read(
+                        "reader",
+                        facts -> {
+                          queries.incrementAndGet();
+                          throw failure;
+                        })));
+        assertEquals(1, queries.get());
+      }
+    }
+  }
+
+  @Test
+  void authoritativeFallbackErrorsAreNotRetriedAgain() {
+    try (var f = new Fixture()) {
+      var failure = new DataAccessResourceFailureException("SQL cancelled during fallback");
+      var queries = new AtomicInteger();
+      assertSame(
+          failure,
+          assertThrows(
+              DataAccessResourceFailureException.class,
+              () ->
+                  f.visibility.read(
+                      "reader",
+                      facts -> {
+                        queries.incrementAndGet();
+                        if (facts.blocked().isEmpty()) throw failure;
+                        when(f.versions.current(f.token)).thenReturn(false);
+                        return "tentative";
+                      })));
+      assertEquals(2, queries.get());
+      assertEquals(0, f.admission.active(ReadAdmission.Work.AUTHORITY));
+    }
+  }
+
+  @Test
+  void actualCacheLoadErrorsAreNotRetriedAsAuthoritativeQueries() {
+    try (var f = new Fixture()) {
+      var failure = new DataAccessResourceFailureException("connection lost");
+      when(f.jdbc.queryForList(anyString(), eq(String.class), any(Object[].class)))
+          .thenThrow(failure);
+      var queries = new AtomicInteger();
+      assertSame(
+          failure,
+          assertThrows(
+              DataAccessResourceFailureException.class,
+              () -> f.visibility.read("reader", facts -> queries.incrementAndGet())));
+      assertEquals(0, queries.get());
       verify(f.jdbc, times(1)).queryForList(anyString(), eq(String.class), any(Object[].class));
     }
   }

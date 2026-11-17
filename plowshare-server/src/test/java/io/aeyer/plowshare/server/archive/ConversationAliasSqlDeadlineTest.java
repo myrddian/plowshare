@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.archive;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -44,9 +46,9 @@ class ConversationAliasSqlDeadlineTest {
   void expiryBeforeRegistrationAbortsTheStillOwnedLateConnection() throws Exception {
     try (var scope = scope()) {
       alarms.getFirst().run();
-      verify(owner).interrupt();
+      verify(owner, never()).interrupt();
       Connection connection = mock(Connection.class);
-      assertThrows(ArchiveUnavailableException.class, () -> scope.attach(connection));
+      assertThrows(ReadFailedException.class, () -> scope.attach(connection));
       verify(connection).abort(any());
       verify(cancellation).run();
     }
@@ -60,7 +62,7 @@ class ConversationAliasSqlDeadlineTest {
       scope.detach();
       alarms.getFirst().run();
       verify(connection, never()).abort(any());
-      assertThrows(ArchiveUnavailableException.class, scope::check);
+      assertThrows(ReadFailedException.class, scope::check);
     }
   }
 
@@ -94,7 +96,7 @@ class ConversationAliasSqlDeadlineTest {
         verify(connection, never()).abort(any());
         alarms.get(2).run();
         verify(connection).abort(any());
-        assertThrows(ArchiveUnavailableException.class, scope::check);
+        assertThrows(ReadFailedException.class, scope::check);
       } finally {
         second.close();
       }
@@ -106,7 +108,9 @@ class ConversationAliasSqlDeadlineTest {
   void callerInterruptionIsRefusedWithoutClearingOrReplacingIt() {
     try (var scope = scope()) {
       when(owner.isInterrupted()).thenReturn(true);
-      assertThrows(ArchiveUnavailableException.class, scope::check);
+      assertEquals(
+          ReadFailedException.Reason.INTERRUPTED,
+          assertThrows(ReadFailedException.class, scope::check).reason());
       verify(owner, never()).interrupt();
     }
   }
@@ -115,7 +119,7 @@ class ConversationAliasSqlDeadlineTest {
   void elapsedBudgetRejectsLateResultsWithoutWaitingForTheAlarm() {
     try (var scope = scope()) {
       clock.set(1_000_000_000L);
-      assertThrows(ArchiveUnavailableException.class, scope::check);
+      assertThrows(ReadFailedException.class, scope::check);
     }
   }
 
@@ -127,7 +131,7 @@ class ConversationAliasSqlDeadlineTest {
       doThrow(failure).when(connection).abort(any());
       scope.attach(connection);
       alarms.getFirst().run();
-      assertSame(failure, assertThrows(ArchiveUnavailableException.class, scope::check).getCause());
+      assertSame(failure, assertThrows(ReadFailedException.class, scope::check).getCause());
       scope.detach();
     }
   }

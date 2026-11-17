@@ -19,6 +19,7 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.pool.OperationStatements;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.relay.RelayReadBudget;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
@@ -37,7 +38,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -830,6 +831,16 @@ public final class EventChannelHandler extends TextWebSocketHandler
     QueuedExternalConversationRequest external;
     try {
       external = retainExternal(socket, delivery, frame, assembledAtNanos);
+    } catch (ReadUnavailableException capacity) {
+      var correlation = correlationOf(frame);
+      // No dispatcher entry or handler exists yet; this refusal permits paced resubmission.
+      delivery.refuse(
+          text(correlation.get("id")),
+          text(correlation.get("type")),
+          Outcome.failed(
+              Code.CAPACITY_EXHAUSTED,
+              "Incoming request capacity is busy; no handler was started"));
+      return;
     } catch (RuntimeException unavailable) {
       var correlation = correlationOf(frame);
       Fault fault = Faults.of(unavailable);
@@ -878,8 +889,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
                 acknowledged.run();
                 return;
               }
-              // Early Ex notifications keep the full request window charged. They do not borrow
-              // the normal one-reply handoff exemption or block this writer on a queued handler.
+              // A normal Ex reply retains its input ownership until physical output settlement.
+              // SQL/provider budgets belong to their actual owners, never to this callback.
               delivery.answer(
                   text(correlation.get("id")),
                   type,
@@ -962,14 +973,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
         delivery.concurrent.offer(
             frame, request, (String) socket.getAttributes().get(HANDLE), external);
       } catch (ConcurrentRequests.CapacityExceededException congested) {
-        if (external == null) refuseCongested(delivery, request);
-        else {
-          external.answer(
-              Outcome.failed(
-                  Code.CAPACITY_EXHAUSTED,
-                  "Request queue is full; nothing was started, retry later"));
-          external.close();
-        }
+        if (external != null) external.close();
+        refuseCongested(delivery, request);
       }
       return true;
     } catch (RuntimeException invalid) {
@@ -1053,10 +1058,32 @@ public final class EventChannelHandler extends TextWebSocketHandler
                   ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
                   : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY,
               fence(socket, delivery, requestSession));
-      Consumer<Outcome> emit =
-          outcome -> {
+      CompletionStage<FrameRouter.Routed> answer;
+      // One socket request, counted on this request's own virtual thread (ConcurrentRequests starts
+      // one per request). Only the synchronous part of the handler is counted; work a handler
+      // completes on another thread is not part of this scope.
+      try (var ignored = OperationStatements.open(OperationStatements.Kind.SOCKET_REQUEST)) {
+        answer =
+            ConcurrentDispatch.TYPE.equals(type)
+                ? CompletableFuture.completedFuture(
+                    new FrameRouter.Routed(
+                        Outcome.ok(
+                            new ConcurrentDispatch.Selected(
+                                ConcurrentDispatch.MODE,
+                                advertisedRequestDepth(),
+                                ConcurrentDispatch.MAX_ID_BYTES)),
+                        false))
+                : router().routeForTransport(frame, asking);
+      }
+      return answer.thenAccept(
+          routed -> {
+            Outcome outcome = routed.outcome();
             if (!delivery.running || !socket.isOpen()) {
               delivered.run();
+              return;
+            }
+            if (routed.refusedBeforeHandler()) {
+              delivery.refuseAdmitted(id, type, outcome, delivered);
               return;
             }
             delivery.answer(
@@ -1074,8 +1101,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
             if (usageSubscriptions != null
                 && outcome.payload() instanceof io.aeyer.plowshare.protocol.Usage.Initial initial)
               usageSubscriptions.ready(socket.getId(), initial.subscription());
-          };
-      return concurrentAnswer(type, frame, asking).thenAccept(emit);
+          });
     } catch (RuntimeException invalid) {
       return CompletableFuture.failedFuture(invalid);
     }
@@ -1099,13 +1125,9 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
   private CompletionStage<Void> routeExternal(
       QueuedExternalConversationRequest completion, Supplier<CompletionStage<Outcome>> route) {
+    CompletionStage<Outcome> source;
     try {
-      // The returned stage follows PHYSICAL execution, never the early notification. This keeps
-      // ConcurrentRequests capacity, resource barriers and request identity owned until settlement.
-      return completion
-          .within(route)
-          .thenAccept(completion::answer)
-          .whenComplete((ignored, failure) -> completion.close());
+      source = completion.within(route);
     } catch (RuntimeException unavailable) {
       try {
         Fault fault = Faults.of(unavailable);
@@ -1118,6 +1140,28 @@ public final class EventChannelHandler extends TextWebSocketHandler
       completion.close();
       throw fatal;
     }
+    var reply = new CompletableFuture<Void>();
+    // The unexposed observer owns physical cleanup even if the returned reply is cancelled.
+    // No transport timer or fresh SQL context surrounds accepted handler/provider work.
+    source.whenComplete(
+        (outcome, failure) -> {
+          Throwable settledFailure = null;
+          try {
+            if (failure instanceof Error fatal) throw fatal;
+            if (failure == null) completion.answer(outcome);
+            else {
+              Fault fault = Faults.of(failure);
+              completion.answer(Outcome.failed(fault.code(), fault.detail()));
+            }
+          } catch (RuntimeException | Error failed) {
+            settledFailure = failed;
+          } finally {
+            completion.close();
+          }
+          if (settledFailure == null) reply.complete(null);
+          else reply.completeExceptionally(settledFailure);
+        });
+    return reply;
   }
 
   /** Recheck authority at execution, because a queued operation may outlive its account session. */
@@ -1858,6 +1902,41 @@ public final class EventChannelHandler extends TextWebSocketHandler
      */
     boolean refuse(String id, String type, Outcome outcome) {
       return enqueue(id, type, outcome, () -> {}, validity, () -> {}, () -> {}, false);
+    }
+
+    /**
+     * A dispatcher-admitted request whose router proved the business handler never started. Its
+     * execution/queueing stage must settle before releasing the request body and ID; release must
+     * precede the physical send because a client may immediately resubmit that same ID after
+     * receiving capacity flow control, even while send() is still returning. This reply takes no
+     * handoff claim. Its encoded output bytes remain owned until the physical send settles.
+     */
+    boolean refuseAdmitted(
+        String id, String type, Outcome outcome, ConcurrentRequests.Delivery dispatch) {
+      // The dispatcher callback retains its Request/body. Clear that reference before the send,
+      // alongside releasing accounting, rather than keeping uncharged input bytes in this Reply.
+      var ownership = new AtomicReference<>(dispatch);
+      boolean queued =
+          enqueue(
+              id,
+              type,
+              outcome,
+              () -> {},
+              validity,
+              () -> {
+                var owned = ownership.getAndSet(null);
+                if (owned != null) {
+                  owned.executionFinished().toCompletableFuture().join();
+                  owned.run();
+                }
+              },
+              () -> {},
+              false);
+      if (!queued) {
+        var owned = ownership.getAndSet(null);
+        if (owned != null) owned.run();
+      }
+      return queued;
     }
 
     /**

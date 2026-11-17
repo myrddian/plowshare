@@ -8,9 +8,7 @@ import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
-import io.aeyer.plowshare.server.reads.ReadDeadline;
 import io.aeyer.plowshare.server.requests.RequestProjects;
-import java.time.Duration;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -25,16 +23,17 @@ import org.springframework.stereotype.Component;
 public class ProjectAuthorization {
   /**
    * Single-use evidence for the immediately following synchronous Ex handler. Only this owner can
-   * mint it after full common policy. It expires with its request scope, deadline or first use and
-   * is never a continuing grant, shared cache entry or value supplied over the wire.
+   * mint it after full common policy. It ends with its explicit request scope or first use and is
+   * never a continuing grant, shared cache entry or value supplied over the wire.
    */
   public static final class ExternalAdmission implements AutoCloseable {
+    private static final ThreadLocal<ExternalAdmission> CURRENT = new ThreadLocal<>();
     private final String project;
     private final String account;
     private final String session;
     private final String operation;
     private final Thread owner = Thread.currentThread();
-    private final long end;
+    private final ExternalAdmission previous;
     private boolean active = true;
 
     private ExternalAdmission(String project, String account, String session, String operation) {
@@ -42,15 +41,14 @@ public class ProjectAuthorization {
       this.account = account;
       this.session = session;
       this.operation = operation;
-      // Ex routing already installed the configured deadline. Direct internal calls have a finite
-      // fallback, never a reusable permit outside this short synchronous owner scope.
-      this.end = ReadDeadline.deadlineNanos(Duration.ofSeconds(2));
+      previous = CURRENT.get();
+      CURRENT.set(this);
     }
 
     public boolean consume(String project, String account, String session, String operation) {
       if (!active
           || Thread.currentThread() != owner
-          || !ReadDeadline.isCurrent(end)
+          || CURRENT.get() != this
           || !Objects.equals(this.project, project)
           || !Objects.equals(this.account, account)
           || !Objects.equals(this.session, session)
@@ -62,6 +60,10 @@ public class ProjectAuthorization {
     @Override
     public void close() {
       active = false;
+      if (Thread.currentThread() == owner && CURRENT.get() == this) {
+        if (previous == null) CURRENT.remove();
+        else CURRENT.set(previous);
+      }
     }
   }
 

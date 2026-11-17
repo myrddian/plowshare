@@ -16,7 +16,9 @@ import static io.aeyer.plowshare.server.cache.ProjectionCacheStatistics.Event.VE
 
 import io.aeyer.plowshare.server.pool.SqlWorkBudget;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
@@ -56,13 +58,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * an item-scoped cache must be {@link ProjectionVersions.Domain#itemTracked item-tracked}; its
  * domain-level hints are ignored, because the same commits also arrive as item hints.
  *
- * <h2>One deadline per read</h2>
+ * <h2>Accepted reads and SQL deadlines</h2>
  *
- * <p>Each read opens a {@link ReadDeadline} of {@code budget} when it reaches the cache. The FETCH
- * slot wait of an elected loader and the wait of a caller joined to another caller's reload both
- * draw on it. A caller still waiting at the deadline, or an elected loader whose load outlived it,
- * receives {@link ReadUnavailableException} and no uncached SQL load is started. The elected
- * loader's value is still stored and serves the next read.
+ * <p>Accepted cache readers coalesce onto their physical load without a workflow-wide timeout. Slow
+ * cache reads are observed, not cancelled. Count, byte, load and waiter limits still bound resource
+ * demand. An explicitly enclosing SQL transaction deadline, interruption or closure can end a
+ * caller's wait without releasing the physical load's reservation before it settles.
  *
  * <h2>Notification-trusted hits</h2>
  *
@@ -98,7 +99,7 @@ public final class VersionedProjectionCache<T>
     }
   }
 
-  /** The default single deadline of one read; production supplies its configured budget. */
+  /** Legacy constructor compatibility value; inline reads have no aggregate completion timer. */
   static final Duration DEFAULT_BUDGET = Duration.ofSeconds(2);
 
   private static final long TOKEN_RESERVATION = 2048L + 128L * 4096;
@@ -108,7 +109,7 @@ public final class VersionedProjectionCache<T>
   private final ProjectionItemVersions itemVersions;
   private final Set<ProjectionVersions.Domain> domains;
   private final long maxWeight;
-  private final Duration budget;
+  private volatile WorkPerformanceReporter performance = WorkPerformanceReporter.NONE;
   private final ProjectionChangeSignals.Subscription subscription;
   private final AtomicReference<ProjectionChangeSignals.State> state = new AtomicReference<>();
   private final AtomicBoolean transitioning = new AtomicBoolean();
@@ -177,7 +178,7 @@ public final class VersionedProjectionCache<T>
     this(cache, versions, signals, domains, maxWeight, notifiedStaleness, DEFAULT_BUDGET);
   }
 
-  /** Domain-scoped cache whose reads each have one deadline of {@code budget}. */
+  /** The legacy {@code budget} is validated for configuration compatibility, not a workflow cap. */
   public VersionedProjectionCache(
       SnapshotCache<Versioned<T>> cache,
       ProjectionVersions versions,
@@ -239,7 +240,6 @@ public final class VersionedProjectionCache<T>
     this.cache = Objects.requireNonNull(cache);
     this.versions = versions;
     this.itemVersions = itemVersions;
-    this.budget = budget;
     this.domains = Set.copyOf(domains);
     if (this.domains.isEmpty() || maxWeight < 1)
       throw new IllegalArgumentException("Invalid projection limits");
@@ -332,6 +332,23 @@ public final class VersionedProjectionCache<T>
     }
   }
 
+  /** Composition-time observation only; telemetry cannot impose a cache workflow deadline. */
+  public VersionedProjectionCache<T> observing(WorkPerformanceReporter reporter) {
+    performance = Objects.requireNonNull(reporter);
+    return this;
+  }
+
+  private <R> R observeRead(Supplier<R> read) {
+    var observation =
+        performance.watch(WorkPerformanceReporter.Kind.CACHE_READ, "projection-cache.read");
+    try (observation) {
+      checkDeadline();
+      R value = read.get();
+      checkDeadline();
+      return value;
+    }
+  }
+
   public boolean enabled() {
     return true;
   }
@@ -351,8 +368,7 @@ public final class VersionedProjectionCache<T>
     Objects.requireNonNull(uncachedLoader);
     Objects.requireNonNull(weight);
     if (versions == null) throw new IllegalStateException("Item-scoped projection needs items");
-    return ReadDeadline.within(
-        budget, () -> readDomains(key, cacheable, boundedLoader, uncachedLoader, weight));
+    return observeRead(() -> readDomains(key, cacheable, boundedLoader, uncachedLoader, weight));
   }
 
   @Override
@@ -371,8 +387,8 @@ public final class VersionedProjectionCache<T>
     var selected = Set.copyOf(items);
     if (selected.isEmpty() || selected.stream().anyMatch(item -> !domains.contains(item.domain())))
       throw new IllegalArgumentException("Items must belong to this projection's domains");
-    return ReadDeadline.within(
-        budget, () -> readItems(key, selected, cacheable, boundedLoader, uncachedLoader, weight));
+    return observeRead(
+        () -> readItems(key, selected, cacheable, boundedLoader, uncachedLoader, weight));
   }
 
   @Override
@@ -415,6 +431,7 @@ public final class VersionedProjectionCache<T>
       }
     }
     long epoch = changes.get();
+    checkDeadline();
     var captured = versions.capture(domains);
     if (captured.isEmpty()) return bypass(BYPASS_INELIGIBLE, uncachedLoader);
     var token = captured.orElseThrow();
@@ -462,6 +479,7 @@ public final class VersionedProjectionCache<T>
     }
     long epoch = changes.get();
     long itemEpoch = itemSequence.get();
+    checkDeadline();
     var captured = itemVersions.captureItems(items);
     if (captured.isEmpty()) return bypass(BYPASS_INELIGIBLE, uncachedLoader);
     var token = captured.orElseThrow();
@@ -500,7 +518,7 @@ public final class VersionedProjectionCache<T>
     var selected = Set.copyOf(items);
     if (selected.isEmpty() || selected.stream().anyMatch(item -> !domains.contains(item.domain())))
       throw new IllegalArgumentException("Items must belong to this projection's domains");
-    return ReadDeadline.within(budget, () -> unconfirmed(key, selected, boundedLoader, weight));
+    return observeRead(() -> unconfirmed(key, selected, boundedLoader, weight));
   }
 
   @Override
@@ -528,6 +546,7 @@ public final class VersionedProjectionCache<T>
         return Optional.of(new Unconfirmed<>(hit.value(), hit.items()));
       }
     }
+    checkDeadline();
     var captured = itemVersions.captureItems(items);
     if (captured.isEmpty()) {
       statistics.record(BYPASS_INELIGIBLE);
@@ -541,6 +560,7 @@ public final class VersionedProjectionCache<T>
       var existing = cache.readExisting(requested);
       if (existing.isEmpty()) {
         statistics.record(SQL_PRIVATE_MISS);
+        checkDeadline();
         T value = Objects.requireNonNull(boundedLoader.get());
         long charged = weight.applyAsLong(value);
         if (charged < 1 || charged > maxWeight || !itemVersions.canShare()) return Optional.empty();
@@ -552,6 +572,7 @@ public final class VersionedProjectionCache<T>
           cache.readInline(
               requested,
               () -> {
+                checkDeadline();
                 loaded[0] = true;
                 statistics.record(LOAD);
                 T value = Objects.requireNonNull(boundedLoader.get());
@@ -568,7 +589,7 @@ public final class VersionedProjectionCache<T>
               });
     }
     try (var read = selected) {
-      var value = await(read, loaded[0]).value();
+      var value = await(read).value();
       if (!ready()) {
         statistics.record(BYPASS_STALE);
         return Optional.empty();
@@ -579,8 +600,8 @@ public final class VersionedProjectionCache<T>
       return Optional.of(new Unconfirmed<>(value.value(), value.items()));
     } catch (CompletionException failed) {
       Throwable cause = failed.getCause();
-      // The same refusals as a versioned read: capacity and the deadline are busy, never an
-      // extra direct load; an inconsistent or reentrant request is a programming error.
+      // Capacity is backpressure; an elapsed wait is a deadline failure. Neither permits an
+      // extra direct load. An inconsistent or reentrant request is a programming error.
       if (cause instanceof SnapshotCache.CacheException failure
           && failure.failure() == SnapshotCache.Failure.CAPACITY) {
         statistics.record(CAPACITY_REJECTED);
@@ -613,11 +634,12 @@ public final class VersionedProjectionCache<T>
       var existing = cache.readExisting(request);
       if (existing.isEmpty()) return null;
       try (var read = existing.orElseThrow()) {
-        return await(read, false).value();
+        return await(read).value();
       } catch (CompletionException | SnapshotCache.CacheException refused) {
         return null;
       }
     }
+
     try (var read =
         cache.readInline(
             request,
@@ -672,13 +694,14 @@ public final class VersionedProjectionCache<T>
           cache.readInline(
               request,
               () -> {
+                checkDeadline();
                 loaded[0] = true;
                 statistics.record(LOAD);
                 return loader.load();
               });
     }
     try (var read = selected) {
-      var stored = await(read, loaded[0]).value();
+      var stored = await(read).value();
       if (ready() && current.test(stored)) {
         if (stored.token() != null
             && stored.token().pendingTransactions().size() <= TRUSTED_PENDING) {
@@ -704,8 +727,8 @@ public final class VersionedProjectionCache<T>
         statistics.record(CAPACITY_REJECTED);
         throw new ReadUnavailableException();
       }
-      // The backing cache's own wait bound. Like the read's deadline, it is a busy refusal: a
-      // direct read here would add a load beside the one this caller was waiting for.
+      // The backing cache's own wait bound is a deadline failure, not resource backpressure.
+      // A direct read here would add a load beside the one this caller was waiting for.
       if (cause instanceof TimeoutException) throw deadlinePassed();
       if (cause instanceof SnapshotCache.CacheException failure
           && (failure.failure() == SnapshotCache.Failure.REENTRANT_LOAD
@@ -722,42 +745,48 @@ public final class VersionedProjectionCache<T>
     return bypass(fallback, uncachedLoader);
   }
 
-  /**
-   * Waits for the read until the current {@link ReadDeadline}. An elected loader has already
-   * finished when this runs; if its load outlived the deadline its value stays stored, but its
-   * caller is refused like a waiting one, so a slow fill never stretches one request's budget.
-   */
-  private SnapshotCache.Tracked<Versioned<T>> await(
-      SnapshotCache.Read<Versioned<T>> read, boolean elected) {
-    long deadline = ReadDeadline.deadlineNanos(budget);
-    if (elected && System.nanoTime() - deadline >= 0) throw deadlinePassed();
+  /** Waits for accepted physical work, bounded only by an explicitly enclosing SQL deadline. */
+  private SnapshotCache.Tracked<Versioned<T>> await(SnapshotCache.Read<Versioned<T>> read) {
+    checkDeadline();
     var future = read.result().toCompletableFuture();
     if (future.isDone()) return future.join();
     try {
-      return future.get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+      var deadline = ReadDeadline.currentDeadlineNanos();
+      return deadline.isPresent()
+          ? future.get(Math.max(0, deadline.getAsLong() - System.nanoTime()), TimeUnit.NANOSECONDS)
+          : future.get();
     } catch (TimeoutException late) {
-      // Caller-local: the elected loader and any other waiter keep the shared reload.
+      // The caller's SQL transaction budget expired. Other readers and physical ownership remain.
       read.cancel();
       throw deadlinePassed();
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       read.cancel();
-      throw new ReadUnavailableException();
+      throw ReadFailedException.interrupted(interrupted);
     } catch (ExecutionException failed) {
       throw new CompletionException(failed.getCause());
     }
   }
 
-  private ReadUnavailableException deadlinePassed() {
+  private void checkDeadline() {
+    var deadline = ReadDeadline.currentDeadlineNanos();
+    if (deadline.isPresent() && System.nanoTime() - deadline.getAsLong() >= 0)
+      throw deadlinePassed();
+  }
+
+  private ReadFailedException deadlinePassed() {
     statistics.record(DEADLINE_REJECTED);
-    return new ReadUnavailableException();
+    return ReadFailedException.deadlineExceeded();
   }
 
   private T bypass(ProjectionCacheStatistics.Event reason, Supplier<T> uncachedLoader) {
     // Count the fallback attempt even if the owner's ordinary SQL path fails. Some owners use
     // an unavailable marker here and decide their SQL fallback later; this is not a SQL count.
+    checkDeadline();
     statistics.record(reason);
-    return uncachedLoader.get();
+    T value = uncachedLoader.get();
+    checkDeadline();
+    return value;
   }
 
   private void remember(SnapshotCache.Key key, Trusted entry) {

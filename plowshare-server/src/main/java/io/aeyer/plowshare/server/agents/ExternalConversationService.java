@@ -11,12 +11,12 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.pool.SqlWorkBudget;
-import io.aeyer.plowshare.server.reads.ReadDeadline;
-import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.requests.RequestedBudget;
 import io.aeyer.plowshare.server.requests.RequestedTurnCap;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import java.util.Objects;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -31,9 +31,29 @@ public final class ExternalConversationService implements ExternalConversations 
   private final Runs.Shown pictures;
   private final LogStages stages;
   private final ConversationsProperties defaults;
-  private final ConversationAliasProperties budgets;
-  private final SqlWorkBudget sql;
+  private final WorkPerformanceReporter performance;
 
+  @Autowired
+  public ExternalConversationService(
+      ConversationAliasRepository aliases,
+      IdentityRepository identities,
+      WorkAccess access,
+      ConversationRuns runs,
+      Runs.Shown pictures,
+      LogStages stages,
+      ConversationsProperties defaults,
+      WorkPerformanceReporter performance) {
+    this.aliases = Objects.requireNonNull(aliases);
+    this.identities = Objects.requireNonNull(identities);
+    this.access = Objects.requireNonNull(access);
+    this.runs = Objects.requireNonNull(runs);
+    this.pictures = Objects.requireNonNull(pictures);
+    this.stages = Objects.requireNonNull(stages);
+    this.defaults = Objects.requireNonNull(defaults);
+    this.performance = Objects.requireNonNull(performance);
+  }
+
+  /** Existing internal fixtures may supply SQL configuration; only repositories consume it. */
   public ExternalConversationService(
       ConversationAliasRepository aliases,
       IdentityRepository identities,
@@ -44,21 +64,24 @@ public final class ExternalConversationService implements ExternalConversations 
       ConversationsProperties defaults,
       ConversationAliasProperties budgets,
       SqlWorkBudget sql) {
-    this.aliases = Objects.requireNonNull(aliases);
-    this.identities = Objects.requireNonNull(identities);
-    this.access = Objects.requireNonNull(access);
-    this.runs = Objects.requireNonNull(runs);
-    this.pictures = Objects.requireNonNull(pictures);
-    this.stages = Objects.requireNonNull(stages);
-    this.defaults = Objects.requireNonNull(defaults);
-    this.budgets = Objects.requireNonNull(budgets);
-    this.sql = Objects.requireNonNull(sql);
+    this(
+        aliases,
+        identities,
+        access,
+        runs,
+        pictures,
+        stages,
+        defaults,
+        WorkPerformanceReporter.NONE);
+    Objects.requireNonNull(budgets);
+    Objects.requireNonNull(sql);
   }
 
   @Override
   public ConversationRecord open(Locator locator, Open options, Caller caller) {
     Objects.requireNonNull(options);
     return within(
+        "external-conversation.open",
         () -> {
           // Validate creation choices even on a hit; never let a hit repair invalid input silently.
           Budget budget =
@@ -75,7 +98,6 @@ public final class ExternalConversationService implements ExternalConversations 
           if (opened.created())
             stages.opened(
                 LogStages.LogOpened.ofConversation(opened.conversation(), caller.session()));
-          ReadDeadline.check();
           return opened.conversation();
         });
   }
@@ -84,6 +106,7 @@ public final class ExternalConversationService implements ExternalConversations 
   public Runs.Started run(Locator locator, Run options, Caller caller) {
     Objects.requireNonNull(options);
     return within(
+        "external-conversation.run",
         () -> {
           var key = key(locator, caller, "agent.run.ex");
           var target =
@@ -94,7 +117,6 @@ public final class ExternalConversationService implements ExternalConversations 
                           new NotFoundFault(
                               "No external conversation exists in this authorized namespace"));
           requireTarget(key, target, caller);
-          ReadDeadline.check();
           // The external project selected the alias. It must not become a conflicting project
           // selector on the ordinary existing-conversation request.
           var started =
@@ -115,23 +137,16 @@ public final class ExternalConversationService implements ExternalConversations 
                       options.maxModelCalls()),
                   pictures,
                   new ConversationRuns.Resolved(target, key.projectId(), caller.account()));
-          try {
-            ReadDeadline.check();
-          } catch (ReadUnavailableException expired) {
-            throw new ExternalConversationUnavailableException(
-                "Run admission may have completed before its deadline; inspect the original work and do not replay",
-                expired);
-          }
           return started;
         });
   }
 
-  private <T> T within(Supplier<T> action) {
-    // Direct typed callers receive the same budget as the public router. A nested call keeps the
-    // earlier request deadline; the repository still owns its transaction and commit boundary.
-    try {
-      return sql.within(
-          budgets.timeout(), () -> ExternalConversationAdmission.within(budgets.timeout(), action));
+  private <T> T within(String operation, Supplier<T> action) {
+    // Repositories own hard SQL/transaction budgets. This facade can include post-commit hooks and
+    // durable job admission, so elapsed workflow time only warns and never changes an accepted job.
+    var observation = performance.watch(WorkPerformanceReporter.Kind.WORKFLOW, operation);
+    try (observation) {
+      return ExternalConversationAdmission.within(action);
     } catch (ArchiveUnavailableException unavailable) {
       // A repository can lose its commit acknowledgement without knowing whether the alias was
       // written. Do not let the ordinary archive mapper turn that into a no-effect/retry promise.
@@ -140,7 +155,7 @@ public final class ExternalConversationService implements ExternalConversations 
   }
 
   private ConversationAliasRepository.Key key(Locator locator, Caller caller, String operation) {
-    ReadDeadline.check();
+    ExternalConversationAdmission.requireAdmission();
     Objects.requireNonNull(locator);
     Objects.requireNonNull(caller);
     access.requireSession(caller.session(), caller.account());
@@ -153,14 +168,13 @@ public final class ExternalConversationService implements ExternalConversations 
     var account = identities.account(caller.account());
     if (account.locked()) throw new CallerFault("External conversations require an account");
     long project = projectId(identities.project(locator.project()));
-    ReadDeadline.check();
     return new ConversationAliasRepository.Key(
         project, account.id(), locator.source(), locator.externalConversation());
   }
 
   private void requireTarget(
       ConversationAliasRepository.Key key, ConversationRecord target, Caller caller) {
-    ReadDeadline.check();
+    ExternalConversationAdmission.requireAdmission();
     if (target.home().isGlobal()
         || target.origin() != Origin.TURN
         || target.parentId() != null
@@ -175,7 +189,6 @@ public final class ExternalConversationService implements ExternalConversations 
     // CONTRIBUTOR includes readable role presence. One live pipeline at this boundary preserves
     // stored roles, service-token ceilings, application manifests and grant lineage together.
     access.requireWork(target.home().project(), caller.account());
-    ReadDeadline.check();
   }
 
   private static long projectId(AuthorityScope scope) {

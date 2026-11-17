@@ -1,11 +1,11 @@
 # Server read work and capacity
 
 The [SQL completion deadline rule](coding-standards.md#bound-sql-work-by-a-completion-deadline)
-requires a 500 ms query target, a one-second per-query worst-case ceiling and a
-configurable two-second default ceiling shared by the whole database work unit. The mechanisms
-below describe current implementation, including narrower wait budgets and some
-longer path-specific SQL limits; they do not establish universal two-second SQL
-cancellation. See the rule's enforcement-gap note before relying on that guarantee.
+requires a 500 ms query target and configurable two-second default query limit.
+Only statements inside one actual SQL transaction share its remaining budget.
+Provider calls, independent transactions, cache coordination and an entire job do
+not acquire a two-second lifetime. Their slow-work observations are warning-only.
+The mechanisms below do not establish universal physical SQL cancellation.
 
 The server owns policy and disclosure. PostgreSQL owns durable facts, constraints and atomic
 state transitions. SQL predicates are one implementation of server policy, not a requirement
@@ -46,15 +46,24 @@ bounds all caches together, and the oldest waiter whose cache has a free slot go
 load before admission, so a slot bounds distinct concurrent loads, not requesters. A requester on a
 miss waits in arrival order for a slot, including inside a transaction: the load runs on that
 requester's thread and its own connection, so waiting cannot starve a slot holder.
-A fill's slot wait and its requesters' wait on that shared reload draw on one deadline per read,
-`plowshare.projection-cache.timeout` (2 s), which starts when the request reaches the cache: the
-slot wait uses whatever remains of it. A requester still waiting at the deadline is refused as busy
-(`ReadUnavailableException`) without starting another load; an elected loader whose load outlived
-it still stores its value, which serves the next request, and only its own caller is refused.
-`plowshare.read-scheduling.fetch-wait-millis` (2,000 ms) bounds a FETCH wait outside any cached
-read. The agent job runtime retries its side-effect-free per-step log check up to three more times
-(100, 200 and 400 ms apart) after a busy refusal; checks that may hold a transaction, such as a
-log-visibility callback, still refuse at once.
+Accepted inline projection reads coalesce onto their existing physical load. The
+cache does not arm a two-second timer that fails the job or starts a duplicate load.
+If an actual caller SQL deadline already exists, it remains authoritative; otherwise
+slow cache work emits an isolated performance warning and continues. The explicit
+asynchronous `SnapshotCache.read` API retains its separate caller-wait contract;
+`plowshare.projection-cache.timeout` is not a workflow or SQL execution deadline.
+`plowshare.read-scheduling.fetch-wait-millis` bounds incoming FETCH-seat acquisition.
+Cache count/byte/load/waiter limits still bound occupancy. Impossible reservations
+are `LOAD_TOO_LARGE` and use the owning ordinary projection path; they are not
+reported as occupied capacity.
+
+The runtime's pure per-step log check may recover actual capacity pressure or an
+independent query deadline under its existing retry policy. It never invents a
+whole-workflow timer, retries inside a held transaction, or replays a provider.
+Collection visibility discards a successful tentative cached page on a global
+version race and evaluates one authoritative query. Each independent callback has
+its own SQL budget; an existing active transaction deadline is never renewed.
+SQL errors and cancellations do not trigger that cache-freshness fallback.
 Log deny sets, log-tree facts and the authority snapshot use no per-account seat: a deny set has
 one key per account, so an account's misses always share one fill; a tree has one key per root log
 and no account, so every account's misses on it share one fill; and the snapshot is one key. PROC queue and
@@ -68,7 +77,9 @@ Socket session checks have a separate bounded intake before any session SQL, sha
 file sockets and their execution/disclosure fences. `plowshare.socket-sessions.pending` (256)
 and `pending-per-principal` (32) include queued and physically executing checks. One physical
 reader gathers up to `batch` (128) checks for at most `gather-millis` (2), then queries distinct
-account/session versions together. `wait-millis` (2000, maximum 5000) bounds callers' wait.
+account/session versions together. `wait-millis` (2000, maximum 5000) bounds each SQL batch check, narrowed by an earlier
+existing SQL deadline. A multi-batch background sweep has no newly invented two-second
+workflow timer.
 Queueing owns no database connection; the existing database throttle still bounds the reader.
 Excess checks fail unavailable before SQL. Timeout does not release a still-running database
 check's admission. A failed/partial scheduled sweep never treats unchecked sockets as revoked.
@@ -87,22 +98,42 @@ Each per-principal limit must be positive and no greater than its process limit.
 initial configurable defaults, not a measured fleet capacity promise. Work leases settle on
 physical completion; asynchronous routing retains a lease until its handler completes.
 Disconnecting a client does not make still-running read work free. Admission retains state
-only for admitted work and the bounded foreground report waiting queue. Background usage
-refreshes share the existing report total and principal limits; when the global report limit is
+only for admitted work and bounded waiting queues. Eligible interactive reads wait before
+handler dispatch rather than fail immediately during an ordinary burst.
+`plowshare.read-scheduling.waiting-interactive` (256),
+`waiting-interactive-per-principal` (16) and `interactive-wait-millis` (2000)
+bound interactive and pure authoritative-read queues; the active limits above remain unchanged.
+Only queue acquisition uses this wait budget; it does not become a handler/workflow
+deadline. Cancelling the reply does not release an unfinished handler's lease.
+HTTP uses bounded acquisition, with execution/async settlement still owned separately.
+Pure authoritative reads may wait only without a caller transaction/synchronization;
+transaction holders retain immediate admission to avoid parking with connections/locks.
+
+Background usage refreshes share the existing report total and principal limits; when the global report limit is
 larger than one, they leave at least one seat for foreground work. They yield whenever a foreground
 report is waiting. `plowshare.read-scheduling.waiting-reports` (64),
 `waiting-reports-per-principal` (4) and `report-wait-millis` (2000, maximum 5000) bound the queue.
 FIFO among eligible principals avoids blocking everyone behind an already busy principal.
 Timeout and interruption remove the waiter before SQL begins. A caller already inside a transaction
 or Spring synchronization retains nonblocking admission: it must not wait while holding a connection
-or disclosure lock. Other admission lanes remain nonblocking. `plowshare.read.waiting` exposes the queue without principal labels.
+or disclosure lock. Other lifetime/maintenance lanes remain nonblocking. `plowshare.read.waiting` exposes the
+report queue; `.interactive.waiting` and `.authoritative.waiting` expose their respective
+queues without principal labels.
 
 Mutating operations retain dispatcher barriers/resource ordering. The shared read admission
 policy does not coalesce mutations, leases, cursor advances, acknowledgements or read receipts.
-HTTP and WebSocket failures use the same fault mapping. Read saturation is service unavailable
-(`ARCHIVE_UNAVAILABLE`, HTTP 503), not `CAPACITY_EXHAUSTED`: the latter promises that an entire
-request was not started and can trigger transport retry. An enclosing mutation may have
-completed before its final projection encounters read saturation; never replay that mutation.
+Pre-handler admission backpressure is `CAPACITY_EXHAUSTED` (HTTP 429): its typed
+entry-point proof means no handler started, so SDK queueing can pace the same
+request. Concurrent sockets release that refused input ID/body before the physical
+capacity reply permits same-ID resubmission; output bytes remain physically owned.
+A handler cannot manufacture that proof merely by returning the capacity code.
+
+`ReadUnavailableException` is reserved for genuine internal capacity pressure.
+Deadlines, invalidation, interruption, closure and query cancellation instead carry
+`ReadFailedException` reasons. Their existing 503 compatibility outcome never
+licenses replay of a whole operation; earlier effects may already be committed.
+A failed SQL unit rolls back without turning a healthy archive into a fatal job
+dependency. Earlier useful work remains retained.
 
 ## Shared projections
 
@@ -192,7 +223,9 @@ subquery so PostgreSQL hashes the set once, including for generic prepared plans
 comparing an entire parameter array per result row. Inbox,
 account-scoped transcript collections and orchestration lists reuse the same bounded deny-set
 projection per effective account across sockets and feeds. Every consuming read has a fresh access
-and authority fence around it. A changed fence refuses disclosure without replaying the query.
+and authority fence around it. A raced global version fence discards a successful tentative
+cached result, then permits one pure statement-authoritative query under its own SQL-unit
+budget, narrowed by any active transaction deadline. SQL errors, cancellations and expiry do not trigger that fallback.
 Dirty/historical callers retain statement-authoritative reads under the same physical authority
 budget. A deny set that exceeds 32,768 identities or the cache byte budget uses a versioned fallback marker
 and the original statement-authoritative SQL under the same physical budget. It is never hydrated

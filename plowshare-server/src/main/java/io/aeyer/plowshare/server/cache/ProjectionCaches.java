@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.cache;
 
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
@@ -17,6 +18,7 @@ public final class ProjectionCaches implements AutoCloseable {
   private final UUID database;
   private final Duration notifiedStaleness;
   private final ProjectionTelemetry telemetry;
+  private final WorkPerformanceReporter performance;
   private final ConcurrentMap<String, VersionedProjectionCache<?>> caches =
       new ConcurrentHashMap<>();
   // One memory budget shared by every line; the number of lines is never limited.
@@ -61,12 +63,31 @@ public final class ProjectionCaches implements AutoCloseable {
       ProjectionCacheProperties properties,
       Duration notifiedStaleness,
       ProjectionTelemetry telemetry) {
+    this(
+        versions,
+        itemVersions,
+        signals,
+        properties,
+        notifiedStaleness,
+        telemetry,
+        WorkPerformanceReporter.NONE);
+  }
+
+  public ProjectionCaches(
+      ProjectionVersions versions,
+      ProjectionItemVersions itemVersions,
+      ProjectionChangeSignals signals,
+      ProjectionCacheProperties properties,
+      Duration notifiedStaleness,
+      ProjectionTelemetry telemetry,
+      WorkPerformanceReporter performance) {
     this.versions = Objects.requireNonNull(versions);
     this.itemVersions = itemVersions;
     this.signals = Objects.requireNonNull(signals);
     this.properties = Objects.requireNonNull(properties);
     this.notifiedStaleness = notifiedStaleness;
     this.telemetry = Objects.requireNonNull(telemetry);
+    this.performance = Objects.requireNonNull(performance);
     budget = new ResidentBudget(properties.totalResidentBytes());
     database = versions.databaseIdentity();
   }
@@ -143,7 +164,10 @@ public final class ProjectionCaches implements AutoCloseable {
     backing.attach(budget);
     VersionedProjectionCache<T> cache;
     try {
-      cache = factory.create(backing, freshness == Freshness.NOTIFIED ? notifiedStaleness : null);
+      cache =
+          factory
+              .create(backing, freshness == Freshness.NOTIFIED ? notifiedStaleness : null)
+              .observing(performance);
     } catch (RuntimeException | Error failure) {
       backing.close();
       throw failure;
