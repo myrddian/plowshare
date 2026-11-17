@@ -29,6 +29,7 @@ import io.aeyer.plowshare.server.access.IdentityRepository;
 import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.api.ConversationsProperties;
+import io.aeyer.plowshare.server.archive.ArchiveQueryCancelledException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.ConversationAliasProperties;
 import io.aeyer.plowshare.server.archive.ConversationAliasRepository;
@@ -55,9 +56,9 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.BadSqlGrammarException;
@@ -302,10 +303,13 @@ class ExternalConversationServiceTest {
   }
 
   @ParameterizedTest
-  @ValueSource(booleans = {false, true})
+  @CsvSource({"false,false", "false,true", "true,false", "true,true"})
   void aliasAvailabilityFailureRetainsUncertaintyWithoutRetryOrRawDependencyDetails(
-      boolean opening) {
-    var outage = new ArchiveUnavailableException("private dependency diagnostic", null);
+      boolean opening, boolean cancelled) {
+    ArchiveUnavailableException outage =
+        cancelled
+            ? new ArchiveQueryCancelledException("private dependency diagnostic", null)
+            : new ArchiveUnavailableException("private dependency diagnostic", null);
     if (opening) doThrow(outage).when(aliases).open(any(), any());
     else doThrow(outage).when(aliases).find(any());
     var failure =

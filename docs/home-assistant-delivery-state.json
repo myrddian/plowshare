@@ -2627,6 +2627,60 @@
         "prompt_gate_satisfied": false,
         "verification": "Assist Ruff checks and 25 isolated tests passed; no live HA or model/device work."
       }
+    },
+    {
+      "at": "2026-11-17T10:27:50.413501+00:00",
+      "event": "publication_main_integration_reviewed",
+      "evidence": {
+        "status": "independently_reviewed_final_checks_pending",
+        "upstream_main": "abef4b11",
+        "merge_commit": "f75d870fca6b680b536d704e9a0814f1dcadc863",
+        "candidate": "docs/reviews/home-assistant-pr-main-integration-v1-candidate.json",
+        "candidate_sha256": "241bbe44f0b95f9bd65fc9b07b20d67ffe2d48897d3c778b82e503b72df52f4a",
+        "review": "docs/reviews/home-assistant-pr-main-integration-review.md",
+        "review_sha256": "451ae9597664638f736ff803f8e381b46405cfe4bd30a2b4ab657d146afef3f6",
+        "implementer": "/root/ha_pr_integration_implementer",
+        "reviewer": "/root/ha_pr_integration_reviewer",
+        "focused_tests": 127,
+        "focused_test_classes": 12,
+        "prompt_gate_satisfied": false
+      }
+    },
+    {
+      "at": "2026-11-17T10:30:31.426206+00:00",
+      "event": "publication_combined_check_failed",
+      "command": "./gradlew check sdkCheck sdkPackageCheck",
+      "duration": "4m1s",
+      "result": "One failure in 8431 server tests: SourceIsTextTest tracked binary inventory rejected 17 frozen review gzip archives. SDK conformance passed; package consumer verification did not run.",
+      "log_sha256": "55a55c538980e0384739193628f072e9ea48d30f43dfb97928ef54e50813ab82",
+      "resolution": "Independently implement/review explicit fixed-hash named archival assets, preserving all immutable bytes and source scans, then rerun."
+    },
+    {
+      "at": "2026-11-17T10:33:28.459410+00:00",
+      "event": "publication_archive_policy_accepted",
+      "evidence": {
+        "status": "verified_and_reviewed",
+        "candidate": "docs/reviews/home-assistant-pr-binary-evidence-v1-candidate.json",
+        "candidate_sha256": "c0d58ba6d4a5f36191def3528d2b6a79681e169cbcdc4b24b987e845d1c377c0",
+        "review": "docs/reviews/home-assistant-pr-binary-evidence-review.md",
+        "review_sha256": "e1427b1727f10170c585cfa0f1002278c42a170f3aa01594a3f4011faf3ea6f0",
+        "implementer": "/root/ha_pr_integration_implementer",
+        "reviewer": "/root/ha_pr_integration_reviewer",
+        "archives_unchanged": 17,
+        "focused_tests": 4,
+        "source_validation_preserved": true
+      }
+    },
+    {
+      "at": "2026-11-17T10:37:39.840297+00:00",
+      "event": "publication_final_verification_passed",
+      "evidence": {
+        "status": "passed",
+        "evidence": "docs/reviews/home-assistant-publication-verification.json",
+        "evidence_sha256": "b8d39a706ac23df1e086ff4b0ef97fb177cc360e5441035d2efcb808cdcbdd0c",
+        "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
+      },
+      "note": "Final source matches independent approvals; repository/SDK/package checks pass. 13 accepted and 11 awaiting_gate remain unchanged. No target merge/deployment/live authorization."
     }
   ],
   "publication_guard": {
@@ -2642,5 +2696,37 @@
     "reviewer": "/root/ha_publication_gate_reviewer",
     "prompt_gate_satisfied": false,
     "verification": "Assist Ruff checks and 25 isolated tests passed; no live HA or model/device work."
+  },
+  "publication_integration": {
+    "status": "verified_and_reviewed",
+    "upstream_main": "abef4b11",
+    "merge_commit": "f75d870fca6b680b536d704e9a0814f1dcadc863",
+    "candidate": "docs/reviews/home-assistant-pr-main-integration-v1-candidate.json",
+    "candidate_sha256": "241bbe44f0b95f9bd65fc9b07b20d67ffe2d48897d3c778b82e503b72df52f4a",
+    "review": "docs/reviews/home-assistant-pr-main-integration-review.md",
+    "review_sha256": "451ae9597664638f736ff803f8e381b46405cfe4bd30a2b4ab657d146afef3f6",
+    "implementer": "/root/ha_pr_integration_implementer",
+    "reviewer": "/root/ha_pr_integration_reviewer",
+    "focused_tests": 127,
+    "focused_test_classes": 12,
+    "prompt_gate_satisfied": false
+  },
+  "publication_archives": {
+    "status": "verified_and_reviewed",
+    "candidate": "docs/reviews/home-assistant-pr-binary-evidence-v1-candidate.json",
+    "candidate_sha256": "c0d58ba6d4a5f36191def3528d2b6a79681e169cbcdc4b24b987e845d1c377c0",
+    "review": "docs/reviews/home-assistant-pr-binary-evidence-review.md",
+    "review_sha256": "e1427b1727f10170c585cfa0f1002278c42a170f3aa01594a3f4011faf3ea6f0",
+    "implementer": "/root/ha_pr_integration_implementer",
+    "reviewer": "/root/ha_pr_integration_reviewer",
+    "archives_unchanged": 17,
+    "focused_tests": 4,
+    "source_validation_preserved": true
+  },
+  "publication_verification": {
+    "status": "passed",
+    "evidence": "docs/reviews/home-assistant-publication-verification.json",
+    "evidence_sha256": "b8d39a706ac23df1e086ff4b0ef97fb177cc360e5441035d2efcb808cdcbdd0c",
+    "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
   }
 }

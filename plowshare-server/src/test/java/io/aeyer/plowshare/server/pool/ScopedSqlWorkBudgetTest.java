@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.intThat;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -21,6 +23,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.server.faults.Faults;
 import io.aeyer.plowshare.server.pool.AdmissionThrottle.Admission;
+import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
@@ -30,6 +33,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +48,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.postgresql.jdbc.PgStatement;
 
 class ScopedSqlWorkBudgetTest {
   private static ScopedSqlWorkBudget fakeBudget(
@@ -127,6 +132,108 @@ class ScopedSqlWorkBudgetTest {
     }
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void readDeadlineComposesWithoutNativeEscapeAndPreservesAnEarlierDriverTimer(boolean vendor)
+      throws Exception {
+    DataSource source = mock(DataSource.class);
+    Connection raw = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    ResultSet rows = mock(ResultSet.class);
+    PgStatement postgres = mock(PgStatement.class);
+    when(source.getConnection()).thenReturn(raw);
+    when(raw.prepareStatement("read")).thenReturn(statement);
+    when(statement.executeQuery()).thenReturn(rows);
+    when(statement.isWrapperFor(PgStatement.class)).thenReturn(vendor);
+    when(statement.unwrap(PgStatement.class)).thenReturn(postgres);
+    when(postgres.getQueryTimeoutMs()).thenReturn(125L);
+    var bounded =
+        new SqlWorkBudgetProperties(Duration.ofSeconds(1), Duration.ofMillis(100), 4, 2, 8, 2);
+    try (var budget = fakeBudget(bounded, null)) {
+      budget.within(
+          Duration.ofSeconds(2),
+          () -> {
+            try (Connection connection = budget.decorate(source).getConnection();
+                PreparedStatement selected = connection.prepareStatement("read")) {
+              assertTrue(selected.isWrapperFor(JdbcReadDeadline.StatementDeadline.class));
+              assertFalse(selected.isWrapperFor(PgStatement.class));
+              assertThrows(
+                  SQLFeatureNotSupportedException.class, () -> selected.unwrap(PgStatement.class));
+              JdbcReadDeadline.apply(
+                  selected, System.nanoTime() + Duration.ofMillis(800).toNanos());
+              try (ResultSet ignored = selected.executeQuery()) {
+                assertSame(selected, ignored.getStatement());
+              }
+              return true;
+            } catch (SQLException failed) {
+              throw new AssertionError(failed);
+            }
+          });
+      verify(raw, atLeastOnce())
+          .setNetworkTimeout(any(), intThat(value -> value > 0 && value <= 800));
+      if (vendor) {
+        verify(postgres).setQueryTimeoutMs(125);
+        verify(statement, never()).setQueryTimeout(anyInt());
+      } else {
+        verify(statement).setQueryTimeout(1);
+        verify(statement, never()).unwrap(PgStatement.class);
+      }
+      verify(raw, never()).abort(any());
+    }
+  }
+
+  @Test
+  void reusingAStatementCannotExtendItsPreviouslyAppliedAbsoluteReadDeadline() throws Exception {
+    DataSource source = mock(DataSource.class);
+    Connection raw = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    ResultSet rows = mock(ResultSet.class);
+    when(source.getConnection()).thenReturn(raw);
+    when(raw.prepareStatement("read")).thenReturn(statement);
+    when(statement.executeQuery()).thenReturn(rows);
+    AtomicLong remaining = new AtomicLong(Long.MAX_VALUE);
+    var bounded =
+        new SqlWorkBudgetProperties(Duration.ofSeconds(1), Duration.ofMillis(100), 4, 2, 8, 2);
+    try (var budget =
+        new ScopedSqlWorkBudget(
+            bounded,
+            null,
+            connection ->
+                new SqlSessionDeadlines.Session() {
+                  @Override
+                  public void beforeStatement(SqlSessionDeadlines.Remaining selected)
+                      throws SQLException {
+                    remaining.set(selected.millis());
+                  }
+
+                  @Override
+                  public void restore(SqlSessionDeadlines.Remaining selected) {}
+                })) {
+      budget.within(
+          Duration.ofSeconds(2),
+          () -> {
+            try (Connection connection = budget.decorate(source).getConnection();
+                PreparedStatement selected = connection.prepareStatement("read")) {
+              long first = System.nanoTime() + Duration.ofMillis(700).toNanos();
+              JdbcReadDeadline.apply(selected, first);
+              try (ResultSet values = selected.executeQuery()) {
+                assertSame(selected, values.getStatement());
+              }
+              JdbcReadDeadline.apply(selected, System.nanoTime() + Duration.ofSeconds(2).toNanos());
+              try (ResultSet values = selected.executeQuery()) {
+                assertSame(selected, values.getStatement());
+              }
+              assertTrue(remaining.get() > 0 && remaining.get() <= 700);
+              return true;
+            } catch (SQLException failed) {
+              throw new AssertionError(failed);
+            }
+          });
+      verify(statement, times(2)).executeQuery();
+      verify(raw, never()).abort(any());
+    }
+  }
+
   @Test
   void deadlineInterruptsAcquisitionWithoutAbortingAnotherBorrower() throws Exception {
     DataSource source = mock(DataSource.class);
@@ -163,8 +270,10 @@ class ScopedSqlWorkBudgetTest {
     }
   }
 
-  @Test
-  void materializationIsTimedAndExpiredPhysicalCleanupRemainsOwned() throws Exception {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void materializationIsTimedAndExpiredPhysicalCleanupRemainsOwned(boolean readDeadline)
+      throws Exception {
     DataSource source = mock(DataSource.class);
     Connection raw = mock(Connection.class);
     PreparedStatement statement = mock(PreparedStatement.class);
@@ -195,7 +304,11 @@ class ScopedSqlWorkBudgetTest {
         .when(raw)
         .abort(any());
     SimpleMeterRegistry registry = new SimpleMeterRegistry();
-    try (var budget = fakeBudget(limits(), registry);
+    SqlWorkBudgetProperties bounded =
+        readDeadline
+            ? new SqlWorkBudgetProperties(Duration.ofSeconds(1), Duration.ofMillis(100), 4, 2, 8, 2)
+            : limits();
+    try (var budget = fakeBudget(bounded, registry);
         var calls = Executors.newVirtualThreadPerTaskExecutor()) {
       var pending =
           calls.submit(
@@ -204,9 +317,13 @@ class ScopedSqlWorkBudgetTest {
                       Duration.ofSeconds(1),
                       () -> {
                         try (Connection connection = budget.decorate(source).getConnection();
-                            PreparedStatement selected = connection.prepareStatement("query");
-                            ResultSet values = selected.executeQuery()) {
-                          return values.next();
+                            PreparedStatement selected = connection.prepareStatement("query")) {
+                          if (readDeadline)
+                            JdbcReadDeadline.apply(
+                                selected, System.nanoTime() + Duration.ofMillis(100).toNanos());
+                          try (ResultSet values = selected.executeQuery()) {
+                            return values.next();
+                          }
                         } catch (SQLException failed) {
                           throw new AssertionError(failed);
                         }

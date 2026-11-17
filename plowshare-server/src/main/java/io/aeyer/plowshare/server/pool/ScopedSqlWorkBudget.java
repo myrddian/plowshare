@@ -393,10 +393,15 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
     }
 
     Query query(Lease lease, String phase) {
+      return query(lease, phase, false, 0);
+    }
+
+    private Query query(Lease lease, String phase, boolean constrained, long ceiling) {
       synchronized (lock) {
         check();
         if (queries.size() >= limits.queriesPerScope()) throw unavailable(null);
         long deadline = earlier(end, System.nanoTime() + limits.queryCeiling().toNanos());
+        if (constrained) deadline = earlier(deadline, ceiling);
         for (Query parent : queries) deadline = earlier(deadline, parent.end);
         Query query = new Query(lease, deadline, phase);
         queries.add(query);
@@ -492,6 +497,10 @@ public final class ScopedSqlWorkBudget implements SqlWorkBudget, AutoCloseable {
 
       Query query(String phase) {
         return Scope.this.query(this, phase);
+      }
+
+      Query query(String phase, long ceiling) {
+        return Scope.this.query(this, phase, true, ceiling);
       }
 
       void abort() {

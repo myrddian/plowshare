@@ -1,0 +1,152 @@
+{
+  "candidate_id": "ha-pr-binary-evidence-v1",
+  "created_at": "2026-11-17T10:32:08.287965+00:00",
+  "base_commit": "f75d870fca6b680b536d704e9a0814f1dcadc863",
+  "implementer_agent_id": "/root/ha_pr_integration_implementer",
+  "reviewer_agent_id": "/root/ha_pr_integration_reviewer",
+  "files": {
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/SourceIsTextTest.java": "3e615d257d6bab2d5940ee86126e94c36c83ee0c965da83a07e2e8f20122e9e0",
+    "docs/reviews/home-assistant-pr-binary-evidence-implementation.md": "1e46e585e5b2e251cde97d916bbc00379233fbc2a227003d3890a5e12694eddf"
+  },
+  "immutable_archives": [
+    {
+      "archive": "docs/reviews/home-assistant-core-03-v1.diff.gz",
+      "sha256": "4c86ecc9efd9f6180ac258303f8cc31cf1d3905aa732d5639e4cd8393ed8fee3",
+      "historical_candidate": "docs/reviews/home-assistant-core-03-v1-candidate.json",
+      "historical_candidate_sha256": "cdf4e89c194c7c932136474f32891e3aa59b777b3c08675ed1bc207879d2ff69",
+      "decoded_bytes": 4253219
+    },
+    {
+      "archive": "docs/reviews/home-assistant-core-03-v2.diff.gz",
+      "sha256": "a5f806005dfc995987468fa7530149f4038c461e0a4a4d21d1e795b672f037b4",
+      "historical_candidate": "docs/reviews/home-assistant-core-03-v2-candidate.json",
+      "historical_candidate_sha256": "510f9a8b6a050c39684df937bd3edbc754ac2ff78cf88be243cc94894dd34724",
+      "decoded_bytes": 4270081
+    },
+    {
+      "archive": "docs/reviews/home-assistant-core-03-v3.diff.gz",
+      "sha256": "fcd896299dcc022ff9f3820c73ce432b938cb44c637f2f836de8201342fbc64e",
+      "historical_candidate": "docs/reviews/home-assistant-core-03-v3-candidate.json",
+      "historical_candidate_sha256": "b58423769ba70418fcabfe407e3a8d1a4843ee44e39ab185be23e852bb0e0e38",
+      "decoded_bytes": 4572713
+    },
+    {
+      "archive": "docs/reviews/home-assistant-core-03-v4.diff.gz",
+      "sha256": "bd81ab50ba829f49b7eb75f05332f0923520b6a26bb4d9adc9cf9040f74e3ffc",
+      "historical_candidate": "docs/reviews/home-assistant-core-03-v4-candidate.json",
+      "historical_candidate_sha256": "221c9e73088c09d71d637ec0e6281f3b25e8920d53b5a2414cd450809f194ac2",
+      "decoded_bytes": 4582511
+    },
+    {
+      "archive": "docs/reviews/home-assistant-core-03a-v1.diff.gz",
+      "sha256": "933e7ce33b11d5495a3020e77b6ac10742f525dd688a1e2c15cf4ea9edc43fa1",
+      "historical_candidate": "docs/reviews/home-assistant-core-03a-v1-candidate.json",
+      "historical_candidate_sha256": "4b9b318c95657e9b2eb604ecb995421563a6b3385264b1d29ca0852c52330143",
+      "decoded_bytes": 4183477
+    },
+    {
+      "archive": "docs/reviews/home-assistant-core-03a-v2.diff.gz",
+      "sha256": "3c4f922643b71458eb05dea686f5867780d586dcd68a84ed59064a879eb69e6c",
+      "historical_candidate": "docs/reviews/home-assistant-core-03a-v2-candidate.json",
+      "historical_candidate_sha256": "ebf322a572498875df1c9866a34f4c1556d972fbe5fe344851b4b83145dc2914",
+      "decoded_bytes": 4189850
+    },
+    {
+      "archive": "docs/reviews/home-assistant-core-04-v1.diff.gz",
+      "sha256": "88bcc231b4433ba969fb84c5932b4d88ec563299ea1b3937bb8da29bd3755ec8",
+      "historical_candidate": "docs/reviews/home-assistant-core-04-v1-candidate.json",
+      "historical_candidate_sha256": "9a0afecb2fc6d4840119bac0bbda08c6e3e32c475fbc3a966cccc7a1dd910da0",
+      "decoded_bytes": 4582916
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-01-v4.diff.gz",
+      "sha256": "d49652d2ee55de0fbb9ec102cd32e5ae85d400bb7447caf0ef2751f441570ddd",
+      "historical_candidate": "docs/reviews/home-assistant-ha-01-v4-candidate.json",
+      "historical_candidate_sha256": "92e201de26647cf90b0094e31d40582749bd3933cb39b1d366e6b6ead883d745",
+      "decoded_bytes": 4183242
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-01-v5.diff.gz",
+      "sha256": "d49652d2ee55de0fbb9ec102cd32e5ae85d400bb7447caf0ef2751f441570ddd",
+      "historical_candidate": "docs/reviews/home-assistant-ha-01-v5-candidate.json",
+      "historical_candidate_sha256": "d8babe9febaae69e1d9b630d3de86b16e7c300e95cc122c5f9b9585cf927ada8",
+      "decoded_bytes": 4183242
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-02-v2.diff.gz",
+      "sha256": "d61c026ab409d7e5564a4c707f36c03f214f5f20d350ac886c3630742611cca3",
+      "historical_candidate": "docs/reviews/home-assistant-ha-02-v2-candidate.json",
+      "historical_candidate_sha256": "0cf20cf8f129e6f10fda75fb25c284d11575b33bca78abdf5a75add287cb3c01",
+      "decoded_bytes": 4145962
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-02-v3.diff.gz",
+      "sha256": "3c4f922643b71458eb05dea686f5867780d586dcd68a84ed59064a879eb69e6c",
+      "historical_candidate": "docs/reviews/home-assistant-ha-02-v3-candidate.json",
+      "historical_candidate_sha256": "9612efe6a189eb2f0b61d3e353d5feb5714cfb4f35fe4459a73fd5c0b4061997",
+      "decoded_bytes": 4189850
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-03-v1.diff.gz",
+      "sha256": "d49652d2ee55de0fbb9ec102cd32e5ae85d400bb7447caf0ef2751f441570ddd",
+      "historical_candidate": "docs/reviews/home-assistant-ha-03-v1-candidate.json",
+      "historical_candidate_sha256": "25ae4382d22cdc71e4046dbc9cfc916cc8e2b0ad91ba773103b0bf69b5f3ed5b",
+      "decoded_bytes": 4183242
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-03-v2.diff.gz",
+      "sha256": "409fc7e4e427c7ce61824792cc901c682069553ce152090fe0c242d97d1d2b50",
+      "historical_candidate": "docs/reviews/home-assistant-ha-03-v2-candidate.json",
+      "historical_candidate_sha256": "8d29b5b267b8fb298b1a24d9e66e2c262b2f822981c0a3eb1838d5837bf99424",
+      "decoded_bytes": 4184499
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-04-v1.diff.gz",
+      "sha256": "b84ecd1fb68a35dbfeb01827f41b1413398f4b82330059ac82cea651ca3c13c3",
+      "historical_candidate": "docs/reviews/home-assistant-ha-04-v1-candidate.json",
+      "historical_candidate_sha256": "6e5eda89cd4b86fe566662981fc4328a9828e0d95cd2c97c2fc76addfc074f0a",
+      "decoded_bytes": 4191027
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-04-v2.diff.gz",
+      "sha256": "d78391ae81cb75b2af0cb8c2b2c10ce9bd8c3207534003136f8706d0d69f1f89",
+      "historical_candidate": "docs/reviews/home-assistant-ha-04-v2-candidate.json",
+      "historical_candidate_sha256": "a8a46645535397cf3b01b2298b7e96af1b441f78377d97acb07a899647928c96",
+      "decoded_bytes": 4225947
+    },
+    {
+      "archive": "docs/reviews/home-assistant-ha-09-v1.diff.gz",
+      "sha256": "d78391ae81cb75b2af0cb8c2b2c10ce9bd8c3207534003136f8706d0d69f1f89",
+      "historical_candidate": "docs/reviews/home-assistant-ha-09-v1-candidate.json",
+      "historical_candidate_sha256": "293509f545137d676861c499208d8745e5f936f1c5e890bf58c4e2244fadc8f8",
+      "decoded_bytes": 4225947
+    },
+    {
+      "archive": "docs/reviews/home-assistant-plan-00-v2.diff.gz",
+      "sha256": "d61c026ab409d7e5564a4c707f36c03f214f5f20d350ac886c3630742611cca3",
+      "historical_candidate": "docs/reviews/home-assistant-plan-00-v2-candidate.json",
+      "historical_candidate_sha256": "554444e229c006158750509e680304783d34167eae3c8851325c2f6dcd17b092",
+      "decoded_bytes": 4145962
+    }
+  ],
+  "evidence": [
+    {
+      "kind": "focused_non_database_verification",
+      "result": "PASS",
+      "duration": "10s",
+      "classes": 1,
+      "tests": 4,
+      "failures": 0,
+      "command": "JAVA_HOME=<Java 21 installation> ./gradlew format formatCheck :plowshare-server:test --tests 'io.aeyer.plowshare.server.SourceIsTextTest'",
+      "local_log": "/private/tmp/ha-pr-binary-evidence-check.log",
+      "local_log_sha256": "db2eca7f9d8c9135194bbfddca4e1dc5064180998547e0cdf4340df8ad49c3ed"
+    },
+    {
+      "kind": "historical_archive_digest_cross_check",
+      "result": "PASS",
+      "archive_count": 17,
+      "note": "Every fixed source digest matches exactly one historical candidate working_tree_diff.sha256 and the unchanged archive bytes; strict UTF8/noNUL checked after decompression."
+    }
+  ],
+  "scope": "Test-only named binary evidence policy; no archive/source scan/runtime/HA gate weakening. Coordinator owns final repository/SDK checks."
+}

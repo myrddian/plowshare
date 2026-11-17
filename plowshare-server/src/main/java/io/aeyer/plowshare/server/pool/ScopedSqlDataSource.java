@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.pool;
 import com.zaxxer.hikari.HikariDataSource;
 import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget.Scope.Lease;
 import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget.Scope.Query;
+import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
+import io.aeyer.plowshare.server.reads.JdbcReadDeadline.StatementDeadline;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -16,6 +18,7 @@ import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
 import java.util.Objects;
 import javax.sql.DataSource;
+import org.postgresql.jdbc.PgStatement;
 import org.springframework.jdbc.datasource.AbstractDataSource;
 
 /**
@@ -119,6 +122,20 @@ final class ScopedSqlDataSource extends AbstractDataSource {
     final class State {
       Query query;
       boolean closed;
+      boolean constrained;
+      long readDeadline;
+
+      void constrain(long selected) throws SQLException {
+        check();
+        if (query != null && !query.finished())
+          throw new SQLException("Apply the read deadline before executing the statement");
+        if (!constrained || selected - readDeadline < 0) readDeadline = selected;
+        constrained = true;
+      }
+
+      Query query(String phase) {
+        return constrained ? lease.query(phase, readDeadline) : lease.query(phase);
+      }
 
       void close() {
         if (query != null) {
@@ -135,7 +152,12 @@ final class ScopedSqlDataSource extends AbstractDataSource {
     State state = new State();
     return proxy(
         type,
+        StatementDeadline.class,
         (self, method, args) -> {
+          if (method.getDeclaringClass() == StatementDeadline.class) {
+            state.constrain((long) args[0]);
+            return null;
+          }
           String name = method.getName();
           if (name.equals("getConnection")) return connection;
           if (name.equals("unwrap") || name.equals("isWrapperFor"))
@@ -157,15 +179,22 @@ final class ScopedSqlDataSource extends AbstractDataSource {
           boolean retained = false;
           if (execute) {
             state.close();
-            state.query = lease.query("query");
-            statement.setQueryTimeout(1);
+            state.query = state.query("query");
           } else if (state.query == null || state.query.finished()) {
-            temporary = lease.query("statement");
+            temporary = state.query("statement");
           }
           Query selected = temporary == null ? state.query : temporary;
           try {
             selected.check();
-            if (execute) lease.beforeStatement(selected);
+            if (execute) {
+              // Only the infrastructure sees this still-owned raw handle. The public wrapper
+              // continues to refuse native unwrap. A driver timer cannot replace our watchdog
+              // and materialization fence, but must retain an already shorter pgJDBC timeout.
+              if (state.constrained && statement.isWrapperFor(PgStatement.class))
+                JdbcReadDeadline.apply(statement, selected.end);
+              else statement.setQueryTimeout(1);
+              lease.beforeStatement(selected);
+            }
             Object result = invoke(statement, method, args);
             selected.check();
             if (result instanceof ResultSet rows) {
@@ -264,10 +293,14 @@ final class ScopedSqlDataSource extends AbstractDataSource {
   }
 
   private static <T> T proxy(Class<T> type, Call call) {
+    return proxy(type, null, call);
+  }
+
+  private static <T> T proxy(Class<T> type, Class<?> capability, Call call) {
     return type.cast(
         Proxy.newProxyInstance(
-            type.getClassLoader(),
-            new Class<?>[] {type},
+            capability == null ? type.getClassLoader() : capability.getClassLoader(),
+            capability == null ? new Class<?>[] {type} : new Class<?>[] {type, capability},
             (self, method, args) -> {
               if (method.getDeclaringClass() == Object.class)
                 return switch (method.getName()) {
