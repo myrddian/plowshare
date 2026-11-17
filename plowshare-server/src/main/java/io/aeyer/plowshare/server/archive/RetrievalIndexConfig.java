@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.server.documents.Chunking;
+import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.llm.*;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import java.time.Duration;
@@ -22,6 +23,7 @@ public class RetrievalIndexConfig {
               io.aeyer.plowshare.server.embedding.EmbeddingTokenizers>
           embeddingTokenizers,
       LlmProperties llm,
+      InformationLogVisibility visibility,
       Environment env) {
     // The operator must bump the generation when an alias's underlying model changes.
     String generation =
@@ -43,7 +45,8 @@ public class RetrievalIndexConfig {
             jdbc,
             transactions,
             env.getProperty(
-                "plowshare.retrieval.search-budget", Duration.class, Duration.ofSeconds(2))),
+                "plowshare.retrieval.search-budget", Duration.class, Duration.ofSeconds(2)),
+            visibility),
         embeddings,
         new Chunking(tokenizer, Math.min(384, ceiling), ceiling),
         generation,

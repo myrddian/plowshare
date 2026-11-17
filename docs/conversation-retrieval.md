@@ -42,6 +42,20 @@ invalid slots without shifting the remaining pages and marks the result
 incomplete. Coverage is current; candidate identities/order are frozen. Lexical
 paging remains the existing exact offset paging.
 
+For example, the `conversation_search` tool pages the same hybrid snapshot with:
+
+```json
+{"question":"earlier retry decision","mode":"hybrid","offset":0,"limit":20}
+{"question":"earlier retry decision","mode":"hybrid","snapshot":"<retrieval.snapshot from the first reply>","offset":20,"limit":20}
+```
+
+Keep the question, mode, home, conversation selector and `includeInputs` selection
+the same. The tool allows up to twenty groups per page. Later pages recheck retained
+source visibility/revisions and current coverage, but make no query embedding or
+ANN candidate-selection call. Offsets paginate the bounded 200-group snapshot;
+reaching its end returns an empty page. A truncated candidate window remains
+labelled truncated on every page and does not promise exhaustive corpus pagination.
+
 Each hit includes its conversation, entry/turn ordinal, kind, source length,
 recorded time, supersession and any historical tool handle. New modes also name
 the contributing retrieval lists, matched passage position and source hash.
@@ -53,11 +67,35 @@ historical tool result. Its home check is authoritative. A current-conversation
 
 ## Ranking, coverage and cost
 
-Semantic mode embeds the question and performs exact, home-filtered cosine
-ranking. A similarity floor of 0.35 excludes weak candidates; it is an ordering
-heuristic awaiting live-model calibration. The best passage is selected per
-entry **before** the 201-candidate truncation check, so duplicate passages cannot
-crowd out other entries. At most 200 lexical and 200 semantic entries enter
+Semantic mode embeds the question and uses the active embedding profile's search
+policy. Indexed profiles select at most `min(2000, max(100, 10 * requested))`
+authorized passage candidates, using the index's distance operator and representation.
+Home, conversation, visibility, readiness, current-vector and supplied-context
+filters apply before that candidate limit. Iterative ANN scans continue past
+filtered rows within pgvector's configured scan bounds and the shared SQL deadline.
+
+Passage ranking and coverage reuse the existing account-specific, version-fenced
+log-visibility facts used by lexical/reach reads. A cache miss resolves the complete
+denied-log graph once for that account/version. Ineligible, dirty, historical or
+oversized snapshots use the authoritative SQL predicate; a visibility change during
+the query refuses its results without replay. Authorization still precedes the
+candidate limit, and no result-window or scoring bounds are reduced.
+
+The first SQL query returns only passage keys and source revisions. A second,
+batched SQL query loads text and scores original vectors for those keys, rechecking
+the source revision so an intervening edit or delete/reinsert cannot reuse a stale
+candidate. Both queries share the same remaining deadline. Bounded
+in-memory stages select the best passage per entry, collapse whitespace-equivalent
+excerpts with at most twenty source references, and then limit the result groups.
+Cosine ranking retains the similarity floor of 0.35; other configured metrics do
+not inherit a cosine threshold. ANN recall is approximate and duplicate-heavy
+windows can contain fewer distinct groups. Source counts describe the retained
+candidate window, not all matching history. Approximate searches report
+`complete: false`; a filled passage window also reports `truncated: true`, even
+when deduplication leaves fewer than 200 groups. Exact profiles retain exact
+filtered ranking and grouping. No index policy or embedding model changes implicitly.
+
+At most 200 lexical and 200 semantic groups enter
 hybrid reciprocal rank fusion (`k=60`); the fused entry window is capped at 200
 and ties use stable entry identity. Incomparable lexical/cosine scores are never
 added. Snippets contain the matched passage, bounded to the existing 1,000
@@ -72,6 +110,13 @@ ready. Ejected and recorded-only exclusions remain in `reach`. An empty semantic
 answer with an indexing backlog is incomplete. Semantic query embedding failure
 is an explicit unavailability; hybrid can return lexical candidates with a
 labelled incomplete fallback. Lexical search needs no inference service.
+
+A cancelled search rolls back its active database transaction and returns a
+recoverable tool failure instead of ending the agent run as an unreachable archive.
+The model can continue with other retained evidence. The server returns no partial
+search results and does not automatically retry SQL, embeddings or completed tools.
+Deadline cancellation and diagnostics remain enabled; an actual archive connection
+failure retains the existing fatal dependency policy.
 
 Search spends a system query embedding and no conversation/model-descent
 allowance. Reusing a snapshot makes no query embedding call. Background repair
@@ -137,11 +182,11 @@ be reused when the whole summary fits one bounded passage. Historical untagged
 vectors are rebuilt rather than guessed compatible. Longer summaries are
 indexed in passages. Stale/missing vectors retain structural navigation.
 
-Exact ranking intentionally uses no ANN index: predicates precede ranking and
-filtered recall is preserved. A controlled 10,000-passage/2,000-entry fixture
-returned all 201 qualified scoped entry candidates in 48–49 ms on the test host.
-This measures plumbing and scope, not real semantic quality or production SLA.
-Larger deployments should measure their volume before introducing an ANN path.
+ANN index lifecycle remains owned by the embedding configuration and activation
+fences. Conversation entries no longer override an indexed profile with exact
+ranking. Query shape keeps the indexed operator as the candidate ordering, with
+batched text loading, full-precision reranking and deduplication after the candidate bound.
+See [pgvector's filtering and iterative-scan contract](https://github.com/pgvector/pgvector#iterative-index-scans).
 
 ## Navigation and grants
 

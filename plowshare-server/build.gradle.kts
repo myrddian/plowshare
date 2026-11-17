@@ -5,6 +5,7 @@ plugins {
 }
 
 val pgvectorJdbcVersion: String by project
+val checkerQualVersion: String by project
 val okhttpVersion: String by project
 val jacksonVersion: String by project
 val flywayVersion: String by project
@@ -65,6 +66,9 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql:$flywayVersion")
 
     implementation("org.postgresql:postgresql")
+    // PgStatement's public millisecond cancellation API carries compile-time Checker annotations.
+    compileOnly("org.checkerframework:checker-qual:$checkerQualVersion")
+    testImplementation("org.checkerframework:checker-qual:$checkerQualVersion")
     implementation("com.pgvector:pgvector:$pgvectorJdbcVersion")
 
     // The password hash for the one admin this server now has. Argon2id and

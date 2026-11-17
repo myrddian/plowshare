@@ -10,8 +10,8 @@ public final class InformationLogSql {
 
   public static InformationSql.Filter visible(
       String column, String account, InformationLogVisibility.Facts facts) {
-    if (!Set.of("conversation", "i.conversation", "id", "c.id").contains(column))
-      throw new IllegalArgumentException("Unknown log column");
+    if (!Set.of("conversation", "i.conversation", "id", "c.id", "s.conversation_id")
+        .contains(column)) throw new IllegalArgumentException("Unknown log column");
     return facts
         .blocked()
         .<InformationSql.Filter>map(

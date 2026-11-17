@@ -67,6 +67,14 @@ retained child by conversation, checking the original task/images, home, callee
 and current authority. Session-loss and mandatory review/stage contracts retain
 their owning gates; a failed reviewer never certifies an answer.
 
+Conversation-search SQL cancellation (including PostgreSQL `57014`) becomes a
+recoverable `ReadUnavailableException` only at the search owner after its archive
+transactions unwind. The runtime records the failed tool result and can continue
+with earlier completed tool results. No partial search window, automatic SQL/model
+retry or replay of earlier effects is produced. Actual archive connection failures
+retain their fatal dependency policy; cancellation of a generic archive write still
+retains unavailable/effect-uncertainty semantics.
+
 Trace [Transcript](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Transcript.java), [EntryKind](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/EntryKind.java),
 [Projection](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Projection.java)/[Compaction](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Compaction.java) and [ContextCountFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java).
 See the [conversation manual](../../docs/manual/03-architecture.md#log-trajectory-and-model-projection) for the user-facing comparison.

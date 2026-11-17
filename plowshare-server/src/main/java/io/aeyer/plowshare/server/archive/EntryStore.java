@@ -20,6 +20,7 @@ import io.aeyer.plowshare.server.information.InformationLogSql;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
+import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.sql.ResultSet;
@@ -1120,6 +1121,7 @@ public final class EntryStore implements ConversationSearchRepository {
       long deadline,
       InformationLogVisibility.Facts facts,
       Object... args) {
+    long queryDeadline = JdbcReadDeadline.completionDeadline(deadline);
     var bound = new ArrayList<>(Arrays.asList(args));
     if (facts != null) {
       int at = sql.indexOf("/*information*/");
@@ -1134,17 +1136,11 @@ public final class EntryStore implements ConversationSearchRepository {
           jdbc.query(
               sql,
               statement -> {
-                long remaining = deadline - System.nanoTime();
-                if (remaining <= 0) throw new ReadUnavailableException();
-                // pgJDBC owns cancellation of the active statement; expiry never returns late data.
-                int timeout = ReadDeadline.jdbcTimeoutSeconds(deadline);
-                int transactionTimeout = statement.getQueryTimeout();
-                statement.setQueryTimeout(
-                    transactionTimeout > 0 ? Math.min(transactionTimeout, timeout) : timeout);
                 setter.setValues(statement);
+                JdbcReadDeadline.apply(statement, queryDeadline);
               },
               mapper);
-      if (System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
+      if (System.nanoTime() - queryDeadline >= 0) throw new ReadUnavailableException();
       return result;
     } finally {
       setter.cleanupParameters();

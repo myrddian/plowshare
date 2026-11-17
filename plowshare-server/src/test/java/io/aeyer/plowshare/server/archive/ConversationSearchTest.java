@@ -18,10 +18,14 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ConversationSearchTest {
   private static final Home HOME = Home.of("project");
@@ -57,8 +61,7 @@ class ConversationSearchTest {
 
   @Test
   void snapshotsCannotSwitchBetweenEvidenceAndFullInputs() {
-    when(index.rank(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
-        .thenReturn(List.of());
+    ranking(List.of());
     when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
     var first = search.search(HOME, "question", 0, 10, "semantic", null);
     assertThrows(
@@ -78,11 +81,10 @@ class ConversationSearchTest {
 
   @Test
   void repeatedContentGetsOneVoteAndRetainsItsConversationReferences() {
-    when(index.rank(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
-        .thenReturn(
-            List.of(
-                new PassageIndex.Match(a.id(), 0, "shared passage", .8, "hash"),
-                new PassageIndex.Match(b.id(), 0, "shared passage", .8, "hash")));
+    ranking(
+        List.of(
+            new PassageIndex.Match(a.id(), 0, "shared passage", .8, "hash"),
+            new PassageIndex.Match(b.id(), 0, "shared passage", .8, "hash")));
     when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of(a, b));
     var result = search.search(HOME, "question", 0, 10, "semantic", null);
     assertEquals(1, result.total());
@@ -92,19 +94,18 @@ class ConversationSearchTest {
 
   @Test
   void snapshotsRecheckEveryReferenceAndCanReplaceARevokedRepresentative() {
-    when(index.rank(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
-        .thenReturn(
-            List.of(
-                new PassageIndex.Match(
-                    a.id(),
-                    0,
-                    "shared",
-                    .8,
-                    "hash",
-                    List.of(
-                        new PassageIndex.Occurrence(a.id(), "hash"),
-                        new PassageIndex.Occurrence(b.id(), "hash")),
-                    2)));
+    ranking(
+        List.of(
+            new PassageIndex.Match(
+                a.id(),
+                0,
+                "shared",
+                .8,
+                "hash",
+                List.of(
+                    new PassageIndex.Occurrence(a.id(), "hash"),
+                    new PassageIndex.Occurrence(b.id(), "hash")),
+                2)));
     when(entries.searchSources(eq(HOME), anyList()))
         .thenReturn(List.of(a, b))
         .thenReturn(List.of(b));
@@ -136,9 +137,7 @@ class ConversationSearchTest {
             2);
     when(entries.search(HOME, "question", 0, 200))
         .thenReturn(new LogSearch(List.of(lexical), 1, new LogSearch.Reach(2, 0, 0)));
-    when(index.rank(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
-        .thenReturn(
-            List.of(new PassageIndex.Match(a.id(), 0, "restricted distinct excerpt", .8, "hash")));
+    ranking(List.of(new PassageIndex.Match(a.id(), 0, "restricted distinct excerpt", .8, "hash")));
     when(entries.searchSources(eq(HOME), anyList()))
         .thenReturn(List.of(a, b))
         .thenReturn(List.of(b));
@@ -150,8 +149,7 @@ class ConversationSearchTest {
 
   @Test
   void semanticSelectionBindsRankingCoverageAndSnapshotIdentity() {
-    when(index.rank(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
-        .thenReturn(List.of());
+    ranking(List.of());
     var result = search.search(HOME, "question", 0, 10, "semantic", null, "cnv_a");
     verify(index, times(2)).inConversation("cnv_a");
     verify(entries).searchReach(HOME, "cnv_a");
@@ -165,5 +163,110 @@ class ConversationSearchTest {
     assertThrows(
         ValidationException.class,
         () -> search.search(HOME, "question", 0, 10, "lexical", null, " "));
+  }
+
+  private void ranking(List<PassageIndex.Match> matches) {
+    when(index.rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+        .thenReturn(new PassageIndex.Ranking(matches, false, false));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"semantic", "hybrid"})
+  void indexedSnapshotPaginatesWithoutRepeatingEmbeddingOrAnnSelection(String mode) {
+    var sources = IntStream.range(0, 25).mapToObj(i -> source("cnv_%02d".formatted(i))).toList();
+    var matches =
+        IntStream.range(0, sources.size())
+            .mapToObj(
+                i ->
+                    new PassageIndex.Match(
+                        sources.get(i).id(), 0, "passage " + i, 1 - i * .01, "hash"))
+            .toList();
+    when(index.rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+        .thenReturn(new PassageIndex.Ranking(matches, true, true));
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(sources);
+
+    var first = search.search(HOME, "question", 0, 10, mode, null);
+    String token = first.retrieval().snapshot();
+    var second = search.search(HOME, "question", 10, 10, mode, token);
+    var last = search.search(HOME, "question", 20, 10, mode, token);
+    var end = search.search(HOME, "question", 30, 10, mode, token);
+
+    assertEquals(
+        List.of(10, 10, 5, 0),
+        List.of(first.hits().size(), second.hits().size(), last.hits().size(), end.hits().size()));
+    var ids = new ArrayList<String>();
+    for (var page : List.of(first, second, last, end)) {
+      assertEquals(25, page.total());
+      assertEquals(token, page.retrieval().snapshot());
+      assertEquals(true, page.retrieval().truncated());
+      assertFalse(page.retrieval().complete());
+      page.hits().forEach(hit -> ids.add(hit.conversationId()));
+    }
+    assertEquals(sources.stream().map(LogSearch.Source::conversationId).toList(), ids);
+    assertEquals(1, first.retrieval().queryEmbeddingCalls());
+    for (var page : List.of(second, last, end))
+      assertEquals(0, page.retrieval().queryEmbeddingCalls());
+    verify(index).capture(eq("question"), any(UsageAttribution.class), eq(HOME));
+    verify(index)
+        .rankWindow(
+            eq(HOME),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            eq(ConversationSearch.CANDIDATES + 1));
+    verify(entries, times(4)).searchSources(eq(HOME), anyList());
+    if (mode.equals("hybrid"))
+      verify(entries).search(HOME, "question", 0, ConversationSearch.CANDIDATES);
+  }
+
+  @Test
+  void laterPagesRequireTheOriginalSnapshotQuestionModeHomeAndReader() {
+    ranking(List.of(new PassageIndex.Match(a.id(), 0, "passage", .8, "hash")));
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of(a));
+    var first = search.search(HOME, "question", 0, 1, "semantic", null);
+    String token = first.retrieval().snapshot();
+    assertThrows(
+        ValidationException.class, () -> search.search(HOME, "question", 1, 1, "semantic", null));
+    assertThrows(
+        ValidationException.class,
+        () -> search.search(HOME, "different question", 1, 1, "semantic", token));
+    assertThrows(
+        ValidationException.class, () -> search.search(HOME, "question", 1, 1, "hybrid", token));
+    assertThrows(
+        ValidationException.class,
+        () -> search.search(Home.global(), "question", 1, 1, "semantic", token));
+    when(entries.forAccount("other")).thenReturn(entries);
+    when(index.forAccount("other")).thenReturn(index);
+    assertThrows(
+        ValidationException.class,
+        () -> search.forAccount("other").search(HOME, "question", 1, 1, "semantic", token));
+    verify(index).capture(eq("question"), any(UsageAttribution.class), eq(HOME));
+    verify(index).rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt());
+  }
+
+  @Test
+  void approximateRecallDoesNotClaimCompletenessWhenThePassageWindowIsNotFull() {
+    when(index.rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+        .thenReturn(new PassageIndex.Ranking(List.of(), true, false));
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
+    var result = search.search(HOME, "question", 0, 10, "semantic", null);
+    assertFalse(result.retrieval().complete());
+    assertFalse(result.retrieval().truncated());
+  }
+
+  @Test
+  void approximateRecallAndExhaustedPassageWindowRemainVisibleEvenAfterDeduplication() {
+    when(index.rankWindow(eq(HOME), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+        .thenReturn(
+            new PassageIndex.Ranking(
+                List.of(new PassageIndex.Match(a.id(), 0, "shared", .8, "hash")), true, true));
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of(a));
+    var result = search.search(HOME, "question", 0, 10, "semantic", null);
+    assertEquals(1, result.total());
+    assertFalse(result.retrieval().complete());
+    assertEquals(true, result.retrieval().truncated());
+    assertEquals("bounded approximate passage groups", result.retrieval().totalMeaning());
+    var replay = search.search(HOME, "question", 0, 10, "semantic", result.retrieval().snapshot());
+    assertFalse(replay.retrieval().complete());
+    assertEquals(true, replay.retrieval().truncated());
   }
 }
