@@ -114,6 +114,16 @@ public interface PassageRepository {
         "typed passage retrieval is not implemented by this repository");
   }
 
+  /**
+   * Selects authorized candidates before the passage bound, then reranks, groups and limits the
+   * retained window. Approximate results never attest exhaustive recall; truncation also records
+   * when duplicate passages or selective ANN filtering may have exhausted the candidate window.
+   */
+  default Ranking rankWindow(
+      Home home, String type, EmbeddingQuery query, int most, String generation, ReadScope scope) {
+    return new Ranking(rank(home, type, query, most, generation, scope), false, false);
+  }
+
   default Coverage coverage(
       Home home,
       String type,

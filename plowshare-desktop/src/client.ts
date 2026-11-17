@@ -666,6 +666,27 @@ export class DesktopClient {
   }
   files: FilePresence | undefined;
   private fileClosing: Promise<void> = Promise.resolve();
+  private recoveryClosing: Promise<void> = Promise.resolve();
+  private recoveryCloseFailed = false;
+  private closeConnection() {
+    const connection = this.connection;
+    this.connection = undefined;
+    if (!connection) return;
+    // Own the cleanup started by socket close until shutdown has drained it.
+    // Otherwise a normal quit can strand local workspace lock directories.
+    this.recoveryClosing = Promise.allSettled([
+      this.recoveryClosing,
+      releaseWorkspaceRecovery(connection),
+    ]).then((results) => {
+      if (results.some((result) => result.status === 'rejected')) {
+        this.recoveryCloseFailed = true;
+        this.state.backgroundError =
+          'Workspace recovery cleanup failed; inspect private client configuration before reopening files.';
+        this.emit();
+      }
+    });
+    connection.close();
+  }
   private closeFiles() {
     const syncing = this.sync.close();
     const files = this.files;
@@ -679,7 +700,19 @@ export class DesktopClient {
   }
   async shutdown() {
     this.dispose();
-    await Promise.all([this.fileClosing, this.nativeClosing]);
+    const stopped = await Promise.allSettled([
+      this.fileClosing,
+      this.nativeClosing,
+      this.recoveryClosing,
+    ]);
+    // A failed provider/native teardown must not let Electron exit while an
+    // independent workspace write is still holding its lock.
+    const failed = stopped.find((result) => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+    if (this.recoveryCloseFailed)
+      throw new Error(
+        'Workspace recovery cleanup failed; inspect private client configuration.',
+      );
     if (this.nativeCloseFailed)
       throw new Error(
         'Native MCP stopped with retained uncertainty; inspect private receipts',
@@ -1032,8 +1065,7 @@ export class DesktopClient {
     this.board.reset();
     this.operator.reset();
     this.lifecycle.reset(true);
-    this.connection?.close();
-    this.connection = undefined;
+    this.closeConnection();
     this.runtimeConfiguration = undefined;
     for (const timer of [...this.timers.values(), ...this.demoTimers.values()])
       clearInterval(timer);
@@ -1049,6 +1081,7 @@ export class DesktopClient {
     this.dirtyHistories.clear();
   }
   private disconnected() {
+    this.closeConnection();
     this.stopNativeMcp();
     this.retainedConversations.clear();
     this.state.answeringApprovals = [];
@@ -1760,8 +1793,7 @@ export class DesktopClient {
           }
         } catch (error) {
           if (generation === this.generation) {
-            this.connection?.close();
-            this.connection = undefined;
+            this.closeConnection();
             this.disconnected();
             this.state.connection =
               error instanceof ConnectionUnavailable

@@ -1,12 +1,14 @@
 package io.aeyer.plowshare.server.archive;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +20,40 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 class ConversationSearchDeadlineTest {
+  @Test
+  void aCancelledSearchIsRecoverableAfterTheReadOwnerUnwinds() {
+    var entries = mock(EntryStore.class);
+    var index = mock(PassageIndex.class);
+    var search = new ConversationSearch(entries, index);
+    var cancelled =
+        new ArchiveQueryCancelledException(
+            "rank conversation passages", new IllegalStateException("cancelled"));
+    when(entries.withinSearchScope(any(), any())).thenThrow(cancelled);
+    var failure =
+        assertThrows(
+            ReadUnavailableException.class,
+            () -> search.search(Home.global(), "failure", 0, 10, "hybrid", null));
+    assertSame(cancelled, failure.getCause());
+    assertTrue(failure.getMessage().contains("Conversation search was cancelled"));
+    verify(entries).withinSearchScope(any(), any());
+    verifyNoInteractions(index);
+  }
+
+  @Test
+  void anUnavailableArchiveIsNotMisclassifiedAsQueryCancellation() {
+    var entries = mock(EntryStore.class);
+    var search = new ConversationSearch(entries, mock(PassageIndex.class));
+    var unavailable =
+        new ArchiveUnavailableException(
+            "archive connection unavailable", new IllegalStateException("connection lost"));
+    when(entries.withinSearchScope(any(), any())).thenThrow(unavailable);
+    assertSame(
+        unavailable,
+        assertThrows(
+            ArchiveUnavailableException.class,
+            () -> search.search(Home.global(), "failure", 0, 10, "hybrid", null)));
+  }
+
   @Test
   void searchSharesTheEarlierCacheAdmissionDeadlineRatherThanResettingIt() {
     var entries = mock(EntryStore.class);
@@ -60,13 +96,7 @@ class ConversationSearchDeadlineTest {
   }
 
   @Test
-  void jdbcCancellationNeverRoundsUpBeyondTheRemainingBudget() {
-    assertEquals(
-        2, ReadDeadline.jdbcTimeoutSeconds(System.nanoTime() + Duration.ofMillis(2900).toNanos()));
-    assertThrows(
-        ReadUnavailableException.class,
-        () ->
-            ReadDeadline.jdbcTimeoutSeconds(System.nanoTime() + Duration.ofMillis(500).toNanos()));
+  void searchRequiresAPositiveBudget() {
     assertThrows(
         IllegalArgumentException.class,
         () ->

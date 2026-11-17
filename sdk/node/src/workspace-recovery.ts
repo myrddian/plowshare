@@ -26,6 +26,8 @@ interface Store {
   owner: string;
   held: Map<string, string>;
   closed: boolean;
+  cleanup?: Promise<void>;
+  acquisitions: Set<Promise<string>>;
 }
 const stores = new WeakMap<Connection, Store>();
 
@@ -99,6 +101,7 @@ export function enableWorkspaceRecovery(
     owner: randomUUID(),
     held: new Map(),
     closed: false,
+    acquisitions: new Set(),
   });
   const close = connection.close.bind(connection);
   connection.close = () => {
@@ -112,24 +115,37 @@ export function enableWorkspaceRecovery(
 }
 
 /** Bound cleanup; a killed process is detected by PID on the next acquisition. Keys are retained. */
-export async function releaseWorkspaceRecovery(
+export function releaseWorkspaceRecovery(
   connection: Connection,
 ): Promise<void> {
   const store = stores.get(connection);
-  if (!store || store.closed) return;
+  if (!store) return Promise.resolve();
+  // Socket close and explicit shutdown converge on the same physical cleanup.
+  // Returning early after close would let the process exit inside localLock.
+  if (store.cleanup) return store.cleanup;
   store.closed = true;
-  for (const name of store.held.keys()) {
-    await localLock(store.directory, name, async () => {
-      const file = join(store.directory, name + '.json');
-      const slots = await readSlots(file);
-      await atomicPrivateWrite(
-        file,
-        slots.map((slot) =>
-          slot.owner === store.owner ? { key: slot.key } : slot,
-        ),
-      );
-    });
-  }
+  store.cleanup = (async () => {
+    // A claim already writing its slot still owns filesystem work. Drain it
+    // before releasing the resulting claim; late acquisitions cannot start.
+    await Promise.allSettled(store.acquisitions);
+    const released = await Promise.allSettled(
+      [...store.held.keys()].map((name) =>
+        localLock(store.directory, name, async () => {
+          const file = join(store.directory, name + '.json');
+          const slots = await readSlots(file);
+          await atomicPrivateWrite(
+            file,
+            slots.map((slot) =>
+              slot.owner === store.owner ? { key: slot.key } : slot,
+            ),
+          );
+        }),
+      ),
+    );
+    const failed = released.find((result) => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+  })();
+  return store.cleanup;
 }
 
 /** Stable per-workspace capability, with a separate slot for every concurrent local client. */
@@ -148,7 +164,7 @@ export async function workspaceRecoveryKey(
     .digest('hex');
   const held = store.held.get(name);
   if (held !== undefined) return held;
-  return localLock(store.directory, name, async () => {
+  const acquisition = localLock(store.directory, name, async () => {
     if (store.closed)
       throw new Error('The workspace recovery connection is closed.');
     const already = store.held.get(name);
@@ -170,6 +186,12 @@ export async function workspaceRecoveryKey(
     store.held.set(name, slot.key);
     return slot.key;
   });
+  store.acquisitions.add(acquisition);
+  try {
+    return await acquisition;
+  } finally {
+    store.acquisitions.delete(acquisition);
+  }
 }
 
 /** Add private proof only at the file connection boundary, never to displayed claims. */

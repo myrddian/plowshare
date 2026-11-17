@@ -20,7 +20,11 @@ import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import io.aeyer.plowshare.server.archive.ArchiveException;
+import io.aeyer.plowshare.server.archive.ArchiveQueryCancelledException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
+import io.aeyer.plowshare.server.archive.ConversationSearch;
+import io.aeyer.plowshare.server.archive.EntryStore;
+import io.aeyer.plowshare.server.archive.PassageIndex;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.files.SessionGoneException;
@@ -438,6 +442,47 @@ class JobRuntimeTest {
     var outcome = runtime.run(agent("reader"), "go", Home.global(), generous(), null);
     assertEquals(Ending.ANSWERED, outcome.ending());
     assertEquals(List.of(busy), observations);
+  }
+
+  @Test
+  void cancelledConversationSearchKeepsEarlierToolResultsAndLetsTheRunContinue() throws Exception {
+    var entries = mock(EntryStore.class);
+    var search = new ConversationSearch(entries, mock(PassageIndex.class));
+    var cancelled =
+        new ArchiveQueryCancelledException(
+            "rank conversation passages", new IllegalStateException("statement cancelled"));
+    when(entries.withinSearchScope(any(), any())).thenThrow(cancelled);
+    var observations = new ArrayList<Throwable>();
+    var tools = new AtomicInteger();
+    var transport =
+        new Scripted()
+            .then(
+                () ->
+                    asking(
+                        "looking",
+                        call("saved", "probe_read", "{}"),
+                        call("cancelled", "probe_read", "{}")))
+            .then(() -> answer("Continued using the earlier evidence; search is unavailable."));
+    var runtime =
+        runtimeOver(
+            (source, failure) -> observations.add(failure),
+            transport,
+            new Probe(
+                "probe_read",
+                args -> {
+                  if (tools.incrementAndGet() == 1) return "earlier completed evidence";
+                  return search.search(Home.global(), "question", 0, 10, "hybrid", null).toString();
+                }));
+    var result = runtime.run(agent("reader"), "go", Home.global(), generous(), null);
+    assertEquals(Ending.ANSWERED, result.ending());
+    assertEquals(2, transport.calls().size());
+    assertEquals(
+        2, tools.get(), "completed work or cancelled search must not be automatically replayed");
+    assertTrue(toolResults(transport, 1).contains("earlier completed evidence"));
+    assertTrue(toolResults(transport, 1).contains("Conversation search was cancelled"));
+    assertEquals(1, observations.size());
+    assertTrue(observations.getFirst() instanceof ReadUnavailableException);
+    assertSame(cancelled, observations.getFirst().getCause());
   }
 
   private static JobRuntime runtimeOver(LlmTransport transport, AgentTool... tools) {

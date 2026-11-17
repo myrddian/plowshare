@@ -57,17 +57,6 @@ public final class ReadDeadline {
     if (deadline != null && System.nanoTime() - deadline >= 0) throw new ReadUnavailableException();
   }
 
-  /**
-   * JDBC cancellation has whole-second precision. Round down, never past the remaining budget;
-   * refuse a statement when no cancellable second remains rather than grant it another second. This
-   * does not reset the enclosing cache/admission deadline or authorize retries.
-   */
-  public static int jdbcTimeoutSeconds(long deadline) {
-    long seconds = (deadline - System.nanoTime()) / 1_000_000_000L;
-    if (seconds < 1) throw new ReadUnavailableException();
-    return (int) Math.min(Integer.MAX_VALUE, seconds);
-  }
-
   private static Duration checked(Duration budget) {
     Objects.requireNonNull(budget);
     if (budget.isNegative() || budget.isZero())

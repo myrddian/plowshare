@@ -399,7 +399,8 @@ export function installServerAdmin(
       ) {
         this.close();
         active = 'configuration';
-        if (!host.hidden) background(request({ action: 'workspace-chat' }));
+        if (!host.hidden && state.connected)
+          background(request({ action: 'workspace-chat' }));
       }
       snapshot = state;
       connected = available;

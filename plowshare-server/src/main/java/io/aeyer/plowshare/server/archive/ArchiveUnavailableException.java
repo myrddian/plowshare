@@ -107,7 +107,9 @@ public class ArchiveUnavailableException extends RuntimeException {
 
   /**
    * Run one database call, translating resource unavailability or query cancellation. Cancellation
-   * retains the unavailable contract but is not reported as a lost connection.
+   * retains the unavailable contract as {@link ArchiveQueryCancelledException}, not a lost
+   * connection. A read-operation owner can downgrade that typed cancellation after its transaction
+   * unwinds; generic writes retain fatal unavailability and effect uncertainty.
    *
    * <p>Wraps the call rather than the whole of a store method, so the {@code what} names one
    * operation an operator can act on. Every JDBC call in {@link MemoryStore} and {@link
@@ -123,14 +125,11 @@ public class ArchiveUnavailableException extends RuntimeException {
     } catch (DataAccessException | TransactionException failed) {
       // PostgreSQL's query_canceled state includes driver deadline cancellation and explicit
       // operator cancellation. The server answered; do not describe either as a lost connection.
-      // Preserve UNAVAILABLE rather than inviting a model to retry expensive/uncertain work.
+      // Preserve a typed failure: only a read owner may make cancellation recoverable after
+      // rollback. Generic writes must not invite replay of expensive or uncertain work.
       if (failed.getMostSpecificCause() instanceof SQLException sql
           && "57014".equals(sql.getSQLState())) {
-        throw new ArchiveUnavailableException(
-            "archive SQL was cancelled before a result was available while trying to "
-                + what
-                + "; a statement deadline or explicit cancellation can cause this (SQLSTATE 57014)",
-            failed);
+        throw new ArchiveQueryCancelledException(what, failed);
       }
       if (!unreachable(failed)) {
         throw failed;

@@ -231,7 +231,7 @@ await test('semantic paging pins snapshots and refuses paging when none was supp
   const f = fixture(),
     first = f.replies['conversation.search'];
   first.total = 2;
-  first.limit = 50;
+  first.limit = 1;
   first.offset = 0;
   first.hits = first.hits.slice(0, 1);
   first.retrieval = {
@@ -277,6 +277,112 @@ await test('semantic paging pins snapshots and refuses paging when none was supp
   await f.client.search('conversation', 'query', 'semantic', true);
   assert.match(f.state.library!.search.error!, /snapshot/);
   assert.equal(f.calls.length, 3);
+});
+await test('sparse snapshot pages advance slots through empty pages and clear fully revoked evidence', async () => {
+  const f = fixture(),
+    first = f.replies['conversation.search'];
+  first.total = 151;
+  first.limit = 50;
+  first.offset = 0;
+  first.hits = first.hits.slice(0, 1);
+  first.retrieval = {
+    requestedMode: 'semantic',
+    effectiveMode: 'semantic',
+    totalMeaning: 'bounded snapshot slots',
+    snapshot: 'sparse',
+    truncated: false,
+    complete: false,
+    fallback:
+      'Source visibility/revision changed; invalid references suppressed',
+    coverage: null,
+    generation: 'g1',
+    queryEmbeddingCalls: 1,
+    provenance: 'materialized',
+  };
+  await f.client.search('conversation', 'query', 'semantic');
+  assert.equal(f.state.library!.search.value!.nextOffset, 50);
+  f.setReply(() => ({
+    code: 'OK',
+    payload: { ...first, offset: 50, hits: [] },
+  }));
+  await f.client.search('conversation', 'query', 'semantic', true);
+  assert.equal(f.state.library!.search.error, undefined);
+  assert.equal(f.state.library!.search.value!.nextOffset, 100);
+  assert.equal(list(f.state.library!.search.value!.reply, ['hits']).length, 1);
+  f.setReply(() => ({
+    code: 'OK',
+    payload: {
+      ...first,
+      offset: 100,
+      hits: [
+        {
+          ...present(first.hits[0]),
+          ordinal: present(first.hits[0]).ordinal + 1,
+        },
+      ],
+    },
+  }));
+  await f.client.search('conversation', 'query', 'semantic', true);
+  assert.equal(f.state.library!.search.error, undefined);
+  assert.equal(f.state.library!.search.value!.nextOffset, 150);
+  assert.equal(list(f.state.library!.search.value!.reply, ['hits']).length, 2);
+  f.setReply(() => ({
+    code: 'OK',
+    payload: { ...first, offset: 150, total: 0, hits: [] },
+  }));
+  await f.client.search('conversation', 'query', 'semantic', true);
+  assert.equal(f.state.library!.search.error, undefined);
+  assert.equal(f.state.library!.search.value!.nextOffset, 200);
+  assert.equal(list(f.state.library!.search.value!.reply, ['hits']).length, 0);
+  assert.equal(field(f.state.library!.search.value!.reply, ['total']), 0);
+  assert.deepEqual(
+    f.calls.map((ask) => field(ask.payload, ['offset'])),
+    [0, 50, 100, 150],
+  );
+  assert.deepEqual(
+    f.calls.slice(1).map((ask) => field(ask.payload, ['snapshot'])),
+    ['sparse', 'sparse', 'sparse'],
+  );
+  await f.client.search('conversation', 'query', 'semantic', true);
+  assert.match(f.state.library!.search.error!, /No more/);
+  assert.equal(f.calls.length, 4);
+});
+await test('lexical pages still reject empty remaining results and nonpositive limits', async () => {
+  const f = fixture(),
+    first = f.replies['conversation.search'];
+  first.total = 100;
+  first.limit = 50;
+  first.offset = 0;
+  first.hits = first.hits.slice(0, 1);
+  first.retrieval = {
+    requestedMode: 'lexical',
+    effectiveMode: 'lexical',
+    totalMeaning: 'distinct matching passage groups',
+    snapshot: null,
+    truncated: false,
+    complete: true,
+    fallback: null,
+    coverage: null,
+    generation: null,
+    queryEmbeddingCalls: 0,
+    provenance: 'live_lexical',
+  };
+  await f.client.search('conversation', 'query', 'lexical');
+  const retained = f.state.library!.search.value;
+  for (const page of [
+    { ...first, offset: 50, hits: [] },
+    { ...first, offset: 50, total: 0, hits: [] },
+    { ...first, offset: 50, limit: 0, hits: [] },
+  ]) {
+    f.setReply(() => ({ code: 'OK', payload: page }));
+    await f.client.search('conversation', 'query', 'lexical', true);
+    assert.match(f.state.library!.search.error!, /page coordinates|Unreadable/);
+    assert.equal(f.state.library!.search.value, retained);
+  }
+  assert.deepEqual(
+    f.calls.map((ask) => field(ask.payload, ['offset'])),
+    [0, 50, 50, 50],
+  );
 });
 await test('search admits only displayed conversations for trajectories without adding them to chat', async () => {
   const f = fixture();
@@ -419,6 +525,7 @@ await test('a replacement semantic snapshot and foreign citations cannot replace
   const f = fixture(),
     page = f.replies['conversation.search'];
   page.total = 2;
+  page.limit = 1;
   page.hits = page.hits.slice(0, 1);
   page.retrieval = {
     requestedMode: 'semantic',

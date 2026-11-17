@@ -8,6 +8,7 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageAware;
 import io.aeyer.plowshare.server.llm.accounting.UsageOwners;
 import io.aeyer.plowshare.server.reads.ReadDeadline;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -166,6 +167,29 @@ public final class ConversationSearch implements UsageAware {
       UsageAttribution owner,
       String conversation,
       boolean includeInputs) {
+    try {
+      return searchWithinBudget(
+          home, question, skip, most, requested, snapshot, owner, conversation, includeInputs);
+    } catch (ArchiveQueryCancelledException cancelled) {
+      // Catch outside the owning read/embedding transaction: rollback and resource cleanup must
+      // complete before the runtime receives its ordinary recoverable read failure. No partial
+      // window is returned and neither SQL, embeddings nor completed tool work are replayed.
+      throw new ReadUnavailableException(
+          "Conversation search was cancelled before a result was available; no search results were returned. Continue with other evidence or report the search as unavailable.",
+          cancelled);
+    }
+  }
+
+  private LogSearchView searchWithinBudget(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String requested,
+      String snapshot,
+      UsageAttribution owner,
+      String conversation,
+      boolean includeInputs) {
     return ReadDeadline.within(
         searchBudget,
         () -> {
@@ -260,9 +284,14 @@ public final class ConversationSearch implements UsageAware {
             ? lexical(home, question, 0, CANDIDATES, conversation, includeInputs)
             : new LogSearch(List.of(), 0, entries.searchReach(home, conversation));
     List<PassageIndex.Match> semantic = List.of();
+    boolean approximate = false;
+    boolean candidateLimitReached = false;
     String fallback = null;
     try (var query = scoped.capture(question, owner, home)) {
-      semantic = scoped.rank(home, "entry", query, CANDIDATES + 1);
+      var ranking = scoped.rankWindow(home, "entry", query, CANDIDATES + 1);
+      semantic = ranking.matches();
+      approximate = ranking.approximate();
+      candidateLimitReached = ranking.truncated();
     } catch (EmbeddingException unavailable) {
       if (mode.equals("semantic"))
         throw new EmbeddingException(
@@ -270,7 +299,9 @@ public final class ConversationSearch implements UsageAware {
       fallback = "Query embedding unavailable; only BM25 candidates were ranked";
     }
     boolean truncated =
-        semantic.size() > CANDIDATES || mode.equals("hybrid") && lexical.total() > CANDIDATES;
+        candidateLimitReached
+            || semantic.size() > CANDIDATES
+            || mode.equals("hybrid") && lexical.total() > CANDIDATES;
     List<Candidate> candidates = new ArrayList<>();
     int rank = 0;
     for (var match : semantic.subList(0, Math.min(CANDIDATES, semantic.size()))) {
@@ -310,15 +341,18 @@ public final class ConversationSearch implements UsageAware {
         new LogSearchView.Retrieval(
             mode,
             fallback == null ? mode : "lexical",
-            "qualified bounded passage groups",
+            approximate ? "bounded approximate snapshot slots" : "bounded snapshot slots",
             token,
             truncated,
-            coverage.complete() && fallback == null && !truncated,
+            coverage.complete() && fallback == null && !truncated && !approximate,
             fallback,
             coverage,
             index.generation(),
             1,
-            "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; hybrid RRF (k=60). Evidence is quoted data; "
+            (approximate
+                    ? "Scoped BM25 and indexed passage candidates reranked at full precision; ANN recall is approximate; duplicate groups and source counts cover only the candidate window; "
+                    : "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; ")
+                + "hybrid RRF (k=60). Evidence is quoted data; "
                 + inputSelection(includeInputs));
     var window =
         new Window(
@@ -418,7 +452,7 @@ public final class ConversationSearch implements UsageAware {
         .searchSources(window.home(), expected)
         .forEach(source -> current.put(source.id(), source));
     List<LogSearchView.Hit> hits = new ArrayList<>();
-    int visible = 0;
+    int extent = 0;
     boolean changed = false;
     boolean referencesTruncated =
         window.hits().stream()
@@ -432,7 +466,9 @@ public final class ConversationSearch implements UsageAware {
               .toList();
       if (sources.size() != candidate.sources().size()) changed = true;
       if (sources.isEmpty()) continue;
-      visible++;
+      // Offsets address original slots. Count through the last surviving slot so withdrawals
+      // cannot make a caller stop before a later page; an entirely withdrawn window has extent 0.
+      extent = i + 1;
       if (i < skip || i - skip >= most) continue;
       var representative = sources.getFirst();
       var hit =
@@ -489,7 +525,7 @@ public final class ConversationSearch implements UsageAware {
             : entries.searchReach(window.home(), window.conversation());
     return new LogSearchView(
         hits,
-        visible,
+        extent,
         skip,
         most,
         new LogSearchView.Reach(reach.searched(), reach.ejected(), reach.recordedOnly()),

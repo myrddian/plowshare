@@ -19,6 +19,8 @@ import io.aeyer.plowshare.server.embedding.JdbcEmbeddingSpaceRepository;
 import io.aeyer.plowshare.server.llm.*;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer;
+import io.aeyer.plowshare.server.reads.ReadDeadline;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.function.Supplier;
@@ -428,7 +430,7 @@ class ConversationRetrievalTest {
         10000, jdbc.queryForObject("SELECT count(*) FROM retrieval_passages", Integer.class));
     long began = System.nanoTime();
     var ranked = index.rank(project, "entry", vector("orchard"), 201);
-    long millis = java.time.Duration.ofNanos(System.nanoTime() - began).toMillis();
+    long millis = Duration.ofNanos(System.nanoTime() - began).toMillis();
     assertEquals(201, ranked.size());
     assertTrue(ranked.stream().allMatch(m -> m.id().startsWith(own + ":")));
     assertEquals(201, ranked.stream().map(PassageIndex.Match::id).distinct().count());
@@ -465,7 +467,7 @@ class ConversationRetrievalTest {
             add(project, "orchard committed");
             return null;
           });
-      long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+      long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
       while (index.coverage(project, "entry").indexed() == 0 && System.nanoTime() < deadline)
         Thread.sleep(50);
       assertEquals(1, index.coverage(project, "entry").indexed());
@@ -669,25 +671,34 @@ class ConversationRetrievalTest {
           }
         };
     var repository = new JdbcPassageRepository(slow, transactions);
+    long began = System.nanoTime();
     var failure =
         assertThrows(
-            ArchiveUnavailableException.class,
+            ArchiveQueryCancelledException.class,
             () ->
-                ArchiveUnavailableException.translating(
-                    "rank conversation passages",
+                ReadDeadline.within(
+                    Duration.ofMillis(400),
                     () ->
-                        transactions.inTransaction(
-                            () -> {
-                              jdbc.update(
-                                  "UPDATE conversations SET project_id=? WHERE id=?", other, id);
-                              return repository.rank(
-                                  Home.of("rollback-destination"),
-                                  "entry",
-                                  vector("orchard"),
-                                  1,
-                                  index.generation(),
-                                  PassageRepository.ReadScope.UNRESTRICTED);
-                            })));
+                        ArchiveUnavailableException.translating(
+                            "rank conversation passages",
+                            () ->
+                                transactions.inTransaction(
+                                    () -> {
+                                      jdbc.update(
+                                          "UPDATE conversations SET project_id=? WHERE id=?",
+                                          other,
+                                          id);
+                                      return repository.rank(
+                                          Home.of("rollback-destination"),
+                                          "entry",
+                                          vector("orchard"),
+                                          1,
+                                          index.generation(),
+                                          PassageRepository.ReadScope.UNRESTRICTED);
+                                    }))));
+    assertTrue(
+        Duration.ofNanos(System.nanoTime() - began).toMillis() < 1500,
+        "sub-second driver cancellation must stop the five-second query");
     assertTrue(failure.getMessage().contains("SQL was cancelled"), failure.getMessage());
     assertEquals(
         original,
@@ -948,7 +959,7 @@ class ConversationRetrievalTest {
                 Map.of("fast", "fixture-model"),
                 1,
                 1,
-                java.time.Duration.ofSeconds(5),
+                Duration.ofSeconds(5),
                 transport)),
         new io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger());
   }

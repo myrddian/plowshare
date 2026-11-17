@@ -1,6 +1,6 @@
 # Installing the packaged clients and server
 
-The initial native target is **macOS Apple Silicon**. The `plowshare` executable contains
+Native targets are **macOS Apple Silicon** and **Windows x64**. The `plowshare` executable contains
 the CLI, stdio MCP server, TUI and Node runtime: no separate Node installation is required.
 Desktop bundles Electron and requires macOS 13 or later; it needs neither Node nor Java
 installed separately. The server archive requires
@@ -8,6 +8,29 @@ installed separately. The server archive requires
 already running remote server.
 
 ## Build and verify
+
+For a client-only native build, use Node 26.7.0, pnpm 10.34.5 and Python 3 on
+the target OS:
+
+```sh
+node scripts/build-client-distributions.mjs
+```
+
+This installs frozen dependencies, builds the JavaScript SDK and client dependency
+graph, packages Desktop plus the CLI/TUI executable, then exercises standalone
+version/help and TUI help without Node on PATH. It does not build the Java server
+or run database tests. Each stage has a finite deadline within a one-hour budget.
+Set `PYTHON` to an explicit interpreter when necessary. The Windows runtime has
+its own official archive SHA-256 pin in `scripts/distribution-runtime.windows.json`.
+
+Windows outputs are `plowshare-0.1.0-win32-x64.exe`, a convenience client ZIP and
+a Desktop ZIP containing `Plowshare.exe` and its required Electron files. Keep
+the entire Desktop folder together. CLI and TUI share the standalone executable:
+`plowshare.exe talk` opens the terminal client. The convenience archive supplies
+`.cmd` aliases without requiring symlink privileges. Windows builds are unsigned
+portable bundles; they do not install services, modify PATH or include credentials.
+Authenticode signing and an installer remain separate release work. Packaging
+does not establish that a GUI works in a noninteractive Windows service session.
 
 From a checkout on macOS Apple Silicon, with Java 21, Node 22.12+, pnpm, Python 3,
 curl, tar and codesign available:
@@ -78,8 +101,8 @@ plowshare --help
 
 The symlinks `plowshare-cli`, `plowshare-talk` and `plowshare-mcp` select their corresponding
 modes of the same executable. The earlier portable JavaScript archive requiring external
-Node is superseded by this native package. Intel, Linux and Windows native clients are
-follow-up platform work; this executable is specifically macOS Apple Silicon.
+Node is superseded by this native package. Intel Mac and Linux native clients are
+follow-up platform work; the Darwin executable is specifically macOS Apple Silicon.
 It has a verified local ad-hoc signature; Developer ID signing and notarization remain
 public-release work, as for the desktop below.
 
