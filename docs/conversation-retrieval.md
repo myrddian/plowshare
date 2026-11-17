@@ -94,12 +94,30 @@ apply only to accepted keys, avoiding repeated home/visibility joins for every
 rejected neighbor. This is statement-local work, not another cache, and retains
 the same candidate limit and visibility predicates.
 
-The first SQL query returns only passage keys and source revisions. A second,
-batched SQL query loads text and scores original vectors for those keys, rechecking
-the source revision so an intervening edit or delete/reinsert cannot reuse a stale
-candidate. Both queries share their actual ranking transaction's remaining deadline. Bounded
-in-memory stages select the best passage per entry, collapse whitespace-equivalent
-excerpts with at most twenty source references, and then limit the result groups.
+Conversation entry search with `hnsw_vector` builds that same prefix in at most
+four 500-key pages. `OFFSET` belongs inside the ordered candidate CTE. Each page
+reacquires the captured profile, read disclosure and current project selection in
+a fresh SQL transaction, and releases the connection before starting the next.
+Existing caller transactions, direct ranking callers and other index policies
+retain their single-window path and earlier transaction deadline. The surrounding
+multi-transaction search has no two-second lifetime; slow workflows only warn.
+
+Within each unit, the first SQL query returns only passage keys and source
+revisions. A second, batched SQL query loads text and scores original vectors for
+those keys, rechecking the source revision so an intervening edit or delete/reinsert
+cannot reuse a stale candidate. Both queries share their actual ranking transaction's
+remaining deadline. Bounded in-memory stages run once over all collected pages,
+select the best passage per entry, collapse whitespace-equivalent excerpts with at
+most twenty source references, and then limit the result groups.
+Identical source/position keys count once. Conflicting source hashes or conflicting
+revision tokens for the same source/position invalidate the whole result; distinct
+positions have independent revision tokens. After the candidate transactions end,
+a final guarded metadata-only transaction revalidates every retained key against
+current source hashes, revisions, generation, profile, home and visibility. This
+freshness read neither reruns ANN nor refetches text/vectors. A failed unit returns
+no partial snapshot and triggers no retry or provider call. Snapshot hydration
+still applies its separate current source fence before disclosure.
+
 Cosine ranking retains the similarity floor of 0.35; other configured metrics do
 not inherit a cosine threshold. ANN recall is approximate and duplicate-heavy
 windows can contain fewer distinct groups. Source counts describe the retained

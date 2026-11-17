@@ -68,8 +68,21 @@ BM25. Exact ranking omits the redundant global distance sort; grouping numbers
 occurrences once and aggregates only the representative and at most twenty
 references rather than building unbounded duplicate arrays. Semantic entries honor
 the active embedding profile's index policy. ANN reads
-select a bounded authorized passage-key window in one query, then batch text
-loading and full-precision scoring in a second query under the same deadline. Entry
+select a bounded authorized passage-key window. Conversation entry search with
+`hnsw_vector` splits the same at-most-2,000-key ANN prefix into at-most-500-key pages, with `OFFSET` inside the
+ordered candidate CTE. Each page acquires fresh disclosure/profile/project fences,
+selects keys, loads their text and scores original vectors in one actual SQL
+transaction, then releases that transaction before the next page. All candidates
+are ranked and grouped together after collection; pages never apply a final result
+limit. Identical passage keys count once; conflicting source hashes or a conflicting
+revision for the same source/position invalidate the entire result. Different
+positions legitimately carry different revision tokens. A fifth, metadata-only
+unit revalidates all retained keys against current source hashes, passage revisions,
+profile, generation, scope and visibility because earlier transaction snapshots
+have ended. It does not refetch text/vectors or rerun ANN. A failed unit returns no
+partial snapshot and triggers no replay. Direct ranking callers, other index
+policies and callers already inside an actual SQL transaction retain the monolithic
+path and the caller's earlier deadline; nested transactions never renew its budget. Entry
 ANN materializes eligible source IDs once per statement and hashes membership
 inside the ordered vector scan. Only accepted keys join source hashes, avoiding
 source/conversation PK probes for every rejected neighbor. This adds no cache and
@@ -108,11 +121,13 @@ cancellations, expired work and mutations are not replayed. Callers that become
 unsafe for sharing still fail closed; transaction holders never wait for an
 authority seat while retaining embedding/disclosure locks.
 
-`plowshare.retrieval.search-budget` defaults to 2s for individual queries and the
-actual disclosure/profile/ranking transaction. Its nested statements share that
-transaction's remaining budget. Independent auto-commit phases and provider
-embedding do not share a hard search-workflow timer. Resolve the project once
-within each SQL phase; resolve again after provider IO for freshness. Source
+`plowshare.retrieval.search-budget` defaults to 2s for individual queries and
+each actual disclosure/profile/ranking transaction, including each independent ANN
+page and its final metadata check. Nested statements share that transaction's
+remaining budget; the multi-transaction candidate loop has no aggregate hard timer.
+Independent auto-commit phases and provider embedding do not share a hard search-workflow timer. Resolve the project once
+within each SQL phase and each independent guarded ANN transaction; resolve again
+after provider IO and between candidate transactions for freshness. Source
 revision and final disclosure fences remain current. pgJDBC cancellation uses
 the earlier of two seconds, an actual transaction's remaining budget and any
 shorter configured timeout. Slow overall search/cache work produces only a

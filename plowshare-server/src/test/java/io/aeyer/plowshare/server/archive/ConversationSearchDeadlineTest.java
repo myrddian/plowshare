@@ -156,11 +156,26 @@ class ConversationSearchDeadlineTest {
               outsideSql(selection);
               return new PassageIndex.Query(new float[768], null, admission);
             });
-    when(index.rankWindow(eq(home), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+    when(index.rankSearchWindow(
+            eq(home),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class)))
         .thenAnswer(
             call -> {
-              sqlDeadline(selection);
-              return new PassageIndex.Ranking(List.of(), false, false);
+              outsideSql(selection);
+              PassageIndex.ReadSelection unit = call.getArgument(5);
+              Duration budget = call.getArgument(4);
+              return ReadDeadline.within(
+                  budget,
+                  () ->
+                      unit.within(
+                          () -> {
+                            sqlDeadline(selection);
+                            return new PassageIndex.Ranking(List.of(), false, false);
+                          }));
             });
     when(index.coverage(home, "entry"))
         .thenAnswer(
@@ -198,7 +213,14 @@ class ConversationSearchDeadlineTest {
     assertEquals(phases.get(3), coveragePhases.getLast());
     assertEquals(phases.get(3), refreshPhases.getLast());
     verify(index).capture(anyString(), any(UsageAttribution.class), eq(home));
-    verify(index).rankWindow(eq(home), eq("entry"), any(PassageIndex.Query.class), anyInt());
+    verify(index)
+        .rankSearchWindow(
+            eq(home),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class));
     verify(admission).close();
   }
 
@@ -281,11 +303,26 @@ class ConversationSearchDeadlineTest {
     var cancelled =
         new ArchiveQueryCancelledException(
             "rank conversation passages", new IllegalStateException("cancelled"));
-    when(index.rankWindow(eq(home), eq("entry"), any(PassageIndex.Query.class), anyInt()))
+    when(index.rankSearchWindow(
+            eq(home),
+            eq("entry"),
+            any(PassageIndex.Query.class),
+            anyInt(),
+            any(Duration.class),
+            any(PassageIndex.ReadSelection.class)))
         .thenAnswer(
             call -> {
-              sqlDeadline(selection);
-              throw cancelled;
+              outsideSql(selection);
+              PassageIndex.ReadSelection unit = call.getArgument(5);
+              Duration budget = call.getArgument(4);
+              return ReadDeadline.within(
+                  budget,
+                  () ->
+                      unit.within(
+                          () -> {
+                            sqlDeadline(selection);
+                            throw cancelled;
+                          }));
             });
     doAnswer(
             call -> {

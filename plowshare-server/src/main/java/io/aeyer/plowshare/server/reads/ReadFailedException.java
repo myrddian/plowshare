@@ -37,8 +37,12 @@ public class ReadFailedException extends RuntimeException {
   }
 
   public static ReadFailedException invalidated() {
+    return invalidated(null);
+  }
+
+  public static ReadFailedException invalidated(Throwable cause) {
     return new ReadFailedException(
-        Reason.INVALIDATED, "Read result changed before it could be safely returned", null);
+        Reason.INVALIDATED, "Read result changed before it could be safely returned", cause);
   }
 
   public static ReadFailedException interrupted() {
