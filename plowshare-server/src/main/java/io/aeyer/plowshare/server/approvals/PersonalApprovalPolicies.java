@@ -36,6 +36,9 @@ public final class PersonalApprovalPolicies implements ApprovalPolicies {
   public ApprovalPolicy save(String owner, ApprovalPolicy expected) {
     requireOwner(owner);
     Objects.requireNonNull(expected);
+    if (expected.rules().stream()
+        .anyMatch(rule -> rule.effect() == ApprovalPolicy.Effect.PERSONAL_READ_INTENT))
+      throw new CallerFault("Set Personal read intent in the deployment security policy");
     if (expected.mode() == ApprovalPolicy.Mode.AUTO)
       Objects.requireNonNull(bots.selected(owner, expected.bot()), "Selected approval bot");
     return policies.save(owner, expected);

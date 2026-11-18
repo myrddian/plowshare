@@ -2,11 +2,14 @@ package io.aeyer.plowshare.server.files;
 
 import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.approvals.SecurityPolicyFiles;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.function.UnaryOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -151,6 +154,54 @@ public final class ProviderRouter {
     return List.copyOf(providers.forHome(home));
   }
 
+  /** Provider selected for a read, with Personal evidence only for its exact workspace root. */
+  public record ReadTarget(
+      FileProvider provider, Optional<FileProvider.PersonalWorkspace> personalWorkspace) {}
+
+  /**
+   * A mutation and whether it names a security policy file or a path under its fragment directory.
+   */
+  public record MutationTarget(FileProvider provider, boolean securityFile) {}
+
+  private record Resolved(FileProvider provider, List<Path> roots) {}
+
+  /**
+   * Resolve once so the roots used to classify the read belong to the provider that will read it.
+   */
+  public ReadTarget readTarget(Home home, Path path) {
+    Resolved target = resolve(home, path, FileProvider::forReviewedRead);
+    FileProvider provider = target.provider();
+    // An alias must not give a read standing intent when exact account rules name the original.
+    // A Personal read also uses the provider's single, declared workspace.
+    return new ReadTarget(
+        provider,
+        provider
+            .personalWorkspace()
+            .filter(workspace -> target.roots().equals(List.of(workspace.root())))
+            .filter(workspace -> path.startsWith(workspace.root()))
+            .filter(workspace -> path.equals(provider.reviewPath(path))));
+  }
+
+  /** Classifies a direct mutation against the same provider roots used for routing it. */
+  public MutationTarget mutationTarget(Home home, Path path) {
+    Resolved target = resolve(home, path, FileProvider::forReviewedMutation);
+    Path named = path.normalize();
+    Path reviewed = target.provider().reviewPath(path);
+    boolean protectedPath =
+        target.roots().stream()
+            .anyMatch(root -> securityFile(root, named) || securityFile(root, reviewed));
+    return new MutationTarget(target.provider(), protectedPath);
+  }
+
+  private static boolean securityFile(Path root, Path path) {
+    if (!path.startsWith(root) || path.equals(root)) return false;
+    Path relative = root.relativize(path);
+    String first = relative.getName(0).toString();
+    // Protect case variants on case-insensitive providers without assuming the server's platform.
+    return SecurityPolicyFiles.DIRECTORY.equalsIgnoreCase(first)
+        || (relative.getNameCount() == 1 && SecurityPolicyFiles.MAIN.equalsIgnoreCase(first));
+  }
+
   /**
    * The one provider that covers this path.
    *
@@ -166,6 +217,10 @@ public final class ProviderRouter {
    *     in which case nothing can be concluded
    */
   public FileProvider providerFor(Home home, Path path) {
+    return resolve(home, path, UnaryOperator.identity()).provider();
+  }
+
+  private Resolved resolve(Home home, Path path, UnaryOperator<FileProvider> bind) {
     // No null checks of its own. Both arguments are dereferenced a line or
     // two down — `canonical` on the path, `providersFor` on the home, which
     // does check — so a requireNonNull here is a line no mutant can kill,
@@ -184,6 +239,7 @@ public final class ProviderRouter {
     for (FileProvider provider : all) {
       List<Path> roots;
       try {
+        provider = bind.apply(provider);
         roots = provider.roots();
       } catch (WorkspaceUnavailableException gone) {
         // Remembered rather than rethrown, and only the first: two
@@ -266,7 +322,8 @@ public final class ProviderRouter {
             covering.get(0).name(),
             unreachable.getMessage());
       }
-      return covering.get(0);
+      FileProvider selected = covering.getFirst();
+      return new Resolved(selected, rootsOf.get(answered.indexOf(selected)));
     }
     if (unreachable != null) {
       // Its own sentence and not one built here: the reason travels with

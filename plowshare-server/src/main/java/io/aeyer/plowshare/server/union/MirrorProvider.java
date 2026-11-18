@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -50,6 +51,7 @@ public final class MirrorProvider implements FileProvider {
   private final Path canonicalTree;
   private final UnionGate gate;
   private final LocalProvider inner;
+  private final Optional<PersonalWorkspace> personalWorkspace;
 
   public MirrorProvider(
       String project,
@@ -58,11 +60,25 @@ public final class MirrorProvider implements FileProvider {
       Path tree,
       UnionGate gate,
       List<Grant> grants) {
+    this(project, workspace, exclusions, tree, gate, grants, Optional.empty());
+  }
+
+  /** A Personal union carries its verified account owner from workspace routing. */
+  public MirrorProvider(
+      String project,
+      Path workspace,
+      List<Path> exclusions,
+      Path tree,
+      UnionGate gate,
+      List<Grant> grants,
+      Optional<String> personalOwner) {
     this.project = Objects.requireNonNull(project, "project");
     this.workspace = Objects.requireNonNull(workspace, "workspace").normalize();
     this.tree = Objects.requireNonNull(tree, "tree");
     this.canonicalTree = FileAccess.canonical(tree);
     this.gate = Objects.requireNonNull(gate, "gate");
+    this.personalWorkspace =
+        personalOwner.map(owner -> new PersonalWorkspace(owner, this.workspace));
     List<Path> mapped =
         exclusions.stream()
             .map(excluded -> excluded.normalize())
@@ -78,8 +94,18 @@ public final class MirrorProvider implements FileProvider {
   }
 
   @Override
+  public Optional<PersonalWorkspace> personalWorkspace() {
+    return personalWorkspace;
+  }
+
+  @Override
   public List<Path> roots() {
     return translated(() -> inner.roots().stream().map(this::toWorkspace).toList());
+  }
+
+  @Override
+  public Path reviewPath(Path path) {
+    return toWorkspace(inner.reviewPath(toTree(path)));
   }
 
   @Override
