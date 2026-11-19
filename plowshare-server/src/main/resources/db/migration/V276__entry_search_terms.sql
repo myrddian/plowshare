@@ -96,7 +96,8 @@ LOCK TABLE conversations, entries IN SHARE ROW EXCLUSIVE MODE;
 --
 -- THE NUMBER IS A POSITION. A search marks the conversations its reader may see as bits at
 -- these numbers (EntryStore.PASSAGE_SEARCH_SQL, `seen`), so a number is never negative. The
--- identity already starts at one and cannot be supplied by a writer; the CHECK states it.
+-- identity starts at one, but OVERRIDING SYSTEM VALUE or a RESTART could still supply another
+-- value; the CHECK is what holds.
 CREATE TABLE entry_search_conversations (
  conversation_no integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY CHECK (conversation_no >= 1),
  conversation_id text NOT NULL UNIQUE

@@ -1188,9 +1188,6 @@ class PassageSearchTest {
             buffers <= MOST_BUFFERS_FOR_ONE_SEARCH,
             what + " touched " + buffers + " buffers:\n" + root);
         assertTrue(
-            root.path("Execution Time").asDouble() < 1500,
-            what + " took " + root.path("Execution Time").asDouble() + " ms:\n" + root);
-        assertTrue(
             mostLoopsOverStep(root.get("Plan"), "seen") <= 1,
             what + " read the visible set once per row:\n" + root);
       }

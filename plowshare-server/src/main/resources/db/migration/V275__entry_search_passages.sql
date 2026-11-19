@@ -121,7 +121,7 @@ CREATE TABLE entry_search_passages (
 -- and so removes the passages with the lexemes. Supersession, learning marks and other metadata
 -- updates do not name content, role or provenance in their SET list and so do not fire the
 -- trigger (`UPDATE OF` below): comparing the old and new text to find it unchanged meant
--- fetching both from storage, about a fifth of a millisecond per row for a 495 kB entry. The
+-- fetching both from storage, about a fifth of a millisecond per row for a 463 kB entry. The
 -- comparison in the function remains for an UPDATE that names a column without changing it.
 --
 -- `UPDATE OF` looks at the statement's SET list, not at the row. It misses nothing here because

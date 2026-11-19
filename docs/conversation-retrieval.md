@@ -337,7 +337,12 @@ Known costs, none of which changes a result:
   off the same search took 209 to 213 ms at 300,000, about 0.7 ms per thousand. A generic
   plan took 143 to 146 ms at 300,000, of which about 31 ms is a hash of every conversation's
   mapping row to translate hit numbers back to ids, which the planner chooses when it
-  expects many hits. The bitmap itself is 125 kB per million conversation numbers.
+  expects many hits. The bitmap itself is 125 kB per million conversation numbers, and it
+  is as long as the highest visible number, not the count of visible conversations: numbers
+  are global across homes, never reused and consumed by rolled-back inserts. Building it
+  measured about 0.65 ms per million numbers (3.5 ms with the highest visible number at one
+  million, 8.5 ms at ten million, about 70 ms at a hundred million, about 630 ms at a
+  billion), and a reader narrowed to one recent conversation pays the same.
 - **Several common words.** The sample that finds a threshold is a fixed share of each
   word's postings, so multi-word cost still grows with the archive, at about a tenth of a
   microsecond per posting. Three common words in a conjunction read most of their postings

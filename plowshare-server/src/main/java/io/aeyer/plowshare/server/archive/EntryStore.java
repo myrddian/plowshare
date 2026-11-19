@@ -51,6 +51,7 @@ import org.springframework.jdbc.core.RowMapperResultSetExtractor;
 import org.springframework.jdbc.core.StatementCallback;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -1136,7 +1137,10 @@ public final class EntryStore implements ConversationSearchRepository {
    *       single-word search; 200 ms at 300,000 without workers). Visibility is decided per search,
    *       so this pass cannot be stored. Document frequency is a sum of stored counts read as one
    *       index range per word: a row for every conversation holding the word, visible or not,
-   *       hidden ones discarded.
+   *       hidden ones discarded. The bitmap is as long as the highest visible conversation number,
+   *       not the count of visible ones: numbers are global, never reused and consumed by
+   *       rolled-back inserts, and building it measured about 0.65 ms per million numbers (8.5 ms
+   *       with the highest visible number at ten million, 70 ms at a hundred million).
    *   <li>Several common words. The best entries hold several of them, and no index orders postings
    *       by a joint score, so the sample that finds them is a fixed share of each word's postings:
    *       an index-only read, about a tenth of a microsecond per posting, but one that grows with
@@ -1563,12 +1567,14 @@ public final class EntryStore implements ConversationSearchRepository {
    * The test that a conversation number is one the reader may see: its bit in {@code seen.numbers}.
    *
    * <p>A number beyond the last visible one has no bit and is hidden. {@code get_bit} refuses a
-   * position outside the value, and {@code CASE} is what guarantees the range is tested first.
+   * position outside the value, and {@code CASE} is what guarantees the range is tested first. The
+   * bit count is a bigint: eight times the length of a bitmap reaching the last conversation
+   * numbers an integer identity can issue does not fit an integer.
    *
    * @param number the SQL expression holding the conversation number, never a caller's value
    */
   private static String seen(String number) {
-    return ("CASE WHEN %1$s>=0 AND %1$s<(SELECT 8*length(numbers) FROM seen)"
+    return ("CASE WHEN %1$s>=0 AND %1$s<(SELECT 8*length(numbers)::bigint FROM seen)"
             + " THEN get_bit((SELECT numbers FROM seen),%1$s)=1 ELSE false END")
         .formatted(number);
   }
@@ -1856,6 +1862,9 @@ public final class EntryStore implements ConversationSearchRepository {
     copy.visibility = visibility;
     copy.informationAccount = account;
     copy.transcriptCache = transcriptCache;
+    // Callers take a copy per request, so the copy shares this store's manager, not its own.
+    DataSource source = jdbc.getDataSource();
+    if (source != null) copy.passageTransactions = passageTransactions(source);
     if (retrieval != null) copy.retrieval = () -> retrieval.get().forAccount(account);
     return copy;
   }
@@ -3343,6 +3352,10 @@ public final class EntryStore implements ConversationSearchRepository {
    * takes its own short transaction as usual. A connection of this {@code DataSource} that is bound
    * only for synchronisation with another resource's transaction counts as the caller's: the
    * statement runs on it unchanged, which is the cautious reading.
+   *
+   * <p>The short transaction is always a new one. Should the test above miss a caller's transaction
+   * (a store built over a proxy of the {@code DataSource} the transaction manager unwraps would be
+   * one way), the search takes a second connection instead of setting anything in the caller's.
    */
   private <T> T passageQuery(String sql, ResultSetExtractor<T> mapper, Object... args) {
     return informationScoped
@@ -3377,6 +3390,8 @@ public final class EntryStore implements ConversationSearchRepository {
         result = search.get();
       } else {
         var transaction = new TransactionTemplate(passageTransactions(source));
+        // Never an existing transaction: SET LOCAL must end with a transaction this method opened.
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         transaction.setReadOnly(true);
         result =
             transaction.execute(
