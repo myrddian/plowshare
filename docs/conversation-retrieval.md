@@ -194,25 +194,41 @@ so served results are unchanged.
 How they are maintained:
 
 - **Postings** are rewritten by a row trigger in the statement that writes the entry. They
-  belong to one entry and are protected by that entry's row lock.
+  belong to one entry and are protected by that entry's row lock. The passage and posting
+  triggers are fired only by an `UPDATE` whose `SET` list names content, role or provenance
+  (or, for postings, the key), so a learning mark or a supersession does not run them and
+  does not read the entry's text. No `BEFORE UPDATE` trigger on `entries` assigns those
+  columns; one that did would have to be added to the lists, and a test checks the catalog
+  for it.
 - **Statistics and lexeme counts** are staged per statement and applied per commit. When a
   statement on `entries` ends, a statement trigger adds up what it changed for each
   conversation and leaves one row in `entry_search_pending`. At commit a deferred trigger
-  takes everything pending for a conversation, applies it once and removes it. A transaction
-  therefore takes every entry row lock before its first statistics row lock; updating the
-  statistics inside the entry write deadlocked a fold (insert a summary, then update older
-  entries) against a concurrent ejection. The work at commit is proportional to the
-  conversations and distinct lexemes a transaction touched, not to its entries.
+  takes everything the transaction has pending and applies it once per conversation, in
+  ascending conversation number and, within a conversation, in lexeme order. A transaction
+  therefore takes every entry row lock before its first statistics row lock, and every
+  commit takes statistics rows in the same order. Updating the statistics inside the entry
+  write deadlocked a fold (insert a summary, then update older entries) against a concurrent
+  ejection; settling conversations in the order their statements ran deadlocked two
+  transactions that had written the same two conversations in opposite orders, which they
+  did not do before these tables existed (50 such deadlocks among 3,200 mixed transactions
+  from eight sessions over three conversations, none once the order was fixed). The work at
+  commit is proportional to the conversations and distinct lexemes a transaction touched,
+  not to its entries. No application path writes entries of two conversations in one
+  transaction today.
 - Inside the writing transaction the postings are current and the counts are not; both
   become visible together at commit. `SET CONSTRAINTS ALL IMMEDIATE` keeps the numbers right
-  and gives up the lock order for that transaction. Two transactions that write the same two
-  conversations in opposite orders can still deadlock at commit.
+  and gives up the lock order for that transaction, as does deleting a conversation: either
+  can still deadlock against a commit.
 - A lexeme count that disagrees with the postings, or a statistic that would go negative,
   refuses the commit. A count that is too high is only found by a recount.
 - What is pending belongs to the conversation's statistics row. A conversation deleted and
-  created again under the same id in one transaction starts from nothing, and a transaction
-  that has written entries may still `TRUNCATE` the table. `TRUNCATE` empties the projections
-  by `DELETE`, which leaves their pages to vacuum.
+  created again under the same id in one transaction starts from nothing.
+- `TRUNCATE entries CASCADE` empties the projections by `DELETE`, which leaves their pages
+  to vacuum, and is allowed in a transaction that has written entries. A `TRUNCATE` that
+  names or cascades to `conversations` is not: PostgreSQL refuses it with `cannot TRUNCATE
+  "entry_search_pending" because it has pending trigger events` until the transaction has
+  settled (`SET CONSTRAINTS ALL IMMEDIATE`). A transaction that has written no entries may
+  truncate both.
 - A single-word search reads its matches from the postings, so they are relied upon, not
   advisory.
 
@@ -267,8 +283,17 @@ entries) or a large archive (most questions at 200,000) crosses PostgreSQL's def
 (124 ms against 16 ms). The setting ends with the transaction. The served search is not
 changed.
 
-Hidden conversations are discarded where postings are read and again where a candidate
-becomes a match; either check alone keeps hidden entries off the page.
+Visibility is decided once per search and before anything is scored. One step joins the
+conversations the reader may see (home, optional conversation, information policy) to their
+statistics rows and reduces them to a single row: the sums that corpus statistics and reach
+need, and a bitmap with one bit per conversation number. Every later visibility test reads
+one bit at a row's conversation number. A hidden conversation has no bit, so it reaches no
+statistic, threshold, count or page. Hidden postings are discarded where postings are read
+and again where a candidate becomes a match; either check alone keeps hidden entries off
+the page. The test is an expression over a value built once, so its cost and the plan do
+not depend on how many conversations are visible or on what the planner estimates: an
+earlier form (`IN` over the visible set) was only hashed while the set was estimated to fit
+in `work_mem`, about 262,000 conversations, and beyond that scanned the set once per row.
 
 ### Measured, synthetic
 
@@ -283,8 +308,36 @@ PostgreSQL 16 in a container with default memory settings:
 | 200,000 | 19 ms | 43 ms | 46 ms | 116 ms | 483 ms |
 | 200,000, exhaustive | 438 ms | 289 ms | 546 ms | 142 ms | 742 ms |
 
+Visible conversations. 60,000 entries in five conversations (a skewed 300-word vocabulary,
+entries of one to five hundred words), plus empty conversations to make 5, 10,000 and
+300,000 visible to the reader; first page of 10, median of five executions of the statement
+in `psql` with a custom plan and JIT off, same container. "Before" is the statement as
+first written, which tested visibility with `IN` over the visible set; "after" builds the
+set once as a bitmap:
+
+| Visible conversations | Reader | One word, before / after | Two words AND, before / after | Two words OR, before / after |
+| --- | --- | --- | --- | --- |
+| 5 | global | 3.5 / 3.4 ms | 25 / 23 ms | 35 / 34 ms |
+| 5 | project | 3.5 / 3.5 ms | 25 / 24 ms | 36 / 35 ms |
+| 10,000 | global | 22 / 7.7 ms | 43 / 26 ms | 52 / 37 ms |
+| 10,000 | project | 11 / 8.6 ms | 38 / 28 ms | 46 / 39 ms |
+| 300,000 | global | 719 / 82 ms | 836 / 110 ms | 840 / 120 ms |
+| 300,000 | project | 3,726 / 78 ms | cancelled at 40 s / 94 ms | cancelled at 40 s / 108 ms |
+
+The project reader at 300,000 is where the planner estimated the set correctly and stopped
+hashing it; the global reader's set was estimated at one row and stayed hashed by accident.
+
 Known costs, none of which changes a result:
 
+- **Visible conversations.** A cost linear in the conversations the reader may see remains,
+  because corpus statistics, reach and the bitmap are one pass over one stored row per
+  visible conversation and visibility is decided per search. In the table it is about
+  0.26 ms per thousand visible conversations (78 to 82 ms at 300,000 against 3.4 ms at
+  five), with PostgreSQL running that pass on two parallel workers; with parallel workers
+  off the same search took 209 to 213 ms at 300,000, about 0.7 ms per thousand. A generic
+  plan took 143 to 146 ms at 300,000, of which about 31 ms is a hash of every conversation's
+  mapping row to translate hit numbers back to ids, which the planner chooses when it
+  expects many hits. The bitmap itself is 125 kB per million conversation numbers.
 - **Several common words.** The sample that finds a threshold is a fixed share of each
   word's postings, so multi-word cost still grows with the archive, at about a tenth of a
   microsecond per posting. Three common words in a conjunction read most of their postings
@@ -300,12 +353,14 @@ Known costs, none of which changes a result:
 - **Planner statistics.** With stale statistics the planner answered a probe for one
   entry's posting from the best-first index, walking every posting of the word per probe:
   4 to 15 seconds at 60,000 entries. The two indexes of the postings table are now built so
-  that neither can answer the other's question (the best-first index is partial and keyed
-  under a different collation), and the same searches take 3 to 56 ms in every planner
-  state tested: statistics from when the archive held three entries, the new tables believed
+  that each read has one index that answers it through an index condition (the best-first
+  index is partial and keyed under a different collation). What that enforces is that no
+  other index can answer the probe; a sequential or bitmap scan of the postings remains
+  legal and was not observed. The same searches take 3 to 56 ms in every planner state
+  tested: statistics from when the archive held three entries, the new tables believed
   empty, no statistics, fresh statistics and a generic plan. Both migrations end with
   `ANALYZE`, and the new tables are analysed after 2% of their rows change, not 10%. One
-  lookup cannot be protected this way: an entry by its key, because `entries` has other
+  lookup is not protected this way: an entry by its key, because `entries` has other
   indexes that begin with the conversation. If the planner believes `entries` itself empty
   it may read a conversation's every entry through one of them; the served search has the
   same exposure.
@@ -321,9 +376,20 @@ Costs to check before adoption:
   transaction, all triggers included; before the lexeme counts existed the single-row
   figure was 0.76 to 0.79 ms. An append adjusts one count row per distinct lexeme of the
   entry; the count is kept out of every index so most of those are heap-only updates.
-  Entries of about fifty distinct words cost about 0.8 ms each in bulk. An update that
-  search does not read (a learning mark, supersession) costs about 0.01 ms more per
-  statement than without the trigger.
+  Entries of about fifty distinct words cost about 0.8 ms each in bulk.
+- **Large entries.** The figures above are for short entries; the cost grows with the
+  entry. A 463 kB tool result with 15,000 distinct lexemes took 269 to 281 ms to insert as a
+  single-row statement against 60 ms with the three search triggers disabled: about 210 ms
+  added, of which the posting trigger was about 100 ms, the passage trigger 71 to 75 ms and
+  staging 8 ms inside the statement, the rest being the commit that adjusts 15,000 count
+  rows.
+- **Updates search does not read** (a learning mark, supersession). The two row triggers do
+  not fire. The statement trigger still runs and compares each updated row's lexemes, old
+  against new: about 0.04 ms per single-row statement and 0.001 ms per row in bulk for
+  entries of fifteen words, and 0.34 ms per row for the 463 kB entries. Before the triggers
+  were given column lists all three compared the stored text and the same update cost
+  1.5 ms per row on those entries (0.002 ms per row on the short ones). An earlier figure
+  here of 0.01 ms was measured on short entries only.
 - **Bulk statements and long transactions.** One `INSERT ... SELECT` into one conversation
   took 1.5, 2.1, 4.4 and 8.7 seconds for 5,000, 10,000, 20,000 and 40,000 short entries
   (when counts were applied per entry it was 1.6, 5.0, 17.7 and 68.6 seconds), and 300,000

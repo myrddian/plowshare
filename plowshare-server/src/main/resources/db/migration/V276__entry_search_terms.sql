@@ -41,19 +41,24 @@
 -- written or removed also adjusts one stored count (`entry_search_term_counts`, below) when the
 -- transaction commits. Measure both on a restored copy of the target database before applying.
 --
--- TWO INDEXES THAT CANNOT STAND IN FOR EACH OTHER. The table is read in two ways: one entry's
--- posting for one word (the primary key), and one word's postings best-first (the second index).
--- Each index can technically answer the other's question by reading far too much, and the
--- planner chose exactly that whenever its statistics were stale: a probe for one posting walked
--- every posting of the word, 8,544 times in one search (4 to 15 seconds, measured in review).
--- Statistics cannot be relied on here, so the choice is taken away from the planner:
---   * the best-first index is partial (`WHERE tf >= 1`, true of every row). A query that does
---     not say `tf >= 1` cannot use it at all, and the per-entry probes do not say it;
+-- TWO INDEXES, EACH THE ONLY ONE THAT ANSWERS ITS QUESTION. The table is read in two ways: one
+-- entry's posting for one word (the primary key), and one word's postings best-first (the second
+-- index). Built plainly, each index could answer the other's question by reading far too much,
+-- and the planner chose exactly that whenever its statistics were stale: a probe for one posting
+-- walked every posting of the word, 8,544 times in one search (4 to 15 seconds, measured in
+-- review). Statistics are not relied on here, so each read is given one index that fits it:
+--   * the best-first index is partial (`WHERE tf >= 1`, true of every row). The planner uses a
+--     partial index only for a query whose own conditions imply its predicate, and the
+--     per-entry probes do not say `tf >= 1`;
 --   * its leading column is the lexeme under collation "POSIX", which orders exactly as "C"
---     does but is a different collation. The best-first reads compare under "POSIX", which the
---     primary key (collation "C") cannot serve as an index condition; the probes compare under
---     "C", which the best-first index cannot.
--- See EntryStore.PASSAGE_SEARCH_SQL for the reads. Nothing here changes what a query returns.
+--     does but is a different collation. The best-first reads compare under "POSIX", which is
+--     not an index condition on the primary key (collation "C"); the probes compare under "C",
+--     which is not one on the best-first index.
+-- What this enforces is that no other index can answer either read through an index condition.
+-- A sequential scan or a bitmap scan of this table remains legal for both reads; neither was
+-- observed in any planner state tested (stale, absent and fresh statistics, the tables believed
+-- empty, a generic plan). See EntryStore.PASSAGE_SEARCH_SQL for the reads. Nothing here changes
+-- what a query returns.
 --
 -- THE BACKFILL parses nothing (it reads the stored lexemes) but writes every posting and then
 -- every count. Tables are filled bare, and their keys, indexes and foreign keys are built
@@ -88,8 +93,12 @@ LOCK TABLE conversations, entries IN SHARE ROW EXCLUSIVE MODE;
 -- entry write therefore only ever reads this table until its transaction commits, and two
 -- transactions first writing to one conversation have nothing to race for. It costs every new
 -- conversation one more small row, whether or not it ever holds a searchable entry.
+--
+-- THE NUMBER IS A POSITION. A search marks the conversations its reader may see as bits at
+-- these numbers (EntryStore.PASSAGE_SEARCH_SQL, `seen`), so a number is never negative. The
+-- identity already starts at one and cannot be supplied by a writer; the CHECK states it.
 CREATE TABLE entry_search_conversations (
- conversation_no integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ conversation_no integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY CHECK (conversation_no >= 1),
  conversation_id text NOT NULL UNIQUE
   REFERENCES conversations(id) ON UPDATE CASCADE ON DELETE CASCADE,
  searched integer NOT NULL DEFAULT 0 CHECK (searched >= 0),
@@ -225,9 +234,10 @@ $$;
 -- leaves one row in `entry_search_pending`. That writes a new row and locks nothing shared.
 --
 -- AT COMMIT, `entry_search_counts_settled` (a deferred constraint trigger on the pending rows)
--- takes everything pending for a conversation, adds it up, applies it once and removes it.
--- Later events for the same conversation find nothing left. This is what makes the lock order
--- safe. An earlier version updated the conversation's row inside each entry write. A fold
+-- settles the whole transaction on its first event: it takes everything pending, conversation
+-- by conversation in ascending conversation number, adds each conversation's changes up,
+-- applies them once and removes them. Later events find nothing left. This is what makes the
+-- lock order safe. An earlier version updated the conversation's row inside each entry write. A fold
 -- inserts a summary and then updates older entries; an ejection updates one of those entries.
 -- The fold then held the conversation's row and wanted the entry, the ejection held the entry
 -- and wanted the conversation's row, and PostgreSQL killed one of them. Deferred to commit, a
@@ -237,10 +247,19 @@ $$;
 --     reads its result: under READ COMMITTED each statement takes a new snapshot. Under
 --     REPEATABLE READ or SERIALIZABLE the update fails with a serialization error instead, at
 --     commit, and the whole transaction is retried by its caller as for any such failure.
---   * The remaining deadlock. Two transactions that each wrote to the same two conversations,
---     in opposite orders, can still deadlock at commit on those two statistics rows. Events fire
---     in the order the statements ran and cannot be sorted. A writer that spans conversations
---     in one transaction must expect that and retry, as before this migration.
+--   * Transactions that write to several conversations. Before this migration two of them did
+--     not block each other at all: an entry write takes no lock that another conversation's
+--     writer wants, only a shared key lock on its conversation. Statistics rows are exclusive,
+--     so two such transactions that settled in the order their statements ran (which is the
+--     order the events fire) deadlocked at commit whenever they had written the same two
+--     conversations in opposite orders; a stress run of multi-conversation transactions in
+--     review produced hundreds of such deadlocks. Hence the ascending order above: every
+--     commit takes its statistics rows lowest number first, and within a conversation its
+--     lexeme counts in byte order, so no two commits wait for each other in a cycle. No
+--     application path writes entries to two conversations in one transaction today.
+--   * `SET CONSTRAINTS ALL IMMEDIATE` and the deletion of a conversation (next point) take
+--     statistics rows when their statement runs, not in that order, and can still deadlock
+--     against a commit or each other.
 --   * Deleting a conversation locks its statistics row at once, by cascade, not at commit. A
 --     transaction that deletes a conversation therefore still takes that row before later
 --     entry locks. Nothing deletes conversations today.
@@ -260,9 +279,19 @@ $$;
 --     as it ends. The numbers stay right; that transaction gives up the lock order above.
 --   * The numbers are deltas between old and new rows, so several changes to one entry in a
 --     transaction add up, and a failure anywhere rolls back entry, postings and counts together.
---   * Every UPDATE of `entries` runs the statement trigger, which compares the old and new rows
---     it was handed. An update that changes none of the key, role, content, provenance or
---     ejection (supersession, learning marks) stages nothing.
+--   * The posting trigger is fired only by an UPDATE that names the key, role, content or
+--     provenance in its SET list (`UPDATE OF`), so a supersession or a learning mark does not
+--     run it and does not read the entry's text. That is every way those columns change: the
+--     lexeme columns are generated from content and provenance, and the one BEFORE UPDATE
+--     trigger on `entries` (`trajectory_image_ejection`) assigns only `tool_observation`. A
+--     BEFORE trigger added later that assigned content, role or provenance without the
+--     statement naming them would change an entry without firing this trigger; a test pins the
+--     list of BEFORE triggers for that reason.
+--   * Every UPDATE of `entries` still runs the statement trigger: a trigger with transition
+--     tables may not have a column list. It compares what the statistics are computed from in
+--     the old and new rows it was handed (role, whether there is content, the evidence
+--     lexemes and their length, ejection), never the text itself. An update that changes none
+--     of those stages nothing; it does read each updated row's lexemes to find that out.
 --
 -- On INSERT/UPDATE the posting trigger must run after V275's so the passages it reads exist:
 -- PostgreSQL fires same-event triggers in name order, and "entry_search_passages" sorts before
@@ -309,9 +338,17 @@ END $$;
 
 -- What one statement did to each conversation's statistics, from the rows it removed (counted
 -- negatively) and the rows it wrote (counted positively). The three branches differ only in
--- which rows those are; an UPDATE counts a row out and in again only if what search reads of it
--- changed, so an entry that keeps its conversation changes only the lexemes it lost or gained,
--- and one that moves leaves the old conversation whole and arrives whole in the new one.
+-- which rows those are; an UPDATE counts a row out and in again only if what the statistics are
+-- computed from changed, so an entry that keeps its conversation changes only the lexemes it
+-- lost or gained, and one that moves leaves the old conversation whole and arrives whole in the
+-- new one.
+--
+-- THE UPDATE BRANCH COMPARES THE INPUTS OF THE SUMS, NOT THE TEXT: role, whether there is
+-- content, whether the payload was ejected, the evidence length and the evidence lexemes. Those
+-- five are everything `sums` and `words` read of a row, so a row in which they are equal would
+-- be counted out and in again for the same amounts and change nothing; leaving it out is the
+-- same result without unpacking its lexemes twice. Comparing `content` instead fetched the
+-- whole stored text of every updated row, old and new, for updates that had not touched it.
 --
 -- A conversation without a statistics row cannot occur while the conversation trigger exists.
 -- If it did, the pending row's NOT NULL conversation number refuses the statement.
@@ -394,9 +431,13 @@ BEGIN
      FROM old_rows o
     WHERE NOT EXISTS (SELECT 1 FROM new_rows n
                        WHERE n.conversation_id = o.conversation_id AND n.ordinal = o.ordinal
-                         AND ROW(n.content, n.role, n.input_provenance, n.ejected_at)
+                         AND ROW(n.role, n.content IS NULL, n.ejected_at IS NULL,
+                                 coalesce(n.evidence_search_length, n.search_length),
+                                 coalesce(n.evidence_text_search, n.text_search))
                           IS NOT DISTINCT FROM
-                          ROW(o.content, o.role, o.input_provenance, o.ejected_at))
+                          ROW(o.role, o.content IS NULL, o.ejected_at IS NULL,
+                              coalesce(o.evidence_search_length, o.search_length),
+                              coalesce(o.evidence_text_search, o.text_search)))
    UNION ALL
    SELECT 1, n.conversation_id, n.role, n.content IS NOT NULL AS said,
           coalesce(n.evidence_text_search, n.text_search) AS vector,
@@ -405,9 +446,13 @@ BEGIN
      FROM new_rows n
     WHERE NOT EXISTS (SELECT 1 FROM old_rows o
                        WHERE o.conversation_id = n.conversation_id AND o.ordinal = n.ordinal
-                         AND ROW(o.content, o.role, o.input_provenance, o.ejected_at)
+                         AND ROW(o.role, o.content IS NULL, o.ejected_at IS NULL,
+                                 coalesce(o.evidence_search_length, o.search_length),
+                                 coalesce(o.evidence_text_search, o.text_search))
                           IS NOT DISTINCT FROM
-                          ROW(n.content, n.role, n.input_provenance, n.ejected_at))
+                          ROW(n.role, n.content IS NULL, n.ejected_at IS NULL,
+                              coalesce(n.evidence_search_length, n.search_length),
+                              coalesce(n.evidence_text_search, n.text_search)))
   ), sums AS (
    SELECT m.conversation_id,
           coalesce(sum(m.sign) FILTER (WHERE m.role IS NOT NULL AND m.length IS NOT NULL), 0)
@@ -439,7 +484,16 @@ BEGIN
  RETURN NULL;
 END $$;
 
--- Applies everything pending for one conversation, once, at commit.
+-- Applies everything the transaction has pending, once per conversation, at commit.
+--
+-- THE FIRST EVENT SETTLES EVERY CONVERSATION, LOWEST NUMBER FIRST. Events fire in the order the
+-- statements ran, which is the order the writer chose; settling one conversation per event took
+-- statistics rows in that order, and two transactions that had written the same conversations
+-- in opposite orders deadlocked at commit. The pending rows this function can see are its own
+-- transaction's (another transaction's are uncommitted until it has settled and removed them),
+-- so the first event reads which conversations they name, sorts the numbers and settles each in
+-- turn. Every commit therefore locks statistics rows in ascending conversation number, and the
+-- events that follow find their rows gone.
 --
 -- AN IMPOSSIBLE STATE REFUSES THE COMMIT. Every lexeme that lost postings must have a count row
 -- holding at least as many, so the rows deleted (the count was exactly what was lost) and
@@ -449,11 +503,12 @@ END $$;
 -- here is a count that is too high, or a missing row for a lexeme that gained postings (it is
 -- recreated): only a recount against the postings finds those.
 --
--- Lexemes are applied in byte order, so two commits never take the same count rows in
--- opposite orders; they could not anyway, since both hold the conversation's statistics row.
+-- Within a conversation, lexemes are applied in byte order. Two commits never take the same
+-- count rows in opposite orders in any case, since both hold the conversation's statistics row.
 CREATE FUNCTION entry_search_counts_settled() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
- held integer := NEW.conversation_no;
+ pending integer[];
+ held integer;
  staged bigint;
  searched_delta bigint;
  length_delta numeric;
@@ -463,71 +518,85 @@ DECLARE
  lost_by integer[];
  gained text[];
  gained_by integer[];
- emptied integer := 0;
- lowered integer := 0;
+ emptied integer;
+ lowered integer;
 BEGIN
- -- This event's own row is gone when an earlier event of the commit settled the conversation, or
- -- when the conversation was deleted. Looked up by key first: gathering by conversation would
+ -- This event's own row is gone when an earlier event of the commit settled the transaction, or
+ -- when the conversation was deleted. Looked up by key first: gathering the pending rows would
  -- step over every row the earlier event removed, once per event.
  IF NOT EXISTS (SELECT 1 FROM entry_search_pending WHERE pending_no = NEW.pending_no) THEN
   RETURN NULL;
  END IF;
- WITH taken AS (
-  DELETE FROM entry_search_pending WHERE conversation_no = held
-  RETURNING searched, total_length, ejected, recorded_only, lexemes, changes
- ), words AS (
-  SELECT u.lexeme, sum(u.change)::integer AS change
-    FROM taken t CROSS JOIN LATERAL unnest(t.lexemes, t.changes) AS u(lexeme, change)
-   GROUP BY u.lexeme HAVING sum(u.change) <> 0
- )
- SELECT (SELECT count(*) FROM taken),
-        (SELECT coalesce(sum(searched), 0) FROM taken),
-        (SELECT coalesce(sum(total_length), 0) FROM taken),
-        (SELECT coalesce(sum(ejected), 0) FROM taken),
-        (SELECT coalesce(sum(recorded_only), 0) FROM taken),
-        (SELECT array_agg(lexeme ORDER BY lexeme COLLATE "C") FROM words WHERE change < 0),
-        (SELECT array_agg(-change ORDER BY lexeme COLLATE "C") FROM words WHERE change < 0),
-        (SELECT array_agg(lexeme ORDER BY lexeme COLLATE "C") FROM words WHERE change > 0),
-        (SELECT array_agg(change ORDER BY lexeme COLLATE "C") FROM words WHERE change > 0)
-   INTO staged, searched_delta, length_delta, ejected_delta, recorded_delta,
-        lost, lost_by, gained, gained_by;
- IF staged = 0 THEN
-  RETURN NULL;
- END IF;
- UPDATE entry_search_conversations SET
-   searched = searched + searched_delta,
-   total_length = total_length + length_delta,
-   ejected = ejected + ejected_delta,
-   recorded_only = recorded_only + recorded_delta
-  WHERE conversation_no = held;
- IF NOT FOUND THEN
-  RAISE EXCEPTION 'search statistics row % is gone while changes to it are pending', held;
- END IF;
- IF lost IS NOT NULL THEN
-  DELETE FROM entry_search_term_counts k USING unnest(lost, lost_by) AS g(lexeme, by)
-   WHERE k.lexeme = g.lexeme AND k.conversation_no = held AND k.entries = g.by;
-  GET DIAGNOSTICS emptied = ROW_COUNT;
-  UPDATE entry_search_term_counts k SET entries = k.entries - g.by
-    FROM unnest(lost, lost_by) AS g(lexeme, by)
-   WHERE k.lexeme = g.lexeme AND k.conversation_no = held AND k.entries > g.by;
-  GET DIAGNOSTICS lowered = ROW_COUNT;
-  IF emptied + lowered <> cardinality(lost) THEN
-   RAISE EXCEPTION
-    'search lexeme counts of conversation number % disagree with its postings: % of % counts found',
-    held, emptied + lowered, cardinality(lost);
+ -- The numbers are read before anything is removed, so the loop does not depend on what a
+ -- query still open would see of rows this function deletes.
+ SELECT array_agg(DISTINCT p.conversation_no ORDER BY p.conversation_no) INTO pending
+   FROM entry_search_pending p;
+ FOREACH held IN ARRAY pending LOOP
+  WITH taken AS (
+   DELETE FROM entry_search_pending WHERE conversation_no = held
+   RETURNING searched, total_length, ejected, recorded_only, lexemes, changes
+  ), words AS (
+   SELECT u.lexeme, sum(u.change)::integer AS change
+     FROM taken t CROSS JOIN LATERAL unnest(t.lexemes, t.changes) AS u(lexeme, change)
+    GROUP BY u.lexeme HAVING sum(u.change) <> 0
+  )
+  SELECT (SELECT count(*) FROM taken),
+         (SELECT coalesce(sum(searched), 0) FROM taken),
+         (SELECT coalesce(sum(total_length), 0) FROM taken),
+         (SELECT coalesce(sum(ejected), 0) FROM taken),
+         (SELECT coalesce(sum(recorded_only), 0) FROM taken),
+         (SELECT array_agg(lexeme ORDER BY lexeme COLLATE "C") FROM words WHERE change < 0),
+         (SELECT array_agg(-change ORDER BY lexeme COLLATE "C") FROM words WHERE change < 0),
+         (SELECT array_agg(lexeme ORDER BY lexeme COLLATE "C") FROM words WHERE change > 0),
+         (SELECT array_agg(change ORDER BY lexeme COLLATE "C") FROM words WHERE change > 0)
+    INTO staged, searched_delta, length_delta, ejected_delta, recorded_delta,
+         lost, lost_by, gained, gained_by;
+  -- Nothing left for this number: its conversation was deleted since the numbers were read.
+  CONTINUE WHEN staged = 0;
+  UPDATE entry_search_conversations SET
+    searched = searched + searched_delta,
+    total_length = total_length + length_delta,
+    ejected = ejected + ejected_delta,
+    recorded_only = recorded_only + recorded_delta
+   WHERE conversation_no = held;
+  IF NOT FOUND THEN
+   RAISE EXCEPTION 'search statistics row % is gone while changes to it are pending', held;
   END IF;
- END IF;
- IF gained IS NOT NULL THEN
-  INSERT INTO entry_search_term_counts AS k (lexeme, conversation_no, entries)
-  SELECT g.lexeme, held, g.by FROM unnest(gained, gained_by) AS g(lexeme, by)
-  ON CONFLICT (lexeme, conversation_no) DO UPDATE SET entries = k.entries + EXCLUDED.entries;
- END IF;
+  IF lost IS NOT NULL THEN
+   DELETE FROM entry_search_term_counts k USING unnest(lost, lost_by) AS g(lexeme, by)
+    WHERE k.lexeme = g.lexeme AND k.conversation_no = held AND k.entries = g.by;
+   GET DIAGNOSTICS emptied = ROW_COUNT;
+   UPDATE entry_search_term_counts k SET entries = k.entries - g.by
+     FROM unnest(lost, lost_by) AS g(lexeme, by)
+    WHERE k.lexeme = g.lexeme AND k.conversation_no = held AND k.entries > g.by;
+   GET DIAGNOSTICS lowered = ROW_COUNT;
+   IF emptied + lowered <> cardinality(lost) THEN
+    RAISE EXCEPTION
+     'search lexeme counts of conversation number % disagree with its postings: % of % counts found',
+     held, emptied + lowered, cardinality(lost);
+   END IF;
+  END IF;
+  IF gained IS NOT NULL THEN
+   INSERT INTO entry_search_term_counts AS k (lexeme, conversation_no, entries)
+   SELECT g.lexeme, held, g.by FROM unnest(gained, gained_by) AS g(lexeme, by)
+   ON CONFLICT (lexeme, conversation_no) DO UPDATE SET entries = k.entries + EXCLUDED.entries;
+  END IF;
+ END LOOP;
  RETURN NULL;
 END $$;
 
 -- TRUNCATE fires no row or statement trigger of the kinds above and no foreign key reaches
 -- these tables from `entries`, so this statement trigger empties them, with whatever the
 -- truncating transaction itself had pending. The conversations remain, with nothing counted.
+--
+-- WHAT A TRANSACTION THAT HAS WRITTEN ENTRIES MAY TRUNCATE. `TRUNCATE entries CASCADE` works:
+-- it does not reach these tables except through this trigger, which uses DELETE. A TRUNCATE
+-- that names or cascades to `conversations` does not: it cascades through
+-- `entry_search_conversations` to `entry_search_pending`, whose rows written by the same
+-- transaction still have their deferred event queued, and PostgreSQL refuses with
+-- `cannot TRUNCATE "entry_search_pending" because it has pending trigger events`. Such a
+-- transaction must truncate before it writes entries, or settle first with
+-- `SET CONSTRAINTS ALL IMMEDIATE`. A transaction that has written no entries truncates either.
 CREATE FUNCTION entry_search_terms_truncated() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  DELETE FROM entry_search_pending;
@@ -574,7 +643,7 @@ ALTER TABLE entry_search_terms
 -- One lexeme's postings, best first within each frequency. Covers everything a best-first read
 -- needs, so it does not touch the table. Partial and under "POSIX" for the reason given at the
 -- top of this file: only a query that says `tf >= 1` and compares the lexeme under "POSIX" can
--- use it, and such a query cannot use the primary key.
+-- use it, and for such a query the primary key offers no index condition.
 CREATE INDEX entry_search_terms_best_first
  ON entry_search_terms (lexeme COLLATE "POSIX", tf, doc_length, conversation_no, ordinal)
  INCLUDE (best_position)
@@ -601,10 +670,15 @@ ALTER TABLE entry_search_term_counts
  ADD FOREIGN KEY (conversation_no)
   REFERENCES entry_search_conversations(conversation_no) ON DELETE CASCADE;
 
-CREATE TRIGGER entry_search_terms AFTER INSERT OR UPDATE OR DELETE ON entries
+-- The column list is what keeps a metadata update from running this trigger at all; the
+-- function's own comparison remains for an UPDATE that names a column without changing it.
+CREATE TRIGGER entry_search_terms
+ AFTER INSERT OR DELETE OR UPDATE OF conversation_id, ordinal, content, role, input_provenance
+ ON entries
  FOR EACH ROW EXECUTE FUNCTION entry_search_terms_changed();
 
--- A transition table may serve one event only, hence three triggers on one function.
+-- A transition table may serve one event only, hence three triggers on one function. A trigger
+-- with transition tables may not have a column list, so the UPDATE one runs for every UPDATE.
 CREATE TRIGGER entry_search_counts_inserted AFTER INSERT ON entries
  REFERENCING NEW TABLE AS new_rows
  FOR EACH STATEMENT EXECUTE FUNCTION entry_search_counts_staged();

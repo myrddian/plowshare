@@ -24,6 +24,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -43,8 +45,10 @@ import org.junit.jupiter.api.Timeout;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -410,6 +414,187 @@ class PassageSearchTest {
     }
     assertCountsAgreeWithARecount("after a fold beside an ejection");
     assertEquals(1, lexemeCount(conversation, "budget"));
+  }
+
+  /**
+   * Two transactions that wrote to the same two conversations in opposite orders settle them in the
+   * same order, lowest conversation number first, and so cannot wait for each other at commit.
+   *
+   * <p>The schedule is forced rather than hoped for. A third session holds the lower conversation's
+   * statistics row as an update of its counts would (a stronger lock would stop the writers'
+   * statements, which take a key-share lock on that row for their pending rows). The first writer
+   * wrote low then high and its commit waits for that row. The second wrote high then low; settling
+   * in statement order it would lock the higher row and then wait for the lower one too. Released,
+   * the first writer would take the lower row and want the higher: a cycle, which PostgreSQL ends
+   * by failing one commit with "deadlock detected" (this test, run against the settle step as it
+   * was first written, fails that way). Settling in number order, the second writer holds nothing
+   * while it waits, and both commit.
+   */
+  @Test
+  @Timeout(value = 120, unit = TimeUnit.SECONDS)
+  void writersOfTheSameConversationsInOppositeOrdersDoNotDeadlockAtCommit() throws Exception {
+    String other = conversations.open(Home.global(), Budget.of(9)).id();
+    List<String> byNumber =
+        jdbc.queryForList(
+            "SELECT conversation_id FROM entry_search_conversations"
+                + " WHERE conversation_id IN (?, ?) ORDER BY conversation_no",
+            String.class,
+            conversation,
+            other);
+    String low = byNumber.get(0);
+    String high = byNumber.get(1);
+    List<Future<?>> commits = new ArrayList<>();
+    try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+      inOneTransaction(
+          holder -> {
+            try (var statement = holder.createStatement()) {
+              statement.execute(
+                  "SELECT 1 FROM entry_search_conversations WHERE conversation_id = '"
+                      + low
+                      + "' FOR NO KEY UPDATE");
+              commits.add(pool.submit(() -> writeToBoth(low, high, 1)));
+              awaitCommitsWaitingForALock(1);
+              commits.add(pool.submit(() -> writeToBoth(high, low, 2)));
+              awaitCommitsWaitingForALock(2);
+            }
+          });
+      for (Future<?> commit : commits) commit.get(30, TimeUnit.SECONDS);
+    }
+    assertCountsAgreeWithARecount("after two writers of the same two conversations");
+    assertEquals(2, lexemeCount(low, "share"));
+    assertEquals(2, lexemeCount(high, "share"));
+  }
+
+  /** One transaction that appends an entry to each conversation, in the order given. */
+  private void writeToBoth(String first, String second, int ordinal) {
+    inOneTransaction(
+        connection -> {
+          try (var statement = connection.createStatement()) {
+            for (String id : List.of(first, second)) {
+              statement.executeUpdate(
+                  "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content)"
+                      + " VALUES ('"
+                      + id
+                      + "', "
+                      + ordinal
+                      + ", 1, 'utterance', 'user', 'shared words from writer"
+                      + ordinal
+                      + "')");
+            }
+          }
+        });
+  }
+
+  /** Waits until that many sessions of this database are blocked on a lock, or fails. */
+  private static void awaitCommitsWaitingForALock(int sessions) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+    while (System.nanoTime() < deadline) {
+      Integer waiting =
+          jdbc.queryForObject(
+              "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                  + " AND wait_event_type = 'Lock'",
+              Integer.class);
+      if (waiting != null && waiting >= sessions) return;
+      try {
+        TimeUnit.MILLISECONDS.sleep(20);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("interrupted while waiting for a blocked commit");
+      }
+    }
+    throw new IllegalStateException(sessions + " commits were expected to be waiting for a lock");
+  }
+
+  /**
+   * The two row triggers are fired by an UPDATE's SET list, not by a comparison of the old and new
+   * text, so a metadata update never reads an entry's stored text. This proves the list misses no
+   * change: every statement that names content, role, provenance or (for the postings) the key
+   * fires them, a statement that names none of those fires neither, and nothing but a statement's
+   * SET list can change those columns, because no BEFORE UPDATE trigger on {@code entries} assigns
+   * one of them. The last is checked against the catalog, so that a trigger added later fails here
+   * instead of silently leaving a projection behind.
+   */
+  @Test
+  void onlyAStatementThatNamesWhatSearchReadsFiresTheRowTriggers() throws IOException {
+    entries.append(
+        conversation, 1, LoggedEntry.utterance("the retry budget refilled", Speaker.person(null)));
+    List<String> none = List.of();
+    List<String> both = List.of("entry_search_passages", "entry_search_terms");
+
+    assertEquals(none, rowTriggersFiredBy("UPDATE entries SET learned_at = now()"));
+    assertEquals(
+        none, rowTriggersFiredBy("UPDATE entries SET recorded_at = now(), took_ms = NULL"));
+    assertEquals(both, rowTriggersFiredBy("UPDATE entries SET content = 'the quota refilled'"));
+    assertEquals(both, rowTriggersFiredBy("UPDATE entries SET role = role"));
+    assertEquals(
+        both, rowTriggersFiredBy("UPDATE entries SET input_provenance = input_provenance"));
+    assertEquals(
+        List.of("entry_search_terms"),
+        rowTriggersFiredBy("UPDATE entries SET ordinal = ordinal + 10"),
+        "the passages follow a changed key by foreign key; the postings need their trigger");
+    assertEquals(
+        both,
+        rowTriggersFiredBy(
+            "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content)"
+                + " SELECT conversation_id, ordinal, 1, 'utterance', 'user', 'unused' FROM entries"
+                + " ON CONFLICT (conversation_id, ordinal)"
+                + " DO UPDATE SET content = 'a ceiling was raised'"));
+    assertCountsAgreeWithARecount("after updates through every listed column");
+    assertEquals(1, entries.searchPassages(Home.global(), "ceiling", 0, 10, null).page().total());
+    assertEquals(0, entries.searchPassages(Home.global(), "quota", 0, 10, null).page().total());
+
+    assertEquals(
+        List.of("content", "input_provenance", "role"), triggerColumns("entry_search_passages"));
+    assertEquals(
+        List.of("content", "conversation_id", "input_provenance", "ordinal", "role"),
+        triggerColumns("entry_search_terms"));
+    // tgtype: 1 is FOR EACH ROW, 2 is BEFORE, 16 is UPDATE.
+    List<String> assigning =
+        jdbc.queryForList(
+            "SELECT t.tgname FROM pg_trigger t JOIN pg_proc f ON f.oid = t.tgfoid"
+                + " WHERE t.tgrelid = 'entries'::regclass AND NOT t.tgisinternal"
+                + " AND t.tgtype & 19 = 19"
+                + " AND f.prosrc ~* 'new\\.(conversation_id|ordinal|content|role|input_provenance)\\s*:='",
+            String.class);
+    assertEquals(
+        none,
+        assigning,
+        "a BEFORE UPDATE trigger on entries assigns a column search reads without the statement"
+            + " naming it; the UPDATE OF lists of V275 and V276 no longer see every change");
+    assertEquals(
+        List.of("trajectory_image_ejection"),
+        jdbc.queryForList(
+            "SELECT tgname FROM pg_trigger WHERE tgrelid = 'entries'::regclass"
+                + " AND NOT tgisinternal AND tgtype & 19 = 19 ORDER BY tgname",
+            String.class),
+        "the BEFORE UPDATE triggers on entries changed; check that none assigns content, role,"
+            + " input_provenance or the key, then update this list");
+  }
+
+  /** The search row triggers on {@code entries} that one statement fired, in name order. */
+  private List<String> rowTriggersFiredBy(String statement) throws IOException {
+    JsonNode explained =
+        new ObjectMapper()
+            .readTree(
+                jdbc.queryForObject("EXPLAIN (ANALYZE, FORMAT JSON) " + statement, String.class))
+            .get(0);
+    Set<String> fired = new TreeSet<>();
+    for (JsonNode trigger : explained.path("Triggers")) {
+      String name = trigger.path("Trigger Name").asText();
+      if (name.equals("entry_search_passages") || name.equals("entry_search_terms")) {
+        fired.add(name);
+      }
+    }
+    return List.copyOf(fired);
+  }
+
+  private List<String> triggerColumns(String trigger) {
+    return jdbc.queryForList(
+        "SELECT a.attname::text FROM pg_trigger t JOIN pg_attribute a"
+            + " ON a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)"
+            + " WHERE t.tgrelid = 'entries'::regclass AND t.tgname = ? ORDER BY a.attname",
+        String.class,
+        trigger);
   }
 
   /**
@@ -929,6 +1114,132 @@ class PassageSearchTest {
   }
 
   /**
+   * The same routes when the reader may see 300,000 conversations and the planner knows it.
+   *
+   * <p>This is the state the single-conversation fixture above cannot reach. Visibility used to be
+   * tested as {@code x IN (SELECT ... FROM visible)}, which PostgreSQL hashes only while it
+   * estimates the set to fit in {@code work_mem}: about 262,000 conversation numbers. With more,
+   * correctly estimated, each test scanned the whole set once per posting, and a single-word search
+   * of this fixture ran for seconds and was cancelled. A project's reader is used because the
+   * global reader's set was then estimated at one row and stayed hashed by accident. Visibility is
+   * now a bit read from a value built once, so the measures are the ones above (buffers, time, the
+   * exhaustive page) plus one of its own: the visible set is read once wherever it is used, never
+   * once per row.
+   *
+   * <p>The entries sit in four conversations whose numbers are spread across the 300,000, and one
+   * of those is then hidden from an information-scoped reader, so the bitmap is exercised at both
+   * ends and with a hole in it.
+   */
+  @Test
+  @Timeout(value = 900, unit = TimeUnit.SECONDS)
+  void everyRouteStaysWithinItsReadsWhenVeryManyConversationsAreVisible() throws IOException {
+    String first = conversations.open(PAYMENTS, Budget.of(20)).id();
+    Long project =
+        jdbc.queryForObject("SELECT project_id FROM conversations WHERE id = ?", Long.class, first);
+    jdbc.update(
+        "INSERT INTO conversations(id, created_at, origin, budget_total, budget_spent, project_id)"
+            + " SELECT 'crowd' || n, now(), 'turn', 20, 0, ? FROM generate_series(1, 300000) n",
+        project);
+    String[] holders = {first, "crowd100000", "crowd200000", "crowd300000"};
+    jdbc.update(
+        "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content)"
+            + " SELECT (?::text[])[1 + n % 4], n, 1, 'utterance', 'user',"
+            + " CASE WHEN n % 2 = 0 THEN repeat('marker ', 1 + (n / 2) % 7) ELSE '' END"
+            + " || 'unique' || n || ' ' || repeat('filler' || n % 13 || ' ', (n * 37) % 211)"
+            + " FROM generate_series(1, 20000) n",
+        (Object) holders);
+    for (String table :
+        List.of(
+            "conversations",
+            "entries",
+            "entry_search_conversations",
+            "entry_search_passages",
+            "entry_search_terms",
+            "entry_search_term_counts")) jdbc.execute("ANALYZE " + table);
+    assertEquals(
+        300001,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM entry_search_conversations k JOIN conversations c"
+                + " ON c.id = k.conversation_id WHERE c.project_id = ?",
+            Integer.class,
+            project));
+
+    List<String> questions =
+        List.of(
+            "marker",
+            "marker OR filler3",
+            "marker filler3",
+            "\"filler3 filler3\" marker",
+            "filler3 -marker");
+    for (String question : questions) {
+      List<String> exhaustive =
+          page(entries.searchPassagesExhaustively(PAYMENTS, question, 0, 10, null).page().hits());
+      assertFalse(exhaustive.isEmpty(), question);
+      for (boolean generic : new boolean[] {false, true}) {
+        String what = question + (generic ? " as a generic plan" : "");
+        JsonNode root =
+            generic
+                ? explained(question, project, null, 0, 10, true, false)
+                : new ObjectMapper()
+                    .readTree(entries.explainPassages(PAYMENTS, question, 0, 10, null))
+                    .get(0);
+        long buffers = buffers(root.get("Plan"));
+        assertTrue(
+            buffers <= MOST_BUFFERS_FOR_ONE_SEARCH,
+            what + " touched " + buffers + " buffers:\n" + root);
+        assertTrue(
+            root.path("Execution Time").asDouble() < 1500,
+            what + " took " + root.path("Execution Time").asDouble() + " ms:\n" + root);
+        assertTrue(
+            mostLoopsOverStep(root.get("Plan"), "seen") <= 1,
+            what + " read the visible set once per row:\n" + root);
+      }
+      // The search itself, under its real two-second budget.
+      BoundedLogSearch found = entries.searchPassages(PAYMENTS, question, 0, 10, null);
+      assertEquals(exhaustive, page(found.page().hits()), question);
+      assertEquals(20000, found.page().reach().searched(), question);
+    }
+
+    String hidden = holders[2];
+    var visibility =
+        new InformationLogVisibility() {
+          public <T> T read(String account, Function<Facts, T> reader) {
+            return reader.apply(new Facts(Optional.of(List.of(hidden))));
+          }
+
+          public boolean readable(String account, String log, BooleanSupplier authoritative) {
+            return !log.equals(hidden);
+          }
+        };
+    var scoped = entries.useVisibility(visibility).forAccount("reader");
+    for (String question : questions) {
+      BoundedLogSearch exhaustive =
+          scoped.searchPassagesExhaustively(PAYMENTS, question, 0, 10, null);
+      BoundedLogSearch found = scoped.searchPassages(PAYMENTS, question, 0, 10, null);
+      assertEquals(page(exhaustive.page().hits()), page(found.page().hits()), question);
+      assertEquals(15000, found.page().reach().searched(), question);
+      assertFalse(found.page().hits().isEmpty(), question);
+      for (LogSearch.Hit hit : found.page().hits()) {
+        assertNotEquals(hidden, hit.conversationId(), "a hidden entry is a hit for " + question);
+        for (LogSearch.Source source : hit.sources()) {
+          assertNotEquals(hidden, source.conversationId(), "a hidden entry is cited");
+        }
+      }
+    }
+  }
+
+  /** The most times any one read of a named step of the statement was repeated. */
+  private static long mostLoopsOverStep(JsonNode node, String step) {
+    long most =
+        "CTE Scan".equals(node.path("Node Type").asText())
+                && step.equals(node.path("CTE Name").asText())
+            ? node.path("Actual Loops").asLong()
+            : 0;
+    for (JsonNode child : node.path("Plans")) most = Math.max(most, mostLoopsOverStep(child, step));
+    return most;
+  }
+
+  /**
    * Five times what the widest of these searches was measured to touch when planned well (78,000,
    * the same in every planner state), and far less than one wrong index costs: a probe that walks a
    * word's thirty thousand postings touches over a hundred pages, and a search makes thousands of
@@ -1140,6 +1451,74 @@ class PassageSearchTest {
   }
 
   /**
+   * A search made inside its caller's transaction runs in that transaction as it is: it reads what
+   * the transaction has written, it sets nothing that would outlast the statement, and it therefore
+   * runs without the JIT setting and is compiled when the server would compile it. A transaction on
+   * another {@code DataSource} is not this store's: the search then takes its own short transaction
+   * and is not compiled.
+   */
+  @Test
+  void aSearchInsideItsCallersTransactionRunsThereWithoutTheJitSetting() throws IOException {
+    entries.append(
+        conversation, 1, LoggedEntry.utterance("the retry budget refilled", Speaker.person(null)));
+    String database = jdbc.queryForObject("SELECT current_database()", String.class);
+    var elsewhere =
+        new DriverManagerDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+    try {
+      jdbc.execute("ALTER DATABASE \"" + database + "\" SET jit = on");
+      jdbc.execute("ALTER DATABASE \"" + database + "\" SET jit_above_cost = 0");
+      assertTrue(
+          explained("budget", null, 0, 10, false, true).has("JIT"),
+          "this server does not compile plans, so the test below proves nothing");
+
+      new TransactionTemplate(new DataSourceTransactionManager(jdbc.getDataSource()))
+          .executeWithoutResult(
+              status -> {
+                jdbc.update(
+                    "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content)"
+                        + " VALUES (?, 50, 1, 'utterance', 'user', 'an uncommitted quokka')",
+                    conversation);
+                assertEquals(
+                    1,
+                    entries.searchPassages(Home.global(), "quokka", 0, 10, null).page().total(),
+                    "the search did not run in the transaction that wrote the entry");
+                assertTrue(
+                    planOf("budget").has("JIT"),
+                    "the search switched JIT off inside a transaction it does not own");
+                assertEquals("on", jdbc.queryForObject("SHOW jit", String.class));
+                assertEquals(
+                    "off", jdbc.queryForObject("SHOW transaction_read_only", String.class));
+                status.setRollbackOnly();
+              });
+      assertEquals(0, entries.searchPassages(Home.global(), "quokka", 0, 10, null).page().total());
+
+      new TransactionTemplate(new DataSourceTransactionManager(elsewhere))
+          .executeWithoutResult(
+              status -> {
+                assertEquals(1, new JdbcTemplate(elsewhere).queryForObject("SELECT 1", int.class));
+                assertFalse(
+                    planOf("budget").has("JIT"),
+                    "a transaction on another DataSource was taken for this store's");
+              });
+    } finally {
+      jdbc.execute("ALTER DATABASE \"" + database + "\" RESET jit_above_cost");
+      jdbc.execute("ALTER DATABASE \"" + database + "\" RESET jit");
+    }
+  }
+
+  /** What PostgreSQL reports for the repository's own run of one global search. */
+  private JsonNode planOf(String question) {
+    try {
+      return new ObjectMapper()
+          .readTree(entries.explainPassages(Home.global(), question, 0, 10, null))
+          .get(0);
+    } catch (IOException unreadable) {
+      throw new IllegalStateException("PostgreSQL returned a plan that is not JSON", unreadable);
+    }
+  }
+
+  /**
    * A passage search that cannot finish is cancelled within its budget and fails as a cancelled
    * query, the same typed failure the statement gave before it ran in a transaction; it is not an
    * empty success, and the next search works.
@@ -1303,6 +1682,64 @@ class PassageSearchTest {
   }
 
   /**
+   * Visibility is one bit per conversation number, so it must be right for every arrangement of
+   * numbers: hidden conversations below, between and above the visible ones (a number past the last
+   * visible one is beyond the bitmap), another home's conversations interleaved, and numbers that
+   * do not start at one. Each conversation holds one distinct entry with the same words, so the
+   * conversations a search returns are exactly the conversations it considered visible.
+   */
+  @Test
+  void visibilityHoldsForEveryConversationNumberAroundAndBeyondTheVisibleOnes() {
+    List<String> global = new ArrayList<>();
+    for (int i = 0; i < 45; i++) {
+      boolean elsewhere = i % 5 == 4;
+      String id = conversations.open(elsewhere ? PAYMENTS : Home.global(), Budget.of(2)).id();
+      entries.append(
+          id, 1, LoggedEntry.utterance("needle shared thread item" + i, Speaker.person(null)));
+      if (!elsewhere) global.add(id);
+    }
+    List<String> hidden =
+        List.of(global.get(0), global.get(9), global.get(10), global.get(22), global.getLast());
+    Set<String> visible = new TreeSet<>(global);
+    visible.removeAll(hidden);
+    var visibility =
+        new InformationLogVisibility() {
+          public <T> T read(String account, Function<Facts, T> reader) {
+            return reader.apply(new Facts(Optional.of(hidden)));
+          }
+
+          public boolean readable(String account, String log, BooleanSupplier authoritative) {
+            return !hidden.contains(log);
+          }
+        };
+    var scoped = entries.useVisibility(visibility).forAccount("reader");
+
+    for (String question :
+        List.of("needle", "needle thread", "needle OR thread", "\"needle shared\" -nosuchword")) {
+      for (boolean prune : new boolean[] {true, false}) {
+        String asked = question + (prune ? "" : " (exhaustive)");
+        LogSearch found =
+            (prune
+                    ? scoped.searchPassages(Home.global(), question, 0, 200, null)
+                    : scoped.searchPassagesExhaustively(Home.global(), question, 0, 200, null))
+                .page();
+        Set<String> returned = new TreeSet<>();
+        for (LogSearch.Hit hit : found.hits()) {
+          returned.add(hit.conversationId());
+          for (LogSearch.Source source : hit.sources()) returned.add(source.conversationId());
+        }
+        assertEquals(visible, returned, asked);
+        assertEquals(visible.size(), found.reach().searched(), asked);
+      }
+    }
+    for (String id : hidden) {
+      assertEquals(
+          0, scoped.searchPassages(Home.global(), "needle", 0, 10, id).page().reach().total(), id);
+    }
+    assertEquals(9, scoped.searchPassages(PAYMENTS, "needle", 0, 200, null).page().hits().size());
+  }
+
+  /**
    * The pruned multi-word routes read postings by word, not by conversation, so visibility has to
    * be applied where postings are read and again where a candidate becomes a match. A hidden
    * conversation here holds three hundred entries that would outrank every visible one for both
@@ -1433,7 +1870,8 @@ class PassageSearchTest {
   /**
    * Two things no application path does, which must still leave the counts right: a conversation
    * deleted and created again under the same id in one transaction starts from nothing, and a
-   * transaction that writes an entry may then truncate the table.
+   * transaction that writes an entry may then truncate {@code entries} (and only {@code entries}:
+   * see the next test).
    */
   @Test
   void aConversationReplacedOrATableTruncatedInTheWritingTransactionLeavesTheCountsRight() {
@@ -1476,6 +1914,68 @@ class PassageSearchTest {
         0, jdbc.queryForObject("SELECT count(*) FROM entry_search_pending", Integer.class));
     assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM entry_search_terms", Integer.class));
     assertEquals(0, entries.searchPassages(Home.global(), "quota", 0, 10, null).page().total());
+  }
+
+  /**
+   * What a transaction that has written entries may truncate. {@code TRUNCATE entries CASCADE} is
+   * allowed (the test above). A TRUNCATE that reaches {@code conversations} cascades to the pending
+   * rows that transaction's own writes queued a deferred event for, and PostgreSQL refuses it; the
+   * transaction's work is rolled back and nothing is left half counted. Settling first, with {@code
+   * SET CONSTRAINTS ALL IMMEDIATE}, makes the same TRUNCATE legal. A transaction that has written
+   * no entries truncates both, as every test here does before it starts.
+   */
+  @Test
+  void aTransactionThatWroteEntriesMayNotTruncateConversationsUntilItHasSettled() {
+    entries.append(conversation, 1, LoggedEntry.toolResult("c1", "the retry budget refilled"));
+    String insert =
+        "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content) VALUES ('"
+            + conversation
+            + "', 2, 1, 'utterance', 'user', 'written before a truncate')";
+
+    DataAccessException refused =
+        assertThrows(
+            DataAccessException.class,
+            () ->
+                inOneTransaction(
+                    connection -> {
+                      try (var statement = connection.createStatement()) {
+                        statement.executeUpdate(insert);
+                        statement.execute("TRUNCATE TABLE conversations, entries CASCADE");
+                      }
+                    }));
+    assertTrue(
+        refused
+            .getMostSpecificCause()
+            .getMessage()
+            .contains(
+                "cannot TRUNCATE \"entry_search_pending\" because it has pending trigger events"),
+        refused.getMostSpecificCause().getMessage());
+    assertEquals(
+        1,
+        jdbc.queryForObject("SELECT count(*) FROM entries", Integer.class),
+        "the refused transaction left its entry, or took the earlier one");
+    assertCountsAgreeWithARecount("after a refused truncate");
+    assertEquals(1, lexemeCount(conversation, "budget"));
+
+    inOneTransaction(
+        connection -> {
+          try (var statement = connection.createStatement()) {
+            statement.executeUpdate(insert);
+            statement.execute("SET CONSTRAINTS ALL IMMEDIATE");
+            statement.execute("TRUNCATE TABLE conversations, entries CASCADE");
+          }
+        });
+    for (String table :
+        List.of(
+            "conversations",
+            "entries",
+            "entry_search_conversations",
+            "entry_search_pending",
+            "entry_search_terms",
+            "entry_search_term_counts",
+            "entry_search_passages")) {
+      assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM " + table, Integer.class), table);
+    }
   }
 
   @Test
@@ -1667,6 +2167,18 @@ class PassageSearchTest {
       int most,
       boolean generic,
       boolean compiled) {
+    return explained(question, null, conversationId, skip, most, generic, compiled);
+  }
+
+  /** The same for one project's reader; a null project is the global reader. */
+  private JsonNode explained(
+      String question,
+      Long project,
+      String conversationId,
+      int skip,
+      int most,
+      boolean generic,
+      boolean compiled) {
     StringBuilder sql = new StringBuilder();
     int parameter = 0;
     for (String piece :
@@ -1695,7 +2207,9 @@ class PassageSearchTest {
                             + asked
                             + ","
                             + asked
-                            + ",NULL,"
+                            + ","
+                            + (project == null ? "NULL" : project.toString())
+                            + ","
                             + scope
                             + ","
                             + EntryStore.MOST_GROUPED_ENTRIES

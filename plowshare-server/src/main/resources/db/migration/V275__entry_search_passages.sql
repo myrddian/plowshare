@@ -119,7 +119,16 @@ CREATE TABLE entry_search_passages (
 --
 -- The searchable set is SEARCH_SQL's: a role and retained content. Ejection sets content to NULL
 -- and so removes the passages with the lexemes. Supersession, learning marks and other metadata
--- updates leave the text alone and return before touching this table.
+-- updates do not name content, role or provenance in their SET list and so do not fire the
+-- trigger (`UPDATE OF` below): comparing the old and new text to find it unchanged meant
+-- fetching both from storage, about a fifth of a millisecond per row for a 495 kB entry. The
+-- comparison in the function remains for an UPDATE that names a column without changing it.
+--
+-- `UPDATE OF` looks at the statement's SET list, not at the row. It misses nothing here because
+-- these three columns change in no other way: no BEFORE UPDATE trigger on `entries` assigns
+-- them (the only one, `trajectory_image_ejection`, assigns `tool_observation`), and the
+-- generated lexeme columns follow content and provenance. A BEFORE trigger added later that
+-- assigned one of them would have to be named here; a test pins the list.
 --
 -- An entry whose key changes keeps its passages: the foreign key below carries the new key to
 -- them. When the same update also rewrites the text, the old passages may already sit under the
@@ -148,7 +157,8 @@ BEGIN
  RETURN NEW;
 END $$;
 
-CREATE TRIGGER entry_search_passages AFTER INSERT OR UPDATE ON entries
+CREATE TRIGGER entry_search_passages
+ AFTER INSERT OR UPDATE OF content, role, input_provenance ON entries
  FOR EACH ROW EXECUTE FUNCTION entry_search_passages_changed();
 
 INSERT INTO entry_search_passages(

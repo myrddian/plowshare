@@ -42,6 +42,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.springframework.jdbc.core.ArgumentPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
@@ -49,6 +50,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.RowMapperResultSetExtractor;
 import org.springframework.jdbc.core.StatementCallback;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -992,7 +994,31 @@ public final class EntryStore implements ConversationSearchRepository {
    * BM25 (k1=1.2, b=.75) over the corpus the reader can see. Stored frequencies and lengths are the
    * values that query derives, so the same entries match and a hit's rank agrees to nine decimal
    * places; it is not the same double, because the parts of a score are added from different
-   * sources. Every count and rank is computed after {@code owners}.
+   * sources. Every count and rank is computed after {@code seen}, the one step that decides which
+   * conversations the reader may see.
+   *
+   * <p><b>The visible set is built once and tested by position.</b> {@code seen} joins the visible
+   * conversations to their statistics rows a single time and reduces them to one row: the sums that
+   * corpus statistics and reach need, and {@code numbers}, a bitmap with one bit per conversation
+   * number up to the highest visible one (125 kB per million conversation numbers). Every later
+   * visibility test is {@code get_bit} on that value at the row's own conversation number. It is an
+   * expression over a value computed once, so there is nothing for the planner to choose: it cannot
+   * become a join, it needs no hash table, and its cost does not depend on how many conversations
+   * are visible or on what the planner believes about them. An earlier version tested {@code x IN
+   * (SELECT ... FROM visible)}, which PostgreSQL only hashes while it estimates the set to fit in
+   * {@code work_mem}: past about 262,000 visible conversations (150,000 for the text keys) each of
+   * the eight tests became a linear scan of the set per row and a single-word search was cancelled
+   * at 30 seconds; below that, each test built its own hash of the set. The bitmap is built from
+   * visible conversations only, so a hidden conversation's number has no bit, and a number beyond
+   * the bitmap is hidden.
+   *
+   * <p>{@code seen} names the three ways a reader is scoped as separate branches (a global reader,
+   * a project's reader, either narrowed to one conversation) because their sizes differ by orders
+   * of magnitude and one predicate covering all three was estimated at one row: {@code project_id
+   * IS NOT DISTINCT FROM NULL} has no statistics, and 300,000 global conversations were then joined
+   * by 300,000 index probes (571 ms). With the parameters known the planner removes the branches
+   * that cannot apply and sizes the remaining one from the column's statistics; a generic plan
+   * keeps all three behind one-time filters and plans each for its own size.
    *
    * <p><b>Where an answer differs from {@link #SEARCH_SQL}'s.</b>
    *
@@ -1102,9 +1128,15 @@ public final class EntryStore implements ConversationSearchRepository {
    * <p><b>What still grows, and what pruning does not help.</b>
    *
    * <ul>
-   *   <li>Corpus statistics and reach are sums over one stored row per visible conversation.
-   *       Document frequency is a sum of stored counts read as one index range per word: a row for
-   *       every conversation holding the word, visible or not, hidden ones discarded.
+   *   <li>The visible set. Corpus statistics, reach and the bitmap are one pass over one stored row
+   *       per visible conversation, so every search pays for the conversations its reader may see,
+   *       whether or not they hold an entry: measured at about 0.3 ms per thousand visible
+   *       conversations when PostgreSQL runs the pass with two parallel workers and 0.7 ms without
+   *       (3 ms at five conversations, 7 to 10 ms at 10,000, 75 to 100 ms at 300,000 for a
+   *       single-word search; 200 ms at 300,000 without workers). Visibility is decided per search,
+   *       so this pass cannot be stored. Document frequency is a sum of stored counts read as one
+   *       index range per word: a row for every conversation holding the word, visible or not,
+   *       hidden ones discarded.
    *   <li>Several common words. The best entries hold several of them, and no index orders postings
    *       by a joint score, so the sample that finds them is a fixed share of each word's postings:
    *       an index-only read, about a tenth of a microsecond per posting, but one that grows with
@@ -1132,9 +1164,9 @@ public final class EntryStore implements ConversationSearchRepository {
    *
    * <ul>
    *   <li>It turned each visibility test into a join driven by the visible conversations and
-   *       repeated a whole posting scan once per conversation (28 seconds at 50,000 entries).
-   *       {@code (x IN (...)) IS TRUE} keeps the test a hashed membership check applied to rows
-   *       read in index order.
+   *       repeated a whole posting scan once per conversation (28 seconds at 50,000 entries). The
+   *       test is now a bit read from {@code seen.numbers}, a filter on rows read in index order
+   *       that no join can replace.
    *   <li>It merged a lateral read of postings into its parent as a hash join on frequency, so the
    *       length bound became a filter over every posting of the word. {@code OFFSET 0} inside each
    *       lateral keeps it a parameterised index scan whose bound is an index condition.
@@ -1144,27 +1176,33 @@ public final class EntryStore implements ConversationSearchRepository {
    *   <li>With stale statistics it answered a probe for one entry's posting from the best-first
    *       index, walking every posting of the word for each probe (4 to 15 seconds at 60,000
    *       entries), and symmetrically could answer a best-first read from the primary key. No fence
-   *       chooses an index, so V276 makes each index unusable for the other's question. The
+   *       chooses an index, so V276 leaves each question one index that can answer it. The
    *       best-first index is partial ({@code WHERE tf >= 1}) and keyed on the lexeme under
    *       collation {@code "POSIX"}: the best-first reads here say {@code t.tf>=1} and compare
    *       under {@code "POSIX"}, the per-entry probes say neither. The best-first reads of the
    *       multi-word route also name {@code best_position}, which only that index holds, so the
-   *       primary key cannot serve them even as a full index-only scan.
+   *       primary key is not a covering index for them. What this enforces is that no other index
+   *       can answer either read through an index condition. A sequential scan or a bitmap scan of
+   *       the postings remains legal for both; neither was observed in any planner state tested.
    * </ul>
    *
-   * <p>Conversation numbers are translated back through the mapping table rather than the {@code
-   * visible} step because a real table has statistics. What cannot be made structural is the lookup
-   * of an entry by its key: {@code entries} has other indexes that begin with the conversation, and
-   * if the planner believes that table empty it may read a conversation's every entry through one
-   * of them. The served query has the same exposure. The plan is asserted by buffers touched and
-   * time at 60,000 entries in one conversation, with stale, absent and fresh statistics, with the
-   * new tables believed empty, and as a generic plan.
+   * <p>A hit's conversation number is translated back to its id by a join to the mapping table,
+   * which has statistics; the planner chooses that join's method. When it expects many hits (as a
+   * generic plan does) it hashes every conversation's row: 31 ms at 300,000 conversations. What is
+   * not made structural is the lookup of an entry by its key: {@code entries} has other indexes
+   * that begin with the conversation, and if the planner believes that table empty it may read a
+   * conversation's every entry through one of them. The served query has the same exposure. The
+   * plan is asserted by buffers touched and time at 60,000 entries in one conversation, with stale,
+   * absent and fresh statistics, with the new tables believed empty, as a generic plan, and with
+   * 300,000 visible conversations.
    *
    * <p><b>Visibility is applied twice on the pruned routes.</b> Postings are read by word, so the
    * reads that find a threshold and the reads that find candidates each discard hidden
    * conversations, and a sampled entry or a candidate is looked up through the visible
    * conversations again before its entry is read. Either check alone keeps hidden entries off the
-   * page; a hidden posting that slipped past the first could only loosen a bound.
+   * page; a hidden posting that slipped past the first could only loosen a bound. On the exhaustive
+   * route a match found by the GIN index is kept only if its conversation's number has its bit,
+   * looked up by the conversation's id for each match, before it is scored.
    *
    * <p><b>JIT.</b> The plan's estimated cost includes the routes it does not take, and it grows
    * with the question as well as the archive: a 16-word question on 30,000 entries, or most
@@ -1192,21 +1230,39 @@ public final class EntryStore implements ConversationSearchRepository {
                to_tsvector('english', ?) AS words, CAST(? AS bigint) AS project,
                CAST(? AS text) AS conversation, CAST(? AS integer) AS most_grouped,
                CAST(? AS bigint) AS wanted, CAST(? AS boolean) AS prune
-      ), owners AS MATERIALIZED (
-        SELECT c.id FROM conversations c CROSS JOIN params p
-         WHERE c.project_id IS NOT DISTINCT FROM p.project
-           AND (p.conversation IS NULL OR c.id=p.conversation) /*information*/
-      ), visible AS MATERIALIZED (
-        SELECT k.conversation_no,k.conversation_id,k.searched,k.total_length,k.ejected,k.recorded_only
-          FROM entry_search_conversations k JOIN owners o ON o.id=k.conversation_id
+      ), seen AS MATERIALIZED (
+        SELECT coalesce(sum(b.searched),0) AS searched,coalesce(sum(b.total_length),0) AS total_length,
+               coalesce(sum(b.ejected),0) AS ejected,coalesce(sum(b.recorded_only),0) AS recorded_only,
+               coalesce(string_agg(decode(repeat('00',b.gap),'hex') || set_byte(decode('00','hex'),0,b.held),
+                                   ''::bytea ORDER BY b.at),''::bytea) AS numbers
+          FROM (SELECT g.*,g.at-1-coalesce(lag(g.at) OVER (ORDER BY g.at),-1) AS gap
+                  FROM (SELECT c.conversation_no>>3 AS at,bit_or(1<<(c.conversation_no&7)) AS held,
+                               sum(c.searched) AS searched,sum(c.total_length) AS total_length,
+                               sum(c.ejected) AS ejected,sum(c.recorded_only) AS recorded_only
+                          FROM (SELECT c.id,n.conversation_no,n.searched,n.total_length,n.ejected,n.recorded_only
+                                  FROM conversations c JOIN entry_search_conversations n ON n.conversation_id=c.id
+                                 CROSS JOIN params p
+                                 WHERE p.conversation IS NULL AND p.project IS NULL AND c.project_id IS NULL
+                                UNION ALL
+                                SELECT c.id,n.conversation_no,n.searched,n.total_length,n.ejected,n.recorded_only
+                                  FROM conversations c JOIN entry_search_conversations n ON n.conversation_id=c.id
+                                 CROSS JOIN params p
+                                 WHERE p.conversation IS NULL AND p.project IS NOT NULL AND c.project_id=p.project
+                                UNION ALL
+                                SELECT c.id,n.conversation_no,n.searched,n.total_length,n.ejected,n.recorded_only
+                                  FROM conversations c JOIN entry_search_conversations n ON n.conversation_id=c.id
+                                 CROSS JOIN params p
+                                 WHERE p.conversation IS NOT NULL AND c.id=p.conversation
+                                   AND c.project_id IS NOT DISTINCT FROM p.project) c
+                         WHERE c.conversation_no>=0 /*information*/
+                         GROUP BY c.conversation_no>>3) g) b
       ), reach AS (
-        SELECT coalesce(sum(searched),0)::integer AS searched,
-               coalesce(sum(ejected),0)::integer AS ejected,
-               coalesce(sum(recorded_only),0)::integer AS recorded_only FROM visible
+        SELECT searched::integer AS searched,ejected::integer AS ejected,
+               recorded_only::integer AS recorded_only FROM seen
       ), corpus AS MATERIALIZED (
-        SELECT coalesce(sum(searched),0)::double precision AS n,
-               greatest(coalesce(sum(total_length)::double precision/nullif(sum(searched),0),1),1) AS avgdl
-          FROM visible
+        SELECT searched::double precision AS n,
+               greatest(coalesce(total_length::double precision/nullif(searched,0),1),1) AS avgdl
+          FROM seen
       ), terms AS MATERIALIZED (
         SELECT unnest(tsvector_to_array(words)) COLLATE "C" AS term FROM params
       ), evidence AS MATERIALIZED (
@@ -1214,7 +1270,7 @@ public final class EntryStore implements ConversationSearchRepository {
       ), frequencies AS MATERIALIZED (
         SELECT t.term, (SELECT coalesce(sum(k.entries),0) FROM entry_search_term_counts k
                          WHERE k.lexeme=t.term
-                           AND (k.conversation_no IN (SELECT conversation_no FROM visible)) IS TRUE) AS df
+                           AND /*seen k*/) AS df
           FROM terms t
       ), weights AS MATERIALIZED (
         SELECT f.term, ln(1+(c.n-f.df+0.5)/(f.df+0.5))*2.2 AS weight, c.avgdl, f.df
@@ -1237,7 +1293,7 @@ public final class EntryStore implements ConversationSearchRepository {
          CROSS JOIN LATERAL (
            SELECT t.conversation_no,t.ordinal,t.doc_length,t.best_position FROM entry_search_terms t
             WHERE t.lexeme COLLATE "POSIX"=l.term AND t.tf=f.tf AND t.tf>=1
-              AND (t.conversation_no IN (SELECT conversation_no FROM visible)) IS TRUE
+              AND /*seen t*/
             ORDER BY t.lexeme COLLATE "POSIX",t.tf,t.doc_length,t.conversation_no,t.ordinal
             LIMIT (SELECT 2*wanted+16 FROM params)) s
       ), threshold AS MATERIALIZED (
@@ -1262,7 +1318,7 @@ public final class EntryStore implements ConversationSearchRepository {
               AND t.doc_length<=CASE WHEN h.score IS NULL THEN 2147483647 ELSE
                     least(2147483646::double precision,greatest(0::double precision,
                       floor((l.weight*f.tf/h.score-f.tf-0.3)*l.avgdl/0.9*(1+1e-9))))::integer+1 END
-              AND (t.conversation_no IN (SELECT conversation_no FROM visible)) IS TRUE
+              AND /*seen t*/
             ORDER BY t.lexeme COLLATE "POSIX",t.tf,t.doc_length,t.conversation_no,t.ordinal
            OFFSET 0) s
       ), single_hits AS MATERIALIZED (
@@ -1298,7 +1354,7 @@ public final class EntryStore implements ConversationSearchRepository {
            SELECT t.conversation_no,t.ordinal,t.doc_length FROM entry_search_terms t
             WHERE t.lexeme COLLATE "POSIX"=l.term AND t.tf=f.tf AND t.tf>=1
               AND (t.best_position IS NULL OR t.best_position>=0)
-              AND (t.conversation_no IN (SELECT conversation_no FROM visible)) IS TRUE
+              AND /*seen t*/
             ORDER BY t.lexeme COLLATE "POSIX",t.tf,t.doc_length,t.conversation_no,t.ordinal
             LIMIT least(16384,greatest(256,l.df/32))) s
          WHERE (SELECT pruning FROM worth)
@@ -1322,7 +1378,7 @@ public final class EntryStore implements ConversationSearchRepository {
          CROSS JOIN LATERAL (
            SELECT k.conversation_id FROM entry_search_conversations k
             WHERE k.conversation_no=s.conversation_no
-              AND (k.conversation_no IN (SELECT conversation_no FROM visible)) IS TRUE
+              AND /*seen k*/
            OFFSET 0) v
          CROSS JOIN LATERAL (
            SELECT 1 FROM entries e CROSS JOIN params p
@@ -1378,7 +1434,7 @@ public final class EntryStore implements ConversationSearchRepository {
                     least(2147483646::double precision,greatest(0::double precision,
                       floor((r.weight*f.tf/b.bar-f.tf-0.3)*r.avgdl/0.9*(1+1e-9))))::integer+1
                     ELSE 2147483647 END
-              AND (t.conversation_no IN (SELECT conversation_no FROM visible)) IS TRUE
+              AND /*seen t*/
             ORDER BY t.lexeme COLLATE "POSIX",t.tf,t.doc_length,t.conversation_no,t.ordinal
            OFFSET 0) s
       ), candidates AS MATERIALIZED (
@@ -1399,20 +1455,24 @@ public final class EntryStore implements ConversationSearchRepository {
         SELECT n.conversation_no,n.ordinal FROM near_scored n CROSS JOIN floor h
          WHERE n.rank>=h.score
       ), matches AS MATERIALIZED (
-        SELECT e.conversation_id,e.ordinal
-          FROM entries e CROSS JOIN params p CROSS JOIN evidence v
+        SELECT e.conversation_id,v.conversation_no,e.ordinal
+          FROM entries e CROSS JOIN params p CROSS JOIN evidence w
+         CROSS JOIN LATERAL (
+           SELECT k.conversation_no FROM entry_search_conversations k
+            WHERE k.conversation_id=e.conversation_id
+              AND /*seen k*/
+           OFFSET 0) v
          WHERE NOT (SELECT single FROM shape) AND NOT EXISTS (SELECT 1 FROM choice)
            AND e.role IS NOT NULL AND e.content IS NOT NULL
-           AND (e.conversation_id IN (SELECT id FROM owners)) IS TRUE
            AND coalesce(e.evidence_text_search,e.text_search) @@ p.query
-           AND coalesce(e.evidence_text_search,e.text_search) @@ v.any_word
+           AND coalesce(e.evidence_text_search,e.text_search) @@ w.any_word
         UNION ALL
-        SELECT v.conversation_id,c.ordinal
+        SELECT v.conversation_id,c.conversation_no,c.ordinal
           FROM kept c
          CROSS JOIN LATERAL (
            SELECT k.conversation_id FROM entry_search_conversations k
             WHERE k.conversation_no=c.conversation_no
-              AND (k.conversation_no IN (SELECT conversation_no FROM visible)) IS TRUE
+              AND /*seen k*/
            OFFSET 0) v
          CROSS JOIN LATERAL (
            SELECT 1 FROM entries e CROSS JOIN params p
@@ -1423,11 +1483,10 @@ public final class EntryStore implements ConversationSearchRepository {
       ), scored AS MATERIALIZED (
         SELECT m.conversation_id,m.ordinal,
                sum(w.weight*s.tf/(s.tf+1.2*(0.25+0.75*s.doc_length/w.avgdl)) ORDER BY w.term) AS rank
-          FROM matches m JOIN entry_search_conversations v ON v.conversation_id=m.conversation_id
-         CROSS JOIN weights w
+          FROM matches m CROSS JOIN weights w
          CROSS JOIN LATERAL (
            SELECT t.tf,t.doc_length FROM entry_search_terms t
-            WHERE t.conversation_no=v.conversation_no AND t.ordinal=m.ordinal AND t.lexeme=w.term
+            WHERE t.conversation_no=m.conversation_no AND t.ordinal=m.ordinal AND t.lexeme=w.term
            OFFSET 0) s
          GROUP BY m.conversation_id,m.ordinal
       ), windowed AS MATERIALIZED (
@@ -1496,7 +1555,23 @@ public final class EntryStore implements ConversationSearchRepository {
                WHERE ps.conversation_id=s.conversation_id AND ps.ordinal=s.ordinal
                ORDER BY (ps.text_search @@ p.query) DESC,(ps.text_search @@ v.any_word) DESC,
                         ts_rank_cd(ps.text_search,v.any_word) DESC,ps.position
-               LIMIT 1""");
+               LIMIT 1""")
+          .replace("/*seen k*/", seen("k.conversation_no"))
+          .replace("/*seen t*/", seen("t.conversation_no"));
+
+  /**
+   * The test that a conversation number is one the reader may see: its bit in {@code seen.numbers}.
+   *
+   * <p>A number beyond the last visible one has no bit and is hidden. {@code get_bit} refuses a
+   * position outside the value, and {@code CASE} is what guarantees the range is tested first.
+   *
+   * @param number the SQL expression holding the conversation number, never a caller's value
+   */
+  private static String seen(String number) {
+    return ("CASE WHEN %1$s>=0 AND %1$s<(SELECT 8*length(numbers) FROM seen)"
+            + " THEN get_bit((SELECT numbers FROM seen),%1$s)=1 ELSE false END")
+        .formatted(number);
+  }
 
   /*
    * ordinal < ? excludes the summary entry itself, which carries the reach as
@@ -1636,6 +1711,29 @@ public final class EntryStore implements ConversationSearchRepository {
         : searchQuery(sql, mapper, null, args);
   }
 
+  /**
+   * A search statement with its information marker resolved for this reader.
+   *
+   * <p>The marker is the SQL comment that says {@code information}, and it stands where the
+   * statement selects conversations as {@code c}. Without facts the store is not information-scoped
+   * and the marker is removed. With them it becomes the log predicate over {@code c.id}, and that
+   * predicate's arguments are inserted into {@code bound} at the marker's place among the
+   * statement's parameters.
+   *
+   * @param sql a statement holding the marker exactly once
+   * @param facts the reader's visibility facts, or null when the store is not information-scoped
+   * @param bound the statement's arguments in order; the predicate's are added in place
+   * @return the statement to prepare
+   */
+  private String visibleTo(String sql, InformationLogVisibility.Facts facts, List<Object> bound) {
+    if (facts == null) return sql.replace("/*information*/", "");
+    int at = sql.indexOf("/*information*/");
+    int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
+    var filter = InformationLogSql.visible("c.id", informationAccount, facts);
+    bound.addAll(before, filter.arguments());
+    return sql.replace("/*information*/", " AND " + filter.sql());
+  }
+
   private <T> T searchQuery(
       String sql,
       ResultSetExtractor<T> mapper,
@@ -1644,18 +1742,12 @@ public final class EntryStore implements ConversationSearchRepository {
     long queryDeadline =
         JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(searchBudget));
     var bound = new ArrayList<>(Arrays.asList(args));
-    if (facts != null) {
-      int at = sql.indexOf("/*information*/");
-      int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
-      var filter = InformationLogSql.visible("c.id", informationAccount, facts);
-      bound.addAll(before, filter.arguments());
-      sql = sql.replace("/*information*/", " AND " + filter.sql());
-    } else sql = sql.replace("/*information*/", "");
+    String selected = visibleTo(sql, facts, bound);
     var setter = new ArgumentPreparedStatementSetter(bound.toArray());
     try {
       T result =
           jdbc.query(
-              sql,
+              selected,
               statement -> {
                 setter.setValues(statement);
                 JdbcReadDeadline.apply(statement, queryDeadline);
@@ -3240,9 +3332,17 @@ public final class EntryStore implements ConversationSearchRepository {
    *
    * <p>The completion deadline is taken once, before the transaction, and bounds both statements
    * and the result; cancellation and failures surface as they do from {@link #searchQuery}, through
-   * the caller's {@link ArchiveUnavailableException#translating}. If the caller already owns a
-   * transaction the statement runs in it unchanged: a {@code SET LOCAL} there would last until that
-   * transaction ended and change the plans of statements this method does not own.
+   * the caller's {@link ArchiveUnavailableException#translating}.
+   *
+   * <p><b>Inside a caller's transaction the statement runs as it is, without the JIT setting.</b> A
+   * {@code SET LOCAL} there would last until the caller's transaction ended and change the plans of
+   * statements this method does not own, so such a search may be compiled and pay for it. "The
+   * caller's transaction" means one on this store's connection: a transaction is active on the
+   * thread and a connection of this store's {@code DataSource} is bound to it. A transaction on
+   * another {@code DataSource} alone is not one this statement would join, and the search then
+   * takes its own short transaction as usual. A connection of this {@code DataSource} that is bound
+   * only for synchronisation with another resource's transaction counts as the caller's: the
+   * statement runs on it unchanged, which is the cautious reading.
    */
   private <T> T passageQuery(String sql, ResultSetExtractor<T> mapper, Object... args) {
     return informationScoped
@@ -3258,14 +3358,7 @@ public final class EntryStore implements ConversationSearchRepository {
     long queryDeadline =
         JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(searchBudget));
     var bound = new ArrayList<>(Arrays.asList(args));
-    String selected;
-    if (facts != null) {
-      int at = sql.indexOf("/*information*/");
-      int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
-      var filter = InformationLogSql.visible("c.id", informationAccount, facts);
-      bound.addAll(before, filter.arguments());
-      selected = sql.replace("/*information*/", " AND " + filter.sql());
-    } else selected = sql.replace("/*information*/", "");
+    String selected = visibleTo(sql, facts, bound);
     var setter = new ArgumentPreparedStatementSetter(bound.toArray());
     Supplier<T> search =
         () ->
@@ -3278,13 +3371,12 @@ public final class EntryStore implements ConversationSearchRepository {
                 mapper);
     try {
       T result;
-      if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      DataSource source = Objects.requireNonNull(jdbc.getDataSource(), "dataSource");
+      if (TransactionSynchronizationManager.isActualTransactionActive()
+          && TransactionSynchronizationManager.hasResource(source)) {
         result = search.get();
       } else {
-        var transaction =
-            new TransactionTemplate(
-                new DataSourceTransactionManager(
-                    Objects.requireNonNull(jdbc.getDataSource(), "dataSource")));
+        var transaction = new TransactionTemplate(passageTransactions(source));
         transaction.setReadOnly(true);
         result =
             transaction.execute(
@@ -3305,6 +3397,24 @@ public final class EntryStore implements ConversationSearchRepository {
       setter.cleanupParameters();
     }
   }
+
+  /**
+   * The transaction manager {@link #passageQuery} opens its short transactions with, made on first
+   * use and kept: it holds nothing but the {@code DataSource}. It is not made in the constructor
+   * because a store built over a template without a {@code DataSource}, as unit tests build it,
+   * must still be constructible; only a passage search needs one. Two threads racing here each make
+   * an equivalent manager and one is kept.
+   */
+  private PlatformTransactionManager passageTransactions(DataSource source) {
+    PlatformTransactionManager held = passageTransactions;
+    if (held == null) {
+      held = new DataSourceTransactionManager(source);
+      passageTransactions = held;
+    }
+    return held;
+  }
+
+  private volatile PlatformTransactionManager passageTransactions;
 
   /** Fresh coverage for replayed snapshots, without reranking or fetching content. */
   public LogSearch.Reach searchReach(Home home, String conversation) {
