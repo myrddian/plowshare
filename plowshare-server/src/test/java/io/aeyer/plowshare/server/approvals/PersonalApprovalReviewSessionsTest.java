@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.approvals;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,10 +14,13 @@ import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -33,11 +37,30 @@ class PersonalApprovalReviewSessionsTest {
   private final AtomicBoolean revoked = new AtomicBoolean();
   private final AtomicBoolean revokeDuringReview = new AtomicBoolean();
   private final AtomicInteger audits = new AtomicInteger();
+  private final AtomicReference<String> reviewerEvidence = new AtomicReference<>();
+  private final AtomicReference<String> reviewerPrompt = new AtomicReference<>();
+  private final AtomicReference<String> securityEvidence = new AtomicReference<>();
   private final OperationApprovalReview.Request request =
       new OperationApprovalReview.Request(
           "project", "remote:session", List.of("git", "status"), "/project", null, "call");
 
   private OperationApprovalReview session() {
+    return session("Inspect repository status");
+  }
+
+  private OperationApprovalReview session(String authenticatedTask) {
+    return session(authenticatedTask, DeploymentSecurityPolicy.NONE);
+  }
+
+  private OperationApprovalReview session(
+      String authenticatedTask, DeploymentSecurityPolicy deployment) {
+    return session(authenticatedTask, deployment, WorkspaceSecurityGuidance.NONE);
+  }
+
+  private OperationApprovalReview session(
+      String authenticatedTask,
+      DeploymentSecurityPolicy deployment,
+      WorkspaceSecurityGuidance guidance) {
     when(operation.executor()).thenReturn("sam");
     when(operation.home()).thenReturn(Home.of("project"));
     when(policies.read("sam"))
@@ -55,19 +78,26 @@ class PersonalApprovalReviewSessionsTest {
                 (definition, system, evidence, work) -> {
                   consultations.incrementAndGet();
                   if (revokeDuringReview.get()) revoked.set(true);
-                  assertTrue(evidence.contains("Inspect repository status"));
+                  reviewerEvidence.set(evidence);
+                  reviewerPrompt.set(system);
+                  if (definition.name().equals("security_reviewer")) securityEvidence.set(evidence);
+                  if (authenticatedTask != null && authenticatedTask.length() <= 16000)
+                    assertTrue(evidence.contains(authenticatedTask));
                   return definition.name().equals("security_reviewer")
                       ? output.get()
                       : "{\"approved\":true,\"reason\":\"Matches personal instructions.\"}";
                 },
             () -> security,
-            Duration.ofSeconds(2));
+            Duration.ofSeconds(2),
+            mock(HumanApprovalHistory.class),
+            deployment,
+            guidance);
     return sessions
         .operations(
             new ApprovalReviewSessions.Context(
                 "sam",
                 "conversation",
-                "Inspect repository status",
+                authenticatedTask,
                 operation,
                 Budget.of(5),
                 UsageAttribution.LEGACY,
@@ -77,6 +107,206 @@ class PersonalApprovalReviewSessionsTest {
                 },
                 (intent, decision) -> audits.incrementAndGet()))
         .orElseThrow();
+  }
+
+  @Test
+  void deployment_intent_applies_without_an_account_rule_and_yields_to_a_personal_reject() {
+    var session =
+        session(
+            null,
+            new DeploymentSecurityPolicy(
+                List.of(personalReadRule()), "Check explicit intent before security file edits."));
+    when(policies.read("sam")).thenReturn(ApprovalPolicy.manual());
+    var read = personalRead("sam");
+    var consent = new ApprovalReviews.Consent(true, false, false);
+    assertEquals(ApprovalReviews.Action.ALLOW, session.review(read, consent).action());
+    assertTrue(reviewerPrompt.get().contains("Check explicit intent before security file edits."));
+    session.requireCurrent(read);
+
+    var block =
+        new ApprovalPolicy.Rule(
+            "block-read",
+            ApprovalPolicy.Effect.REJECT,
+            ApprovalPolicy.Kind.FILE_READ,
+            null,
+            null,
+            null,
+            null,
+            List.of(),
+            List.of(),
+            null);
+    when(policies.read("sam"))
+        .thenReturn(new ApprovalPolicy(1, ApprovalPolicy.Mode.MANUAL, null, List.of(block)));
+    assertEquals(ApprovalReviews.Action.REJECT, session.review(read, consent).action());
+  }
+
+  @Test
+  void auto_requires_deployment_intent_for_verified_personal_reads_without_a_task() {
+    var withoutStandingIntent = session(null);
+    var session =
+        session(
+            null,
+            new DeploymentSecurityPolicy(List.of(personalReadRule()), ""),
+            (project, provider, work) ->
+                new WorkspaceSecurityGuidance.Guidance("Require extra care.", ""));
+    var bot = mock(AgentDefinition.class);
+    when(bot.name()).thenReturn("my-bot");
+    when(bot.bot()).thenReturn(true);
+    when(bot.prompt()).thenReturn("Review only");
+    when(bots.selected("sam", "my-bot")).thenReturn(bot);
+    when(policies.read("sam"))
+        .thenReturn(
+            new ApprovalPolicy(2, ApprovalPolicy.Mode.AUTO, "my-bot", List.of(personalReadRule())));
+    var consent = new ApprovalReviews.Consent(true, false, false);
+    var read = personalRead("sam");
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN, withoutStandingIntent.review(read, consent).action());
+    assertEquals(1, consultations.get());
+    assertTrue(reviewerEvidence.get().contains("\"ownerPersonalRead\":true"));
+
+    var approved = session.review(read, consent);
+    assertEquals(ApprovalReviews.Action.ALLOW, approved.action());
+    assertEquals(List.of("personal-reads"), approved.matchedRules());
+    assertEquals(3, consultations.get());
+    assertTrue(reviewerEvidence.get().contains("\"userIntent\":null"));
+    assertTrue(reviewerEvidence.get().contains("\"effect\":\"PERSONAL_READ_INTENT\""));
+    assertTrue(securityEvidence.get().contains("Require extra care."));
+    assertFalse(reviewerEvidence.get().contains("Require extra care."));
+    assertThrows(
+        WorkspaceRefusedException.class, () -> session.requireCurrent(personalRead("other")));
+    session.requireCurrent(read);
+
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN, session.review(personalRead("other"), consent).action());
+    assertTrue(reviewerEvidence.get().contains("\"ownerPersonalRead\":false"));
+    assertFalse(reviewerEvidence.get().contains("\"effect\":\"PERSONAL_READ_INTENT\""));
+    assertEquals(ApprovalReviews.Action.ASK_HUMAN, session.review(request, consent).action());
+    assertEquals(
+        5, consultations.get(), "Missing task evidence for other work never reaches the bot");
+  }
+
+  @Test
+  void verified_personal_read_still_honors_security_and_human_only_consent() {
+    var session = session(null, new DeploymentSecurityPolicy(List.of(personalReadRule()), ""));
+    var read = personalRead("sam");
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN,
+        session.review(read, new ApprovalReviews.Consent(true, true, false)).action());
+    output.set("{\"outcome\":\"REJECT\",\"reason\":\"This file is outside the review scope.\"}");
+    assertEquals(
+        ApprovalReviews.Action.REJECT,
+        session.review(read, new ApprovalReviews.Consent(true, false, false)).action());
+  }
+
+  @Test
+  void standing_read_intent_does_not_cover_a_task_too_large_to_review() {
+    var session =
+        session(
+            "Do not read my preferences. " + "x".repeat(16000),
+            new DeploymentSecurityPolicy(List.of(personalReadRule()), ""));
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN,
+        session
+            .review(personalRead("sam"), new ApprovalReviews.Consent(true, false, false))
+            .action());
+  }
+
+  @Test
+  void unmatched_remote_path_restriction_disables_standing_intent_without_canonical_identity() {
+    var session = session(null, new DeploymentSecurityPolicy(List.of(personalReadRule()), ""));
+    var restrict =
+        new ApprovalPolicy.Rule(
+            "restrict",
+            ApprovalPolicy.Effect.REJECT,
+            ApprovalPolicy.Kind.FILE_READ,
+            null,
+            "remote:session",
+            null,
+            null,
+            List.of(),
+            List.of("/personal/private.md"),
+            null);
+    when(policies.read("sam"))
+        .thenReturn(new ApprovalPolicy(2, ApprovalPolicy.Mode.SMART, null, List.of(restrict)));
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN,
+        session
+            .review(personalRead("sam"), new ApprovalReviews.Consent(true, false, false))
+            .action());
+    assertFalse(reviewerEvidence.get().contains("\"effect\":\"PERSONAL_READ_INTENT\""));
+  }
+
+  @Test
+  void protected_edit_without_task_or_verification_cannot_become_a_human_question() {
+    var request = protectedEdit();
+    var session = session(null);
+    var consent = new ApprovalReviews.Consent(true, false, false);
+    assertEquals(ApprovalReviews.Action.REJECT, session.review(request, consent).action());
+    assertEquals(0, consultations.get());
+    assertThrows(WorkspaceRefusedException.class, () -> session.humanOverride(request, "approval"));
+
+    var inspection = session("Inspect the workspace.");
+    output.set(
+        "{\"outcome\":\"ASK_HUMAN\",\"reason\":\"No request for an edit.\",\"explicitRequest\":null}");
+    assertEquals(ApprovalReviews.Action.REJECT, inspection.review(request, consent).action());
+  }
+
+  @Test
+  void protected_edit_can_honor_human_consent_after_security_verifies_the_exact_request() {
+    String task = "Update security.md to require review for exports.";
+    var session = session(task);
+    var request = protectedEdit();
+    output.set(
+        """
+        {"outcome":"CLEAR","reason":"Explicitly requested","explicitRequest":"Update security.md to require review for exports."}
+        """);
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN,
+        session.review(request, new ApprovalReviews.Consent(true, true, false)).action());
+    assertThrows(WorkspaceRefusedException.class, () -> session.humanOverride(request, "approval"));
+    session.humanOverride(request, "approval", true);
+    session.requireCurrent(request);
+  }
+
+  private static OperationApprovalReview.Request protectedEdit() {
+    return new OperationApprovalReview.Request(
+        "project",
+        "remote:session",
+        List.of(),
+        "/project",
+        "{\"path\":\"/project/security.md\",\"content\":\"# Security\"}",
+        "call",
+        ApprovalPolicy.Kind.FILE_WRITE,
+        List.of("/project/security.md"),
+        Optional.empty(),
+        true);
+  }
+
+  private static ApprovalPolicy.Rule personalReadRule() {
+    return new ApprovalPolicy.Rule(
+        "personal-reads",
+        ApprovalPolicy.Effect.PERSONAL_READ_INTENT,
+        ApprovalPolicy.Kind.FILE_READ,
+        null,
+        null,
+        null,
+        null,
+        List.of(),
+        List.of(),
+        null);
+  }
+
+  private static OperationApprovalReview.Request personalRead(String owner) {
+    return new OperationApprovalReview.Request(
+        "project",
+        "remote:session",
+        List.of(),
+        "/personal",
+        "{\"path\":\"/personal/preferences.md\"}",
+        "call",
+        ApprovalPolicy.Kind.FILE_READ,
+        List.of("/personal/preferences.md"),
+        Optional.of(new PersonalWorkspace(owner, Path.of("/personal"))));
   }
 
   @Test

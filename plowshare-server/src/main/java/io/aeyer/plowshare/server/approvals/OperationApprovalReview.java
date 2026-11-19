@@ -1,6 +1,9 @@
 package io.aeyer.plowshare.server.approvals;
 
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 
 /** Per-run operation review, followed by a fresh publication fence immediately before execution. */
 public interface OperationApprovalReview {
@@ -12,15 +15,47 @@ public interface OperationApprovalReview {
       String stdin,
       String call,
       ApprovalPolicy.Kind kind,
-      List<String> paths) {
+      List<String> paths,
+      Optional<PersonalWorkspace> personalWorkspace,
+      boolean securityFileMutation) {
+    public Request(
+        String project,
+        String provider,
+        List<String> argv,
+        String cwd,
+        String stdin,
+        String call,
+        ApprovalPolicy.Kind kind,
+        List<String> paths,
+        Optional<PersonalWorkspace> personalWorkspace) {
+      this(project, provider, argv, cwd, stdin, call, kind, paths, personalWorkspace, false);
+    }
+
     public Request(
         String project, String provider, List<String> argv, String cwd, String stdin, String call) {
-      this(project, provider, argv, cwd, stdin, call, ApprovalPolicy.Kind.COMMAND, List.of());
+      this(
+          project,
+          provider,
+          argv,
+          cwd,
+          stdin,
+          call,
+          ApprovalPolicy.Kind.COMMAND,
+          List.of(),
+          Optional.empty(),
+          false);
     }
 
     public Request {
       paths = List.copyOf(paths);
       argv = List.copyOf(argv);
+      Objects.requireNonNull(personalWorkspace);
+      if (personalWorkspace.isPresent() && kind != ApprovalPolicy.Kind.FILE_READ)
+        throw new IllegalArgumentException(
+            "Personal workspace review evidence applies only to file reads");
+      if (securityFileMutation
+          && (kind == ApprovalPolicy.Kind.COMMAND || kind == ApprovalPolicy.Kind.FILE_READ))
+        throw new IllegalArgumentException("Security file mutation requires a direct file change");
     }
   }
 
@@ -33,6 +68,11 @@ public interface OperationApprovalReview {
 
   default void humanOverride(Request request, String approval) {
     humanOverride(request);
+  }
+
+  /** Accepts only the server-authored clearance retained with the exact file approval. */
+  default void humanOverride(Request request, String approval, boolean securityEditVerified) {
+    humanOverride(request, approval);
   }
 
   /**

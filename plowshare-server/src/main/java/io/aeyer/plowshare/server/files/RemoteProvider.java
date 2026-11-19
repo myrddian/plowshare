@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -141,6 +142,7 @@ public final class RemoteProvider implements FileProvider {
   private final Home home;
   private final ImageStore images;
   private final FileContents contents;
+  private final Optional<PersonalWorkspace> personalWorkspace;
 
   /** How many file actions this session answered in an old client's words. */
   private final AtomicInteger oldClientReplies = new AtomicInteger();
@@ -169,6 +171,28 @@ public final class RemoteProvider implements FileProvider {
       Home home,
       ImageStore images,
       FileContents contents) {
+    this(channel, session, grants, home, images, contents, Optional.empty());
+  }
+
+  /** Use only for a live workspace selected by authenticated project routing. */
+  public RemoteProvider(
+      SessionChannel channel,
+      String session,
+      List<Grant> grants,
+      Home home,
+      ImageStore images,
+      Optional<PersonalWorkspace> personalWorkspace) {
+    this(channel, session, grants, home, images, FileContents.SHARED, personalWorkspace);
+  }
+
+  private RemoteProvider(
+      SessionChannel channel,
+      String session,
+      List<Grant> grants,
+      Home home,
+      ImageStore images,
+      FileContents contents,
+      Optional<PersonalWorkspace> personalWorkspace) {
     this.channel = Objects.requireNonNull(channel, "channel");
     this.session = Objects.requireNonNull(session, "session");
     Objects.requireNonNull(grants, "grants");
@@ -181,6 +205,38 @@ public final class RemoteProvider implements FileProvider {
     this.home = Objects.requireNonNull(home);
     this.images = Objects.requireNonNull(images);
     this.contents = Objects.requireNonNull(contents);
+    this.personalWorkspace = Objects.requireNonNull(personalWorkspace);
+  }
+
+  private RemoteProvider(RemoteProvider provider) {
+    this.channel = provider.channel.bound(provider.session);
+    this.session = provider.session;
+    this.anyGrant = provider.anyGrant;
+    this.writable = provider.writable;
+    this.home = provider.home;
+    this.images = provider.images;
+    this.contents = provider.contents;
+    this.personalWorkspace = provider.personalWorkspace;
+  }
+
+  @Override
+  public Optional<PersonalWorkspace> personalWorkspace() {
+    return personalWorkspace;
+  }
+
+  @Override
+  public FileProvider forReviewedRead() {
+    return anyGrant ? new RemoteProvider(this) : this;
+  }
+
+  @Override
+  public FileProvider forReviewedMutation() {
+    return anyGrant ? new RemoteProvider(this) : this;
+  }
+
+  @Override
+  public void requireReviewBinding() {
+    channel.requireCurrent(session);
   }
 
   @Override

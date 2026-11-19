@@ -18,6 +18,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Optional;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,6 +54,16 @@ public class ApprovalPolicyConfiguration {
     } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException("SHA-256 is unavailable", impossible);
     }
+  }
+
+  @Bean
+  public DeploymentSecurityPolicy deploymentSecurityPolicy(DataLayout data) {
+    // Operator files are an immutable startup snapshot. An approval never changes its deployment
+    // rules while a tool is being reviewed or guards are being enforced.
+    return SecurityPolicyFiles.deployment(
+        data.keepsAnything()
+            ? SecurityPolicyFiles.directory(data.root())
+            : path -> Optional.empty());
   }
 
   @Bean
@@ -105,6 +116,8 @@ public class ApprovalPolicyConfiguration {
       AvailableApprovalBots bots,
       HumanApprovalHistory history,
       ReviewInferenceFactory inference,
+      DeploymentSecurityPolicy deploymentSecurity,
+      WorkspaceSecurityGuidance workspaceGuidance,
       ObjectProvider<GlobalAgentDefinitions> globals,
       ObjectProvider<AgentRegistry> agents,
       @Value("${plowshare.approvals.review-budget:PT60S}") Duration budget) {
@@ -114,7 +127,9 @@ public class ApprovalPolicyConfiguration {
         inference,
         () -> GlobalAgentSnapshots.supply(globals, agents).get().get("security_reviewer"),
         budget,
-        history);
+        history,
+        deploymentSecurity,
+        workspaceGuidance);
   }
 
   @Bean

@@ -4,6 +4,7 @@ import io.aeyer.plowshare.server.access.BuiltInIdentities;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -16,6 +17,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * Captures reviewer evidence per request and fences automatic results by policy revision. A human
@@ -28,6 +30,8 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
   private final Supplier<AgentDefinition> security;
   private final Duration budget;
   private final HumanApprovalHistory history;
+  private final DeploymentSecurityPolicy deployment;
+  private final WorkspaceSecurityGuidance workspaceGuidance;
 
   public PersonalApprovalReviewSessions(
       ApprovalPolicyRepository policies,
@@ -59,7 +63,29 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
       Supplier<AgentDefinition> security,
       Duration budget,
       HumanApprovalHistory history) {
+    this(
+        policies,
+        bots,
+        inference,
+        security,
+        budget,
+        history,
+        DeploymentSecurityPolicy.NONE,
+        WorkspaceSecurityGuidance.NONE);
+  }
+
+  public PersonalApprovalReviewSessions(
+      ApprovalPolicyRepository policies,
+      AvailableApprovalBots bots,
+      ReviewInferenceFactory inference,
+      Supplier<AgentDefinition> security,
+      Duration budget,
+      HumanApprovalHistory history,
+      DeploymentSecurityPolicy deployment,
+      WorkspaceSecurityGuidance workspaceGuidance) {
     this.history = Objects.requireNonNull(history);
+    this.deployment = Objects.requireNonNull(deployment);
+    this.workspaceGuidance = Objects.requireNonNull(workspaceGuidance);
     this.policies = Objects.requireNonNull(policies);
     this.bots = Objects.requireNonNull(bots);
     this.inference = Objects.requireNonNull(inference);
@@ -90,7 +116,9 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
         List<String> argv,
         List<String> paths,
         String cwd,
-        String inputDigest) {}
+        String inputDigest,
+        Optional<PersonalWorkspace> personalWorkspace,
+        boolean securityFileMutation) {}
 
     private record Grant(long revision, String bot, AgentDefinition definition, boolean human) {}
 
@@ -112,6 +140,7 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
       context.validity().run();
       try {
         policy = policies.read(context.owner());
+        List<ApprovalPolicy.Rule> effectiveRules = rules(policy);
         AtomicReference<ModelApprovalReviewers> models = new AtomicReference<>();
         SecurityReviewer securityReview =
             (intent, rules, work) -> {
@@ -130,9 +159,12 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
                             Objects.requireNonNull(bots.selected(context.owner(), name));
                         selectedBot.set(definition);
                         return definition;
-                      });
+                      },
+                      deployment.guidance());
               models.set(selected);
-              return selected.review(intent, rules, work);
+              var guidance = workspaceGuidance.read(intent.project(), intent.provider(), work);
+              context.validity().run();
+              return selected.review(intent, rules, guidance, work);
             };
         PersonalBotReviewer botReview =
             (name, intent, rules, cleared, work) ->
@@ -142,6 +174,7 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
             new PolicyApprovalReviews(securityReview, botReview, budget)
                 .review(
                     policy,
+                    effectiveRules,
                     capturedIntent,
                     new ApprovalReviews.Consent(
                         consent.existingConsent(),
@@ -149,20 +182,25 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
                         !consent.existingConsent()
                             && !consent.humanOnly()
                             && policy.mode() != ApprovalPolicy.Mode.MANUAL
-                            && policy.rules().stream()
-                                .noneMatch(rule -> rule.matches(capturedIntent))
+                            && effectiveRules.stream()
+                                .noneMatch(
+                                    rule ->
+                                        rule.effect() != ApprovalPolicy.Effect.PERSONAL_READ_INTENT
+                                            && rule.matches(capturedIntent))
                             && history.eligible(capturedIntent)),
                     context.cancelled());
       } catch (RuntimeException unavailable) {
         // An authority failure is not an overridable review outage.
         context.validity().run();
         return new ApprovalReviews.Decision(
-            context.cancelled().getAsBoolean()
+            context.cancelled().getAsBoolean() || request.securityFileMutation()
                 ? ApprovalReviews.Action.REJECT
                 : ApprovalReviews.Action.ASK_HUMAN,
             context.cancelled().getAsBoolean()
                 ? "The requesting operation was cancelled."
-                : "Approval review is unavailable; a human decision is required.",
+                : request.securityFileMutation()
+                    ? "SECURITY could not verify the explicit request for the security file change."
+                    : "Approval review is unavailable; a human decision is required.",
             0,
             List.of(),
             null,
@@ -187,17 +225,30 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
 
     @Override
     public void humanOverride(Request request) {
+      authorizeHumanOverride(request, false);
+    }
+
+    private void authorizeHumanOverride(Request request, boolean securityEditVerified) {
       context.validity().run();
+      Target target = target(request);
+      if (request.securityFileMutation() && !securityEditVerified)
+        throw new WorkspaceRefusedException(
+            "Approval cannot substitute for SECURITY verification of an explicit security file edit request.");
       ApprovalPolicy policy = policies.read(context.owner());
-      refuseProhibited(policy, request);
+      refuseProhibited(rules(policy), request);
       if (allowed.size() >= 256)
         throw new WorkspaceRefusedException("Too many unconsumed review results");
-      allowed.put(target(request), new Grant(policy.revision(), null, null, true));
+      allowed.put(target, new Grant(policy.revision(), null, null, true));
     }
 
     @Override
     public void humanOverride(Request request, String approval) {
-      humanOverride(request);
+      humanOverride(request, approval, false);
+    }
+
+    @Override
+    public void humanOverride(Request request, String approval, boolean securityEditVerified) {
+      authorizeHumanOverride(request, securityEditVerified);
       history.remember(intent(request), approval);
     }
 
@@ -210,7 +261,7 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
       if (grant == null)
         throw new WorkspaceRefusedException("No current review covers this command; nothing ran");
       ApprovalPolicy policy = policies.read(context.owner());
-      refuseProhibited(policy, request);
+      refuseProhibited(rules(policy), request);
       if (!grant.human() && policy.revision() != grant.revision())
         throw new WorkspaceRefusedException(
             "Approval policy changed after review; nothing ran. Request a fresh review.");
@@ -230,9 +281,17 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
       }
     }
 
-    private void refuseProhibited(ApprovalPolicy policy, Request request) {
+    private List<ApprovalPolicy.Rule> rules(ApprovalPolicy account) {
+      return Stream.concat(
+              deployment.rules().stream(),
+              account.rules().stream()
+                  .filter(rule -> rule.effect() != ApprovalPolicy.Effect.PERSONAL_READ_INTENT))
+          .toList();
+    }
+
+    private void refuseProhibited(List<ApprovalPolicy.Rule> rules, Request request) {
       ApprovalIntent intent = intent(request);
-      if (policy.rules().stream()
+      if (rules.stream()
           .anyMatch(rule -> rule.effect() == ApprovalPolicy.Effect.REJECT && rule.matches(intent)))
         throw new WorkspaceRefusedException(
             "Personal approval rules prohibit this command; nothing ran");
@@ -240,9 +299,10 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
 
     private ApprovalIntent intent(Request request) {
       String task = context.authenticatedTask();
-      // Missing or oversized authenticated intent is explicit uncertainty, not truncation that can
-      // manufacture an apparent instruction. SECURITY is instructed to ask the human in that case.
-      if (task != null && (task.isBlank() || task.length() > 16000)) task = null;
+      boolean taskTooLong = task != null && task.length() > 16000;
+      // A supplied task that exceeds the evidence limit may contain restrictions. Treat it as
+      // unavailable evidence even for a read ordinarily covered by standing intent.
+      if (taskTooLong || (task != null && task.isBlank())) task = null;
       return new ApprovalIntent(
           context.owner(),
           context.conversation(),
@@ -256,7 +316,13 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
           digest(request.stdin()),
           task,
           null,
-          request.stdin() == null || request.stdin().length() > 16000 ? null : request.stdin());
+          request.stdin() == null || request.stdin().length() > 16000 ? null : request.stdin(),
+          !taskTooLong
+              && request
+                  .personalWorkspace()
+                  .filter(workspace -> workspace.owner().equals(context.owner()))
+                  .isPresent(),
+          request.securityFileMutation());
     }
 
     private Target target(Request request) {
@@ -272,7 +338,9 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
           request.argv(),
           request.paths(),
           request.cwd(),
-          digest(request.stdin()));
+          digest(request.stdin()),
+          request.personalWorkspace(),
+          request.securityFileMutation());
     }
   }
 

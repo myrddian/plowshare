@@ -9,6 +9,7 @@ import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.files.ClientWork;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
@@ -25,6 +26,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -215,6 +217,46 @@ class FileSessionFenceTest {
     files.afterConnectionClosed(socket, CloseStatus.GOING_AWAY);
     var failed = assertThrows(ExecutionException.class, () -> pending.get(1, TimeUnit.SECONDS));
     assertInstanceOf(SessionGoneException.class, failed.getCause());
+  }
+
+  @Test
+  void an_interrupted_bound_mutation_records_its_unknown_outcome_without_replaying()
+      throws Exception {
+    String session = "mutating";
+    var socket = connect(session, "owner");
+    var request = FileRequest.delete("original-delete", "/fixture/security.md");
+    var replacement = new AtomicReference<WebSocketSession>();
+    var work = mock(ClientWork.class);
+    when(work.requestBudget(any())).thenAnswer(call -> call.getArgument(0));
+    when(work.interrupted(session, request))
+        .thenAnswer(
+            call -> {
+              replacement.set(connect(session, "owner"));
+              return true;
+            });
+    files.useClientWork(work);
+    doAnswer(
+            call -> {
+              files.afterConnectionClosed(socket, CloseStatus.GOING_AWAY);
+              return null;
+            })
+        .when(socket)
+        .sendMessage(any());
+    var captured = files.bound(session);
+
+    assertThrows(SessionGoneException.class, () -> captured.ask(session, request));
+
+    var ordered = inOrder(work, socket);
+    ordered.verify(work).beforeRequest(session);
+    ordered.verify(socket).sendMessage(any());
+    ordered.verify(work).interrupted(session, request);
+    assertNotNull(replacement.get());
+    verify(replacement.get(), never()).sendMessage(any());
+
+    var unsent = FileRequest.delete("new-delete", "/fixture/security.md");
+    assertThrows(SessionGoneException.class, () -> captured.ask(session, unsent));
+    verify(work, never()).interrupted(session, unsent);
+    verify(replacement.get(), never()).sendMessage(any());
   }
 
   @Test
