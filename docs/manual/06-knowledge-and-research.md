@@ -163,8 +163,9 @@ limit. Whitespace differences are normalized for grouping; different wording is
 not treated as a duplicate. A group retains its representative evidence address
 and up to twenty `sources`, with conversation IDs, ordinals, revision hashes and
 available tool-result handles. `total` counts groups. Lexical `sourceCount` counts
-matching occurrences; semantic snapshots report the retained references that were
-revalidated, and mark coverage incomplete when the reference list is capped.
+matching occurrences; both are lower bounds when the answer is marked truncated. Semantic
+snapshots report the retained references that were revalidated, and mark coverage
+incomplete when the reference list is capped.
 
 Delegated research now separates task instructions from explicitly supplied context.
 Default conversation search excludes that context from lexical statistics and
@@ -185,6 +186,16 @@ corroboration. Read original sources through their authorized owning APIs.
 ```json
 {"question":"capacity failure","mode":"hybrid","includeInputs":true}
 ```
+
+`plowshare.retrieval.lexical-engine` selects the lexical conversation search: `passages`
+(default), `passages-pruned`, or `legacy`, the original search, kept as a rollback; any
+other value fails startup. `passages` gives exact `total` and `sourceCount` values for a
+question of one plain lexeme, and for any other question unless more than 2,000 entries
+match it; the answer then reports `retrieval.truncated: true` and counts the groups among
+the 2,000 best, with stable paging up to that total. `passages-pruned` trades exact totals
+for speed: a truncated total can be little more than the page. The MCP tool reports a
+truncated total as "at least N"; Desktop still pages by `total`, so leave
+`passages-pruned` off until it reads `retrieval.truncated`.
 
 Conversation search uses `plowshare.retrieval.search-budget` (default `2s`, positive
 and at most `1m`). The operation inherits an earlier cache/admission deadline; its

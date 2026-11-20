@@ -28,10 +28,17 @@ and labels its actual tier. `--json` preserves the server result. Exit statuses:
 2 invalid command, 3 successful but incomplete retrieval.
 
 Search modes are lexical, semantic, and hybrid. New commands and the internal
-tool default to hybrid. HTTP and WS requests omitting `mode` keep
-the original lexical matching, exact totals, scope, reach counts and response
-shape. Explicit lexical mode adds retrieval metadata. Search never starts
-model-funded navigation automatically.
+tool default to hybrid. HTTP and WS requests omitting `mode` are lexical requests with
+the original matching syntax, scope, reach counts and response shape, and carry no
+`retrieval` object while their total is exact. Explicit lexical mode always adds
+retrieval metadata. When the lexical engine did not count every match (see
+[stored lexical passages](#stored-lexical-passages-and-postings)), a lexical answer,
+default or explicit, carries `retrieval` with `truncated: true`, `complete: false` and a
+`totalMeaning` that says the total is a lower bound; the page, its order and its ranks
+are still exact. With the default engine that happens only when more than 2,000 entries
+match a question that is not one plain lexeme, and `total` is then the number of groups
+among the 2,000 best, the same on every page. The MCP `conversation_search` tool reports
+such a total as "at least N". Search never starts model-funded navigation automatically.
 
 For semantic/hybrid pages, reuse the returned `retrieval.snapshot`, the exact
 question, mode and scope with `--offset N`. Snapshots last five minutes; a restart
@@ -42,8 +49,12 @@ not count every semantically related entry. Source removal/movement/revision
 suppresses invalid slots without shifting the remaining pages and marks the
 result incomplete. Advance by the returned `offset + limit`, including after a
 short or empty interior page, until that offset reaches `total`. Clear retained
-hits if `total` becomes zero. Coverage is current; candidate identities/order are frozen. Lexical
-paging remains the existing exact offset paging.
+hits if `total` becomes zero. Coverage is current; candidate identities/order are frozen.
+Lexical paging remains offset paging without a snapshot. With the default engine, pages up to
+`total` are stable even when the answer is marked truncated; matches ranked below the
+2,000-entry grouping window are not reachable by paging. With `passages-pruned`, a truncated
+`total` can be little more than the current page and is not the end of the results: keep
+advancing the offset until a page comes back empty or short.
 
 For example, the `conversation_search` tool pages the same hybrid snapshot with:
 
@@ -157,14 +168,42 @@ its existing independent system allowance, with `modelCalls` and embedding
 attempts returned separately. Attempt counts do not imply that a failed request
 was billed. These operations are not advertised as free.
 
-## Stored lexical passages and postings (prototype, not yet served)
+## Stored lexical passages and postings
 
-Lexical search groups hits by a `ts_headline` excerpt, scores each match by unpacking all of
-its lexemes, and reads one row per visible entry for corpus statistics. Its cost therefore
-grows with the total size of matching entries, the number of matches and the size of the
-archive. Two migrations add provider-free projections that remove those costs, and
-`EntryStore.searchPassages` reads them. **No transport, tool or hybrid path calls it yet**,
-so served results are unchanged.
+The legacy lexical search groups hits by a `ts_headline` excerpt, scores each match by
+unpacking all of its lexemes, and reads one row per visible entry for corpus statistics. Its
+cost therefore grows with the total size of matching entries, the number of matches and the
+size of the archive. Two migrations add provider-free projections that remove those costs,
+and `EntryStore.searchPassages` reads them. It is the served lexical engine: default and
+explicit lexical requests and the BM25 half of hybrid search reach it through
+`ConversationSearchRepository.searchBounded`.
+
+`plowshare.retrieval.lexical-engine` selects the engine at startup. Any other value fails
+startup; a change needs a restart and no schema change, and the projections stay maintained
+under every value.
+
+- `passages` (the default) counts every match: it takes the exhaustive form of each route
+  below. A question that parses to one plain lexeme (one unquoted word, not repeated and
+  not negated, that PostgreSQL stores as a single lexeme) has no window and is always
+  exact. Any other question, including the same word twice (`common common`) and a
+  compound token stored as several lexemes (`up-to-date`), is exact unless more than 2,000
+  entries match it; then the answer is marked truncated and `total` and `sourceCount`
+  count only the 2,000 best-scoring entries. That window is chosen by rank alone, so the
+  total is the same on every page and offset pages up to it are consecutive,
+  non-overlapping slices of one order.
+- `passages-pruned` lets the search skip matches that cannot reach the requested page. It
+  is faster on common words, and a truncated `total` is then a lower bound that can be
+  little more than the page. Do not enable it until every client that pages by `total`
+  reads `retrieval.truncated`. The MCP `conversation_search` tool does: it reports a
+  truncated total as "at least N" and does not present it as the end of the results.
+  Desktop's library search still stops at `total` and would end results early.
+- `legacy` restores the original search, its headline grouping and its exact totals for
+  every lexical request. It is the rollback lever if the passage search misbehaves on a
+  deployment.
+
+Full-input search (`includeInputs: true`) always
+uses the legacy query, because stored passages are cut from evidence text and do not hold
+supplied context. Semantic mode runs no lexical search.
 
 `V277__entry_search_passages.sql`:
 
@@ -233,7 +272,8 @@ How they are maintained:
   advisory.
 
 The search takes one of three routes, and each returns exactly the page an exhaustive
-search returns:
+search returns. The thresholds and pruning described here apply under `passages-pruned`;
+under `passages` the first two routes read every posting and match instead:
 
 - **One plain word.** It reads the shortest few postings of each frequency, scores them, and
   uses the score of the last group the page needs as a threshold. It then reads, as index
@@ -257,30 +297,41 @@ search returns:
   negation combined with OR, parentheses or a phrase.
 
 `BoundedLogSearch.truncated` is true when postings were skipped, candidates were dropped
-below the threshold or matches fell outside the grouping window: in practice, whenever
-pruning engaged. The total then counts groups among the entries read, which for a pruned
-search is little more than the page, and a group's source count and references omit copies
-that were not read. A phrase cut by a passage boundary still matches; its excerpt shows one
-side of the cut. Full-input search is not offered. A window far beyond the answer is an
-empty page.
+below the threshold or matches fell outside the grouping window: under `passages-pruned`,
+in practice whenever pruning engaged; under `passages`, only for the grouping window. The
+total then counts groups among the entries read, which for a pruned search is little more
+than the page, and a group's source count and references omit copies that were not read.
+A phrase cut by a passage boundary still matches; its excerpt shows one side of the cut. A
+window far beyond the answer is an empty page.
 
-Where an answer differs from the served search:
+A truncated lexical answer says so on the wire. `retrieval.truncated` is true,
+`retrieval.complete` is false and `retrieval.totalMeaning` names the total a lower bound,
+including on a default request that would otherwise carry no `retrieval`. In hybrid mode the
+flag joins the other reasons a candidate window is marked truncated.
 
-- **Grouping.** The served search groups hits whose 60-word headline reads the same; the
-  prototype groups hits whose stored passage does. Entries that differ outside the headline
-  are one group there and several here, so pages can differ even for short entries: on 3,000
-  short random entries a review found different pages for 54 of 600 questions.
+Where an answer differs from the legacy search:
+
+- **Grouping.** The legacy search groups hits whose 60-word headline reads the same; the
+  passage search groups hits whose stored passage does. Entries that differ outside the
+  headline are one group there and several here, so pages can differ even for short
+  entries: on 3,000 short random entries a review found different pages for 54 of 600
+  questions.
 - **Ranks** of the same entry agree to nine decimal places, not bit for bit.
-- **Compound lexemes.** For a lexeme such as `up-to-date` the served query derives document
-  frequency by parsing the lexeme again, which splits it and finds nothing; the prototype
-  reads the stored count. The entries and their order were the same where measured, and the
+- **Totals.** The legacy search counts every matching group. The passage search counts the
+  groups among at most the 2,000 best-scoring matching entries of a question that is not
+  one plain lexeme, and under `passages-pruned` only among the entries it read; either way
+  it marks the answer truncated.
+- **Compound lexemes.** For a lexeme such as `up-to-date` the legacy query derives document
+  frequency by parsing the lexeme again, which splits it and finds nothing; the passage
+  search reads the stored count. The entries and their order were the same where measured,
+  and the
   ranks lower.
 
 The statement runs in a short read-only transaction with `SET LOCAL jit = off`. Its plan is
 priced including the routes it does not take, so a long question (16 words at 30,000
 entries) or a large archive (most questions at 200,000) crosses PostgreSQL's default
 `jit_above_cost`, and compiling it cost about 100 ms for a statement that executes in tens
-(124 ms against 16 ms). The setting ends with the transaction. The served search is not
+(124 ms against 16 ms). The setting ends with the transaction. The legacy search is not
 changed.
 
 Visibility is decided once per search and before anything is scored. One step joins the
@@ -367,7 +418,7 @@ Known costs, none of which changes a result:
   `ANALYZE`, and the new tables are analysed after 2% of their rows change, not 10%. One
   lookup is not protected this way: an entry by its key, because `entries` has other
   indexes that begin with the conversation. If the planner believes `entries` itself empty
-  it may read a conversation's every entry through one of them; the served search has the
+  it may read a conversation's every entry through one of them; the legacy search has the
   same exposure.
 
 Costs to check before adoption:

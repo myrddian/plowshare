@@ -31,13 +31,21 @@ import java.util.List;
  * @param hits what matched, best first. Never null; empty for a question nothing matched and for a
  *     page past the end. Withdrawn snapshot slots can also leave an empty interior page.
  * @param total lexical matching group count, or one past the last currently visible original
- *     semantic/hybrid snapshot slot (zero if all are withdrawn). Snapshot holes are not compacted;
- *     advance by {@code offset + limit}, even on short or empty pages, until reaching this extent.
+ *     semantic/hybrid snapshot slot (zero if all are withdrawn). The lexical count is exact unless
+ *     {@link Retrieval#truncated} is true; then it is a lower bound and {@link
+ *     Retrieval#totalMeaning} says so. Under the default lexical engine that bound is the group
+ *     count of the engine's grouping window, the same on every page, and pages up to it are stable;
+ *     under {@code passages-pruned} it covers only the entries read for this page, and a caller
+ *     pages until an empty or short page instead of stopping at it. Snapshot holes are not
+ *     compacted; advance by {@code offset + limit}, even on short or empty pages, until reaching
+ *     this extent.
  * @param offset lexical hits or original snapshot slots skipped, as asked for
  * @param limit how many hits this page could hold — <b>the number this server used and not the one
  *     the caller sent</b>, which differ exactly when the caller asked for more than {@code
  *     ConversationController.MOST_ENTRIES_A_PAGE}
  * @param reach what the search could and could not look at, in the same instant
+ * @param retrieval how the answer was retrieved and what its total means. Absent only for a default
+ *     lexical request whose total is exact; a truncated lexical answer always carries it
  */
 public record LogSearchView(
     List<Hit> hits,

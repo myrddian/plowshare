@@ -168,6 +168,99 @@ await test('conversation search exposes why retained history could not be search
   assert.match(result, /words are gone and they could not be searched/);
   assert.match(result, /read those with conversation_trajectory/);
 });
+await test('conversation search presents a truncated total as a lower bound and an exact one unchanged', () => {
+  const hit = {
+    conversationId: 'cnv_1',
+    ordinal: 4,
+    turnOrdinal: 2,
+    kind: 'utterance',
+    rank: 0.5,
+    snippet: 'the [retry] budget',
+    length: 18,
+    supersededBy: null,
+    handle: null,
+    recordedAt: null,
+    sources: [],
+    sourceCount: 1,
+  };
+  const retrieval = {
+    requestedMode: 'lexical',
+    effectiveMode: 'lexical',
+    totalMeaning: 'lower bound on distinct matching passage groups',
+    snapshot: null,
+    truncated: true,
+    complete: false,
+    fallback: null,
+    coverage: null,
+    generation: null,
+    queryEmbeddingCalls: 0,
+    provenance: 'Scoped BM25',
+  };
+  const reach = { searched: 9, ejected: 0, recordedOnly: 0 };
+  const page = { hits: [hit], total: 1, offset: 0, limit: 20, reach };
+  const exact = conversations.searched(page, 'retry', null, 0);
+  assert.match(exact, /^Entries 0 to 0 of 1 in the global tier matching/);
+  assert.doesNotMatch(exact, /at least|lower bound|There is more/);
+  // Metadata that reports an exact count changes nothing: only truncation does.
+  assert.equal(
+    conversations.searched(
+      {
+        ...page,
+        retrieval: {
+          ...retrieval,
+          totalMeaning: 'distinct matching passage groups',
+          truncated: false,
+          complete: true,
+        },
+      },
+      'retry',
+      null,
+      0,
+    ),
+    exact,
+  );
+  const bounded = conversations.searched(
+    { ...page, retrieval },
+    'retry',
+    null,
+    0,
+  );
+  assert.match(
+    bounded,
+    /^Entries 0 to 0 of at least 1 in the global tier matching/,
+  );
+  // The page reached the counted total, which is not the end when the count is a lower bound.
+  assert.match(bounded, /The count is a lower bound/);
+  assert.match(bounded, /the same question and offset=1/);
+  const inside = conversations.searched(
+    { ...page, total: 40, retrieval },
+    'retry',
+    null,
+    0,
+  );
+  assert.match(inside, /of at least 40 in/);
+  assert.match(inside, /There is more of this list: call conversation_search/);
+  assert.doesNotMatch(inside, /The count is a lower bound/);
+  const pastExact = conversations.searched(
+    { ...page, hits: [], total: 3, offset: 60 },
+    'retry',
+    null,
+    60,
+  );
+  assert.match(
+    pastExact,
+    /this holds 3 matching entries, the last is at offset 2/,
+  );
+  const pastBounded = conversations.searched(
+    { ...page, hits: [], total: 3, offset: 60, retrieval },
+    'retry',
+    null,
+    60,
+  );
+  assert.match(pastBounded, /at least 3 matching entries were counted/);
+  assert.match(pastBounded, /more may exist/);
+  assert.doesNotMatch(pastBounded, /this holds 3|the last is at offset/);
+});
 await test('web content remains quoted and embedded provider refusal is explicit', () => {
   const refused = web.searched({
     hits: [],

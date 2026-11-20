@@ -121,6 +121,15 @@ cancellations, expired work and mutations are not replayed. Callers that become
 unsafe for sharing still fail closed; transaction holders never wait for an
 authority seat while retaining embedding/disclosure locks.
 
+`plowshare.retrieval.lexical-engine` (`passages` default, `passages-pruned`, `legacy`
+rollback; anything else fails startup) chooses the lexical query `ConversationSearch` runs.
+`passages` asks the repository to count every match (`searchBounded(..., true)`): a
+question of one plain lexeme is always exact; any other is exact up to the 2,000-entry
+grouping window, with stable offset paging inside it. `passages-pruned` permits lower-bound
+totals and must stay off while a client pages by `total` without reading
+`retrieval.truncated` (MCP reads it; Desktop does not yet). Full-input search always uses
+the legacy query.
+
 `plowshare.retrieval.search-budget` defaults to 2s for individual queries and
 each actual disclosure/profile/ranking transaction, including each independent ANN
 page and its final metadata check. Nested statements share that transaction's

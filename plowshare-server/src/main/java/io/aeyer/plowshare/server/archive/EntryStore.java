@@ -988,8 +988,9 @@ public final class EntryStore implements ConversationSearchRepository {
   static final int MOST_GROUPED_ENTRIES = 2_000;
 
   /**
-   * Prototype lexical search over stored passages (V277) and stored term frequencies (V278): score
-   * without unpacking entries, skip postings that cannot reach the page, highlight only the page.
+   * Lexical search over stored passages (V277) and stored term frequencies (V278), served through
+   * {@link #searchBounded} unless the {@code legacy} engine is configured: score without unpacking
+   * entries, skip postings that cannot reach the page, highlight only the page.
    *
    * <p><b>Unchanged from {@link #SEARCH_SQL}:</b> the visibility predicate, the statement snapshot
    * shared by statistics and matches, web-search matching (phrases and exclusions included), and
@@ -1025,13 +1026,13 @@ public final class EntryStore implements ConversationSearchRepository {
    * <p><b>Where an answer differs from {@link #SEARCH_SQL}'s.</b>
    *
    * <ul>
-   *   <li>Grouping. The served query groups hits whose 60-word headline reads the same; this one
+   *   <li>Grouping. The legacy query groups hits whose 60-word headline reads the same; this one
    *       groups hits whose stored passage does. Entries that differ outside the headline are one
    *       group there and several here, so group counts and therefore pages can differ even for
    *       entries of a few dozen words: on 3,000 short random entries a review found different
    *       pages for 54 of 600 questions. The excerpt of a long entry is likewise a passage, not a
    *       headline over the whole text.
-   *   <li>A compound lexeme such as {@code up-to-date}. The served query finds a word's document
+   *   <li>A compound lexeme such as {@code up-to-date}. The legacy query finds a word's document
    *       frequency by parsing the lexeme again, which splits a compound and finds nothing, so it
    *       weighs the compound as if no entry held it. This query reads the stored count of the
    *       lexeme itself. The entries and their order were the same where this was measured; the
@@ -1196,7 +1197,7 @@ public final class EntryStore implements ConversationSearchRepository {
    * generic plan does) it hashes every conversation's row: 31 ms at 300,000 conversations. What is
    * not made structural is the lookup of an entry by its key: {@code entries} has other indexes
    * that begin with the conversation, and if the planner believes that table empty it may read a
-   * conversation's every entry through one of them. The served query has the same exposure. The
+   * conversation's every entry through one of them. The legacy query has the same exposure. The
    * plan is asserted by buffers touched and time at 60,000 entries in one conversation, with stale,
    * absent and fresh statistics, with the new tables believed empty, as a generic plan, and with
    * 300,000 visible conversations.
@@ -1214,7 +1215,7 @@ public final class EntryStore implements ConversationSearchRepository {
    * questions at 200,000, cross PostgreSQL's default {@code jit_above_cost}. Compiling the plan
    * then costs about 100 ms (124 ms against 16 ms, measured in review) for a statement that
    * executes in tens. {@code passageQuery} therefore runs it in a short read-only transaction with
-   * JIT off; the served {@link #search} is not changed.
+   * JIT off; the legacy {@link #search} is not changed.
    *
    * <p><b>Ties.</b> A multi-word score is a sum of a few doubles, and the order of a sum changes
    * its last bit. {@code scored} therefore adds the words' contributions in word order, so that
@@ -1813,7 +1814,11 @@ public final class EntryStore implements ConversationSearchRepository {
       String conversation,
       boolean includeInputs) {
     validateConversation(conversation);
-    if (mode == null && snapshot == null)
+    // A default request is lexical retrieval and goes through the same service as an explicit
+    // mode, so the configured lexical engine, its truncation disclosure and the cancellation
+    // translation apply to it. Only a store composed without retrieval (not production wiring)
+    // answers from the legacy query directly, which needs no engine choice.
+    if (mode == null && snapshot == null && retrieval == null)
       return LogSearchView.of(
           search(home, question, skip, most, conversation, includeInputs), skip, most);
     ConversationSearch.mode(mode);
@@ -3251,12 +3256,39 @@ public final class EntryStore implements ConversationSearchRepository {
   }
 
   /**
-   * Prototype lexical search that ranks and groups stored passages before highlighting.
+   * The served bounded lexical search: the passage search under the repository contract's name.
+   * Project selection ({@link #withinSearchScope}) and account scoping ({@link #forAccount}) are
+   * those of {@link #search}.
    *
-   * <p>Not yet reachable from any transport or tool: it exists so its output and cost can be
-   * compared with {@link #search} against real PostgreSQL. It applies the same home resolution,
-   * visibility facts and per-query SQL budget, and returns no partial result when that budget
-   * expires. Full-input search is not offered; the stored passages are cut from evidence text.
+   * <p>Counting every match is the passage search with pruning off: every posting and match is
+   * read. A question that parses to one plain lexeme ({@code shape.single}) is always exact. Any
+   * other question, which includes one word written twice and a token stored as several lexemes
+   * such as {@code up-to-date}, is exact unless more than {@link #MOST_GROUPED_ENTRIES} entries
+   * match. Then it is marked truncated and its total is the number of groups among the best-scoring
+   * {@link #MOST_GROUPED_ENTRIES} entries: a window chosen by rank alone, so the total and the
+   * pages inside it do not depend on the offset asked for.
+   */
+  @Override
+  public BoundedLogSearch searchBounded(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String conversation,
+      boolean countEveryMatch) {
+    return searchPassages(home, question, skip, most, conversation, !countEveryMatch);
+  }
+
+  /**
+   * Lexical search that ranks and groups stored passages before highlighting.
+   *
+   * <p>This is the pruned form, served through {@link #searchBounded} only when {@code
+   * plowshare.retrieval.lexical-engine} is {@code passages-pruned}. The default {@code passages}
+   * engine serves the same statement with pruning off, and {@link #search} remains the {@code
+   * legacy} engine and the only full-input search. It applies the same home resolution, visibility
+   * facts and per-query SQL budget as {@link #search}, and returns no partial result when that
+   * budget expires. Full-input search is not offered; the stored passages are cut from evidence
+   * text.
    *
    * @param home the tier to search; never widened by a missing or foreign conversation
    * @param question web-search syntax, parsed by PostgreSQL
@@ -3274,7 +3306,8 @@ public final class EntryStore implements ConversationSearchRepository {
 
   /**
    * The same search with every posting and every match read: what {@link #searchPassages} must
-   * agree with on the page it returns. It exists for that comparison and is not a served path.
+   * agree with on the page it returns. The default engine serves this same form through {@link
+   * #searchBounded}; this entry point exists for the comparison.
    */
   BoundedLogSearch searchPassagesExhaustively(
       Home home, String question, int skip, int most, String conversation) {

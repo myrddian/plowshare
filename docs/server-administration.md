@@ -1134,6 +1134,30 @@ events rather than actual work. `plowshare.performance.observed`, `.slow`, `.dro
 `.pressure` and `.active` use fixed kind-only labels. True operation failures emit
 ERROR diagnostics; recovered/expected warning conditions remain WARN.
 
+### Conversation lexical engine
+
+`plowshare.retrieval.lexical-engine` (`PLOWSHARE_RETRIEVAL_LEXICAL_ENGINE`) selects the
+lexical conversation search. Any value but these three fails startup; a change needs a
+restart and no schema change or rebuild.
+
+- `passages` (default) reads the stored passages and postings added by V277/V278 and counts
+  every match. A lexical `total` and per-hit `sourceCount` are exact for a question of one
+  plain lexeme, and for any other question (a repeated word and a compound token such as
+  `up-to-date` included) unless more than 2,000 entries match it; the answer then reports
+  `retrieval.truncated: true` and `total` counts the groups among the 2,000 best, the same
+  on every page, so clients that page by `total` keep working.
+- `passages-pruned` skips matches that cannot reach the requested page. It is faster on
+  common words, but a truncated `total` is a lower bound that can be little more than the
+  page. Do not enable it until clients that page by `total` read `retrieval.truncated`:
+  the MCP `conversation_search` tool reports a truncated total as "at least N", but Desktop
+  library search still stops at `total`.
+- `legacy` restores the original whole-entry search for every lexical request, with exact
+  totals. Set it and restart to roll back if the passage search misbehaves.
+
+Full-input search (`includeInputs: true`) uses the legacy query under every setting. Each
+engine's query has the search budget below. See
+[conversation retrieval](conversation-retrieval.md#stored-lexical-passages-and-postings).
+
 ### Conversation search budget
 
 `plowshare.retrieval.search-budget` defaults to `2s` (positive, at most `1m`).

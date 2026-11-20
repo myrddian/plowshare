@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,7 +15,9 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.api.LogSearchView;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -54,7 +59,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * The stored-passage lexical search prototype, against real PostgreSQL.
+ * The stored-passage lexical search, against real PostgreSQL.
  *
  * <p>Everything asserted here is PostgreSQL's behavior: the V277 trigger and splitter, the V278
  * triggers that keep postings and counts in step under concurrent writers, the foreign keys that
@@ -64,13 +69,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>The comparisons with {@link EntryStore#search} are deliberately narrow. The two searches match
  * the same entries and give them the same rank to nine decimal places (not bit for bit: one adds a
  * score's parts from stored frequencies, the other from the entry's lexemes). Their pages can still
- * differ, because they group differently: the served search groups hits whose 60-word headline
+ * differ, because they group differently: the legacy search groups hits whose 60-word headline
  * reads the same, this one groups hits whose stored passage does. Two entries that differ outside
  * the headline are one group there and two here, and the page shifts. On 3,000 short random entries
  * a review found different pages for 54 of 600 questions. The tests below therefore compare with
- * the served search only on fixtures where no two entries share a headline without sharing a
- * passage, and compare the pruned routes with this prototype's own exhaustive route everywhere
- * else.
+ * the legacy search only on fixtures where no two entries share a headline without sharing a
+ * passage, and compare the pruned routes with this search's own exhaustive route everywhere else.
  */
 @Tag("full-db")
 @Testcontainers
@@ -752,7 +756,7 @@ class PassageSearchTest {
         "the stored document frequency is not the one a count of matches gives");
   }
 
-  // --- what the prototype keeps --------------------------------------------------
+  // --- what the passage search keeps --------------------------------------------------
 
   /**
    * Seven entries, each short enough to be one passage and to fit whole in a headline, so that both
@@ -762,7 +766,7 @@ class PassageSearchTest {
    * how pages differ there.
    */
   @Test
-  void sevenOnePassageEntriesAgreeWithTheServedSearchToNineDecimals() {
+  void sevenOnePassageEntriesAgreeWithTheLegacySearchToNineDecimals() {
     List<String> said =
         List.of(
             "the retry budget refilled after the outage",
@@ -851,7 +855,7 @@ class PassageSearchTest {
         1e-9);
   }
 
-  // --- what the prototype changes ------------------------------------------------
+  // --- what the passage search changes ------------------------------------------------
 
   /** The excerpt of a long entry is the passage holding the match, however deep it is. */
   @Test
@@ -916,7 +920,7 @@ class PassageSearchTest {
    * different lengths, so frequency and length pull the score in different directions in different
    * directions. The current search scores all of them.
    *
-   * <p>The served search is only the oracle here and gets a long budget: it headlines all three
+   * <p>The legacy search is only the oracle here and gets a long budget: it headlines all three
    * thousand matches, which took more than its two-second default on a slow build host. The pruned
    * search keeps the default budget.
    */
@@ -967,6 +971,228 @@ class PassageSearchTest {
     assertEquals(EntryStore.MOST_GROUPED_ENTRIES + 5, found.page().reach().searched());
   }
 
+  /**
+   * What the default engine's grouping window means for a client that pages by the total. With
+   * every match counted, more matching entries than the window are still marked truncated, but the
+   * window is chosen by rank alone: the total is the number of groups inside it whatever page is
+   * asked for, and offset pages up to it are consecutive slices of one order.
+   */
+  @Test
+  void countingEveryMatchPagesStablyInsideTheGroupingWindow() {
+    int matching = EntryStore.MOST_GROUPED_ENTRIES + 500;
+    jdbc.update(
+        "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content)"
+            + " SELECT ?, n, 1 + n % 5, 'utterance', 'user',"
+            + " 'common ' || repeat('marker ', 1 + n % 7) || 'unique' || n || ' '"
+            + " || repeat('filler' || n % 13 || ' ', (n * 37) % 211)"
+            + " FROM generate_series(1, ?) n",
+        conversation, matching);
+    String question = "common marker";
+
+    List<LogSearch.Hit> paged = new ArrayList<>();
+    for (int skip = 0; skip < 150; skip += 50) {
+      BoundedLogSearch page = entries.searchBounded(Home.global(), question, skip, 50, null, true);
+      assertTrue(page.truncated(), "more entries matched than are grouped, at offset " + skip);
+      // Every entry is its own passage, so the groups are exactly the grouped entries.
+      assertEquals(EntryStore.MOST_GROUPED_ENTRIES, page.page().total(), "at offset " + skip);
+      assertEquals(matching, page.page().reach().searched());
+      assertEquals(50, page.page().hits().size(), "at offset " + skip);
+      paged.addAll(page.page().hits());
+    }
+
+    assertEquals(
+        150,
+        paged.stream().map(hit -> hit.conversationId() + ":" + hit.ordinal()).distinct().count(),
+        "consecutive pages overlap");
+    for (int i = 1; i < paged.size(); i++)
+      assertTrue(
+          paged.get(i - 1).rank() >= paged.get(i).rank(), "rank order breaks at position " + i);
+    assertEquals(
+        positionsAndRanks(
+            entries.searchBounded(Home.global(), question, 0, 150, null, true).page().hits()),
+        positionsAndRanks(paged),
+        "three pages of fifty are not the first hundred and fifty");
+
+    // The window's last page is full, and the page after the total is empty with the same total.
+    BoundedLogSearch last =
+        entries.searchBounded(
+            Home.global(), question, EntryStore.MOST_GROUPED_ENTRIES - 50, 50, null, true);
+    assertEquals(50, last.page().hits().size());
+    assertEquals(EntryStore.MOST_GROUPED_ENTRIES, last.page().total());
+    assertTrue(paged.getLast().rank() >= last.page().hits().getFirst().rank());
+    BoundedLogSearch past =
+        entries.searchBounded(
+            Home.global(), question, EntryStore.MOST_GROUPED_ENTRIES, 50, null, true);
+    assertEquals(List.of(), past.page().hits());
+    assertEquals(EntryStore.MOST_GROUPED_ENTRIES, past.page().total());
+    assertTrue(past.truncated());
+
+    // Allowed to skip matches, the same question counts little more than the page it was asked.
+    BoundedLogSearch pruned = entries.searchBounded(Home.global(), question, 0, 50, null, false);
+    assertEquals(positionsAndRanks(paged.subList(0, 50)), positionsAndRanks(pruned.page().hits()));
+    assertTrue(pruned.truncated());
+  }
+
+  /**
+   * Which questions are exact however many entries match. Only a question that parses to one plain
+   * lexeme is answered from postings alone, with no grouping window. The same word twice, and a
+   * token PostgreSQL stores as several lexemes, are scored as multi-lexeme questions: with more
+   * matching entries than the window they are marked truncated and counted inside it.
+   */
+  @Test
+  void onlyAQuestionOfOnePlainLexemeIsExactBeyondTheGroupingWindow() {
+    int matching = EntryStore.MOST_GROUPED_ENTRIES + 300;
+    jdbc.update(
+        "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content)"
+            + " SELECT ?, n, 1, 'utterance', 'user', 'common up-to-date unique' || n"
+            + " FROM generate_series(1, ?) n",
+        conversation,
+        matching);
+
+    BoundedLogSearch plain = entries.searchBounded(Home.global(), "common", 0, 10, null, true);
+    assertFalse(plain.truncated());
+    assertEquals(matching, plain.page().total());
+    assertEquals(
+        5,
+        entries
+            .searchBounded(Home.global(), "common", matching - 5, 10, null, true)
+            .page()
+            .hits()
+            .size(),
+        "the last page of an exact answer is reachable");
+
+    for (String question : List.of("common common", "up-to-date")) {
+      BoundedLogSearch windowed = entries.searchBounded(Home.global(), question, 0, 10, null, true);
+      assertTrue(windowed.truncated(), question);
+      assertEquals(EntryStore.MOST_GROUPED_ENTRIES, windowed.page().total(), question);
+      assertEquals(matching, windowed.page().reach().searched(), question);
+    }
+  }
+
+  /**
+   * An information-scoped reader through the served path. The reader's copy of the store reaches
+   * the retrieval service bound to the same account, so a conversation hidden from that reader
+   * gives no hit, snippet, total or reach on any engine, by default or explicit lexical request;
+   * naming a hidden conversation or one of another home returns nothing; and another account's copy
+   * of the same store is not narrowed by the first reader's.
+   */
+  @Test
+  void aScopedReaderThroughTheServedPathNeverReachesAHiddenOrForeignConversation() {
+    String hidden = conversations.open(Home.global(), Budget.of(2)).id();
+    String payments = conversations.open(PAYMENTS, Budget.of(2)).id();
+    entries.append(conversation, 1, LoggedEntry.utterance("needle visible", Speaker.person(null)));
+    entries.append(hidden, 1, LoggedEntry.utterance("needle secret words", Speaker.person(null)));
+    entries.append(payments, 1, LoggedEntry.utterance("needle payments", Speaker.person(null)));
+    var visibility =
+        new InformationLogVisibility() {
+          public <T> T read(String account, Function<Facts, T> reader) {
+            return reader.apply(
+                new Facts(Optional.of("reader".equals(account) ? List.of(hidden) : List.of())));
+          }
+
+          public boolean readable(String account, String log, BooleanSupplier authoritative) {
+            return !log.equals(hidden);
+          }
+        };
+    PassageIndex index = mock(PassageIndex.class);
+    when(index.forAccount(anyString())).thenReturn(index);
+
+    for (LexicalEngine engine : LexicalEngine.values()) {
+      EntryStore root = new EntryStore(jdbc).useVisibility(visibility);
+      root.retrieving(
+          () ->
+              new ConversationSearch(
+                  root, index, Duration.ofSeconds(2), WorkPerformanceReporter.NONE, engine));
+      EntryStore reader = root.forAccount("reader");
+      for (String mode : new String[] {null, "lexical"}) {
+        String asked = engine + " " + (mode == null ? "default" : mode);
+        var found = reader.searchView(Home.global(), "needle", 0, 10, mode, null);
+        assertEquals(1, found.total(), asked);
+        assertEquals(1, found.hits().size(), asked);
+        assertEquals(conversation, found.hits().getFirst().conversationId(), asked);
+        assertFalse(found.hits().getFirst().snippet().contains("secret"), asked);
+        for (LogSearch.Source source : found.hits().getFirst().sources())
+          assertEquals(conversation, source.conversationId(), asked);
+        assertEquals(1, found.hits().getFirst().sourceCount(), asked);
+        assertEquals(new LogSearchView.Reach(1, 0, 0), found.reach(), asked);
+        // A word only the hidden conversation holds is not found, counted or reachable.
+        var secret = reader.searchView(Home.global(), "secret", 0, 10, mode, null);
+        assertEquals(0, secret.total(), asked);
+        assertEquals(List.of(), secret.hits(), asked);
+        assertEquals(new LogSearchView.Reach(1, 0, 0), secret.reach(), asked);
+
+        var narrowedToHidden =
+            reader.searchView(Home.global(), "needle", 0, 10, mode, null, null, hidden);
+        assertEquals(0, narrowedToHidden.total(), asked);
+        assertEquals(new LogSearchView.Reach(0, 0, 0), narrowedToHidden.reach(), asked);
+        var narrowedToForeign =
+            reader.searchView(Home.global(), "needle", 0, 10, mode, null, null, payments);
+        assertEquals(0, narrowedToForeign.total(), asked);
+        assertEquals(new LogSearchView.Reach(0, 0, 0), narrowedToForeign.reach(), asked);
+
+        var ownHome = reader.searchView(PAYMENTS, "needle", 0, 10, mode, null);
+        assertEquals(1, ownHome.total(), asked);
+        assertEquals(payments, ownHome.hits().getFirst().conversationId(), asked);
+        assertEquals(
+            0, reader.searchView(Home.of("nowhere"), "needle", 0, 10, mode, null).total(), asked);
+      }
+      var other = root.forAccount("someone").searchView(Home.global(), "needle", 0, 10, null, null);
+      assertEquals(2, other.total(), engine + " second account");
+      assertEquals(new LogSearchView.Reach(2, 0, 0), other.reach(), engine + " second account");
+    }
+  }
+
+  /**
+   * The served path end to end: a default request reaches this search through the retrieval
+   * service, a truncated answer says its counts are lower bounds, and the {@code legacy} engine is
+   * the original search with exact counts and the original response.
+   */
+  @Test
+  void aDefaultRequestIsServedByThePassageSearchAndTheLegacyEngineRestoresExactCounts() {
+    jdbc.update(
+        "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content)"
+            + " SELECT ?, n, 1, 'utterance', 'user', 'common marker text'"
+            + " FROM generate_series(1, ?) n",
+        conversation,
+        EntryStore.MOST_GROUPED_ENTRIES + 5);
+    PassageIndex index = mock(PassageIndex.class);
+    // The legacy query headlines every match; it is the comparison here, not what is timed.
+    Duration budget = Duration.ofSeconds(30);
+    EntryStore passages = new EntryStore(jdbc).useSearchBudget(budget);
+    passages.retrieving(
+        () ->
+            new ConversationSearch(
+                passages, index, budget, WorkPerformanceReporter.NONE, LexicalEngine.PASSAGES));
+    EntryStore legacy = new EntryStore(jdbc).useSearchBudget(budget);
+    legacy.retrieving(
+        () ->
+            new ConversationSearch(
+                legacy, index, budget, WorkPerformanceReporter.NONE, LexicalEngine.LEGACY));
+
+    var bounded = passages.searchView(Home.global(), "common marker", 0, 10, null, null);
+    var exact = legacy.searchView(Home.global(), "common marker", 0, 10, null, null);
+
+    assertTrue(bounded.retrieval().truncated());
+    assertFalse(bounded.retrieval().complete());
+    assertEquals(ConversationSearch.LOWER_BOUND_TOTAL, bounded.retrieval().totalMeaning());
+    assertEquals(1, bounded.total());
+    assertEquals(EntryStore.MOST_GROUPED_ENTRIES, bounded.hits().getFirst().sourceCount());
+    assertEquals(EntryStore.MOST_GROUPED_ENTRIES + 5, bounded.reach().searched());
+
+    assertEquals(null, exact.retrieval());
+    assertEquals(1, exact.total());
+    assertEquals(EntryStore.MOST_GROUPED_ENTRIES + 5, exact.hits().getFirst().sourceCount());
+    assertEquals(bounded.reach(), exact.reach());
+    assertEquals(
+        LogSearchView.of(legacy.search(Home.global(), "common marker", 0, 10), 0, 10), exact);
+    // Full-input search is the original query under either engine, and is never bounded.
+    var inputs =
+        passages.searchView(
+            Home.global(), "common marker", 0, 10, "lexical", null, null, null, true);
+    assertFalse(inputs.retrieval().truncated());
+    assertEquals(EntryStore.MOST_GROUPED_ENTRIES + 5, inputs.hits().getFirst().sourceCount());
+  }
+
   /** A word every probed entry repeats gives no threshold, so every copy is read and counted. */
   @Test
   void copiesBeyondTheProbeAreStillCountedWhenThereIsNoThreshold() {
@@ -998,7 +1224,7 @@ class PassageSearchTest {
    * <p>The "believed empty" state is applied to the tables this search owns. Applied to {@code
    * entries} as well, a key lookup of one entry can be answered through {@code entries_recorded},
    * which reads the conversation's every entry: that table's indexes are not this migration's to
-   * change, and the served search has the same exposure.
+   * change, and the legacy search has the same exposure.
    */
   @Test
   @Timeout(value = 900, unit = TimeUnit.SECONDS)
@@ -1337,7 +1563,7 @@ class PassageSearchTest {
           entries.searchPassages(Home.global(), question, 0, 10, null).truncated(),
           "the comparison above no longer exercises pruning for: " + question);
     }
-    // Where the served search completes, it agrees too: the oracle is not only this prototype.
+    // Where the legacy search completes, it agrees too: the oracle is not only this search.
     assertEquals(
         positionsAndRanks(entries.search(Home.global(), "gamma alpha", 0, 10).hits()),
         positionsAndRanks(
@@ -1382,7 +1608,7 @@ class PassageSearchTest {
   }
 
   /**
-   * A far page is an empty page on every route, as it is for the served search, and not an
+   * A far page is an empty page on every route, as it is for the legacy search, and not an
    * arithmetic failure in the limits derived from the window.
    */
   @Test
@@ -1584,11 +1810,11 @@ class PassageSearchTest {
   }
 
   /**
-   * A compound lexeme is where the prototype's rank is deliberately not the served one. PostgreSQL
-   * stores {@code up-to-date} as one lexeme beside its parts. The served query counts a word's
-   * document frequency by parsing the lexeme again, which splits it and finds nothing, so it weighs
-   * the compound as if no entry held it. The prototype reads the count of the stored lexeme. Same
-   * entries, same order here, lower and truer ranks.
+   * A compound lexeme is where the passage search's rank is deliberately not the legacy one.
+   * PostgreSQL stores {@code up-to-date} as one lexeme beside its parts. The legacy query counts a
+   * word's document frequency by parsing the lexeme again, which splits it and finds nothing, so it
+   * weighs the compound as if no entry held it. The passage search reads the count of the stored
+   * lexeme. Same entries, same order here, lower and truer ranks.
    */
   @Test
   void aCompoundLexemeIsWeighedByItsRealDocumentFrequency() {
@@ -1627,7 +1853,7 @@ class PassageSearchTest {
     assertEquals(
         positionsAndRanks(entries.search(Home.global(), "date", 0, 10).hits()),
         positionsAndRanks(entries.searchPassages(Home.global(), "date", 0, 10, null).page().hits()),
-        "a plain word must still rank as the served search ranks it");
+        "a plain word must still rank as the legacy search ranks it");
   }
 
   // --- scope and disclosure ------------------------------------------------------

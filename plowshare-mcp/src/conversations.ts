@@ -118,16 +118,21 @@ export function searched(
 ): string {
   const found = record(value),
     total = number(found['total']),
-    hits = array(found['hits']).map((value) => record(value));
+    hits = array(found['hits']).map((value) => record(value)),
+    // The server marks a total it did not finish counting. It is then a lower bound, and the
+    // sentences below must not present it as the number of matches or as the end of them.
+    bounded = found.retrieval?.truncated === true;
   if (total === 0)
     return (
       `Nothing in ${home(project)} matches ${line(question)}.` +
       reach(found['reach'], true)
     );
   if (!hits.length)
-    return past(offset, total, 'conversation_search', 'matching entries');
+    return bounded
+      ? `There is nothing at offset ${offset}: at least ${total} matching entries were counted, and the list is not empty. The search did not count every match, so more may exist below those it ranked; they are not reachable by a larger offset, and a narrower question is the way to them. Call conversation_search again with offset=0 for the beginning.`
+      : past(offset, total, 'conversation_search', 'matching entries');
   const last = offset + hits.length - 1;
-  let out = `Entries ${offset} to ${last} of ${total} in ${home(project)} matching ${line(question)}, counting from 0 as offset does, closest first. Read a conversation a hit is in with conversation_trajectory.\n`;
+  let out = `Entries ${offset} to ${last} of ${bounded ? 'at least ' : ''}${total} in ${home(project)} matching ${line(question)}, counting from 0 as offset does, closest first. Read a conversation a hit is in with conversation_trajectory.\n`;
   for (const hit of hits) {
     out += `\n[${line(hit['conversationId'])} entry ${number(hit['ordinal'])}] ${line(hit['kind'])} — turn ${number(hit['turnOrdinal'])}`;
     if (hit['recordedAt'] != null) out += ' — ' + hit['recordedAt'];
@@ -142,7 +147,9 @@ export function searched(
   return (
     out +
     reach(found['reach'], false) +
-    more(last, total, 'conversation_search', 'the same question and ')
+    (bounded && last >= total - 1
+      ? `\n\nThe count is a lower bound: the search did not count every match, so more may exist than the ${total} counted. Call conversation_search again with the same question and offset=${last + 1} to look for more; if that answers with nothing, the rest is not reachable by offset and a narrower question is the way to it.`
+      : more(last, total, 'conversation_search', 'the same question and '))
   );
 }
 export function context(

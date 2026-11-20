@@ -71,7 +71,9 @@ public class RetrievalIndexConfig {
         entries,
         index,
         env.getProperty("plowshare.retrieval.search-budget", Duration.class, Duration.ofSeconds(2)),
-        performance);
+        performance,
+        // An unknown value fails this bean, and so startup: a misspelt rollback must not serve.
+        LexicalEngine.configured(env.getProperty(LexicalEngine.PROPERTY)));
   }
 
   @Bean
