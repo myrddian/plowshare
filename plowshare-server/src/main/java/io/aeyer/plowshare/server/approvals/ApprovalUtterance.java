@@ -7,8 +7,11 @@ public final class ApprovalUtterance {
   private ApprovalUtterance() {}
 
   public static String forAnswer(RunApproval approval, String decision, List<String> prefix) {
+    String operation = approval.web() == null ? "Command" : "Web request";
     return "deny".equals(decision)
-        ? "[approval] Command denied. The harness will return the decision to the requesting tool call."
-        : "[approval] Command approved. The harness will resume the retained tool call.";
+        ? "[approval] "
+            + operation
+            + " denied. The harness will return the decision to the requesting tool call."
+        : "[approval] " + operation + " approved. The harness will resume the retained tool call.";
   }
 }

@@ -41,6 +41,7 @@ INTERNAL_BINDINGS = {
     "search": ("SearchTool", "SearchTool"), "fetch": ("FetchTool", "FetchTool"),
     "agent_run": ("AgentRunTool", "AgentRunTool"),
 }
+MODEL_NAMES = {"search": "web_search", "fetch": "web_fetch"}
 OPERATOR_BOUNDARIES = {
     "information": "scoped information capability wrapper; internal agents use root-bound information_read/information_write",
     **dict.fromkeys(["project_define", "project_workspace_set", "project_lend", "project_unlend", "project_move", "project_forget"],
@@ -188,11 +189,12 @@ def inventory():
         if name == "agent_run":
             assert "NAME = AgentRegistry.AGENT_RUN" in schema_source
             schema_source = read(f"{AGENTS}/AgentRegistry.java")
-        assert f'"{name}"' in schema_source, f"missing model schema name: {name}"
+        model_name = MODEL_NAMES.get(name, name)
+        assert f'"{model_name}"' in schema_source, f"missing model schema name: {model_name}"
         assert f"new {constructor}(" in assembly, f"unbound model adapter: {name}"
         if source == "ScopedDocumentTool":
             assert f'new ScopedDocumentTool("{name}",' in assembly, f"unbound scoped model adapter: {name}"
-    grants = {name: [] for name in INTERNAL_BINDINGS}
+    grants = {MODEL_NAMES.get(name, name): [] for name in INTERNAL_BINDINGS}
     for directory in ["agents", "bots"]:
         for path in sorted((ROOT / f"plowshare-server/src/main/resources/{directory}").glob("*.md")):
             match = re.search(r"^tools:\s*\[([^\]]*)\]", path.read_text(), re.M)
@@ -389,9 +391,10 @@ def inventory():
             "internalAgent": {
                 "adapter": "registered" if name in INTERNAL_BINDINGS else "operator-or-platform-boundary",
                 "grant": "definition-dependent; registration does not grant every agent access",
+                **({"name": MODEL_NAMES[name]} if name in MODEL_NAMES else {}),
                 **({"selection": "required explicit RBAC-readable scopes; document is an exact revision UUID; execution and write home stay unchanged"}
                    if name in {"document_retrieve", "document_outline", "document_citations"} else {}),
-                **({"source": f"{AGENTS}/{INTERNAL_BINDINGS[name][0]}.java", "shippedGrants": grants[name]}
+                **({"source": f"{AGENTS}/{INTERNAL_BINDINGS[name][0]}.java", "shippedGrants": grants[MODEL_NAMES.get(name, name)]}
                    if name in INTERNAL_BINDINGS else {"reason": OPERATOR_BOUNDARIES[name]}),
             },
             "work": ["live-mcp-deployment-validation", "typescript-cli-parity"],

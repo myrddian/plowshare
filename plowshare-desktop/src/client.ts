@@ -2404,6 +2404,7 @@ export class DesktopClient {
               decision,
               undefined,
               approval.file?.inputDigest,
+              approval.web?.inputDigest,
             ),
           ),
         ),

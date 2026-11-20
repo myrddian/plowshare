@@ -12,9 +12,11 @@ import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Window;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.Grant;
 import io.aeyer.plowshare.server.files.Mode;
 import io.aeyer.plowshare.server.files.ProviderRouter;
@@ -24,6 +26,7 @@ import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.session.Presence;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.Role;
@@ -35,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -96,6 +100,55 @@ class PresenceRoutingTest {
   private final PresenceRegistry presences = new PresenceRegistry();
 
   private final Recording channel = new Recording();
+
+  @Test
+  void personal_read_evidence_requires_the_owners_serving_session_and_exact_root()
+      throws Exception {
+    Home personal = Home.of(PersonalSpaces.name("alice"));
+    String project = personal.project();
+    Path root = serverSide.toRealPath().resolve("personal");
+    Path extra = serverSide.toRealPath().resolve("personal-extra");
+    sessions.attach("client", Role.FILE_PROVIDER, new Object(), "alice");
+    presences.declare(new Presence("client", "laptop", root.toString(), project));
+    var projects = mock(ProjectStore.class);
+    when(projects.personalOwner(project)).thenReturn(Optional.of("alice"));
+    var members = mock(ProjectMembers.class);
+    when(members.mayWork(project, "alice")).thenReturn(true);
+    var roots = new AtomicReference<>(List.of(root.toString()));
+    SessionChannel bound = (session, request) -> FileReply.listed(request.id(), roots.get());
+    var transport = mock(SessionChannel.class);
+    when(transport.bound("client")).thenReturn(bound);
+    var providers =
+        new AgentsConfig()
+            .runProviders(
+                projects,
+                transport,
+                sessions,
+                presences,
+                ImageStore.NONE,
+                UnionRouting.NONE,
+                members);
+    var router = new ProviderRouter(home -> providers.forRun(home, READ, null, "alice"));
+    Path preferences = root.resolve("Resources/personal/preferences.md");
+    assertEquals(
+        Optional.of(new PersonalWorkspace("alice", root)),
+        router.readTarget(personal, preferences).personalWorkspace());
+
+    roots.set(List.of(root.toString(), extra.toString()));
+    assertTrue(router.readTarget(personal, preferences).personalWorkspace().isEmpty());
+    assertTrue(
+        router.readTarget(personal, extra.resolve("preferences.md")).personalWorkspace().isEmpty());
+    assertThrows(
+        WorkspaceRefusedException.class,
+        () -> router.readTarget(personal, root.resolve("../unbound/preferences.md")));
+
+    roots.set(List.of(root.toString()));
+    presences.withdraw("client");
+    sessions.attach("other", Role.FILE_PROVIDER, new Object(), "bob");
+    presences.declare(new Presence("other", "laptop", root.toString(), project));
+    when(transport.bound("other")).thenReturn(bound);
+    assertTrue(router.readTarget(personal, preferences).personalWorkspace().isEmpty());
+  }
 
   // --- the feature ---------------------------------------------------------
 

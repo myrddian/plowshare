@@ -31,7 +31,8 @@ public final class UnionRouting {
       String project,
       List<Grant> grants,
       Optional<String> servingSession,
-      Function<String, FileProvider> remoteFor) {
+      Function<String, FileProvider> remoteFor,
+      Optional<String> personalOwner) {
     Optional<Mirrored> mirrored = mirrored(project);
     if (mirrored.isEmpty()) {
       return Optional.empty();
@@ -49,7 +50,8 @@ public final class UnionRouting {
                 exclusions,
                 union.hub().tree(),
                 gate,
-                grants)));
+                grants,
+                personalOwner)));
   }
 
   public Optional<String> mirrorPlace(String project) {

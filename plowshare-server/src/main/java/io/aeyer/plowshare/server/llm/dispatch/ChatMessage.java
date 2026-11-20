@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.llm.dispatch;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.aeyer.plowshare.protocol.ToolCall;
 import java.util.List;
 import java.util.Objects;
@@ -88,7 +89,15 @@ import java.util.Objects;
  * mistake, and the transport is several frames and one lane thread away from whoever made it.
  */
 public record ChatMessage(
-    Role role, List<Content> parts, List<ToolCall> toolCalls, String toolCallId) {
+    Role role,
+    List<Content> parts,
+    List<ToolCall> toolCalls,
+    String toolCallId,
+    @JsonIgnore WebEvidenceRelease webRelease) {
+
+  public ChatMessage(Role role, List<Content> parts, List<ToolCall> toolCalls, String toolCallId) {
+    this(role, parts, toolCalls, toolCallId, null);
+  }
 
   /**
    * The four roles the chat contract defines. {@code wireName} rather than {@code
@@ -114,6 +123,8 @@ public record ChatMessage(
 
   public ChatMessage {
     Objects.requireNonNull(role, "role");
+    if (webRelease != null && (role != Role.TOOL || !webRelease.call().equals(toolCallId)))
+      throw new IllegalArgumentException("Web release must identify its tool result");
     // Copied, and rejecting a null element: a message may sit in a pool
     // queue while the caller still holds the list it passed.
     parts = parts == null ? List.of() : List.copyOf(parts);

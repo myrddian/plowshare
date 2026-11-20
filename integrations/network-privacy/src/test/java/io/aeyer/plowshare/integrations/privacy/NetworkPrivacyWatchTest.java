@@ -54,7 +54,7 @@ class NetworkPrivacyWatchTest {
           "outgoing_send",
           "outgoing_read",
           "relay_tool_read",
-          "search");
+          "web_search");
   private final Path application = Path.of(System.getProperty("privacy.application"));
 
   private static SwarmScheduler.Pools emptyPools() {

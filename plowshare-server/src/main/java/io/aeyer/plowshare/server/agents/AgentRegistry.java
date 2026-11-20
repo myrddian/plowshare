@@ -291,7 +291,8 @@ public final class AgentRegistry {
    * names for one tool would have to be matched by every hook's {@code tools:} list for as long as
    * both existed.
    */
-  private static final Map<String, String> RENAMED = Map.of("file_write", FileTools.EDIT_NAME);
+  private static final Map<String, String> RENAMED =
+      Map.of("file_write", FileTools.EDIT_NAME, "search", SearchTool.NAME, "fetch", FetchTool.NAME);
 
   /**
    * The agents that ARE the memory pipeline, and so may not author into it.

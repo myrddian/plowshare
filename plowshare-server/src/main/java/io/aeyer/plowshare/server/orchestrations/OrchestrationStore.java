@@ -136,6 +136,25 @@ public class OrchestrationStore {
   private final Supplier<Instant> clock;
   private final UnitOfWork unitOfWork;
 
+  /** Set inside the start transaction before any conductor turn is submitted. */
+  void pinWebTask(String id, String task) {
+    if (jdbc.update(
+            "UPDATE orchestrations SET web_task = ? WHERE id = ? AND web_task IS NULL", task, id)
+        != 1) throw new IllegalStateException("Orchestration web task could not be pinned");
+  }
+
+  /** The stored evidence belongs only to the admitted execution account. */
+  public Optional<String> webTask(String conversation, String owner) {
+    return jdbc
+        .queryForList(
+            "SELECT web_task FROM orchestrations WHERE conductor_conversation = ? AND caller_handle = ? AND web_task IS NOT NULL",
+            String.class,
+            conversation,
+            owner)
+        .stream()
+        .findFirst();
+  }
+
   public OrchestrationStore(JdbcTemplate jdbc, Supplier<Instant> clock) {
     this(jdbc, clock, null);
   }

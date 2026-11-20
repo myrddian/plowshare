@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.agents.InputProvenanceCodec;
 import io.aeyer.plowshare.server.agents.Invocation;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.agents.WebReleaseAudit;
 import io.aeyer.plowshare.server.api.LogSearchView;
 import io.aeyer.plowshare.server.cache.ProjectionCache;
 import io.aeyer.plowshare.server.cache.SnapshotCache;
@@ -2498,10 +2499,31 @@ public final class EntryStore implements ConversationSearchRepository {
                 "SELECT "
                     + COLUMNS
                     + " FROM entries WHERE conversation_id = ?"
+                    + " AND ((TRUE "
                     + THAT_PROJECT
+                    + ") OR (superseded_by IS NULL AND kind = 'diagnostic' AND content LIKE ?))"
                     + IN_CONVERSATION_ORDER,
                 ROW_MAPPER,
-                conversation));
+                conversation,
+                WebReleaseAudit.PREFIX + "%"));
+  }
+
+  /** A scripted orchestration's authenticated opening, independent of later harness messages. */
+  public Optional<String> authenticatedOpening(String conversationId, String owner) {
+    requireInformation(conversationId);
+    return ArchiveUnavailableException.translating(
+        "read authenticated orchestration intent",
+        () ->
+            jdbc
+                .queryForList(
+                    "SELECT content FROM entries WHERE conversation_id = ? AND turn_ordinal = 1"
+                        + " AND kind = 'utterance' AND speaker = 'person' AND speaker_name = ?"
+                        + " ORDER BY ordinal LIMIT 1",
+                    String.class,
+                    ConversationStore.named(conversationId),
+                    owner)
+                .stream()
+                .findFirst());
   }
 
   /**

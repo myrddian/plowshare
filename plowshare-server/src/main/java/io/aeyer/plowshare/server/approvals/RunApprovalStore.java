@@ -39,7 +39,7 @@ public class RunApprovalStore
   private static final String COLUMNS =
       "id, project_id, conversation, asked_in, handle, agent, side,"
           + " argv::text AS argv, cwd, reason, state, scope, prefix::text AS prefix, answered_by,"
-          + " answered_at, delivered_at, created_at, commands::text AS commands, judged, budget_calls, budget_steps, file_operation::text AS file_operation";
+          + " answered_at, delivered_at, created_at, commands::text AS commands, judged, budget_calls, budget_steps, file_operation::text AS file_operation, web_operation::text AS web_operation";
   private static final String SELECT = "SELECT " + COLUMNS + " FROM run_approvals";
 
   private static final Logger log = LoggerFactory.getLogger(RunApprovalStore.class);
@@ -183,6 +183,47 @@ public class RunApprovalStore
             RunApproval.ALLOWED,
             RunApproval.ONCE,
             encoded)
+        == 1;
+  }
+
+  public RunApproval askWeb(
+      long project,
+      String root,
+      String conversation,
+      String owner,
+      String agent,
+      WebApproval request) {
+    RunApproval asked =
+        jdbc.queryForObject(
+            "INSERT INTO run_approvals (id, project_id, conversation, asked_in, handle, agent, side,"
+                + " argv, cwd, reason, state, created_at, web_operation)"
+                + " VALUES (?, ?, ?, ?, ?, ?, 'server', '[]'::jsonb, '', ?, ?, ?, ?::jsonb) RETURNING "
+                + COLUMNS,
+            ROW,
+            newId(),
+            project,
+            root,
+            conversation,
+            owner,
+            agent,
+            "SECURITY asks for permission to make this exact web request.",
+            RunApproval.ASKED,
+            Timestamp.from(clock.get()),
+            json(request));
+    tell("approval " + asked.id(), () -> events.asked(asked));
+    return asked;
+  }
+
+  /** Consume only the named web consent for the exact displayed operation. */
+  public boolean consumeWeb(String id, WebApproval expected, Instant oldest) {
+    return jdbc.update(
+            "UPDATE run_approvals SET state = ? WHERE id = ? AND state = ? AND scope = ? AND web_operation = ?::jsonb AND created_at >= ?",
+            RunApproval.USED,
+            id,
+            RunApproval.ALLOWED,
+            RunApproval.ONCE,
+            json(expected),
+            Timestamp.from(oldest))
         == 1;
   }
 
@@ -373,7 +414,7 @@ public class RunApprovalStore
     var answered =
         jdbc.query(
             "UPDATE run_approvals SET state = ?, scope = ?, prefix = ?::jsonb,"
-                + " answered_by = ?, answered_at = ? WHERE id = ? AND state = ? AND budget_calls IS NULL AND (file_operation IS NULL OR ? = 'once') RETURNING "
+                + " answered_by = ?, answered_at = ? WHERE id = ? AND state = ? AND budget_calls IS NULL AND ((file_operation IS NULL AND web_operation IS NULL) OR ? = 'once') RETURNING "
                 + COLUMNS,
             ROW,
             RunApproval.ALLOWED,
@@ -457,7 +498,7 @@ public class RunApprovalStore
     List<RunApproval> exact =
         jdbc.query(
             SELECT
-                + " WHERE project_id = ? AND conversation = ? AND budget_calls IS NULL AND file_operation IS NULL"
+                + " WHERE project_id = ? AND conversation = ? AND budget_calls IS NULL AND file_operation IS NULL AND web_operation IS NULL"
                 + " AND side = ? AND argv = ?::jsonb AND cwd = ? AND state = ? AND scope IN (?, ?)"
                 + " ORDER BY CASE scope WHEN 'conversation' THEN 0 ELSE 1 END, answered_at, id LIMIT 128",
             ROW,
@@ -493,7 +534,7 @@ public class RunApprovalStore
       throw new IllegalArgumentException("Only inspected command consent may be claimed");
     if (RunApproval.ONCE.equals(inspected.scope()))
       return jdbc.update(
-              "UPDATE run_approvals SET state = ? WHERE id = ? AND state = ? AND scope = ? AND budget_calls IS NULL AND file_operation IS NULL",
+              "UPDATE run_approvals SET state = ? WHERE id = ? AND state = ? AND scope = ? AND budget_calls IS NULL AND file_operation IS NULL AND web_operation IS NULL",
               RunApproval.USED,
               inspected.id(),
               RunApproval.ALLOWED,
@@ -503,7 +544,7 @@ public class RunApprovalStore
     // It rechecks only the selected grant, rather than fetching and discarding its full projection.
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM run_approvals WHERE id = ? AND state = ? AND scope = ? AND budget_calls IS NULL AND file_operation IS NULL)",
+            "SELECT EXISTS (SELECT 1 FROM run_approvals WHERE id = ? AND state = ? AND scope = ? AND budget_calls IS NULL AND file_operation IS NULL AND web_operation IS NULL)",
             Boolean.class,
             inspected.id(),
             RunApproval.ALLOWED,
@@ -530,7 +571,7 @@ public class RunApprovalStore
         jdbc.query(
             SELECT
                 + " WHERE project_id = ? AND conversation = ?"
-                + " AND budget_calls IS NULL AND file_operation IS NULL AND side = ? AND argv = ?::jsonb AND cwd = ? AND state = ? AND scope IN (?, ?)"
+                + " AND budget_calls IS NULL AND file_operation IS NULL AND web_operation IS NULL AND side = ? AND argv = ?::jsonb AND cwd = ? AND state = ? AND scope IN (?, ?)"
                 + " ORDER BY CASE scope WHEN 'conversation' THEN 0 ELSE 1 END, answered_at, id",
             ROW,
             projectId,
@@ -584,9 +625,9 @@ public class RunApprovalStore
         && argv.subList(0, prefix.size()).equals(prefix);
   }
 
-  private static String json(List<String> strings) {
+  private static String json(Object value) {
     try {
-      return JSON.writeValueAsString(strings);
+      return JSON.writeValueAsString(value);
     } catch (JsonProcessingException unreachable) {
       throw new IllegalStateException(unreachable);
     }
@@ -663,5 +704,15 @@ public class RunApprovalStore
               row.getObject("budget_calls", Integer.class) == null
                   ? null
                   : new BudgetExtension(row.getInt("budget_calls"), row.getInt("budget_steps")),
-              file(row.getString("file_operation")));
+              file(row.getString("file_operation")),
+              web(row.getString("web_operation")));
+
+  private static WebApproval web(String json) {
+    if (json == null) return null;
+    try {
+      return JSON.readValue(json, WebApproval.class);
+    } catch (JsonProcessingException invalid) {
+      throw new IllegalStateException("Invalid stored web approval", invalid);
+    }
+  }
 }

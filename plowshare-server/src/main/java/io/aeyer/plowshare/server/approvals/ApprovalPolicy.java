@@ -19,6 +19,7 @@ public record ApprovalPolicy(long revision, Mode mode, String bot, List<Rule> ru
 
   public enum Effect {
     MAY_APPROVE,
+    PERSONAL_READ_INTENT,
     ASK_HUMAN,
     REJECT
   }
@@ -32,10 +33,10 @@ public record ApprovalPolicy(long revision, Mode mode, String bot, List<Rule> ru
   }
 
   /**
-   * Exact conditions, evaluated against provider-resolved operation identity. Null conditions are
-   * unrestricted; automatic permission always requires an explicit project, provider and target.
-   * Command arguments match whole argv, never a textual command prefix. Paths match exactly, not by
-   * string prefix. Broader patterns require a separately validated matching contract.
+   * Conditions evaluated against provider-resolved operation identity. MAY_APPROVE requires an
+   * exact target and digest. PERSONAL_READ_INTENT supplies intent for an otherwise permitted read
+   * in the owner's verified Personal workspace, with optional exact selectors. Paths and argv match
+   * whole values.
    */
   public record Rule(
       String id,
@@ -64,6 +65,8 @@ public record ApprovalPolicy(long revision, Mode mode, String bot, List<Rule> ru
       optional(guidance, "Rule guidance", 2000);
       if (kind == Kind.COMMAND && !paths.isEmpty() || kind != Kind.COMMAND && !argv.isEmpty())
         throw new IllegalArgumentException("A rule must use its operation's target type");
+      if (effect == Effect.PERSONAL_READ_INTENT && kind != Kind.FILE_READ)
+        throw new IllegalArgumentException("Personal read intent requires FILE_READ");
       if (effect == Effect.MAY_APPROVE
           && (project == null
               || provider == null
@@ -80,10 +83,14 @@ public record ApprovalPolicy(long revision, Mode mode, String bot, List<Rule> ru
 
     public boolean matches(ApprovalIntent intent) {
       return kind == intent.kind()
+          && (effect != Effect.PERSONAL_READ_INTENT || intent.ownerPersonalRead())
           && (project == null || project.equals(intent.project()))
           && (provider == null || provider.equals(intent.provider()))
           && (cwd == null || cwd.equals(intent.cwd()))
           && (effect != Effect.MAY_APPROVE || Objects.equals(inputDigest, intent.inputDigest()))
+          && (effect != Effect.PERSONAL_READ_INTENT
+              || inputDigest == null
+              || inputDigest.equals(intent.inputDigest()))
           && (argv.isEmpty() || argv.equals(intent.argv()))
           && (paths.isEmpty() || paths.equals(intent.paths()));
     }

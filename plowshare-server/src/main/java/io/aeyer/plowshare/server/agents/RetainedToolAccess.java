@@ -28,8 +28,8 @@ public final class RetainedToolAccess {
   private static final Set<String> SYNCHRONOUS =
       Set.of(
           "get_date",
-          "fetch",
-          "search",
+          FetchTool.NAME,
+          SearchTool.NAME,
           "memory_read",
           "memory_index",
           "conversation_list",

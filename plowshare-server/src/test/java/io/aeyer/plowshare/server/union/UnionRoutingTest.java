@@ -5,8 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
+import io.aeyer.plowshare.server.files.Grant;
+import io.aeyer.plowshare.server.files.Mode;
+import io.aeyer.plowshare.server.files.ProviderRouter;
+import io.aeyer.plowshare.server.files.Scope;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -87,15 +93,39 @@ class UnionRoutingTest {
   @Test
   void a_project_that_is_not_a_union_is_left_to_the_existing_rules() {
     when(unions.find("other")).thenReturn(Optional.empty());
-    assertTrue(routing.providers("other", List.of(), Optional.empty(), s -> remote).isEmpty());
+    assertTrue(
+        routing
+            .providers("other", List.of(), Optional.empty(), s -> remote, Optional.empty())
+            .isEmpty());
   }
 
   @Test
   void with_no_client_the_mirror_serves() {
     List<FileProvider> providers =
-        routing.providers("ledger", List.of(), Optional.empty(), s -> remote).orElseThrow();
+        routing
+            .providers("ledger", List.of(), Optional.empty(), s -> remote, Optional.empty())
+            .orElseThrow();
     assertEquals(1, providers.size());
     assertEquals(MirrorProvider.NAME, providers.get(0).name());
+  }
+
+  @Test
+  void a_personal_mirror_identifies_its_own_root_for_reviewed_reads() {
+    var providers =
+        routing
+            .providers(
+                "ledger",
+                List.of(new Grant(Scope.WORKSPACE, Mode.READ)),
+                Optional.empty(),
+                s -> remote,
+                Optional.of("alice"))
+            .orElseThrow();
+    Path root = Path.of(ENABLED.workspace());
+    assertEquals(
+        Optional.of(new PersonalWorkspace("alice", root)),
+        new ProviderRouter(home -> providers)
+            .readTarget(Home.of("ledger"), root.resolve("a.txt"))
+            .personalWorkspace());
   }
 
   @Test
@@ -104,7 +134,7 @@ class UnionRoutingTest {
     assertEquals(
         MirrorProvider.NAME,
         routing
-            .providers("ledger", List.of(), Optional.of("s1"), s -> remote)
+            .providers("ledger", List.of(), Optional.of("s1"), s -> remote, Optional.empty())
             .orElseThrow()
             .get(0)
             .name());
@@ -116,7 +146,9 @@ class UnionRoutingTest {
     gate.ready("ledger", "s1", hubMain());
     assertEquals(
         List.of(remote),
-        routing.providers("ledger", List.of(), Optional.of("s1"), s -> remote).orElseThrow());
+        routing
+            .providers("ledger", List.of(), Optional.of("s1"), s -> remote, Optional.empty())
+            .orElseThrow());
   }
 
   @Test

@@ -126,7 +126,8 @@ class CallerOrchestrationsTest {
             caller.commands(),
             caller.end(),
             caller.hooks(),
-            admittedTurn);
+            admittedTurn,
+            "Authenticated parent task");
     var operation =
         (io.aeyer.plowshare.server.agents.BoundCommandTool)
             tool(context, "orchestrate_code_implementation");
@@ -135,7 +136,11 @@ class CallerOrchestrationsTest {
             .runBound(invocation, definition.hash(), "original request", Home.of("story"))
             .contains("orc_bound"));
     var payload = ArgumentCaptor.forClass(String.class);
-    verify(engine).startFromRun(any(), eq(admittedTurn), eq(invocation), payload.capture());
+    var launch = ArgumentCaptor.forClass(Orchestrations.Start.class);
+    verify(engine)
+        .startFromRun(launch.capture(), eq(admittedTurn), eq(invocation), payload.capture());
+    assertEquals("Authenticated parent task", launch.getValue().authenticatedWebTask());
+    assertEquals("original request", launch.getValue().request());
     assertTrue(payload.getValue().contains("original request"));
     assertTrue(payload.getValue().contains(definition.hash()));
     org.junit.jupiter.api.Assertions.assertThrows(
@@ -180,13 +185,17 @@ class CallerOrchestrationsTest {
     when(store.byConductorConversation("cnv_conductor")).thenReturn(java.util.Optional.of(parent));
     OrchestrationRecord child = mock(OrchestrationRecord.class);
     when(child.id()).thenReturn("orc_child");
-    when(engine.startNested("orc_own", definition, "do it", null, true))
+    when(engine.startNested("orc_own", definition, "do it", "handoff", true, "Parent task"))
         .thenReturn(new Orchestrations.Started(null, child, true));
-    AgentTool tool = tool(context("enzo", "cnv_conductor"), "orchestrate_code_implementation");
+    AgentTool tool =
+        tool(
+            contextWith("enzo", "cnv_conductor", null, "Parent task"),
+            "orchestrate_code_implementation");
 
-    String result = tool.run("{\"request\":\"do it\"}", Home.of("story"));
+    String result = tool.run("{\"request\":\"do it\",\"context\":\"handoff\"}", Home.of("story"));
 
     assertEquals("{\"id\":\"orc_child\",\"stages\":[\"goal\",\"code\"]}", result);
+    verify(engine).startNested("orc_own", definition, "do it", "handoff", true, "Parent task");
     verify(engine, never()).start(any());
   }
 
@@ -196,7 +205,7 @@ class CallerOrchestrationsTest {
     when(store.byConductorConversation("cnv_conductor")).thenReturn(java.util.Optional.of(parent));
     OrchestrationRecord child = mock(OrchestrationRecord.class);
     when(child.id()).thenReturn("orc_child");
-    when(engine.startNested("orc_own", definition, "do it", null, true))
+    when(engine.startNested("orc_own", definition, "do it", null, true, null))
         .thenReturn(new Orchestrations.Started(null, child, false));
     AgentTool tool = tool(context("enzo", "cnv_conductor"), "orchestrate_code_implementation");
 
@@ -215,7 +224,7 @@ class CallerOrchestrationsTest {
     when(store.byConductorConversation("cnv_conductor")).thenReturn(java.util.Optional.of(parent));
     OrchestrationRecord child = mock(OrchestrationRecord.class);
     when(child.id()).thenReturn("orc_child");
-    when(engine.startNested("orc_own", definition, "do it", null, false))
+    when(engine.startNested("orc_own", definition, "do it", null, false, null))
         .thenReturn(new Orchestrations.Started(null, child, false));
     AgentTool tool = tool(context("enzo", "cnv_conductor"), "orchestrate_code_implementation");
 
@@ -229,7 +238,7 @@ class CallerOrchestrationsTest {
     OrchestrationRecord endedParent = run("enzo", OrchestrationState.FINISHED);
     when(store.byConductorConversation("cnv_conductor"))
         .thenReturn(java.util.Optional.of(endedParent));
-    when(engine.startNested("orc_own", definition, "do it", null, true))
+    when(engine.startNested("orc_own", definition, "do it", null, true, null))
         .thenReturn(
             new Orchestrations.Started(
                 "this orchestration is finished, so it cannot start a child", null, false));
@@ -258,14 +267,14 @@ class CallerOrchestrationsTest {
             + "\"}",
         result);
     verify(store, never()).byConductorConversation(any());
-    verify(engine, never()).startNested(any(), any(), any(), any(), anyBoolean());
+    verify(engine, never()).startNested(any(), any(), any(), any(), anyBoolean(), any());
   }
 
   @Test
   void a_nested_start_that_is_refused_answers_with_the_refusal() {
     OrchestrationRecord parent = run("enzo", OrchestrationState.RUNNING);
     when(store.byConductorConversation("cnv_conductor")).thenReturn(java.util.Optional.of(parent));
-    when(engine.startNested("orc_own", definition, "do it", null, true))
+    when(engine.startNested("orc_own", definition, "do it", null, true, null))
         .thenReturn(
             new Orchestrations.Started(
                 "this orchestration is already 2 deep, and nesting stops at 2. Do this"
@@ -298,7 +307,7 @@ class CallerOrchestrationsTest {
             + "\"}",
         result);
     verify(engine).start(any());
-    verify(engine, never()).startNested(any(), any(), any(), any(), anyBoolean());
+    verify(engine, never()).startNested(any(), any(), any(), any(), anyBoolean(), any());
   }
 
   @Test
@@ -307,13 +316,13 @@ class CallerOrchestrationsTest {
     when(store.byConductorConversation("cnv_conductor")).thenReturn(java.util.Optional.of(parent));
     OrchestrationRecord child = mock(OrchestrationRecord.class);
     when(child.id()).thenReturn("orc_child");
-    when(engine.startNested("orc_own", definition, "do it", null, true))
+    when(engine.startNested("orc_own", definition, "do it", null, true, null))
         .thenReturn(new Orchestrations.Started(null, child, true));
     AgentTool tool = tool(context("enzo", "cnv_conductor"), "orchestrate_code_implementation");
 
     tool.run("{\"request\":\"do it\"}", Home.of("story"));
 
-    verify(engine).startNested("orc_own", definition, "do it", null, true);
+    verify(engine).startNested("orc_own", definition, "do it", null, true, null);
   }
 
   @Test
@@ -1188,6 +1197,11 @@ class CallerOrchestrationsTest {
    * than the {@code null} the other overloads still stand in for.
    */
   private RunExtras.Context contextWith(String handle, String conversation, TurnEnd end) {
+    return contextWith(handle, conversation, end, null);
+  }
+
+  private RunExtras.Context contextWith(
+      String handle, String conversation, TurnEnd end, String authenticatedWebTask) {
     AgentDefinition caller =
         new AgentDefinition(
             "interlocutor",
@@ -1209,7 +1223,17 @@ class CallerOrchestrationsTest {
             AgentDefinition.Fallback.NONE,
             List.of("code_implementation"));
     return new RunExtras.Context(
-        caller, conversation, "ses_1", null, Home.of("story"), handle, null, end);
+        caller,
+        conversation,
+        "ses_1",
+        null,
+        Home.of("story"),
+        handle,
+        null,
+        end,
+        null,
+        null,
+        authenticatedWebTask);
   }
 
   private AgentTool tool(RunExtras.Context context, String name) {

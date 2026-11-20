@@ -11,6 +11,7 @@ import io.aeyer.plowshare.server.approvals.FileApproval;
 import io.aeyer.plowshare.server.approvals.FileApprovalConsent;
 import io.aeyer.plowshare.server.approvals.OperationApprovalReview;
 import io.aeyer.plowshare.server.approvals.RunApproval;
+import io.aeyer.plowshare.server.approvals.SecurityReviewer;
 import io.aeyer.plowshare.server.files.FileProvider;
 import io.aeyer.plowshare.server.files.ProviderRouter;
 import io.aeyer.plowshare.server.files.RemoteProvider;
@@ -40,7 +41,11 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
   record Question(Home home, String side, FileApproval file, String reason) {}
 
   private record Prepared(
-      String arguments, String side, OperationApprovalReview.Request request, FileApproval file) {}
+      String arguments,
+      String side,
+      OperationApprovalReview.Request request,
+      FileApproval file,
+      FileProvider provider) {}
 
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final String RETAINED = "__plowshare_file_consent";
@@ -125,6 +130,16 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
             checked.records(),
             false);
       }
+      if (prepared.request().securityFileMutation()
+          && (decision.security() == null
+              || decision.security().outcome() != SecurityReviewer.Outcome.CLEAR)) {
+        rejected = true;
+        return new ToolPre(
+            checked.arguments(),
+            "SECURITY must verify an explicit authenticated request before changing security files.",
+            checked.records(),
+            false);
+      }
       if (decision.action() == ApprovalReviews.Action.ASK_HUMAN) {
         waiting =
             questions.apply(
@@ -154,6 +169,8 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
     ObjectNode frozen = JSON.createObjectNode();
     frozen.put("id", waiting.id());
     frozen.set("file", JSON.valueToTree(permitted.file()));
+    // A protected question can be parked only after SECURITY cleared the original request.
+    frozen.put("securityEditVerified", permitted.request().securityFileMutation());
     ObjectNode envelope = JSON.createObjectNode();
     envelope.put("arguments", permitted.arguments());
     envelope.set(RETAINED, frozen);
@@ -187,11 +204,14 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
     ToolPre checked = chain.apply(context, original);
     if (checked.isDenied()) return checked;
     Prepared current = prepare(checked.arguments(), home);
+    var verified = frozen.path("securityEditVerified");
+    boolean securityEditVerified = verified.isBoolean() && verified.booleanValue();
     // Exact argument bytes are retained, including content and read windows. A rewriter must not
     // turn the human's original question into permission for another change.
     if (!original.equals(checked.arguments())
         || !side.equals(current.side())
-        || !expected.equals(current.file()))
+        || !expected.equals(current.file())
+        || current.request().securityFileMutation() != securityEditVerified)
       return new ToolPre(
           original,
           "The retained file operation or provider changed; nothing ran",
@@ -204,7 +224,8 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
           checked.records(),
           false);
     try {
-      review.humanOverride(current.request(), id);
+      if (securityEditVerified) review.humanOverride(current.request(), id, true);
+      else review.humanOverride(current.request(), id);
     } catch (WorkspaceRefusedException refused) {
       return new ToolPre(original, refused.getMessage(), checked.records(), false);
     }
@@ -218,7 +239,6 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
     Path path = Path.of(from);
     if (!path.isAbsolute())
       throw new WorkspaceRefusedException("File approval requires an absolute path");
-    FileProvider provider = router.providerFor(home, path);
     ApprovalPolicy.Kind kind =
         switch (schema().name()) {
           case FileTools.READ_NAME -> ApprovalPolicy.Kind.FILE_READ;
@@ -227,21 +247,39 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
           case FileTools.MOVE_NAME -> ApprovalPolicy.Kind.FILE_MOVE;
           default -> throw new IllegalStateException("Unsupported file review tool");
         };
+    var read = kind == ApprovalPolicy.Kind.FILE_READ ? router.readTarget(home, path) : null;
+    var mutation = read == null ? router.mutationTarget(home, path) : null;
+    FileProvider provider = read == null ? mutation.provider() : read.provider();
+    boolean securityFileMutation = mutation != null && mutation.securityFile();
     List<String> paths = List.of(from);
     if (kind == ApprovalPolicy.Kind.FILE_MOVE) {
       String to = ToolArguments.requireText(args, "to", schema().name(), "an absolute destination");
       Path destination = Path.of(to);
-      if (!destination.isAbsolute()
-          || !provider.identity().equals(router.providerFor(home, destination).identity()))
+      if (!destination.isAbsolute())
+        throw new WorkspaceRefusedException("File moves require an absolute destination");
+      var destinationTarget = router.mutationTarget(home, destination);
+      if (!provider.identity().equals(destinationTarget.provider().identity()))
         throw new WorkspaceRefusedException(
             "File moves require one current provider for both targets");
+      securityFileMutation |= destinationTarget.securityFile();
       paths = List.of(from, to);
     }
     String cwd = path.getParent().toString();
     String digest = digest(arguments);
     var request =
         new OperationApprovalReview.Request(
-            home.project(), provider.identity(), List.of(), cwd, arguments, call, kind, paths);
+            home.project(),
+            provider.identity(),
+            List.of(),
+            cwd,
+            arguments,
+            call,
+            kind,
+            paths,
+            read == null || !from.equals(path.normalize().toString())
+                ? Optional.empty()
+                : read.personalWorkspace(),
+            securityFileMutation);
     var file =
         new FileApproval(
             kind,
@@ -250,19 +288,29 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
             digest,
             arguments.length() <= 16000 ? arguments : null);
     return new Prepared(
-        arguments, RemoteProvider.NAME.equals(provider.name()) ? "local" : "server", request, file);
+        arguments,
+        RemoteProvider.NAME.equals(provider.name()) ? "local" : "server",
+        request,
+        file,
+        provider);
   }
 
-  private void require(String arguments, Home home) {
+  private FileProvider require(String arguments, Home home) {
     Prepared grant = permitted;
     permitted = null;
     if (grant == null || !grant.arguments().equals(arguments))
       throw new WorkspaceRefusedException(
           "No review covers this exact file operation; nothing ran");
     Prepared now = prepare(arguments, home);
-    if (!grant.file().equals(now.file()))
-      throw new WorkspaceRefusedException("The file provider changed after review; nothing ran");
+    if (!grant.file().equals(now.file())
+        || grant.request().securityFileMutation() != now.request().securityFileMutation())
+      throw new WorkspaceRefusedException(
+          "The file provider or target changed after review; nothing ran");
     review.requireCurrent(now.request());
+    // A refreshed route may name the same logical client after its connection was replaced.
+    // The review belongs to the original provider binding until an exact retained call resumes.
+    grant.provider().requireReviewBinding();
+    return now.provider();
   }
 
   @Override
@@ -273,7 +321,9 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
   @Override
   public String run(String arguments, Home home, UsageAttribution usage) {
     try {
-      require(arguments, home);
+      FileProvider provider = require(arguments, home);
+      if (delegate instanceof FileTools.Routed routed)
+        return routed.runFrom(arguments, home, provider);
       return delegate.run(arguments, home, usage);
     } catch (WorkspaceRefusedException refused) {
       return refused.getMessage();
@@ -288,7 +338,9 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
   @Override
   public AgentTool.Result runResult(String arguments, Home home, UsageAttribution usage) {
     try {
-      require(arguments, home);
+      FileProvider provider = require(arguments, home);
+      if (delegate instanceof FileTools.Routed routed)
+        return new AgentTool.Result(routed.runFrom(arguments, home, provider), null);
       return delegate instanceof AgentTool.ContentTool content
           ? content.runResult(arguments, home, usage)
           : new AgentTool.Result(delegate.run(arguments, home, usage), null);

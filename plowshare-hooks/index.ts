@@ -144,6 +144,8 @@ export interface ToolPostEvent {
     readonly tool: string
     readonly args: Readonly<Record<string, unknown>>
     readonly result: string
+    /** Opaque Trajectory audit ID for a reviewed web result. */
+    readonly reviewId?: string
 }
 
 export type PromptPreDecision = undefined | { readonly add: string; readonly mode: Mode }

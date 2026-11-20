@@ -25,6 +25,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * The file tools: read a window of one file, measure one without reading it, find files by name and
@@ -314,9 +316,9 @@ public final class FileTools {
                       + "'; this class builds "
                       + new TreeSet<>(NAMES));
         };
-    if (reads.codeMap == null || !Set.of(EDIT_NAME, DELETE_NAME, MOVE_NAME).contains(name))
+    if (reads.codeMap == null || READ_NAME.equals(name) || !(tool instanceof Routed routed))
       return tool;
-    return new AgentTool() {
+    return new Routed() {
       @Override
       public ToolSchema schema() {
         return tool.schema();
@@ -324,9 +326,18 @@ public final class FileTools {
 
       @Override
       public String run(String arguments, Home home) {
+        return mutation(arguments, home, () -> routed.run(arguments, home));
+      }
+
+      @Override
+      public String runFrom(String arguments, Home home, FileProvider provider) {
+        return mutation(arguments, home, () -> routed.runFrom(arguments, home, provider));
+      }
+
+      private String mutation(String arguments, Home home, Supplier<String> execute) {
         reads.codeMap.beforeMutation(home);
         try {
-          return tool.run(arguments, home);
+          return execute.get();
         } finally {
           var changed = new ArrayList<Path>();
           try {
@@ -344,13 +355,18 @@ public final class FileTools {
 
   private FileTools() {}
 
+  /** Executes the exact reviewed arguments using the provider binding checked before execution. */
+  interface Routed extends AgentTool {
+    String runFrom(String argumentsJson, Home home, FileProvider provider);
+  }
+
   // --- file_read ---------------------------------------------------------------
 
   /**
    * {@code file_read} — one window of one file's text, and, when the window does not reach the end,
    * the call that fetches the next one.
    */
-  public static final class Read implements AgentTool {
+  public static final class Read implements Routed {
 
     private final ProviderRouter router;
     private final Reads reads;
@@ -397,8 +413,18 @@ public final class FileTools {
       // model's. See AgentTool.
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
+      return answer(argumentsJson, path -> router.providerFor(home, path));
+    }
+
+    // Reviewed reads must use the same binding used to confirm the current scoped approval.
+    @Override
+    public String runFrom(String argumentsJson, Home home, FileProvider provider) {
+      return answer(argumentsJson, path -> provider);
+    }
+
+    private String answer(String argumentsJson, Function<Path, FileProvider> providerFor) {
       try {
-        return answer(argumentsJson, home);
+        return read(argumentsJson, providerFor);
       } catch (BadArguments | WorkspaceRefusedException correctable) {
         // The two halves of "the caller was wrong", and nothing else.
         // WorkspaceUnavailableException shares no supertype with the
@@ -409,7 +435,7 @@ public final class FileTools {
       }
     }
 
-    private String answer(String argumentsJson, Home home) {
+    private String read(String argumentsJson, Function<Path, FileProvider> providerFor) {
       JsonNode args =
           ToolArguments.parse(
               argumentsJson,
@@ -417,7 +443,7 @@ public final class FileTools {
               "{\"path\": \"/srv/repo/src/Main.java\", \"offset\": 0, \"limit\": 500}");
       Path path = path(args, READ_NAME);
       Asked asked = window(args);
-      FileProvider provider = router.providerFor(home, path);
+      FileProvider provider = providerFor.apply(path);
       Span span = provider.read(path, asked.window());
       reads.saw(path);
       var type = io.aeyer.plowshare.protocol.DocumentType.classify(path.toString(), null);
@@ -1217,7 +1243,7 @@ public final class FileTools {
   // --- file_edit ---------------------------------------------------------------
 
   /** {@code file_edit} — replace one file's contents, or one piece of text in it. */
-  public static final class Edit implements AgentTool {
+  public static final class Edit implements Routed {
 
     private final ProviderRouter router;
     private final Reads reads;
@@ -1256,8 +1282,17 @@ public final class FileTools {
     public String run(String argumentsJson, Home home) {
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
+      return result(argumentsJson, path -> router.providerFor(home, path));
+    }
+
+    @Override
+    public String runFrom(String argumentsJson, Home home, FileProvider provider) {
+      return result(argumentsJson, path -> provider);
+    }
+
+    private String result(String argumentsJson, Function<Path, FileProvider> providerFor) {
       try {
-        return answer(argumentsJson, home);
+        return answer(argumentsJson, providerFor);
       } catch (BadArguments | WorkspaceRefusedException correctable) {
         return correctable.getMessage();
       }
@@ -1267,7 +1302,7 @@ public final class FileTools {
         " Send either {\"path\", \"content\"} to write the"
             + " whole file, or {\"path\", \"old\", \"new\"} to replace one piece of text.";
 
-    private String answer(String argumentsJson, Home home) {
+    private String answer(String argumentsJson, Function<Path, FileProvider> providerFor) {
       JsonNode args =
           ToolArguments.parse(
               argumentsJson,
@@ -1287,7 +1322,7 @@ public final class FileTools {
       if (!whole && !replacing) {
         throw new BadArguments(EDIT_NAME + " was given nothing to change." + SHAPES);
       }
-      FileProvider provider = router.providerFor(home, path);
+      FileProvider provider = providerFor.apply(path);
       if (whole) {
         // requireExactText and never requireText: that method strips and
         // refuses blank, which for a file's contents means dropping the
@@ -1401,7 +1436,7 @@ public final class FileTools {
   // --- file_delete -------------------------------------------------------------
 
   /** {@code file_delete} — remove one file. */
-  public static final class Delete implements AgentTool {
+  public static final class Delete implements Routed {
 
     private final ProviderRouter router;
     private final Reads reads;
@@ -1430,18 +1465,27 @@ public final class FileTools {
     public String run(String argumentsJson, Home home) {
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
+      return result(argumentsJson, path -> router.providerFor(home, path));
+    }
+
+    @Override
+    public String runFrom(String argumentsJson, Home home, FileProvider provider) {
+      return result(argumentsJson, path -> provider);
+    }
+
+    private String result(String argumentsJson, Function<Path, FileProvider> providerFor) {
       try {
-        return answer(argumentsJson, home);
+        return answer(argumentsJson, providerFor);
       } catch (BadArguments | WorkspaceRefusedException correctable) {
         return correctable.getMessage();
       }
     }
 
-    private String answer(String argumentsJson, Home home) {
+    private String answer(String argumentsJson, Function<Path, FileProvider> providerFor) {
       JsonNode args =
           ToolArguments.parse(argumentsJson, DELETE_NAME, "{\"path\": \"/srv/repo/src/Old.java\"}");
       Path path = path(args, DELETE_NAME);
-      Changed deleted = router.providerFor(home, path).delete(path);
+      Changed deleted = providerFor.apply(path).delete(path);
       reads.forget(path);
       return FileTools.deleted(path, deleted.facts());
     }
@@ -1450,7 +1494,7 @@ public final class FileTools {
   // --- file_move ---------------------------------------------------------------
 
   /** {@code file_move} — rename one file, never over another. */
-  public static final class Move implements AgentTool {
+  public static final class Move implements Routed {
 
     private final ProviderRouter router;
     private final Reads reads;
@@ -1485,14 +1529,23 @@ public final class FileTools {
     public String run(String argumentsJson, Home home) {
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
+      return result(argumentsJson, path -> router.providerFor(home, path));
+    }
+
+    @Override
+    public String runFrom(String argumentsJson, Home home, FileProvider provider) {
+      return result(argumentsJson, path -> provider);
+    }
+
+    private String result(String argumentsJson, Function<Path, FileProvider> providerFor) {
       try {
-        return answer(argumentsJson, home);
+        return answer(argumentsJson, providerFor);
       } catch (BadArguments | WorkspaceRefusedException correctable) {
         return correctable.getMessage();
       }
     }
 
-    private String answer(String argumentsJson, Home home) {
+    private String answer(String argumentsJson, Function<Path, FileProvider> providerFor) {
       JsonNode args =
           ToolArguments.parse(
               argumentsJson,
@@ -1500,8 +1553,8 @@ public final class FileTools {
               "{\"path\": \"/srv/repo/src/Old.java\", \"to\": \"/srv/repo/src/New.java\"}");
       Path from = path(args, MOVE_NAME);
       Path to = named(args, "to", MOVE_NAME);
-      FileProvider source = router.providerFor(home, from);
-      FileProvider destination = router.providerFor(home, to);
+      FileProvider source = providerFor.apply(from);
+      FileProvider destination = providerFor.apply(to);
       // By name and not by identity: the router asks for its providers
       // afresh on every call, so one filesystem arrives as two instances.
       // A run holds at most one provider of each kind.

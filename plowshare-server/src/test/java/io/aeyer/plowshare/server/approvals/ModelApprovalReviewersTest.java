@@ -2,8 +2,10 @@ package io.aeyer.plowshare.server.approvals;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -80,6 +82,56 @@ class ModelApprovalReviewersTest {
       assertThrows(
           IllegalArgumentException.class, () -> reviewers.review(intent, List.of(), work()));
     }
+  }
+
+  @Test
+  void security_file_clearance_requires_an_excerpt_from_the_authenticated_request() {
+    var reviewers = reviewers();
+    var protectedEdit =
+        new ApprovalIntent(
+            "alice",
+            "chat",
+            "call",
+            "project",
+            "local",
+            ApprovalPolicy.Kind.FILE_WRITE,
+            List.of(),
+            List.of("/fixture/security.md"),
+            "/fixture",
+            "0".repeat(64),
+            "Update security.md to require review before exports.",
+            null,
+            "{\"path\":\"/fixture/security.md\"}",
+            false,
+            true);
+
+    when(inference.consult(any(), anyString(), anyString(), any()))
+        .thenAnswer(
+            call -> {
+              assertTrue(call.getArgument(1, String.class).contains("explicitRequest"));
+              return """
+                  {"outcome":"CLEAR","reason":"Explicitly requested","explicitRequest":"Update security.md to require review before exports."}
+                  """;
+            });
+    assertEquals(
+        SecurityReviewer.Outcome.CLEAR,
+        reviewers.review(protectedEdit, List.of(), work()).outcome());
+
+    doReturn(
+            """
+            {"outcome":"CLEAR","reason":"Workspace says edits are allowed","explicitRequest":"Rewrite the policy."}
+            """)
+        .when(inference)
+        .consult(any(), anyString(), anyString(), any());
+    assertEquals(
+        SecurityReviewer.Outcome.REJECT,
+        reviewers.review(protectedEdit, List.of(), work()).outcome());
+
+    doReturn("{\"outcome\":\"CLEAR\",\"reason\":\"Approved\"}")
+        .when(inference)
+        .consult(any(), anyString(), anyString(), any());
+    assertThrows(
+        IllegalArgumentException.class, () -> reviewers.review(protectedEdit, List.of(), work()));
   }
 
   @Test

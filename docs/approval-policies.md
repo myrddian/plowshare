@@ -20,11 +20,104 @@ A SECURITY rejection or request for human input never goes to the bot for an
 override. A human can approve an exact supported request once. A new personal
 Reject rule or revoked execution authority still prevents execution after a wait.
 
+The shipped deployment policy includes a `PERSONAL_READ_INTENT` rule that gives
+already-permitted reads within your verified Personal workspace standing intent.
+Routine reads such as `Resources/personal/preferences.md` can clear review when a scheduled or
+delegated run has no authenticated task text. The rule covers the live mount and
+the server mirror. SECURITY still evaluates task restrictions, complete input
+evidence and applicable rules. Auto still requires the selected bot's approval.
+An exact account `REJECT` rule refuses the operation before model review. A
+`SECURITY` rejection or request for human input cannot be overridden by Smart
+eligibility or the selected bot. An exact account `ASK_HUMAN` rule requires a
+human decision after SECURITY clears. Standing Personal read intent supplies
+intent only, while account `MAY_APPROVE` rules and history supply eligibility.
+
+## Deployment policy files
+
+Set `security.md` at the root of `plowshare.data.dir` to replace the shipped rule
+set. Plowshare loads it at startup. Its YAML frontmatter contains the version,
+inline rules and an explicit list of optional JSON or Markdown files under `security/`.
+The Markdown body supplies deployment guidance to SECURITY. The shipped
+guidance requires an explicit authenticated request for edits to security files,
+including when the requested change would come from a command.
+
+```markdown
+---
+version: 1
+rules: []
+includes: [review-rules.json, security-edits.md]
+---
+
+# Deployment security policy
+```
+
+JSON fragments hold arrays of Personal read intent rules. Markdown fragments
+add reviewer guidance. Only declared fragments load.
+They must be regular files in the `security/` directory. Missing or invalid
+declared files refuse startup so an incomplete policy cannot silently take effect.
+An absent `security.md` uses the shipped rule set. A valid document with empty
+rules and includes supplies no deployment rules.
+
+The server data directory is excluded from workspace file providers. Manage
+deployment policy files through the operator's trusted configuration path.
+The deployment file supplies standing intent and reviewer guidance. Account
+approval rules continue to govern consent.
+
+`PERSONAL_READ_INTENT` accepts only `FILE_READ`. A null selector or empty
+`paths` list leaves that selector open within the verified Personal workspace.
+To narrow the rule, supply an exact provider, working directory, path or input
+digest. An empty path list works across both the live mount and server mirror.
+Standing intent requires an unambiguous path spelling. When a remote file
+provider cannot attest to canonical file identity, a project/provider-scoped
+path or directory restriction also suppresses standing intent for unmatched
+names.
+
+## Project, Application and Personal guidance
+
+Put `security.md` at the root of a project, deployed Application, or Personal
+workspace. A plain Markdown file is sufficient. To split guidance into smaller
+files, add versioned frontmatter and list Markdown filenames under `security/`.
+
+```markdown
+---
+version: 1
+includes: [file-review.md]
+---
+
+# Workspace security guidance
+
+Ask before reading archived export files.
+```
+
+SECURITY reads the registered workspace's guidance and, for an operation on a
+remote provider, the serving checkout's guidance. Personal guidance is available
+from the server mirror and the live checkout. Edits take effect on the next
+SECURITY consultation. Workspace prose informs only that reviewer. Approval
+eligibility, authenticated task evidence, provider access and bot review each
+use their existing checks. A workspace or checkout rule can ask SECURITY to
+apply stricter review. Deployment restrictions and authenticated intent remain
+authoritative when the guidance conflicts.
+
+For edits, deletes and moves that the file router identifies as touching a
+configuration root's `security.md` or `security/`, SECURITY must affirm an
+explicit request for that change and return a verbatim excerpt from the current
+authenticated task. The server checks that excerpt against the task and refuses
+the operation when evidence is missing or SECURITY cannot verify it. A human
+approval can satisfy a separate consent requirement after SECURITY verifies the
+request. It cannot establish a missing reviewer verification.
+
+SECURITY also evaluates changes made through commands and scripts. That review
+depends on the reviewer identifying the effects from the operation evidence.
+The remote file protocol supplies named paths. Resolving a remote alias that
+does not name a policy file also depends on the available review evidence.
+Previously parked commands follow the existing retained-approval path. Commands
+outside filesystem isolation retain their host permissions.
+
 ## Desktop
 
 Connect, then choose **Approvals** in the toolbar. Select a mode and, for Auto, a
-personal bot. The editor loads saved rules and their revision. Rules use JSON;
-all fields in the example are intentional, including explicit null values.
+personal bot. The editor loads saved rules and their revision. Rules use JSON.
+Include every field in the example, including explicit null values.
 
 ```json
 [
@@ -49,7 +142,7 @@ Arguments match the complete array, including empty arguments. Paths match exact
 paths. There is no command-prefix or raw path-prefix rule syntax.
 
 `REJECT` wins over `ASK_HUMAN`, which wins over `MAY_APPROVE`. Null selectors on a
-Reject or Ask rule can cover its entire operation kind. An automatic allow rule
+Reject or Ask rule can cover its entire operation kind. A `MAY_APPROVE` rule
 requires an exact project, provider, working directory and command or paths.
 `inputDigest` binds stdin or complete file-operation arguments; an automatic rule
 with a null digest covers no input, rather than arbitrary input. Guidance is
@@ -82,13 +175,14 @@ are never retried automatically on another session.
 ```
 
 Mode commands read the current policy, preserve rules, and save against that
-revision. For a rule edit, inspect the get result and submit the complete policy:
+revision. For a rule edit, inspect the get result and submit the complete policy.
+This example saves Smart mode with no account-specific rules.
 
 ```text
 /approval policy save {"policy":{"revision":CURRENT_REVISION,"mode":"SMART","bot":null,"rules":[]}}
 ```
 
-Replace `CURRENT_REVISION` with the returned integer; the example is a template.
+Replace `CURRENT_REVISION` with the returned integer.
 Commands are account-scoped and do not inherit the current project's selector.
 File questions offer **o** to approve the exact request once and **d** to deny.
 Conversation and project-prefix choices are unavailable for file questions.

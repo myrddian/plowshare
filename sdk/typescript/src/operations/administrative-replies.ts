@@ -65,7 +65,17 @@ export interface ApprovalView {
   readonly judged: string | null;
   readonly budget?: BudgetExtension;
   readonly file?: FileApproval;
+  readonly web?: WebApproval;
 }
+export type WebApproval = {
+  readonly verb: 'SEARCH' | 'FETCH';
+  readonly target: string;
+  readonly page: number | null;
+  readonly pageSize: number | null;
+  readonly max: number | null;
+  readonly offset: number | null;
+  readonly inputDigest: string;
+};
 /** A one-time additive grant for the same retained execution. */
 export interface BudgetExtension {
   readonly calls: number;
@@ -399,7 +409,38 @@ const approval = record({
   judged: nullable(text),
   budget: (value) => value === undefined || budgetExtensionCheck(value),
   file: (value) => value === undefined || isFileApproval(value),
+  web: (value) => value === undefined || isWebApproval(value),
 });
+const webApprovalCheck = record(
+  {
+    verb: (value) => value === 'SEARCH' || value === 'FETCH',
+    target: named,
+    page: nullable(count),
+    pageSize: nullable(count),
+    max: nullable(count),
+    offset: nullable(count),
+    inputDigest: (value) =>
+      typeof value === 'string' && /^[a-f0-9]{64}$/.test(value),
+  },
+  (row) =>
+    row.verb === 'FETCH'
+      ? row.page === null &&
+        row.pageSize === null &&
+        row.max === null &&
+        typeof row.offset === 'number'
+      : row.offset === null &&
+        typeof row.page === 'number' &&
+        row.page > 0 &&
+        typeof row.pageSize === 'number' &&
+        row.pageSize > 0 &&
+        typeof row.max === 'number' &&
+        row.max > 0,
+);
+export function isWebApproval(
+  value: unknown,
+): value is NonNullable<ApprovalView['web']> {
+  return webApprovalCheck(value);
+}
 const budgetExtensionCheck = record(
   { calls: count, steps: count },
   (row) =>

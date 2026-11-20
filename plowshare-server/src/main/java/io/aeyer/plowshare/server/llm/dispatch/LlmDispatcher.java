@@ -461,6 +461,11 @@ public final class LlmDispatcher implements AutoCloseable {
     return stream(request, sink, abandoned, false);
   }
 
+  /** One tool-free SECURITY call over quoted evidence with ordinary routing and accounting. */
+  public Completion streamReview(ChatRequest request, BooleanSupplier abandoned) {
+    return stream(request, Deltas.DISCARDING, abandoned, false, true);
+  }
+
   /**
    * Summarise retained history with the fold budget and historical-data inspection. This is an
    * internal, model-only service path: it cannot offer tools or relax request authorization.
@@ -484,12 +489,20 @@ public final class LlmDispatcher implements AutoCloseable {
 
   private Completion stream(
       ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold) {
+    return stream(request, sink, abandoned, fold, false);
+  }
+
+  private Completion stream(
+      ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold, boolean review) {
     request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
-    if (fold && !request.tools().isEmpty())
-      throw new IllegalArgumentException("Historical summary requests cannot carry tools");
+    if ((fold || review) && !request.tools().isEmpty())
+      throw new IllegalArgumentException(
+          "Historical summary and review requests cannot carry tools");
     ChatRequest input =
-        fold ? filtering.historyInput(request, abandoned) : filtering.input(request, abandoned);
+        fold || review
+            ? filtering.historyInput(request, abandoned)
+            : filtering.input(request, abandoned);
     boundary.require(input.authorization());
     requireSameInputContracts(request, input);
     boolean retainedImages = PromptImages.hasStored(input);

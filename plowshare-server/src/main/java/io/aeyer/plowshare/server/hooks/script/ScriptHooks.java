@@ -582,6 +582,7 @@ public final class ScriptHooks implements Hooks, AutoCloseable {
       event.put("tool", tool);
       event.set("args", arguments(argumentsJson));
       event.put("result", current);
+      if (context.webReviewId() != null) event.put("reviewId", context.webReviewId());
       Instant started = clock.get();
       try {
         Decision decision = call(hook, Stage.TOOL_POST, context, event);

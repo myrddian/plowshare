@@ -7,7 +7,9 @@ import java.util.Objects;
  * Immutable operation evidence captured before review. The provider identity is the actual machine
  * and provider generation, not merely "local". User intent must come from an authenticated user
  * entry, never from a requesting model's justification. The input digest binds stdin or a file
- * edit.
+ * edit. The ownerPersonalRead flag is evidence that the provider verified the target is inside the
+ * owner's Personal workspace. Standing intent must come from a separately matched policy rule. The
+ * securityFileMutation flag records a configuration path identified by the file router.
  */
 public record ApprovalIntent(
     String owner,
@@ -22,7 +24,9 @@ public record ApprovalIntent(
     String inputDigest,
     String userIntent,
     String justification,
-    String inputPreview) {
+    String inputPreview,
+    boolean ownerPersonalRead,
+    boolean securityFileMutation) {
   public ApprovalIntent(
       String owner,
       String conversation,
@@ -49,7 +53,41 @@ public record ApprovalIntent(
         inputDigest,
         userIntent,
         justification,
-        null);
+        null,
+        false,
+        false);
+  }
+
+  public ApprovalIntent(
+      String owner,
+      String conversation,
+      String call,
+      String project,
+      String provider,
+      ApprovalPolicy.Kind kind,
+      List<String> argv,
+      List<String> paths,
+      String cwd,
+      String inputDigest,
+      String userIntent,
+      String justification,
+      String inputPreview) {
+    this(
+        owner,
+        conversation,
+        call,
+        project,
+        provider,
+        kind,
+        argv,
+        paths,
+        cwd,
+        inputDigest,
+        userIntent,
+        justification,
+        inputPreview,
+        false,
+        false);
   }
 
   public ApprovalIntent {
@@ -59,6 +97,12 @@ public record ApprovalIntent(
     ApprovalPolicy.text(project, "Approval project", 512);
     ApprovalPolicy.text(provider, "Approval provider", 1024);
     Objects.requireNonNull(kind, "Approval operation");
+    if (ownerPersonalRead && kind != ApprovalPolicy.Kind.FILE_READ)
+      throw new IllegalArgumentException(
+          "Personal workspace review evidence applies only to file reads");
+    if (securityFileMutation
+        && (kind == ApprovalPolicy.Kind.COMMAND || kind == ApprovalPolicy.Kind.FILE_READ))
+      throw new IllegalArgumentException("Security file mutation requires a direct file change");
     argv = ApprovalPolicy.strings(argv, "Approval command", 256);
     paths = ApprovalPolicy.strings(paths, "Approval paths", 2);
     for (String path : paths) ApprovalPolicy.text(path, "Approval path", 8192);

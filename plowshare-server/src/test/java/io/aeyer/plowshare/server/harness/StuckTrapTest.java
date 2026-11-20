@@ -28,7 +28,13 @@ class StuckTrapTest {
           "aristoxenus",
           true,
           java.util.Set.of(
-              "search", "file_read", "file_grep", "file_glob", "file_edit", "run", "todo_write"),
+              "web_search",
+              "file_read",
+              "file_grep",
+              "file_glob",
+              "file_edit",
+              "run",
+              "todo_write"),
           null,
           "cnv_1",
           HookContext.SERVER);
@@ -39,7 +45,7 @@ class StuckTrapTest {
           "code_reviewer",
           false,
           java.util.Set.of(
-              "file_read", "file_grep", "file_glob", "file_stat", "search", "todo_write"),
+              "file_read", "file_grep", "file_glob", "file_stat", "web_search", "todo_write"),
           null,
           "cnv_2",
           HookContext.SERVER);
@@ -478,7 +484,7 @@ class StuckTrapTest {
           CONTEXT,
           i % 2 == 0
               ? turn.read("f" + i + ".txt")
-              : turn.call("search", "{\"query\":\"q" + i + "\"}", "results " + i));
+              : turn.call("web_search", "{\"query\":\"q" + i + "\"}", "results " + i));
       executor.runAll();
     }
     assertEquals(0, advisor.briefs.size());
@@ -896,7 +902,7 @@ class StuckTrapTest {
             .get(0)
             .contains(
                 "\n\nThe tools it may call, and no others: file_glob, file_grep,"
-                    + " file_read, file_stat, search, todo_write\n\n"),
+                    + " file_read, file_stat, todo_write, web_search\n\n"),
         advisor.briefs.get(0));
   }
 

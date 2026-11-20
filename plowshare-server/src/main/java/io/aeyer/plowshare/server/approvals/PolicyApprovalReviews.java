@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.approvals;
 
+import io.aeyer.plowshare.server.files.RemoteProvider;
 import io.aeyer.plowshare.server.hooks.Deadline;
 import java.time.Duration;
 import java.util.List;
@@ -8,8 +9,8 @@ import java.util.function.BooleanSupplier;
 
 /**
  * Pure policy coordination. Persistence and current-authority confirmation belong to the calling
- * lifecycle owner. No decision is an execution claim. Review failures are human attention, never
- * synthetic security rejections or allows.
+ * lifecycle owner. No decision is an execution claim. Review failures normally require human
+ * attention. A direct security file change requires verified intent before any consent decision.
  */
 public final class PolicyApprovalReviews implements ApprovalReviews {
   private final SecurityReviewer security;
@@ -32,22 +33,39 @@ public final class PolicyApprovalReviews implements ApprovalReviews {
   @Override
   public Decision review(
       ApprovalPolicy policy, ApprovalIntent intent, Consent consent, BooleanSupplier cancelled) {
+    return review(policy, policy.rules(), intent, consent, cancelled);
+  }
+
+  Decision review(
+      ApprovalPolicy policy,
+      List<ApprovalPolicy.Rule> rules,
+      ApprovalIntent intent,
+      Consent consent,
+      BooleanSupplier cancelled) {
     Objects.requireNonNull(consent);
     Objects.requireNonNull(cancelled);
     ReviewWork work = new ReviewWork(Deadline.after(budget), cancelled);
-    List<ApprovalPolicy.Rule> matched =
-        policy.rules().stream().filter(r -> r.matches(intent)).toList();
+    List<ApprovalPolicy.Rule> matched = rules.stream().filter(r -> r.matches(intent)).toList();
+    boolean standingIntent =
+        consent.existingConsent()
+            && matched.stream()
+                .anyMatch(r -> r.effect() == ApprovalPolicy.Effect.PERSONAL_READ_INTENT)
+            && !hasUnresolvedPathRestrictions(intent, rules);
     // Cross-tool attempts matter: a command may edit a file, and a file edit may change Git
     // identity. Reviewers see all rules in this machine/project scope; only exact matches below
-    // can establish deterministic consent eligibility.
+    // can establish deterministic consent eligibility. Personal read intent rules are positive
+    // evidence for this operation only and reviewers see them only after a verified match.
     List<ApprovalPolicy.Rule> reviewRules =
-        policy.rules().stream()
+        rules.stream()
             .filter(
                 rule ->
-                    (rule.project() == null || rule.project().equals(intent.project()))
-                        && (rule.provider() == null || rule.provider().equals(intent.provider())))
+                    rule.effect() == ApprovalPolicy.Effect.PERSONAL_READ_INTENT
+                        ? standingIntent && rule.matches(intent)
+                        : (rule.project() == null || rule.project().equals(intent.project()))
+                            && (rule.provider() == null
+                                || rule.provider().equals(intent.provider())))
             .toList();
-    List<String> ids = matched.stream().map(ApprovalPolicy.Rule::id).toList();
+    List<String> ids = matched.stream().map(ApprovalPolicy.Rule::id).distinct().toList();
     if (cancelled.getAsBoolean())
       return decision(
           Action.REJECT, "The requesting operation was cancelled.", policy, ids, null, null);
@@ -59,10 +77,20 @@ public final class PolicyApprovalReviews implements ApprovalReviews {
           ids,
           null,
           null);
+    boolean incompleteInput = intent.inputDigest() != null && intent.inputPreview() == null;
+    if (intent.securityFileMutation()
+        && (intent.userIntent() == null || intent.inputDigest() == null || incompleteInput))
+      return decision(
+          Action.REJECT,
+          "Security file changes require an explicit authenticated request and complete input evidence.",
+          policy,
+          ids,
+          null,
+          null);
     if (work.expired())
       return decision(
-          Action.ASK_HUMAN,
-          "Review deadline expired; a human decision is required.",
+          unresolvedAction(intent),
+          unresolvedReason(intent, "Review deadline expired; a human decision is required."),
           policy,
           ids,
           null,
@@ -75,8 +103,8 @@ public final class PolicyApprovalReviews implements ApprovalReviews {
         return decision(
             Action.REJECT, "The requesting operation was cancelled.", policy, ids, null, null);
       return decision(
-          Action.ASK_HUMAN,
-          "SECURITY review is unavailable; a human decision is required.",
+          unresolvedAction(intent),
+          unresolvedReason(intent, "SECURITY review is unavailable; a human decision is required."),
           policy,
           ids,
           null,
@@ -87,24 +115,26 @@ public final class PolicyApprovalReviews implements ApprovalReviews {
           Action.REJECT, "The requesting operation was cancelled.", policy, ids, reviewed, null);
     if (work.expired())
       return decision(
-          Action.ASK_HUMAN,
-          "SECURITY review exceeded its deadline; a human decision is required.",
+          unresolvedAction(intent),
+          unresolvedReason(
+              intent, "SECURITY review exceeded its deadline; a human decision is required."),
           policy,
           ids,
           reviewed,
           null);
     if (reviewed.outcome() != SecurityReviewer.Outcome.CLEAR)
       return decision(
-          reviewed.outcome() == SecurityReviewer.Outcome.REJECT ? Action.REJECT : Action.ASK_HUMAN,
+          reviewed.outcome() == SecurityReviewer.Outcome.REJECT
+              ? Action.REJECT
+              : unresolvedAction(intent),
           reviewed.reason(),
           policy,
           ids,
           reviewed,
           null);
-    // A model Clear cannot manufacture missing authenticated intent or authorize input whose
-    // contents were withheld from review. Keep this uncertainty deterministic and human-only.
-    if (intent.userIntent() == null
-        || (intent.inputDigest() != null && intent.inputPreview() == null))
+    // A matched standing rule supplies intent for this operation only. Even a clear verdict
+    // requires the exact input to be reviewable.
+    if ((intent.userIntent() == null && !standingIntent) || incompleteInput)
       return decision(
           Action.ASK_HUMAN,
           "Authenticated task intent or complete input evidence is missing; a human must review the exact operation.",
@@ -179,6 +209,33 @@ public final class PolicyApprovalReviews implements ApprovalReviews {
           bot);
     return decision(
         bot.approved() ? Action.ALLOW : Action.ASK_HUMAN, bot.reason(), policy, ids, reviewed, bot);
+  }
+
+  private static Action unresolvedAction(ApprovalIntent intent) {
+    return intent.securityFileMutation() ? Action.REJECT : Action.ASK_HUMAN;
+  }
+
+  private static String unresolvedReason(ApprovalIntent intent, String ordinaryReason) {
+    return intent.securityFileMutation()
+        ? "Security file changes require SECURITY to verify the explicit authenticated request."
+        : ordinaryReason;
+  }
+
+  private static boolean hasUnresolvedPathRestrictions(
+      ApprovalIntent intent, List<ApprovalPolicy.Rule> rules) {
+    // The remote protocol identifies the serving machine and root, but gives no canonical
+    // file identity. A named alias cannot use standing intent to bypass exact account restrictions.
+    return intent.provider().startsWith(RemoteProvider.NAME + ":")
+        && rules.stream()
+            .anyMatch(
+                rule ->
+                    rule.kind() == ApprovalPolicy.Kind.FILE_READ
+                        && (rule.effect() == ApprovalPolicy.Effect.REJECT
+                            || rule.effect() == ApprovalPolicy.Effect.ASK_HUMAN)
+                        && (rule.cwd() != null || !rule.paths().isEmpty())
+                        && (rule.project() == null || rule.project().equals(intent.project()))
+                        && (rule.provider() == null || rule.provider().equals(intent.provider()))
+                        && !rule.matches(intent));
   }
 
   private static Decision decision(

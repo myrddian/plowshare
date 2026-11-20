@@ -73,10 +73,36 @@ public interface RunExtras {
       Commands.Port commands,
       TurnEnd end,
       RunHooks hooks,
-      OperationAuthority.Admission operation) {
+      OperationAuthority.Admission operation,
+      String authenticatedWebTask) {
 
     public Context {
       hooks = hooks == null ? RunHooks.NONE : hooks;
+    }
+
+    public Context(
+        AgentDefinition definition,
+        String conversationId,
+        String sessionId,
+        Transcript transcript,
+        Home home,
+        String callerHandle,
+        Commands.Port commands,
+        TurnEnd end,
+        RunHooks hooks,
+        OperationAuthority.Admission operation) {
+      this(
+          definition,
+          conversationId,
+          sessionId,
+          transcript,
+          home,
+          callerHandle,
+          commands,
+          end,
+          hooks,
+          operation,
+          null);
     }
 
     public Context(

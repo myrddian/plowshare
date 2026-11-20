@@ -76,28 +76,39 @@ export function installApprovalControls(
         pending.has(row.id) || state().answeringApprovals?.includes(row.id);
       const disabled = busy || (state().mode === 'live' && !state().connected);
       const budget = row.budget;
-      const title = row.file
-        ? 'File operation approval'
-        : budget === undefined
-          ? 'Command approval'
-          : 'Budget extension approval';
-      const subject = row.file
-        ? row.file.provider
-        : budget === undefined
-          ? row.side
-          : 'Continue the same work';
-      const details = row.file
-        ? `${row.file.kind} ${row.file.paths.join(' → ')}\nInput SHA-256: ${row.file.inputDigest}\n${row.file.inputPreview ?? 'Input is too large to preview; inspect the original call in Trajectory before approving.'}`
-        : budget === undefined
-          ? (row.commands ?? [row.command])
-              .map((command) => command.join(' '))
-              .join('\n')
-          : `${budget.calls} additional model calls · ${budget.steps} additional steps`;
-      const effect = row.file
-        ? 'Approval allows this exact file operation once.'
-        : budget === undefined
-          ? 'Approval allows this command once.'
-          : 'Approval extends the original allowance once; history and prior spending are retained.';
+      const web = row.web;
+      const title = web
+        ? 'Web request approval'
+        : row.file
+          ? 'File operation approval'
+          : budget === undefined
+            ? 'Command approval'
+            : 'Budget extension approval';
+      const subject = web
+        ? web.verb === 'SEARCH'
+          ? 'Web search'
+          : 'Web fetch'
+        : row.file
+          ? row.file.provider
+          : budget === undefined
+            ? row.side
+            : 'Continue the same work';
+      const details = web
+        ? `${web.target}\n${web.verb === 'SEARCH' ? `Page ${web.page ?? 1}, size ${web.pageSize ?? 10}, maximum ${web.max ?? 30}` : `Offset ${web.offset ?? 0}`}\nRequest SHA-256 ${web.inputDigest}`
+        : row.file
+          ? `${row.file.kind} ${row.file.paths.join(' → ')}\nInput SHA-256: ${row.file.inputDigest}\n${row.file.inputPreview ?? 'Input is too large to preview; inspect the original call in Trajectory before approving.'}`
+          : budget === undefined
+            ? (row.commands ?? [row.command])
+                .map((command) => command.join(' '))
+                .join('\n')
+            : `${budget.calls} additional model calls · ${budget.steps} additional steps`;
+      const effect = web
+        ? 'Approval allows this exact web request once.'
+        : row.file
+          ? 'Approval allows this exact file operation once.'
+          : budget === undefined
+            ? 'Approval allows this command once.'
+            : 'Approval extends the original allowance once; history and prior spending are retained.';
       return `<section class="command-approval" data-approval-prompt="${esc(row.id)}" aria-label="${title}"><strong class="section-label">${icon('shield')}Approval requested · ${esc(subject)}${context ? ` · ${esc(context)}` : ''}</strong><pre>${esc(details)}</pre><p>${esc(row.cwd)}${row.reason ? ` · ${esc(row.reason)}` : ''}</p><div class="approval-actions"><button data-approval="${esc(row.id)}" data-decision="once" ${disabled ? 'disabled' : ''}>${icon('check')}${busy ? 'Recording…' : 'Approve'}</button><button data-approval="${esc(row.id)}" data-decision="deny" ${disabled ? 'disabled' : ''}>${icon('close')}Deny</button><span>${effect}</span></div>${errors.has(row.id) ? `<p class="approval-error" role="alert">${esc(errors.get(row.id))}</p>` : ''}</section>`;
     },
   };
