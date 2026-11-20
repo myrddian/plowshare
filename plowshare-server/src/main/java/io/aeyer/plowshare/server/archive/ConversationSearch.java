@@ -30,13 +30,30 @@ import java.util.stream.Collectors;
 public final class ConversationSearch implements UsageAware {
   public static final int CANDIDATES = 200;
 
-  /** {@code totalMeaning} of a lexical answer whose repository search did not count every match. */
+  /**
+   * {@code totalMeaning} of a truncated lexical answer from {@link LexicalEngine#PASSAGES_PRUNED}:
+   * the search skipped matches that could not reach the requested page, so the total is a lower
+   * bound that can grow on a later page.
+   */
   public static final String LOWER_BOUND_TOTAL =
       "lower bound on distinct matching passage groups; lower-ranked matches were not counted";
+
+  /**
+   * {@code totalMeaning} of a truncated lexical answer from an engine that counts every match: more
+   * entries matched than the repository groups. The total is the same on every page, pages past it
+   * are empty, and the matches ranked below the grouped ones cannot be reached by paging.
+   */
+  public static final String GROUPING_WINDOW_TOTAL =
+      "distinct passage groups among the best-ranked matching entries; more entries matched than"
+          + " are grouped, and lower-ranked matches are not counted or reachable by paging";
 
   private static final String LOWER_BOUND_COUNTS =
       "lower-ranked lexical matches were not counted, so the lexical group total and source"
           + " counts are lower bounds; ";
+
+  private static final String GROUPING_WINDOW_COUNTS =
+      "more entries matched than the lexical search groups, so the lexical group total and"
+          + " source counts cover only the best-ranked matches; ";
   private static final int WINDOWS = 128;
   private UsageOwners usageOwners = UsageOwners.NONE;
   private final ConversationSearchRepository entries;
@@ -256,7 +273,7 @@ public final class ConversationSearch implements UsageAware {
           readPhase(home, () -> lexical(home, question, skip, most, conversation, includeInputs));
       var view = LogSearchView.of(found.page(), skip, most);
       boolean bounded = found.truncated();
-      // A default request keeps its original shape while its total is exact. A lower bound must
+      // A default request keeps its original shape while its total is exact. A bounded total must
       // not travel as a bare number, so a truncated answer carries the metadata regardless.
       if (requested == null && !bounded) return view;
       return new LogSearchView(
@@ -268,7 +285,7 @@ public final class ConversationSearch implements UsageAware {
           new LogSearchView.Retrieval(
               mode,
               mode,
-              bounded ? LOWER_BOUND_TOTAL : "distinct matching passage groups",
+              bounded ? truncatedTotal() : "distinct matching passage groups",
               null,
               bounded,
               !bounded,
@@ -277,11 +294,14 @@ public final class ConversationSearch implements UsageAware {
               null,
               0,
               "Scoped BM25 (k1=1.2, b=0.75); repeated excerpts grouped before pagination; "
-                  + (bounded ? LOWER_BOUND_COUNTS : "")
+                  + (bounded ? truncatedCounts() : "")
                   + inputSelection(includeInputs)));
     }
     // Resolved only past the lexical branch: lexical retrieval spends no embedding, and every
     // default request now passes through here, so it must not pay for an owner it never charges.
+    // Resolving an owner looks the project up by name and registers a name it does not find, so
+    // an explicit lexical search naming an unknown project no longer creates that project row;
+    // semantic and hybrid searches still do.
     if (owner == null || owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED)
       owner = usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY);
     if (snapshot != null) {
@@ -407,7 +427,7 @@ public final class ConversationSearch implements UsageAware {
                   (approximate
                           ? "Scoped BM25 and indexed passage candidates reranked at full precision; ANN recall is approximate; duplicate groups and source counts cover only the candidate window; "
                           : "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; ")
-                      + (lexicalBounded ? LOWER_BOUND_COUNTS : "")
+                      + (lexicalBounded ? truncatedCounts() : "")
                       + "hybrid RRF (k=60). Evidence is quoted data; "
                       + inputSelection(includeInputs));
           var window =
@@ -432,6 +452,19 @@ public final class ConversationSearch implements UsageAware {
           }
           return page(window, skip, most, false);
         });
+  }
+
+  /**
+   * What a truncated lexical total means, from the engine that produced it. Only the two passage
+   * engines can truncate: pruning yields a lower bound that moves with the page, and counting every
+   * match yields the stable total of the repository's grouping window.
+   */
+  private String truncatedTotal() {
+    return engine == LexicalEngine.PASSAGES_PRUNED ? LOWER_BOUND_TOTAL : GROUPING_WINDOW_TOTAL;
+  }
+
+  private String truncatedCounts() {
+    return engine == LexicalEngine.PASSAGES_PRUNED ? LOWER_BOUND_COUNTS : GROUPING_WINDOW_COUNTS;
   }
 
   private static String inputSelection(boolean includeInputs) {

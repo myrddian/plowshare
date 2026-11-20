@@ -1034,34 +1034,53 @@ class PassageSearchTest {
   }
 
   /**
-   * Which questions are exact however many entries match. Only a question that parses to one plain
-   * lexeme is answered from postings alone, with no grouping window. The same word twice, and a
+   * Which questions are exact however many entries match, and that the flag is what makes them so.
+   * A question that parses to one plain lexeme is answered from postings alone, with no grouping
+   * window: quoting the word or adding stop words leaves it one lexeme. The same word twice, and a
    * token PostgreSQL stores as several lexemes, are scored as multi-lexeme questions: with more
    * matching entries than the window they are marked truncated and counted inside it.
+   *
+   * <p>The word's frequency and the entries' lengths vary, so that a search allowed to skip matches
+   * has postings it can skip. On a corpus where every entry scores the same there is no threshold
+   * to prune by, and counting every match would be indistinguishable from pruning.
    */
   @Test
   void onlyAQuestionOfOnePlainLexemeIsExactBeyondTheGroupingWindow() {
-    int matching = EntryStore.MOST_GROUPED_ENTRIES + 300;
+    int matching = EntryStore.MOST_GROUPED_ENTRIES + 500;
     jdbc.update(
         "INSERT INTO entries(conversation_id,ordinal,turn_ordinal,kind,role,content)"
-            + " SELECT ?, n, 1, 'utterance', 'user', 'common up-to-date unique' || n"
+            + " SELECT ?, n, 1 + n % 5, 'utterance', 'user',"
+            + " 'up-to-date ' || repeat('marker ', 1 + n % 7) || 'unique' || n || ' '"
+            + " || repeat('filler' || n % 13 || ' ', (n * 37) % 211)"
             + " FROM generate_series(1, ?) n",
-        conversation,
-        matching);
+        conversation, matching);
 
-    BoundedLogSearch plain = entries.searchBounded(Home.global(), "common", 0, 10, null, true);
-    assertFalse(plain.truncated());
-    assertEquals(matching, plain.page().total());
-    assertEquals(
-        5,
-        entries
-            .searchBounded(Home.global(), "common", matching - 5, 10, null, true)
-            .page()
-            .hits()
-            .size(),
-        "the last page of an exact answer is reachable");
+    for (String question : List.of("marker", "\"marker\"", "the marker")) {
+      BoundedLogSearch counted = entries.searchBounded(Home.global(), question, 0, 10, null, true);
+      assertFalse(counted.truncated(), question);
+      assertEquals(matching, counted.page().total(), question);
+      assertEquals(
+          5,
+          entries
+              .searchBounded(Home.global(), question, matching - 5, 10, null, true)
+              .page()
+              .hits()
+              .size(),
+          "the last page of an exact answer is reachable: " + question);
 
-    for (String question : List.of("common common", "up-to-date")) {
+      // Allowed to skip matches, the same question returns the same page and counts far fewer.
+      BoundedLogSearch pruned = entries.searchBounded(Home.global(), question, 0, 10, null, false);
+      assertTrue(pruned.truncated(), question);
+      assertTrue(
+          pruned.page().total() < matching / 10,
+          question + " pruned still counted " + pruned.page().total());
+      assertEquals(
+          positionsAndRanks(counted.page().hits()),
+          positionsAndRanks(pruned.page().hits()),
+          question);
+    }
+
+    for (String question : List.of("marker marker", "up-to-date")) {
       BoundedLogSearch windowed = entries.searchBounded(Home.global(), question, 0, 10, null, true);
       assertTrue(windowed.truncated(), question);
       assertEquals(EntryStore.MOST_GROUPED_ENTRIES, windowed.page().total(), question);
@@ -1144,8 +1163,8 @@ class PassageSearchTest {
 
   /**
    * The served path end to end: a default request reaches this search through the retrieval
-   * service, a truncated answer says its counts are lower bounds, and the {@code legacy} engine is
-   * the original search with exact counts and the original response.
+   * service, a truncated answer says its counts cover the grouping window, and the {@code legacy}
+   * engine is the original search with exact counts and the original response.
    */
   @Test
   void aDefaultRequestIsServedByThePassageSearchAndTheLegacyEngineRestoresExactCounts() {
@@ -1174,7 +1193,7 @@ class PassageSearchTest {
 
     assertTrue(bounded.retrieval().truncated());
     assertFalse(bounded.retrieval().complete());
-    assertEquals(ConversationSearch.LOWER_BOUND_TOTAL, bounded.retrieval().totalMeaning());
+    assertEquals(ConversationSearch.GROUPING_WINDOW_TOTAL, bounded.retrieval().totalMeaning());
     assertEquals(1, bounded.total());
     assertEquals(EntryStore.MOST_GROUPED_ENTRIES, bounded.hits().getFirst().sourceCount());
     assertEquals(EntryStore.MOST_GROUPED_ENTRIES + 5, bounded.reach().searched());

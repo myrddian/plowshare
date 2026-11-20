@@ -230,8 +230,32 @@ await test('conversation search presents a truncated total as a lower bound and 
     /^Entries 0 to 0 of at least 1 in the global tier matching/,
   );
   // The page reached the counted total, which is not the end when the count is a lower bound.
-  assert.match(bounded, /The count is a lower bound/);
-  assert.match(bounded, /the same question and offset=1/);
+  assert.match(
+    bounded,
+    /The count is a lower bound, so offset=1 may hold more/,
+  );
+  assert.match(bounded, /the same question and offset=1\./);
+  assert.match(
+    bounded,
+    /An empty answer there means the remainder cannot be reached by paging, and the question should be narrowed\./,
+  );
+  // The server's free text does not choose the wording: any truncated total reads the same.
+  assert.equal(
+    conversations.searched(
+      {
+        ...page,
+        retrieval: {
+          ...retrieval,
+          totalMeaning:
+            'distinct passage groups among the best-ranked matching entries',
+        },
+      },
+      'retry',
+      null,
+      0,
+    ),
+    bounded,
+  );
   const inside = conversations.searched(
     { ...page, total: 40, retrieval },
     'retry',
@@ -257,9 +281,34 @@ await test('conversation search presents a truncated total as a lower bound and 
     null,
     60,
   );
-  assert.match(pastBounded, /at least 3 matching entries were counted/);
-  assert.match(pastBounded, /more may exist/);
-  assert.doesNotMatch(pastBounded, /this holds 3|the last is at offset/);
+  assert.match(
+    pastBounded,
+    /^There is nothing at offset 60: at least 3 matching entries were counted, the last counted entry is at offset 2, and the list is not empty\./,
+  );
+  assert.match(pastBounded, /more may match than were counted/);
+  assert.match(pastBounded, /the remainder cannot be reached by paging/);
+  assert.match(pastBounded, /offset=0 for the beginning\.$/);
+  assert.doesNotMatch(pastBounded, /this holds 3/);
+  // Byte-identical to the original sentence when the total is exact, with or without metadata.
+  assert.equal(
+    pastExact,
+    'There is nothing at offset 60: this holds 3 matching entries, the last is at offset 2, and the list is not empty. Call conversation_search again with offset=0 for the beginning.',
+  );
+  assert.equal(
+    conversations.searched(
+      {
+        ...page,
+        hits: [],
+        total: 3,
+        offset: 60,
+        retrieval: { ...retrieval, truncated: false, complete: true },
+      },
+      'retry',
+      null,
+      60,
+    ),
+    pastExact,
+  );
 });
 await test('web content remains quoted and embedded provider refusal is explicit', () => {
   const refused = web.searched({

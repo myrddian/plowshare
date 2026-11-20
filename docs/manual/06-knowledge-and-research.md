@@ -188,10 +188,10 @@ corroboration. Read original sources through their authorized owning APIs.
 ```
 
 `plowshare.retrieval.lexical-engine` selects the lexical conversation search: `passages`
-(default), `passages-pruned`, or `legacy`, the original search, kept as a rollback; any
-other value fails startup. `passages` gives exact `total` and `sourceCount` values for a
-question of one plain lexeme, and for any other question unless more than 2,000 entries
-match it; the answer then reports `retrieval.truncated: true` and counts the groups among
+(default, also for a blank value), `passages-pruned`, or `legacy`, the original search,
+kept as a rollback; any other value fails startup. `passages` gives exact `total` and
+`sourceCount` values for a question of one plain lexeme, and for any other question
+unless more than 2,000 entries match it; the answer then reports `retrieval.truncated: true` and counts the groups among
 the 2,000 best, with stable paging up to that total. `passages-pruned` trades exact totals
 for speed: a truncated total can be little more than the page. The MCP tool reports a
 truncated total as "at least N"; Desktop still pages by `total`, so leave

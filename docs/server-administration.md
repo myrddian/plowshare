@@ -1137,8 +1137,9 @@ ERROR diagnostics; recovered/expected warning conditions remain WARN.
 ### Conversation lexical engine
 
 `plowshare.retrieval.lexical-engine` (`PLOWSHARE_RETRIEVAL_LEXICAL_ENGINE`) selects the
-lexical conversation search. Any value but these three fails startup; a change needs a
-restart and no schema change or rebuild.
+lexical conversation search. Values are trimmed and compared without regard to case; an
+unset or blank value selects `passages`, and any other value fails startup. A change needs
+a restart and no schema change or rebuild.
 
 - `passages` (default) reads the stored passages and postings added by V277/V278 and counts
   every match. A lexical `total` and per-hit `sourceCount` are exact for a question of one

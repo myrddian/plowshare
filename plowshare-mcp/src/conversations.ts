@@ -120,7 +120,9 @@ export function searched(
     total = number(found['total']),
     hits = array(found['hits']).map((value) => record(value)),
     // The server marks a total it did not finish counting. It is then a lower bound, and the
-    // sentences below must not present it as the number of matches or as the end of them.
+    // sentences below must not present it as the number of matches or as the end of them. Only
+    // this flag is read: the wording holds whether the total can still grow with the offset or
+    // is final with unreachable matches below it, which the server's free text is not parsed for.
     bounded = found.retrieval?.truncated === true;
   if (total === 0)
     return (
@@ -129,7 +131,7 @@ export function searched(
     );
   if (!hits.length)
     return bounded
-      ? `There is nothing at offset ${offset}: at least ${total} matching entries were counted, and the list is not empty. The search did not count every match, so more may exist below those it ranked; they are not reachable by a larger offset, and a narrower question is the way to them. Call conversation_search again with offset=0 for the beginning.`
+      ? `There is nothing at offset ${offset}: at least ${total} matching entries were counted, the last counted entry is at offset ${total - 1}, and the list is not empty. The count is a lower bound, so more may match than were counted; an empty answer here means the remainder cannot be reached by paging, and a narrower question is the way to it. Call conversation_search again with offset=0 for the beginning.`
       : past(offset, total, 'conversation_search', 'matching entries');
   const last = offset + hits.length - 1;
   let out = `Entries ${offset} to ${last} of ${bounded ? 'at least ' : ''}${total} in ${home(project)} matching ${line(question)}, counting from 0 as offset does, closest first. Read a conversation a hit is in with conversation_trajectory.\n`;
@@ -148,7 +150,7 @@ export function searched(
     out +
     reach(found['reach'], false) +
     (bounded && last >= total - 1
-      ? `\n\nThe count is a lower bound: the search did not count every match, so more may exist than the ${total} counted. Call conversation_search again with the same question and offset=${last + 1} to look for more; if that answers with nothing, the rest is not reachable by offset and a narrower question is the way to it.`
+      ? `\n\nThe count is a lower bound, so offset=${last + 1} may hold more: call conversation_search again with the same question and offset=${last + 1}. An empty answer there means the remainder cannot be reached by paging, and the question should be narrowed.`
       : more(last, total, 'conversation_search', 'the same question and '))
   );
 }

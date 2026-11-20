@@ -34,7 +34,7 @@ the original matching syntax, scope, reach counts and response shape, and carry 
 retrieval metadata. When the lexical engine did not count every match (see
 [stored lexical passages](#stored-lexical-passages-and-postings)), a lexical answer,
 default or explicit, carries `retrieval` with `truncated: true`, `complete: false` and a
-`totalMeaning` that says the total is a lower bound; the page, its order and its ranks
+`totalMeaning` that says what the total covers; the page, its order and its ranks
 are still exact. With the default engine that happens only when more than 2,000 entries
 match a question that is not one plain lexeme, and `total` is then the number of groups
 among the 2,000 best, the same on every page. The MCP `conversation_search` tool reports
@@ -178,19 +178,21 @@ and `EntryStore.searchPassages` reads them. It is the served lexical engine: def
 explicit lexical requests and the BM25 half of hybrid search reach it through
 `ConversationSearchRepository.searchBounded`.
 
-`plowshare.retrieval.lexical-engine` selects the engine at startup. Any other value fails
-startup; a change needs a restart and no schema change, and the projections stay maintained
-under every value.
+`plowshare.retrieval.lexical-engine` selects the engine at startup. Values are trimmed and
+compared without regard to case; an unset or blank value selects `passages`, and any other
+value fails startup. A change needs a restart and no schema change, and the projections
+stay maintained under every value.
 
 - `passages` (the default) counts every match: it takes the exhaustive form of each route
-  below. A question that parses to one plain lexeme (one unquoted word, not repeated and
-  not negated, that PostgreSQL stores as a single lexeme) has no window and is always
-  exact. Any other question, including the same word twice (`common common`) and a
-  compound token stored as several lexemes (`up-to-date`), is exact unless more than 2,000
-  entries match it; then the answer is marked truncated and `total` and `sourceCount`
-  count only the 2,000 best-scoring entries. That window is chosen by rank alone, so the
-  total is the same on every page and offset pages up to it are consecutive,
-  non-overlapping slices of one order.
+  below. A question that parses to one plain lexeme has no window and is always exact:
+  one word that PostgreSQL stores as a single lexeme, also when it is quoted or
+  accompanied only by stop words (`marker`, `"marker"`, `the marker`). Any other question,
+  including the same word twice (`marker marker`) and a compound token stored as several
+  lexemes (`up-to-date`), is exact unless more than 2,000 entries match it; then the
+  answer is marked truncated and `total` and `sourceCount` count only the 2,000
+  best-scoring entries. That window is chosen by rank alone, so the total is the same on
+  every page and offset pages up to it are consecutive, non-overlapping slices of one
+  order.
 - `passages-pruned` lets the search skip matches that cannot reach the requested page. It
   is faster on common words, and a truncated `total` is then a lower bound that can be
   little more than the page. Do not enable it until every client that pages by `total`
@@ -304,10 +306,18 @@ than the page, and a group's source count and references omit copies that were n
 A phrase cut by a passage boundary still matches; its excerpt shows one side of the cut. A
 window far beyond the answer is an empty page.
 
-A truncated lexical answer says so on the wire. `retrieval.truncated` is true,
-`retrieval.complete` is false and `retrieval.totalMeaning` names the total a lower bound,
-including on a default request that would otherwise carry no `retrieval`. In hybrid mode the
-flag joins the other reasons a candidate window is marked truncated.
+A truncated lexical answer says so on the wire, including on a default request that would
+otherwise carry no `retrieval`: `retrieval.truncated` is true, `retrieval.complete` is
+false, and `retrieval.totalMeaning` and `retrieval.provenance` say which truncation it is.
+
+- Under `passages`: "distinct passage groups among the best-ranked matching entries; more
+  entries matched than are grouped, and lower-ranked matches are not counted or reachable
+  by paging". The total is final: the same on every page, with empty pages past it.
+- Under `passages-pruned`: "lower bound on distinct matching passage groups; lower-ranked
+  matches were not counted". The total can grow as the offset advances.
+
+In hybrid mode the flag joins the other reasons a candidate window is marked truncated, and
+the provenance carries the same distinction.
 
 Where an answer differs from the legacy search:
 
@@ -421,7 +431,7 @@ Known costs, none of which changes a result:
   it may read a conversation's every entry through one of them; the legacy search has the
   same exposure.
 
-Costs to check before adoption:
+Costs of the projections, to watch as an archive grows:
 
 - **Size.** The postings are the largest object this search owns: 1.7 GB for 9.7 million
   postings at 200,000 of those entries, beside 330 MB of entries. The lexeme counts were 2.0
