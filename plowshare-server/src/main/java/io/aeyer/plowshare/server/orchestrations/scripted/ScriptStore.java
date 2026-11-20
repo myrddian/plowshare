@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.aeyer.plowshare.protocol.Orchestration.CheckpointRepair;
 import io.aeyer.plowshare.server.llm.ModelOutputRecovery.Diagnostic;
 import io.aeyer.plowshare.server.todos.TodoItem;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -103,7 +104,20 @@ public interface ScriptStore {
       String result,
       boolean started,
       String arguments,
-      UUID retryOfReport) {
+      UUID retryOfReport,
+      WebResult webReview) {
+    public Step(
+        int sequence,
+        String hash,
+        Command command,
+        String raw,
+        String result,
+        boolean started,
+        String arguments,
+        UUID retryOfReport) {
+      this(sequence, hash, command, raw, result, started, arguments, retryOfReport, null);
+    }
+
     public Step(
         int sequence,
         String hash,
@@ -119,6 +133,27 @@ public interface ScriptStore {
       if (sequence < 0) throw new IllegalArgumentException("invalid script sequence");
       hash = identity(hash, "source hash");
       Objects.requireNonNull(command, "command");
+    }
+  }
+
+  /**
+   * Host-owned receipt for a held result. It is stored with the result and never enters script
+   * input.
+   */
+  record WebResult(
+      String digest,
+      String policy,
+      String reviewId,
+      String rule,
+      Instant expires,
+      boolean withheld,
+      boolean notifyOwner) {
+    public WebResult {
+      if (digest == null
+          || !digest.matches("[0-9a-f]{64}")
+          || (!withheld && (policy == null || reviewId == null || expires == null))
+          || (notifyOwner && (withheld || rule == null)))
+        throw new IllegalArgumentException("Invalid held web result receipt");
     }
   }
 
@@ -252,6 +287,10 @@ public interface ScriptStore {
   Optional<String> delegateResult(String conversation, int sequence);
 
   void executed(String conversation, int sequence, String raw);
+
+  default void executedWeb(String conversation, int sequence, String held, WebResult review) {
+    throw new UnsupportedOperationException("Script web review receipts are unavailable");
+  }
 
   void retryReadinessObserver(String conversation, int sequence);
 

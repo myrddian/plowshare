@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.FileAccess;
+import io.aeyer.plowshare.protocol.search.Verb;
 import io.aeyer.plowshare.server.approvals.SecurityPolicyFiles;
 import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectNames;
@@ -35,6 +36,10 @@ public final class ProjectConfigurations {
   }
 
   String securityGuidance(String project, Runnable requireActive) {
+    return webSecurityGuidance(project, null, requireActive);
+  }
+
+  String webSecurityGuidance(String project, Verb operation, Runnable requireActive) {
     return location(project)
         .filter(at -> at.root() != null)
         .map(
@@ -48,7 +53,8 @@ public final class ProjectConfigurations {
                       throw new IllegalArgumentException(
                           "Security guidance is outside the workspace fence");
                     return source.read(name);
-                  });
+                  },
+                  operation);
             })
         .orElse("");
   }

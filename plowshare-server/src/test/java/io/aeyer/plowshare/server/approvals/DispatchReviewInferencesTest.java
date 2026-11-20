@@ -81,6 +81,29 @@ class DispatchReviewInferencesTest {
   }
 
   @Test
+  void quotedWebReviewUsesItsOwnTransportAndTheExistingAllowance() {
+    Budget budget = Budget.of(2);
+    ReviewModelTransport ordinary = mock(ReviewModelTransport.class);
+    ReviewModelTransport web =
+        (request, cancelled) -> {
+          assertTrue(request.tools().isEmpty());
+          request.authorization().require();
+          return completion(List.of());
+        };
+    try (var dispatch =
+        new DispatchReviewInferences(ordinary, web, calls, 1, Duration.ofSeconds(1))) {
+      assertEquals(
+          "decision",
+          dispatch
+              .withinWeb(operation, budget, UsageAttribution.LEGACY, () -> {})
+              .consult(definition, "Review", "quoted evidence", work(Duration.ofSeconds(2))));
+    }
+    verifyNoInteractions(ordinary);
+    verify(calls).claimed(eq(operation), any());
+    assertEquals(1, budget.spent());
+  }
+
+  @Test
   void timeoutDoesNotReleasePhysicalCapacityOrReplayTheAttempt() throws Exception {
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);

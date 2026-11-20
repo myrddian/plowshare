@@ -6,6 +6,7 @@ import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
 import io.aeyer.plowshare.server.agents.OrchestrationResolver;
+import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -159,7 +160,9 @@ public class OrchestrationFrames implements FrameArea {
                 handle,
                 asking.sessionId(),
                 null,
-                0),
+                0,
+                null,
+                Speaker.person(handle)),
             key,
             identity.toString());
     return new Outcome(

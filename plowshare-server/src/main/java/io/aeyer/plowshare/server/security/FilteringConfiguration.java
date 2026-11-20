@@ -27,7 +27,12 @@ public class FilteringConfiguration {
   }
 
   @Bean
-  public ChatFiltering chatFiltering(FilteringProperties properties, MessageReview review) {
-    return new FilteredChat(new LocalTextFilter(properties), review);
+  public TextFiltering localTextFiltering(FilteringProperties properties) {
+    return new LocalTextFilter(properties);
+  }
+
+  @Bean
+  public ChatFiltering chatFiltering(TextFiltering local, MessageReview review) {
+    return new FilteredChat(local, review);
   }
 }

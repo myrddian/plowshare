@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.search;
 import io.aeyer.plowshare.protocol.search.AnswerStatus;
 import io.aeyer.plowshare.protocol.search.SearchAnswer;
 import io.aeyer.plowshare.protocol.search.SearchAsk;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -136,6 +137,10 @@ public class SearchLadder {
    *     checked here so that which one of them happens does not depend on the registry
    */
   public LadderResult run(String query, int max, List<String> ignoredDomains) {
+    return run(query, max, ignoredDomains, null);
+  }
+
+  public LadderResult run(String query, int max, List<String> ignoredDomains, WebRequestWork work) {
     if (query == null || query.isBlank()) {
       throw new IllegalArgumentException("query must not be blank");
     }
@@ -156,6 +161,7 @@ public class SearchLadder {
     List<String> notes = new ArrayList<>();
 
     for (String providerKey : ladder) {
+      if (work != null && work.stopped()) return stopped();
       Optional<Registration> found = store.find(providerKey);
       if (found.isEmpty()) {
         notes.add(providerKey + " is not registered as a search provider.");
@@ -174,7 +180,9 @@ public class SearchLadder {
         continue;
       }
 
-      SearchAnswer answer = invoke(registration, query, max, ignoredDomains);
+      if (work != null && work.stopped()) return stopped();
+      SearchAnswer answer = invoke(registration, query, max, ignoredDomains, work);
+      if (work != null && work.stopped()) return stopped();
       if (answer.status() == AnswerStatus.SUCCESS) {
         store.recordOutcome(providerKey, AnswerStatus.SUCCESS, null);
         return new LadderResult(providerKey, answer.hits(), null);
@@ -209,6 +217,10 @@ public class SearchLadder {
     return new LadderResult(null, List.of(), refusal);
   }
 
+  private static LadderResult stopped() {
+    return new LadderResult(null, List.of(), "Search work expired or was cancelled.");
+  }
+
   /** A provider controls part of a refusal, so it gets one bounded log line. */
   private static String diagnostic(String refusal) {
     String oneLine = refusal.replaceAll("\\s+", " ").trim();
@@ -239,11 +251,12 @@ public class SearchLadder {
    * Normalising both a null answer and a null status here, in the one place a raw provider answer
    * enters this class, means {@code run} never has to guard against either again.
    */
-  private SearchAnswer invoke(Registration at, String query, int max, List<String> ignoredDomains) {
+  private SearchAnswer invoke(
+      Registration at, String query, int max, List<String> ignoredDomains, WebRequestWork work) {
     SearchAsk ask = new SearchAsk(UUID.randomUUID().toString(), query, max, ignoredDomains);
     SearchAnswer answer;
     try {
-      answer = provider.search(at, ask);
+      answer = work == null ? provider.search(at, ask) : provider.search(at, ask, work);
     } catch (RuntimeException escaped) {
       String detail =
           escaped.getMessage() == null || escaped.getMessage().isBlank()

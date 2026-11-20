@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.search;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.search.AnswerStatus;
@@ -12,12 +13,16 @@ import io.aeyer.plowshare.protocol.search.ProviderFacts;
 import io.aeyer.plowshare.protocol.search.SearchAnswer;
 import io.aeyer.plowshare.protocol.search.SearchAsk;
 import io.aeyer.plowshare.protocol.search.Verb;
+import io.aeyer.plowshare.server.hooks.Deadline;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.SocketPolicy;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -66,6 +71,21 @@ class RemoteSearchProviderTest {
             512,
             domainExclusion);
     return new Registration(facts.providerKey(), stripped, facts, null, null, 0);
+  }
+
+  @Test
+  void remote_search_caps_the_http_call_at_the_managed_request_deadline() throws Exception {
+    try (var remote = new MockWebServer()) {
+      remote.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE));
+      remote.start();
+      var ask = new SearchAsk("r1", "q", 10, List.of());
+      var registration = registrationAt(remote);
+      var work = new WebRequestWork(Deadline.after(Duration.ofMillis(300)), () -> false);
+      SearchAnswer answer =
+          assertTimeout(Duration.ofMillis(1500), () -> provider.search(registration, ask, work));
+      assertEquals(AnswerStatus.FAILED, answer.status());
+      assertNotNull(remote.takeRequest(1, TimeUnit.SECONDS));
+    }
   }
 
   @Test

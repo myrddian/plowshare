@@ -111,6 +111,10 @@ public final class ApprovalDelivery implements ApprovalNotifications {
    * of them in the reason — where it runs, and why.
    */
   public static String question(RunApproval approval) {
+    if (approval.web() != null)
+      return "SECURITY asks for one web request. Open the approval to review its exact target and paging arguments. ["
+          + approval.id()
+          + "]";
     if (approval.file() != null)
       return "Approve "
           + approval.file().kind()

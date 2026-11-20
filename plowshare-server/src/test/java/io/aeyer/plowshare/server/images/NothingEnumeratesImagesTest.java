@@ -149,7 +149,6 @@ class NothingEnumeratesImagesTest {
             "document_rank",
             "document_retrieve",
             "document_search",
-            "fetch",
             "file_delete",
             "file_edit",
             "file_glob",
@@ -174,10 +173,11 @@ class NothingEnumeratesImagesTest {
             "result_list",
             "result_read",
             "run",
-            "search",
             "send_message",
             "todo_read",
-            "todo_write");
+            "todo_write",
+            "web_fetch",
+            "web_search");
     String why =
         "a tool has been added to what an agent may reach. If it can answer with"
             + " WHICH images exist, agent_run's permissive id rule stops being"

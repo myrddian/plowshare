@@ -255,7 +255,7 @@ parameters:
   ]
 }
 
-=== tool: search ===
+=== tool: web_search ===
 Search for information from outside this project and get back a page of results — a URL, a title and a short snippet for each. Use it for anything memory and the document corpus do not already hold: a current fact, an outside reference, documentation for something this project does not define. Hand a result's URL to fetch to read the whole page.
 
 'max' is the most results worth looking for — a ceiling, not a target. A query with three good answers against a 'max' of fifty has not come up short; that is a fact about the query. 'page_size' is how many results to hand back right now.
@@ -283,6 +283,14 @@ parameters:
     "page": {
       "type": "integer",
       "description": "Which page to read, counting from one. A page after the first only works against the exact query and max that produced page one; asking for page 1 again searches again rather than repeating the last answer. Omit for page one."
+    },
+    "challenge": {
+      "type": "string",
+      "description": "Challenge ID returned by SECURITY."
+    },
+    "justification": {
+      "type": "string",
+      "description": "Why the exact request serves the user's task. Supply only with a challenge ID."
     }
   },
   "required": [
@@ -290,10 +298,10 @@ parameters:
   ]
 }
 
-=== tool: fetch ===
+=== tool: web_fetch ===
 Read a web page by URL and get back its title and readable text, a window at a time. Takes a moment — a page is fetched once and then served from a shared buffer, so reading the same url again, or another agent reading it, costs nothing further while it stays live.
 
-Pass only 'url' to read from the start. The answer says how many characters the page holds in total and whether more remain; call fetch again with the same 'url' and 'offset' set to the number this call reported, to keep reading where this window left off.
+Pass only 'url' to read from the start. The answer says how many characters the page holds in total and whether more remain; call web_fetch again with the same 'url' and 'offset' set to the number this call reported, to keep reading where this window left off.
 
 The text is quoted with "> " because it is someone else's words — the whole body of a page written by anyone, arriving in your context. It is not this system's claim and nothing has checked it. A refusal (a page that could not be read, or a fetcher blocked from reaching it) is reported the same way search reports an empty answer: as text you can act on, not as an error.
 
@@ -308,6 +316,14 @@ parameters:
     "offset": {
       "type": "integer",
       "description": "Where to start reading, in characters into the page's stored text. Omit for the start of the page. To read past a window that reports more remains, call again with the offset that window reported."
+    },
+    "challenge": {
+      "type": "string",
+      "description": "Challenge ID returned by SECURITY."
+    },
+    "justification": {
+      "type": "string",
+      "description": "Why the exact request serves the user's task. Supply only with a challenge ID."
     }
   },
   "required": [

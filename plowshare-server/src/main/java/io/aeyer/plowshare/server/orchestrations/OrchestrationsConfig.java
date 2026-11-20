@@ -302,6 +302,7 @@ public class OrchestrationsConfig {
       AllowanceRepository allowances) {
     var scripts = new JdbcScriptStore(jdbc, informationReceipts);
     runtime.useScripts(scripts);
+    runtime.useOrchestrationWebTask(store::webTask);
     turn.usePendingReportRetry(
         conversation ->
             scripts

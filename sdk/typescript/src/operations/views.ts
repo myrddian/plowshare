@@ -4,7 +4,11 @@ import {
   type FileStoreReference,
 } from '../binding/filestores.ts';
 import { isList } from '../binding/values.ts';
-import type { BudgetExtension } from './administrative-replies.ts';
+import {
+  isWebApproval,
+  type ApprovalView,
+  type BudgetExtension,
+} from './administrative-replies.ts';
 import { commandEntry, type CommandEntry } from './conversation-replies.ts';
 // Shared domain readers. Unknown fields are tolerated; frontend rendering stays outside this module.
 import {
@@ -541,6 +545,7 @@ export interface Approval {
   readonly defaultPrefix: readonly string[];
   readonly budget?: BudgetExtension;
   readonly file?: FileApproval;
+  readonly web?: NonNullable<ApprovalView['web']>;
 }
 
 /** A list of strings, or nothing for anything that is not exactly that. */
@@ -595,6 +600,19 @@ function approvalIn(fields: Record<string, unknown>): Approval | undefined {
   const rawFile = fields['file'];
   if (rawFile !== undefined && !isFileApproval(rawFile)) return undefined;
   const file = isFileApproval(rawFile) ? rawFile : undefined;
+  const rawWeb = fields['web'];
+  if (rawWeb !== undefined && !isWebApproval(rawWeb)) return undefined;
+  const web = isWebApproval(rawWeb) ? rawWeb : undefined;
+  if (
+    web &&
+    (file ||
+      fields['budget'] != null ||
+      commands !== undefined ||
+      command?.length !== 0 ||
+      (fields['scope'] != null && fields['scope'] !== 'once') ||
+      fields['prefix'] != null)
+  )
+    return undefined;
   if (
     file &&
     (fields['budget'] != null ||
@@ -631,7 +649,8 @@ function approvalIn(fields: Record<string, unknown>): Approval | undefined {
     (command.length === 0 &&
       commands === undefined &&
       budget === undefined &&
-      file === undefined)
+      file === undefined &&
+      web === undefined)
   ) {
     return undefined;
   }
@@ -656,6 +675,7 @@ function approvalIn(fields: Record<string, unknown>): Approval | undefined {
     ...(prefix === undefined ? {} : { prefix }),
     defaultPrefix: wordsAt(fields, 'defaultPrefix') ?? [],
     ...(budget === undefined ? {} : { budget }),
+    ...(web === undefined ? {} : { web }),
     ...(file === undefined ? {} : { file }),
   };
 }

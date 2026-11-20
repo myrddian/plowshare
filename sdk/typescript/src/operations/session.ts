@@ -227,6 +227,7 @@ export function answeringApproval(
   decision: Decision,
   prefix?: readonly string[],
   fileDigest?: string,
+  webDigest?: string,
 ): Ask<typeof APPROVAL_ANSWER> {
   return {
     type: APPROVAL_ANSWER,
@@ -237,6 +238,7 @@ export function answeringApproval(
         ? { prefix: [...prefix] }
         : {}),
       ...(fileDigest === undefined ? {} : { fileDigest }),
+      ...(webDigest === undefined ? {} : { webDigest }),
     },
   };
 }

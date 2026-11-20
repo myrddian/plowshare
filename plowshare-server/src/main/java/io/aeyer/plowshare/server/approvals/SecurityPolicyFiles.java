@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.approvals;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.search.Verb;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -10,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -80,16 +82,23 @@ public final class SecurityPolicyFiles {
    * Workspace Markdown is reviewer evidence. Only the deployment format can define rule effects.
    */
   public static String workspace(Source source) {
-    return source.read(MAIN).map(text -> workspace(text, source)).orElse("");
+    return workspace(source, null);
   }
 
-  private static String workspace(String text, Source source) {
+  /** Load general guidance and the fragment selected by the reviewed web verb. */
+  public static String workspace(Source source, Verb operation) {
+    return source.read(MAIN).map(text -> workspace(text, source, operation)).orElse("");
+  }
+
+  private static String workspace(String text, Source source, Verb operation) {
     Document document = document(text);
     var guidance = new StringBuilder(document.body());
     if (document.frontmatter() != null) {
       var header = parse(document, WorkspaceHeader.class);
       validateHeader(header.version(), header.includes());
       for (String name : filenames(header.includes(), "md")) {
+        Verb web = webVerb(name);
+        if (web != null && web != operation) continue;
         guidance.append("\n\n").append(fragment(source, name));
         if (guidance.length() > 16000)
           throw new IllegalArgumentException(
@@ -109,9 +118,18 @@ public final class SecurityPolicyFiles {
     validateHeader(header.version(), header.includes());
     var rules = new ArrayList<>(Objects.requireNonNull(header.rules()));
     var guidance = new StringBuilder(document.body());
+    var web = new EnumMap<Verb, String>(Verb.class);
     for (String name : filenames(header.includes(), "(?:json|md)")) {
       String content = fragment(source, name);
       if (name.endsWith(".md")) {
+        Verb verb = webVerb(name);
+        if (verb != null) {
+          if (content.length() > 16000)
+            throw new IllegalArgumentException(
+                "Deployment web security guidance exceeds 16000 characters");
+          web.put(verb, content);
+          continue;
+        }
         guidance.append("\n\n").append(content);
         if (guidance.length() > 16000)
           throw new IllegalArgumentException(
@@ -128,7 +146,15 @@ public final class SecurityPolicyFiles {
     }
     // The same rule bounds and duplicate checks apply to all rule sources.
     var policy = new ApprovalPolicy(0, ApprovalPolicy.Mode.MANUAL, null, rules);
-    return new DeploymentSecurityPolicy(policy.rules(), guidance.toString().strip());
+    return new DeploymentSecurityPolicy(policy.rules(), guidance.toString().strip(), web);
+  }
+
+  private static Verb webVerb(String name) {
+    return switch (name) {
+      case "web-search.md" -> Verb.SEARCH;
+      case "web-fetch.md" -> Verb.FETCH;
+      default -> null;
+    };
   }
 
   private static Document document(String text) {

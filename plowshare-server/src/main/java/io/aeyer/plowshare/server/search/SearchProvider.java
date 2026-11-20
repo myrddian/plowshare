@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.search;
 
 import io.aeyer.plowshare.protocol.search.SearchAnswer;
 import io.aeyer.plowshare.protocol.search.SearchAsk;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 
 /**
  * The one thing dispatch does to a provider: hand it a question against one registered row, and get
@@ -26,4 +27,8 @@ import io.aeyer.plowshare.protocol.search.SearchAsk;
 public interface SearchProvider {
 
   SearchAnswer search(Registration at, SearchAsk ask);
+
+  default SearchAnswer search(Registration at, SearchAsk ask, WebRequestWork work) {
+    return search(at, ask);
+  }
 }

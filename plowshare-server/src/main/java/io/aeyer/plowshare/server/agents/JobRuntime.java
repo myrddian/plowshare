@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.ContainedProjects;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.protocol.search.Verb;
 import io.aeyer.plowshare.server.access.AccessRequest;
 import io.aeyer.plowshare.server.access.AuthorityAction;
 import io.aeyer.plowshare.server.access.InferenceCalls;
@@ -94,6 +95,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -104,6 +106,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
@@ -460,6 +463,9 @@ public final class JobRuntime {
     retained.workspaceRuns = workspaceRuns;
     retained.budgetRequests = budgetRequests;
     retained.budgetStack = budgetStack;
+    retained.webSecurity = webSecurity;
+    retained.webTaskEvidence = webTaskEvidence;
+    retained.orchestrationWebTask = orchestrationWebTask;
     return retained;
   }
 
@@ -779,6 +785,98 @@ public final class JobRuntime {
   private volatile RunApprovalStore approvals;
 
   private volatile ApprovalReviewSessions approvalReviewSessions;
+  private volatile WebToolSecurity webSecurity;
+  private volatile BiFunction<String, String, Optional<String>> webTaskEvidence =
+      (conversation, owner) -> Optional.empty();
+  private volatile BiFunction<String, String, Optional<String>> orchestrationWebTask =
+      (conversation, owner) -> Optional.empty();
+  private static final ThreadLocal<WebTask> WEB_TASK = new ThreadLocal<>();
+
+  private static final class WebTask {
+    private final String owner;
+    private final String text;
+    private WebToolSecurity.Session review;
+
+    private WebTask(String owner, String text) {
+      this.owner = owner;
+      this.text = text;
+    }
+  }
+
+  private WorkspaceExecution.Scope enterWebTask(
+      String owner, String utterance, Transcript transcript, boolean scripted) {
+    var previous = WEB_TASK.get();
+    String authenticated =
+        authenticatedApprovalTask(
+            transcript.speaker(), owner, utterance, transcript.inputProvenance());
+    if (transcript.origin() == Origin.ORCHESTRATION) {
+      authenticated = retainedWebTask(owner, transcript, scripted, authenticated);
+    }
+    if (authenticated == null
+        && previous != null
+        && transcript.origin() == Origin.DELEGATION
+        && Objects.equals(previous.owner, owner)) authenticated = previous.text;
+    var task = new WebTask(owner, authenticated);
+    WEB_TASK.set(task);
+    // Delegation is synchronous on the owning run thread. The child's model-generated
+    // handoff never becomes authenticated task evidence.
+    return () -> {
+      try {
+        if (task.review != null) task.review.closeChallenges();
+      } catch (RuntimeException recordingFailed) {
+        log.warn("Unanswered web authorization could not be recorded", recordingFailed);
+      } finally {
+        if (previous == null) WEB_TASK.remove();
+        else WEB_TASK.set(previous);
+      }
+    };
+  }
+
+  private String retainedWebTask(
+      String owner, Transcript transcript, boolean scripted, String currentTask) {
+    String conversation = transcript.conversationId();
+    if (webSecurity == null || owner == null || conversation == null)
+      return scripted ? null : currentTask;
+    requireLogReadable(conversation, owner);
+    var pinned = orchestrationWebTask.apply(conversation, owner);
+    if (!scripted) return pinned.orElse(currentTask);
+    if (pinned.isPresent()) return pinned.orElseThrow();
+    // Compatibility for direct starts that already recorded an authenticated JSON opening.
+    return webTaskEvidence
+        .apply(conversation, owner)
+        .flatMap(JobRuntime::scriptOpeningTask)
+        .orElse(null);
+  }
+
+  private static Optional<String> scriptOpeningTask(String opening) {
+    try {
+      return Optional.of(
+          ToolArguments.requireText(
+              ToolArguments.parse(opening, "web intent", "{\"request\":\"task\"}"),
+              "request",
+              "web intent",
+              "the authenticated request"));
+    } catch (ToolArguments.BadArguments invalid) {
+      return Optional.empty();
+    }
+  }
+
+  public void useOrchestrationWebTask(BiFunction<String, String, Optional<String>> evidence) {
+    orchestrationWebTask = Objects.requireNonNull(evidence);
+  }
+
+  private static String authenticatedWebTask(String owner) {
+    var task = WEB_TASK.get();
+    return task != null && Objects.equals(task.owner, owner) ? task.text : null;
+  }
+
+  void useWebToolSecurity(WebToolSecurity webSecurity) {
+    this.webSecurity = Objects.requireNonNull(webSecurity);
+  }
+
+  void useWebTaskEvidence(BiFunction<String, String, Optional<String>> evidence) {
+    webTaskEvidence = Objects.requireNonNull(evidence);
+  }
 
   public void useApprovalReviewSessions(ApprovalReviewSessions sessions) {
     approvalReviewSessions = Objects.requireNonNull(sessions);
@@ -2182,7 +2280,10 @@ public final class JobRuntime {
     // not let a failure of its own -- writing the harness's records -- replace
     // whatever this try block was already unwinding with.
     RuntimeException inFlight = null;
-    try (var budgetFrame = budgetStack.enter(definition, ownedTranscript, cap)) {
+    try (var webTask =
+            enterWebTask(
+                owner, userPrompt, ownedTranscript, ScriptProgram.isScript(definition.prompt()));
+        var budgetFrame = budgetStack.enter(definition, ownedTranscript, cap)) {
       budgetFrame.progress(
           restoredBudgetFrame.map(BudgetCheckpoint.Frame::steps).orElse(0),
           restoredBudgetFrame.map(BudgetCheckpoint.Frame::pending).orElse(List.of()));
@@ -2400,7 +2501,8 @@ public final class JobRuntime {
                 commands,
                 end,
                 runHooks,
-                operation));
+                operation,
+                authenticatedWebTask(owner)));
     if (extras == null) throw new IllegalStateException("script run extras are unavailable");
     if (extras.end() == null)
       extras =
@@ -2428,9 +2530,11 @@ public final class JobRuntime {
         (name, tool) ->
             tool instanceof AgentRunTool delegate
                 ? delegate.scripted()
-                : tool instanceof SearchTool search
-                    ? search.scripted()
-                    : tool instanceof TodoTools.Write write ? write.scripted() : tool);
+                : tool instanceof WebToolSecurity.Bound web
+                    ? web.scripted()
+                    : tool instanceof SearchTool search
+                        ? search.scripted()
+                        : tool instanceof TodoTools.Write write ? write.scripted() : tool);
     HookContext context = declared.holding(offered.keySet());
     String hash = ScriptProgram.sourceHash(definition.prompt());
     var head = scripts.head(conversation);
@@ -2623,6 +2727,7 @@ public final class JobRuntime {
       AgentTool tool = offered.get(name);
       if (tool == null)
         throw new IllegalStateException("script requested an ungranted tool: " + name);
+      if (tool instanceof WebToolSecurity.Bound web) web.beginInvocation(id);
       var pre = toolPre(activeHooks(route, harnessRun, skillChecks), context, name, arguments);
       pre.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
       if (pre.isDenied())
@@ -2695,6 +2800,36 @@ public final class JobRuntime {
           if (retainedInputs.isPresent() && tool instanceof InformationTool information) {
             raw =
                 usable(information.retryReport(pre.arguments(), home, retainedInputs.get()), name);
+          } else if (tool instanceof WebToolSecurity.Bound web) {
+            var reviewed =
+                runGate(
+                    web,
+                    pre.arguments(),
+                    home,
+                    context,
+                    (ignored, exact) -> ToolPre.allowed(exact));
+            var question = web.waitingApproval();
+            if (question.isPresent()) {
+              raw =
+                  awaitScriptWebApproval(
+                      web,
+                      question.orElseThrow(),
+                      id,
+                      reviewed.arguments(),
+                      home,
+                      transcript,
+                      session,
+                      owner,
+                      cancelled,
+                      end,
+                      context,
+                      activeHooks(route, harnessRun, skillChecks));
+            } else {
+              raw =
+                  reviewed.isDenied()
+                      ? web.refuse(reviewed.denied())
+                      : web.run(reviewed.arguments(), home);
+            }
           } else {
             raw =
                 usable(
@@ -2722,12 +2857,23 @@ public final class JobRuntime {
         } catch (AgentRunTool.ScriptedDelegateStopped stopped) {
           return stopped.outcome;
         }
-        scripts.executed(conversation, pending.sequence(), raw);
+        if (tool instanceof WebToolSecurity.Bound web)
+          scripts.executedWeb(conversation, pending.sequence(), raw, web.scriptReceipt(raw));
+        else scripts.executed(conversation, pending.sequence(), raw);
         watch.scriptProgress(taken, budget.spent() - callsBefore);
+      } else if (tool instanceof WebToolSecurity.Bound web) {
+        requireOperationTool(operation, home, name, pre.arguments());
+        raw = web.restoreScriptResult(id, pre.arguments(), raw, pending.webReview());
       }
       ToolPost post =
           toolPost(
-              activeHooks(route, harnessRun, skillChecks), context, name, pre.arguments(), raw);
+              activeHooks(route, harnessRun, skillChecks),
+              tool instanceof WebToolSecurity.Bound web
+                  ? context.withWebReview(web.auditId())
+                  : context,
+              name,
+              pre.arguments(),
+              raw);
       post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
       runHooks.drain().forEach(record -> transcript.record(LoggedEntry.hook(record)));
       if (withheld(post))
@@ -2755,8 +2901,12 @@ public final class JobRuntime {
             budget.spent() - callsBefore);
       }
       String result = usable(post.result(), name);
+      if (tool instanceof WebToolSecurity.Bound web) result = web.finish(result, false);
       scripts.completed(conversation, pending.sequence(), result);
-      transcript.record(LoggedEntry.toolResult(id, result));
+      if (tool instanceof WebToolSecurity.Bound web) {
+        transcript.recordDurably(LoggedEntry.toolResult(id, result));
+        web.resultRecorded();
+      } else transcript.record(LoggedEntry.toolResult(id, result));
       previous = scripts.latest(conversation).orElseThrow();
       if (end.requested().isPresent()) {
         var requested = end.requested().orElseThrow();
@@ -2772,6 +2922,69 @@ public final class JobRuntime {
     }
     return new Outcome(
         Ending.CANCELLED, "script cancelled", taken, budget.spent() - callsBefore, "");
+  }
+
+  /** The script retains the same once-only human decision without replaying its started command. */
+  private String awaitScriptWebApproval(
+      WebToolSecurity.Bound web,
+      RunApproval question,
+      String id,
+      String arguments,
+      Home home,
+      Transcript transcript,
+      String session,
+      String owner,
+      BooleanSupplier cancelled,
+      TurnEnd end,
+      HookContext context,
+      Hooks hooks) {
+    String approval = question.id();
+    suspendedRunCalls.retain(
+        approval,
+        transcript.conversationId(),
+        session,
+        question.side(),
+        owner,
+        new ToolCall(id, web.schema().name(), web.retainedArguments(arguments, home)));
+    var executed = new AtomicBoolean();
+    var returned =
+        new RunCallResumption(suspendedRunCalls)
+            .await(
+                approval,
+                question.conversation(),
+                activeRunApprovals,
+                () -> cancelled.getAsBoolean() || web.approvalExpired(question),
+                () -> {
+                  if (approvalDelivery != null) approvalDelivery.drain(question.conversation());
+                },
+                observed -> recordApprovalDecision(observed.approval(), transcript),
+                retained -> {
+                  executed.set(true);
+                  web.retainedApproval(approval);
+                  var checked =
+                      web.gateRetained(
+                          retained.tool().arguments(),
+                          retained.side(),
+                          home,
+                          context,
+                          (at, exact) -> toolPre(hooks, at, web.schema().name(), exact));
+                  checked.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+                  return checked.isDenied()
+                      ? web.refuse(checked.denied())
+                      : web.run(checked.arguments(), home);
+                },
+                ignored -> {});
+    end.approvalResumed(approval);
+    if (returned.isPresent())
+      return executed.get()
+          ? returned.orElseThrow()
+          : web.refuse("The web authorization was denied.");
+    String refusal = web.refuse("The web authorization expired or the requesting run ended.");
+    approvals.deny(
+        approval, RunApproval.RUN_ENDED, "The web authorization expired or the run ended.");
+    suspendedRunCalls.complete(approval, refusal);
+    suspendedRunCalls.acknowledged(approval);
+    return refusal;
   }
 
   /**
@@ -2886,7 +3099,8 @@ public final class JobRuntime {
                       commands,
                       end,
                       runHooks,
-                      operation)),
+                      operation,
+                      authenticatedWebTask(owner))),
               RunExtras.Extras.NONE);
     } catch (RuntimeException failed) {
       log.warn(
@@ -3053,7 +3267,7 @@ public final class JobRuntime {
     List<ChatMessage> history =
         opening(
             systemText(definition.prompt(), transcript.opening()),
-            transcript.before(),
+            revalidateWebHistory(transcript.before(), offered),
             userPrompt,
             images);
     // Where this turn's opening request is: the last message `opening` added. A fold inside
@@ -3303,6 +3517,10 @@ public final class JobRuntime {
     if (suspendedRunCalls != null && transcript.conversationId() != null) {
       var resumption = new RunCallResumption(suspendedRunCalls);
       for (var pending : suspendedRunCalls.pending(transcript.conversationId())) {
+        var pendingTool = pending.tool();
+        WebToolSecurity.Bound pendingWeb =
+            offered.get(pendingTool.name()) instanceof WebToolSecurity.Bound web ? web : null;
+        if (pendingWeb != null) pendingWeb.beginInvocation(pendingTool.id());
         boolean resumed;
         try {
           if (pending.released() && !RunApproval.ASKED.equals(pending.decision()))
@@ -3341,7 +3559,13 @@ public final class JobRuntime {
                     transcript.recordDurably(
                         LoggedEntry.toolResult(pending.tool().id(), result)
                             .told(ToolLines.outcome(pending.tool().name(), result)));
-                    replaceRetainedResult(history, pending.tool(), result);
+                    if (pendingWeb != null) pendingWeb.resultRecorded();
+                    replaceRetainedResult(
+                        history,
+                        pendingTool,
+                        pendingWeb == null
+                            ? ChatMessage.tool(pendingTool.id(), result)
+                            : pendingWeb.projectRetained(pendingTool.id(), result));
                   });
         } catch (RuntimeException interrupted) {
           failures.report(FailureReporter.Source.RUNTIME, interrupted);
@@ -3431,7 +3655,8 @@ public final class JobRuntime {
                 operation);
         String told = ToolLines.delegation(runner.returned());
         transcript.recordDurably(LoggedEntry.toolResult(retried.call().id(), result).told(told));
-        replaceRetainedResult(history, retried.call(), result);
+        replaceRetainedResult(
+            history, retried.call(), ChatMessage.tool(retried.call().id(), result));
         budgetStack.current().progress(resumedSteps, List.of());
         trail.add(AgentRunTool.NAME);
       }
@@ -4424,6 +4649,7 @@ public final class JobRuntime {
               return stopped(Ending.STUCK, repeats.futility(), trail, steps - 1, modelCalls, "");
             }
             AgentTool tool = offered.get(wanted.name());
+            if (tool instanceof WebToolSecurity.Bound web) web.beginInvocation(wanted.id());
             ToolObservation observation = null;
             // THE RECORD'S TOOL LINE (spec 2026-09-28, the orchestration record §2): told as
             // the call starts, so a call still running is the current activity, and told its
@@ -4550,7 +4776,10 @@ public final class JobRuntime {
                           approval,
                           root,
                           activeRunApprovals,
-                          cancelled,
+                          () ->
+                              cancelled.getAsBoolean()
+                                  || (tool instanceof WebToolSecurity.Bound web
+                                      && web.approvalExpired(question)),
                           () -> {
                             if (approvalDelivery != null) approvalDelivery.drain(root);
                           },
@@ -4580,6 +4809,7 @@ public final class JobRuntime {
                                         executedAt.get() == null
                                             ? Duration.ZERO
                                             : Duration.between(executedAt.get(), clock.get())));
+                            if (tool instanceof WebToolSecurity.Bound web) web.resultRecorded();
                           });
                 } catch (RuntimeException interrupted) {
                   failures.report(FailureReporter.Source.RUNTIME, interrupted);
@@ -4594,23 +4824,40 @@ public final class JobRuntime {
                       describe(interrupted));
                 }
                 if (output.isEmpty()) {
+                  boolean expired =
+                      !cancelled.getAsBoolean()
+                          && tool instanceof WebToolSecurity.Bound web
+                          && web.approvalExpired(question);
                   String cancelledResult =
-                      "The harness cancelled this retained command because its requesting run ended. Nothing ran.";
+                      expired
+                          ? "Web authorization expired. The request was denied."
+                          : "The harness cancelled this retained command because its requesting run ended. Nothing ran.";
                   approvals.deny(
                       approval,
                       RunApproval.RUN_ENDED,
-                      "The requesting run was cancelled before execution.");
+                      expired
+                          ? "The web request's approval expired."
+                          : "The requesting run was cancelled before execution.");
                   suspendedRunCalls.complete(approval, cancelledResult);
                   transcript.recordDurably(
                       LoggedEntry.toolResult(wanted.id(), cancelledResult).told(ToolLines.DENIED));
                   suspendedRunCalls.acknowledged(approval);
                   extras.end().approvalResumed(approval);
                   recording.returned(ToolLines.DENIED);
+                  if (expired) {
+                    history.add(ChatMessage.tool(wanted.id(), cancelledResult));
+                    results.add(cancelledResult);
+                    outcomes.add(ToolLines.DENIED);
+                    continue;
+                  }
                   return stopped(Ending.CANCELLED, cancelledResult, trail, steps, modelCalls, "");
                 }
                 extras.end().approvalResumed(approval);
                 result = output.get();
-                history.add(ChatMessage.tool(wanted.id(), result));
+                history.add(
+                    tool instanceof WebToolSecurity.Bound web
+                        ? web.project(wanted.id(), result)
+                        : ChatMessage.tool(wanted.id(), result));
                 results.add(result);
                 told = ToolLines.outcome(RunTool.NAME, result);
                 outcomes.add(told);
@@ -4718,7 +4965,9 @@ public final class JobRuntime {
                     ToolPost postTool =
                         toolPost(
                             activeHooks(route, harnessRun, skillChecks),
-                            hookContext,
+                            tool instanceof WebToolSecurity.Bound web
+                                ? hookContext.withWebReview(web.auditId())
+                                : hookContext,
                             wanted.name(),
                             preTool.arguments(),
                             result);
@@ -4727,6 +4976,8 @@ public final class JobRuntime {
                     // must not hand the model the blank result usable
                     // exists to replace.
                     result = usable(postTool.result(), wanted.name());
+                    if (tool instanceof WebToolSecurity.Bound web)
+                      result = web.finish(result, withheld(postTool));
                     if (observation != null)
                       observation =
                           observation.afterHook(!withheld(postTool) && result.equals(providerText));
@@ -4737,6 +4988,7 @@ public final class JobRuntime {
                         tool instanceof AgentRunTool runner ? runner.returned() : null;
                     told =
                         withheld(postTool)
+                                || (tool instanceof WebToolSecurity.Bound web && web.withheld())
                             ? ToolLines.ERROR
                             : delegate != null
                                 ? ToolLines.delegation(delegate)
@@ -4845,7 +5097,10 @@ public final class JobRuntime {
               }
             }
             Duration toolTook = Duration.between(askedAt, clock.get());
-            history.add(ChatMessage.tool(wanted.id(), result));
+            history.add(
+                tool instanceof WebToolSecurity.Bound web
+                    ? web.project(wanted.id(), result)
+                    : ChatMessage.tool(wanted.id(), result));
             results.add(result);
             outcomes.add(told);
             // Recorded where it is appended, so that the four returns above
@@ -4866,6 +5121,10 @@ public final class JobRuntime {
                     Ending.AWAITING, result, steps, modelCalls, "budget approval pending");
               if (requestTool.approval() != null)
                 budgetRequests.acknowledged(requestTool.approval());
+            } else if (tool instanceof WebToolSecurity.Bound web
+                && transcript.conversationId() != null) {
+              transcript.recordDurably(toolEntry);
+              web.resultRecorded();
             } else if (retainsBudget && observation == null) transcript.recordDurably(toolEntry);
             else if (observation == null) transcript.record(toolEntry);
             else {
@@ -5128,12 +5387,15 @@ public final class JobRuntime {
         ToolPost after =
             toolPost(
                 activeHooks(route, harnessRun, skillChecks),
-                context,
+                run instanceof WebToolSecurity.Bound web
+                    ? context.withWebReview(web.auditId())
+                    : context,
                 retained.tool().name(),
                 checked.arguments(),
                 result);
         after.records().forEach(r -> transcript.record(LoggedEntry.hook(r)));
         result = usable(after.result(), retained.tool().name());
+        if (run instanceof WebToolSecurity.Bound web) result = web.finish(result, withheld(after));
       }
     } catch (RuntimeException failed) {
       // A lost bridge can mean a command ran but its response was lost. Do not manufacture a
@@ -5153,18 +5415,26 @@ public final class JobRuntime {
 
   /** Replace the suspended result in its original slot; never invent another assistant call. */
   private static void replaceRetainedResult(
-      List<ChatMessage> history, ToolCall tool, String result) {
-    for (int i = 0; i < history.size(); i++) {
-      ChatMessage message = history.get(i);
-      if (message.role() == ChatMessage.Role.TOOL && tool.id().equals(message.toolCallId())) {
-        history.set(i, ChatMessage.tool(tool.id(), result));
-        return;
+      List<ChatMessage> history, ToolCall tool, ChatMessage result) {
+    for (int i = history.size() - 1; i >= 0; i--) {
+      if (history.get(i).toolCalls().stream()
+          .noneMatch(call -> call.id().equals(tool.id()) && call.name().equals(tool.name())))
+        continue;
+      int slot = i + 1;
+      while (slot < history.size() && history.get(slot).role() == ChatMessage.Role.TOOL) {
+        if (tool.id().equals(history.get(slot).toolCallId())) {
+          history.set(slot, result);
+          return;
+        }
+        slot++;
       }
+      history.add(slot, result);
+      return;
     }
     // Some agents deliberately omit previous tool working from their projection. Reinstate the
     // original request/result pair in that case, without submitting another inference.
     history.add(ChatMessage.assistant("", List.of(tool)));
-    history.add(ChatMessage.tool(tool.id(), result));
+    history.add(result);
   }
 
   // --- what the agent may reach ------------------------------------------------
@@ -5294,6 +5564,34 @@ public final class JobRuntime {
     return provenance == null ? task : provenance.evidenceText(task);
   }
 
+  private static List<ChatMessage> revalidateWebHistory(
+      List<ChatMessage> history, Map<String, AgentTool> offered) {
+    var policies = new EnumMap<Verb, String>(Verb.class);
+    return history.stream()
+        .map(
+            message -> {
+              var release = message.webRelease();
+              if (release == null) return message;
+              Verb verb = release.verb();
+              String name = verb == Verb.SEARCH ? SearchTool.NAME : FetchTool.NAME;
+              AgentTool offeredTool = offered.get(name);
+              if (offeredTool instanceof WebToolSecurity.Bound web) web.restoreHeightened(release);
+              String current =
+                  policies.computeIfAbsent(
+                      verb,
+                      key ->
+                          offeredTool instanceof WebToolSecurity.Bound web
+                              ? web.currentPolicy(key)
+                              : "");
+              return release.policy().equals(current)
+                  ? message
+                  : ChatMessage.tool(
+                      message.toolCallId(),
+                      "Web evidence withheld because its reviewed policy has changed.");
+            })
+        .toList();
+  }
+
   /**
    * @param images what this run is being shown, which {@code agent_run} needs and no other tool
    *     does — a caller may hand a callee a picture it is itself looking at, so the tool is built
@@ -5327,6 +5625,76 @@ public final class JobRuntime {
     String policyOwner = operation == null ? callerHandle : operation.executor();
     String authenticatedTask =
         authenticatedApprovalTask(speaker, policyOwner, currentTask, transcript.inputProvenance());
+    WebToolSecurity security = webSecurity;
+    var webTask = WEB_TASK.get();
+    String webIntent =
+        webTask != null && Objects.equals(webTask.owner, policyOwner)
+            ? webTask.text
+            : transcript.origin() == Origin.ORCHESTRATION
+                    && ScriptProgram.isScript(definition.prompt())
+                ? null
+                : authenticatedTask;
+    WebToolSecurity.Session webSession =
+        security == null
+            ? null
+            : security.within(
+                new WebToolReviews.Context(
+                    webIntent,
+                    toolHome == null ? null : toolHome.project(),
+                    definition.name(),
+                    definition.model(),
+                    policyOwner,
+                    transcript.conversationId(),
+                    operation,
+                    budget,
+                    transcript.usage(),
+                    () -> {
+                      admittedAuthority.run();
+                      if (operation != null) operations.require(operation);
+                    }),
+                cancelled,
+                transcript.conversationId() == null
+                    ? transcript::record
+                    : transcript::recordDurably,
+                approvals == null
+                        || suspendedRunCalls == null
+                        || extras.end() == null
+                        || policyOwner == null
+                        || transcript.conversationId() == null
+                    ? null
+                    : request -> {
+                      Long project = environments.projectId(toolHome.project());
+                      if (project == null)
+                        throw new CallerFault("The project is unavailable for web approval");
+                      String conversation = transcript.conversationId();
+                      String root =
+                          approvalRoots
+                              .apply(conversation)
+                              .map(ConversationRecord::id)
+                              .orElse(conversation);
+                      var before =
+                          runHooks.approvalPre(
+                              null,
+                              null,
+                              new Approving(
+                                  List.of(),
+                                  "",
+                                  "SECURITY requests once-only web authorization.",
+                                  sessionId != null,
+                                  List.of(RunApproval.ONCE)));
+                      runHooks.record(before.records());
+                      if (before.isDenied()) throw new CallerFault(before.denied());
+                      var asked =
+                          approvals.askWeb(
+                              project, root, conversation, policyOwner, definition.name(), request);
+                      extras.end().requestApproval(asked.id(), ApprovalDelivery.question(asked));
+                      return asked;
+                    },
+                approvals == null
+                    ? null
+                    : consent ->
+                        approvals.consumeWeb(consent.id(), consent.approval(), consent.oldest()));
+    if (webTask != null) webTask.review = webSession;
     var operationReview =
         approvalReviewSessions == null
             ? Optional.<OperationApprovalReview>empty()
@@ -5848,6 +6216,8 @@ public final class JobRuntime {
             listing.forRun(
                 runInformation, callerHandle, informationInputs, transcript.conversationId());
       }
+      if (webSession != null && (tool instanceof SearchTool || tool instanceof FetchTool))
+        tool = webSession.wrap(tool);
       offered.put(name, tool);
     }
     // Only the registry's owner-filtered external tools may supplement named requests.
