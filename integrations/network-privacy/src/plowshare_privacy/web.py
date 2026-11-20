@@ -294,6 +294,12 @@ def application(
         await operator().check_and_resume()
         return web.json_response({"checked": True})
 
+    async def release_completion(request: web.Request) -> web.Response:
+        row = object_fields(parse_json(await request.read()), {"scan_id"})
+        return web.json_response(
+            {"released": await operator().release_completion(uuid(row["scan_id"]))}
+        )
+
     async def pihole(request: web.Request) -> web.Response:
         row = object_fields(
             parse_json(await request.read()), {"origin", "password", "save"}
@@ -1400,6 +1406,7 @@ def application(
         ("expected", expected),
         ("investigations", investigate),
         ("recovery", recovery),
+        ("recovery/completion", release_completion),
         ("pihole", pihole),
         ("device-moves", moves),
         ("device-moves/accept", accept_move),

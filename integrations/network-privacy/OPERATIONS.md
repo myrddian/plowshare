@@ -590,8 +590,25 @@ fix, use **Check retained work**. An explicitly refused completion stays
 `uploaded` and can complete with its original scan, evidence revision and
 completion request ID; it does not collect or upload again. A `publishing`
 receipt still means an unknown outcome and requires a matching retained receipt,
-never a resend based on absence. Preserve the journals and existing schedule
+never an automatic resend based on absence. Preserve the journals and existing schedule
 cursor throughout recovery.
+
+The scan journal holds seven days of settled scans and prunes older ones by
+itself; see "Local scan retention" in the README. Back up `state/receipts.json`
+and `state/evidence/` together: the index refuses to start without the evidence
+it names. Do not remove evidence files by hand.
+
+If **Check retained work** keeps reporting an unknown completion, the connection
+may have dropped before the server stored it; no later read can settle that.
+Choose **Republish missing completion** beside the notice under **System
+health**. It first reads the retained `privacy.scan.completed` log. A matching
+event settles the scan with nothing sent. A confirmed absence releases the scan,
+and the collector publishes the original completion once, with the same request
+identity, then resumes. It refuses, and changes nothing, when another event holds
+that identity or when the log holds no event older than the scan's finish time:
+retention may then have removed a published completion, so inspect the project's
+Relay log and investigation history yourself before deciding anything further.
+The scan is not collected or uploaded again.
 
 For an uncertain schedule deployment, open **Settings** and expand **Change
 schedule frequency**. Enter the deployment administrator password and choose

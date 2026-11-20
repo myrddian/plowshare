@@ -172,7 +172,13 @@ class SubnetTest(unittest.IsolatedAsyncioTestCase):
                             str(uuid4()),
                         )
                     )
-                self.assertGreater(journal.path.stat().st_size, 1048576)
+                # More than a mebibyte of evidence is retained, one file per
+                # scan, while the index that every save rewrites stays small.
+                stored = sum(
+                    path.stat().st_size for path in journal.evidence_directory.iterdir()
+                )
+                self.assertGreater(stored, 1048576)
+                self.assertLess(journal.path.stat().st_size, 65536)
             with FileReceipts(config) as journal:
                 self.assertEqual(len(journal.all()), 20)
                 retained = journal.all()[-1].evidence

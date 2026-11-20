@@ -128,8 +128,9 @@ reply budget. Each collection retains every selected TCP observation and device 
 in one document. DNS samples are capped at 4,096 rows and may be reduced further
 with an explicit coverage gap. Large investigations receive a bounded context
 projection and can page relevant evidence; omitted rows never prove absence.
-The local receipt file is bounded to 128 MiB and 1,000 scans; a full journal
-refuses new work rather than dropping history or uncertain receipts.
+The local journal keeps full evidence for settled scans from the last seven
+days and is fenced at 1,000 scans; a full journal refuses new work rather than
+dropping uncertain receipts. See [local scan retention](#local-scan-retention).
 
 ### Services, capabilities and address assignment
 
@@ -884,15 +885,59 @@ resends an uncertain request. Only a positive matching receipt settles an unknow
 effect; missing/conflicting evidence, retention gaps, invalid responses and
 permission refusals leave the collector in an attention state for operator review.
 After resolving those conditions, choose **Check retained work** to run the same
-receipt checks explicitly. Shutdown interrupts reconnect waits and attempts; no
+receipt checks explicitly.
+
+A completion the server never stored cannot be settled by any read. While
+collection is stopped, **Republish missing completion** under **System health**
+is the operator's explicit decision for that one scan. The collector reads the
+retained log again: a matching completion settles the receipt without sending
+anything; a conflicting event, or a log that no longer reaches back before the
+scan finished, leaves the outcome unknown. Only a confirmed absence returns the
+receipt to `uploaded`, and the next pass publishes it once with its original
+request identity, parent, text and timestamp. Relay deduplicates that identity
+while it is retained. Nothing is collected or uploaded again, and the collector
+never takes this step by itself. Shutdown interrupts reconnect waits and attempts; no
 credentials are rotated and the collector journals keep their original identities.
 
 Journal identity includes deployment scope and collection configuration. A foreign
 journal, competing local owner, excessive queue or corrupt source refuses work.
-State is bounded at 1 MiB and 1,000 receipts/requests each, without automatic
-pruning. For longer operation, archive settled state only after
-confirming durable evidence and the consumer cursor; choose a new state directory
-for a deliberate scope change. Do not delete uncertain receipts to force retries.
+Choose a new state directory for a deliberate scope change. Do not delete
+uncertain receipts to force retries.
+
+### Local scan retention
+
+The scan journal is a small index, `state/receipts.json`, and one evidence file
+per scan under `state/evidence/`. Evidence is written once, in its exact retained
+encoding, before the index names it by SHA-256; a phase change then rewrites only
+the index. An index that names missing or altered evidence refuses to start.
+
+A settled scan keeps its local evidence for seven days. It leaves the journal
+only when it is `done` and has a retained revision, so Plowshare's project
+information store still holds its evidence. The newest 50 settled scans always
+stay, whatever their age, and a schedule fast enough to exceed 900 scans in
+seven days sheds its oldest settled scans early. A scan with an unknown or
+unfinished outcome never leaves; the 1,000-scan and 1,000-request fences still
+refuse new work if such scans accumulate.
+
+When a scan leaves, one durable index write removes it together with the
+published dashboard request that caused it, and records two things:
+
+- its identity, so a Relay redelivery of the same occurrence is acknowledged
+  and never collected again (the newest 10,000 departed scans are remembered);
+- per address, the first and last TCP response, the last known identity and
+  whether an open service was ever observed. Device cards read this carried
+  summary, so a device keeps its first and last response and stays on the
+  dashboard after the scans that established them are gone.
+
+Scan lists, findings, reports, evidence downloads and agent tools cover only
+the retained scans. These windows are fixed in `limits.py`, not collector
+configuration.
+
+A journal from before this layout held all evidence inline in `receipts.json`.
+It is converted the first time the collector opens it, and scans older than the
+window leave in that same start. The original file is kept unchanged as
+`state/receipts.before-split.json`; remove it once the converted collector has
+run.
 
 ## Verify without a database or live household data
 

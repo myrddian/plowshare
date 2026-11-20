@@ -18,6 +18,7 @@ from .contracts import (
     Configuration,
     Evidence,
     ScanRequest,
+    earlier,
     parse_json,
     same_instant,
     utc_now,
@@ -160,6 +161,10 @@ class Worker:
                         ),
                         None,
                     )
+                    if existing is None and self.receipts.archived(scan_id):
+                        # Settled and already outside the retained window: this
+                        # redelivery is acknowledged, never collected again.
+                        continue
                     if existing is None:
                         self.receipts.save(
                             Receipt(scan_id, event.event_id, topic, event.occurred_at)
@@ -420,7 +425,11 @@ class Worker:
             return publication
 
     async def reconcile(self) -> None:
-        """Positive retained evidence settles unknowns. Absence never authorizes a retry."""
+        """Positive retained evidence settles unknowns. Absence never authorizes a retry.
+
+        The only path from an absent completion back to publication is the
+        operator's explicit ``release_absent_completion``.
+        """
         async with self.lock:
             for publication in self.receipts.publications():
                 if publication.state != "pending":
@@ -479,6 +488,68 @@ class Worker:
             if self.attention is not None:
                 await self.attention.reconcile()
 
+    async def release_absent_completion(self, scan_id: str) -> bool:
+        """Explicit operator recovery for a completion the server never retained.
+
+        ``reconcile`` stays read-only: absence alone never lets the collector
+        resend by itself. This is the operator's separate, deliberate decision
+        for one named scan while collection is stopped. It reads the retained
+        log again and then does one of three things:
+
+        * the exact completion is retained: the receipt settles as ``done`` and
+          nothing is sent (returns ``False``);
+        * a different event holds the identity, or the log no longer reaches
+          back before this scan finished: the outcome stays unknown and the
+          receipt stays ``publishing``. Retention may already have removed a
+          published completion, so absence proves nothing there;
+        * the log still holds an event older than this completion and the
+          completion is absent: the receipt returns to ``uploaded`` (returns
+          ``True``).
+
+        Nothing is published here. The next ordinary pass publishes the
+        ``uploaded`` receipt with its original request identity, parent, text
+        and timestamp, exactly as after a submission that never left this
+        process. Relay deduplicates that identity while it is retained, so a
+        completion that lands between this read and the publish is not doubled.
+        Collection and upload are never repeated.
+        """
+        scan_id = uuid(scan_id)
+        async with self.lock:
+            if self.state != "attention_required":
+                raise ValueError(
+                    "A completion can be released only while collection is stopped"
+                )
+            receipt = next(
+                (
+                    item
+                    for item in self.receipts.all()
+                    if item.scan_id == scan_id and item.phase == "publishing"
+                ),
+                None,
+            )
+            if receipt is None:
+                raise ValueError("Choose a scan whose completion outcome is unknown")
+            expected = self.completion_request(receipt)
+            self.operation = "relay.log (" + expected.topic + ")"
+            event = await self.port.find_event(expected.topic, expected.request_id)
+            if event is not None:
+                if event.payload.text != expected.text or not same_instant(
+                    event.occurred_at, expected.occurred_at
+                ):
+                    raise ReconciliationRequired(
+                        "A different retained event holds this completion identity"
+                    )
+                self.receipts.save(replace(receipt, phase="done"))
+                return False
+            oldest = await self.port.oldest_event(expected.topic)
+            if oldest is None or not earlier(oldest.occurred_at, expected.occurred_at):
+                raise ReconciliationRequired(
+                    "The retained log no longer reaches back before this completion; "
+                    "its absence cannot be established"
+                )
+            self.receipts.save(replace(receipt, phase="uploaded"))
+            return True
+
     def presence_view(self) -> PresenceView:
         if self.presence is None:
             # One shared empty view keeps the inventory projection's identity
@@ -492,7 +563,10 @@ class Worker:
     def device_inventory(self) -> DeviceInventory:
         """The monitored inventory from done receipts and the current presence view."""
         return self.inventory_projection.current(
-            self.config.collection, self.receipts.all(), self.presence_view()
+            self.config.collection,
+            self.receipts.all(),
+            self.presence_view(),
+            self.receipts.carried(),
         )
 
     def presence_status(self) -> PresenceStatus:

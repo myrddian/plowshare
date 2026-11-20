@@ -8,7 +8,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 from plowshare import Delivery, Refusal, TransportError
 from plowshare.contracts import RelayPublishRequest, RelayPublishResultDto
@@ -188,6 +188,111 @@ class WorkerRecoveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.port.uploads, 1)
         self.assertEqual(len(self.port.published), 1)
         self.assertEqual(self.worker.state, "ready")
+
+    async def _lose_completion(self, *, retained: bool) -> str:
+        """Leave one scan in ``publishing`` after an unknown completion outcome."""
+        self.port.events["schedule.due"] = [event()]
+        publish = self.port.publish
+
+        async def lost(request: RelayPublishRequest) -> RelayPublishResultDto:
+            if retained:
+                await publish(request)
+            raise TransportError(Delivery.UNKNOWN, "completion reply lost")
+
+        with patch.object(self.port, "publish", side_effect=lost):
+            # One pass copies the occurrence, collects, uploads and publishes.
+            with self.assertRaises(TransportError) as stopped:
+                await self.worker.poll()
+        self.worker._attention(stopped.exception)
+        receipt = self.receipts.all()[0]
+        self.assertEqual(receipt.phase, "publishing")
+        return receipt.scan_id
+
+    def _retain_earlier_completion(self) -> None:
+        # The log still reaches back before this scan finished, so a retained
+        # completion could not have aged out of it.
+        self.port.events[self.config.result_topic].insert(
+            0,
+            replace(
+                event(str(uuid4()), manual=True), occurred_at="2000-01-01T00:00:00Z"
+            ),
+        )
+
+    async def test_operator_release_republishes_an_absent_completion_once(
+        self,
+    ) -> None:
+        scan = await self._lose_completion(retained=False)
+        self._retain_earlier_completion()
+        with self.assertRaises(ReconciliationRequired):
+            await self.worker.reconcile()  # The ordinary check stays read-only.
+        self.assertEqual(self.port.published, [])
+
+        self.assertTrue(await self.worker.release_absent_completion(scan))
+        self.assertEqual(self.receipts.all()[0].phase, "uploaded")
+        self.assertEqual(self.port.published, [])  # Release itself sends nothing.
+
+        await self.worker.reconcile()
+        await self.worker.poll()
+        self.assertEqual(self.receipts.all()[0].phase, "done")
+        self.assertEqual(
+            [item.request_id for item in self.port.published],
+            [str(uuid5(UUID(scan), "completion"))],
+        )
+        self.assertEqual(self.port.uploads, 1)
+
+    async def test_operator_release_settles_a_retained_completion_without_resending(
+        self,
+    ) -> None:
+        scan = await self._lose_completion(retained=True)
+        self.assertFalse(await self.worker.release_absent_completion(scan))
+        self.assertEqual(self.receipts.all()[0].phase, "done")
+        self.assertEqual(len(self.port.published), 1)
+
+    async def test_operator_release_refuses_when_the_log_cannot_prove_absence(
+        self,
+    ) -> None:
+        scan = await self._lose_completion(retained=False)
+        # Nothing older is retained: the completion may have been published and
+        # then removed by retention, so absence proves nothing.
+        with self.assertRaises(ReconciliationRequired):
+            await self.worker.release_absent_completion(scan)
+        self.port.events[self.config.result_topic].append(
+            replace(
+                event(str(uuid4()), manual=True), occurred_at="2099-01-01T00:00:00Z"
+            )
+        )
+        with self.assertRaises(ReconciliationRequired):
+            await self.worker.release_absent_completion(scan)
+        self.assertEqual(self.receipts.all()[0].phase, "publishing")
+        self.assertEqual(self.port.published, [])
+
+    async def test_operator_release_refuses_a_conflicting_retained_completion(
+        self,
+    ) -> None:
+        scan = await self._lose_completion(retained=True)
+        topic = self.port.events[self.config.result_topic]
+        topic[0] = replace(
+            topic[0], payload=replace(topic[0].payload, text='{"version": 1}')
+        )
+        with self.assertRaises(ReconciliationRequired):
+            await self.worker.release_absent_completion(scan)
+        self.assertEqual(self.receipts.all()[0].phase, "publishing")
+        self.assertEqual(len(self.port.published), 1)
+
+    async def test_operator_release_needs_a_stopped_collector_and_an_unknown_completion(
+        self,
+    ) -> None:
+        scan = await self._lose_completion(retained=False)
+        self._retain_earlier_completion()
+        with self.assertRaises(ValueError):
+            await self.worker.release_absent_completion(str(uuid4()))
+        with self.assertRaises(ValueError):
+            await self.worker.release_absent_completion("not-a-scan")
+        self.worker.state = "ready"
+        with self.assertRaises(ValueError):
+            await self.worker.release_absent_completion(scan)
+        self.assertEqual(self.receipts.all()[0].phase, "publishing")
+        self.assertEqual(self.port.published, [])
 
     async def test_disabled_collection_reconnects_without_scanning(self) -> None:
         self.worker.config = replace(

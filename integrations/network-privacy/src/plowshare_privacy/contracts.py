@@ -88,6 +88,13 @@ def same_instant(first: str, second: str) -> bool:
     ) == datetime.fromisoformat(timestamp(second).replace("Z", "+00:00"))
 
 
+def earlier(first: str, second: str) -> bool:
+    """Whether ``first`` is strictly before ``second``, whatever their spelling."""
+    return datetime.fromisoformat(
+        timestamp(first).replace("Z", "+00:00")
+    ) < datetime.fromisoformat(timestamp(second).replace("Z", "+00:00"))
+
+
 def uuid(value: object) -> str:
     result = text(value, 36)
     if str(UUID(result)) != result:

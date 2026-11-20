@@ -37,6 +37,7 @@ from plowshare_privacy.identity_source import (
 from plowshare_privacy.journal import Publication, Receipt
 from plowshare_privacy.pihole import DeviceDataSource
 from plowshare_privacy.ports import AvailableTopics, evidence_name
+from plowshare_privacy.scan_retention import CarriedAddress
 from plowshare_privacy.source_set import (
     Bound,
     DnsActivityReader,
@@ -248,6 +249,12 @@ class MemoryReceipts:
     def save_publication(self, publication: Publication) -> None:
         self.requests[publication.request_id] = publication
 
+    def carried(self) -> tuple[CarriedAddress, ...]:
+        return ()
+
+    def archived(self, scan_id: str) -> bool:
+        return False
+
 
 class CountingCollector(NetworkCollector):
     def __init__(self, config: Configuration):
@@ -356,6 +363,9 @@ class FixturePort:
         return next(
             (item for item in self.events[topic] if item.event_id == event_id), None
         )
+
+    async def oldest_event(self, topic: str) -> RelayEventDto | None:
+        return next(iter(self.events[topic]), None)
 
     async def reports(self) -> tuple[InformationRevisionDto, ...]:
         return tuple(
