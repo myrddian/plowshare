@@ -32,8 +32,10 @@ can reach the active model through the implemented
 [active-loop and Trajectory path](trajectory-image-observations.md). Hosted worker
 content support and other producer SDKs remain separate work. The proposed
 [computer-control design and phased plan](computer-control-design-and-plan.md)
-uses this path for browser and full desktop providers; those providers are not
-implemented yet.
+uses this path for browser and full desktop providers. Its initial
+[observation-only integration](../integrations/computer-control/README.md)
+separates implemented/reviewed code from configured-server and native live
+acceptance; input/control tools remain later phases.
 
 ## Application-owned dynamic tools
 
